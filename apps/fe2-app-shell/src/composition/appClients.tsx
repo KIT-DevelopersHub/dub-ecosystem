@@ -75,8 +75,12 @@ export function createPrefixedHttpClient(api: ApiClient): Fe3HttpClient {
   };
 }
 
+// FE3's createHttpEventApi now consumes the FE2 ApiClient contract directly
+// (contracts/fe2.ApiClient), a structural mirror of the shell ApiClient — so the
+// shell client is handed in as-is. (createPrefixedHttpClient is retained above as
+// a standalone logical-path helper + is covered by the composition tests.)
 export function createEventApi(api: ApiClient): EventApi {
-  return createHttpEventApi(createPrefixedHttpClient(api));
+  return createHttpEventApi(api as unknown as Parameters<typeof createHttpEventApi>[0]);
 }
 
 // ── FE5 (ApiClient) & FE7 (ResourceClient): absolute-path gateway client ─────
@@ -111,26 +115,12 @@ export function createRosterClient(api: ApiClient): ReturnType<typeof createRost
   return createRosterApi(createGatewayResourceClient(api));
 }
 
-// ── FE4: request-object ApiClient ────────────────────────────────────────────
+// ── FE4: shell ApiClient ─────────────────────────────────────────────────────
+// FE4's spa-shell `ApiClient` contract converged onto the full FE2 ApiClient
+// surface (request + auth/bff/events/tasks/gantt/notifications/chat/identity/files),
+// a structural mirror of the shell client — so it is handed in as-is.
 export function createTaskApiClient(api: ApiClient): Fe4ApiClient {
-  return {
-    request: <T,>(req: {
-      method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
-      path: ApiPath;
-      query?: Record<string, string | number | boolean | undefined | null>;
-      body?: unknown;
-      headers?: Record<string, string>;
-    }): Promise<T> => {
-      const q = normalizeQuery(req.query);
-      return api.request<T>({
-        method: req.method,
-        path: req.path,
-        ...(req.body !== undefined ? { body: req.body } : {}),
-        ...(q ? { query: q } : {}),
-        ...(req.headers ? { headers: req.headers } : {}),
-      });
-    },
-  };
+  return api as unknown as Fe4ApiClient;
 }
 
 // ── FE6: ChatApiClient over the shell request layer ──────────────────────────

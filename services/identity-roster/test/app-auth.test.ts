@@ -28,13 +28,13 @@ describe("app-level auth & routing", () => {
     expect(res.status).toBe(200);
   });
 
-  it("exposes the frozen 30-key permission catalog", async () => {
+  it("exposes the frozen 32-key permission catalog", async () => {
     const h = await makeHarness();
     const res = await h.app.request("/identity/permissions/catalog", asUser(h.memberId));
     expect(res.status).toBe(200);
     const body = (await res.json()) as identity.PermissionCatalogEntry[];
-    expect(body).toHaveLength(30);
-    expect(body.every((e) => /^[a-z]+:[a-z]+$/.test(e.key))).toBe(true);
+    expect(body).toHaveLength(32);
+    expect(body.every((e) => /^[a-z]+:[a-z]+(:self)?$/.test(e.key))).toBe(true);
   });
 
   it("error responses use the wire ErrorResponse shape", async () => {

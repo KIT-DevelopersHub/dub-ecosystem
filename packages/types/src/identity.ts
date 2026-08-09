@@ -9,11 +9,13 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (30 keys). `<domain>:<action>` 2-segment, lowercase, no
-// wildcard, default deny. Adding a key = contract change (theme2). The
-// github:* / drive:* / webhook:read keys were promoted from wire-boundary
-// string casts (github-sync, drive-proxy, webhook-ingest) into the closed
-// union so /authz/check no longer default-denies them as unknown keys.
+// P0 frozen catalog (32 keys). `<domain>:<action>` (self-service keys carry a
+// `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
+// contract change (theme2). The github:* / drive:* / webhook:read keys were
+// promoted from wire-boundary string casts (github-sync, drive-proxy,
+// webhook-ingest) into the closed union so /authz/check no longer default-denies
+// them as unknown keys. notif:inbox:self / notif:prefs:self back FE5's
+// self-service inbox + preference routes (promoted from the shell composition).
 export const PERMISSION_CATALOG = [
   { key: "identity:read", name: "Read roster", description: "View roster, roles and the permission catalog", domain: "identity", dangerous: false },
   { key: "identity:admin", name: "Administer identity", description: "Update users, invite, role CRUD, grant/revoke", domain: "identity", dangerous: true },
@@ -28,6 +30,8 @@ export const PERMISSION_CATALOG = [
   { key: "file:admin", name: "Administer files", description: "Force visibility/owner changes and restore", domain: "file", dangerous: true },
   { key: "notif:send", name: "Send notifications", description: "POST /notify (service-to-service)", domain: "notif", dangerous: false },
   { key: "notif:admin", name: "Administer notifications", description: "Search delivery records", domain: "notif", dangerous: false },
+  { key: "notif:inbox:self", name: "Read own inbox", description: "View and manage one's own notification inbox", domain: "notif", dangerous: false },
+  { key: "notif:prefs:self", name: "Manage own notification preferences", description: "View and update one's own notification preferences", domain: "notif", dangerous: false },
   { key: "mail:send", name: "Send mail", description: "Send email", domain: "mail", dangerous: true },
   { key: "mail:read", name: "Read mail", description: "View messages/threads/rules", domain: "mail", dangerous: false },
   { key: "mail:admin", name: "Administer mail", description: "Manage mailbox/watch/rules", domain: "mail", dangerous: true },
@@ -47,7 +51,7 @@ export const PERMISSION_CATALOG = [
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 30 keys (open `${string}:${string}` template retired).
+// Closed union of the 32 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

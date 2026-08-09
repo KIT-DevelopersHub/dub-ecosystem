@@ -17,7 +17,7 @@ import { WsChatClient } from "@dub/fe6-chat/src/realtime/ws-client";
 import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
-import { useToast } from "../stubs/dub-ui.tsx";
+import { useToast } from "@dub/ui";
 import {
   createChatApiClient,
   createEventApi,

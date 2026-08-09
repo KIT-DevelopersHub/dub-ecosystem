@@ -4,8 +4,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
+import { actionTypeRegistry } from "@dub/fe3-event-action";
+import { registerTaskActionPlugin } from "@dub/fe4-task-gantt/src/features/task-gantt/public";
 import { createApiClient } from "./lib/api-client.tsx";
 import { registerFeatureModules } from "./modules/registry.tsx";
+import { assembleFeatureModules } from "./composition/index.tsx";
 import { AppRoot } from "./shell/AppRoot.tsx";
 import { createShellRouter } from "./shell/router.tsx";
 
@@ -22,8 +25,16 @@ const api = createApiClient({
   },
 });
 
-// FE3-FE7 register their FeatureModule objects here as they ship.
-const registry = registerFeatureModules([]);
+// FE4 registers its `task_management` action-type plugin into FE3's app-global
+// ActionTypeRegistry singleton before the modules are assembled (design 2-3).
+// FE3's registry and FE4's expected registry are the same ActionTypeRegistry
+// shape; they differ only in the breadth of their IconName mirror, so bridge the
+// nominal type gap with a cast.
+registerTaskActionPlugin(actionTypeRegistry as unknown as Parameters<typeof registerTaskActionPlugin>[0]);
+
+// Assemble FE3-FE7 into the shell FeatureModule array (each feature's routes
+// wrapped in its runtime Provider, fed by the one shell api-client) and register.
+const registry = registerFeatureModules(assembleFeatureModules(api));
 
 const router = createShellRouter(api, registry, {
   onNavigate: (path) => {
