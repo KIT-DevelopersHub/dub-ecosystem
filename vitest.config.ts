@@ -9,6 +9,7 @@ export default defineConfig({
       "services/*/test/**/*.test.ts",
       "apps/*/test/**/*.test.ts",
       "infra/*/test/**/*.test.ts",
+      "tests/**/*.test.ts",
     ],
     environment: "node",
   },

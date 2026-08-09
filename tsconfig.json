@@ -13,6 +13,7 @@
     "apps/*/test/**/*.ts",
     "infra/*/src/**/*.ts",
     "infra/*/test/**/*.ts",
+    "tests/**/*.ts",
     "vitest.config.ts"
   ]
 }
