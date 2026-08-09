@@ -1,0 +1,25 @@
+{
+  "name": "@dub/drive-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) drive-proxy — the single window onto Google Drive/Docs/Sheets/Forms. Owns no D1 (Drive holds bodies, file-meta owns metadata).",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*",
+    "hono": "^4"
+  }
+}
