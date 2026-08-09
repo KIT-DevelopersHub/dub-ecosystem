@@ -129,7 +129,7 @@ describe("createApiClient", () => {
     const e = new ApiError(403, errBody("FORBIDDEN", "x", "req-7"));
     const d = toDisplayableError(e);
     expect(d.code).toBe("FORBIDDEN");
-    expect(d.description).toContain("権限");
-    expect(d.requestId).toBe("req-7");
+    expect(d.message).toContain("権限");
+    expect(d.correlationId).toBe("req-7");
   });
 });

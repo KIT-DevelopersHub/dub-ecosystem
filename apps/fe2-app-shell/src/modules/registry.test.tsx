@@ -12,7 +12,7 @@ function mod(over: Partial<FeatureModule> & Pick<FeatureModule, "id">): FeatureM
 describe("buildRegistry", () => {
   it("aggregates and sorts nav by order across modules", () => {
     const reg = buildRegistry([
-      mod({ id: "chat", nav: [{ label: "Chat", path: "/chat", icon: "message-square", order: 30 }] }),
+      mod({ id: "chat", nav: [{ label: "Chat", path: "/chat", icon: "message-circle", order: 30 }] }),
       mod({ id: "events", nav: [{ label: "Events", path: "/events", icon: "calendar", order: 10 }] }),
     ]);
     expect(reg.nav.map((n) => n.path)).toEqual(["/events", "/chat"]);

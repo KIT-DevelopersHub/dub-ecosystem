@@ -1,6 +1,5 @@
 // Global error fallback (design 2-2). Last-resort UI when a route/render throws.
-import { Button } from "../stubs/dub-ui.tsx";
-import { Icon } from "../stubs/icons.tsx";
+import { Button, Icon } from "@dub/ui";
 
 export function GlobalErrorFallback({
   error,

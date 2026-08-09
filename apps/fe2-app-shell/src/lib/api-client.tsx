@@ -7,7 +7,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import { isErrorResponse } from "@dub/errors";
 import type { gateway } from "@dub/types";
-import type { DisplayableError } from "../stubs/dub-ui.tsx";
+import type { DisplayableError } from "@dub/ui";
 
 type MeResponse = gateway.MeResponse;
 type BffHomeResponse = gateway.BffHomeResponse;
@@ -277,10 +277,10 @@ const JA_BY_CODE: Record<string, string> = {
 
 export function toDisplayableError(e: ApiError): DisplayableError {
   const out: DisplayableError = {
-    title: "エラー",
-    description: JA_BY_CODE[e.code] ?? e.message ?? "エラーが発生しました。",
     code: e.code,
+    message: JA_BY_CODE[e.code] ?? e.message ?? "エラーが発生しました。",
   };
-  if (e.requestId !== undefined) out.requestId = e.requestId;
+  // wire field = requestId; FE1 DisplayableError exposes it as correlationId (テーマ3裁定).
+  if (e.requestId !== undefined) out.correlationId = e.requestId;
   return out;
 }

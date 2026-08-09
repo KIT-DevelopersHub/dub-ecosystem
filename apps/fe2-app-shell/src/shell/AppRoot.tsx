@@ -5,7 +5,8 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider, ToastProvider } from "../stubs/dub-ui.tsx";
+import { ThemeProvider, ToastProvider } from "@dub/ui";
+import type { ThemeName } from "@dub/ui";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { AuthProvider } from "../auth/AuthProvider.tsx";
 import { useUiStore } from "../store/uiStore.tsx";
@@ -45,9 +46,17 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: unknown 
   }
 }
 
+// @dub/ui ThemeProvider is controlled and only accepts "light"|"dark"; FE2 resolves
+// "system" here against the OS preference (UiStore stays the source of truth).
+function resolveTheme(theme: "light" | "dark" | "system"): ThemeName {
+  if (theme !== "system") return theme;
+  const prefersDark = globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  return prefersDark ? "dark" : "light";
+}
+
 function ThemeBridge({ children }: { children: ReactNode }): JSX.Element {
   const theme = useUiStore((s) => s.theme);
-  return <ThemeProvider theme={theme}>{children}</ThemeProvider>;
+  return <ThemeProvider theme={resolveTheme(theme)}>{children}</ThemeProvider>;
 }
 
 export function AppRoot({
