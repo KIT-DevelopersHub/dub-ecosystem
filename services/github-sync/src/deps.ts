@@ -6,7 +6,7 @@ import { createAuthClient, type AuthClient } from "@dub/auth-client";
 import type { Env } from "./env";
 import { d1Stores } from "./store/d1";
 import type { Stores } from "./store/types";
-import { StubGithubApi, type GithubApiClient } from "./clients/github";
+import { StubGithubApi, RealGithubApi, type GithubApiClient } from "./clients/github";
 import { HttpTaskClient, type TaskServiceClient } from "./clients/task";
 import { HttpIdentityClient, type IdentityUserClient } from "./clients/identity";
 import { HttpEventClient, type EventExistenceClient } from "./clients/event";
@@ -42,7 +42,15 @@ export function buildRuntime(env: Env): Runtime {
   const tasks = new HttpTaskClient(taskClient);
   const identity = new HttpIdentityClient(identitySvc);
   const events = new HttpEventClient(eventSvc);
-  const github: GithubApiClient = new StubGithubApi();
+  // Ship the real GitHub App REST client when the App secret is present; otherwise
+  // fall back to the fail-closed stub so the Worker still boots and every GitHub
+  // operation surfaces GITHUB_NOT_CONFIGURED rather than silently no-op'ing.
+  const appId = env.GITHUB_APP_ID?.trim();
+  const privateKeyPem = env.GITHUB_APP_PRIVATE_KEY?.trim();
+  const github: GithubApiClient =
+    appId && privateKeyPem
+      ? new RealGithubApi({ auth: { appId, privateKeyPem } })
+      : new StubGithubApi();
 
   const publisher = new QueuePublisher({ EVT_NOTIFICATION: env.EVT_NOTIFICATION }, env.AUDIT_QUEUE);
 
