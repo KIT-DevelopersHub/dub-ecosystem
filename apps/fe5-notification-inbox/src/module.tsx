@@ -18,34 +18,36 @@ export const notificationsModule: FeatureModule = {
   routes: [
     {
       path: ROUTE_INBOX,
-      component: () =>
+      // Frozen shell shape: lazy loader resolving to `{ Component }`.
+      lazy: () =>
         import("./components/NotificationInboxPage").then((m) => ({
-          default: m.default as ComponentType,
+          Component: m.default as ComponentType,
         })),
+      auth: "required",
       requiredPermissions: [PERM_INBOX],
     },
     {
       path: ROUTE_PREFERENCES,
-      component: () =>
+      lazy: () =>
         import("./components/NotificationPreferencesPage").then((m) => ({
-          default: m.default as ComponentType,
+          Component: m.default as ComponentType,
         })),
+      auth: "required",
       requiredPermissions: [PERM_PREFS],
     },
   ],
   nav: [
     {
-      id: "notifications",
       label: "Notifications",
-      to: ROUTE_INBOX,
+      path: ROUTE_INBOX,
       icon: "bell",
-      requiredPermissions: [PERM_INBOX],
+      // events(10) < tasks(20) < notifications(30) < chat(40) < admin(50).
+      order: 30,
       // Single source of truth: the shell reads this, never polls itself.
       badgeSource: getUnreadCount,
     },
   ],
   headerWidget: NotificationBell as ComponentType,
-  requiredPermissions: [PERM_INBOX],
 };
 
 export default notificationsModule;
