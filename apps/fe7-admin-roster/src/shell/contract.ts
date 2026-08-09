@@ -1,38 +1,50 @@
-// Local model of the FE2 `@spa/shell` registration contract (P0b frozen 1-2).
+// Local model of the FE2 `@spa/shell` FeatureModule registration contract.
 //
-// FE2 is a sibling unit and is not yet published, so FE7 models the contract it
-// consumes here. In P1 this file is deleted and replaced by `import ... from
-// "@spa/shell"`. Shapes below track the FE7 design §2-2 / §5 dependency table and
-// the P0b freeze: FeatureModule one-object registration, permission-based route
-// guards (PermissionKey, not role), TanStack Router, ResourceClient typed fetch,
-// createOptimisticMutation, can(permission), AuthState.me = gateway.MeResponse.
+// FE2 (apps/fe2-app-shell) is a sibling unit and is not yet merged, so FE7 mirrors
+// the contract it consumes here. Shapes below track FE2's real
+// `src/modules/types.tsx` (the P0b freeze): one FeatureModule per feature, lazy
+// code-split routes (`lazy: () => Promise<{ Component }>`), permission-based route
+// guards (PermissionKey[]), and NavEntry ordered by `order`. In P1 this file is
+// deleted and replaced by `import ... from "@spa/shell"`.
+//
+// Cross-PR note: this is a LOCAL mirror only — FE7 must not import from
+// apps/fe2-app-shell (unmerged). Keep it in lock-step with FE2's types.tsx.
 import type { ComponentType } from "react";
 import type { identity, gateway } from "@dub/types";
 import type { ErrorResponse } from "@dub/errors";
 
-// ---- FE1 icon union (frozen 1-1-7). Local subset used by FE7 nav entries. ----
+// ---- FE1 icon union (frozen 1-1-7). Local subset used by FE7 nav entries. In FE2
+// the real NavEntry.icon is FE1's IconName; FE7 only needs this handful. ----
 export type IconName = "users" | "shield" | "history" | "key";
 
-// ---- Route + nav registration (frozen 1-2-2: requiredPermissions is PermissionKey[]) ----
+// ---- Feature module identifiers (FE2 real: FeatureModuleId union). ----
+export type FeatureModuleId = "events" | "tasks" | "notifications" | "chat" | "admin";
+
+// ---- Route registration (FE2 real shape: lazy Component + auth + optional perms). ----
 export interface FeatureRoute {
-  path: string; // absolute, flat under /admin (no nested delegation)
-  component: ComponentType;
-  requiredPermissions: identity.PermissionKey[]; // AND semantics; [] = any authed user
+  path: `/${string}`; // absolute, flat under /admin (no nested delegation in P0)
+  lazy: () => Promise<{ Component: ComponentType }>; // code-split page body
+  auth: "required" | "public";
+  requiredPermissions?: identity.PermissionKey[]; // AND semantics; omitted = any authed user
+  children?: FeatureRoute[]; // nested delegation (unused by FE7 in P0)
 }
 
+// ---- Sidebar nav entry (FE2 real shape: ordered, no per-entry permissions; the
+// shell derives visibility from the matching route's requiredPermissions). ----
 export interface NavEntry {
   label: string; // ja direct string (frozen 1-6-5), not an i18n key
   path: string;
   icon: IconName;
   order: number;
-  requiredPermissions: identity.PermissionKey[];
-  badgeSource?: string;
+  badgeSource?: () => number; // hook injection (FE5/FE6); unused by FE7
 }
 
 export interface FeatureModule {
-  id: string; // "admin"
+  id: FeatureModuleId; // "admin"
   routes: FeatureRoute[];
   nav: NavEntry[];
+  requiredPermissions?: identity.PermissionKey[]; // applies to all module routes
+  headerWidget?: ComponentType; // e.g. FE5 NotificationBell; unused by FE7
 }
 
 // ---- Typed fetch client provided by FE2 (frozen: ResourceClient) ----

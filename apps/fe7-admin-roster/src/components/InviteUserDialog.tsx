@@ -1,9 +1,12 @@
 import { useState } from "react";
 import type { identity } from "@dub/types";
-import { Modal, TextField, Select, Button, uiStyles as s } from "../ui/primitives";
+import { Modal, TextField, Select, Button, FormField, type SelectOption } from "@dub/ui";
 import { useInviteUser, useRoles } from "../hooks/useRosterApi";
 import { useToast } from "../hooks/useToast";
 import { presentError, fieldErrorMap } from "../lib/errorDisplay";
+
+const actionsRow: React.CSSProperties = { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 };
+const formErrorStyle: React.CSSProperties = { color: "var(--dub-color-danger-600)", fontSize: 13, margin: "8px 0 0" };
 
 export function InviteUserDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [email, setEmail] = useState("");
@@ -45,31 +48,37 @@ export function InviteUserDialog({ open, onClose }: { open: boolean; onClose: ()
     });
   }
 
+  const roleOptions: SelectOption[] = [
+    { value: "", label: "なし" },
+    ...(roles.data?.items.map((r) => ({ value: r.id, label: r.name })) ?? []),
+  ];
+
   return (
     <Modal title="ユーザーを招待" open={open} onClose={onClose} testId="fe7-invite-dialog">
-      <TextField
-        label="メールアドレス"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        error={fieldErrors.email}
-        testId="fe7-invite-email"
-      />
-      <TextField
-        label="表示名（任意）"
-        value={displayName}
-        onChange={(e) => setDisplayName(e.target.value)}
-        testId="fe7-invite-name"
-      />
-      <Select label="事前ロール（任意）" value={roleId} onChange={(e) => setRoleId(e.target.value)} testId="fe7-invite-role">
-        <option value="">なし</option>
-        {roles.data?.items.map((r) => (
-          <option key={r.id} value={r.id}>{r.name}</option>
-        ))}
-      </Select>
-      {formError ? <p className={s.error} role="alert">{formError}</p> : null}
-      <div className={s.modalActions}>
-        <Button onClick={onClose} testId="fe7-invite-cancel">キャンセル</Button>
+      <FormField label="メールアドレス" htmlFor="fe7-invite-email" error={fieldErrors.email}>
+        <TextField
+          id="fe7-invite-email"
+          type="email"
+          value={email}
+          onChange={(v) => setEmail(v)}
+          testId="fe7-invite-email"
+        />
+      </FormField>
+      <FormField label="表示名（任意）" htmlFor="fe7-invite-name">
+        <TextField id="fe7-invite-name" value={displayName} onChange={(v) => setDisplayName(v)} testId="fe7-invite-name" />
+      </FormField>
+      <FormField label="事前ロール（任意）" htmlFor="fe7-invite-role">
+        <Select
+          id="fe7-invite-role"
+          value={roleId}
+          options={roleOptions}
+          onChange={(v) => setRoleId(v)}
+          testId="fe7-invite-role"
+        />
+      </FormField>
+      {formError ? <p style={formErrorStyle} role="alert">{formError}</p> : null}
+      <div style={actionsRow}>
+        <Button variant="secondary" onClick={onClose} testId="fe7-invite-cancel">キャンセル</Button>
         <Button variant="primary" onClick={submit} disabled={invite.isPending} testId="fe7-invite-submit">
           招待する
         </Button>

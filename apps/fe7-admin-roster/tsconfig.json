@@ -5,7 +5,16 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "types": ["node", "vite/client"],
-    "moduleResolution": "Bundler"
+    "moduleResolution": "Bundler",
+    "baseUrl": "../..",
+    "paths": {
+      "@dub/types": ["packages/types/src/index.ts"],
+      "@dub/errors": ["packages/errors/src/index.ts"],
+      "@dub/tokens": ["packages/tokens/src/index.ts"],
+      "@dub/tokens/css": ["packages/tokens/src/css.ts"],
+      "@dub/ui": ["apps/fe1-design-system/src/index.tsx"],
+      "@dub/ui/icons": ["apps/fe1-design-system/src/icons.ts"]
+    }
   },
   "include": ["src/**/*", "test/**/*"]
 }

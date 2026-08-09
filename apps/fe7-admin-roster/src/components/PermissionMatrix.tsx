@@ -1,6 +1,14 @@
 import type { identity } from "@dub/types";
 import { groupByDomain, toggleDomain, togglePermission, domainSelectionState, type CatalogEntry } from "../lib/permissionMatrix";
-import { uiStyles as s } from "../ui/primitives";
+
+const cardStyle: React.CSSProperties = {
+  border: "1px solid var(--dub-color-border-default, #d0d7de)",
+  borderRadius: 8,
+  padding: 12,
+  marginBottom: 12,
+};
+const rowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center" };
+const dangerousStyle: React.CSSProperties = { color: "var(--dub-color-danger-600)" };
 
 export function PermissionMatrix({
   catalog,
@@ -20,9 +28,9 @@ export function PermissionMatrix({
       {groups.map((g) => {
         const state = domainSelectionState(selected, g.entries);
         return (
-          <fieldset key={g.domain} className={s.card} style={{ marginBottom: 12 }}>
+          <fieldset key={g.domain} style={cardStyle}>
             <legend>
-              <label className={s.checkboxRow}>
+              <label style={rowStyle}>
                 <input
                   type="checkbox"
                   checked={state.all}
@@ -38,7 +46,7 @@ export function PermissionMatrix({
               const key = e.key as identity.PermissionKey;
               const checked = selected.includes(key);
               return (
-                <label key={e.key} className={s.checkboxRow}>
+                <label key={e.key} style={rowStyle}>
                   <input
                     type="checkbox"
                     checked={checked}
@@ -46,7 +54,7 @@ export function PermissionMatrix({
                     onChange={() => onChange(togglePermission(selected, key))}
                     data-testid={`fe7-matrix-key-${e.key}`}
                   />
-                  <span className={e.dangerous ? s.dangerous : undefined} title={e.description}>
+                  <span style={e.dangerous ? dangerousStyle : undefined} title={e.description}>
                     {e.name}
                     {e.dangerous ? " ⚠" : ""}
                   </span>

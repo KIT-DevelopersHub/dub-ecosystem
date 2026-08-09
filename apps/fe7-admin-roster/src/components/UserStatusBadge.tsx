@@ -1,5 +1,5 @@
 import type { identity } from "@dub/types";
-import { Badge, type BadgeTone } from "../ui/primitives";
+import { Badge, type BadgeTone } from "@dub/ui";
 
 const TONE: Record<identity.UserStatus, BadgeTone> = {
   active: "success",

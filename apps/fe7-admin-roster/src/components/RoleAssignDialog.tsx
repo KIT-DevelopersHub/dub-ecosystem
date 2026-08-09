@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { Modal, Select, Button, uiStyles as s } from "../ui/primitives";
+import { Modal, Select, Button, FormField, type SelectOption } from "@dub/ui";
 import { ScopePicker } from "./ScopePicker";
 import { useRoles, useAssignRole } from "../hooks/useRosterApi";
 import { useToast } from "../hooks/useToast";
 import { DEFAULT_SCOPE, buildAssignRequest, type ScopeSelection } from "../lib/scope";
 import { errorMessage } from "../lib/errorDisplay";
+
+const actionsRow: React.CSSProperties = { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 };
+const formErrorStyle: React.CSSProperties = { color: "var(--dub-color-danger-600)", fontSize: 13, margin: "8px 0 0" };
 
 export function RoleAssignDialog({
   open,
@@ -39,16 +42,24 @@ export function RoleAssignDialog({
     );
   }
 
+  const roleOptions: SelectOption[] = roles.data?.items.map((r) => ({ value: r.id, label: r.name })) ?? [];
+
   return (
     <Modal title="ロールを付与" open={open} onClose={onClose} testId="fe7-assign-dialog">
-      <Select label="ロール" value={roleId} onChange={(e) => setRoleId(e.target.value)} testId="fe7-assign-role">
-        <option value="">選択してください</option>
-        {roles.data?.items.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-      </Select>
+      <FormField label="ロール" htmlFor="fe7-assign-role">
+        <Select
+          id="fe7-assign-role"
+          value={roleId}
+          options={roleOptions}
+          placeholder="選択してください"
+          onChange={(v) => setRoleId(v)}
+          testId="fe7-assign-role"
+        />
+      </FormField>
       <ScopePicker value={scope} events={events} onChange={setScope} />
-      {error ? <p className={s.error} role="alert">{error}</p> : null}
-      <div className={s.modalActions}>
-        <Button onClick={onClose} testId="fe7-assign-cancel">キャンセル</Button>
+      {error ? <p style={formErrorStyle} role="alert">{error}</p> : null}
+      <div style={actionsRow}>
+        <Button variant="secondary" onClick={onClose} testId="fe7-assign-cancel">キャンセル</Button>
         <Button variant="primary" onClick={submit} disabled={assign.isPending} testId="fe7-assign-submit">付与する</Button>
       </div>
     </Modal>

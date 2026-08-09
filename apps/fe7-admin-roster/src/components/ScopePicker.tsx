@@ -1,6 +1,8 @@
-import { Select, uiStyles as s } from "../ui/primitives";
+import { Select, FormField, type SelectOption } from "@dub/ui";
 import { usePermissions } from "../hooks/usePermissions";
 import { eventScopeAvailable, type ScopeSelection } from "../lib/scope";
+
+const checkboxRow: React.CSSProperties = { display: "flex", gap: 16, alignItems: "center", margin: "8px 0" };
 
 // P0: org-wide or event scope. Event candidates require event:read; without it the
 // picker degrades to org-wide only (design §6 FORBIDDEN degrade).
@@ -15,10 +17,11 @@ export function ScopePicker({
 }) {
   const { can } = usePermissions();
   const eventAllowed = eventScopeAvailable(can("event:read") ? ["event:read"] : []);
+  const eventOptions: SelectOption[] = events.map((ev) => ({ value: ev.id, label: ev.name }));
 
   return (
     <div data-testid="fe7-scope-picker">
-      <div className={s.checkboxRow}>
+      <div style={checkboxRow}>
         <label>
           <input
             type="radio"
@@ -42,14 +45,15 @@ export function ScopePicker({
         </label>
       </div>
       {value.kind === "event" && eventAllowed ? (
-        <Select
-          label="対象イベント"
-          value={value.eventId ?? ""}
-          onChange={(e) => onChange({ kind: "event", eventId: e.target.value || null })}
-          testId="fe7-scope-event-select"
-        >
-          {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
-        </Select>
+        <FormField label="対象イベント" htmlFor="fe7-scope-event-select">
+          <Select
+            id="fe7-scope-event-select"
+            value={value.eventId ?? ""}
+            options={eventOptions}
+            onChange={(v) => onChange({ kind: "event", eventId: v || null })}
+            testId="fe7-scope-event-select"
+          />
+        </FormField>
       ) : null}
     </div>
   );

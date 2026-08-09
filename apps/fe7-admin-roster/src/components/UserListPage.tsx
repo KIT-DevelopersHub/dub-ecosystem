@@ -1,14 +1,26 @@
 import { useState } from "react";
 import type { identity } from "@dub/types";
-import { PageHeader, DataTable, TextField, Select, Button, EmptyState, ErrorState, LoadMore, type Column } from "../ui/primitives";
+import {
+  PageHeader,
+  DataTable,
+  TextField,
+  Select,
+  Button,
+  EmptyState,
+  ErrorState,
+  LoadMore,
+  FormField,
+  type ColumnDef,
+  type SelectOption,
+} from "@dub/ui";
 import { UserStatusBadge } from "./UserStatusBadge";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { useUsers } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
-import { errorMessage } from "../lib/errorDisplay";
+import { displayError } from "../lib/errorDisplay";
 
-const STATUS_OPTIONS: { value: UserStatusFilter; label: string }[] = [
+const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
   { value: "all", label: "すべて" },
   { value: "active", label: "在籍" },
   { value: "invited", label: "招待中" },
@@ -25,19 +37,26 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
 
   const canInvite = can("identity:admin");
 
-  const columns: Column<identity.IdentityUser>[] = [
+  // @dub/ui DataTable has no per-row testId; the row identity testid (frozen e2e
+  // convention 1-7) is surfaced on the first cell instead.
+  const columns: ColumnDef<identity.IdentityUser>[] = [
     {
       key: "name",
       header: "名前",
-      render: (u) =>
-        onOpenUser ? (
-          <button onClick={() => onOpenUser(u.id)} data-testid={`fe7-users-open-${u.id}`}>{u.displayName}</button>
-        ) : (
-          u.displayName
-        ),
+      cell: (u) => (
+        <span data-testid={`fe7-users-row-${u.id}`}>
+          {onOpenUser ? (
+            <button onClick={() => onOpenUser(u.id)} data-testid={`fe7-users-open-${u.id}`}>
+              {u.displayName}
+            </button>
+          ) : (
+            u.displayName
+          )}
+        </span>
+      ),
     },
-    { key: "email", header: "メール", render: (u) => u.email },
-    { key: "status", header: "状態", render: (u) => <UserStatusBadge status={u.status} /> },
+    { key: "email", header: "メール", cell: (u) => u.email },
+    { key: "status", header: "状態", cell: (u) => <UserStatusBadge status={u.status} /> },
   ];
 
   return (
@@ -55,33 +74,41 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
       />
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-        <TextField
-          label="検索"
-          value={filters.search}
-          onChange={(e) => { setCursor(undefined); setFilters((f) => ({ ...f, search: e.target.value })); }}
-          testId="fe7-users-search"
-        />
-        <Select
-          label="状態"
-          value={filters.status}
-          onChange={(e) => { setCursor(undefined); setFilters((f) => ({ ...f, status: e.target.value as UserStatusFilter })); }}
-          testId="fe7-users-status-filter"
-        >
-          {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </Select>
+        <FormField label="検索" htmlFor="fe7-users-search">
+          <TextField
+            id="fe7-users-search"
+            value={filters.search}
+            onChange={(v) => {
+              setCursor(undefined);
+              setFilters((f) => ({ ...f, search: v }));
+            }}
+            testId="fe7-users-search"
+          />
+        </FormField>
+        <FormField label="状態" htmlFor="fe7-users-status-filter">
+          <Select
+            id="fe7-users-status-filter"
+            value={filters.status}
+            options={STATUS_OPTIONS}
+            onChange={(v) => {
+              setCursor(undefined);
+              setFilters((f) => ({ ...f, status: v }));
+            }}
+            testId="fe7-users-status-filter"
+          />
+        </FormField>
       </div>
 
       {query.isError ? (
-        <ErrorState message={errorMessage(query.error)} onRetry={() => query.refetch()} testId="fe7-users-error" />
+        <ErrorState error={displayError(query.error)} onRetry={() => query.refetch()} testId="fe7-users-error" />
       ) : query.data && query.data.items.length === 0 ? (
-        <EmptyState message="該当するユーザーがいません" testId="fe7-users-empty" />
+        <EmptyState title="該当するユーザーがいません" testId="fe7-users-empty" />
       ) : (
         <>
           <DataTable
             columns={columns}
             rows={query.data?.items ?? []}
             rowKey={(u) => u.id}
-            rowTestId={(u) => `fe7-users-row-${u.id}`}
             testId="fe7-users-table"
           />
           <LoadMore
