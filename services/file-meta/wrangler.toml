@@ -1,0 +1,51 @@
+# file-meta-service (#9) — Cloudflare Worker template. NOT deployed in P0 (deploy is a
+# later wave). Bindings mirror the P0b frozen contract (shared dub-core D1, R2 bucket,
+# EVT_FILE_META consumer queue + DLQ, AUDIT_QUEUE producer, SVC_* service bindings).
+name = "dub-file-meta"
+main = "src/index.ts"
+compatibility_date = "2024-11-27"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+# Shared core D1 (namespace-scoped access enforced by @dub/db to `file_meta_*`).
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_WITH_D1_ID" # infra-d1-seed (#28) owns provisioning
+
+# R2 attachment body store (metadata stays in this service; body lives in R2).
+[[r2_buckets]]
+binding = "R2_FILES"
+bucket_name = "dub-file-attachments"
+
+# --- Queue consumer: events this service subscribes to (drive.* + *.archived) ---
+[[queues.consumers]]
+queue = "dub-q-evt-file-meta"
+max_retries = 5
+max_batch_size = 25
+max_batch_timeout = 5
+dead_letter_queue = "dub-q-evt-file-meta-dlq"
+
+# --- Queue producers ---
+# EVT_FILE_META: this service's own inbound queue binding (present so the entry
+# can be self-referential in tooling; producers of drive.*/*.archived target it).
+[[queues.producers]]
+queue = "dub-q-evt-file-meta"
+binding = "EVT_FILE_META"
+
+# Audit channel (publishAudit → audit-log consumer).
+[[queues.producers]]
+queue = "dub-q-audit-record"
+binding = "AUDIT_QUEUE"
+
+# --- Service bindings (synchronous internal calls) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[[services]]
+binding = "SVC_DRIVE_PROXY"
+service = "dub-drive-proxy"
+
+[observability]
+enabled = true
