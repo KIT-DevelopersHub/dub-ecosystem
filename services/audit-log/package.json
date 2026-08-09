@@ -1,0 +1,26 @@
+{
+  "name": "@dub/audit-log",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "audit-log service (#10) — append-only record store (Queue + sync fail-close write, gated read, R2 monthly archive).",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/types": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/auth-client": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/http": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

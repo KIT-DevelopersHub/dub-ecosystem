@@ -1,0 +1,37 @@
+# audit-log service (#10) — scaffold only. DO NOT deploy from this unit.
+# Queue/DO/R2 real creation and prod IDs land in the infra波 (9-B/C/E).
+name = "audit-log"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared dub-core D1 (audit_ namespace only). database_id filled at infra Apply.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+
+# R2 bucket for monthly NDJSON archive (audit-archive/{YYYY-MM}.ndjson).
+[[r2_buckets]]
+binding = "AUDIT_ARCHIVE"
+bucket_name = "dub-audit-archive"
+
+# identity-roster Service Binding (authz/check for audit:read).
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"
+
+# Consume the audit-record special channel; DLQ after max_retries=5 (frozen).
+[[queues.consumers]]
+queue = "dub-q-audit-record"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "dub-q-audit-record-dlq"
+
+# Monthly archive Cron (00:00 UTC on the 1st).
+[triggers]
+crons = ["0 0 1 * *"]
+
+[observability]
+enabled = true
