@@ -1,0 +1,30 @@
+# identity-roster-service — Cloudflare Worker skeleton (deploy is NOT part of P0 unit work).
+name = "identity-roster"
+main = "src/index.ts"
+compatibility_date = "2025-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared core D1 (binding DB). identity-roster owns only the identity_* namespace.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_AT_DEPLOY"
+
+# Queue producer for best-effort audit records (@dub/events publishAudit).
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "dub-q-audit"
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+
+# Internal Service Bindings (audit-log sync log + auth-service revoke).
+# Uncommented at the integration wave (9-B/C/E). Left documented here so the
+# contract surface is visible; the Worker degrades to no-op sinks when absent.
+# [[services]]
+# binding = "SVC_AUDIT_LOG"
+# service = "audit-log"
+#
+# [[services]]
+# binding = "SVC_AUTH"
+# service = "auth-service"

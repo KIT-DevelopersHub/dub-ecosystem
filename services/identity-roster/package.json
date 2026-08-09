@@ -1,0 +1,26 @@
+{
+  "name": "@dub/identity-roster",
+  "version": "0.1.0",
+  "private": true,
+  "description": "identity-roster-service — orgs, users, roles and the RBAC authz-check source of truth (Cloudflare Worker + Hono).",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "hono": "^4"
+  }
+}
