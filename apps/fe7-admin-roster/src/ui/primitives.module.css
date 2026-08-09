@@ -1,0 +1,110 @@
+/* Local stand-ins for FE1 @dub/ui parts. Styled with @dub/tokens CSS variables
+   (--dub-*). Replaced by real @dub/ui imports in P1. */
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+  padding-bottom: var(--dub-space-4);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  margin-bottom: var(--dub-space-6);
+}
+.pageTitle {
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  margin: 0;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  font: inherit;
+  font-weight: var(--dub-font-weight-medium);
+  padding: var(--dub-space-2) var(--dub-space-4);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+  color: var(--dub-color-text-primary);
+  cursor: pointer;
+}
+.button:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--dub-color-brand-500); border-color: var(--dub-color-brand-500); color: #fff; }
+.danger { background: var(--dub-color-danger-500); border-color: var(--dub-color-danger-500); color: #fff; }
+
+.field { display: flex; flex-direction: column; gap: var(--dub-space-1); margin-bottom: var(--dub-space-4); }
+.label { font-size: var(--dub-font-size-sm); color: var(--dub-color-text-secondary); }
+.input, .select {
+  font: inherit;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-radius: var(--dub-radius-sm);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+}
+.error { color: var(--dub-color-danger-600); font-size: var(--dub-font-size-xs); }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--dub-space-2);
+  border-radius: var(--dub-radius-full);
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+  line-height: 1.6;
+}
+.badgeNeutral { background: var(--dub-color-gray-100); color: var(--dub-color-gray-700); }
+.badgeSuccess { background: var(--dub-color-success-100); color: var(--dub-color-success-700); }
+.badgeWarning { background: var(--dub-color-warning-100); color: var(--dub-color-warning-700); }
+.badgeDanger { background: var(--dub-color-danger-100); color: var(--dub-color-danger-700); }
+
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td {
+  text-align: left;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+.table th { color: var(--dub-color-text-secondary); font-weight: var(--dub-font-weight-medium); }
+
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: var(--dub-zIndex-modal);
+}
+.modal {
+  background: var(--dub-color-surface-raised);
+  border-radius: var(--dub-radius-lg);
+  padding: var(--dub-space-6);
+  min-width: 360px;
+  max-width: 560px;
+  box-shadow: var(--dub-shadow-overlay);
+}
+.modalTitle { margin: 0 0 var(--dub-space-4); font-size: var(--dub-font-size-lg); font-weight: var(--dub-font-weight-bold); }
+.modalActions { display: flex; justify-content: flex-end; gap: var(--dub-space-2); margin-top: var(--dub-space-6); }
+
+.card {
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  padding: var(--dub-space-4);
+}
+
+.empty, .errorState {
+  text-align: center;
+  padding: var(--dub-space-10) var(--dub-space-4);
+  color: var(--dub-color-text-muted);
+}
+
+.tabs { display: flex; gap: var(--dub-space-2); border-bottom: 1px solid var(--dub-color-border-default); margin-bottom: var(--dub-space-4); }
+.tab { padding: var(--dub-space-2) var(--dub-space-3); background: none; border: none; cursor: pointer; color: var(--dub-color-text-secondary); }
+.tabActive { color: var(--dub-color-brand-600); border-bottom: 2px solid var(--dub-color-brand-500); }
+
+.loadMore { display: flex; justify-content: center; margin-top: var(--dub-space-4); }
+
+.checkboxRow { display: flex; align-items: center; gap: var(--dub-space-2); padding: var(--dub-space-1) 0; }
+.dangerous { color: var(--dub-color-danger-600); font-weight: var(--dub-font-weight-medium); }
