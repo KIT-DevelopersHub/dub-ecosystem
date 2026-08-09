@@ -1,0 +1,22 @@
+{
+  "name": "@dub/gantt-calc",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) gantt-calc — stateless pure calculation lib (schedule rollup, critical path, dependency validation). Zero deps, zero side effects.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/types": "workspace:*"
+  }
+}

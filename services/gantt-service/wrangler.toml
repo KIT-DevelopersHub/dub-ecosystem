@@ -1,0 +1,43 @@
+# gantt-service — Cloudflare Worker config (scaffold; NOT deployed by this unit).
+# One physical Worker per service (テーマ7). Shared D1 "dub-core", binding = DB (テーマ12).
+name = "gantt-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+# Shared core D1 (single DB; gantt owns the gantt_* namespace only).
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "00000000-0000-0000-0000-000000000000" # placeholder; infra sets the real id
+migrations_dir = "migrations"
+
+# DTO short-lived cache (テーマ: gantt:dto:<eventId>, TTL 60s).
+[[kv_namespaces]]
+binding = "GANTT_KV"
+id = "00000000000000000000000000000000" # placeholder; infra sets the real id
+
+# Inbound event queue (cache purge). DLQ + max_retries per Queue catalog common values.
+[[queues.consumers]]
+queue = "dub-q-evt-gantt"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "dub-q-evt-gantt-dlq"
+
+# Upstream services via Service Bindings (read-only: task/event; authz: identity).
+[[services]]
+binding = "SVC_TASK"
+service = "task-service"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "event-service"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster-service"
+
+[observability]
+enabled = true
