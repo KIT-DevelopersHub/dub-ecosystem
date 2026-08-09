@@ -3,7 +3,7 @@
 // alias @spa/shell (no @dub/spa-shell package — theme5).
 import type { ComponentType } from "react";
 import type { identity } from "@dub/types";
-import type { IconName } from "../stubs/icons.tsx";
+import type { IconName } from "@dub/ui";
 
 type PermissionKey = identity.PermissionKey;
 

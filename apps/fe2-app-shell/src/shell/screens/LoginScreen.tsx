@@ -1,6 +1,6 @@
 // Login screen (design 2-1). Starts Google login; auth is public at the gateway.
 import { useState } from "react";
-import { Button } from "../../stubs/dub-ui.tsx";
+import { Button } from "@dub/ui";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 
@@ -16,7 +16,7 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
       globalThis.location.assign(authorizeUrl);
     } catch (e) {
       setBusy(false);
-      setError(ApiError.isApiError(e) ? toDisplayableError(e).description : "ログインを開始できませんでした。");
+      setError(ApiError.isApiError(e) ? toDisplayableError(e).message : "ログインを開始できませんでした。");
     }
   }
 

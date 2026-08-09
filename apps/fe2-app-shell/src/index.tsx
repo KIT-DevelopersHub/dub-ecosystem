@@ -58,7 +58,7 @@ export { createShellRouter, toTanstackPath } from "./shell/router.tsx";
 export { GlobalErrorFallback } from "./shell/GlobalErrorFallback.tsx";
 export { RouteLoadingBar } from "./shell/RouteLoadingBar.tsx";
 
-// ---- FE1 re-exports (design 2-3): Toast type & component are FE1-owned; FE2 only
-// mounts the provider and re-exports. Sourced from the FE1 stub until @dub/ui ships.
-export { useToast, type ToastOptions, type DisplayableError } from "./stubs/dub-ui.tsx";
-export type { IconName } from "./stubs/icons.tsx";
+// ---- @dub/ui re-exports (design 2-3): Toast hook, display-error & icon-name types
+// are FE1-owned; FE2 only mounts the provider (AppRoot) and re-exports the surface
+// FE3-FE7 consume via @spa/shell, so features import them from one shell entry.
+export { useToast, type ToastOptions, type DisplayableError, type IconName } from "@dub/ui";

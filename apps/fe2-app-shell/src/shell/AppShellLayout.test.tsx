@@ -22,7 +22,7 @@ function api(): ApiClient {
 
 const NAV: NavEntry[] = [
   { label: "Events", path: "/events", icon: "calendar", order: 10 },
-  { label: "Chat", path: "/chat", icon: "message-square", order: 20, badgeSource: () => 5 },
+  { label: "Chat", path: "/chat", icon: "message-circle", order: 20, badgeSource: () => 5 },
 ];
 
 function Widget() {
@@ -60,7 +60,8 @@ describe("AppShellLayout", () => {
 
   it("renders injected nav badge from badgeSource", () => {
     renderShell();
-    expect(screen.getByLabelText("5 件の未読")).toBeInTheDocument();
+    // badgeSource() -> SidebarItem.badgeCount -> @dub/ui Sidebar renders a Badge
+    expect(screen.getByText("5")).toBeInTheDocument();
   });
 
   it("calls onNavigate on nav click and onLogout on logout", async () => {
