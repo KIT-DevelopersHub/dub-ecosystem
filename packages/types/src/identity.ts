@@ -9,8 +9,11 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (23 keys). `<domain>:<action>` 2-segment, lowercase, no
-// wildcard, default deny. Adding a key = contract change (theme2).
+// P0 frozen catalog (30 keys). `<domain>:<action>` 2-segment, lowercase, no
+// wildcard, default deny. Adding a key = contract change (theme2). The
+// github:* / drive:* / webhook:read keys were promoted from wire-boundary
+// string casts (github-sync, drive-proxy, webhook-ingest) into the closed
+// union so /authz/check no longer default-denies them as unknown keys.
 export const PERMISSION_CATALOG = [
   { key: "identity:read", name: "Read roster", description: "View roster, roles and the permission catalog", domain: "identity", dangerous: false },
   { key: "identity:admin", name: "Administer identity", description: "Update users, invite, role CRUD, grant/revoke", domain: "identity", dangerous: true },
@@ -35,9 +38,16 @@ export const PERMISSION_CATALOG = [
   { key: "infra:dns", name: "Change DNS", description: "Modify DNS records", domain: "infra", dangerous: true },
   { key: "infra:admin", name: "Administer infra", description: "Register sites and manage allowed zones", domain: "infra", dangerous: true },
   { key: "audit:read", name: "Read audit log", description: "Search/query audit records", domain: "audit", dangerous: false },
+  { key: "github:read", name: "Read GitHub", description: "View GitHub sync state, repos and pull requests", domain: "github", dangerous: false },
+  { key: "github:write", name: "Write GitHub", description: "Create/update GitHub-side resources via sync", domain: "github", dangerous: false },
+  { key: "github:sync", name: "Sync GitHub", description: "Trigger GitHub synchronization jobs", domain: "github", dangerous: false },
+  { key: "github:admin", name: "Administer GitHub", description: "Manage the GitHub integration, tokens and webhooks", domain: "github", dangerous: true },
+  { key: "drive:read", name: "Read Drive", description: "View/search Google Drive metadata and download content", domain: "drive", dangerous: false },
+  { key: "drive:write", name: "Write Drive", description: "Upload/update Google Drive files", domain: "drive", dangerous: false },
+  { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 23 keys (open `${string}:${string}` template retired).
+// Closed union of the 30 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";
