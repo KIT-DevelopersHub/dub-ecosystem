@@ -5,7 +5,16 @@
 //   3. ErrorResponse -> semi-open DubClientError + retryable backoff (max 2).
 // Contract types come from @dub/types `mobile`/`task`/`event`/`notification`
 // namespaces (MO3 正本); this layer never re-defines them.
-import { common, type auth, type event, type mobile, type notification, type task } from "@dub/types";
+import {
+  common,
+  type auth,
+  type chat,
+  type event,
+  type gantt,
+  type mobile,
+  type notification,
+  type task,
+} from "@dub/types";
 import { CommonErrorCodes, isErrorResponse } from "@dub/errors";
 import type { Transport, HttpMethod } from "./transport.js";
 import type { TokenStore, StoredSession } from "./token-store.js";
@@ -99,6 +108,40 @@ export class MobileApiClient {
     return this.#request<notification.ListInboxResponse>("GET", "/inbox", {
       query: { cursor: query.cursor, limit: query.limit },
     });
+  }
+
+  /** S6 gantt chart read: rows + FS dependency lines for one event. */
+  getGantt(query: gantt.GetGanttQuery): Promise<gantt.GanttChartDTO> {
+    return this.#request<gantt.GanttChartDTO>("GET", "/gantt", {
+      query: { eventId: query.eventId },
+    });
+  }
+
+  /** S8 chat: list the channels the caller can see. */
+  listChatChannels(query: common.CursorQuery = {}): Promise<common.Paginated<chat.ChatChannel>> {
+    return this.#request<common.Paginated<chat.ChatChannel>>("GET", "/chat/channels", {
+      query: { cursor: query.cursor, limit: query.limit },
+    });
+  }
+
+  /** S8 chat: page a channel's message history (oldest resolved via cursor). */
+  listChatMessages(
+    channelId: string,
+    query: common.CursorQuery = {},
+  ): Promise<common.Paginated<chat.ChatMessage>> {
+    return this.#request<common.Paginated<chat.ChatMessage>>(
+      "GET",
+      `/chat/channels/${encodeURIComponent(channelId)}/messages`,
+      { query: { cursor: query.cursor, limit: query.limit } },
+    );
+  }
+
+  /** S8 chat: short-lived ticket for the DO-direct (gateway-bypassing) WS. */
+  getChatWsTicket(channelId: string): Promise<chat.WsTicketResponse> {
+    return this.#request<chat.WsTicketResponse>(
+      "GET",
+      `/chat/channels/${encodeURIComponent(channelId)}/ws-ticket`,
+    );
   }
 
   registerDevice(req: mobile.RegisterDeviceRequest): Promise<mobile.RegisterDeviceResponse> {
