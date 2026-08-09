@@ -45,8 +45,13 @@ export const QUEUE_NAME_BY_SOURCE: Record<webhook.WebhookSource, string> = {
   stripe: "dub-q-wh-stripe",
 };
 
-// P0 implementation scope: github only (others are verifier stubs + queue declaration).
-export const ENABLED_SOURCES: ReadonlySet<webhook.WebhookSource> = new Set(["github"]);
+// Enabled ingress sources. github/google-drive/stripe accept live traffic; gmail stays
+// gated (its verifier is implemented but the endpoint is not yet activated — see 9-B).
+export const ENABLED_SOURCES: ReadonlySet<webhook.WebhookSource> = new Set([
+  "github",
+  "google-drive",
+  "stripe",
+]);
 
 export const KNOWN_SOURCES: ReadonlySet<string> = new Set<webhook.WebhookSource>([
   "github",

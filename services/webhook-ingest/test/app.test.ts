@@ -85,8 +85,8 @@ describe("POST /hooks/github", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 for a known-but-stub source not enabled in P0 (stripe)", async () => {
-    const res = await h.app.fetch(new Request("https://hooks/hooks/stripe", { method: "POST", body: "{}" }), h.env);
+  it("returns 404 for a known-but-disabled source (gmail, gated until 9-B)", async () => {
+    const res = await h.app.fetch(new Request("https://hooks/hooks/gmail", { method: "POST", body: "{}" }), h.env);
     expect(res.status).toBe(404);
     expect(h.queue.sent).toHaveLength(0);
   });
