@@ -1,0 +1,13 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import NewsList from "../../components/NewsList.astro";
+
+const news = (await getCollection("news")).sort((a, b) =>
+  a.data.publishedAt > b.data.publishedAt ? -1 : 1,
+);
+---
+<BaseLayout title="お知らせ" description="DevelopersHub からのお知らせ一覧。" path="/news">
+  <h1>お知らせ</h1>
+  <NewsList items={news.map((n) => ({ slug: n.slug, title: n.data.title, publishedAt: n.data.publishedAt, summary: n.data.summary }))} />
+</BaseLayout>

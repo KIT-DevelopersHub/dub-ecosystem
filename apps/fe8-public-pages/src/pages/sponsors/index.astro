@@ -1,0 +1,26 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import SponsorTierTable from "../../components/SponsorTierTable.astro";
+import CtaBanner from "../../components/CtaBanner.astro";
+
+const plans = (await getCollection("sponsorPlans"))
+  .map((p) => p.data)
+  .sort((a, b) => a.order - b.order);
+---
+<BaseLayout
+  title="スポンサー募集"
+  description="DevelopersHub / 北陸ITカンファレンスのスポンサープラン・特典・お申し込み。"
+  path="/sponsors"
+>
+  <h1>スポンサー募集</h1>
+  <p>私たちのイベントは、スポンサー企業の皆さまのご支援に支えられています。地域の開発者コミュニティへの貢献と、採用・ブランディングの機会をご提供します。</p>
+
+  <h2>プラン一覧</h2>
+  <SponsorTierTable plans={plans} />
+
+  <h2>資料ダウンロード</h2>
+  <p><a href="/sponsor-deck.pdf">スポンサー募集資料 (PDF)</a></p>
+
+  <CtaBanner title="スポンサーのご相談はこちら" href="/sponsors/inquiry" label="お問い合わせする" />
+</BaseLayout>

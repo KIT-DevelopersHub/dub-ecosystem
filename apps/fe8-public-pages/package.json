@@ -1,0 +1,26 @@
+{
+  "name": "@dub/fe8-public-pages",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "FE8 public pages — DevelopersHub org site / event LPs / sponsor intake. Astro SSG, light-fixed, @dub/tokens/css only.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/tokens": "workspace:*",
+    "@dub/types": "workspace:*",
+    "astro": "^4.16.18",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^2.1.8"
+  }
+}
