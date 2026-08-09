@@ -78,6 +78,23 @@ describe("assembleFeatureModules", () => {
     const registry = buildRegistry(assembleFeatureModules(api));
     expect(registry.headerWidgets.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("propagates FE5's module-level requiredPermissions onto every notifications route", () => {
+    // Regression: adaptNotifications must carry notificationsModule's MODULE-LEVEL
+    // perm (notif:inbox:self) so registry.flatten() ANDs it onto each route. Dropping
+    // it let the preferences route be gated by prefs alone — a silent authz weaken.
+    const { api } = fakeApi();
+    const notifications = assembleFeatureModules(api).find((m) => m.id === "notifications");
+    expect(notifications?.requiredPermissions).toContain("notif:inbox:self");
+
+    const registry = buildRegistry(assembleFeatureModules(api));
+    const prefs = registry.routes.find((r) => r.path === "/settings/notifications");
+    expect(prefs?.requiredPermissions).toEqual(
+      expect.arrayContaining(["notif:inbox:self", "notif:prefs:self"]),
+    );
+    const inbox = registry.routes.find((r) => r.path === "/notifications");
+    expect(inbox?.requiredPermissions).toContain("notif:inbox:self");
+  });
 });
 
 describe("toIcon", () => {

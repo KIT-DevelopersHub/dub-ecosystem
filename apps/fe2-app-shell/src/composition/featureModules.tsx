@@ -82,6 +82,22 @@ function placeholderLazy(wrap: ElementWrapper): FeatureRoute["lazy"] {
   return () => Promise.resolve({ Component: () => wrap(null) });
 }
 
+/** Carry a feature's MODULE-LEVEL requiredPermissions onto the shell module.
+ *  registry.flatten() merges these onto every route (AND semantics), so dropping
+ *  them here would SILENTLY weaken each route's authz gate. FE5 declares
+ *  module-level perms today; every adapter copies them uniformly so any feature
+ *  that adds module-level perms later is honoured without another shell change.
+ *  Source contracts type these as string[] but they are PermissionKey by contract. */
+function withModulePerms(
+  source: { id: string; requiredPermissions?: readonly string[] },
+  module: FeatureModule,
+): FeatureModule {
+  if (source.requiredPermissions && source.requiredPermissions.length > 0) {
+    module.requiredPermissions = [...source.requiredPermissions] as PermissionKey[];
+  }
+  return module;
+}
+
 // ── events (FE3) + delegated tasks (FE4 nested) ──────────────────────────────
 function fe4NestedTaskRoutes(wrap: ElementWrapper): FeatureRoute[] {
   const nested = taskModule.nestedRoutes;
@@ -121,13 +137,13 @@ function adaptEvents(api: ApiClient): FeatureModule {
   const wEvent = providerWrapper(EventProviders, api);
   const wTask = providerWrapper(TaskProviders, api);
   const wEventTask: ElementWrapper = (node) => wEvent(wTask(node));
-  return {
+  return withModulePerms(eventFeatureModule, {
     id: "events",
     routes: eventFeatureModule.routes.map((r) => adaptFe3Route(r, wEvent, wEventTask)),
     // FE3 declares no nav (events is the shell's primary section); the shell owns
     // top-level nav ordering, so it supplies the entry here.
     nav: [{ label: "イベント", path: "/events", icon: "calendar", order: 10 }],
-  };
+  });
 }
 
 // ── tasks (FE4 top-level /me/tasks) ──────────────────────────────────────────
@@ -145,7 +161,7 @@ function adaptTasks(api: ApiClient): FeatureModule {
     icon: toIcon(n.icon),
     order: 20 + i,
   }));
-  return { id: "tasks", routes, nav };
+  return withModulePerms(taskModule, { id: "tasks", routes, nav });
 }
 
 // ── notifications (FE5) ──────────────────────────────────────────────────────
@@ -170,7 +186,7 @@ function adaptNotifications(api: ApiClient): FeatureModule {
     const Bell = notificationsModule.headerWidget;
     module.headerWidget = () => wrap(createElement(Bell));
   }
-  return module;
+  return withModulePerms(notificationsModule, module);
 }
 
 // ── chat (FE6) ───────────────────────────────────────────────────────────────
@@ -192,7 +208,7 @@ function adaptChat(api: ApiClient): FeatureModule {
       ...(n.badgeSource ? { badgeSource: n.badgeSource } : {}),
     },
   ];
-  return { id: "chat", routes, nav };
+  return withModulePerms(chatFeature, { id: "chat", routes, nav });
 }
 
 // ── admin (FE7) ──────────────────────────────────────────────────────────────
@@ -210,7 +226,7 @@ function adaptAdmin(api: ApiClient): FeatureModule {
     icon: toIcon(n.icon),
     order: 50 + i, // admin section sits after the primary features
   }));
-  return { id: "admin", routes, nav };
+  return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 
 /**
