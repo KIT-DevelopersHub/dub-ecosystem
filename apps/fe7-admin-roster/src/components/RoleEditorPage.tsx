@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { identity } from "@dub/types";
-import { PageHeader, Card, TextField, Button, ConfirmDialog } from "../ui/primitives";
+import { PageHeader, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { PermissionMatrix } from "./PermissionMatrix";
 import { useRoles, usePermissionCatalog, useCreateRole, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
@@ -53,7 +53,9 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
     <div>
       <PageHeader title={roleId ? "ロールを編集" : "ロールを作成"} testId="fe7-role-editor-header" />
       <Card testId="fe7-role-editor">
-        <TextField label="ロール名" value={name} onChange={(e) => setName(e.target.value)} disabled={readOnly} testId="fe7-role-name" />
+        <FormField label="ロール名" htmlFor="fe7-role-name">
+          <TextField id="fe7-role-name" value={name} onChange={(v) => setName(v)} disabled={readOnly} testId="fe7-role-name" />
+        </FormField>
         {catalog.data ? (
           <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} />
         ) : (

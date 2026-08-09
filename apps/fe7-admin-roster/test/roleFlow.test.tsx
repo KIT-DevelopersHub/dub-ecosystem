@@ -37,8 +37,10 @@ describe("role editor (PermissionMatrix)", () => {
     await user.type(screen.getByTestId("fe7-role-name"), "reviewer");
     await user.click(screen.getByTestId("fe7-matrix-key-event:read"));
     await user.click(screen.getByTestId("fe7-role-save"));
-    // ConfirmDialog appears; confirm.
-    await user.click(screen.getByTestId("fe7-role-save-confirm-confirm"));
+    // ConfirmDialog appears; confirm. @dub/ui ConfirmDialog does not put testids on
+    // its buttons, so click the confirm action by role within the dialog.
+    const confirm = await screen.findByTestId("fe7-role-save-confirm");
+    await user.click(within(confirm).getByRole("button", { name: "確認" }));
     // no throw = success path exercised; matrix still present
     expect(screen.getByTestId("fe7-permission-matrix")).toBeInTheDocument();
   });

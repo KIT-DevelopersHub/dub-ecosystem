@@ -1,13 +1,13 @@
 import { useState } from "react";
 import type { identity } from "@dub/types";
-import { PageHeader, Card, Tabs, Button, TextField, ConfirmDialog, ErrorState, EmptyState } from "../ui/primitives";
+import { PageHeader, Card, Tabs, Button, TextField, ConfirmDialog, ErrorState, EmptyState, FormField } from "@dub/ui";
 import { UserStatusBadge } from "./UserStatusBadge";
 import { RoleAssignmentList } from "./RoleAssignmentList";
 import { RoleAssignDialog } from "./RoleAssignDialog";
 import { useUser, usePatchUser } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
-import { presentError, errorMessage } from "../lib/errorDisplay";
+import { presentError, errorMessage, displayError } from "../lib/errorDisplay";
 
 // P0 event candidates are fetched via event-service; here we accept them as a prop
 // (wired by the shell / mock). Empty = org-wide only.
@@ -35,8 +35,8 @@ export function UserDetailPage({
 
   if (user.isError) {
     const p = presentError(user.error);
-    if (p.kind === "empty") return <EmptyState message={p.message} testId="fe7-user-notfound" />;
-    return <ErrorState message={"message" in p ? p.message : "読み込みに失敗しました"} onRetry={() => user.refetch()} testId="fe7-user-error" />;
+    if (p.kind === "empty") return <EmptyState title={p.message} testId="fe7-user-notfound" />;
+    return <ErrorState error={displayError(user.error)} onRetry={() => user.refetch()} testId="fe7-user-error" />;
   }
   if (!user.data) return <p>読み込み中…</p>;
 
@@ -73,12 +73,16 @@ export function UserDetailPage({
       />
 
       <Card testId="fe7-user-profile">
-        <TextField label="表示名" value={displayName} onChange={(e) => setDisplayName(e.target.value)} disabled={!canAdmin} testId="fe7-user-displayName" />
-        <TextField label="GitHub Login" value={githubLogin} onChange={(e) => setGithubLogin(e.target.value)} disabled={!canAdmin} testId="fe7-user-github" />
+        <FormField label="表示名" htmlFor="fe7-user-displayName">
+          <TextField id="fe7-user-displayName" value={displayName} onChange={(v) => setDisplayName(v)} disabled={!canAdmin} testId="fe7-user-displayName" />
+        </FormField>
+        <FormField label="GitHub Login" htmlFor="fe7-user-github">
+          <TextField id="fe7-user-github" value={githubLogin} onChange={(v) => setGithubLogin(v)} disabled={!canAdmin} testId="fe7-user-github" />
+        </FormField>
         {canAdmin ? (
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="primary" onClick={saveProfile} disabled={patch.isPending} testId="fe7-user-save">保存</Button>
-            <Button variant={nextStatus === "disabled" ? "danger" : "default"} onClick={() => setStatusConfirm(nextStatus)} testId="fe7-user-status-toggle">
+            <Button variant={nextStatus === "disabled" ? "danger" : "secondary"} onClick={() => setStatusConfirm(nextStatus)} testId="fe7-user-status-toggle">
               {nextStatus === "disabled" ? "利用停止" : "在籍に戻す"}
             </Button>
           </div>
@@ -86,8 +90,8 @@ export function UserDetailPage({
       </Card>
 
       <Tabs
-        tabs={[{ id: "roles", label: "ロール割当" }, { id: "org", label: "組織所属" }]}
-        active={tab}
+        items={[{ id: "roles", label: "ロール割当" }, { id: "org", label: "組織所属" }]}
+        activeId={tab}
         onChange={setTab}
         testId="fe7-user-tabs"
       />

@@ -2,10 +2,14 @@
 // but not yet present in the frozen `@dub/types` identity namespace at this cut:
 //   CreateRoleRequest, UpdateRoleRequest, AssignRoleRequest, RoleAssignment.
 //
-// They are modelled here so FE7 can build request/response bodies type-safely
-// today. When identity-roster lands these in @dub/types they replace this file
-// (import from "@dub/types" identity namespace). Kept minimal and P0-scoped
-// (resourceType "event" only; task-scope is P1 per design #5).
+// Cross-PR contract source: these are OWNED by services/identity-roster, which is
+// on a separate, still-unmerged branch and is OFF-LIMITS to this PR. FE7 therefore
+// models them LOCALLY here (do NOT import from services/identity-roster, and do not
+// take a build dependency on it). When identity-roster merges and publishes these
+// into the `@dub/types` identity namespace, delete this file and import from there.
+//
+// Kept minimal and P0-scoped (resourceType "event" only; task-scope is P1 per
+// design #5).
 import type { identity, common } from "@dub/types";
 
 export interface CreateRoleRequest {

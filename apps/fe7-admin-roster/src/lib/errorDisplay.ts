@@ -57,6 +57,26 @@ export function errorMessage(err: unknown): string {
   return p.kind === "reauth" ? "再ログインが必要です" : p.message;
 }
 
+/**
+ * Project any thrown value onto @dub/ui `ErrorState`'s `DisplayableError`
+ * ({ code, message }). Structurally typed to avoid importing from @dub/ui here.
+ * `code` drives the ErrorState icon/presentation (FORBIDDEN -> shield, etc.).
+ */
+export function displayError(err: unknown): { code: string; message: string } {
+  const p = presentError(err);
+  const code =
+    p.kind === "forbidden"
+      ? "FORBIDDEN"
+      : p.kind === "empty"
+        ? "NOT_FOUND"
+        : p.kind === "conflict"
+          ? "CONFLICT"
+          : p.kind === "reauth"
+            ? "UNAUTHENTICATED"
+            : "INTERNAL";
+  return { code, message: errorMessage(err) };
+}
+
 /** Reduce FieldError[] to a { field -> message } map for FormField.error binding. */
 export function fieldErrorMap(fields: readonly FieldError[]): Record<string, string> {
   const out: Record<string, string> = {};
