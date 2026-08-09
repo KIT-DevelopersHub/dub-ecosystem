@@ -1,0 +1,53 @@
+# chat-service Worker — SKELETON ONLY. Deploy is out of scope for this unit
+# (P0b: no deploy until the integration wave). account_id / database_id / queue
+# ids / DO class binding are filled by infra at Apply.
+#
+# Boundary note (design 4-8 / theme11): this Worker is the conversation MASTER
+# (HTTP: channels/threads/messages + chat_* D1 + chat.* Queue publish). The
+# realtime side (ChatRoom DO: WS fanout / presence / ws-ticket verify) is a
+# SEPARATE chat-owned Worker and is NOT wired here (STUB via RealtimePublisher).
+name = "chat-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared core D1 (single DB, namespace = chat_*). DDL is draft until 9-C freeze;
+# physical migration lives in infra/d1/migrations/chat/0001_init.sql (owned by
+# infra-d1-seed #28 — not created here to respect unit boundaries).
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_AT_APPLY"
+
+# Service Bindings (Service-to-Service, x-dub-* propagation via @dub/http).
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster-service"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "event-service"
+
+[[services]]
+binding = "SVC_FILE_META"
+service = "file-meta-service"
+
+# Producer queues (chat.* fan-out targets — dub-q- prefix). The chat.* rows are
+# △ in the frozen catalog (active after 9-C); the only subscriber is notification.
+[[queues.producers]]
+binding = "EVT_NOTIFICATION"
+queue = "dub-q-notification"
+
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "dub-q-audit"
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+# Absolute base for the ws-ticket doUrl (gateway-bypassing / DO-direct). ":id" is
+# replaced with the channel id. Overridden per environment at Apply.
+CHAT_RT_DO_URL_BASE = "wss://chat-rt.developershub.jp/ws/:id"
+
+# NOTE: WS_TICKET_SECRET is a Worker Secret (never in wrangler.toml). Set via
+# `wrangler secret put WS_TICKET_SECRET` at Apply. The ChatRoom DO verifies with
+# the same secret (chat self-owned HMAC, theme11).

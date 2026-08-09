@@ -1,0 +1,29 @@
+{
+  "name": "@dub/chat-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) chat-service — master of channels/threads/messages + membership/read-state. HTTP side owns chat_* D1; RT (ChatRoom DO) is chat-owned, WS is gateway-bypassing/DO-direct (P0b theme11). Cloudflare Worker + Hono.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
