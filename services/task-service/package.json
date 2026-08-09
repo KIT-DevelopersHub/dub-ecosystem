@@ -1,0 +1,30 @@
+{
+  "name": "@dub/task-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) task-service — task master (CRUD / assignment / due / status / dependencies) + task.* Queue events (Cloudflare Worker, Hono). P0b frozen contracts.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/gantt-calc": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

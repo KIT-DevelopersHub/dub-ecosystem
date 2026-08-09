@@ -1,0 +1,50 @@
+# mail-automation-service — Cloudflare Worker (DEPLOY DISABLED in P0).
+# Queue creation waits on 9-B (Workspace/mail contract). This is a template only.
+name = "dub-mail-automation"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- D1 (single shared dub-core DB; namespace-scoped access via @dub/db) ---
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "00000000-0000-0000-0000-000000000000" # placeholder until infra apply
+migrations_dir = "migrations"
+
+# --- Service Bindings (dependencies) ---
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "dub-mail-gateway"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"
+
+# --- Queue consumer: inbound decisions (contract frozen; creation post-9-B) ---
+[[queues.consumers]]
+queue = "dub-q-evt-mail-automation"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "dub-q-evt-mail-automation-dlq"
+
+# --- Queue producers: decided/routed -> notification, audit summaries ---
+[[queues.producers]]
+binding = "EVT_NOTIFICATION"
+queue = "dub-q-evt-notification"
+
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "dub-q-audit-record"
+
+[vars]
+SELF_DOMAINS = "developershub.jp"
+SELF_ADDRESSES = ""
+
+[observability]
+enabled = true

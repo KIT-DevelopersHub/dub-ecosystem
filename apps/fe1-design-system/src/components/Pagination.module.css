@@ -1,0 +1,34 @@
+.nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+.pageButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  cursor: pointer;
+}
+.pageButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.flip {
+  transform: rotate(180deg);
+}
+.status {
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+.loadMore {
+  display: flex;
+  justify-content: center;
+  padding: var(--dub-space-4) 0;
+}

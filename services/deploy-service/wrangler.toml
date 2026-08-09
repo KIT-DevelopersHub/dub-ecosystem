@@ -1,0 +1,54 @@
+# deploy-service Worker config (TEMPLATE — not deployed in this wave).
+# Real ids/tokens are provisioned by infra (#27/#28) and wrangler secret. Do NOT
+# commit account ids or tokens. This file documents the required bindings only.
+name = "dub-deploy-service"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- D1 (shared dub-core DB; deploy_* namespace only) ---
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+migrations_dir = "migrations"
+
+# --- Service Bindings (Service Binding calls only; never public) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[[services]]
+binding = "SVC_AUDIT_LOG"
+service = "dub-audit-log"
+
+# --- Queue producers ---
+[[queues.producers]]
+binding = "EVT_NOTIFICATION"
+queue = "dub-q-evt-notification"
+
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "dub-q-audit-record"
+
+[[queues.producers]]
+binding = "DEPLOY_JOBS"
+queue = "dub-q-deploy-jobs"
+
+# --- Queue consumer: this service's PRIVATE job queue ---
+[[queues.consumers]]
+queue = "dub-q-deploy-jobs"
+max_batch_size = 10
+max_retries = 5
+dead_letter_queue = "dub-q-deploy-jobs-dlq"
+
+[observability]
+enabled = true
+
+# --- Vars (non-secret) ---
+[vars]
+CF_API_BASE = "https://api.cloudflare.com/client/v4"
+# CF_ACCOUNT_ID is set per-environment.
+
+# Secrets (set via `wrangler secret put`, values LOCAL only — never committed):
+#   CF_ACCOUNT_ID, CF_DEPLOY_TOKEN_PAGES, CF_DEPLOY_TOKEN_DNS, CF_DEPLOY_TOKEN_READ

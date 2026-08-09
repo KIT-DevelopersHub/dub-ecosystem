@@ -1,0 +1,13 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import InquiryForm from "../components/InquiryForm.astro";
+---
+<BaseLayout
+  title="お問い合わせ"
+  description="DevelopersHub への一般のお問い合わせはこちらから。"
+  path="/contact"
+>
+  <h1>お問い合わせ</h1>
+  <p>ご質問・ご相談は以下のフォームからお送りください。スポンサーのご相談は <a href="/sponsors/inquiry">スポンサーお問い合わせ</a> をご利用ください。</p>
+  <InquiryForm defaultKind="general" />
+</BaseLayout>

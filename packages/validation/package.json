@@ -1,0 +1,26 @@
+{
+  "name": "@dub/validation",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) contract-derived runtime validation — hand-rolled body/query guards + FieldError collector emitting @dub/errors VALIDATION_FAILED, aligned with the @dub/types contracts. Zero external deps.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*"
+  }
+}

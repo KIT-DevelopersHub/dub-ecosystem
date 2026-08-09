@@ -1,0 +1,24 @@
+{
+  "name": "@dub/api-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) api-gateway — the only external HTTP entrypoint. Auth verify, routing, BFF aggregation, public inquiry receipt. Owns no data.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "hono": "^4"
+  }
+}

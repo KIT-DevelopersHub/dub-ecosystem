@@ -1,0 +1,25 @@
+{
+  "name": "@dub/svc-file-meta",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) file-meta service (#9) — file metadata + link registry (source of truth), R2 attachment I/O, drive.* / *.archived subscriptions.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*",
+    "hono": "^4"
+  }
+}

@@ -1,0 +1,9 @@
+---
+import { serializeJsonLd } from "../lib/jsonld";
+interface Props {
+  node: Record<string, unknown>;
+}
+const { node } = Astro.props;
+const json = serializeJsonLd(node);
+---
+<script type="application/ld+json" is:inline set:html={json} />

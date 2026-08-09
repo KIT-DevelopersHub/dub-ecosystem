@@ -1,0 +1,12 @@
+# Android / Gradle build artifacts
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+# FCM: real config is provided per-environment, never committed
+app/google-services.json
+captures/
+.externalNativeBuild/
+.cxx/

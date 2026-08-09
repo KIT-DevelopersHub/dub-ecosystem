@@ -1,0 +1,53 @@
+// notificationsModule — the single FeatureModule FE5 registers into the SPA
+// shell (FE2). One object: routes (lazy, code-split), nav (badgeSource wired to
+// the shared unread store), headerWidget (the bell), requiredPermissions.
+
+import type { ComponentType } from "react";
+import type { FeatureModule } from "./contracts/fe2";
+import {
+  PERM_INBOX,
+  PERM_PREFS,
+  ROUTE_INBOX,
+  ROUTE_PREFERENCES,
+} from "./lib/routes";
+import { getUnreadCount } from "./store/unread-store";
+import NotificationBell from "./components/NotificationBell";
+
+export const notificationsModule: FeatureModule = {
+  id: "notifications",
+  routes: [
+    {
+      path: ROUTE_INBOX,
+      // Frozen shell shape: lazy loader resolving to `{ Component }`.
+      lazy: () =>
+        import("./components/NotificationInboxPage").then((m) => ({
+          Component: m.default as ComponentType,
+        })),
+      auth: "required",
+      requiredPermissions: [PERM_INBOX],
+    },
+    {
+      path: ROUTE_PREFERENCES,
+      lazy: () =>
+        import("./components/NotificationPreferencesPage").then((m) => ({
+          Component: m.default as ComponentType,
+        })),
+      auth: "required",
+      requiredPermissions: [PERM_PREFS],
+    },
+  ],
+  nav: [
+    {
+      label: "Notifications",
+      path: ROUTE_INBOX,
+      icon: "bell",
+      // events(10) < tasks(20) < notifications(30) < chat(40) < admin(50).
+      order: 30,
+      // Single source of truth: the shell reads this, never polls itself.
+      badgeSource: getUnreadCount,
+    },
+  ],
+  headerWidget: NotificationBell as ComponentType,
+};
+
+export default notificationsModule;

@@ -1,0 +1,86 @@
+# api-gateway — Cloudflare Worker (single external HTTP entrypoint: api.developershub.jp).
+# Deployment is NOT performed here (P0). This is the frozen binding topology only.
+name = "dub-api-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ---- vars (non-secret) ----
+[vars]
+GATEWAY_VERSION = "0.1.0"
+# comma-separated; dev localhost origins included for local SPA work.
+ALLOWED_ORIGINS = "https://app.developershub.jp,http://localhost:5173,http://localhost:3000"
+DEFAULT_MAX_BODY_BYTES = "10485760"    # 10 MiB default request body cap
+FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8-6 numeric agreement)
+
+# ---- secrets (set via `wrangler secret put`, never committed) ----
+# TURNSTILE_SECRET  -> public inquiry siteverify
+
+# ---- Service Bindings (transparent routing + BFF/me composition) ----
+# gantt-calc / mail-gateway / mail-automation are internal-only (registered in the
+# infra binding registry, never routed by the gateway) and intentionally omitted.
+[[services]]
+binding = "SVC_AUTH"
+service = "dub-auth-service"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"
+
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"
+
+[[services]]
+binding = "SVC_GANTT"
+service = "dub-gantt-service"
+
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
+
+[[services]]
+binding = "SVC_FILE_META"
+service = "dub-file-meta"
+
+[[services]]
+binding = "SVC_DRIVE_PROXY"
+service = "dub-drive-proxy"
+
+[[services]]
+binding = "SVC_CHAT"
+service = "dub-chat-service"
+
+[[services]]
+binding = "SVC_DEPLOY"
+service = "dub-deploy-service"
+
+[[services]]
+binding = "SVC_GITHUB_SYNC"
+service = "dub-github-sync"
+
+[[services]]
+binding = "SVC_AUDIT_LOG"
+service = "dub-audit-log"
+
+[[services]]
+binding = "SVC_WEBHOOK_INGEST"
+service = "dub-webhook-ingest"
+
+# ---- Queue producer (the single publish exception: public.inquiry.received) ----
+[[queues.producers]]
+binding = "EVT_NOTIFICATION"
+queue = "dub-q-evt-notification"
+
+[observability]
+enabled = true
+
+# ---- Rate limiting (R1: CF native binding is the first candidate; KV fallback).
+# Left unbound in P0 — the in-memory limiter is used until infra registers RATE_LIMITER.
+# [[unsafe.bindings]]
+# name = "RATE_LIMITER"
+# type = "ratelimit"

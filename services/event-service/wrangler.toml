@@ -1,0 +1,58 @@
+# event-service Worker — SKELETON ONLY. Deploy is out of scope for this unit
+# (P0b: no deploy until the integration wave). Bindings mirror the design's
+# dependencies; account_id / database_id / queue ids are filled by infra at Apply.
+name = "event-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared core D1 (single DB, namespace = event_*).
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_AT_APPLY"
+
+# Service Bindings (Service-to-Service, x-dub-* propagation via @dub/http).
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster-service"
+
+[[services]]
+binding = "SVC_TASK"
+service = "task-service"
+
+# Producer queues (fan-out targets for event.* / action.* — frozen dub-q-evt-* names;
+# queue names must match each consumer's [[queues.consumers]] and @dub/events bindings).
+[[queues.producers]]
+binding = "EVT_NOTIFICATION"
+queue = "dub-q-evt-notification"
+
+[[queues.producers]]
+binding = "EVT_TASK"
+queue = "dub-q-evt-task"
+
+[[queues.producers]]
+binding = "EVT_GANTT"
+queue = "dub-q-evt-gantt"
+
+[[queues.producers]]
+binding = "EVT_FILE_META"
+queue = "dub-q-evt-file-meta"
+
+[[queues.producers]]
+binding = "EVT_GITHUB_SYNC"
+queue = "dub-q-evt-github-sync"
+
+[[queues.producers]]
+binding = "EVT_MOBILE_BFF"
+queue = "dub-q-evt-mobile-bff"
+
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "dub-q-audit-record"
+
+[observability]
+enabled = true
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"

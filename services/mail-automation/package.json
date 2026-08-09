@@ -1,0 +1,28 @@
+{
+  "name": "@dub/mail-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "mail-automation-service — inbound-mail decision logic (rule eval, template render, loop prevention). Delegates all send/receive to mail-gateway.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^2.1.8"
+  }
+}

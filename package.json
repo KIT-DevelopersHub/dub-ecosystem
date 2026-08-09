@@ -9,8 +9,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
     "build": "turbo run build",
     "check": "pnpm typecheck && pnpm test"
   },

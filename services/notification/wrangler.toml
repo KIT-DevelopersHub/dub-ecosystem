@@ -1,0 +1,54 @@
+# notification service (#8) — scaffold only. DO NOT deploy from this unit.
+# Queue/DO real creation and prod IDs land in the infra波 (9-B/C/E).
+name = "notification"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared dub-core D1 (notif_ namespace only). database_id filled at infra Apply.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+
+# --- Service Bindings (contract-only; real targets wired in the infra波) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"      # GET /users/:id (email), GET /users?roleKey= (roles)
+
+[[services]]
+binding = "SVC_EVENT"
+service = "event-service"        # GET /events/:id/participants (eventId expansion)
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "mail-gateway"         # POST /send (EmailAdapter — P0 stub / unwired)
+
+[[services]]
+binding = "SVC_CHAT"
+service = "chat-service"         # POST /internal/system-messages (ChatAdapter — P0 stub)
+
+[[services]]
+binding = "SVC_MOBILE_BFF"
+service = "mobile-bff"           # POST /internal/push/dispatch (PushAdapter — P0 stub)
+
+# --- Queues ---
+# Domain event subscription (frozen: dub-q-evt-notification / EVT_NOTIFICATION).
+[[queues.consumers]]
+queue = "dub-q-evt-notification"
+max_batch_size = 50
+max_batch_timeout = 10
+max_retries = 5
+dead_letter_queue = "dub-q-evt-notification-dlq"
+
+# publishAudit channel (theme#13) — delivery-failed audit records.
+[[queues.producers]]
+queue = "dub-q-audit-record"
+binding = "AUDIT_QUEUE"
+
+# Retention purge Cron (03:00 UTC daily): inbox 90d / deliveries 30d / processed 7d.
+[triggers]
+crons = ["0 3 * * *"]
+
+[observability]
+enabled = true

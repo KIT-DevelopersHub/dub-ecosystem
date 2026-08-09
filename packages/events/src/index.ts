@@ -19,6 +19,7 @@ export {
   type DubEventPublisherEnv,
   type DubEventHandlerMap,
   type QueueHandlerOptions,
+  type QueueHandlerErrorInfo,
   type IdempotencyStore,
   type AuditRecordEnvelopeV1,
   type WebhookEventEnvelopeV1,

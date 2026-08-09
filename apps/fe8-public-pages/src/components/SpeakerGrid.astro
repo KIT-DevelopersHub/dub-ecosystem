@@ -1,0 +1,27 @@
+---
+interface Speaker {
+  name: string;
+  org?: string;
+  avatarUrl?: string;
+  bio?: string;
+}
+interface Props {
+  speakers: Speaker[];
+}
+const { speakers } = Astro.props;
+---
+{speakers.length > 0 && (
+  <section aria-labelledby="speakers-h">
+    <h2 id="speakers-h">登壇者</h2>
+    <ul class="card-grid">
+      {speakers.map((s) => (
+        <li class="card">
+          {s.avatarUrl && <img src={s.avatarUrl} alt={`${s.name}のプロフィール写真`} width="72" height="72" />}
+          <h3>{s.name}</h3>
+          {s.org && <p>{s.org}</p>}
+          {s.bio && <p>{s.bio}</p>}
+        </li>
+      ))}
+    </ul>
+  </section>
+)}

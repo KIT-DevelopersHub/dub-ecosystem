@@ -1,0 +1,25 @@
+{
+  "name": "@dub/api-client",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) shared browser API SDK — the single gateway call surface for FE apps (cookie session, silent refresh, x-dub-* correlation, ApiError -> DisplayableError bridge).",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*"
+  },
+  "peerDependencies": {
+    "@dub/types": "workspace:*"
+  }
+}

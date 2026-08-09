@@ -1,0 +1,28 @@
+{
+  "name": "@dub/gantt-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) gantt-service — read-model Worker: assembles the gantt chart DTO from task/event, persists per-user view state, purges cache on domain events.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "echo 'deploy is out of scope for this unit' && exit 1"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*"
+  },
+  "peerDependencies": {
+    "hono": "^4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    // For d.ts emission resolve workspace deps to their built types (not src),
+    // so rootDir stays confined to this package. `turbo run build` builds
+    // @dub/tokens first via ^build; the isolated build script does the same.
+    "paths": {
+      "@dub/tokens": ["../../packages/tokens/dist/index.d.ts"],
+      "@dub/tokens/css": ["../../packages/tokens/dist/css.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["test/**/*", "**/*.test.ts", "**/*.test.tsx"]
+}

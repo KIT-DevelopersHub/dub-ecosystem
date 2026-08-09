@@ -1,0 +1,29 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.label {
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-primary);
+}
+.required {
+  color: var(--dub-color-danger-500);
+}
+.help {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  margin: 0;
+}
+.error {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-danger-600);
+  margin: 0;
+}

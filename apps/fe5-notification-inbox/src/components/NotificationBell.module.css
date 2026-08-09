@@ -1,0 +1,49 @@
+.bell {
+  position: relative;
+  display: inline-flex;
+}
+
+.badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-danger-500);
+  color: var(--dub-color-text-inverse);
+  font-size: var(--dub-font-size-xs);
+  line-height: 16px;
+  text-align: center;
+}
+
+.dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--dub-space-2));
+  width: 360px;
+  max-width: 90vw;
+  background: var(--dub-color-surface-overlay);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-overlay);
+  z-index: var(--dub-zIndex-dropdown);
+  overflow: hidden;
+}
+
+.dropdownHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-primary);
+}
+
+.footer {
+  padding: var(--dub-space-2) var(--dub-space-4);
+  border-top: 1px solid var(--dub-color-border-default);
+  text-align: center;
+}

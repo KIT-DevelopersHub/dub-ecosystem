@@ -1,7 +1,7 @@
 // Producer / consumer helpers + special channels (audit, webhook).
 import type { Queue, MessageBatch } from "@cloudflare/workers-types";
 import { DubError } from "@dub/errors";
-import { redactSecrets } from "@dub/observability";
+import { redactSecrets, consoleSink } from "@dub/observability";
 import type { auditLog, webhook } from "@dub/types";
 import {
   type DubEventName,
@@ -114,16 +114,53 @@ export interface IdempotencyStore {
 export type DubEventHandlerMap = {
   [N in DubEventName]?: (event: DubEventEnvelope<N>, ctx: { requestId: string }) => Promise<void>;
 };
+// Diagnostics passed to the error hook when a consumer message fails and is
+// re-queued (or, on max_retries exhaustion, sent to the DLQ). Fields are read
+// defensively because a malformed envelope may be missing them.
+export interface QueueHandlerErrorInfo {
+  error: unknown;
+  eventId?: string;
+  eventName?: string;
+  requestId?: string;
+  attempts?: number; // CF Message.attempts (delivery count) when available
+  service?: string;
+}
+
 export interface QueueHandlerOptions {
   idempotency?: IdempotencyStore;
   onUnknownEvent?: "ack" | "retry"; // default "ack" (forward-compat)
   onUnknownLog?: (name: string) => void;
+  service?: string; // stamped onto the default error log for source attribution
+  // Observability hook for poison / handler failures. When omitted, a structured
+  // error line is emitted via @dub/observability consoleSink (secrets redacted),
+  // so a failing message is never silently retried into oblivion.
+  onError?: (info: QueueHandlerErrorInfo) => void;
+}
+
+/** Default queue error sink: one redacted structured JSON line per failed message. */
+function defaultQueueErrorLog(info: QueueHandlerErrorInfo): void {
+  consoleSink({
+    level: "error",
+    message: "queue consumer handler failed; message will retry (DLQ after max_retries)",
+    requestId: info.requestId,
+    service: info.service,
+    fields: {
+      eventId: info.eventId,
+      eventName: info.eventName,
+      attempts: info.attempts,
+      error:
+        info.error instanceof Error
+          ? { name: info.error.name, message: info.error.message }
+          : String(info.error),
+    },
+  });
 }
 
 export function createQueueHandler(
   handlers: DubEventHandlerMap,
   opts: QueueHandlerOptions = {},
 ): (batch: MessageBatch<DubEventEnvelope>, env: unknown) => Promise<void> {
+  const logError = opts.onError ?? defaultQueueErrorLog;
   return async (batch) => {
     for (const message of batch.messages) {
       const env = message.body;
@@ -145,8 +182,19 @@ export function createQueueHandler(
         await handler(env, { requestId: env.requestId });
         if (opts.idempotency) await opts.idempotency.markProcessed(env.id);
         message.ack();
-      } catch {
-        message.retry(); // P0: unconditional retry (max_retries exhaustion -> DLQ)
+      } catch (err) {
+        // Observability: never retry silently. Emit diagnostics, then retry
+        // (max_retries exhaustion -> DLQ per each service's wrangler config).
+        const body = env as Partial<DubEventEnvelope> | null | undefined;
+        logError({
+          error: err,
+          eventId: typeof body?.id === "string" ? body.id : undefined,
+          eventName: typeof body?.name === "string" ? body.name : undefined,
+          requestId: typeof body?.requestId === "string" ? body.requestId : undefined,
+          attempts: (message as { attempts?: number }).attempts,
+          service: opts.service,
+        });
+        message.retry(); // P0: retry (max_retries exhaustion -> DLQ)
       }
     }
   };

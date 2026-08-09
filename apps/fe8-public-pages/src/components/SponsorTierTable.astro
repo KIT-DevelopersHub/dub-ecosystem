@@ -1,0 +1,29 @@
+---
+interface Plan {
+  tier: string;
+  label: string;
+  priceJpy: number | null;
+  benefits: string[];
+  capacity?: number;
+}
+interface Props {
+  plans: Plan[];
+}
+const { plans } = Astro.props;
+const yen = (v: number | null) => (v === null ? "個別見積" : `¥${v.toLocaleString("ja-JP")}`);
+---
+<table class="tier-table">
+  <thead>
+    <tr><th scope="col">プラン</th><th scope="col">費用</th><th scope="col">枠</th><th scope="col">特典</th></tr>
+  </thead>
+  <tbody>
+    {plans.map((p) => (
+      <tr>
+        <th scope="row">{p.label}</th>
+        <td>{yen(p.priceJpy)}</td>
+        <td>{p.capacity ?? "-"}</td>
+        <td><ul>{p.benefits.map((b) => <li>{b}</li>)}</ul></td>
+      </tr>
+    ))}
+  </tbody>
+</table>

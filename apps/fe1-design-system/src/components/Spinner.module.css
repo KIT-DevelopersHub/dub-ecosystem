@@ -1,0 +1,24 @@
+.spinner {
+  display: inline-block;
+  border-radius: var(--dub-radius-full);
+  border: 2px solid var(--dub-color-border-default);
+  border-top-color: var(--dub-color-brand-500);
+  animation: dub-spin var(--dub-motion-normal) linear infinite;
+}
+.spinner[data-size="sm"] {
+  width: 14px;
+  height: 14px;
+}
+.spinner[data-size="md"] {
+  width: 20px;
+  height: 20px;
+}
+.spinner[data-size="lg"] {
+  width: 28px;
+  height: 28px;
+}
+@keyframes dub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,61 @@
+# webhook-ingest (#13) — Cloudflare Worker template. NOT deployed by this unit.
+# Physical resource names follow the infra (#27) RESOURCE_NAMES registry (dub-* prefix).
+# External ingress is on a dedicated route (hooks.developershub.jp) and does NOT go
+# through api-gateway (spike isolation). Admin query is reached via gateway binding.
+name = "dub-webhook-ingest"
+main = "src/index.ts"
+compatibility_date = "2024-11-27"
+compatibility_flags = ["nodejs_compat"]
+
+# Dedicated external route (frozen: hooks.developershub.jp direct, gateway non-transit).
+# routes = [{ pattern = "hooks.developershub.jp/*", custom_domain = true }]
+
+[observability]
+enabled = true
+
+# ---- D1 (single shared dub-core DB; webhook_* namespace only) ----
+[[d1_databases]]
+binding = "DUB_DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_dub_core_d1_id"
+migrations_dir = "migrations/webhook"
+
+# ---- R2 (large-body offload; RW here, read-only on consumers) ----
+[[r2_buckets]]
+binding = "WEBHOOK_RAW"
+bucket_name = "dub-r2-webhook-raw"
+
+# ---- Queue producers (per-source; 1 Queue = 1 consumer). github live in P0. ----
+[[queues.producers]]
+binding = "WH_GITHUB"
+queue = "dub-q-wh-github"
+
+[[queues.producers]]
+binding = "WH_GOOGLE_DRIVE"
+queue = "dub-q-wh-google-drive"
+
+[[queues.producers]]
+binding = "WH_GMAIL"
+queue = "dub-q-wh-gmail"
+
+[[queues.producers]]
+binding = "WH_STRIPE"
+queue = "dub-q-wh-stripe"
+
+# ---- Service binding: identity-roster (authz /authz/check for admin query) ----
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+# ---- Cron: daily retention sweep (30-day dedup/record window + R2 objects) ----
+[triggers]
+crons = ["17 3 * * *"]
+
+# ---- Secrets (set via `wrangler secret put`; new+next for rotation) ----
+#   GITHUB_WEBHOOK_SECRET / GITHUB_WEBHOOK_SECRET_NEXT   (P0 live)
+#   DRIVE_WEBHOOK_TOKEN   / DRIVE_WEBHOOK_TOKEN_NEXT      (stub; drive-proxy issued)
+#   STRIPE_WEBHOOK_SECRET / STRIPE_WEBHOOK_SECRET_NEXT    (stub)
+#   GMAIL_WEBHOOK_AUDIENCE                                (stub; mail-gateway shared)
+#   GMAIL_PUSH_SA_EMAIL                                   (stub; Pub/Sub push SA identity)
+[vars]
+RETENTION_DAYS = "30"
