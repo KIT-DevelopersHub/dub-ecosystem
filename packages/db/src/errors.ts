@@ -1,0 +1,8 @@
+// DB error codes — SCREAMING_SNAKE <SERVICE>_<REASON> (D7; legacy db.* retired).
+export type DbErrorCode =
+  | "DB_NAMESPACE_VIOLATION"
+  | "DB_FORBIDDEN_STATEMENT"
+  | "DB_MIGRATION_FAILED"
+  | "DB_MIGRATION_DRIFT"
+  | "DB_LINT_FAILED"
+  | "DB_QUERY_FAILED";

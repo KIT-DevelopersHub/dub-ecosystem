@@ -1,0 +1,19 @@
+{
+  "name": "@dub/types",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) HTTP contract types — the single source of truth for all inter-service API I/O. Type-only (18 namespaces + common).",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

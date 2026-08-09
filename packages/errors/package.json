@@ -1,0 +1,29 @@
+{
+  "name": "@dub/errors",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) unified error type, error-code catalog, wire ErrorResponse and boundary reconstruction.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wire": {
+      "types": "./dist/wire.d.ts",
+      "import": "./dist/wire.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "hono": "^4"
+  },
+  "peerDependenciesMeta": {
+    "hono": { "optional": true }
+  }
+}

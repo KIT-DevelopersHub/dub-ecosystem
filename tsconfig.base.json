@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@dub/types": ["packages/types/src/index.ts"],
+      "@dub/errors": ["packages/errors/src/index.ts"],
+      "@dub/observability": ["packages/observability/src/index.ts"],
+      "@dub/http": ["packages/http/src/index.ts"],
+      "@dub/db": ["packages/db/src/index.ts"],
+      "@dub/events": ["packages/events/src/index.ts"],
+      "@dub/auth-client": ["packages/auth-client/src/index.ts"],
+      "@dub/tokens": ["packages/tokens/src/index.ts"],
+      "@dub/tokens/css": ["packages/tokens/src/css.ts"]
+    }
+  }
+}

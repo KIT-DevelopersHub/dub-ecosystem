@@ -1,0 +1,19 @@
+{
+  "name": "@dub/observability",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) observability primitives — canonical x-dub-* header constants, secret redaction, structured log shape.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

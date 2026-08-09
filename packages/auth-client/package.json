@@ -1,0 +1,28 @@
+{
+  "name": "@dub/auth-client",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) auth client — trusted-header authn context + identity /authz/check wrapper with TTL cache. Hono middleware.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/http": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*",
+    "hono": "^4"
+  }
+}

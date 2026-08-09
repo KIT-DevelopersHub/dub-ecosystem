@@ -1,0 +1,24 @@
+{
+  "name": "@dub/tokens",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) design tokens — distributed in 3 forms: TS constants, CSS variables, and W3C DTCG tokens.json.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./css": {
+      "import": "./dist/css.js",
+      "default": "./dist/css.js"
+    },
+    "./tokens.json": "./tokens.json"
+  },
+  "files": ["dist", "tokens.json"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

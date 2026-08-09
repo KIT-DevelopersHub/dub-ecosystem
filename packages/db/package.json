@@ -1,0 +1,25 @@
+{
+  "name": "@dub/db",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) D1 client — namespace-scoped access, forward-only migrations + lint, schema conventions (newId/nowIso).",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}

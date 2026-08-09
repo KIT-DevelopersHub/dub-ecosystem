@@ -1,0 +1,27 @@
+{
+  "name": "@dub/events",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) Queue event catalog — canonical envelope, pub/sub table, typed publish/consume helpers, audit + webhook channels.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/observability": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*"
+  }
+}
