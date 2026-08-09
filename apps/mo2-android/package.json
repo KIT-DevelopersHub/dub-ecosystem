@@ -1,0 +1,20 @@
+{
+  "name": "@dub/mo2-android",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "MO2 Android front (kind=mobile). Pure MO3 mobile-bff client. P0: portable client-core (TS 枠) — BFF client, single-token auth interceptor, @dub/errors -> AppError mapper, optimistic-locked task repo, deep-link/push parsing. Kotlin/Compose app mirrors this core (see README).",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/types": "workspace:*",
+    "@dub/errors": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "vite-tsconfig-paths": "^5.1.4"
+  }
+}
