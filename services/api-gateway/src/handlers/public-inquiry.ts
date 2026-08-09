@@ -57,7 +57,7 @@ export function createPublicInquiryHandler(override?: TurnstileVerifier) {
 
     const event = createEvent(
       "public.inquiry.received",
-      { kind: inquiry.kind, email: inquiry.email },
+      { kind: inquiry.kind, name: inquiry.name, email: inquiry.email, message: inquiry.message },
       { requestId, actorId: null },
     );
     await publishEvent({ EVT_NOTIFICATION: c.env.EVT_NOTIFICATION }, event);

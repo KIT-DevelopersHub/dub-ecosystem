@@ -235,6 +235,18 @@ describe("lane-A mapping", () => {
     expect(EVENT_MAPPINGS["task.archived"]).toBeDefined();
     expect((EVENT_MAPPINGS as Record<string, unknown>)["task.deleted"]).toBeUndefined();
   });
+
+  it("public.inquiry.received propagates name/email/message into content body", () => {
+    const rule = EVENT_MAPPINGS["public.inquiry.received"]!;
+    const env = envelope("public.inquiry.received", { kind: "sponsor", name: "Bob", email: "bob@example.com", message: "We would like to sponsor." });
+    const input = mappingToIngest(rule, env);
+    expect(input.type).toBe("public.inquiry.received");
+    expect(input.title).toBe("New inquiry: sponsor");
+    expect(input.body).toContain("Bob");
+    expect(input.body).toContain("bob@example.com");
+    expect(input.body).toContain("We would like to sponsor.");
+    expect(input.resourceType).toBe("inquiry");
+  });
 });
 
 describe("queue consumer (lanes A/B + idempotency)", () => {
