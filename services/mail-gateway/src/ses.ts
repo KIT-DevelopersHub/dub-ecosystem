@@ -8,6 +8,7 @@
 // publishes mail.message.send_failed and audits it — mail is never silently dropped.
 import { DubError } from "@dub/errors";
 import type { Env } from "./env";
+import { safeErrorDetail } from "./provider-error";
 import type { MailProvider, OutboundMail } from "./provider";
 import { signRequest } from "./sigv4";
 
@@ -71,7 +72,7 @@ export class SesMailProvider implements MailProvider {
     }
 
     if (!res.ok) {
-      const detail = await safeErrorDetail(res);
+      const detail = await safeErrorDetail(res, ["message", "Message", "__type"]);
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `SES rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,
@@ -84,22 +85,6 @@ export class SesMailProvider implements MailProvider {
       throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "SES returned no MessageId", { status: 502 });
     }
     return { providerMessageId: parsed.MessageId };
-  }
-}
-
-/** Best-effort extraction of the SES error message (never throws; never logs creds). */
-async function safeErrorDetail(res: Response): Promise<string | null> {
-  try {
-    const text = await res.text();
-    if (!text) return null;
-    try {
-      const j = JSON.parse(text) as { message?: string; Message?: string; __type?: string };
-      return j.message ?? j.Message ?? j.__type ?? text.slice(0, 200);
-    } catch {
-      return text.slice(0, 200);
-    }
-  } catch {
-    return null;
   }
 }
 
