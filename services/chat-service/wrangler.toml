@@ -51,11 +51,14 @@ service = "file-meta-service"
 # △ in the frozen catalog (active after 9-C); the only subscriber is notification.
 [[queues.producers]]
 binding = "EVT_NOTIFICATION"
-queue = "dub-q-notification"
+queue = "dub-q-evt-notification"
 
 [[queues.producers]]
 binding = "AUDIT_QUEUE"
-queue = "dub-q-audit"
+queue = "dub-q-audit-record"
+
+[observability]
+enabled = true
 
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"

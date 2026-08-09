@@ -29,7 +29,7 @@ queue = "dub-q-evt-notification"
 
 [[queues.producers]]
 binding = "AUDIT_QUEUE"
-queue = "dub-q-audit"
+queue = "dub-q-audit-record"
 
 [[queues.producers]]
 binding = "DEPLOY_JOBS"
@@ -41,6 +41,9 @@ queue = "dub-q-deploy-jobs"
 max_batch_size = 10
 max_retries = 5
 dead_letter_queue = "dub-q-deploy-jobs-dlq"
+
+[observability]
+enabled = true
 
 # --- Vars (non-secret) ---
 [vars]

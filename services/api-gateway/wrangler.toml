@@ -74,7 +74,10 @@ service = "dub-webhook-ingest"
 # ---- Queue producer (the single publish exception: public.inquiry.received) ----
 [[queues.producers]]
 binding = "EVT_NOTIFICATION"
-queue = "dub-q-notification"
+queue = "dub-q-evt-notification"
+
+[observability]
+enabled = true
 
 # ---- Rate limiting (R1: CF native binding is the first candidate; KV fallback).
 # Left unbound in P0 — the in-memory limiter is used until infra registers RATE_LIMITER.
