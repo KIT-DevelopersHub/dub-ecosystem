@@ -1,0 +1,27 @@
+{
+  "name": "@dub/webhook-ingest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "webhook-ingest (#13) — common ingress for external webhooks: verify, dedup, envelope-normalize, publish to per-source Queues. P0: github only.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*"
+  },
+  "peerDependencies": {
+    "hono": "^4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}
