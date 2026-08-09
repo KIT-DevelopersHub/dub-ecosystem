@@ -26,9 +26,11 @@ Kotlin port a precise, tested behavioral spec. No backend, no Worker.
 | `http.ts` | fetch transport, Bearer, JSON, failure normalization | `core:network` (Retrofit/OkHttp) |
 | `auth-interceptor.ts` | single-token 401 -> refresh once -> retry/logout | `core:network` AuthInterceptor |
 | `session-store.ts` | opaque token + refresh + server deviceId vault | `core:database` EncryptedDataStore |
-| `bff-client.ts` | all `/m/v1/*` endpoint methods (S1–S9 + devices) | `core:network` |
+| `bff-client.ts` | all `/m/v1/*` endpoint methods (S1–S11 + devices) | `core:network` |
 | `task-repository.ts` | optimistic status change + 409 rollback/refetch | `feature:tasks` repo |
 | `home-view-model.ts` | S2 MVI UiState machine (loading/content/error) | `feature:home` |
+| `gantt.ts` | S11 gantt MVI UiState (chart read model + optimistic view prefs) | `feature:gantt` |
+| `chat.ts` | S10 channel/message repo + optimistic send + WS reconcile | `feature:chat` |
 | `deep-link.ts` | App Links + `dub://` fallback -> Route | `app` NavHost |
 | `push.ts` | FCM `MobilePushPayload` -> notification + tap route | `app` messaging |
 
@@ -39,9 +41,35 @@ home aggregate, events, my-tasks + single-PATCH optimistic locking (theme3 D4,
 HTTP 409), inbox, preferences, device registration, deep-link + push routing,
 `@dub/errors` -> `AppError` mapping (open-ended unknown codes -> Server).
 
-Out of P0 (STUB / later wave, per §1 / §8): chat UI (S10, blocker C), gantt view
-(S11), offline write queue (`/sync` `/mutations` are STUB), Compose UI /
-screenshot / Maestro E2E tests.
+## S10/S11 client-core (chat + gantt)
+
+The client-core layer for chat (S10) and gantt (S11) is now implemented and
+tested here — the earlier "Out of P0 / STUB" note applied to the *Compose UI*
+wave, not to the portable contract logic, which lands with the rest of the core:
+
+- **`gantt.ts` (S11)** — `GanttViewModel`, the same MVI/UDF state machine as
+  `home-view-model.ts`. Loads the `gantt.GanttChartDTO` read model plus the
+  server-persisted `gantt.GanttViewState`; zoom / row-collapse are applied
+  optimistically and best-effort persisted (a failed pref save never blanks the
+  chart, §6 stale-while-error). `bff-client` methods: `getGantt` /
+  `getGanttView` / `saveGanttView` (PATCH — mobile transport carries no PUT).
+- **`chat.ts` (S10)** — `ChatRepository` (channel list + per-channel message
+  store) with the same observable single-source-is-MO3 boundary as
+  `TaskRepository`. Optimistic send: pending row → promote to the server message
+  on 200, or mark `failed` for retry. Realtime is a **DO-direct WebSocket**
+  (theme11, gateway-bypassed) modeled as an **injected `ChatRealtimeTransport`**
+  (stubbed in tests); this module owns only the reconcile logic — dedupe by
+  server id, promote a matching pending optimistic row, apply `message.deleted`.
+  `bff-client` methods: `listChannels` / `listMessages` / `postMessage` /
+  `getChatWsTicket` (mints the short-lived ticket + DO URL).
+
+The frozen `chat` / `gantt` `@dub/types` namespaces are consumed directly (owner
+= chat/gantt-service); they are not re-declared in `contract.ts` (that file is
+the curated P0 subset). The Kotlin/Compose app mirrors these boundaries 1:1 and
+supplies the real OkHttp WebSocket for `ChatRealtimeTransport`.
+
+Out of P0 (STUB / later wave, per §1 / §8): offline write queue (`/sync`
+`/mutations` are STUB), Compose UI / screenshot / Maestro E2E tests.
 
 ## Contract gaps noted for MO3 (not re-implemented here)
 
