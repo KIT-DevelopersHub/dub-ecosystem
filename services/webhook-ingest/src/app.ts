@@ -101,8 +101,14 @@ export function createApp(opts: AppOptions = {}): WebhookApp {
       throw new DubError("UNAUTHENTICATED", "signature verification failed", { status: 401 });
     }
 
-    // small bodies must be valid JSON (signature already proves a trusted sender -> 400 ok)
-    if (rawBytes.byteLength <= OFFLOAD_THRESHOLD_BYTES) {
+    // small bodies must be valid JSON (signature already proves a trusted sender -> 400 ok).
+    // Exception: Google Drive channel-watch notifications — notably the mandatory
+    // `sync` handshake POST sent when a channel is created — arrive with an EMPTY body
+    // and carry all state in X-Goog-* headers. Treat an empty google-drive body as
+    // payload=null so the handshake can publish instead of 400-ing.
+    const emptyBody = rawBytes.byteLength === 0;
+    const allowEmpty = emptyBody && source === "google-drive";
+    if (!allowEmpty && rawBytes.byteLength <= OFFLOAD_THRESHOLD_BYTES) {
       try {
         JSON.parse(new TextDecoder().decode(rawBytes));
       } catch {

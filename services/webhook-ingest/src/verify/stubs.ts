@@ -67,7 +67,7 @@ export const verifyStripe: Verifier = async (input, secrets) => {
   }
 };
 
-// ---- gmail: Google Pub/Sub push OIDC (JWKS + RS256 JWT: sig / iss / aud / exp) --------
+// ---- gmail: Google Pub/Sub push OIDC (JWKS + RS256 JWT: sig / iss / aud / exp + SA id) --
 // Gmail push arrives as an authenticated Pub/Sub push: an `Authorization: Bearer <jwt>`
 // header carrying a Google-signed OIDC token, and a body that is the Pub/Sub envelope
 // ({ message: { messageId, ... }, subscription }). We authenticate the token; the
@@ -98,6 +98,7 @@ interface OidcClaims {
   exp?: number;
   iat?: number;
   email?: string;
+  email_verified?: boolean;
 }
 
 function b64urlToBytes(s: string): Uint8Array {
@@ -145,6 +146,10 @@ export function createGmailVerifier(deps: GmailVerifierDeps = {}): Verifier {
   return async (input, secrets) => {
     const audience = secrets.gmailAudience;
     if (!audience) return { ok: false, reason: "no gmail audience configured" };
+    // aud is chosen by whoever creates the push subscription and is therefore
+    // attacker-controllable; the SA identity (email + email_verified) must be pinned too.
+    const expectedEmail = secrets.gmailServiceAccountEmail;
+    if (!expectedEmail) return { ok: false, reason: "no gmail service account configured" };
 
     const authz = input.headers.get("authorization");
     if (!authz || !/^Bearer\s+/i.test(authz)) {
@@ -187,6 +192,10 @@ export function createGmailVerifier(deps: GmailVerifierDeps = {}): Verifier {
       return { ok: false, reason: "issuer mismatch" };
     }
     if (claims.aud !== audience) return { ok: false, reason: "audience mismatch" };
+    // Pin the Pub/Sub push service-account identity: Google only sets email_verified=true
+    // for a verified SA, and email must match the one we configured for this subscription.
+    if (claims.email !== expectedEmail) return { ok: false, reason: "service account email mismatch" };
+    if (claims.email_verified !== true) return { ok: false, reason: "service account email not verified" };
 
     const nowSec = Math.floor((deps.now ?? Date.now)() / 1000);
     if (typeof claims.exp !== "number" || claims.exp + tolerance < nowSec) {

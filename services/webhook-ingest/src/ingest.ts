@@ -64,8 +64,9 @@ export async function ingest(deps: IngestDeps, req: VerifiedRequest): Promise<we
     let payload: unknown = null;
     if (offload) {
       await deps.raw.put(r2Key!, req.rawBytes);
-    } else {
-      // signature already verified => trusted sender; malformed JSON surfaced as 400 upstream
+    } else if (req.rawBytes.byteLength > 0) {
+      // signature already verified => trusted sender; malformed JSON surfaced as 400 upstream.
+      // An empty body (e.g. google-drive `sync` handshake) stays payload=null.
       payload = JSON.parse(new TextDecoder().decode(req.rawBytes));
     }
 

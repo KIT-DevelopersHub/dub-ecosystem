@@ -26,6 +26,9 @@ export interface VerifierSecrets {
   driveTokens?: readonly (string | undefined)[];
   stripe?: readonly (string | undefined)[];
   gmailAudience?: string;
+  // Expected Pub/Sub push service-account email (OIDC `email` claim) — pins identity
+  // because the OIDC `aud` claim alone is attacker-controllable.
+  gmailServiceAccountEmail?: string;
 }
 
 export type Verifier = (input: VerifyInput, secrets: VerifierSecrets) => Promise<VerifyResult>;

@@ -62,6 +62,29 @@ describe("google-drive ingress (enabled)", () => {
     expect(h.q.drive.sent[0]!.externalId).toBe("chan-1:7");
   });
 
+  it("accepts the empty-body `sync` handshake POST -> 200 published with payload=null", async () => {
+    // When a channel is created, Google sends a mandatory handshake POST with an EMPTY
+    // body and x-goog-resource-state: sync; all state is in X-Goog-* headers. This must
+    // not 400 on the JSON gate — it publishes with payload=null.
+    const h = harness();
+    const headers = new Headers({
+      "x-goog-channel-id": "chan-9",
+      "x-goog-message-number": "1",
+      "x-goog-channel-token": DRIVE_TOKEN,
+      "x-goog-resource-state": "sync",
+    });
+    const res = await h.app.fetch(
+      new Request("https://hooks/hooks/google-drive", { method: "POST", body: "", headers }),
+      h.env,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { accepted: boolean }).accepted).toBe(true);
+    expect(h.q.drive.sent).toHaveLength(1);
+    expect(h.q.drive.sent[0]!.eventKind).toBe("sync");
+    expect(h.q.drive.sent[0]!.externalId).toBe("chan-9:1");
+    expect(h.q.drive.sent[0]!.payload).toBeNull();
+  });
+
   it("rejects a bad channel token -> 401, nothing published", async () => {
     const h = harness();
     const headers = new Headers({
