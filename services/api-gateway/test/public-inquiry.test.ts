@@ -32,10 +32,10 @@ describe("POST /api/v1/public/inquiries", () => {
     expect((await res.json()) as gateway.PublicInquiryResponse).toEqual({ accepted: true });
 
     expect(sent).toHaveLength(1);
-    const evt = sent[0] as { name: string; actorId: string | null; payload: { kind: string; email: string } };
+    const evt = sent[0] as { name: string; actorId: string | null; payload: { kind: string; name: string; email: string; message: string } };
     expect(evt.name).toBe("public.inquiry.received");
     expect(evt.actorId).toBeNull();
-    expect(evt.payload).toEqual({ kind: "sponsor", email: "bob@example.com" });
+    expect(evt.payload).toEqual({ kind: "sponsor", name: "Bob", email: "bob@example.com", message: "We would like to sponsor." });
   });
 
   it("[case11] turnstile fail -> 403 GATEWAY_TURNSTILE_FAILED, no publish", async () => {

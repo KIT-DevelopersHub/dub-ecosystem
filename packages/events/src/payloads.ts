@@ -39,7 +39,7 @@ export interface NotificationRequestedPayload {
   title: string;
   body: string;
 }
-export interface PublicInquiryReceivedPayload { kind: string; email: string }
+export interface PublicInquiryReceivedPayload { kind: string; name: string; email: string; message: string }
 
 // ---- chat (△ pending 9-C) ----
 export interface ChatMessageCreatedPayload { channelId: ChannelId; messageId: MessageId; authorId: UserId }

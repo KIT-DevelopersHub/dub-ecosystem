@@ -153,7 +153,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN, ROLE_ORGANIZER] }),
     buildContent: (p) => {
       const i = p as PublicInquiryReceivedPayload;
-      return { title: `New inquiry: ${i.kind}`, body: `From ${i.email}`, resourceType: "inquiry" };
+      return { title: `New inquiry: ${i.kind}`, body: `From ${i.name} <${i.email}>\n\n${i.message}`, resourceType: "inquiry" };
     },
   },
 
