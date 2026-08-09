@@ -161,6 +161,74 @@ describe("@dub/events consumer", () => {
     await handler(batch, {});
     expect(acked).toEqual([0]);
   });
+
+  it("marks processed and acks on success when idempotency is configured", async () => {
+    const store = { wasProcessed: vi.fn(async () => false), markProcessed: vi.fn(async () => {}) };
+    const handler = createQueueHandler({ "task.created": async () => {} }, { idempotency: store });
+    const e = createEvent("task.created", { taskId: "t1", eventId: "e1" }, ctx);
+    const { batch, acked } = fakeBatch([e]);
+    await handler(batch, {});
+    expect(store.wasProcessed).toHaveBeenCalledWith(e.id);
+    expect(store.markProcessed).toHaveBeenCalledWith(e.id);
+    expect(acked).toEqual([0]);
+  });
+
+  it("invokes onError with diagnostics before retrying a failed message", async () => {
+    const onError = vi.fn();
+    const boom = new Error("handler blew up");
+    const handler = createQueueHandler(
+      { "task.created": async () => { throw boom; } },
+      { onError, service: "task-service" },
+    );
+    const e = createEvent("task.created", { taskId: "t1", eventId: "e1" }, ctx);
+    const { batch, retried } = fakeBatch([e]);
+    await handler(batch, {});
+    expect(retried).toEqual([0]);
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError.mock.calls[0]![0]).toMatchObject({
+      error: boom,
+      eventId: e.id,
+      eventName: "task.created",
+      requestId: "req_1",
+      service: "task-service",
+    });
+  });
+
+  it("reports a malformed envelope to onError (poison) and retries", async () => {
+    const onError = vi.fn();
+    const handler = createQueueHandler({}, { onError });
+    const bad = null as unknown as DubEventEnvelope;
+    const { batch, retried } = fakeBatch([bad]);
+    await handler(batch, {});
+    expect(retried).toEqual([0]);
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError.mock.calls[0]![0]).toMatchObject({ eventId: undefined, eventName: undefined });
+    expect((onError.mock.calls[0]![0] as { error: unknown }).error).toBeInstanceOf(Error);
+  });
+
+  it("default error sink emits a redacted structured console.log line (no silent retry)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const handler = createQueueHandler({
+        "task.created": async () => { throw new Error("boom-secret"); },
+      });
+      const e = createEvent("task.created", { taskId: "t1", eventId: "e1" }, ctx);
+      const { batch, retried } = fakeBatch([e]);
+      await handler(batch, {});
+      expect(retried).toEqual([0]);
+      expect(logSpy).toHaveBeenCalledOnce();
+      const line = JSON.parse(logSpy.mock.calls[0]![0] as string) as {
+        level: string;
+        fields: { eventId: string; eventName: string; error: { message: string } };
+      };
+      expect(line.level).toBe("error");
+      expect(line.fields.eventId).toBe(e.id);
+      expect(line.fields.eventName).toBe("task.created");
+      expect(line.fields.error.message).toBe("boom-secret");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
 
 describe("@dub/events special channels", () => {
