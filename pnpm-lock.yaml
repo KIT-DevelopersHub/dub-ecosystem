@@ -542,6 +542,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/types
 
+  packages/api-client:
+    dependencies:
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../types
+
   packages/auth-client:
     dependencies:
       '@cloudflare/workers-types':
