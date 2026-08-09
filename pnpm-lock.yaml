@@ -647,6 +647,18 @@ importers:
 
   packages/types: {}
 
+  packages/validation:
+    dependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4
+        version: 4.20260702.1
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../types
+
   services/api-gateway:
     dependencies:
       '@cloudflare/workers-types':
