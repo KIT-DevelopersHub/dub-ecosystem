@@ -1,0 +1,56 @@
+# auth-service — Cloudflare Worker scaffold (P0: DO NOT DEPLOY from here).
+# Binding names (AUTH_KV / AUDIT_QUEUE / SVC_IDENTITY) follow the design; the
+# infra binding-name registry may rename AUTH_KV -> KV_SESSION at Apply time
+# (auth-service.md §8 #2) — mechanical rename when it lands.
+name = "auth-service"
+main = "src/index.ts"
+compatibility_date = "2024-11-27"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# --- KV: sessions / oauth_state / revoked_user (id filled at infra Apply) ---
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "REPLACE_AT_APPLY"
+
+# --- Queue producer: audit-record (theme13 publishAudit) ---
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "dub-q-audit-record"
+
+# --- Service binding: identity-roster (POST /users/provision) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster-service"
+
+# --- vars (non-secret) ---
+[vars]
+ENVIRONMENT = "production"
+COOKIE_DOMAIN = ".developershub.jp"
+SPA_SUCCESS_URL = "https://app.developershub.jp/"
+SPA_ERROR_URL = "https://app.developershub.jp/login?error=auth"
+REDIRECT_ALLOWLIST = "https://app.developershub.jp"
+SESSION_ACCESS_TTL_SEC = "3600"
+SESSION_ABS_WEB_TTL_SEC = "2592000"
+SESSION_ABS_MOBILE_TTL_SEC = "15552000"
+STATE_TTL_SEC = "600"
+
+# Secrets (set via `wrangler secret put`, never committed):
+#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI
+#   GOOGLE_MOBILE_IOS_CLIENT_ID / GOOGLE_MOBILE_ANDROID_CLIENT_ID
+# test-login is gated by DUB_TEST_LOGIN="1" and only in local/preview envs.
+
+[env.preview.vars]
+ENVIRONMENT = "preview"
+DUB_TEST_LOGIN = "1"
+
+[env.local.vars]
+ENVIRONMENT = "local"
+DUB_TEST_LOGIN = "1"
+COOKIE_DOMAIN = "localhost"
+SPA_SUCCESS_URL = "http://localhost:5173/"
+SPA_ERROR_URL = "http://localhost:5173/login?error=auth"
+REDIRECT_ALLOWLIST = "http://localhost:5173"
