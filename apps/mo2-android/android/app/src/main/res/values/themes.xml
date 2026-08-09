@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme. Compose drives the real theming (DubTheme);
+         this hosts the activity before Compose takes over. -->
+    <style name="Theme.DubMo2" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
