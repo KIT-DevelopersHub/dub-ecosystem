@@ -1,0 +1,70 @@
+# github-sync-service — Cloudflare Worker (template; deploy is NOT part of this unit).
+# 1 service = 1 physical Worker (P0b theme7). Consumes wh-github + evt-github-sync,
+# publishes github.* domain events, calls task/identity/event via Service Bindings.
+name = "dub-github-sync"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# ---- D1 (shared dub-core; github_* namespace only) ----
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_AT_DEPLOY"
+migrations_dir = "../../infra/d1/migrations/github"
+
+# ---- R2 (read-only fallback for >96KB webhook payloads) ----
+[[r2_buckets]]
+binding = "WEBHOOK_RAW"
+bucket_name = "dub-r2-webhook-raw"
+
+# ---- Queue producers (publish github.* domain + audit) ----
+[[queues.producers]]
+binding = "EVT_NOTIFICATION"
+queue = "dub-q-evt-notification"
+
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "dub-q-audit-record"
+
+# ---- Queue consumers (two inbound queues, dispatched by batch.queue) ----
+[[queues.consumers]]
+queue = "dub-q-wh-github"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "dub-q-wh-github-dlq"
+
+[[queues.consumers]]
+queue = "dub-q-evt-github-sync"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "dub-q-evt-github-sync-dlq"
+
+# ---- Service Bindings (internal RPC over @dub/http) ----
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"
+
+# ---- Reconciliation cron (8-N4: 6h; tune in ops) ----
+[triggers]
+crons = ["0 */6 * * *"]
+
+# ---- Vars ----
+[vars]
+GITHUB_ORIGIN_DEFAULT = "github"
+
+# Secrets (set via `wrangler secret put`, never committed):
+#   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_CLIENT_SECRET

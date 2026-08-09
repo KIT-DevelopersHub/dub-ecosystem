@@ -1,0 +1,26 @@
+{
+  "name": "@dub/github-sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "github-sync-service — the sync layer between task-service and GitHub Issues/Projects (P0b frozen contract).",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*",
+    "hono": "^4"
+  }
+}
