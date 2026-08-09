@@ -1,0 +1,271 @@
+/* FE6 chat styles. Tokens come from @dub/tokens CSS vars (--dub-*), injected by
+   main.tsx. CSS Modules per FE1/theme5 stack. Theme-aware via [data-theme]. */
+
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font-family: var(--dub-font-family-sans);
+}
+.layout.withThread {
+  grid-template-columns: 260px 1fr 340px;
+}
+
+.sidebar {
+  border-right: 1px solid var(--dub-color-border-default);
+  overflow-y: auto;
+  padding: var(--dub-space-2);
+}
+.sidebarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--dub-space-2);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.channelItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: var(--dub-radius-md);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.channelItem:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.channelItem.active {
+  background: var(--dub-color-brand-100);
+  color: var(--dub-color-brand-700);
+}
+.channelGroupLabel {
+  padding: var(--dub-space-2) var(--dub-space-3);
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  text-transform: uppercase;
+}
+.badge {
+  min-width: 20px;
+  padding: 0 var(--dub-space-2);
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-inverse);
+  font-size: var(--dub-font-size-xs);
+  text-align: center;
+}
+.badge.mention {
+  background: var(--dub-color-danger-500);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.headerTitle {
+  font-weight: var(--dub-font-weight-bold);
+}
+.headerTopic {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+
+.timeline {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.dateDivider {
+  align-self: center;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  margin: var(--dub-space-3) 0;
+}
+.unreadDivider {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  color: var(--dub-color-danger-500);
+  font-size: var(--dub-font-size-xs);
+}
+.unreadDivider::before,
+.unreadDivider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--dub-color-danger-300);
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-2);
+  border-radius: var(--dub-radius-md);
+}
+.message:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.message.pending {
+  opacity: 0.6;
+}
+.message.failed {
+  border: 1px solid var(--dub-color-danger-300);
+}
+.messageMeta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dub-space-2);
+}
+.author {
+  font-weight: var(--dub-font-weight-medium);
+}
+.time {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+.deleted {
+  color: var(--dub-color-text-muted);
+  font-style: italic;
+}
+.mention {
+  color: var(--dub-color-brand-600);
+  font-weight: var(--dub-font-weight-medium);
+}
+.inlineCode {
+  font-family: var(--dub-font-family-mono);
+  background: var(--dub-color-surface-sunken);
+  padding: 0 var(--dub-space-1);
+  border-radius: var(--dub-radius-sm);
+}
+
+.reactionBar {
+  display: flex;
+  gap: var(--dub-space-1);
+  flex-wrap: wrap;
+}
+.reaction {
+  display: inline-flex;
+  gap: var(--dub-space-1);
+  padding: 0 var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-full);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+}
+.reaction.mine {
+  border-color: var(--dub-color-brand-400);
+  background: var(--dub-color-brand-100);
+}
+
+.composer {
+  border-top: 1px solid var(--dub-color-border-default);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  position: relative;
+}
+.composer textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  padding: var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+  color: inherit;
+  font: inherit;
+}
+.composer textarea:disabled {
+  opacity: 0.5;
+}
+.composerError {
+  color: var(--dub-color-danger-500);
+  font-size: var(--dub-font-size-sm);
+  margin-top: var(--dub-space-1);
+}
+.mentionMenu {
+  position: absolute;
+  bottom: 100%;
+  left: var(--dub-space-4);
+  background: var(--dub-color-surface-overlay);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-md);
+  list-style: none;
+  margin: 0;
+  padding: var(--dub-space-1);
+  min-width: 200px;
+  z-index: var(--dub-zIndex-dropdown);
+}
+.mentionMenu li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: var(--dub-space-2);
+  border-radius: var(--dub-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.mentionMenu li button:hover,
+.mentionMenu li button[aria-selected="true"] {
+  background: var(--dub-color-brand-100);
+}
+
+.banner {
+  padding: var(--dub-space-2) var(--dub-space-4);
+  background: var(--dub-color-warning-100);
+  color: var(--dub-color-warning-700);
+  font-size: var(--dub-font-size-sm);
+  text-align: center;
+}
+.banner.archived {
+  background: var(--dub-color-gray-100);
+  color: var(--dub-color-text-secondary);
+}
+
+.thread {
+  border-left: 1px solid var(--dub-color-border-default);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.sendButton {
+  margin-top: var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-4);
+  border: none;
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-inverse);
+  cursor: pointer;
+  font: inherit;
+}
+.sendButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

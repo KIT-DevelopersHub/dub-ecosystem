@@ -1,0 +1,36 @@
+{
+  "name": "@dub/fe6-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FE6 — chat feature module for the DevHub (Dub) admin SPA. Standalone during Phase0; lifted into apps/admin-spa/src/features/chat once FE2 shell lands.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/tokens": "workspace:*",
+    "@dub/types": "workspace:*",
+    "@tanstack/react-query": "^5.62.7",
+    "@tanstack/react-router": "^1.87.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "vite": "^5.4.11",
+    "zod": "^3.24.1"
+  }
+}
