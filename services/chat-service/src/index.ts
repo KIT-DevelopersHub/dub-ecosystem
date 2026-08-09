@@ -1,7 +1,7 @@
 // Worker entrypoint. Wires the runtime env (D1, Service Bindings, Queues) into
 // AppDeps and serves the Hono app. Deploy is out of scope for this unit (wrangler
 // config is a skeleton); this file stays import-clean for `wrangler dev`.
-import type { D1Database, Fetcher, Queue, ExecutionContext } from "@cloudflare/workers-types";
+import type { D1Database, Fetcher, Queue, ExecutionContext, DurableObjectNamespace } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
 import { createServiceClient, type RequestContext } from "@dub/http";
@@ -11,8 +11,9 @@ import { common, type auditLog } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1ChatRepo } from "./d1-repo";
-import { NoopRealtimePublisher } from "./realtime";
-import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient } from "./types";
+import { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
+import { ChatRoom } from "./chat-room-do";
+import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, RealtimePublisher } from "./types";
 
 export interface Env {
   DB: D1Database;
@@ -21,6 +22,8 @@ export interface Env {
   SVC_FILE_META?: Fetcher;
   EVT_NOTIFICATION?: Queue;
   AUDIT_QUEUE?: Queue;
+  // ChatRoom DO namespace (RT fanout). Absent in local/preview -> Noop publisher.
+  CHAT_ROOM?: DurableObjectNamespace<ChatRoom>;
   DUB_DEFAULT_ORG_ID?: string;
   CHAT_RT_DO_URL_BASE?: string;
   WS_TICKET_SECRET?: string;
@@ -84,6 +87,12 @@ function buildFileClient(env: Env): FileClient {
   };
 }
 
+function buildRealtime(env: Env): RealtimePublisher {
+  // Real DO fanout when the CHAT_ROOM namespace is bound; Noop otherwise so the
+  // HTTP master runs unchanged in local/preview without a DO.
+  return env.CHAT_ROOM ? new DoRealtimePublisher(env.CHAT_ROOM) : new NoopRealtimePublisher();
+}
+
 export function buildDeps(env: Env, requestId?: string): AppDeps {
   const db = createDbClient(env.DB, {
     namespace: "chat",
@@ -100,7 +109,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     authz,
     publisher: buildPublisher(env),
     audit: buildAudit(env),
-    realtime: new NoopRealtimePublisher(),
+    realtime: buildRealtime(env),
     eventClient: buildEventClient(env),
     fileClient: buildFileClient(env),
     orgId: env.DUB_DEFAULT_ORG_ID ?? common.DUB_DEFAULT_ORG_ID,
@@ -112,19 +121,38 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
   };
 }
 
+// WS is gateway-bypassing / DO-direct: the ws-ticket `doUrl` points at `/ws/:id`.
+// Here (co-hosted P0 entry) we route the upgrade straight to the channel's ChatRoom
+// DO, which is the sole verifier (ticket + Origin). Production may split this into a
+// dedicated `chat-rt` Worker via a cross-script CHAT_ROOM binding — the DO class and
+// contract are unchanged.
+function routeWebSocket(request: Request, env: Env, url: URL): Response {
+  if (!env.CHAT_ROOM) return new Response("realtime unavailable", { status: 503 });
+  const match = url.pathname.match(/^\/ws\/([^/]+)$/);
+  if (!match) return new Response("not found", { status: 404 });
+  const channelId = decodeURIComponent(match[1]!);
+  const stub = env.CHAT_ROOM.getByName(channelId);
+  return stub.fetch(request as unknown as Request) as unknown as Response;
+}
+
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/ws/") && request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+      return routeWebSocket(request, env, url);
+    }
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
     const app = createApp(buildDeps(env, requestId));
     return app.fetch(request as unknown as Request) as unknown as Response;
   },
 };
 
+export { ChatRoom } from "./chat-room-do";
 export { createApp } from "./app";
 export { ChatService } from "./service";
 export { createD1ChatRepo } from "./d1-repo";
 export { InMemoryChatRepo } from "./memory-repo";
-export { NoopRealtimePublisher } from "./realtime";
+export { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
 export { CHAT_SCHEMA_MIGRATION } from "./schema";
 export { signWsTicket, verifyWsTicket, ticketExpiryMs } from "./wsticket";
 export type { AppDeps } from "./types";

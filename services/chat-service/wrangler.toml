@@ -19,6 +19,21 @@ binding = "DB"
 database_name = "dub-core"
 database_id = "REPLACE_AT_APPLY"
 
+# Realtime (9-C): the chat-owned ChatRoom Durable Object. One instance per channel
+# (getByName(channelId)). It verifies ws-tickets (HMAC) + Origin and fans out
+# ChatRealtimeEvent to connected sockets. WS is gateway-bypassing / DO-direct.
+# Co-hosted with the HTTP master here for P0; production may move it to a dedicated
+# `chat-rt` Worker addressed by CHAT_RT_DO_URL_BASE via a cross-script binding.
+[[durable_objects.bindings]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+
+# SQLite-backed DO class registration (required to create the DO). ChatRoom holds
+# no durable rows in P0 (WS coordinator only); the migration still registers it.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatRoom"]
+
 # Service Bindings (Service-to-Service, x-dub-* propagation via @dub/http).
 [[services]]
 binding = "SVC_IDENTITY"
@@ -47,6 +62,9 @@ DUB_DEFAULT_ORG_ID = "org_devhub"
 # Absolute base for the ws-ticket doUrl (gateway-bypassing / DO-direct). ":id" is
 # replaced with the channel id. Overridden per environment at Apply.
 CHAT_RT_DO_URL_BASE = "wss://chat-rt.developershub.jp/ws/:id"
+# Origin allow-list enforced by the ChatRoom DO (comma-separated). Browser clients
+# must match; native/mobile clients send no Origin and are allowed.
+CHAT_RT_ALLOWED_ORIGINS = "https://app.developershub.jp"
 
 # NOTE: WS_TICKET_SECRET is a Worker Secret (never in wrangler.toml). Set via
 # `wrangler secret put WS_TICKET_SECRET` at Apply. The ChatRoom DO verifies with
