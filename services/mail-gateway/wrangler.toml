@@ -39,6 +39,17 @@ binding = "AUDIT_QUEUE"
 # send_email binding for outbound reply-through-CF is NOT used; outbound = managed
 # provider (SES暫定) via Workers Secrets (SES_* / MAIL_FROM_ADDRESS).
 
+# --- Outbound provider (ADR-001: Amazon SES via SigV4-signed HTTPS, SES v2). ---
+# Non-secret config only. Credentials are Workers Secrets set out-of-band at Apply
+# (NEVER committed — 機密はローカルのみ):
+#   wrangler secret put SES_ACCESS_KEY_ID
+#   wrangler secret put SES_SECRET_ACCESS_KEY
+# If the secrets are absent the provider falls back to a loud stub (no silent drop).
+[vars]
+MAIL_OUTBOUND_PROVIDER = "ses"
+SES_REGION = "ap-northeast-1"
+MAIL_FROM_ADDRESS = "info@developershub.jp"
+
 # Retention purge Cron (03:20 UTC daily): send_log 30d / inbound 30d.
 [triggers]
 crons = ["20 3 * * *"]

@@ -11,16 +11,22 @@
 // `@dub/events` payload map (thin), see publisher.ts.
 import type { mail } from "@dub/types";
 
-// ---- inbound message (superset of the frozen mail.MailMessage) ----
+// ---- inbound message (reconciled cross-service DTO, 統合波 reconcile 2026-08) ----
 // The frozen mail.MailMessage lacks mailbox / raw headers / references, which the
-// design's loop-prevention + send contract require. We extend it locally; the
-// integration wave (post-9-B) reconciles this with the mail-gateway contract.
+// design's loop-prevention + rule evaluation require, so we extend it with OPTIONAL
+// enrichment fields. This shape is now RECONCILED with mail-gateway's published
+// `InboundMailView` (services/mail-gateway/src/types.ts): both extend the frozen
+// @dub/types `mail.MailMessage` anchor and declare the identical mailbox/headers/
+// references fields. @dub/types is frozen and the repo shares types only via @dub/*
+// packages (no service→service imports), so the contract is kept as this structural
+// mirror of the gateway view rather than a single physical import. Keep the two
+// definitions in lockstep if either side changes.
 export interface InboundMail extends mail.MailMessage {
-  /** Receiving mailbox address; defaults to first recipient when absent. */
+  /** Receiving mailbox local-part / address; falls back to the first recipient. */
   mailbox?: string;
-  /** Lower-cased raw header map used by loop detection. */
+  /** Lower-cased raw header map used by loop detection + rule fields (list-id等). */
   headers?: Record<string, string>;
-  /** RFC References chain (thread depth signal). */
+  /** RFC References chain (thread-depth signal). */
   references?: string[];
 }
 
