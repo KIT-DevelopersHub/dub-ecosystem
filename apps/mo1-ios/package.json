@@ -1,0 +1,22 @@
+{
+  "name": "@dub/mo1-ios",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MO1 — iOS SwiftUI participant/staff app. P0 = TypeScript contract-consumption reference layer (ApiClient, auth/refresh, semi-open error mapping, optimistic task UI, push deeplink routing, SWR read cache) that locks the MO3 `mobile` namespace contract the Swift app consumes. Production target is Swift 5.10+/SwiftUI/iOS17+ (see README).",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^2.1.8"
+  }
+}
