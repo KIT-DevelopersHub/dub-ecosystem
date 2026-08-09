@@ -1,0 +1,29 @@
+{
+  "name": "@dub/mo3-mobile-bff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) MO3 mobile-bff — single entry for MO1 iOS / MO2 Android (Cloudflare Worker, Hono). Cross-cutting entry + BFF aggregation + thin transparent proxy + push dispatch. sync/mutations are STUB (P0b frozen contract). DO NOT DEPLOY from here.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
