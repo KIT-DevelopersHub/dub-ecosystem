@@ -1,8 +1,7 @@
 import { useState } from "react";
 import type { event } from "@dub/types";
 import { Button, FormField } from "@dub/ui";
-import { wrapUnknown } from "@dub/errors";
-import { fieldErrorsOf } from "../lib/errorMap";
+import { fieldErrorsOf, normalizeError } from "../lib/errorMap";
 import { useUpdateEvent } from "../hooks/useEventMutations";
 import styles from "./components.module.css";
 
@@ -18,7 +17,7 @@ export function EventEditForm({
   const [description, setDescription] = useState(ev.description ?? "");
 
   const readOnly = !canWrite || ev.archivedAt !== null;
-  const fieldErrors = update.isError ? fieldErrorsOf(wrapUnknown(update.error)) : {};
+  const fieldErrors = update.isError ? fieldErrorsOf(normalizeError(update.error)) : {};
 
   const save = () => {
     const req: event.UpdateEventRequest = { version: ev.version };

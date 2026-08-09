@@ -5,9 +5,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { common, event } from "@dub/types";
 import { useEventApi } from "../context/ApiContext";
 import { useToast } from "@dub/ui";
-import { wrapUnknown } from "@dub/errors";
 import { createOptimisticMutation } from "./useOptimisticMutation";
 import { eventKeys } from "../lib/queryKeys";
+import { normalizeError } from "../lib/errorMap";
 import type { CreateActionRequest, ListActionsResponse, UpdateActionRequest } from "../api/actionContracts";
 
 // ---- Event: create (non-optimistic; server mints id) ----
@@ -21,7 +21,7 @@ export function useCreateEvent() {
       void qc.invalidateQueries({ queryKey: eventKeys.lists() });
       toast.show({ kind: "success", title: "イベントを作成しました" });
     },
-    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
+    onError: (err) => toast.show({ kind: "error", title: normalizeError(err).message }),
   });
 }
 
@@ -58,7 +58,7 @@ export function useArchiveEvent(eventId: common.EventId) {
       void qc.invalidateQueries({ queryKey: eventKeys.detail(eventId) });
       toast.show({ kind: "success", title: "イベントをアーカイブしました" });
     },
-    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
+    onError: (err) => toast.show({ kind: "error", title: normalizeError(err).message }),
   });
 }
 
@@ -74,7 +74,7 @@ export function useCreateAction(eventId: common.EventId) {
       void qc.invalidateQueries({ queryKey: eventKeys.detail(eventId) });
       toast.show({ kind: "success", title: "アクションを作成しました" });
     },
-    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
+    onError: (err) => toast.show({ kind: "error", title: normalizeError(err).message }),
   });
 }
 
@@ -119,6 +119,6 @@ export function useArchiveAction(eventId: common.EventId) {
       void qc.invalidateQueries({ queryKey: eventKeys.actions(eventId) });
       toast.show({ kind: "success", title: "アクションをアーカイブしました" });
     },
-    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
+    onError: (err) => toast.show({ kind: "error", title: normalizeError(err).message }),
   });
 }

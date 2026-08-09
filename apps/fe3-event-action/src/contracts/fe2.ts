@@ -65,8 +65,12 @@ export interface ResolvedRoute {
 // ---- API client (mirror of apps/fe2-app-shell/src/lib/api-client.tsx public shape) ----
 // FE2's @dub/api-client is the single gateway call surface. It absorbs the
 // /api/v1 prefix, sends the cookie session (credentials: "include"), refreshes
-// once on 401, retries GETs on 5xx/network, and rejects with a DubError
-// (@dub/errors). FE3 consumes the generic `request` surface via createHttpEventApi.
+// once on 401, retries GETs on 5xx/network, and rejects with an `ApiError`
+// (Error subclass carrying .code/.status/.details/.message; see apps/fe2-app-shell
+// api-client.tsx) — NOT a DubError. FE3 must normalize caught errors via
+// errorMap.normalizeError (which duck-types the wire .code) before classifying,
+// never bare @dub/errors wrapUnknown (that would collapse ApiError to INTERNAL).
+// FE3 consumes the generic `request` surface via createHttpEventApi.
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export interface RequestInput<TBody = unknown> {

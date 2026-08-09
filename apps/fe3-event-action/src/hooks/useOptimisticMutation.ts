@@ -4,8 +4,7 @@
 // integration. Wraps TanStack useMutation with snapshot/rollback/invalidate.
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
-import { wrapUnknown } from "@dub/errors";
-import { isVersionConflict } from "../lib/errorMap";
+import { isVersionConflict, normalizeError } from "../lib/errorMap";
 
 export interface OptimisticMutationConfig<TData, TVars, TCache> {
   mutationFn: (vars: TVars) => Promise<TData>;
@@ -41,7 +40,7 @@ export function createOptimisticMutation<TData, TVars, TCache = unknown>(
     onError: (err, _vars, ctx) => {
       // Roll back to the pre-mutation snapshot.
       if (ctx) qc.setQueryData(config.queryKey, ctx.prev);
-      const de = wrapUnknown(err);
+      const de = normalizeError(err);
       if (isVersionConflict(de)) {
         void qc.invalidateQueries({ queryKey: config.queryKey }); // refetch latest for diff
         config.onConflict?.();

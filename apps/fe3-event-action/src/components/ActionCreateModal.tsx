@@ -1,8 +1,7 @@
 import { useState } from "react";
 import type { common } from "@dub/types";
 import { Modal, Button, FormField } from "@dub/ui";
-import { wrapUnknown } from "@dub/errors";
-import { fieldErrorsOf } from "../lib/errorMap";
+import { fieldErrorsOf, normalizeError } from "../lib/errorMap";
 import { useActionRegistry } from "../context/ApiContext";
 import { useCreateAction } from "../hooks/useEventMutations";
 import styles from "./components.module.css";
@@ -25,7 +24,7 @@ export function ActionCreateModal({
 
   // Suggestions: registered plugin types + kinds already present on this event.
   const suggestions = [...new Set([...registry.list().map((p) => p.type), ...knownKinds])];
-  const fieldErrors = create.isError ? fieldErrorsOf(wrapUnknown(create.error)) : {};
+  const fieldErrors = create.isError ? fieldErrorsOf(normalizeError(create.error)) : {};
 
   const submit = () => {
     create.mutate(

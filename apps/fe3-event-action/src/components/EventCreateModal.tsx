@@ -1,8 +1,7 @@
 import { useState } from "react";
 import type { event } from "@dub/types";
 import { Modal, Button, FormField } from "@dub/ui";
-import { wrapUnknown } from "@dub/errors";
-import { fieldErrorsOf } from "../lib/errorMap";
+import { fieldErrorsOf, normalizeError } from "../lib/errorMap";
 import { useCreateEvent } from "../hooks/useEventMutations";
 import styles from "./components.module.css";
 
@@ -19,7 +18,7 @@ export function EventCreateModal({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
-  const fieldErrors = create.isError ? fieldErrorsOf(wrapUnknown(create.error)) : {};
+  const fieldErrors = create.isError ? fieldErrorsOf(normalizeError(create.error)) : {};
 
   const submit = () => {
     const req: event.CreateEventRequest = { title };
