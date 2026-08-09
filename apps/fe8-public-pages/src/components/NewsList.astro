@@ -1,0 +1,21 @@
+---
+interface Item {
+  slug: string;
+  title: string;
+  publishedAt: string;
+  summary?: string;
+}
+interface Props {
+  items: Item[];
+}
+const { items } = Astro.props;
+---
+<ul class="card-grid">
+  {items.map((n) => (
+    <li class="card">
+      <time datetime={n.publishedAt}>{n.publishedAt}</time>
+      <h3><a href={`/news/${n.slug}`}>{n.title}</a></h3>
+      {n.summary && <p>{n.summary}</p>}
+    </li>
+  ))}
+</ul>

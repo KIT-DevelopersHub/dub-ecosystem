@@ -1,0 +1,14 @@
+---
+import { SITE } from "../lib/site";
+const year = new Date().getFullYear();
+---
+<footer class="site-footer">
+  <div class="container">
+    <nav aria-label="フッター" class="site-nav">
+      <a href="/code-of-conduct">行動規範</a>
+      <a href="/privacy">プライバシーポリシー</a>
+      <a href="/sponsors/inquiry">スポンサーのお問い合わせ</a>
+    </nav>
+    <p>&copy; {year} {SITE.name}. {SITE.tagline}</p>
+  </div>
+</footer>

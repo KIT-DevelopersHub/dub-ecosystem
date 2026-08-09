@@ -1,0 +1,153 @@
+---
+// The ONLY interactive island (design §2-2). Static markup here; behavior is the
+// client <script> below, which reuses the unit-tested lib modules verbatim.
+interface Props {
+  defaultKind?: "general" | "sponsor" | "press";
+}
+const { defaultKind = "general" } = Astro.props;
+const siteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ?? "";
+---
+<form id="inquiry-form" novalidate data-testid="fe8-inquiry-form" data-default-kind={defaultKind}>
+  <div class="form-status" data-testid="fe8-inquiry-status" hidden role="status" aria-live="polite"></div>
+
+  <div class="field">
+    <label for="iq-kind">お問い合わせ種別 <span aria-hidden="true">*</span></label>
+    <select id="iq-kind" name="kind" required data-testid="fe8-inquiry-kind">
+      <option value="general">一般のお問い合わせ</option>
+      <option value="sponsor">スポンサーのご相談</option>
+      <option value="press">取材・プレスのお問い合わせ</option>
+    </select>
+    <p class="field-error" data-field="kind" hidden></p>
+  </div>
+
+  <div class="field">
+    <label for="iq-name">お名前 <span aria-hidden="true">*</span></label>
+    <input id="iq-name" name="name" type="text" autocomplete="name" required data-testid="fe8-inquiry-name" />
+    <p class="field-error" data-field="name" hidden></p>
+  </div>
+
+  <div class="field">
+    <label for="iq-email">メールアドレス <span aria-hidden="true">*</span></label>
+    <input id="iq-email" name="email" type="email" autocomplete="email" required data-testid="fe8-inquiry-email" />
+    <p class="field-error" data-field="email" hidden></p>
+  </div>
+
+  <div class="field">
+    <label for="iq-message">お問い合わせ内容 <span aria-hidden="true">*</span></label>
+    <textarea id="iq-message" name="message" rows="6" required data-testid="fe8-inquiry-message"></textarea>
+    <p class="field-error" data-field="message" hidden></p>
+  </div>
+
+  <div class="cf-turnstile" data-sitekey={siteKey} data-testid="fe8-inquiry-turnstile"></div>
+  <p class="field-error" data-field="turnstileToken" hidden></p>
+
+  <p>
+    送信により <a href="/privacy">プライバシーポリシー</a> に同意したものとみなされます。
+  </p>
+
+  <button type="submit" class="btn" data-testid="fe8-inquiry-submit">送信する</button>
+</form>
+
+{siteKey && (
+  <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+)}
+
+<script>
+  import {
+    validateInquiry,
+    toInquiryRequest,
+    type InquiryFormValues,
+  } from "../lib/inquiry-validation";
+  import { submitInquiry } from "../lib/inquiry-client";
+  import { errorCodeToUserMessage, shouldResetTurnstile } from "../lib/error-messages";
+  import { generateIdempotencyKey } from "../lib/idempotency";
+
+  const form = document.getElementById("inquiry-form") as HTMLFormElement | null;
+  if (form) {
+    const baseUrl = import.meta.env.PUBLIC_GATEWAY_ORIGIN ?? "";
+    const statusEl = form.querySelector<HTMLElement>('[data-testid="fe8-inquiry-status"]')!;
+    const submitBtn = form.querySelector<HTMLButtonElement>('[data-testid="fe8-inquiry-submit"]')!;
+    // Stable across retries so the gateway dedups on x-dub-idempotency-key.
+    let idempotencyKey = generateIdempotencyKey();
+    let inFlight = false;
+
+    const clearFieldErrors = () => {
+      form.querySelectorAll<HTMLElement>(".field-error").forEach((el) => {
+        el.hidden = true;
+        el.textContent = "";
+      });
+    };
+    const showFieldError = (field: string, message: string) => {
+      const el = form.querySelector<HTMLElement>(`.field-error[data-field="${field}"]`);
+      if (el) {
+        el.textContent = message;
+        el.hidden = false;
+      }
+    };
+    const setStatus = (tone: "error" | "success", message: string) => {
+      statusEl.dataset.tone = tone;
+      statusEl.textContent = message;
+      statusEl.hidden = false;
+    };
+    const resetTurnstile = () => {
+      const w = (window as unknown as { turnstile?: { reset: () => void } }).turnstile;
+      w?.reset();
+    };
+    const readTurnstileToken = (): string => {
+      const w = (window as unknown as { turnstile?: { getResponse: () => string | undefined } }).turnstile;
+      const fromWidget = w?.getResponse();
+      if (fromWidget) return fromWidget;
+      const input = form.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]');
+      return input?.value ?? "";
+    };
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (inFlight) return; // double-submit guard (design §6)
+      clearFieldErrors();
+      statusEl.hidden = true;
+
+      const data = new FormData(form);
+      const values: InquiryFormValues = {
+        kind: String(data.get("kind") ?? ""),
+        name: String(data.get("name") ?? ""),
+        email: String(data.get("email") ?? ""),
+        message: String(data.get("message") ?? ""),
+        turnstileToken: readTurnstileToken(),
+      };
+
+      const errors = validateInquiry(values);
+      if (errors.length > 0) {
+        for (const err of errors) showFieldError(err.field, err.message ?? err.reason);
+        return;
+      }
+
+      inFlight = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "送信中...";
+
+      const result = await submitInquiry(toInquiryRequest(values), { baseUrl, idempotencyKey });
+
+      inFlight = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "送信する";
+
+      if (result.ok) {
+        setStatus("success", "お問い合わせを受け付けました。ご連絡ありがとうございます。");
+        form.reset();
+        idempotencyKey = generateIdempotencyKey();
+        resetTurnstile();
+        return;
+      }
+
+      if (result.code === "VALIDATION_FAILED" && Array.isArray(result.error?.details)) {
+        for (const d of result.error!.details as Array<{ field: string; message?: string; reason: string }>) {
+          showFieldError(d.field, d.message ?? d.reason);
+        }
+      }
+      setStatus("error", errorCodeToUserMessage(result.code));
+      if (shouldResetTurnstile(result.code)) resetTurnstile();
+      // idempotencyKey intentionally retained: a retry dedups server-side.
+    });
+  }
+</script>

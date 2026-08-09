@@ -1,0 +1,71 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+import Timetable from "../components/Timetable.astro";
+import SpeakerGrid from "../components/SpeakerGrid.astro";
+import { eventJsonLd } from "../lib/jsonld";
+import { SITE } from "../lib/site";
+import type { EventContentData } from "../content/schemas";
+
+interface Props {
+  slug: string;
+  data: EventContentData;
+}
+const { slug, data } = Astro.props;
+const path = `/events/${slug}`;
+const url = `${SITE.url}${path}`;
+
+const node = eventJsonLd({
+  name: data.title,
+  url,
+  startDate: data.dateStart,
+  endDate: data.dateEnd,
+  description: data.summary,
+  locationName: data.venue.name,
+  locationAddress: data.venue.address,
+  status: data.status,
+  image: data.ogImage,
+});
+---
+<BaseLayout
+  title={data.title}
+  description={data.summary}
+  path={path}
+  ogImage={data.ogImage}
+  jsonLd={[node]}
+>
+  <article>
+    <header>
+      <h1>{data.title}</h1>
+      <p><time datetime={data.dateStart}>{data.dateStart}</time>{data.dateEnd && <> 〜 <time datetime={data.dateEnd}>{data.dateEnd}</time></>}</p>
+      <p>{data.venue.name}{data.venue.address && <> / {data.venue.address}</>}</p>
+    </header>
+    <p>{data.summary}</p>
+
+    <slot />
+
+    <Timetable rows={data.timetable ?? []} />
+    <SpeakerGrid speakers={data.speakers ?? []} />
+
+    {data.sponsorTiers && data.sponsorTiers.length > 0 && (
+      <section aria-labelledby="ev-sponsors-h">
+        <h2 id="ev-sponsors-h">スポンサー</h2>
+        {data.sponsorTiers.map((tier) => (
+          <div>
+            <h3>{tier.tier}</h3>
+            <ul class="card-grid">
+              {tier.sponsors.map((s) => (
+                <li class="card">
+                  {s.url ? <a href={s.url}>{s.name}</a> : s.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </section>
+    )}
+
+    {data.registrationUrl && (
+      <p><a class="btn" href={data.registrationUrl}>参加を申し込む</a></p>
+    )}
+  </article>
+</BaseLayout>

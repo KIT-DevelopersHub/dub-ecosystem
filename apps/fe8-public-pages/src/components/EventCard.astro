@@ -1,0 +1,23 @@
+---
+const STATUS_LABEL: Record<string, string> = {
+  announced: "開催予定",
+  open: "申込受付中",
+  closed: "受付終了",
+  finished: "開催終了",
+};
+interface Props {
+  slug: string;
+  title: string;
+  status: string;
+  dateStart: string;
+  venue: string;
+  summary: string;
+}
+const { slug, title, status, dateStart, venue, summary } = Astro.props;
+---
+<article class="card">
+  <p><span class="badge">{STATUS_LABEL[status] ?? status}</span> <time datetime={dateStart}>{dateStart}</time></p>
+  <h3><a href={`/events/${slug}`}>{title}</a></h3>
+  <p>{venue}</p>
+  <p>{summary}</p>
+</article>

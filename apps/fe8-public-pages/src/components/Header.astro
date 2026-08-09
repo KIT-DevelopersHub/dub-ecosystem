@@ -1,0 +1,16 @@
+---
+import { SITE } from "../lib/site";
+const nav = [
+  { href: "/about", label: "私たちについて" },
+  { href: "/events", label: "イベント" },
+  { href: "/news", label: "お知らせ" },
+  { href: "/sponsors", label: "スポンサー募集" },
+  { href: "/contact", label: "お問い合わせ" },
+];
+---
+<header class="site-header">
+  <nav class="container site-nav" aria-label="グローバルナビゲーション">
+    <a class="brand" href="/">{SITE.name}</a>
+    {nav.map((item) => <a href={item.href}>{item.label}</a>)}
+  </nav>
+</header>

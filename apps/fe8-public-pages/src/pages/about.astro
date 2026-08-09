@@ -1,0 +1,21 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE } from "../lib/site";
+---
+<BaseLayout title="私たちについて" description={`${SITE.name} の目的・体制・沿革。`} path="/about">
+  <h1>私たちについて</h1>
+  <p>{SITE.name} は{SITE.tagline}です。勉強会・カンファレンス・ハッカソンを通じて、地域の開発者が学び合い、つながる場を運営しています。</p>
+
+  <h2>目的</h2>
+  <p>技術的な学びの機会を増やし、開発者コミュニティの持続的な成長を支えること。</p>
+
+  <h2>おもな活動</h2>
+  <ul>
+    <li>北陸ITカンファレンスの開催</li>
+    <li>定期的な勉強会・もくもく会</li>
+    <li>学生ハッカソン Hackit の運営支援</li>
+  </ul>
+
+  <h2>体制</h2>
+  <p>運営メンバーとボランティアスタッフにより運営されています。参加はどなたでも歓迎です。</p>
+</BaseLayout>

@@ -1,0 +1,32 @@
+---
+interface Row {
+  time: string;
+  title: string;
+  speaker?: string;
+  track?: string;
+}
+interface Props {
+  rows: Row[];
+}
+const { rows } = Astro.props;
+---
+{rows.length > 0 && (
+  <section aria-labelledby="timetable-h">
+    <h2 id="timetable-h">タイムテーブル</h2>
+    <table class="timetable">
+      <thead>
+        <tr><th scope="col">時刻</th><th scope="col">セッション</th><th scope="col">登壇者</th><th scope="col">トラック</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr>
+            <td>{r.time}</td>
+            <td>{r.title}</td>
+            <td>{r.speaker ?? "-"}</td>
+            <td>{r.track ?? "-"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+)}

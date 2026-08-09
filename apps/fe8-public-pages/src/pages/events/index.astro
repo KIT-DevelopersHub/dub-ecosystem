@@ -1,0 +1,35 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import EventCard from "../../components/EventCard.astro";
+
+const all = await getCollection("events");
+const upcoming = all
+  .filter((e) => e.data.status !== "finished")
+  .sort((a, b) => (a.data.dateStart < b.data.dateStart ? -1 : 1));
+const past = all
+  .filter((e) => e.data.status === "finished")
+  .sort((a, b) => (a.data.dateStart > b.data.dateStart ? -1 : 1));
+---
+<BaseLayout title="イベント" description="DevelopersHub が開催する開催予定・過去のイベント一覧。" path="/events">
+  <h1>イベント</h1>
+
+  <section aria-labelledby="ev-upcoming-h">
+    <h2 id="ev-upcoming-h">開催予定</h2>
+    {upcoming.length === 0 && <p>現在、開催予定のイベントはありません。</p>}
+    <div class="card-grid">
+      {upcoming.map((e) => (
+        <EventCard slug={e.slug} title={e.data.title} status={e.data.status} dateStart={e.data.dateStart} venue={e.data.venue.name} summary={e.data.summary} />
+      ))}
+    </div>
+  </section>
+
+  <section aria-labelledby="ev-past-h">
+    <h2 id="ev-past-h">過去のイベント</h2>
+    <div class="card-grid">
+      {past.map((e) => (
+        <EventCard slug={e.slug} title={e.data.title} status={e.data.status} dateStart={e.data.dateStart} venue={e.data.venue.name} summary={e.data.summary} />
+      ))}
+    </div>
+  </section>
+</BaseLayout>
