@@ -5,7 +5,8 @@ import {
   IDEMPOTENCY_HEADER,
   type FetchLike,
 } from "../src/lib/inquiry-client";
-import type { PublicInquiryRequest } from "@dub/types";
+import type { gateway } from "@dub/types";
+type PublicInquiryRequest = gateway.PublicInquiryRequest;
 import type { ErrorResponse } from "@dub/errors/wire";
 
 const body: PublicInquiryRequest = {
@@ -37,7 +38,7 @@ describe("submitInquiry", () => {
   it("POSTs to the gateway path with idempotency header and JSON body", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(200, { accepted: true })) as unknown as FetchLike;
     await submitInquiry(body, { fetchImpl, baseUrl: "https://api.example.com", idempotencyKey: "K1" });
-    const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(url).toBe(`https://api.example.com${PUBLIC_INQUIRY_PATH}`);
     expect(init.method).toBe("POST");
     expect(init.headers[IDEMPOTENCY_HEADER]).toBe("K1");

@@ -3,7 +3,9 @@
 // (field/reason/message) so the same rendering path handles client + server errors.
 
 import type { FieldError } from "@dub/errors/wire";
-import type { PublicInquiryRequest, PublicInquiryKind } from "@dub/types";
+import type { gateway } from "@dub/types";
+type PublicInquiryRequest = gateway.PublicInquiryRequest;
+type PublicInquiryKind = gateway.PublicInquiryKind;
 
 export const INQUIRY_KINDS: readonly PublicInquiryKind[] = ["general", "sponsor", "press"];
 

@@ -21,8 +21,8 @@ export const GET: APIRoute = async () => {
 
   const paths = [
     ...STATIC_PATHS,
-    ...events.map((e) => `/events/${e.slug}`),
-    ...news.map((n) => `/news/${n.slug}`),
+    ...events.map((e: { slug: string }) => `/events/${e.slug}`),
+    ...news.map((n: { slug: string }) => `/news/${n.slug}`),
   ];
 
   const body =

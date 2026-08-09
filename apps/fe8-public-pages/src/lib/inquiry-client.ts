@@ -3,7 +3,9 @@
 // the FROZEN @dub/types gateway namespace (body {kind,name,email,message,turnstileToken}
 // → {accepted}); richer draft fields from the P0a doc are NOT in the frozen contract.
 
-import type { PublicInquiryRequest, PublicInquiryResponse } from "@dub/types";
+import type { gateway } from "@dub/types";
+type PublicInquiryRequest = gateway.PublicInquiryRequest;
+type PublicInquiryResponse = gateway.PublicInquiryResponse;
 import { isErrorResponse, type ErrorResponse } from "@dub/errors/wire";
 import { NETWORK_ERROR } from "./error-messages";
 import { generateIdempotencyKey } from "./idempotency";
