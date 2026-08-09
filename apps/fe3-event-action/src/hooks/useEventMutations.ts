@@ -4,8 +4,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { common, event } from "@dub/types";
 import { useEventApi } from "../context/ApiContext";
-import { useToast } from "../contracts/fe1";
-import { toDisplayableError } from "../contracts/fe2";
+import { useToast } from "@dub/ui";
+import { wrapUnknown } from "@dub/errors";
 import { createOptimisticMutation } from "./useOptimisticMutation";
 import { eventKeys } from "../lib/queryKeys";
 import type { CreateActionRequest, ListActionsResponse, UpdateActionRequest } from "../api/actionContracts";
@@ -19,9 +19,9 @@ export function useCreateEvent() {
     mutationFn: (req) => api.createEvent(req),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: eventKeys.lists() });
-      toast.show({ message: "イベントを作成しました", variant: "success" });
+      toast.show({ kind: "success", title: "イベントを作成しました" });
     },
-    onError: (err) => toast.show({ message: toDisplayableError(err).message, variant: "error" }),
+    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
   });
 }
 
@@ -56,9 +56,9 @@ export function useArchiveEvent(eventId: common.EventId) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: eventKeys.lists() });
       void qc.invalidateQueries({ queryKey: eventKeys.detail(eventId) });
-      toast.show({ message: "イベントをアーカイブしました", variant: "success" });
+      toast.show({ kind: "success", title: "イベントをアーカイブしました" });
     },
-    onError: (err) => toast.show({ message: toDisplayableError(err).message, variant: "error" }),
+    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
   });
 }
 
@@ -72,9 +72,9 @@ export function useCreateAction(eventId: common.EventId) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: eventKeys.actions(eventId) });
       void qc.invalidateQueries({ queryKey: eventKeys.detail(eventId) });
-      toast.show({ message: "アクションを作成しました", variant: "success" });
+      toast.show({ kind: "success", title: "アクションを作成しました" });
     },
-    onError: (err) => toast.show({ message: toDisplayableError(err).message, variant: "error" }),
+    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
   });
 }
 
@@ -117,8 +117,8 @@ export function useArchiveAction(eventId: common.EventId) {
     mutationFn: (actionId) => api.archiveAction(actionId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: eventKeys.actions(eventId) });
-      toast.show({ message: "アクションをアーカイブしました", variant: "success" });
+      toast.show({ kind: "success", title: "アクションをアーカイブしました" });
     },
-    onError: (err) => toast.show({ message: toDisplayableError(err).message, variant: "error" }),
+    onError: (err) => toast.show({ kind: "error", title: wrapUnknown(err).message }),
   });
 }

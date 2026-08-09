@@ -2,7 +2,7 @@
 // real event-service will (optimistic version lock -> EVENT_VERSION_CONFLICT,
 // phase table -> EVENT_INVALID_PHASE_TRANSITION, archive immutability ->
 // EVENT_ARCHIVED_IMMUTABLE), so screens and tests exercise the real contract.
-// Errors are thrown as DubError (code+status), which toDisplayableError handles.
+// Errors are thrown as DubError (code+status); callers normalize via @dub/errors wrapUnknown.
 import { DubError, CommonErrorCodes } from "@dub/errors";
 import { event as ev } from "@dub/types";
 import type { common, event, identity } from "@dub/types";

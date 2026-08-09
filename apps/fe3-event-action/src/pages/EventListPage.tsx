@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { event } from "@dub/types";
-import { Button, LoadMore } from "../contracts/fe1";
+import { Button, Icon, LoadMore } from "@dub/ui";
 import { useCan } from "../contracts/fe2";
 import { useNavigation } from "../contracts/navigation";
 import { useEventsQuery } from "../hooks/useEventQueries";
@@ -33,7 +33,7 @@ export function EventListPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>イベント</h1>
         {canWrite ? (
-          <Button icon="plus" variant="primary" onClick={() => setCreateOpen(true)} testId="fe3-eventlist-create">
+          <Button iconLeft={<Icon name="plus" />} variant="primary" onClick={() => setCreateOpen(true)} testId="fe3-eventlist-create">
             イベントを作成
           </Button>
         ) : null}
@@ -80,7 +80,7 @@ export function EventListPage() {
         <LoadMore
           hasMore={Boolean(data?.nextCursor)}
           loading={isLoading}
-          onClick={() => {
+          onLoadMore={() => {
             /* cursor pagination wired via query when nextCursor present (LoadMore, not infinite scroll) */
           }}
           testId="fe3-eventlist-loadmore"

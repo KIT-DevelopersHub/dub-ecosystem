@@ -5,7 +5,7 @@ import { StrictMode, useMemo, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cssText } from "@dub/tokens/css";
-import { ToastProvider } from "./contracts/fe1";
+import { ToastProvider } from "@dub/ui";
 import { useAuthStore } from "./contracts/fe2";
 import { NavigationProvider, type NavigationApi } from "./contracts/navigation";
 import { EventApiProvider, RegistryProvider } from "./context/ApiContext";

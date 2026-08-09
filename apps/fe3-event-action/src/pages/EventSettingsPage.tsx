@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "../contracts/fe1";
+import { Button } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { EventEditForm } from "../components/EventEditForm";

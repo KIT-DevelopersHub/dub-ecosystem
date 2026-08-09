@@ -1,4 +1,4 @@
-import { Button } from "../contracts/fe1";
+import { Button, Icon } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { PhaseBadge } from "../components/PhaseBadge";
@@ -22,7 +22,7 @@ function EventDetailInner({ eventId }: { eventId: string }) {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Button
-            icon="chat"
+            iconLeft={<Icon name="message-circle" />}
             variant="secondary"
             onClick={() => nav.navigate(chatHref(eventId))}
             testId="fe3-detail-open-chat"
@@ -31,7 +31,7 @@ function EventDetailInner({ eventId }: { eventId: string }) {
           </Button>
           {permissions.write ? (
             <Button
-              icon="settings"
+              iconLeft={<Icon name="settings" />}
               variant="ghost"
               onClick={() => nav.navigate(eventRoutes.settings(eventId))}
               testId="fe3-detail-settings"

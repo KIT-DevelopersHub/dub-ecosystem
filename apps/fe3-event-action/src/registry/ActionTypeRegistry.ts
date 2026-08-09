@@ -5,7 +5,7 @@
 // principle: new kinds are allowed without a code change).
 import type * as React from "react";
 import type { event } from "@dub/types";
-import type { IconName } from "../contracts/fe1";
+import type { IconName } from "@dub/ui";
 
 export interface ActionPanelProps {
   event: event.DubEvent;

@@ -1,10 +1,10 @@
 // EventApi — the typed surface FE3 calls (gateway -> event-service). All shapes
 // come from @dub/types event/common/identity; FE3 never redefines them. Two
-// implementations: createHttpEventApi (real, over FE2 @dub/api-client HttpClient)
-// and createMockEventApi (Phase0 contract stub, see mockData.ts). Both satisfy
+// implementations: createHttpEventApi (real, over the FE2 @dub/api-client request
+// surface) and createMockEventApi (Phase0 contract stub, see mockData.ts). Both satisfy
 // this interface, so screens/tests are agnostic.
 import type { common, event, identity } from "@dub/types";
-import type { HttpClient } from "../contracts/fe2";
+import type { ApiClient } from "../contracts/fe2";
 import type {
   CreateActionRequest,
   ListActionsQuery,
@@ -29,21 +29,58 @@ export interface EventApi {
   getUsers(ids: readonly common.UserId[]): Promise<common.Paginated<identity.UserSummary>>;
 }
 
-/** Real implementation over the FE2 HttpClient (paths are logical; client adds /api/v1). */
-export function createHttpEventApi(client: HttpClient): EventApi {
+// Query values are string|number|boolean|undefined on the wire (FE2 RequestInput).
+type Query = Record<string, string | number | boolean | undefined>;
+
+/**
+ * Real implementation over the FE2 @dub/api-client `request` surface. The client
+ * owns the /api/v1 prefix, session/refresh/retry, and DubError normalization; FE3
+ * only maps the Event > Action resource paths onto it.
+ */
+export function createHttpEventApi(client: ApiClient): EventApi {
   return {
-    listEvents: (query) => client.get<event.ListEventsResponse>("/events", query as Record<string, unknown>),
-    createEvent: (req) => client.post<event.DubEvent>("/events", req),
-    getEvent: (id) => client.get<event.GetEventResponse>(`/events/${id}`, { include: "actions" }),
-    updateEvent: (id, req) => client.patch<event.DubEvent>(`/events/${id}`, req),
-    archiveEvent: (id) => client.del<void>(`/events/${id}`),
+    listEvents: (query) =>
+      client.request<event.ListEventsResponse>({ method: "GET", path: "/api/v1/events", query: query as Query }),
+    createEvent: (req) =>
+      client.request<event.DubEvent, event.CreateEventRequest>({ method: "POST", path: "/api/v1/events", body: req }),
+    getEvent: (id) =>
+      client.request<event.GetEventResponse>({
+        method: "GET",
+        path: `/api/v1/events/${id}`,
+        query: { include: "actions" },
+      }),
+    updateEvent: (id, req) =>
+      client.request<event.DubEvent, event.UpdateEventRequest>({
+        method: "PATCH",
+        path: `/api/v1/events/${id}`,
+        body: req,
+      }),
+    archiveEvent: (id) => client.request<void>({ method: "DELETE", path: `/api/v1/events/${id}` }),
     listActions: (eventId, query) =>
-      client.get<ListActionsResponse>(`/events/${eventId}/actions`, query as Record<string, unknown>),
-    createAction: (eventId, req) => client.post<event.DubAction>(`/events/${eventId}/actions`, req),
-    getAction: (id) => client.get<event.DubAction>(`/actions/${id}`),
-    updateAction: (id, req) => client.patch<event.DubAction>(`/actions/${id}`, req),
-    archiveAction: (id) => client.del<void>(`/actions/${id}`),
+      client.request<ListActionsResponse>({
+        method: "GET",
+        path: `/api/v1/events/${eventId}/actions`,
+        query: query as Query,
+      }),
+    createAction: (eventId, req) =>
+      client.request<event.DubAction, CreateActionRequest>({
+        method: "POST",
+        path: `/api/v1/events/${eventId}/actions`,
+        body: req,
+      }),
+    getAction: (id) => client.request<event.DubAction>({ method: "GET", path: `/api/v1/actions/${id}` }),
+    updateAction: (id, req) =>
+      client.request<event.DubAction, UpdateActionRequest>({
+        method: "PATCH",
+        path: `/api/v1/actions/${id}`,
+        body: req,
+      }),
+    archiveAction: (id) => client.request<void>({ method: "DELETE", path: `/api/v1/actions/${id}` }),
     getUsers: (ids) =>
-      client.get<common.Paginated<identity.UserSummary>>("/identity/users", { ids: ids.join(",") }),
+      client.request<common.Paginated<identity.UserSummary>>({
+        method: "GET",
+        path: "/api/v1/identity/users",
+        query: { ids: ids.join(",") },
+      }),
   };
 }

@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { common, event } from "@dub/types";
-import { Icon, Button } from "../contracts/fe1";
+import { Icon, Button } from "@dub/ui";
 import { ActionCard } from "./ActionCard";
 import { ActionCreateModal } from "./ActionCreateModal";
 import { useActionsQuery } from "../hooks/useEventQueries";
@@ -46,7 +46,7 @@ function SortableActionRow({
       <div className={styles.actionRow}>
         {canWrite ? (
           <span className={styles.dragHandle} {...attributes} {...listeners} data-testid={`fe3-actionboard-drag-${action.id}`}>
-            <Icon name="drag" />
+            <Icon name="menu" aria-label="ドラッグして並べ替え" />
           </span>
         ) : null}
         <div style={{ flex: 1 }}>
@@ -115,7 +115,7 @@ export function ActionBoard({
         </select>
         <span className={styles.spacer} />
         {canWrite ? (
-          <Button icon="plus" variant="primary" onClick={() => setCreateOpen(true)} testId="fe3-actionboard-create">
+          <Button iconLeft={<Icon name="plus" />} variant="primary" onClick={() => setCreateOpen(true)} testId="fe3-actionboard-create">
             アクションを追加
           </Button>
         ) : null}

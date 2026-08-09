@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { common } from "@dub/types";
-import { Modal, Button, Field } from "../contracts/fe1";
-import { toDisplayableError } from "../contracts/fe2";
+import { Modal, Button, FormField } from "@dub/ui";
+import { wrapUnknown } from "@dub/errors";
 import { fieldErrorsOf } from "../lib/errorMap";
 import { useActionRegistry } from "../context/ApiContext";
 import { useCreateAction } from "../hooks/useEventMutations";
@@ -25,7 +25,7 @@ export function ActionCreateModal({
 
   // Suggestions: registered plugin types + kinds already present on this event.
   const suggestions = [...new Set([...registry.list().map((p) => p.type), ...knownKinds])];
-  const fieldErrors = create.isError ? fieldErrorsOf(toDisplayableError(create.error)) : {};
+  const fieldErrors = create.isError ? fieldErrorsOf(wrapUnknown(create.error)) : {};
 
   const submit = () => {
     create.mutate(
@@ -42,7 +42,7 @@ export function ActionCreateModal({
 
   return (
     <Modal open={open} onClose={onClose} title="アクションを追加" testId="fe3-actionboard-create-modal">
-      <Field label="タイトル" error={fieldErrors.title} htmlFor="fe3-action-title">
+      <FormField label="タイトル" error={fieldErrors.title} htmlFor="fe3-action-title">
         <input
           id="fe3-action-title"
           className={styles.input}
@@ -50,8 +50,8 @@ export function ActionCreateModal({
           onChange={(e) => setTitle(e.target.value)}
           data-testid="fe3-actionboard-create-title"
         />
-      </Field>
-      <Field label="種別（既知の一覧から選択、または自由入力）" htmlFor="fe3-action-kind">
+      </FormField>
+      <FormField label="種別（既知の一覧から選択、または自由入力）" htmlFor="fe3-action-kind">
         <input
           id="fe3-action-kind"
           className={styles.input}
@@ -66,7 +66,7 @@ export function ActionCreateModal({
             <option key={s} value={s} />
           ))}
         </datalist>
-      </Field>
+      </FormField>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
         <Button variant="ghost" onClick={onClose}>
           キャンセル

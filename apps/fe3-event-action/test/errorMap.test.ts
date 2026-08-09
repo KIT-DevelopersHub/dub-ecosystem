@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { classifyError, isVersionConflict, fieldErrorsOf, EventErrorCodes } from "../src/lib/errorMap";
-import type { DisplayableError } from "../src/contracts/fe2";
+import { DubError } from "@dub/errors";
 
-function de(code: string, extra: Partial<DisplayableError> = {}): DisplayableError {
-  return { code, message: extra.message ?? code, retryable: false, ...extra };
+function de(code: string, extra: { message?: string; details?: unknown } = {}): DubError {
+  return new DubError(code, extra.message ?? code, { details: extra.details });
 }
 
 describe("classifyError (test observations #5, #7, #10, #11)", () => {

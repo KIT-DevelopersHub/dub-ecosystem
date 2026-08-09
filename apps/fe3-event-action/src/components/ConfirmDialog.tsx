@@ -1,4 +1,4 @@
-import { Modal, Button } from "../contracts/fe1";
+import { Modal, Button } from "@dub/ui";
 
 export interface ConfirmDialogProps {
   open: boolean;

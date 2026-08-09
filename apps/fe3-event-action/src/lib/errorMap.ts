@@ -1,7 +1,6 @@
 // Map wire error codes to FE3 screen handling. Codes: common (@dub/errors
 // CommonErrorCodes) + event-service specific EVENT_* (SCREAMING_SNAKE, theme3 D7).
-import { CommonErrorCodes } from "@dub/errors";
-import type { DisplayableError } from "../contracts/fe2";
+import { CommonErrorCodes, type DubError } from "@dub/errors";
 
 // event-service specific codes (design §6). Kept local until event-service exports
 // a code catalog; the string values are the frozen wire contract.
@@ -51,12 +50,12 @@ export function classifyError(code: string): ErrorHandling {
   }
 }
 
-export function isVersionConflict(err: DisplayableError): boolean {
+export function isVersionConflict(err: DubError): boolean {
   return classifyError(err.code) === "version-conflict";
 }
 
 /** Field errors extracted from a VALIDATION_FAILED details payload (FieldError[]). */
-export function fieldErrorsOf(err: DisplayableError): Record<string, string> {
+export function fieldErrorsOf(err: DubError): Record<string, string> {
   const out: Record<string, string> = {};
   if (err.code === EventErrorCodes.SLUG_CONFLICT) {
     out.slug = err.message;

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Button, Icon } from "../contracts/fe1";
+import { Button, Icon } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { useActionRegistry } from "../context/ApiContext";
@@ -53,7 +53,7 @@ function ActionDetailInner({ eventId, actionId }: { eventId: string; actionId: s
             ← {ev.title}
           </button>
           <h1 className={styles.pageTitle}>
-            <Icon name={registry.has(action.kind) ? plugin.icon : "list"} /> {action.title}
+            <Icon name={registry.has(action.kind) ? plugin.icon : "check-square"} /> {action.title}
           </h1>
           <span className={styles.badge}>{action.kind}</span>
         </div>

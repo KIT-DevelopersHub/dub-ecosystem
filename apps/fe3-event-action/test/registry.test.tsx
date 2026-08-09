@@ -6,7 +6,7 @@ import { genericActionPlugin } from "../src/components/GenericActionPanel";
 const mockPlugin: ActionTypePlugin = {
   type: "task_management",
   label: "タスク管理",
-  icon: "task",
+  icon: "check-square",
   Panel: () => null,
 };
 
