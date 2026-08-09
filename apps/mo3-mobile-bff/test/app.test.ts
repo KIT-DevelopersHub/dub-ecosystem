@@ -187,7 +187,7 @@ describe("BFF event overview", () => {
 });
 
 describe("sync / mutations (wired)", () => {
-  it("GET /m/v1/sync -> 200 with a differential envelope (cursor + serverTime)", async () => {
+  it("GET /m/v1/sync -> 200 with a full-snapshot envelope (cursor + serverTime)", async () => {
     const h = makeHarness();
     h.event.on("GET", "/events", { items: [{ id: "evt_1", title: "E", phase: "live", startsAt: null }], nextCursor: null });
     h.task.on("GET", "/tasks", { items: [], nextCursor: null });

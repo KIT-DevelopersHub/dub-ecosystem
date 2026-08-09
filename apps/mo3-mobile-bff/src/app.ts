@@ -3,8 +3,9 @@
 //     trust inbound x-dub-* (the @dub/http client re-adds trusted headers downstream);
 // (2) BFF aggregation (/m/v1/bff/*); (3) thin transparent proxy (logic-free forward);
 // (4) push dispatch (/internal/push/dispatch, Service-Binding only); (5) offline
-// sync — GET /sync (cursor differential, sync.ts) + POST /mutations (idempotent
-// replay with per-mutation conflict resolution, mutations.ts). Built from injected
+// sync — GET /sync (full snapshot; cursor is round-tripped for forward-compat,
+// sync.ts) + POST /mutations (idempotent replay with per-mutation conflict
+// resolution, mutations.ts). Built from injected
 // Deps → fully testable without the Cloudflare runtime.
 import { Hono, type MiddlewareHandler } from "hono";
 import { dubErrorHandler, errors, type FieldError } from "@dub/errors";
@@ -223,8 +224,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
   app.get("/m/v1/preferences", requireAuth, (c) => proxy(c, deps.notification, "GET", "/preferences"));
   app.patch("/m/v1/preferences", requireAuth, (c) => proxy(c, deps.notification, "PATCH", "/preferences"));
 
-  // ================= offline: differential sync / mutation replay =================
-  // GET /m/v1/sync — resources changed since the opaque cursor (sync.ts).
+  // ================= offline: snapshot sync / mutation replay =================
+  // GET /m/v1/sync — full snapshot of the caller's resources; the opaque cursor is
+  // round-tripped for forward-compat, not yet a change-since filter (sync.ts).
   app.get("/m/v1/sync", requireAuth, async (c) => {
     const ctx = authedCtx(c);
     const q = c.req.query();
