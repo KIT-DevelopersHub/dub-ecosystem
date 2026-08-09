@@ -1,13 +1,14 @@
 // Reference-data seed: the default org + the 3 system roles (admin/organizer/
 // member). Idempotent. Demo USERS are #28 seedDemo's job (kept out of here so no
 // demo rows leak into prod). Role permission bundles are an α-decision (§3 seed).
-import type { identity } from "@dub/types";
+import { identity } from "@dub/types";
 import type { IdentityRepo } from "./repo/types";
 
-const ALL_KEYS = (): identity.PermissionKey[] => (
-  // full catalog; admin is genuinely all-powerful in P0
-  ["identity:read", "identity:admin", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "file:admin", "notif:send", "notif:admin", "mail:send", "mail:read", "mail:admin", "chat:create", "chat:moderate", "infra:read", "infra:deploy", "infra:dns", "infra:admin", "audit:read"]
-);
+// admin is genuinely all-powerful in P0: derive every key from the frozen
+// catalog so a catalog change (e.g. github:* / drive:* / webhook:read) can never
+// silently drop admin below full coverage (drift-proof, see seed test).
+const ALL_KEYS = (): identity.PermissionKey[] =>
+  identity.PERMISSION_CATALOG.map((e) => e.key);
 
 const SYSTEM_ROLES: { name: string; permissions: identity.PermissionKey[] }[] = [
   { name: "admin", permissions: ALL_KEYS() },
