@@ -6,6 +6,25 @@ import { z } from "zod";
 import type { chat, identity } from "@dub/types";
 import { MockChatClient } from "./mock-client";
 import { demoSeed } from "../dev/seed";
+import { chatFeature } from "../feature";
+
+// FE2's canonical IconName union (fe2-app-shell/src/stubs/icons.tsx). FE6's local
+// shell-contract mirrors nav.icon as a plain string, so the compiler cannot catch an
+// icon that FE2's closed set rejects (e.g. "chat"). Assert membership at test time so
+// this contract mismatch is caught here instead of only when FE2 integrates.
+const ICON_NAMES = [
+  "home",
+  "calendar",
+  "check-square",
+  "bell",
+  "message-square",
+  "shield",
+  "settings",
+  "users",
+  "file",
+  "alert-triangle",
+  "log-out",
+] as const;
 
 const reactionSchema = z.object({ emoji: z.string(), userIds: z.array(z.string()) });
 const messageSchema = z.object({
@@ -91,5 +110,33 @@ describe("contract conformance", () => {
       { kind: "member.removed", channelId: "c", userId: "u", at: "2026-08-09T00:00:00Z" },
     ];
     for (const e of events) expect(rtEventSchema.safeParse(e).success).toBe(true);
+  });
+});
+
+describe("FeatureModule shape conformance (FE2 shell contract)", () => {
+  it("nav is a non-empty array of NavEntry-shaped objects", () => {
+    expect(Array.isArray(chatFeature.nav)).toBe(true);
+    expect(chatFeature.nav.length).toBeGreaterThan(0);
+    for (const n of chatFeature.nav) {
+      expect(n.label).toBeTypeOf("string");
+      expect(n.path).toBeTypeOf("string");
+      expect(n.order).toBeTypeOf("number");
+    }
+  });
+
+  it("every nav icon is a member of FE2's canonical IconName union", () => {
+    for (const n of chatFeature.nav) {
+      expect(ICON_NAMES).toContain(n.icon);
+    }
+  });
+
+  it("routes is a non-empty array; each route has a lazy factory and an auth mode", () => {
+    expect(Array.isArray(chatFeature.routes)).toBe(true);
+    expect(chatFeature.routes.length).toBeGreaterThan(0);
+    for (const r of chatFeature.routes) {
+      expect(r.path.startsWith("/")).toBe(true);
+      expect(r.lazy).toBeTypeOf("function");
+      expect(["required", "public"]).toContain(r.auth);
+    }
   });
 });
