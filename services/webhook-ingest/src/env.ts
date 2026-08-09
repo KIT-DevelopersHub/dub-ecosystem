@@ -26,6 +26,9 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_WEBHOOK_SECRET_NEXT?: string;
   GMAIL_WEBHOOK_AUDIENCE?: string;
+  // Pub/Sub push service-account identity (the OIDC token's `email` claim). Pub/Sub push
+  // aud is attacker-controllable, so the SA identity must be pinned in addition to aud.
+  GMAIL_PUSH_SA_EMAIL?: string;
 
   // vars
   RETENTION_DAYS?: string;
@@ -45,8 +48,13 @@ export const QUEUE_NAME_BY_SOURCE: Record<webhook.WebhookSource, string> = {
   stripe: "dub-q-wh-stripe",
 };
 
-// P0 implementation scope: github only (others are verifier stubs + queue declaration).
-export const ENABLED_SOURCES: ReadonlySet<webhook.WebhookSource> = new Set(["github"]);
+// Enabled ingress sources. github/google-drive/stripe accept live traffic; gmail stays
+// gated (its verifier is implemented but the endpoint is not yet activated — see 9-B).
+export const ENABLED_SOURCES: ReadonlySet<webhook.WebhookSource> = new Set([
+  "github",
+  "google-drive",
+  "stripe",
+]);
 
 export const KNOWN_SOURCES: ReadonlySet<string> = new Set<webhook.WebhookSource>([
   "github",

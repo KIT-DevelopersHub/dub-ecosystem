@@ -1,6 +1,6 @@
 // Hono app factory. Routes:
-//   EXT  POST /hooks/:source              external webhook ingress (github live; others 404)
-//   EXT  GET  /hooks/:source              endpoint handshake (P0 stub -> 404)
+//   EXT  POST /hooks/:source              external webhook ingress (enabled sources only; else 404)
+//   EXT  GET  /hooks/:source              endpoint reachability handshake (enabled -> 200; else 404)
 //   GW   GET  /api/v1/webhooks/deliveries administrative delivery search (webhook:read)
 //   GW   GET  /api/v1/webhooks/deliveries/:id
 //   SB   GET  /internal/health
@@ -101,8 +101,14 @@ export function createApp(opts: AppOptions = {}): WebhookApp {
       throw new DubError("UNAUTHENTICATED", "signature verification failed", { status: 401 });
     }
 
-    // small bodies must be valid JSON (signature already proves a trusted sender -> 400 ok)
-    if (rawBytes.byteLength <= OFFLOAD_THRESHOLD_BYTES) {
+    // small bodies must be valid JSON (signature already proves a trusted sender -> 400 ok).
+    // Exception: Google Drive channel-watch notifications — notably the mandatory
+    // `sync` handshake POST sent when a channel is created — arrive with an EMPTY body
+    // and carry all state in X-Goog-* headers. Treat an empty google-drive body as
+    // payload=null so the handshake can publish instead of 400-ing.
+    const emptyBody = rawBytes.byteLength === 0;
+    const allowEmpty = emptyBody && source === "google-drive";
+    if (!allowEmpty && rawBytes.byteLength <= OFFLOAD_THRESHOLD_BYTES) {
       try {
         JSON.parse(new TextDecoder().decode(rawBytes));
       } catch {
@@ -121,9 +127,13 @@ export function createApp(opts: AppOptions = {}): WebhookApp {
     return c.json(ack satisfies webhook.WebhookIngestAck, 200);
   });
 
-  // handshake endpoints are per-source and only for enabled sources (P0: none) -> 404
+  // Endpoint-reachability handshake (e.g. Google Drive channel watch verifies the
+  // callback URL responds). Ack for enabled sources; unknown/disabled stays 404.
   app.get("/hooks/:source", (c) => {
-    throw errors.notFound("webhook handshake", c.req.param("source"));
+    const source = c.req.param("source");
+    if (!isWebhookSource(source)) throw errors.notFound("webhook handshake", source);
+    if (!enabled.has(source)) throw errors.notFound("webhook handshake", source);
+    return c.json({ status: "ok", source }, 200);
   });
 
   // ---- administrative query (via api-gateway; webhook:read) ----

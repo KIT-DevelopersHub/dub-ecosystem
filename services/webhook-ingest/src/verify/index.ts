@@ -18,6 +18,7 @@ export function secretsFromEnv(env: Env): VerifierSecrets {
     driveTokens: [env.DRIVE_WEBHOOK_TOKEN, env.DRIVE_WEBHOOK_TOKEN_NEXT],
     stripe: [env.STRIPE_WEBHOOK_SECRET, env.STRIPE_WEBHOOK_SECRET_NEXT],
     ...(env.GMAIL_WEBHOOK_AUDIENCE ? { gmailAudience: env.GMAIL_WEBHOOK_AUDIENCE } : {}),
+    ...(env.GMAIL_PUSH_SA_EMAIL ? { gmailServiceAccountEmail: env.GMAIL_PUSH_SA_EMAIL } : {}),
   };
 }
 

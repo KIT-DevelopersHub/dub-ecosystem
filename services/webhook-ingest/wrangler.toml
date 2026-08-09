@@ -56,5 +56,6 @@ crons = ["17 3 * * *"]
 #   DRIVE_WEBHOOK_TOKEN   / DRIVE_WEBHOOK_TOKEN_NEXT      (stub; drive-proxy issued)
 #   STRIPE_WEBHOOK_SECRET / STRIPE_WEBHOOK_SECRET_NEXT    (stub)
 #   GMAIL_WEBHOOK_AUDIENCE                                (stub; mail-gateway shared)
+#   GMAIL_PUSH_SA_EMAIL                                   (stub; Pub/Sub push SA identity)
 [vars]
 RETENTION_DAYS = "30"
