@@ -1,7 +1,6 @@
 // Map wire error codes to FE3 screen handling. Codes: common (@dub/errors
 // CommonErrorCodes) + event-service specific EVENT_* (SCREAMING_SNAKE, theme3 D7).
-import { CommonErrorCodes } from "@dub/errors";
-import type { DisplayableError } from "../contracts/fe2";
+import { CommonErrorCodes, DubError, isDubError, wrapUnknown, type ErrorCode } from "@dub/errors";
 
 // event-service specific codes (design §6). Kept local until event-service exports
 // a code catalog; the string values are the frozen wire contract.
@@ -22,6 +21,45 @@ export type ErrorHandling =
   | "version-conflict" // rollback + refetch + diff
   | "rate-limited"
   | "retry-toast"; // INTERNAL / network -> rollback + retry toast
+
+// Duck-typed wire-error shape. The FE2 real ApiClient (apps/fe2-app-shell
+// api-client.tsx) rejects with `ApiError` — an Error subclass carrying
+// .code/.status/.details/.message — which is NOT a DubError instance. Mock
+// EventApi (mockData.ts) throws real DubError. Both must classify identically.
+interface WireErrorLike {
+  code: string;
+  message?: string;
+  status?: number;
+  details?: unknown;
+  retryable?: boolean;
+}
+
+function isWireErrorLike(v: unknown): v is WireErrorLike {
+  return v !== null && typeof v === "object" && typeof (v as { code?: unknown }).code === "string";
+}
+
+/**
+ * Normalize any thrown value into a DubError WITHOUT losing its wire code.
+ * Plain `wrapUnknown` only preserves the code of genuine DubError instances and
+ * collapses everything else (including FE2 `ApiError`) to INTERNAL — which would
+ * silently break version-conflict refetch, phase-error detection, and field-error
+ * rendering on the REAL wired path. So duck-type the code first (covers ApiError
+ * and any wire-shaped throw), and fall back to wrapUnknown only for truly opaque
+ * values. FE3 must route every caught error through this, never bare wrapUnknown.
+ */
+export function normalizeError(err: unknown): DubError {
+  if (isDubError(err)) return err;
+  if (isWireErrorLike(err)) {
+    const message = err.message && err.message.length > 0 ? err.message : err.code;
+    return new DubError(err.code as ErrorCode, message, {
+      ...(typeof err.status === "number" ? { status: err.status } : {}),
+      details: err.details,
+      ...(typeof err.retryable === "boolean" ? { retryable: err.retryable } : {}),
+      cause: err,
+    });
+  }
+  return wrapUnknown(err);
+}
 
 export function classifyError(code: string): ErrorHandling {
   switch (code) {
@@ -51,12 +89,12 @@ export function classifyError(code: string): ErrorHandling {
   }
 }
 
-export function isVersionConflict(err: DisplayableError): boolean {
+export function isVersionConflict(err: DubError): boolean {
   return classifyError(err.code) === "version-conflict";
 }
 
 /** Field errors extracted from a VALIDATION_FAILED details payload (FieldError[]). */
-export function fieldErrorsOf(err: DisplayableError): Record<string, string> {
+export function fieldErrorsOf(err: DubError): Record<string, string> {
   const out: Record<string, string> = {};
   if (err.code === EventErrorCodes.SLUG_CONFLICT) {
     out.slug = err.message;

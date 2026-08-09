@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { identity } from "@dub/types";
-import { ToastProvider } from "../src/contracts/fe1";
+import { ToastProvider } from "@dub/ui";
 import { useAuthStore } from "../src/contracts/fe2";
 import { NavigationProvider, type NavigationApi } from "../src/contracts/navigation";
 import { EventApiProvider, RegistryProvider } from "../src/context/ApiContext";

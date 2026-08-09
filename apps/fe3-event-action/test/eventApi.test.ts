@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createMockEventApi } from "../src/api/mockData";
-import { toDisplayableError } from "../src/contracts/fe2";
+import { wrapUnknown } from "@dub/errors";
 import { EventErrorCodes } from "../src/lib/errorMap";
 
 describe("mock EventApi contract (test observations #1, #5, #7, #11)", () => {
@@ -29,14 +29,14 @@ describe("mock EventApi contract (test observations #1, #5, #7, #11)", () => {
     await api.updateEvent(ev.id, { version: ev.version, title: "e2" }); // bumps to v2
     // stale version
     const err = await api.updateEvent(ev.id, { version: ev.version, title: "e3" }).catch((e) => e);
-    expect(toDisplayableError(err).code).toBe(EventErrorCodes.VERSION_CONFLICT);
+    expect(wrapUnknown(err).code).toBe(EventErrorCodes.VERSION_CONFLICT);
   });
 
   it("invalid phase transition -> EVENT_INVALID_PHASE_TRANSITION (#7)", async () => {
     const api = createMockEventApi({ events: 0 });
     const ev = await api.createEvent({ title: "e" }); // planning
     const err = await api.updateEvent(ev.id, { version: ev.version, phase: "closed" }).catch((e) => e);
-    expect(toDisplayableError(err).code).toBe(EventErrorCodes.INVALID_PHASE_TRANSITION);
+    expect(wrapUnknown(err).code).toBe(EventErrorCodes.INVALID_PHASE_TRANSITION);
   });
 
   it("archived event is immutable", async () => {
@@ -44,7 +44,7 @@ describe("mock EventApi contract (test observations #1, #5, #7, #11)", () => {
     const ev = await api.createEvent({ title: "e" });
     await api.archiveEvent(ev.id);
     const err = await api.updateEvent(ev.id, { version: ev.version + 1, title: "x" }).catch((e) => e);
-    expect(toDisplayableError(err).code).toBe(EventErrorCodes.ARCHIVED_IMMUTABLE);
+    expect(wrapUnknown(err).code).toBe(EventErrorCodes.ARCHIVED_IMMUTABLE);
     // archived hidden from default list, visible with includeArchived
     const list = await api.listEvents({});
     expect(list.items.map((e) => e.id)).not.toContain(ev.id);

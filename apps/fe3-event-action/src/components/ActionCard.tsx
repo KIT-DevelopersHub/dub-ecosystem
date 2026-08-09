@@ -1,5 +1,5 @@
 import type { event } from "@dub/types";
-import { Icon, type IconName } from "../contracts/fe1";
+import { Icon, type IconName } from "@dub/ui";
 import { useActionRegistry } from "../context/ApiContext";
 import styles from "./components.module.css";
 
@@ -12,7 +12,7 @@ export function ActionCard({
 }) {
   const registry = useActionRegistry();
   const plugin = registry.resolve(action.kind);
-  const icon: IconName = registry.has(action.kind) ? plugin.icon : "list";
+  const icon: IconName = registry.has(action.kind) ? plugin.icon : "check-square";
   const CardExtra = plugin.CardExtra;
 
   return (

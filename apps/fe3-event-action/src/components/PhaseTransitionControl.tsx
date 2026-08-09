@@ -1,8 +1,7 @@
 import { useState } from "react";
 import type { event } from "@dub/types";
-import { Button } from "../contracts/fe1";
-import { toDisplayableError } from "../contracts/fe2";
-import { classifyError } from "../lib/errorMap";
+import { Button } from "@dub/ui";
+import { classifyError, normalizeError } from "../lib/errorMap";
 import { phaseTransitionOptions } from "../lib/phase";
 import { phaseLabel } from "./PhaseBadge";
 import { useUpdateEvent } from "../hooks/useEventMutations";
@@ -25,8 +24,8 @@ export function PhaseTransitionControl({
   };
 
   const phaseError =
-    update.isError && classifyError(toDisplayableError(update.error).code) === "phase-error"
-      ? toDisplayableError(update.error).message
+    update.isError && classifyError(normalizeError(update.error).code) === "phase-error"
+      ? normalizeError(update.error).message
       : null;
 
   return (

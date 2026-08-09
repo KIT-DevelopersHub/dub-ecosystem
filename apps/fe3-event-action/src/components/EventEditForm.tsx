@@ -1,8 +1,7 @@
 import { useState } from "react";
 import type { event } from "@dub/types";
-import { Button, Field } from "../contracts/fe1";
-import { toDisplayableError } from "../contracts/fe2";
-import { fieldErrorsOf } from "../lib/errorMap";
+import { Button, FormField } from "@dub/ui";
+import { fieldErrorsOf, normalizeError } from "../lib/errorMap";
 import { useUpdateEvent } from "../hooks/useEventMutations";
 import styles from "./components.module.css";
 
@@ -18,7 +17,7 @@ export function EventEditForm({
   const [description, setDescription] = useState(ev.description ?? "");
 
   const readOnly = !canWrite || ev.archivedAt !== null;
-  const fieldErrors = update.isError ? fieldErrorsOf(toDisplayableError(update.error)) : {};
+  const fieldErrors = update.isError ? fieldErrorsOf(normalizeError(update.error)) : {};
 
   const save = () => {
     const req: event.UpdateEventRequest = { version: ev.version };
@@ -29,7 +28,7 @@ export function EventEditForm({
 
   return (
     <div data-testid="fe3-settings-edit-form">
-      <Field label="タイトル" error={fieldErrors.title} htmlFor="fe3-edit-title">
+      <FormField label="タイトル" error={fieldErrors.title} htmlFor="fe3-edit-title">
         <input
           id="fe3-edit-title"
           className={styles.input}
@@ -37,8 +36,8 @@ export function EventEditForm({
           disabled={readOnly}
           onChange={(e) => setTitle(e.target.value)}
         />
-      </Field>
-      <Field label="説明" htmlFor="fe3-edit-desc">
+      </FormField>
+      <FormField label="説明" htmlFor="fe3-edit-desc">
         <input
           id="fe3-edit-desc"
           className={styles.input}
@@ -46,7 +45,7 @@ export function EventEditForm({
           disabled={readOnly}
           onChange={(e) => setDescription(e.target.value)}
         />
-      </Field>
+      </FormField>
       {ev.archivedAt !== null ? (
         <div className={styles.errorText}>このイベントはアーカイブ済みのため編集できません。</div>
       ) : null}

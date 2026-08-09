@@ -1,5 +1,5 @@
 import type { event } from "@dub/types";
-import { Icon } from "../contracts/fe1";
+import { Icon } from "@dub/ui";
 import { PhaseBadge } from "./PhaseBadge";
 import styles from "./components.module.css";
 

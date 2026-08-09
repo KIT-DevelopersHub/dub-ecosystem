@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ToastProvider } from "../src/contracts/fe1";
+import { ToastProvider } from "@dub/ui";
 import { createOptimisticMutation } from "../src/hooks/useOptimisticMutation";
 import { newQueryClient, resetAuth } from "./util";
 import { DubError } from "@dub/errors";

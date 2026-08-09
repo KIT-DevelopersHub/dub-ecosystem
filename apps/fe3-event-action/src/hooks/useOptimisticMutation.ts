@@ -3,9 +3,8 @@
 // Implemented locally as part of the FE2 shim; repoint at @dub/app-shell on
 // integration. Wraps TanStack useMutation with snapshot/rollback/invalidate.
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { useToast } from "../contracts/fe1";
-import { toDisplayableError } from "../contracts/fe2";
-import { isVersionConflict } from "../lib/errorMap";
+import { useToast } from "@dub/ui";
+import { isVersionConflict, normalizeError } from "../lib/errorMap";
 
 export interface OptimisticMutationConfig<TData, TVars, TCache> {
   mutationFn: (vars: TVars) => Promise<TData>;
@@ -41,17 +40,17 @@ export function createOptimisticMutation<TData, TVars, TCache = unknown>(
     onError: (err, _vars, ctx) => {
       // Roll back to the pre-mutation snapshot.
       if (ctx) qc.setQueryData(config.queryKey, ctx.prev);
-      const de = toDisplayableError(err);
+      const de = normalizeError(err);
       if (isVersionConflict(de)) {
         void qc.invalidateQueries({ queryKey: config.queryKey }); // refetch latest for diff
         config.onConflict?.();
-        toast.show({ message: "他の変更と競合しました。最新を取得しました。", variant: "error" });
+        toast.show({ kind: "error", title: "他の変更と競合しました。最新を取得しました。" });
       } else {
-        toast.show({ message: de.message, variant: "error" });
+        toast.show({ kind: "error", title: de.message });
       }
     },
     onSuccess: () => {
-      if (config.successMessage) toast.show({ message: config.successMessage, variant: "success" });
+      if (config.successMessage) toast.show({ kind: "success", title: config.successMessage });
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: config.queryKey });

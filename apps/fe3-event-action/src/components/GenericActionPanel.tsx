@@ -22,6 +22,6 @@ export function GenericActionPanel({ action }: ActionPanelProps) {
 export const genericActionPlugin: ActionTypePlugin = {
   type: "__generic__",
   label: "汎用アクション",
-  icon: "list",
+  icon: "check-square",
   Panel: GenericActionPanel,
 };
