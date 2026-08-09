@@ -56,7 +56,17 @@ describe("ResendMailProvider — request shape", () => {
     expect(payload.subject).toBe("Hello");
     expect(payload.text).toBe("Body — 日本語も含む");
     expect(payload.html).toBeUndefined();
-    expect(payload.headers).toBeUndefined();
+    // Our minted Message-ID is always sent (best-effort threading; Resend may override
+    // it — see the CONSTRAINT note in resend.ts).
+    expect(payload.headers).toEqual({ "Message-ID": "<maillog_1@developershub.jp>" });
+  });
+
+  it("stamps our minted Message-ID header (best-effort thread parity with SES)", async () => {
+    const fetchImpl = okFetch();
+    const provider = new ResendMailProvider({ apiKey: "re-key", fetchImpl });
+    await provider.send(outbound({ messageId: "maillog_42@developershub.jp" }));
+    const payload = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string);
+    expect(payload.headers["Message-ID"]).toBe("<maillog_42@developershub.jp>");
   });
 
   it("includes cc, html, and threading headers when present", async () => {
@@ -70,6 +80,8 @@ describe("ResendMailProvider — request shape", () => {
     expect(payload.html).toBe("<p>hi</p>");
     expect(payload.headers["In-Reply-To"]).toBe("<orig@example.com>");
     expect(payload.headers.References).toBe("<orig@example.com>");
+    // Message-ID rides alongside the threading headers on a reply too.
+    expect(payload.headers["Message-ID"]).toBe("<maillog_1@developershub.jp>");
   });
 });
 

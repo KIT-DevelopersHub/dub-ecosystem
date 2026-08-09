@@ -10,6 +10,7 @@
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
 import type { Env } from "./env";
+import { safeErrorDetail } from "./provider-error";
 import type { MailProvider, OutboundMail } from "./provider";
 
 const MAILCHANNELS_ENDPOINT = "https://api.mailchannels.net/tx/v1/send";
@@ -31,8 +32,12 @@ export class MailChannelsMailProvider implements MailProvider {
 
   async send(msg: OutboundMail): Promise<{ providerMessageId: string }> {
     const [fromEmail, fromName] = splitFrom(msg.from);
-    // Forward threading headers the structured API would otherwise drop.
-    const headers: Record<string, string> = {};
+    // Forward threading headers the structured API would otherwise drop. We stamp
+    // OUR minted Message-ID (matching the raw MIME SES sends) so a recipient's reply
+    // carries it in In-Reply-To/References and the inbound handler correlates the
+    // thread. Without this, MailChannels mints its own id and replies silently
+    // diverge from SES — the exact break this must guards against.
+    const headers: Record<string, string> = { "Message-ID": `<${msg.messageId}>` };
     if (msg.inReplyTo) {
       const ref = `<${msg.inReplyTo}>`;
       headers["In-Reply-To"] = ref;
@@ -68,7 +73,7 @@ export class MailChannelsMailProvider implements MailProvider {
     }
 
     if (!res.ok) {
-      const detail = await safeErrorDetail(res);
+      const detail = await safeErrorDetail(res, ["errors", "message"]);
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `MailChannels rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,
@@ -94,23 +99,6 @@ function splitFrom(from: string): [string, string | undefined] {
     return [m[2]!.trim(), name || undefined];
   }
   return [from.trim(), undefined];
-}
-
-/** Best-effort extraction of the MailChannels error message (never throws; never logs creds). */
-async function safeErrorDetail(res: Response): Promise<string | null> {
-  try {
-    const text = await res.text();
-    if (!text) return null;
-    try {
-      const j = JSON.parse(text) as { message?: string; errors?: string[] };
-      if (Array.isArray(j.errors) && j.errors.length > 0) return j.errors.join("; ").slice(0, 200);
-      return j.message ?? text.slice(0, 200);
-    } catch {
-      return text.slice(0, 200);
-    }
-  } catch {
-    return null;
-  }
 }
 
 /**

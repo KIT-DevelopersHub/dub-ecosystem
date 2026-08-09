@@ -53,7 +53,16 @@ describe("MailChannelsMailProvider — request shape", () => {
     expect(payload.personalizations[0]!.cc).toBeUndefined();
     expect(payload.subject).toBe("Hello");
     expect(payload.content).toEqual([{ type: "text/plain", value: "Body — 日本語も含む" }]);
-    expect(payload.headers).toBeUndefined();
+    // Our minted Message-ID always rides along so replies thread back (parity with SES).
+    expect(payload.headers).toEqual({ "Message-ID": "<maillog_1@developershub.jp>" });
+  });
+
+  it("stamps our minted Message-ID so replies thread back (parity with SES raw MIME)", async () => {
+    const fetchImpl = okFetch();
+    const provider = new MailChannelsMailProvider({ apiKey: "mc-key", fetchImpl });
+    await provider.send(outbound({ messageId: "maillog_42@developershub.jp" }));
+    const payload = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string);
+    expect(payload.headers["Message-ID"]).toBe("<maillog_42@developershub.jp>");
   });
 
   it("includes cc, an html content part, and threading headers when present", async () => {
@@ -70,6 +79,8 @@ describe("MailChannelsMailProvider — request shape", () => {
     ]);
     expect(payload.headers["In-Reply-To"]).toBe("<orig@example.com>");
     expect(payload.headers.References).toBe("<orig@example.com>");
+    // Message-ID rides alongside the threading headers on a reply too.
+    expect(payload.headers["Message-ID"]).toBe("<maillog_1@developershub.jp>");
   });
 
   it("falls back to request_id then our Message-Id when message_ids is absent", async () => {

@@ -10,6 +10,7 @@
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
 import type { Env } from "./env";
+import { safeErrorDetail } from "./provider-error";
 import type { MailProvider, OutboundMail } from "./provider";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -30,7 +31,19 @@ export class ResendMailProvider implements MailProvider {
   constructor(private readonly cfg: ResendConfig) {}
 
   async send(msg: OutboundMail): Promise<{ providerMessageId: string }> {
-    const headers: Record<string, string> = {};
+    // We stamp OUR minted Message-ID (matching the raw MIME SES sends) so a
+    // recipient's reply carries it in In-Reply-To/References and the inbound handler
+    // correlates the thread.
+    //
+    // CONSTRAINT (verified 2026-08, Resend docs "Custom Headers"): Resend accepts a
+    // `headers` map but does NOT document Message-ID as overridable and is reported to
+    // generate/override its own Message-ID for deliverability (industry norm; SES does
+    // the same for non-Raw sends). So on Resend this is best-effort: if Resend honors
+    // it, threading matches SES/MailChannels; if Resend overrides it, replies thread
+    // against Resend's id, not our minted one. We still send it (harmless if ignored,
+    // correct if honored) rather than silently omit it. SES (raw MIME) and MailChannels
+    // (honors custom Message-ID) are the deterministic paths; Resend carries this caveat.
+    const headers: Record<string, string> = { "Message-ID": `<${msg.messageId}>` };
     if (msg.inReplyTo) {
       const ref = `<${msg.inReplyTo}>`;
       headers["In-Reply-To"] = ref;
@@ -60,7 +73,7 @@ export class ResendMailProvider implements MailProvider {
     }
 
     if (!res.ok) {
-      const detail = await safeErrorDetail(res);
+      const detail = await safeErrorDetail(res, ["message", "name"]);
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `Resend rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,
@@ -74,22 +87,6 @@ export class ResendMailProvider implements MailProvider {
       throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "Resend returned no id", { status: 502 });
     }
     return { providerMessageId: parsed.id };
-  }
-}
-
-/** Best-effort extraction of the Resend error message (never throws; never logs creds). */
-async function safeErrorDetail(res: Response): Promise<string | null> {
-  try {
-    const text = await res.text();
-    if (!text) return null;
-    try {
-      const j = JSON.parse(text) as { message?: string; name?: string };
-      return j.message ?? j.name ?? text.slice(0, 200);
-    } catch {
-      return text.slice(0, 200);
-    }
-  } catch {
-    return null;
   }
 }
 
