@@ -40,8 +40,9 @@ export type {
   ApiClient,
   ApiError,
   FeatureModule,
+  FeatureModuleId,
   FeatureRoute,
-  FeatureNav,
+  NavEntry,
   OptimisticMutationSpec,
 } from "./contracts/fe2";
 export { isApiError } from "./contracts/fe2";

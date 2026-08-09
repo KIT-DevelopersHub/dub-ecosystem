@@ -1,10 +1,15 @@
-// FE1 (design system) contract surface + minimal stub implementations.
+// FE1 (design system, `@dub/ui`) contract surface + minimal stub implementations.
 //
-// FE1 is not yet built. FE5 must code against FE1's *public component I/F* and
-// the closed `IconName` union. These stubs are intentionally unstyled/minimal —
-// they exist so FE5 compiles, renders, and is testable. When FE1 ships, this
-// file is replaced by `import { Button, Badge, ... } from "@dub/ui"` and
-// `import type { IconName } from "@dub/ui/icons"` with no call-site changes.
+// Cross-PR blocker: `@dub/ui` (apps/fe1-design-system, exports "." and "./icons")
+// is NOT yet merged into feat/ecosystem-build — packages/ui does not resolve and
+// no workspace package declares it. So this shim CANNOT yet be deleted nor can
+// `@dub/ui: workspace:*` be added (pnpm install would fail). It is kept as a
+// LOCAL MIRROR of FE1's *public component I/F* and the closed `IconName` union.
+// These stubs are intentionally unstyled/minimal — they exist so FE5 compiles,
+// renders, and is testable. FOLLOW-UP PR (once @dub/ui lands on the integration
+// branch): delete this file, add `@dub/ui: workspace:*`, and repoint imports to
+// `@dub/ui` / `@dub/ui/icons` — call sites are already written to that I/F so the
+// swap is a pure import change.
 
 import type {
   ButtonHTMLAttributes,
