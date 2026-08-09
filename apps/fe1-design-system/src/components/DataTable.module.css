@@ -1,0 +1,51 @@
+.wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-sm);
+}
+.th {
+  text-align: left;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  color: var(--dub-color-text-secondary);
+  font-weight: var(--dub-font-weight-medium);
+  border-bottom: 1px solid var(--dub-color-border-strong);
+  white-space: nowrap;
+}
+.td {
+  padding: var(--dub-space-2) var(--dub-space-3);
+  color: var(--dub-color-text-primary);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.tr.clickable {
+  cursor: pointer;
+}
+.tr.clickable:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.checkCell {
+  width: 40px;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  padding: 0;
+}
+.loadingCell,
+.emptyWrap {
+  padding: var(--dub-space-6);
+  text-align: center;
+  color: var(--dub-color-text-muted);
+}

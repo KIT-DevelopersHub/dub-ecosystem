@@ -1,0 +1,38 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+.trigger {
+  display: inline-flex;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.bubble {
+  position: absolute;
+  z-index: var(--dub-z-index-tooltip);
+  background: var(--dub-color-surface-overlay);
+  color: var(--dub-color-text-inverse);
+  font-size: var(--dub-font-size-xs);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border-radius: var(--dub-radius-sm);
+  white-space: nowrap;
+  bottom: calc(100% + var(--dub-space-1));
+  left: 50%;
+  transform: translateX(-50%);
+}
+.panel {
+  position: absolute;
+  z-index: var(--dub-z-index-dropdown);
+  top: calc(100% + var(--dub-space-1));
+  left: 0;
+  min-width: 200px;
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-md);
+  padding: var(--dub-space-2);
+}
