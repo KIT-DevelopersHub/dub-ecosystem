@@ -6,9 +6,46 @@ import type { IconName } from "../src/types";
 
 const ALL_NAMES = Object.keys(iconRegistry) as IconName[];
 
+// P1 additions the fe2〜fe7 units reference beyond the original 20. Listed
+// explicitly so a missing registry entry fails here with the offending name.
+const P1_NAMES: IconName[] = [
+  "task",
+  "list",
+  "alert",
+  "chat",
+  "warning",
+  "viewport",
+  "inbox",
+  "message-square",
+  "scope",
+  "megaphone",
+  "user",
+  "history",
+  "file",
+  "drag",
+  "refresh",
+  "flag",
+  "clock",
+  "check",
+  "check-all",
+  "bell-off",
+  "archive",
+];
+
 describe("Icon", () => {
   it("renders every IconName in the closed union", () => {
     for (const name of ALL_NAMES) {
+      const { container, unmount } = render(<Icon name={name} testId={`icon-${name}`} />);
+      const svg = container.querySelector("svg");
+      expect(svg, `icon ${name} should render an svg`).not.toBeNull();
+      expect(svg).toHaveAttribute("data-icon", name);
+      unmount();
+    }
+  });
+
+  it("resolves and renders each P1 icon name with its data-icon", () => {
+    for (const name of P1_NAMES) {
+      expect(iconRegistry[name], `registry must map ${name}`).toBeDefined();
       const { container, unmount } = render(<Icon name={name} testId={`icon-${name}`} />);
       const svg = container.querySelector("svg");
       expect(svg, `icon ${name} should render an svg`).not.toBeNull();
