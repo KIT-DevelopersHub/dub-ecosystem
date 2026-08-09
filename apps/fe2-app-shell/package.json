@@ -13,7 +13,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@dub/admin-roster": "workspace:*",
     "@dub/errors": "workspace:*",
+    "@dub/fe3-event-action": "workspace:*",
+    "@dub/fe4-task-gantt": "workspace:*",
+    "@dub/fe5-notification-inbox": "workspace:*",
+    "@dub/fe6-chat": "workspace:*",
     "@dub/tokens": "workspace:*",
     "@dub/types": "workspace:*",
     "@tanstack/react-query": "^5.62.0",

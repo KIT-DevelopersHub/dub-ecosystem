@@ -75,9 +75,24 @@ importers:
 
   apps/fe2-app-shell:
     dependencies:
+      '@dub/admin-roster':
+        specifier: workspace:*
+        version: link:../fe7-admin-roster
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@dub/fe3-event-action':
+        specifier: workspace:*
+        version: link:../fe3-event-action
+      '@dub/fe4-task-gantt':
+        specifier: workspace:*
+        version: link:../fe4-task-gantt
+      '@dub/fe5-notification-inbox':
+        specifier: workspace:*
+        version: link:../fe5-notification-inbox
+      '@dub/fe6-chat':
+        specifier: workspace:*
+        version: link:../fe6-chat
       '@dub/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
