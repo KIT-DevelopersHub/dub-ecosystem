@@ -6,8 +6,11 @@ import { APP_LINK_HOST, DEEP_LINK_SCHEME } from "./config";
 export type Route =
   | { screen: "home" } // S2
   | { screen: "eventDetail"; eventId: string } // S4
+  | { screen: "eventGantt"; eventId: string } // S11 (per-event gantt view)
   | { screen: "taskDetail"; taskId: string } // S6
   | { screen: "inbox" } // S7
+  | { screen: "chat" } // S10 channel list
+  | { screen: "chatChannel"; channelId: string } // S10 channel
   | { screen: "unknown"; raw: string };
 
 /** Parse an App Link or dub:// fallback into a Route. Unknown -> {screen:"unknown"}. */
@@ -28,16 +31,28 @@ export function parseDeepLink(raw: string): Route {
     return { screen: "unknown", raw };
   }
 
-  const [head, id] = segments;
+  const [head, a, b] = segments;
   switch (head) {
     case "home":
       return { screen: "home" };
     case "inbox":
       return { screen: "inbox" };
     case "events":
-      return id ? { screen: "eventDetail", eventId: id } : { screen: "unknown", raw };
+      if (!a) return { screen: "unknown", raw };
+      // /events/{id}/gantt -> event's gantt view; /events/{id} -> detail (S11/S4)
+      return b === "gantt"
+        ? { screen: "eventGantt", eventId: a }
+        : { screen: "eventDetail", eventId: a };
+    case "gantt":
+      // /gantt/{eventId} shorthand (App Link + dub://gantt/{eventId})
+      return a ? { screen: "eventGantt", eventId: a } : { screen: "unknown", raw };
     case "tasks":
-      return id ? { screen: "taskDetail", taskId: id } : { screen: "unknown", raw };
+      return a ? { screen: "taskDetail", taskId: a } : { screen: "unknown", raw };
+    case "chat":
+      // /chat -> list; /chat/channels/{id} (canonical) or /chat/{id} (shorthand)
+      if (!a) return { screen: "chat" };
+      if (a === "channels") return b ? { screen: "chatChannel", channelId: b } : { screen: "unknown", raw };
+      return { screen: "chatChannel", channelId: a };
     default:
       return { screen: "unknown", raw };
   }

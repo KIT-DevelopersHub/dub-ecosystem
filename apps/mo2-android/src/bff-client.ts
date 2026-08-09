@@ -22,6 +22,10 @@ import type {
   Paginated,
   MobileAuthTokenResponse,
 } from "./contract";
+// S10 chat (S17 namespace) + S11 gantt frozen contract. Consumed directly from
+// @dub/types (owner=MO3/chat/gantt-service); contract.ts is a curated P0 subset
+// and is intentionally not touched here — these land in it when S10/S11 leave STUB.
+import type { chat, gantt } from "@dub/types";
 
 export interface BffClientOptions {
   fetchFn: FetchFn;
@@ -129,6 +133,61 @@ export class MobileBffClient {
   updatePreferences(prefs: PreferenceEntry[]): Promise<PreferenceEntry[]> {
     return this.auth.execute((t) =>
       this.transport.send({ method: "PATCH", path: "/preferences", body: { preferences: prefs } }, t),
+    );
+  }
+
+  // ---- S10 chat (channel/message; RT via ws-ticket -> DO-direct) ----
+  /** List the channels the user can see (cursor-paged; §S10). */
+  listChannels(cursor?: string): Promise<Paginated<chat.ChatChannel>> {
+    return this.auth.execute((t) =>
+      this.transport.send({ method: "GET", path: "/chat/channels", query: { cursor } }, t),
+    );
+  }
+  /** Message history for a channel, newest-cursor paged. */
+  listMessages(channelId: string, cursor?: string): Promise<Paginated<chat.ChatMessage>> {
+    return this.auth.execute((t) =>
+      this.transport.send(
+        { method: "GET", path: `/chat/channels/${channelId}/messages`, query: { cursor } },
+        t,
+      ),
+    );
+  }
+  /** Post a message; the persisted server message (authoritative id/createdAt) is returned. */
+  postMessage(channelId: string, body: string): Promise<chat.ChatMessage> {
+    return this.auth.execute((t) =>
+      this.transport.send(
+        { method: "POST", path: `/chat/channels/${channelId}/messages`, body: { body } },
+        t,
+      ),
+    );
+  }
+  /** Mint a short-lived WS ticket + DO URL for DO-direct realtime (gateway bypassed). */
+  getChatWsTicket(channelId: string): Promise<chat.WsTicketResponse> {
+    return this.auth.execute((t) =>
+      this.transport.send({ method: "POST", path: `/chat/channels/${channelId}/ws-ticket` }, t),
+    );
+  }
+
+  // ---- S11 gantt (read model over task/event + persisted view prefs) ----
+  /** Gantt chart read model (rows + FS dependency lines) for one event. */
+  getGantt(eventId: string): Promise<gantt.GanttChartDTO> {
+    return this.auth.execute((t) =>
+      this.transport.send({ method: "GET", path: "/gantt", query: { event: eventId } }, t),
+    );
+  }
+  /** Server-persisted per-user view state (zoom + collapsed rows) for an event. */
+  getGanttView(eventId: string): Promise<gantt.GanttViewState> {
+    return this.auth.execute((t) =>
+      this.transport.send({ method: "GET", path: "/gantt/view", query: { event: eventId } }, t),
+    );
+  }
+  /** Persist view prefs. PATCH (mobile transport has no PUT); body is PutGanttViewRequest. */
+  saveGanttView(eventId: string, req: gantt.PutGanttViewRequest): Promise<gantt.GanttViewState> {
+    return this.auth.execute((t) =>
+      this.transport.send(
+        { method: "PATCH", path: "/gantt/view", query: { event: eventId }, body: req },
+        t,
+      ),
     );
   }
 

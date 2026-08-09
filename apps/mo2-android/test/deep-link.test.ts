@@ -50,4 +50,51 @@ describe("parseDeepLink — App Links canonical + dub:// fallback (§2-4)", () =
   it("garbage -> unknown", () => {
     expect(parseDeepLink("not a url")).toEqual({ screen: "unknown", raw: "not a url" });
   });
+
+  // ---- S11 gantt ----
+  it("App Link /events/{id}/gantt -> eventGantt", () => {
+    expect(parseDeepLink("https://developershub.jp/events/evt_1/gantt")).toEqual({
+      screen: "eventGantt",
+      eventId: "evt_1",
+    });
+  });
+  it("App Link /gantt/{eventId} shorthand -> eventGantt", () => {
+    expect(parseDeepLink("https://developershub.jp/gantt/evt_2")).toEqual({
+      screen: "eventGantt",
+      eventId: "evt_2",
+    });
+  });
+  it("dub://gantt/{eventId} fallback -> eventGantt", () => {
+    expect(parseDeepLink("dub://gantt/evt_3")).toEqual({ screen: "eventGantt", eventId: "evt_3" });
+  });
+  it("gantt without eventId -> unknown", () => {
+    expect(parseDeepLink("dub://gantt")).toEqual({ screen: "unknown", raw: "dub://gantt" });
+  });
+  it("plain /events/{id} still resolves to eventDetail (not gantt)", () => {
+    expect(parseDeepLink("https://developershub.jp/events/evt_9")).toEqual({
+      screen: "eventDetail",
+      eventId: "evt_9",
+    });
+  });
+
+  // ---- S10 chat ----
+  it("App Link /chat -> chat list", () => {
+    expect(parseDeepLink("https://developershub.jp/chat")).toEqual({ screen: "chat" });
+  });
+  it("App Link /chat/channels/{id} -> chatChannel", () => {
+    expect(parseDeepLink("https://developershub.jp/chat/channels/chn_1")).toEqual({
+      screen: "chatChannel",
+      channelId: "chn_1",
+    });
+  });
+  it("dub://chat fallback -> chat list", () => {
+    expect(parseDeepLink("dub://chat")).toEqual({ screen: "chat" });
+  });
+  it("dub://chat/{id} shorthand -> chatChannel", () => {
+    expect(parseDeepLink("dub://chat/chn_2")).toEqual({ screen: "chatChannel", channelId: "chn_2" });
+  });
+  it("chat channels without id -> unknown", () => {
+    const raw = "https://developershub.jp/chat/channels";
+    expect(parseDeepLink(raw)).toEqual({ screen: "unknown", raw });
+  });
 });

@@ -12,3 +12,5 @@ export * from "./task-repository";
 export * from "./deep-link";
 export * from "./push";
 export * from "./home-view-model";
+export * from "./gantt";
+export * from "./chat";
