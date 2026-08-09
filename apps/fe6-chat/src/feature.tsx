@@ -20,7 +20,9 @@ export const chatFeature: FeatureModule = {
     {
       label: "チャット",
       path: "/chat",
-      icon: "chat",
+      // Must be a member of FE2's canonical IconName union (fe2 stubs/icons.tsx);
+      // "chat" is not in that set — FE2 uses "message-square" for the chat nav.
+      icon: "message-square",
       order: 40,
       badgeSource: useChatUnreadTotal,
     },
