@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isErrorResponse } from "@dub/errors";
+import { identity } from "@dub/types";
 import { createMockClient } from "../src/api/mockClient";
 import { createRosterApi } from "../src/api/rosterApi";
 import { DEFAULT_USER_FILTERS } from "../src/lib/listUsersQuery";
@@ -18,9 +19,9 @@ describe("rosterApi over mock client — contract adherence", () => {
     expect(invited.items.every((u) => u.status === "invited")).toBe(true);
   });
 
-  it("returns the frozen 23-key permission catalog", async () => {
+  it("returns the frozen permission catalog from @dub/types", async () => {
     const catalog = await api().permissionCatalog();
-    expect(catalog).toHaveLength(23);
+    expect(catalog).toHaveLength(identity.PERMISSION_CATALOG.length);
     expect(catalog.find((e) => e.key === "identity:admin")?.dangerous).toBe(true);
   });
 
