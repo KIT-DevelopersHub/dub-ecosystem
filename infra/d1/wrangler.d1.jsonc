@@ -1,0 +1,31 @@
+{
+  // D1 instance definition fragment for the single shared `dub-core` database.
+  // infra #27 assembles this into per-service wrangler configs; binding name is the
+  // codebase-wide constant `DB`. Only two named instances exist (prod + preview);
+  // local uses miniflare's local D1 (no named instance).
+  //
+  // database_id values are placeholders — infra #27 fills real ids from the
+  // Cloudflare account (dub_ecosystem CF account, see cf-token.txt) at deploy time.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dub-core",
+      "database_id": "REPLACE_WITH_PROD_D1_ID",
+      "migrations_dir": "migrations",
+      "preview_database_id": "REPLACE_WITH_PREVIEW_D1_ID"
+    }
+  ],
+  "env": {
+    "preview": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "dub-core-preview",
+          "database_id": "REPLACE_WITH_PREVIEW_D1_ID",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
+}

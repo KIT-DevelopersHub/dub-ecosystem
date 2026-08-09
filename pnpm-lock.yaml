@@ -33,6 +33,21 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  infra/d1:
+    dependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4
+        version: 4.20260702.1
+      '@dub/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+
   packages/auth-client:
     dependencies:
       '@cloudflare/workers-types':
