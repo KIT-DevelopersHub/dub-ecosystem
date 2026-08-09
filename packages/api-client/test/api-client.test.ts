@@ -54,19 +54,40 @@ describe("createApiClient", () => {
     }
   });
 
-  it("reconstructs a non-envelope error body via @dub/errors fromResponse", async () => {
-    // A 4xx with an unrecognized body -> UPSTREAM_UNAVAILABLE/502 (fromResponse rule);
-    // requestId is recovered from the response header.
+  it("reconstructs a non-envelope error body via @dub/errors fromResponse (HTTP status preserved)", async () => {
+    // A 4xx with an unrecognized body -> code/retryable normalized to
+    // UPSTREAM_UNAVAILABLE/retryable (fromResponse rule), but the real HTTP
+    // status (400) is preserved (NOT clamped to 502); requestId is recovered
+    // from the response header.
     const fetchImpl = vi
       .fn()
       .mockImplementation(async () => jsonRes({ oops: "not an envelope" }, 400, { "x-dub-request-id": "hdr-req-1" }));
     const api = createApiClient({ baseUrl: BASE, fetchImpl });
     await expect(api.request({ method: "POST", path: "/api/v1/events", body: {} })).rejects.toMatchObject({
-      status: 502,
+      status: 400,
       code: "UPSTREAM_UNAVAILABLE",
       retryable: true,
       requestId: "hdr-req-1",
     });
+  });
+
+  it("on a bare (non-envelope) 401 still triggers the silent refresh path", async () => {
+    // Regression: fromResponse clamps a non-5xx unknown body to 502. If the
+    // ApiError carried that clamped status, request()'s status===401 refresh
+    // branch would never fire. The client must preserve the real 401 so the
+    // silent refresh + single retry still happen.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes({ oops: "not an envelope" }, 401)) // bare 401, no envelope
+      .mockResolvedValueOnce(jsonRes({ session: "new" }, 200)) // refresh
+      .mockResolvedValueOnce(jsonRes({ ok: true }, 200)); // retry
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    const res = await api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/me" });
+    expect(res).toEqual({ ok: true });
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+    expect(fetchImpl.mock.calls[1]![0]).toBe("https://api.test/api/v1/auth/refresh");
+    expect(fetchImpl).toHaveBeenCalledTimes(3); // original + refresh + retry
   });
 
   it("on 401 refreshes once (empty body) then retries and succeeds", async () => {

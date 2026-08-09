@@ -171,11 +171,14 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     }
     // Well-formed envelope: keep it verbatim so the origin requestId survives.
     if (isErrorResponse(body)) return new ApiError(res.status, body);
-    // Non-envelope failure: let @dub/errors normalize it (fromResponse maps an
-    // unrecognized body to UPSTREAM_UNAVAILABLE / retryable), then re-project.
+    // Non-envelope failure: let @dub/errors normalize the code/retryable
+    // (fromResponse maps an unrecognized body to UPSTREAM_UNAVAILABLE /
+    // retryable), but keep the real HTTP status. fromResponse clamps a non-5xx
+    // unknown body to 502, which would erase a bare 401 and defeat the
+    // silent-refresh branch in request() (judged by ApiError.status === 401).
     const requestId = res.headers.get(REQUEST_ID_HEADER) ?? undefined;
     const dubErr = fromResponse(res.status, body);
-    return new ApiError(dubErr.status, envelopeFromDubError(dubErr, requestId));
+    return new ApiError(res.status, envelopeFromDubError(dubErr, requestId));
   }
 
   async function attemptRefresh(): Promise<boolean> {
