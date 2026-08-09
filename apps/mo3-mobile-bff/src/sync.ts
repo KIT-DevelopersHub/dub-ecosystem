@@ -1,18 +1,23 @@
-// Differential sync (GET /m/v1/sync). Returns everything the caller's resources
-// changed *since* an opaque cursor, so an offline client can catch up with one
-// call. The cursor is a base64url-wrapped server-time watermark: the BFF stamps
-// "now" at the start of a pull and, on the next pull, forwards it to each master
-// service as `updatedSince`. A single cross-service watermark keeps the diff
-// consistent even though the upstream cursors are per-service and opaque
-// (design §1 — MO3 composes, it never re-defines a resource shape).
+// Snapshot sync (GET /m/v1/sync). Returns a *full snapshot* of the caller's
+// resources (all events + own tasks + inbox) so an offline client can rebuild
+// its mirror in one catch-up. It is NOT yet differential: no upstream service
+// honors a `updatedSince`/change-since filter today (grep: zero readers), so the
+// BFF cannot ask for "changed since X" and must pull the whole set every time.
 //
-// This is the read side of the offline wave (theme14 D2). The physical
-// mobile_change_log table + its queue writers land with #28 / the sync wave; the
-// BFF read model here fans out to the source-of-truth services directly, so it is
-// correct without a local change_log and forward-compatible with one.
+// The cursor is still round-tripped as a base64url-wrapped server-time
+// watermark, but its only live purpose is forward-compatibility: it is passed to
+// each master service as `updatedSince`, which they currently ignore. When the
+// physical mobile_change_log table + its queue writers land (theme14 D2 / #28),
+// the same cursor becomes a real differential watermark with no wire-shape
+// change. Until then, treat every pull as a fresh full snapshot; the cursor is
+// harmless and correct-by-superset (a superset of "the changes" is always safe
+// for an upsert-merge client).
+//
+// MO3 composes, it never re-defines a resource shape (design §1): it fans out to
+// the source-of-truth services and tags each item with its resource kind.
 import type { ServiceClient, RequestContext } from "@dub/http";
-import { DubError } from "@dub/errors";
-import type { event, task, notification, mobile } from "@dub/types";
+import type { common, event, task, notification, mobile } from "@dub/types";
+import { mobileErrors } from "./errors";
 
 /** The three master services a mobile client mirrors offline. */
 export interface SyncSources {
@@ -37,14 +42,7 @@ export interface SyncChangeEntry {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200; // common.ts D3
-
-/** 400 — cursor is unparseable (tampered) or from an incompatible version. */
-function syncCursorExpired(): DubError {
-  return new DubError("MOBILE_SYNC_CURSOR_EXPIRED", "sync cursor is invalid or expired", {
-    status: 400,
-    retryable: false,
-  });
-}
+const MAX_PAGES = 50; // safety bound per source (<= 10k rows/source at MAX_LIMIT)
 
 function encodeCursor(since: string): string {
   return btoa(JSON.stringify({ v: 1, since }))
@@ -60,7 +58,7 @@ function decodeCursor(cursor: string): string {
     if (obj.v !== 1 || typeof obj.since !== "string") throw new Error("shape");
     return obj.since;
   } catch {
-    throw syncCursorExpired();
+    throw mobileErrors.syncCursorExpired();
   }
 }
 
@@ -70,11 +68,37 @@ function clampLimit(limit?: number): number {
 }
 
 /**
- * GET /m/v1/sync — the resources changed since the cursor watermark.
+ * Drain every page of one upstream list, following its opaque `nextCursor` until
+ * the source reports the end (`nextCursor === null`). `limit` is the per-page
+ * size, not a total cap — the whole set is returned, so no rows are silently
+ * dropped past the first page. Mirrors gantt-service/src/upstream.ts.
+ */
+async function fetchAllPages<T>(
+  page: (cursor: string | undefined) => Promise<common.Paginated<T>>,
+): Promise<T[]> {
+  const out: T[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const res = await page(cursor);
+    out.push(...res.items);
+    if (!res.nextCursor) break;
+    cursor = res.nextCursor;
+  }
+  return out;
+}
+
+/**
+ * GET /m/v1/sync — a full snapshot of the caller's mirrored resources.
+ *
+ * Each source is drained across *all* pages (fetchAllPages) so a result set
+ * larger than one page is never truncated. `limit` is the per-page size.
  *
  * Fail-closed: if any source errors the whole pull rejects (the client retries
- * with the *same* cursor), so the watermark never advances past changes the
- * client did not receive. `now` is injectable for deterministic tests.
+ * with the *same* cursor), so the watermark never advances past a snapshot the
+ * client did not fully receive. `now` is injectable for deterministic tests.
+ *
+ * `updatedSince` is forwarded for forward-compatibility only; no upstream
+ * filters on it yet (see file header), so the response is a full snapshot.
  */
 export async function buildSync(
   sources: SyncSources,
@@ -88,18 +112,25 @@ export async function buildSync(
   const serverTime = now();
   const since = input.cursor ? decodeCursor(input.cursor) : input.since;
   const limit = clampLimit(input.limit);
-  const q = since ? { updatedSince: since, limit } : { limit };
+  const base = since ? { updatedSince: since, limit } : { limit };
+  const withCursor = (cursor: string | undefined) => (cursor ? { ...base, cursor } : { ...base });
 
   const [events, tasks, inbox] = await Promise.all([
-    sources.event.get<event.ListEventsResponse>(ctx, "/events", { query: q }),
-    sources.task.get<task.ListTasksResponse>(ctx, "/tasks", { query: { ...q, assigneeId: userId } }),
-    sources.notification.get<notification.ListInboxResponse>(ctx, "/inbox", { query: q }),
+    fetchAllPages<event.EventSummary>((cursor) =>
+      sources.event.get<event.ListEventsResponse>(ctx, "/events", { query: withCursor(cursor) }),
+    ),
+    fetchAllPages<task.Task>((cursor) =>
+      sources.task.get<task.ListTasksResponse>(ctx, "/tasks", { query: { ...withCursor(cursor), assigneeId: userId } }),
+    ),
+    fetchAllPages<notification.InboxItem>((cursor) =>
+      sources.notification.get<notification.ListInboxResponse>(ctx, "/inbox", { query: withCursor(cursor) }),
+    ),
   ]);
 
   const items: SyncChangeEntry[] = [
-    ...events.items.map((e): SyncChangeEntry => ({ resource: "event", id: e.id, data: e })),
-    ...tasks.items.map((t): SyncChangeEntry => ({ resource: "task", id: t.id, data: t })),
-    ...inbox.items.map((n): SyncChangeEntry => ({ resource: "notification", id: n.id, data: n })),
+    ...events.map((e): SyncChangeEntry => ({ resource: "event", id: e.id, data: e })),
+    ...tasks.map((t): SyncChangeEntry => ({ resource: "task", id: t.id, data: t })),
+    ...inbox.map((n): SyncChangeEntry => ({ resource: "notification", id: n.id, data: n })),
   ];
 
   return { items, nextCursor: encodeCursor(serverTime), serverTime };

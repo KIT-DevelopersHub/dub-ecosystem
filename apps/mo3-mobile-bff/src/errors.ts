@@ -28,4 +28,18 @@ export const mobileErrors = {
   internalOnly(): DubError {
     return errors.forbidden("internal endpoint: Service Binding only");
   },
+  /** 400 — /sync cursor is unparseable (tampered) or from an incompatible version. */
+  syncCursorExpired(): DubError {
+    return new DubError("MOBILE_SYNC_CURSOR_EXPIRED", "sync cursor is invalid or expired", {
+      status: 400,
+      retryable: false,
+    });
+  },
+  /** 400 — /mutations carried an op outside the supported registry. */
+  mutationUnsupportedType(op: string): DubError {
+    return new DubError("MOBILE_MUTATION_UNSUPPORTED_TYPE", `unsupported mutation op: ${op}`, {
+      status: 400,
+      retryable: false,
+    });
+  },
 };

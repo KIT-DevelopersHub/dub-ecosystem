@@ -50,6 +50,31 @@ describe("buildSync — first pull (no cursor)", () => {
   });
 });
 
+describe("buildSync — full pagination (no data loss past page 1)", () => {
+  it("follows each source's nextCursor until the end and merges every page", async () => {
+    const h = makeHarness();
+    h.event.on("GET", "/events", { items: [], nextCursor: null });
+    h.notification.on("GET", "/inbox", { items: [], nextCursor: null });
+    // /tasks paginates: page 1 -> cursor "c1", page 2 -> end.
+    h.task.on("GET", "/tasks", ({ opts }: { opts?: { query?: Record<string, unknown> } }) => {
+      const cursor = opts?.query?.cursor;
+      if (!cursor) return { items: [{ id: "tsk_1", title: "T1", status: "todo", version: 1 }], nextCursor: "c1" };
+      if (cursor === "c1") return { items: [{ id: "tsk_2", title: "T2", status: "todo", version: 1 }], nextCursor: null };
+      throw new Error(`unexpected cursor: ${String(cursor)}`);
+    });
+
+    const res = await buildSync(h.deps, { requestId: "r1", userId: ALICE }, ALICE, {});
+
+    const entries = res.items as { resource: string; id: string }[];
+    const taskIds = entries.filter((i) => i.resource === "task").map((i) => i.id);
+    expect(taskIds).toEqual(["tsk_1", "tsk_2"]);
+    // exactly two upstream calls: page 1 (no cursor) then page 2 (cursor c1).
+    expect(h.task.calls).toHaveLength(2);
+    expect(h.task.calls[0]?.opts?.query).not.toHaveProperty("cursor");
+    expect(h.task.calls[1]?.opts?.query?.cursor).toBe("c1");
+  });
+});
+
 describe("buildSync — incremental pull (cursor round-trip)", () => {
   it("forwards the previous serverTime as updatedSince on the next pull", async () => {
     const h = makeHarness();

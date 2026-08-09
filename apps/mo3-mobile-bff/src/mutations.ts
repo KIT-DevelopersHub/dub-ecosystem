@@ -15,7 +15,8 @@
 // write never blocks the rest of the replay. The client reconciles conflicts
 // against the fresh snapshot it gets from /sync.
 import type { ServiceClient, RequestContext, CallOptions } from "@dub/http";
-import { DubError, errors, isDubError } from "@dub/errors";
+import { errors, isDubError } from "@dub/errors";
+import { mobileErrors } from "./errors";
 
 /** Same three services the proxy/sync surfaces route to. */
 export interface MutationSinks {
@@ -68,7 +69,7 @@ function dispatch(sinks: MutationSinks, ctx: RequestContext, m: MutationInput, o
     case "inbox.readAll":
       return sinks.notification.post(ctx, "/inbox/read-all", {}, opts);
     default:
-      throw unsupportedType((m as MutationInput).op);
+      throw mobileErrors.mutationUnsupportedType((m as MutationInput).op);
   }
 }
 
@@ -77,13 +78,6 @@ function requireId(m: MutationInput): string {
     throw errors.validationFailed([{ field: "id", reason: "required" }]);
   }
   return m.id;
-}
-
-function unsupportedType(op: string): DubError {
-  return new DubError("MOBILE_MUTATION_UNSUPPORTED_TYPE", `unsupported mutation op: ${op}`, {
-    status: 400,
-    retryable: false,
-  });
 }
 
 function toError(err: unknown): { code: string; message: string } {
