@@ -6,6 +6,8 @@ export * from "./token-store.js";
 export * from "./transport.js";
 export * from "./api-client.js";
 export * from "./optimistic.js";
+export * from "./gantt.js";
+export * from "./chat.js";
 export * from "./deeplink.js";
 export * from "./push.js";
 export * from "./home.js";

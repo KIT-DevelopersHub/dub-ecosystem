@@ -23,6 +23,8 @@ here maps 1:1 to a Swift counterpart:
 | `optimistic.ts` | task状態変更ViewModel | §5 S5, §6 |
 | `push.ts` / `deeplink.ts` | PushKit routing | §2-2, §7 Push |
 | `home.ts` | HomeViewModel (S2) | §2-1 |
+| `gantt.ts` | GanttViewModel (S6) | §2-1 |
+| `chat.ts` | ChatViewModel (S8) | §2-1 |
 | `cache.ts` | SwiftData SWR cache | §1, §8-3 |
 | `capabilities.ts` | UI 出し分け | §6 |
 
@@ -38,6 +40,14 @@ generated Models) lands in the mobile implementation wave (9-D GO'd).
   (`TASK_VERSION_CONFLICT`, `MOBILE_SYNC_CURSOR_EXPIRED`, …) classify by suffix/
   status; anything unmodelled → `unknown` (never crashes).
 - **Optimistic task UI**: PATCH carries `version`; 409 → rollback to snapshot.
+- **Gantt view-model (S6)**: `gantt.GanttChartDTO` → dependency-ordered rows
+  (stable topo sort over the `ganttCalc` shapes; cycles fall back to source
+  order + `hasCycle`, never throw) with per-row depth, date range, and bar
+  offset/duration.
+- **Chat optimistic append (S8)**: the sender's message renders `pending`
+  instantly; the echoed `message.created` RT event reconciles it to `sent`
+  (idempotent by `messageId` across WS reconnects). The DO-direct WebSocket is
+  behind an injectable `ChatSocketFactory` (`stubChatSocket()` for tests).
 - **All traffic to `/m/v1/*`** via `common.MOBILE_API_PREFIX`; MO3 is the only
   peer (no gateway / internal-18 knowledge).
 
@@ -51,16 +61,25 @@ freezes it.** Also absent vs design §2-3: `MobileHomeResponse.partialErrors` /
 `syncCursor`, `InboxItem`-based `MobileInboxResponse`, `capabilities` on the
 event detail (current frozen type is `MobileEventOverviewResponse`). This layer
 consumes the **frozen** shapes as-is (no手書き再定義); the deltas are MO3's call.
+Also: the `chat` namespace freezes the inbound `ChatRealtimeEvent` WS wire but
+**not** the outbound send frame (message CRUD is STUB pending 9-C), so `chat.ts`
+uses a client-local `ChatSendFrame { kind:"message.send", localId, body }` —
+**replace once chat-service freezes the inbound contract.** The gantt/chat read
+methods target `/m/v1/gantt`, `/m/v1/chat/channels[/…/messages]`, and
+`/m/v1/chat/channels/…/ws-ticket`; MO3 mounts these BFF routes.
 
 ## Run
 
 ```
-pnpm --filter ./apps/mo1-ios test        # 45 tests
+pnpm --filter ./apps/mo1-ios test        # 70 tests
 pnpm --filter ./apps/mo1-ios typecheck
 ```
 
 ## Deferred (per design §8 / P0b, not in P0)
 
-- S6 gant / S8 chat screens (P0 out; chat waits on 9-C RT DO + WS RT-direct).
+- S6 gantt / S8 chat **screens** (SwiftUI) land in the Swift wave; the
+  client-core view-models (`gantt.ts` dependency ordering + date range, `chat.ts`
+  optimistic append + injectable WS transport) and their MO3 read methods ship
+  here. Live chat still waits on 9-C RT DO + WS RT-direct for the socket itself.
 - `/sync` + `/mutations` offline write (STUB, MO3-owned, later wave).
 - APNs live dispatch (notification-service → MO3 → APNs; 9-E push timing).
