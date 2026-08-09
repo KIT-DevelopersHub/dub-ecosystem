@@ -45,3 +45,22 @@ export interface ParsedInbound {
   loop: mail.MailLoopHeaders; // loop-prevention hints (passthrough; no logic here)
   mailbox: string | null; // destination mailbox id (best-effort local-part)
 }
+
+// ---- reconciled cross-service inbound DTO (統合波 reconcile, 2026-08) ----
+// The inbound-message VIEW shared by mail-gateway (producer: GET /messages/:id,
+// /threads/:id) and mail-automation (consumer). Anchored on the frozen @dub/types
+// `mail.MailMessage`; the enrichment fields below are OPTIONAL supersets that
+// `@dub/types` deliberately omits but automation's loop-detection + rule evaluation
+// need (list-id, x-dub-event-tag, References depth). @dub/types is frozen and the
+// repo shares types only via @dub/* packages (no service→service imports), so the
+// two definitions are kept structurally IDENTICAL and both `extends mail.MailMessage`.
+// mail-automation/src/types.ts mirrors this exact shape — that mirror + this shared
+// anchor is what resolves the former "統合波でreconcile" gap.
+export interface InboundMailView extends mail.MailMessage {
+  /** Receiving mailbox local-part / address; falls back to the first recipient. */
+  mailbox?: string;
+  /** Lower-cased raw header map used by loop detection + rule fields (list-id等). */
+  headers?: Record<string, string>;
+  /** RFC References chain (thread-depth signal). */
+  references?: string[];
+}

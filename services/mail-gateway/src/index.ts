@@ -71,3 +71,5 @@ const handler = {
 export default handler;
 export { createApp };
 export type { Env };
+// Reconciled cross-service inbound DTO (see types.ts); mail-automation mirrors this.
+export type { InboundMailView } from "./types";

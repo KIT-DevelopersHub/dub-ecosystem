@@ -1,11 +1,12 @@
 // Provider abstraction (design §2-3): keeps the managed-ESP decision out of the send
-// core and the public contract. P0 ships the interface + a Mock (single-test-green
-// requirement, テーマ15決定1) + honest stubs for the real providers whose credentials
-// and SigV4/API wiring land in the integration波 (9-B managed outbound / 9-E paid).
+// core and the public contract. Ships the interface + a Mock (single-test-green
+// requirement, テーマ15決定1) + the real Amazon SES client (ADR-001, see ses.ts).
+// MailChannels/Resend remain honest stubs until their credentials/API wiring land.
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
 import { DEFAULT_OUTBOUND_PROVIDER } from "./config";
 import type { Env } from "./env";
+import { SesMailProvider, sesConfigFromEnv } from "./ses";
 
 export type ProviderName = mail.SendMailResponse["provider"];
 
@@ -65,15 +66,23 @@ class UnwiredMailProvider implements MailProvider {
 }
 
 /**
- * Select the outbound provider from Env. Real SES/MailChannels/Resend clients (SigV4 /
- * API-key REST) are the integration波; until credentials are present we return the
- * loud stub. `mock` is available for local/preview only.
+ * Select the outbound provider from Env. SES is the real, signed HTTPS client
+ * (ADR-001) — but only when credentials are present; otherwise we fall back to the
+ * loud stub so a mis-provisioned environment fails loudly instead of dropping mail.
+ * MailChannels/Resend stay stubbed (API-key REST wiring pending). `mock` is
+ * local/preview only.
  */
 export function buildProvider(env: Env): MailProvider {
   const name = (env.MAIL_OUTBOUND_PROVIDER ?? DEFAULT_OUTBOUND_PROVIDER).toLowerCase();
   if (name === "mock") return new MockMailProvider();
-  if (name === "ses") return new UnwiredMailProvider("ses");
+  if (name === "ses") return buildSesProvider(env);
   if (name === "mailchannels") return new UnwiredMailProvider("mailchannels");
   if (name === "resend") return new UnwiredMailProvider("resend");
-  return new UnwiredMailProvider("ses");
+  return buildSesProvider(env);
+}
+
+/** SES client when credentials are configured, else the loud stub (never silent-drop). */
+function buildSesProvider(env: Env): MailProvider {
+  const cfg = sesConfigFromEnv(env);
+  return cfg ? new SesMailProvider(cfg) : new UnwiredMailProvider("ses");
 }
