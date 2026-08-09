@@ -1,0 +1,25 @@
+{
+  "name": "@dub/deploy-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) deploy-service — the single strong-privilege executor for Cloudflare Pages deploys + DNS/Registrar, with write-ahead audit (intent=sync fail-close / result=Queue).",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}
