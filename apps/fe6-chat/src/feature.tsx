@@ -1,7 +1,11 @@
 // FE6 public surface for the FE2 shell (design §2-3). One FeatureModule object:
-// routes + nav entry (badgeSource = useChatUnreadTotal) + lazy chunks. When lifted
-// into apps/admin-spa this file moves to features/chat/index.ts and imports the
-// real "@spa/shell" contract in place of ./shell-contract.
+// lazy routes + a nav entry (badgeSource = useChatUnreadTotal). Shape matches FE2's
+// canonical contract — apps/fe2-app-shell/src/modules/types.tsx (cross-PR source);
+// ./shell-contract mirrors it locally. When lifted into apps/admin-spa this file moves
+// to features/chat/index.ts and imports "@spa/shell" in place of ./shell-contract.
+//
+// ChatRuntimeProvider (re-exported below) is the documented injection point: FE2 wraps
+// the mounted feature and supplies the real ChatApiClient + realtime client factory.
 import type { FeatureModule } from "./shell-contract";
 import { useChatUnreadTotal } from "./store/useChatStore";
 
@@ -12,26 +16,30 @@ export { ChatApp } from "./components/ChatApp";
 
 export const chatFeature: FeatureModule = {
   id: "chat",
-  nav: {
-    id: "chat",
-    label: "チャット",
-    to: "/chat",
-    icon: "chat",
-    badgeSource: useChatUnreadTotal,
-  },
+  nav: [
+    {
+      label: "チャット",
+      path: "/chat",
+      icon: "chat",
+      order: 40,
+      badgeSource: useChatUnreadTotal,
+    },
+  ],
   routes: [
     {
       path: "/chat",
-      component: () => import("./routes/ChatHomeRoute").then((m) => ({ default: m.ChatHomeRoute })),
+      lazy: () => import("./routes/ChatHomeRoute").then((m) => ({ Component: m.ChatHomeRoute })),
+      auth: "required",
     },
     {
       path: "/chat/channels/$channelId",
-      component: () => import("./routes/ChannelRoute").then((m) => ({ default: m.ChannelRoute })),
-      requiredPermissions: [],
+      lazy: () => import("./routes/ChannelRoute").then((m) => ({ Component: m.ChannelRoute })),
+      auth: "required",
     },
     {
       path: "/chat/channels/$channelId/settings",
-      component: () => import("./routes/ChannelSettingsRoute").then((m) => ({ default: m.ChannelSettingsRoute })),
+      lazy: () => import("./routes/ChannelSettingsRoute").then((m) => ({ Component: m.ChannelSettingsRoute })),
+      auth: "required",
       requiredPermissions: ["chat:moderate"],
     },
   ],
