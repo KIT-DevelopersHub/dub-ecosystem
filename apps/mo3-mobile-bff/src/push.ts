@@ -1,11 +1,14 @@
 // Push dispatch — expands a notification (userId) to the user's active devices,
-// records deliveries, and sends via a platform PushAdapter. APNs/FCM实送信 is
-// interface-frozen and stubbed in P0 (theme8/8-9, 9-D wave); tests inject a fake
-// adapter. Failure audit uses publishAudit() — no domain event (theme1 D3).
+// records deliveries, and sends via a platform PushAdapter. APNs/FCM real sends
+// live in apns.ts/fcm.ts (HTTP + JWT injectable); tests inject a fake adapter for
+// fan-out and a fake fetch/signer for the adapters. Failure audit uses
+// publishAudit() — no domain event (theme1 D3).
 import type { auditLog, mobile } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import type { DeviceRecord, DeviceStore } from "./devices";
 import type { DeliveryStore } from "./deliveries";
+import { type ApnsCredentials, type Es256Signer, sendApns } from "./apns";
+import { type FcmAccessTokenProvider, type FcmServiceAccount, sendFcm } from "./fcm";
 
 export type SendResult = "sent" | "token_invalid" | "failed";
 
@@ -93,24 +96,80 @@ export async function dispatchPush(
   return { accepted: true, deviceCount: devices.length };
 }
 
-// ---- production adapters (interface-frozen, P0 stub) ----
+// ---- production adapters ----
+//
+// Each adapter delegates the wire protocol to apns.ts/fcm.ts and is constructed
+// either with an options object (real credentials + injectable transport) or,
+// for the legacy deps.ts wiring, a boolean "configured" flag. Without credentials
+// send() returns "failed" (audited upstream) and never throws — a missing secret
+// or a network/provider error is a delivery failure, not a crash.
 
-/** APNs HTTP/2 provider (p8 JWT). P0 stub: no live send until the 9-D wave. */
+export interface ApnsAdapterOptions {
+  credentials?: ApnsCredentials | null;
+  fetchImpl?: typeof fetch; // inject for tests
+  signer?: Es256Signer; // inject to avoid real WebCrypto in tests
+  host?: string; // api.push.apple.com (prod) | api.sandbox.push.apple.com
+  now?: () => number;
+}
+
+/** APNs HTTP/2 provider (p8 -> ES256 JWT -> POST /3/device/<token>). */
 export class ApnsAdapter implements PushAdapter {
-  constructor(private readonly configured: boolean) {}
-  async send(): Promise<SendResult> {
-    if (!this.configured) return "failed"; // no creds in P0 -> audited, never crashes
-    // TODO(9-D): POST https://api.push.apple.com/3/device/<token> with p8 JWT.
-    return "failed";
+  private readonly opts: ApnsAdapterOptions;
+  // A boolean carries no credentials (P0 stub wiring) -> send() returns "failed".
+  constructor(init: boolean | ApnsAdapterOptions = false) {
+    this.opts = typeof init === "boolean" ? {} : init;
+  }
+
+  async send(device: DeviceRecord, payload: mobile.MobilePushPayload): Promise<SendResult> {
+    const credentials = this.opts.credentials;
+    if (!credentials) return "failed";
+    try {
+      return await sendApns({
+        credentials,
+        device,
+        payload,
+        fetchImpl: this.opts.fetchImpl,
+        signer: this.opts.signer,
+        host: this.opts.host,
+        now: this.opts.now,
+      });
+    } catch {
+      return "failed"; // network/crypto/provider error -> delivery failure, audited upstream
+    }
   }
 }
 
-/** FCM HTTP v1 (service account). P0 stub: no live send until the 9-D wave. */
+export interface FcmAdapterOptions {
+  serviceAccount?: FcmServiceAccount | null;
+  projectId?: string; // falls back to serviceAccount.project_id
+  fetchImpl?: typeof fetch;
+  accessTokenProvider?: FcmAccessTokenProvider; // inject to avoid real OAuth/WebCrypto in tests
+  now?: () => number;
+}
+
+/** FCM HTTP v1 (service account -> OAuth token -> messages:send). */
 export class FcmAdapter implements PushAdapter {
-  constructor(private readonly configured: boolean) {}
-  async send(): Promise<SendResult> {
-    if (!this.configured) return "failed";
-    // TODO(9-D): POST https://fcm.googleapis.com/v1/projects/<id>/messages:send.
-    return "failed";
+  private readonly opts: FcmAdapterOptions;
+  constructor(init: boolean | FcmAdapterOptions = false) {
+    this.opts = typeof init === "boolean" ? {} : init;
+  }
+
+  async send(device: DeviceRecord, payload: mobile.MobilePushPayload): Promise<SendResult> {
+    const serviceAccount = this.opts.serviceAccount;
+    const projectId = this.opts.projectId ?? serviceAccount?.project_id;
+    if (!serviceAccount || !projectId) return "failed";
+    try {
+      return await sendFcm({
+        serviceAccount,
+        projectId,
+        device,
+        payload,
+        fetchImpl: this.opts.fetchImpl,
+        accessTokenProvider: this.opts.accessTokenProvider,
+        now: this.opts.now,
+      });
+    } catch {
+      return "failed";
+    }
   }
 }
