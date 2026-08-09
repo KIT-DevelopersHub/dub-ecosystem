@@ -1,0 +1,47 @@
+# mail-gateway service (#15) — scaffold only. DO NOT deploy from this unit.
+# Queue/DO real creation, Email Routing binding and prod IDs / secrets land in the
+# integration波 (9-B mail=Cloudflare Email Routing + managed outbound / 9-E paid plan).
+name = "mail-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared dub-core D1 (mail_ namespace only). database_id filled at infra Apply.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+
+# --- Service Bindings (contract-only; real targets wired in the infra波) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"      # POST /authz/check (mail:send / mail:read / mail:admin)
+
+# --- Queue producers ---
+# Domain events (frozen catalog): mail.message.received -> mail-automation,
+# mail.message.sent / send_failed -> notification.
+[[queues.producers]]
+queue = "dub-q-evt-mail-automation"
+binding = "EVT_MAIL_AUTOMATION"
+
+[[queues.producers]]
+queue = "dub-q-evt-notification"
+binding = "EVT_NOTIFICATION"
+
+# publishAudit channel (theme#13) — send success/failure audit records.
+[[queues.producers]]
+queue = "dub-q-audit-record"
+binding = "AUDIT_QUEUE"
+
+# --- Inbound (9-B: Cloudflare Email Routing -> this Worker's email() handler) ---
+# Bind at Apply: `wrangler.toml` email routing rule maps info@developershub.jp here.
+# (Section commented out until the integration波 provisions the domain/rule.)
+# send_email binding for outbound reply-through-CF is NOT used; outbound = managed
+# provider (SES暫定) via Workers Secrets (SES_* / MAIL_FROM_ADDRESS).
+
+# Retention purge Cron (03:20 UTC daily): send_log 30d / inbound 30d.
+[triggers]
+crons = ["20 3 * * *"]
+
+[observability]
+enabled = true
