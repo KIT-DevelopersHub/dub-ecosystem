@@ -2,9 +2,10 @@
 // (1) entry cross-cutting — fresh requestId per request, verify Bearer once, never
 //     trust inbound x-dub-* (the @dub/http client re-adds trusted headers downstream);
 // (2) BFF aggregation (/m/v1/bff/*); (3) thin transparent proxy (logic-free forward);
-// (4) push dispatch (/internal/push/dispatch, Service-Binding only). sync/mutations
-// are contract-frozen STUB → 501 (theme14 D2). Built from injected Deps → fully
-// testable without the Cloudflare runtime.
+// (4) push dispatch (/internal/push/dispatch, Service-Binding only); (5) offline
+// sync — GET /sync (cursor differential, sync.ts) + POST /mutations (idempotent
+// replay with per-mutation conflict resolution, mutations.ts). Built from injected
+// Deps → fully testable without the Cloudflare runtime.
 import { Hono, type MiddlewareHandler } from "hono";
 import { dubErrorHandler, errors, type FieldError } from "@dub/errors";
 import { type RequestContext, type ServiceClient } from "@dub/http";
@@ -16,6 +17,8 @@ import { mobileErrors } from "./errors";
 import { toDeviceDto } from "./devices";
 import { buildHome, buildEventOverview } from "./bff";
 import { dispatchPush } from "./push";
+import { buildSync } from "./sync";
+import { applyMutations, type MutationsRequest } from "./mutations";
 
 type Variables = { requestId: string; userId?: string };
 
@@ -220,12 +223,27 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
   app.get("/m/v1/preferences", requireAuth, (c) => proxy(c, deps.notification, "GET", "/preferences"));
   app.patch("/m/v1/preferences", requireAuth, (c) => proxy(c, deps.notification, "PATCH", "/preferences"));
 
-  // ================= STUB: sync / offline mutations (theme14 D2) =================
-  app.get("/m/v1/sync", requireAuth, () => {
-    throw mobileErrors.notImplemented("/sync");
+  // ================= offline: differential sync / mutation replay =================
+  // GET /m/v1/sync — resources changed since the opaque cursor (sync.ts).
+  app.get("/m/v1/sync", requireAuth, async (c) => {
+    const ctx = authedCtx(c);
+    const q = c.req.query();
+    const limitRaw = q.limit !== undefined ? Number(q.limit) : undefined;
+    const res = await buildSync(
+      { event: deps.event, task: deps.task, notification: deps.notification },
+      ctx,
+      ctx.userId!,
+      { cursor: q.cursor, since: q.since, limit: limitRaw },
+    );
+    return c.json(res);
   });
-  app.post("/m/v1/mutations", requireAuth, () => {
-    throw mobileErrors.notImplemented("/mutations");
+
+  // POST /m/v1/mutations — idempotent offline replay, per-mutation results (mutations.ts).
+  app.post("/m/v1/mutations", requireAuth, async (c) => {
+    const ctx = authedCtx(c);
+    const body = await readJson<MutationsRequest>(c);
+    const res = await applyMutations({ event: deps.event, task: deps.task, notification: deps.notification }, ctx, body);
+    return c.json(res);
   });
 
   // ================= internal: push dispatch (Service Binding only) =================

@@ -186,17 +186,39 @@ describe("BFF event overview", () => {
   });
 });
 
-describe("STUB sync / mutations", () => {
-  it("GET /m/v1/sync -> 501 MOBILE_NOT_IMPLEMENTED", async () => {
+describe("sync / mutations (wired)", () => {
+  it("GET /m/v1/sync -> 200 with a differential envelope (cursor + serverTime)", async () => {
     const h = makeHarness();
+    h.event.on("GET", "/events", { items: [{ id: "evt_1", title: "E", phase: "live", startsAt: null }], nextCursor: null });
+    h.task.on("GET", "/tasks", { items: [], nextCursor: null });
+    h.notification.on("GET", "/inbox", { items: [], nextCursor: null });
+
     const res = await buildApp(h.deps).request("/m/v1/sync", { headers: authHeaders() });
-    expect(res.status).toBe(501);
-    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("MOBILE_NOT_IMPLEMENTED");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { resource: string; id: string }[]; nextCursor: string; serverTime: string };
+    expect(body.items).toEqual([{ resource: "event", id: "evt_1", data: { id: "evt_1", title: "E", phase: "live", startsAt: null } }]);
+    expect(typeof body.nextCursor).toBe("string");
+    expect(typeof body.serverTime).toBe("string");
   });
-  it("POST /m/v1/mutations -> 501", async () => {
+
+  it("POST /m/v1/mutations -> 200 applies a task update and returns its result", async () => {
     const h = makeHarness();
-    const res = await buildApp(h.deps).request("/m/v1/mutations", { method: "POST", headers: authHeaders() });
-    expect(res.status).toBe(501);
+    h.task.on("PATCH", "/tasks/tsk_1", { id: "tsk_1", version: 2 });
+    const res = await buildApp(h.deps).request(
+      "/m/v1/mutations",
+      jsonInit({ mutations: [{ idempotencyKey: "k1", op: "task.update", id: "tsk_1", patch: { version: 1, title: "x" } }] }, authHeaders()),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { results: { idempotencyKey: string; status: string; resource?: { id: string } }[] };
+    expect(body.results).toHaveLength(1);
+    expect(body.results[0]).toMatchObject({ idempotencyKey: "k1", status: "applied", resource: { id: "tsk_1" } });
+  });
+
+  it("both endpoints still require auth (401 without bearer)", async () => {
+    const h = makeHarness();
+    const app = buildApp(h.deps);
+    expect((await app.request("/m/v1/sync")).status).toBe(401);
+    expect((await app.request("/m/v1/mutations", { method: "POST" })).status).toBe(401);
   });
 });
 
