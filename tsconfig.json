@@ -7,6 +7,12 @@
   "include": [
     "packages/*/src/**/*.ts",
     "packages/*/test/**/*.ts",
+    "services/*/src/**/*.ts",
+    "services/*/test/**/*.ts",
+    "apps/*/src/**/*.ts",
+    "apps/*/test/**/*.ts",
+    "infra/*/src/**/*.ts",
+    "infra/*/test/**/*.ts",
     "vitest.config.ts"
   ]
 }
