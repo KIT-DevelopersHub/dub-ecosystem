@@ -42,7 +42,29 @@ export type IconName =
   | "x"
   | "menu"
   | "log-out"
-  | "shield";
+  | "shield"
+  // P1 additions (fe2〜fe7 needs beyond the original 20; keep closed, additive-only)
+  | "task"
+  | "list"
+  | "alert"
+  | "chat"
+  | "warning"
+  | "viewport"
+  | "inbox"
+  | "message-square"
+  | "scope"
+  | "megaphone"
+  | "user"
+  | "history"
+  | "file"
+  | "drag"
+  | "refresh"
+  | "flag"
+  | "clock"
+  | "check"
+  | "check-all"
+  | "bell-off"
+  | "archive";
 
 export interface IconProps extends TestableProps {
   name: IconName;
