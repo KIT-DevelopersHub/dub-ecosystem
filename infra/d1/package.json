@@ -1,0 +1,24 @@
+{
+  "name": "@dub/infra-d1",
+  "version": "0.1.0",
+  "private": true,
+  "description": "infra-d1-seed (#28) — single-source D1 schema aggregation, forward-only migration + lint pipeline, and idempotent demo seed (scenarios).",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "d1:lint": "node --import tsx scripts/verify.ts lint",
+    "d1:migrate": "node --import tsx scripts/migrate.ts",
+    "d1:verify": "node --import tsx scripts/verify.ts",
+    "d1:seed": "node --import tsx scripts/migrate.ts seed"
+  },
+  "dependencies": {
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/types": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}

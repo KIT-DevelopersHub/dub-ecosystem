@@ -1,0 +1,61 @@
+-- namespace: chat | owner: chat-service (#17). DRAFT — frozen only after 9-C
+-- (DO vs Ably). Excluded from the frozen lint/CI gate but still applied locally so
+-- all 16 namespaces materialize for tests. No cross-namespace FK (chat is the first
+-- DB-split candidate); user/event/file ids are plain references.
+CREATE TABLE chat_channels (
+  id          TEXT PRIMARY KEY,
+  type        TEXT NOT NULL CHECK (type IN ('event','topic','dm')),
+  visibility  TEXT NOT NULL CHECK (visibility IN ('public','private')),
+  name        TEXT NOT NULL,
+  topic       TEXT,
+  event_id    TEXT,
+  dm_key      TEXT UNIQUE,
+  created_by  TEXT NOT NULL,
+  archived_at TEXT,
+  version     INTEGER NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX idx_chat_channels_event ON chat_channels(event_id);
+CREATE INDEX idx_chat_channels_visibility ON chat_channels(visibility) WHERE archived_at IS NULL;
+
+CREATE TABLE chat_channel_members (
+  channel_id TEXT NOT NULL REFERENCES chat_channels(id),
+  user_id    TEXT NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('admin','member')),
+  joined_at  TEXT NOT NULL,
+  PRIMARY KEY (channel_id, user_id)
+);
+CREATE INDEX idx_chat_members_user ON chat_channel_members(user_id);
+
+CREATE TABLE chat_messages (
+  id                  TEXT PRIMARY KEY,
+  channel_id          TEXT NOT NULL REFERENCES chat_channels(id),
+  thread_root_id      TEXT,
+  author_id           TEXT,
+  kind                TEXT NOT NULL CHECK (kind IN ('user','system')),
+  body                TEXT NOT NULL,
+  attachment_file_ids TEXT NOT NULL,
+  version             INTEGER NOT NULL,
+  edited_at           TEXT,
+  deleted_at          TEXT,
+  created_at          TEXT NOT NULL
+);
+CREATE INDEX idx_chat_messages_channel ON chat_messages(channel_id, id DESC);
+CREATE INDEX idx_chat_messages_thread ON chat_messages(thread_root_id, id);
+
+CREATE TABLE chat_reactions (
+  message_id TEXT NOT NULL REFERENCES chat_messages(id),
+  emoji      TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (message_id, emoji, user_id)
+);
+
+CREATE TABLE chat_read_states (
+  channel_id           TEXT NOT NULL REFERENCES chat_channels(id),
+  user_id              TEXT NOT NULL,
+  last_read_message_id TEXT,
+  updated_at           TEXT NOT NULL,
+  PRIMARY KEY (channel_id, user_id)
+);
