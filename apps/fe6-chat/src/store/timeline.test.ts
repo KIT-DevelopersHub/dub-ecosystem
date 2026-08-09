@@ -1,0 +1,158 @@
+import { describe, it, expect } from "vitest";
+import type { ChatRealtimeEvent, Message } from "../api/contract";
+import {
+  ackPending,
+  addPending,
+  applyRealtimeEvent,
+  failPending,
+  markDeleted,
+  mergeMessages,
+  toggleReactionLocal,
+  upsertMessage,
+} from "./timeline";
+import { emptyChannelView, type PendingMessage } from "../types";
+
+const CH = "chn_test";
+const ME = "usr_me";
+const OTHER = "usr_other";
+
+function msg(id: string, over: Partial<Message> = {}): Message {
+  return {
+    id,
+    channelId: CH,
+    authorId: OTHER,
+    body: "hi",
+    threadRootId: null,
+    replyCount: 0,
+    reactions: [],
+    attachments: [],
+    editedAt: null,
+    deletedAt: null,
+    version: 1,
+    createdAt: "2026-08-09T01:00:00Z",
+    ...over,
+  };
+}
+
+describe("upsertMessage", () => {
+  it("keeps ULID ascending order regardless of insertion order", () => {
+    let m: Message[] = [];
+    m = upsertMessage(m, msg("msg_c"));
+    m = upsertMessage(m, msg("msg_a"));
+    m = upsertMessage(m, msg("msg_b"));
+    expect(m.map((x) => x.id)).toEqual(["msg_a", "msg_b", "msg_c"]);
+  });
+
+  it("replaces an existing id instead of duplicating", () => {
+    let m = [msg("msg_a", { body: "old" })];
+    m = upsertMessage(m, msg("msg_a", { body: "new", version: 2 }));
+    expect(m).toHaveLength(1);
+    expect(m[0]!.body).toBe("new");
+  });
+});
+
+describe("mergeMessages", () => {
+  it("merges a page without duplicates or gaps", () => {
+    const existing = [msg("msg_b"), msg("msg_d")];
+    const page = [msg("msg_a"), msg("msg_c"), msg("msg_b")]; // overlap on b
+    const merged = mergeMessages(existing, page);
+    expect(merged.map((x) => x.id)).toEqual(["msg_a", "msg_b", "msg_c", "msg_d"]);
+  });
+});
+
+describe("markDeleted", () => {
+  it("tombstones body + attachments in place", () => {
+    const m = [msg("msg_a", { body: "secret", attachments: [{ fileId: "f", name: "n", mime: "x", size: 1 }] })];
+    const out = markDeleted(m, "msg_a", "2026-08-09T02:00:00Z");
+    expect(out[0]!.deletedAt).toBe("2026-08-09T02:00:00Z");
+    expect(out[0]!.body).toBe("");
+    expect(out[0]!.attachments).toEqual([]);
+  });
+});
+
+describe("applyRealtimeEvent", () => {
+  it("ignores events for other channels", () => {
+    const state = emptyChannelView(CH);
+    const ev: ChatRealtimeEvent = { kind: "message.created", channelId: "chn_other", messageId: "msg_x", authorId: OTHER, body: "y", at: "2026-08-09T01:00:00Z" };
+    expect(applyRealtimeEvent(state, ev, ME)).toBe(state);
+  });
+
+  it("inserts a created message at its ULID position", () => {
+    let state = { ...emptyChannelView(CH), messages: [msg("msg_a"), msg("msg_c")] };
+    const ev: ChatRealtimeEvent = { kind: "message.created", channelId: CH, messageId: "msg_b", authorId: OTHER, body: "mid", at: "2026-08-09T01:00:00Z" };
+    state = applyRealtimeEvent(state, ev, ME);
+    expect(state.messages.map((m) => m.id)).toEqual(["msg_a", "msg_b", "msg_c"]);
+  });
+
+  it("dedupes my own pending echo (same author + body)", () => {
+    const pending: PendingMessage = {
+      clientTempId: "tmp_1",
+      authorId: ME,
+      state: "sending",
+      createdAt: "2026-08-09T01:00:00Z",
+      request: { channelId: CH, body: "hello world", clientTempId: "tmp_1" },
+    };
+    let state = addPending(emptyChannelView(CH), pending);
+    const ev: ChatRealtimeEvent = { kind: "message.created", channelId: CH, messageId: "msg_real", authorId: ME, body: "hello world", at: "2026-08-09T01:00:00Z" };
+    state = applyRealtimeEvent(state, ev, ME);
+    expect(state.pending).toHaveLength(0);
+    expect(state.messages.map((m) => m.id)).toEqual(["msg_real"]);
+  });
+
+  it("tombstones on message.deleted", () => {
+    let state = { ...emptyChannelView(CH), messages: [msg("msg_a", { body: "x" })] };
+    state = applyRealtimeEvent(state, { kind: "message.deleted", channelId: CH, messageId: "msg_a", at: "2026-08-09T03:00:00Z" }, ME);
+    expect(state.messages[0]!.deletedAt).toBe("2026-08-09T03:00:00Z");
+  });
+
+  it("leaves timeline unchanged for member events", () => {
+    const state = { ...emptyChannelView(CH), messages: [msg("msg_a")] };
+    const out = applyRealtimeEvent(state, { kind: "member.added", channelId: CH, userId: OTHER, at: "2026-08-09T01:00:00Z" }, ME);
+    expect(out).toBe(state);
+  });
+});
+
+describe("pending lifecycle", () => {
+  it("ack drops pending and inserts the real message", () => {
+    const pending: PendingMessage = {
+      clientTempId: "tmp_1",
+      authorId: ME,
+      state: "sending",
+      createdAt: "2026-08-09T01:00:00Z",
+      request: { channelId: CH, body: "hi", clientTempId: "tmp_1" },
+    };
+    let state = addPending(emptyChannelView(CH), pending);
+    state = ackPending(state, "tmp_1", msg("msg_real", { authorId: ME }));
+    expect(state.pending).toHaveLength(0);
+    expect(state.messages[0]!.id).toBe("msg_real");
+  });
+
+  it("fail marks pending failed without removing", () => {
+    const pending: PendingMessage = {
+      clientTempId: "tmp_1",
+      authorId: ME,
+      state: "sending",
+      createdAt: "2026-08-09T01:00:00Z",
+      request: { channelId: CH, body: "hi", clientTempId: "tmp_1" },
+    };
+    let state = addPending(emptyChannelView(CH), pending);
+    state = failPending(state, "tmp_1");
+    expect(state.pending[0]!.state).toBe("failed");
+  });
+});
+
+describe("toggleReactionLocal", () => {
+  it("adds, then removes a reaction for the same user", () => {
+    let m = [msg("msg_a")];
+    m = toggleReactionLocal(m, "msg_a", "👍", ME);
+    expect(m[0]!.reactions).toEqual([{ emoji: "👍", userIds: [ME] }]);
+    m = toggleReactionLocal(m, "msg_a", "👍", ME);
+    expect(m[0]!.reactions).toEqual([]);
+  });
+
+  it("appends a second user to an existing reaction", () => {
+    let m = [msg("msg_a", { reactions: [{ emoji: "👍", userIds: [OTHER] }] })];
+    m = toggleReactionLocal(m, "msg_a", "👍", ME);
+    expect(m[0]!.reactions[0]!.userIds).toEqual([OTHER, ME]);
+  });
+});
