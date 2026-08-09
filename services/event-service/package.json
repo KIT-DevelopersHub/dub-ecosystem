@@ -1,0 +1,26 @@
+{
+  "name": "@dub/event-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) event-service — source of truth for events & actions (Event > Action hierarchy). Cloudflare Worker + Hono.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/events": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}
