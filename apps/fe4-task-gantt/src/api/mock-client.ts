@@ -2,11 +2,17 @@
 // real `@dub/api-client` (gateway HTTP) lands. Enforces the same contract the
 // server does: version conflicts, status-transition rules, dependency cycles —
 // so optimistic-UI rollback paths (tests 2/3/5/9/11) exercise real branches.
-import type { gantt, identity, event, common } from "@dub/types";
+import type { gantt, identity, event, common, gateway } from "@dub/types";
 import { task } from "@dub/types";
 import type { ErrorResponse } from "@dub/errors";
 import { CommonErrorCodes } from "@dub/errors";
-import type { ApiClient, ApiRequest } from "../contracts/spa-shell";
+import type {
+  ApiClient,
+  ApiPath,
+  AuthLoginStartResponse,
+  RequestInput,
+  ResourceClient,
+} from "../contracts/spa-shell";
 import { ApiError } from "../contracts/spa-shell";
 
 let seq = 0;
@@ -33,7 +39,7 @@ export interface MockSeed {
 }
 
 export class MockApiClient implements ApiClient {
-  private tasks = new Map<common.TaskId, task.Task>();
+  private taskById = new Map<common.TaskId, task.Task>();
   private deps = new Map<common.TaskId, common.TaskId[]>(); // taskId -> dependsOnIds
   private users = new Map<common.UserId, identity.UserSummary>();
   private actions: event.ActionSummary[] = [];
@@ -43,10 +49,10 @@ export class MockApiClient implements ApiClient {
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
   /** call log for assertions (batch counts, headers). */
-  readonly calls: ApiRequest[] = [];
+  readonly calls: RequestInput[] = [];
 
   constructor(seed: MockSeed = {}) {
-    for (const t of seed.tasks ?? []) this.tasks.set(t.id, t);
+    for (const t of seed.tasks ?? []) this.taskById.set(t.id, t);
     for (const d of seed.dependencies ?? []) {
       const list = this.deps.get(d.toTaskId) ?? [];
       list.push(d.fromTaskId);
@@ -58,7 +64,7 @@ export class MockApiClient implements ApiClient {
     this.rowDates = seed.rowDates ?? {};
   }
 
-  async request<T>(req: ApiRequest): Promise<T> {
+  async request<T, TBody = unknown>(req: RequestInput<TBody>): Promise<T> {
     this.calls.push(req);
     if (this.failNext) {
       const e = this.failNext;
@@ -93,10 +99,48 @@ export class MockApiClient implements ApiClient {
     throw err(404, CommonErrorCodes.NOT_FOUND, `no mock route for ${req.method} ${path}`);
   }
 
+  // ---- FE2 ApiClient resource surface (design 2-4). Delegates to `request`, so
+  // the mock's path-router backs both the direct-request calls (FE4 endpoints)
+  // and the prefix-scoped resource clients FE2's real client exposes. ----
+  private makeResource(prefix: string): ResourceClient {
+    const p = (path: string): ApiPath => `/api/v1/${prefix}${path}` as ApiPath;
+    return {
+      get: <TRes,>(path: string, query?: Record<string, string | number | boolean | undefined>) =>
+        this.request<TRes>({ method: "GET", path: p(path), ...(query ? { query } : {}) }),
+      post: <TRes, TBody>(path: string, body: TBody) => this.request<TRes, TBody>({ method: "POST", path: p(path), body }),
+      patch: <TRes, TBody>(path: string, body: TBody) => this.request<TRes, TBody>({ method: "PATCH", path: p(path), body }),
+      delete: <TRes,>(path: string) => this.request<TRes>({ method: "DELETE", path: p(path) }),
+    };
+  }
+
+  readonly events: ResourceClient = this.makeResource("events");
+  readonly tasks: ResourceClient = this.makeResource("tasks");
+  readonly gantt: ResourceClient = this.makeResource("gantt");
+  readonly notifications: ResourceClient = this.makeResource("notifications");
+  readonly chat: ResourceClient = this.makeResource("chat");
+  readonly identity: ResourceClient = this.makeResource("identity");
+  readonly files: ResourceClient = this.makeResource("files");
+
+  readonly auth = {
+    loginStart: (redirectPath?: string): Promise<AuthLoginStartResponse> =>
+      this.request<AuthLoginStartResponse>({
+        method: "POST",
+        path: "/api/v1/auth/login",
+        body: { redirectUri: redirectPath ?? "/", client: "web" },
+      }),
+    logout: (): Promise<void> => this.request<void>({ method: "POST", path: "/api/v1/auth/logout", body: {} }),
+    me: (): Promise<gateway.MeResponse> => this.request<gateway.MeResponse>({ method: "GET", path: "/api/v1/me" }),
+  };
+
+  readonly bff = {
+    home: (): Promise<gateway.BffHomeResponse> =>
+      this.request<gateway.BffHomeResponse>({ method: "GET", path: "/api/v1/bff/home" }),
+  };
+
   // ---- task handlers ----
-  private listTasks(req: ApiRequest): task.ListTasksResponse {
+  private listTasks(req: RequestInput): task.ListTasksResponse {
     const q = req.query ?? {};
-    let items = [...this.tasks.values()];
+    let items = [...this.taskById.values()];
     if (q.eventId) items = items.filter((t) => t.eventId === q.eventId);
     if (q.assigneeId) items = items.filter((t) => t.assigneeId === q.assigneeId);
     if (q.status) {
@@ -114,7 +158,7 @@ export class MockApiClient implements ApiClient {
   }
 
   private getTask(id: string): task.Task {
-    const t = this.tasks.get(id);
+    const t = this.taskById.get(id);
     if (!t) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     return t;
   }
@@ -136,12 +180,12 @@ export class MockApiClient implements ApiClient {
       updatedAt: now,
       version: 1,
     };
-    this.tasks.set(t.id, t);
+    this.taskById.set(t.id, t);
     return t;
   }
 
   private updateTask(id: string, body: task.UpdateTaskRequest): task.Task {
-    const cur = this.tasks.get(id);
+    const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     if (body.version !== cur.version)
       throw err(409, "TASK_VERSION_CONFLICT", "version conflict", { current: cur.version });
@@ -161,18 +205,18 @@ export class MockApiClient implements ApiClient {
       version: cur.version + 1,
       updatedAt: new Date().toISOString(),
     };
-    this.tasks.set(id, next);
+    this.taskById.set(id, next);
     return next;
   }
 
   private deleteTask(id: string): void {
-    const cur = this.tasks.get(id);
+    const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
-    this.tasks.set(id, { ...cur, archivedAt: new Date().toISOString(), version: cur.version + 1 });
+    this.taskById.set(id, { ...cur, archivedAt: new Date().toISOString(), version: cur.version + 1 });
   }
 
   private replaceDeps(id: string, body: task.ReplaceDependenciesRequest): task.Task {
-    const cur = this.tasks.get(id);
+    const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     if (body.version !== cur.version) throw err(409, "TASK_VERSION_CONFLICT", "version conflict");
     // cycle check over the proposed graph
@@ -181,13 +225,13 @@ export class MockApiClient implements ApiClient {
     if (hasCycle(proposed)) throw err(409, "TASK_DEPENDENCY_CYCLE", "dependency cycle", { taskId: id });
     this.deps.set(id, body.dependsOnIds);
     const next: task.Task = { ...cur, version: cur.version + 1, updatedAt: new Date().toISOString() };
-    this.tasks.set(id, next);
+    this.taskById.set(id, next);
     return next;
   }
 
   // ---- gantt handlers ----
   private ganttRows(eventId: string): gantt.GanttRow[] {
-    return [...this.tasks.values()]
+    return [...this.taskById.values()]
       .filter((t) => t.eventId === eventId && t.archivedAt === null)
       .map((t): gantt.GanttRow => {
         const d = this.rowDates[t.id];
@@ -203,7 +247,7 @@ export class MockApiClient implements ApiClient {
   }
 
   private ganttDeps(eventId: string): gantt.GanttDependencyLine[] {
-    const ids = new Set([...this.tasks.values()].filter((t) => t.eventId === eventId).map((t) => t.id));
+    const ids = new Set([...this.taskById.values()].filter((t) => t.eventId === eventId).map((t) => t.id));
     const lines: gantt.GanttDependencyLine[] = [];
     for (const [toTaskId, fromIds] of this.deps) {
       if (!ids.has(toTaskId)) continue;
