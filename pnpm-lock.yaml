@@ -28,7 +28,7 @@ importers:
         version: 5.9.3
       vite-tsconfig-paths:
         specifier: ^5.1.4
-        version: 5.1.4(typescript@5.9.3)(vite@5.4.21(@types/node@22.20.1))
+        version: 5.1.4(typescript@5.9.3)(vite@6.4.3(@types/node@22.20.1))
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
@@ -1082,6 +1082,9 @@ importers:
       '@dub/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@dub/gantt-calc':
+        specifier: workspace:*
+        version: link:../../packages/gantt-calc
       '@dub/http':
         specifier: workspace:*
         version: link:../../packages/http

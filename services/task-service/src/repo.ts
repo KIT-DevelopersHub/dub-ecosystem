@@ -91,6 +91,8 @@ export interface TaskRepo {
   archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]>;
   getDependsOn(taskId: string): Promise<common.TaskId[]>;
   listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]>;
+  /** Ids of every live (non-archived) task in an event — the valid dependsOn target set. */
+  listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]>;
   /** Version-checked full replace of a task's dependsOn edges. */
   replaceDependencies(
     taskId: string,
@@ -248,6 +250,14 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         eventId,
       );
       return rows.map((r) => ({ taskId: r.task_id, dependsOnId: r.depends_on_id }));
+    },
+
+    async listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]> {
+      const rows = await db.all<{ id: string }>(
+        `SELECT id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
+        eventId,
+      );
+      return rows.map((r) => r.id);
     },
 
     async replaceDependencies(

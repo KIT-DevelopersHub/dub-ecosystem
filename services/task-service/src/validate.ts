@@ -1,24 +1,27 @@
-// Input validation + status-transition + dependency-cycle checks.
+// Input validation + status-transition checks.
 //
-// validateDependencies is the STUB seam for gantt-calc's pure function
-// (task-service.md §1/§5: cycle detection is imported from gantt-calc as a
-// module, HTTP /validate removed). Until the gantt-calc package ships that
-// export, this local DFS holds the identical contract (throws on cycle).
+// Dependency-cycle / unknown-ref detection is NOT here: it lives in the single
+// @dub/gantt-calc `validateDependencies` pure function that app.ts imports
+// (task-service.md §1/§5 — HTTP /validate removed, engine unified). The former
+// local DFS was deleted to end the two-engine duplication.
 import { errors, type FieldError } from "@dub/errors";
 import { task } from "@dub/types";
 import { taskErrors } from "./errors";
-
-export interface DependencyEdge {
-  taskId: string;
-  dependsOnId: string;
-}
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const PRIORITIES: ReadonlySet<string> = new Set(["low", "medium", "high", "urgent"]);
 const STATUSES: ReadonlySet<string> = new Set(["todo", "in_progress", "blocked", "done", "cancelled"]);
 
-// origin=github protected fields (task-service.md §6): edited only by service role.
-export const PROTECTED_ORIGIN_FIELDS: readonly string[] = ["title", "description", "status", "assigneeId", "dueAt"];
+// origin=github protected fields (task-service.md §6 + P0b 凍結: 保護6項目):
+// edited only by service role. priority is protected (github-sync owns it).
+export const PROTECTED_ORIGIN_FIELDS: readonly string[] = [
+  "title",
+  "description",
+  "status",
+  "priority",
+  "assigneeId",
+  "dueAt",
+];
 
 export function assertValid(fieldErrors: FieldError[]): void {
   if (fieldErrors.length > 0) throw errors.validationFailed(fieldErrors);
@@ -65,34 +68,4 @@ export function assertStatusTransition(from: task.TaskStatus, to: task.TaskStatu
   if (from === to) return;
   const allowed = task.TASK_STATUS_TRANSITIONS[from];
   if (!allowed.includes(to)) throw taskErrors.invalidStatusTransition(from, to);
-}
-
-/**
- * Cycle detection over the whole event's dependency graph (edge = task depends
- * on dependsOn). Throws TASK_DEPENDENCY_CYCLE on any cycle. Pure — the gantt-calc
- * replacement will have the same signature/behaviour.
- */
-export function validateDependencies(edges: readonly DependencyEdge[]): void {
-  const adj = new Map<string, string[]>();
-  for (const e of edges) {
-    (adj.get(e.taskId) ?? adj.set(e.taskId, []).get(e.taskId)!).push(e.dependsOnId);
-  }
-  const WHITE = 0;
-  const GRAY = 1;
-  const BLACK = 2;
-  const color = new Map<string, number>();
-
-  const visit = (node: string): void => {
-    color.set(node, GRAY);
-    for (const next of adj.get(node) ?? []) {
-      const c = color.get(next) ?? WHITE;
-      if (c === GRAY) throw taskErrors.dependencyCycle({ at: next });
-      if (c === WHITE) visit(next);
-    }
-    color.set(node, BLACK);
-  };
-
-  for (const node of adj.keys()) {
-    if ((color.get(node) ?? WHITE) === WHITE) visit(node);
-  }
 }

@@ -154,11 +154,12 @@ describe("origin=github protection", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_GITHUB_ORIGIN_READONLY");
   });
 
-  it("allows a normal user to edit a non-protected field (priority)", async () => {
+  it("422 TASK_GITHUB_ORIGIN_READONLY when a normal user edits priority (protected, 6-field 凍結)", async () => {
     const { h, app } = setup();
     const t = await ghTask(h, app);
     const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: t.version, priority: "high" }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_GITHUB_ORIGIN_READONLY");
   });
 
   it("service role may write protected fields on a github task", async () => {
@@ -196,6 +197,46 @@ describe("PUT /tasks/:id/dependencies", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_DEPENDENCY_CYCLE");
     expect(await h.repo.getDependsOn(a.id)).toEqual([]);
     expect(h.events.byName("task.dependency_changed")).toHaveLength(0);
+  });
+
+  it("400 VALIDATION_FAILED when a dependsOn target does not exist (gantt-calc unknownTaskIds)", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: ["task_ghost"] }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(0);
+  });
+
+  it("400 VALIDATION_FAILED when a dependsOn target belongs to another event", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A", eventId: "evt_1" });
+    const other = await create(app, { title: "X", eventId: "evt_2" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [other.id] }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+  });
+
+  it("400 VALIDATION_FAILED when a dependsOn target is archived", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A" });
+    const b = await create(app, { title: "B" });
+    await app.request(`/tasks/${b.id}`, userInit("DELETE"));
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
   });
 });
 

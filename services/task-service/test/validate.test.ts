@@ -1,30 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { validateDependencies, assertStatusTransition } from "../src/validate";
-import { isDubError } from "@dub/errors";
+import { assertStatusTransition } from "../src/validate";
 
-describe("validateDependencies (gantt-calc stub contract)", () => {
-  it("passes for an acyclic graph", () => {
-    expect(() =>
-      validateDependencies([
-        { taskId: "a", dependsOnId: "b" },
-        { taskId: "b", dependsOnId: "c" },
-      ]),
-    ).not.toThrow();
-  });
-
-  it("throws TASK_DEPENDENCY_CYCLE for a cycle", () => {
-    try {
-      validateDependencies([
-        { taskId: "a", dependsOnId: "b" },
-        { taskId: "b", dependsOnId: "c" },
-        { taskId: "c", dependsOnId: "a" },
-      ]);
-      throw new Error("should have thrown");
-    } catch (err) {
-      expect(isDubError(err) && err.code).toBe("TASK_DEPENDENCY_CYCLE");
-    }
-  });
-});
+// Dependency cycle / unknown-ref detection moved to @dub/gantt-calc
+// (single engine — see graph.test.ts in that package). Its integration with
+// task-service is covered end-to-end in app.test.ts (PUT /tasks/:id/dependencies).
 
 describe("assertStatusTransition", () => {
   it("allows legal transitions and no-ops", () => {

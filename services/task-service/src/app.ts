@@ -11,9 +11,9 @@ import type { Deps } from "./deps";
 import { taskErrors } from "./errors";
 import { resolvePrincipal, isServiceRole, actorIdOf, type Principal } from "./principal";
 import { emit, type EventSpec } from "./events";
+import { validateDependencies } from "@dub/gantt-calc";
 import {
   assertStatusTransition,
-  validateDependencies,
   checkTitle,
   checkIso,
   checkPriority,
@@ -226,6 +226,7 @@ export function buildApp(deps: Deps): Hono {
       if (body.title !== undefined && body.title !== current.title) violated.push("title");
       if (body.description !== undefined && body.description !== current.description) violated.push("description");
       if (body.status !== undefined && body.status !== current.status) violated.push("status");
+      if (body.priority !== undefined && body.priority !== current.priority) violated.push("priority");
       if (body.assigneeId !== undefined && body.assigneeId !== current.assigneeId) violated.push("assigneeId");
       if (body.dueAt !== undefined && body.dueAt !== current.dueAt) violated.push("dueAt");
       const blocked = violated.filter((f) => PROTECTED_ORIGIN_FIELDS.includes(f));
@@ -345,10 +346,26 @@ export function buildApp(deps: Deps): Hono {
     if (!current) throw taskErrors.notFound(id);
     if (body.version !== current.version) throw taskErrors.versionConflict();
 
-    // cycle check over the whole event graph with this task's edges swapped.
-    const graph = (await deps.repo.listDependenciesByEvent(current.eventId)).filter((e) => e.taskId !== id);
-    for (const dep of dependsOnIds) graph.push({ taskId: id, dependsOnId: dep });
-    validateDependencies(graph);
+    // Single-engine dependency validation via @dub/gantt-calc. taskIds = the live
+    // tasks of this event (existence + same-event + non-archived in one set):
+    // any dependsOnId outside it surfaces as unknownTaskIds (4xx). The graph is
+    // the event's edges with this task's swapped for the requested ones (409 on cycle).
+    const liveIds = await deps.repo.listLiveTaskIdsByEvent(current.eventId);
+    const liveSet = new Set(liveIds);
+    const dependencies: task.TaskDependency[] = (await deps.repo.listDependenciesByEvent(current.eventId))
+      .filter((e) => e.taskId !== id && liveSet.has(e.taskId) && liveSet.has(e.dependsOnId))
+      .concat(dependsOnIds.map((dep) => ({ taskId: id, dependsOnId: dep })));
+    const verdict = validateDependencies({ taskIds: liveIds, dependencies });
+    if (verdict.unknownTaskIds.length > 0) {
+      throw errors.validationFailed(
+        verdict.unknownTaskIds.map((dep) => ({
+          field: "dependsOnIds",
+          reason: "unknown_task_ref",
+          message: `unknown, cross-event, or archived task: ${dep}`,
+        })),
+      );
+    }
+    if (verdict.cycles.length > 0) throw taskErrors.dependencyCycle({ cycles: verdict.cycles });
 
     const now = nowIso();
     const result = await deps.repo.replaceDependencies(id, dependsOnIds, body.version, now);

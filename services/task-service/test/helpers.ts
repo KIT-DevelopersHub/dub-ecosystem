@@ -121,6 +121,12 @@ export class InMemoryTaskRepo implements TaskRepo {
     return this.deps.filter((d) => this.rows.get(d.taskId)?.eventId === eventId).map((d) => ({ ...d }));
   }
 
+  async listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]> {
+    return [...this.rows.values()]
+      .filter((r) => r.eventId === eventId && r.archivedAt === null)
+      .map((r) => r.id);
+  }
+
   async replaceDependencies(
     taskId: string,
     dependsOnIds: string[],
