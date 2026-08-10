@@ -9,14 +9,18 @@
 // failure, publishes mail.message.send_failed and audits it — mail is never dropped.
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
+import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
 import type { Env } from "./env";
-import { safeErrorDetail } from "./provider-error";
+import { retryableStatus, safeErrorDetail } from "./provider-error";
 import type { MailProvider, OutboundMail } from "./provider";
+import { parseTimeoutMs } from "./resilience";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 export interface ResendConfig {
   apiKey: string;
+  /** Per-attempt upstream timeout (ms). A hung request is aborted and retried. */
+  timeoutMs?: number;
   /** Injectable for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -67,9 +71,11 @@ export class ResendMailProvider implements MailProvider {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.apiKey}` },
         body,
+        signal: AbortSignal.timeout(this.cfg.timeoutMs ?? DEFAULT_SEND_TIMEOUT_MS),
       });
     } catch (err) {
-      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "Resend request failed", { status: 502, cause: err });
+      // Network reset / DNS / abort(timeout): message not accepted -> retryable.
+      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "Resend request failed", { status: 502, cause: err, retryable: true });
     }
 
     if (!res.ok) {
@@ -77,14 +83,14 @@ export class ResendMailProvider implements MailProvider {
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `Resend rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,
-        { status: 502 },
+        { status: 502, retryable: retryableStatus(res.status) },
       );
     }
 
     // 200 OK returns { id: "..." }. A 2xx without an id is a contract violation → loud.
     const parsed = (await res.json().catch(() => null)) as { id?: string } | null;
     if (!parsed?.id) {
-      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "Resend returned no id", { status: 502 });
+      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "Resend returned no id", { status: 502, retryable: false });
     }
     return { providerMessageId: parsed.id };
   }
@@ -97,7 +103,7 @@ export class ResendMailProvider implements MailProvider {
  * lives in a Workers Secret (RESEND_API_KEY); it is never committed.
  */
 export function resendConfigFromEnv(env: Env): ResendConfig | null {
-  const apiKey = (env as unknown as Record<string, unknown>).RESEND_API_KEY;
+  const apiKey = env.RESEND_API_KEY;
   if (typeof apiKey !== "string" || !apiKey) return null;
-  return { apiKey };
+  return { apiKey, timeoutMs: parseTimeoutMs(env) };
 }

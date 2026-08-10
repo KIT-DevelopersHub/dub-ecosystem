@@ -6,7 +6,8 @@
   "description": "mail-gateway service (#15) — thin mail adapter: outbound send (managed provider, SES暫定) with idempotent send-log, inbound normalization (Cloudflare Email Routing -> Worker), event publish (mail.message.*), publishAudit.",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "send-test": "node scripts/send-test.mjs"
   },
   "dependencies": {
     "@dub/types": "workspace:*",

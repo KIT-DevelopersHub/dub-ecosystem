@@ -7,6 +7,7 @@ import type { RequestContext } from "@dub/http";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS } from "./config";
 import { buildProvider, type MailProvider } from "./provider";
+import { sendRetryOptions } from "./resilience";
 import type { AuditEnv, EventPublishEnv, InboundDeps, SendDeps } from "./types";
 
 export function buildDb(env: Env, requestId: string): DbClient {
@@ -29,6 +30,7 @@ export function buildSendDeps(env: Env, ctx: RequestContext, provider: MailProvi
     orgId: common.DUB_DEFAULT_ORG_ID,
     fromAddress: env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ctx,
+    retry: sendRetryOptions(env),
   };
 }
 

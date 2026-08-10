@@ -32,3 +32,13 @@ export const OUTBOUND_HEADER_ALLOWLIST = ["x-dub-mail-loop", "auto-submitted"] a
 // Managed outbound providers (frozen SendMailResponse.provider union). SES暫定 (ADR-001).
 export const OUTBOUND_PROVIDERS = ["ses", "mailchannels", "resend"] as const;
 export const DEFAULT_OUTBOUND_PROVIDER = "ses";
+
+// Outbound send resilience (production hardening). A provider call is retried with
+// exponential backoff + jitter ONLY when it fails with a transient (retryable) error
+// (network/timeout/429/5xx). Deterministic failures (validation, unverified domain,
+// 2xx-without-id) are never retried. Overridable via MAIL_SEND_MAX_ATTEMPTS /
+// MAIL_SEND_TIMEOUT_MS so ops can tune without a redeploy of the code.
+export const DEFAULT_SEND_MAX_ATTEMPTS = 3; // 1 initial attempt + up to 2 retries
+export const DEFAULT_SEND_BASE_DELAY_MS = 200; // backoff base (200ms, 400ms, ...)
+export const DEFAULT_SEND_TIMEOUT_MS = 15_000; // per-attempt upstream timeout (abort)
+export const MAX_SEND_ATTEMPTS_CEIL = 6; // guardrail: never retry-storm a provider

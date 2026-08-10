@@ -9,14 +9,18 @@
 // failure, publishes mail.message.send_failed and audits it — mail is never dropped.
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
+import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
 import type { Env } from "./env";
-import { safeErrorDetail } from "./provider-error";
+import { retryableStatus, safeErrorDetail } from "./provider-error";
 import type { MailProvider, OutboundMail } from "./provider";
+import { parseTimeoutMs } from "./resilience";
 
 const MAILCHANNELS_ENDPOINT = "https://api.mailchannels.net/tx/v1/send";
 
 export interface MailChannelsConfig {
   apiKey: string;
+  /** Per-attempt upstream timeout (ms). A hung request is aborted and retried. */
+  timeoutMs?: number;
   /** Injectable for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -67,9 +71,11 @@ export class MailChannelsMailProvider implements MailProvider {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": this.cfg.apiKey },
         body,
+        signal: AbortSignal.timeout(this.cfg.timeoutMs ?? DEFAULT_SEND_TIMEOUT_MS),
       });
     } catch (err) {
-      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "MailChannels request failed", { status: 502, cause: err });
+      // Network reset / DNS / abort(timeout): message not accepted -> retryable.
+      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "MailChannels request failed", { status: 502, cause: err, retryable: true });
     }
 
     if (!res.ok) {
@@ -77,7 +83,7 @@ export class MailChannelsMailProvider implements MailProvider {
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `MailChannels rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,
-        { status: 502 },
+        { status: 502, retryable: retryableStatus(res.status) },
       );
     }
 
@@ -108,7 +114,7 @@ function splitFrom(from: string): [string, string | undefined] {
  * lives in a Workers Secret (MAILCHANNELS_API_KEY); it is never committed.
  */
 export function mailchannelsConfigFromEnv(env: Env): MailChannelsConfig | null {
-  const apiKey = (env as unknown as Record<string, unknown>).MAILCHANNELS_API_KEY;
+  const apiKey = env.MAILCHANNELS_API_KEY;
   if (typeof apiKey !== "string" || !apiKey) return null;
-  return { apiKey };
+  return { apiKey, timeoutMs: parseTimeoutMs(env) };
 }

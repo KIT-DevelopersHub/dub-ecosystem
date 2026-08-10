@@ -9,6 +9,7 @@ import { HEADERS } from "@dub/observability";
 import { common, type identity, type mail } from "@dub/types";
 import type { AppBindings } from "./env";
 import { SERVICE_NAME } from "./config";
+import { effectiveTuning, providerReadiness } from "./config-check";
 import { buildDb, buildSendDeps } from "./deps";
 import { sendMail } from "./send";
 import { getInboundById, listInbound, listMailboxes, upsertMailbox } from "./repo";
@@ -25,6 +26,15 @@ export function createApp() {
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
+
+  // ---- readiness: internal-only. Reports whether the configured provider is actually
+  // wired (credentials present) + non-secret tuning, so a deploy smoke-test can gate on
+  // it. NEVER echoes a secret value. 200 when ready, 503 when not (issues listed).
+  app.get("/internal/health/ready", (c) => {
+    if (!c.req.header(HEADERS.internal)) throw errors.forbidden("internal-only");
+    const readiness = providerReadiness(c.env);
+    return c.json({ service: SERVICE_NAME, ...readiness, tuning: effectiveTuning(c.env) }, readiness.ready ? 200 : 503);
+  });
 
   // ---- POST /send: internal-binding only (design §2/§6). x-dub-internal absent -> 403
   // (gateway also 404s via internalOnlyPaths). Idempotency-Key required (二重送信ゼロ).

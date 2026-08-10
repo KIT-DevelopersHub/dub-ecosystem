@@ -7,9 +7,11 @@
 // DubError(MAIL_PROVIDER_UNAVAILABLE, 502); the send core then records the failure,
 // publishes mail.message.send_failed and audits it — mail is never silently dropped.
 import { DubError } from "@dub/errors";
+import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
 import type { Env } from "./env";
-import { safeErrorDetail } from "./provider-error";
+import { retryableStatus, safeErrorDetail } from "./provider-error";
 import type { MailProvider, OutboundMail } from "./provider";
+import { parseTimeoutMs } from "./resilience";
 import { signRequest } from "./sigv4";
 
 const SES_SERVICE = "ses";
@@ -20,6 +22,8 @@ export interface SesProviderConfig {
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /** Per-attempt upstream timeout (ms). A hung SES request is aborted and retried. */
+  timeoutMs?: number;
   /** Injectable for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -60,15 +64,22 @@ export class SesMailProvider implements MailProvider {
         payload: body,
       });
     } catch (err) {
-      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "failed to sign SES request", { status: 502, cause: err });
+      // A signing failure is deterministic (bad key material) — not retryable.
+      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "failed to sign SES request", { status: 502, cause: err, retryable: false });
     }
 
     const doFetch = this.cfg.fetchImpl ?? fetch;
     let res: Response;
     try {
-      res = await doFetch(`https://${host}${SES_PATH}`, { method: "POST", headers, body });
+      res = await doFetch(`https://${host}${SES_PATH}`, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(this.cfg.timeoutMs ?? DEFAULT_SEND_TIMEOUT_MS),
+      });
     } catch (err) {
-      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "SES request failed", { status: 502, cause: err });
+      // Network reset / DNS / abort(timeout): message not accepted -> retryable.
+      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "SES request failed", { status: 502, cause: err, retryable: true });
     }
 
     if (!res.ok) {
@@ -76,13 +87,14 @@ export class SesMailProvider implements MailProvider {
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `SES rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,
-        { status: 502 },
+        { status: 502, retryable: retryableStatus(res.status) },
       );
     }
 
     const parsed = (await res.json().catch(() => null)) as { MessageId?: string } | null;
     if (!parsed?.MessageId) {
-      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "SES returned no MessageId", { status: 502 });
+      // 2xx without an id is a contract violation, not a transient blip — do not retry.
+      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "SES returned no MessageId", { status: 502, retryable: false });
     }
     return { providerMessageId: parsed.MessageId };
   }
@@ -99,5 +111,5 @@ export function sesConfigFromEnv(env: Env): SesProviderConfig | null {
   const accessKeyId = env.SES_ACCESS_KEY_ID;
   const secretAccessKey = env.SES_SECRET_ACCESS_KEY;
   if (!accessKeyId || !secretAccessKey) return null;
-  return { region: env.SES_REGION || DEFAULT_SES_REGION, accessKeyId, secretAccessKey };
+  return { region: env.SES_REGION || DEFAULT_SES_REGION, accessKeyId, secretAccessKey, timeoutMs: parseTimeoutMs(env) };
 }

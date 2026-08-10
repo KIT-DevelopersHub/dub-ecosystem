@@ -1,6 +1,9 @@
-# mail-gateway service (#15) — scaffold only. DO NOT deploy from this unit.
-# Queue/DO real creation, Email Routing binding and prod IDs / secrets land in the
-# integration波 (9-B mail=Cloudflare Email Routing + managed outbound / 9-E paid plan).
+# mail-gateway service (#15). Go-Live ready: outbound send (managed provider) works on
+# the Workers FREE plan. Before `wrangler deploy` fill the two placeholders below
+# (D1 database_id from `wrangler d1 create`, and provider secrets — see [vars]), and
+# provision the queues / Email-Routing rule per README.md "Go-Live runbook".
+# NOTE: the Queue producer bindings below require Workers PAID only if you keep the
+# audit/event fan-out; the send endpoint itself needs no Queue (README §Free-tier).
 name = "mail-gateway"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
@@ -39,16 +42,28 @@ binding = "AUDIT_QUEUE"
 # send_email binding for outbound reply-through-CF is NOT used; outbound = managed
 # provider (SES暫定) via Workers Secrets (SES_* / MAIL_FROM_ADDRESS).
 
-# --- Outbound provider (ADR-001: Amazon SES via SigV4-signed HTTPS, SES v2). ---
-# Non-secret config only. Credentials are Workers Secrets set out-of-band at Apply
-# (NEVER committed — 機密はローカルのみ):
-#   wrangler secret put SES_ACCESS_KEY_ID
-#   wrangler secret put SES_SECRET_ACCESS_KEY
-# If the secrets are absent the provider falls back to a loud stub (no silent drop).
+# --- Outbound provider. Non-secret config only; credentials are Workers Secrets set
+# out-of-band at Apply (NEVER committed — 機密はローカルのみ). See README.md "Go-Live
+# runbook" for the full per-provider steps. Pick ONE provider:
+#
+#   Resend (fastest / free 100/day, 3000/mo — recommended first Go-Live):
+#     MAIL_OUTBOUND_PROVIDER = "resend"   ;  wrangler secret put RESEND_API_KEY
+#   Amazon SES (ADR-001 default; sandbox -> prod-access request):
+#     MAIL_OUTBOUND_PROVIDER = "ses"      ;  wrangler secret put SES_ACCESS_KEY_ID
+#                                            wrangler secret put SES_SECRET_ACCESS_KEY
+#   MailChannels (API-key; requires a domain lockdown record):
+#     MAIL_OUTBOUND_PROVIDER = "mailchannels" ; wrangler secret put MAILCHANNELS_API_KEY
+#
+# If the selected provider's secrets are absent the provider falls back to a LOUD stub
+# (no silent drop) and GET /internal/health/ready returns 503 with the missing config.
 [vars]
 MAIL_OUTBOUND_PROVIDER = "ses"
 SES_REGION = "ap-northeast-1"
 MAIL_FROM_ADDRESS = "info@developershub.jp"
+# Send resilience tuning (optional; defaults shown). Retries transient provider failures
+# (network / timeout / 429 / 5xx) with backoff+jitter; deterministic 4xx fail fast.
+MAIL_SEND_MAX_ATTEMPTS = "3"      # total attempts (1 try + 2 retries); range 1..6
+MAIL_SEND_TIMEOUT_MS = "15000"    # per-attempt upstream timeout (ms); range 1000..120000
 
 # Retention purge Cron (03:20 UTC daily): send_log 30d / inbound 30d.
 [triggers]

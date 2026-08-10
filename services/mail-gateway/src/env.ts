@@ -17,12 +17,22 @@ export interface Env {
   // --- service bindings ---
   SVC_IDENTITY: Fetcher; // POST /authz/check (mail:* permissions)
 
-  // --- outbound provider config (Workers Secrets; P0 stubs — real send = 統合波) ---
+  // --- outbound provider config (Workers Secrets; real send credentials) ---
   MAIL_OUTBOUND_PROVIDER?: string; // "ses" (default) | "mailchannels" | "resend" | "mock"
   MAIL_FROM_ADDRESS?: string; // default From (e.g. info@developershub.jp)
+
+  // SES (SigV4-signed HTTPS). Secrets: SES_ACCESS_KEY_ID / SES_SECRET_ACCESS_KEY.
   SES_REGION?: string;
   SES_ACCESS_KEY_ID?: string;
   SES_SECRET_ACCESS_KEY?: string;
+
+  // Resend / MailChannels (Bearer / X-Api-Key). Secrets, never committed.
+  RESEND_API_KEY?: string;
+  MAILCHANNELS_API_KEY?: string;
+
+  // --- send resilience tuning (non-secret [vars]; optional, sane defaults) ---
+  MAIL_SEND_MAX_ATTEMPTS?: string; // integer 1..6 (default 3)
+  MAIL_SEND_TIMEOUT_MS?: string; // per-attempt upstream timeout ms (default 15000)
 }
 
 // Hono per-request variables.
