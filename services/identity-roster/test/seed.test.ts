@@ -30,16 +30,31 @@ describe("seedReferenceData / system roles", () => {
     expect([...adminKeys].sort()).toEqual([...catalogKeys].sort());
   });
 
-  it("seeds the default org + the three system roles", async () => {
+  it("seeds the default org + the system roles (incl. maintainer)", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);
 
     expect(await repo.getOrg(ORG_ID)).toBeTruthy();
-    for (const name of ["admin", "organizer", "member"]) {
+    for (const name of ["admin", "maintainer", "organizer", "member"]) {
       const role = await repo.getRoleByName(ORG_ID, name);
       expect(role, `${name} role should be seeded`).toBeTruthy();
       expect(role!.isSystem).toBe(true);
     }
+  });
+
+  it("maintainer has operational power but NOT org administration", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    const maintainer = (await repo.getRoleByName(ORG_ID, "maintainer"))!;
+    const perms = new Set(maintainer.permissions);
+    // can do operations + editing
+    expect(perms.has("event:write")).toBe(true);
+    expect(perms.has("task:delete")).toBe(true);
+    expect(perms.has("infra:deploy")).toBe(true);
+    // cannot administer identity/roles, org infra, or member permissions
+    expect(perms.has("identity:admin")).toBe(false);
+    expect(perms.has("infra:admin")).toBe(false);
+    expect(perms.has("infra:dns")).toBe(false);
   });
 
   it("is idempotent: re-seeding does not duplicate roles or widen admin", async () => {

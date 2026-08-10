@@ -7,7 +7,6 @@ import { LoginScreen } from "./LoginScreen.tsx";
 function makeApi(over: Partial<ApiClient["auth"]>): ApiClient {
   return {
     auth: {
-      loginStart: vi.fn(),
       passwordLogin: vi.fn(),
       logout: vi.fn(),
       me: vi.fn(),
@@ -55,14 +54,9 @@ describe("LoginScreen — email/password", () => {
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps the Google login path working", async () => {
-    const loginStart = vi.fn().mockResolvedValue({ authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?x=1" });
-    render(<LoginScreen api={makeApi({ loginStart })} redirectPath="/" />);
-    fireEvent.click(screen.getByTestId("fe2-login-google"));
-    // The SPA sends an absolute, same-origin return URL (not the bare path) so the
-    // auth-service redirect allowlist can match this SPA's origin.
-    await waitFor(() => expect(loginStart).toHaveBeenCalledWith(expect.stringMatching(/^https?:\/\/[^/]+\/$/)));
-    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?x=1"));
+  it("has no Google login button (Google OAuth removed)", () => {
+    render(<LoginScreen api={makeApi({})} />);
+    expect(screen.queryByTestId("fe2-login-google")).toBeNull();
   });
 
   it("disables submit until both fields are filled", () => {

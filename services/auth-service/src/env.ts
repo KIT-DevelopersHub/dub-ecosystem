@@ -1,11 +1,13 @@
 // Worker bindings + derived runtime config for auth-service.
 // KV for sessions + a small D1 for the free-tier audit outbox (no paid Queues).
-// Google OAuth secrets are Workers Secrets; TTLs are vars (theme8).
+// Web Google OAuth was removed (login is email+password, company-domain only);
+// the only remaining Google config is the MOBILE client ids used by the separate
+// /mobile/exchange track. TTLs are vars (theme8).
 import type { KVNamespace, D1Database, Fetcher } from "@cloudflare/workers-types";
 
 export interface Env {
   // --- data ---
-  AUTH_KV: KVNamespace; // sessions / oauth_state / revoked_user (binding name pending infra registry)
+  AUTH_KV: KVNamespace; // sessions / password creds / revoked_user (binding name pending infra registry)
   OUTBOX_DB: D1Database; // @dub/freeq audit outbox (replaces the AUDIT_QUEUE producer, theme13)
 
   // --- service bindings ---
@@ -16,20 +18,14 @@ export interface Env {
   ENVIRONMENT?: string; // "local" | "preview" | "production" (default production)
   DUB_TEST_LOGIN?: string; // "1" enables /auth/test-login (local/preview only)
   COOKIE_DOMAIN?: string; // unset/empty -> host-only cookie (no Domain attr; required on *.workers.dev)
-  SPA_SUCCESS_URL?: string; // fallback success redirect when no redirectUri stored
-  SPA_ERROR_URL?: string; // callback failure redirect
-  REDIRECT_ALLOWLIST?: string; // comma-separated allowed redirect prefixes
+  ALLOWED_LOGIN_DOMAIN?: string; // only emails on this domain may log in (default developershub.jp)
   SESSION_ACCESS_TTL_SEC?: string; // access lifetime (default 3600 = 1h)
   SESSION_ABS_WEB_TTL_SEC?: string; // web absolute (default 2592000 = 30d)
   SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute (default 15552000 = 180d)
-  STATE_TTL_SEC?: string; // oauth_state lifetime (default 600 = 10m)
   PWLOGIN_MAX_FAILURES?: string; // password-login failures per window before 429 (default 5)
   PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
 
-  // --- Google OAuth secrets ---
-  GOOGLE_CLIENT_ID?: string; // web client
-  GOOGLE_CLIENT_SECRET?: string;
-  GOOGLE_REDIRECT_URI?: string; // web callback URL registered with Google
+  // --- Google OAuth secrets (MOBILE ONLY — web OAuth removed) ---
   GOOGLE_MOBILE_IOS_CLIENT_ID?: string;
   GOOGLE_MOBILE_ANDROID_CLIENT_ID?: string;
 }
@@ -38,10 +34,10 @@ const DEFAULTS = {
   // Empty => host-only cookie (Domain attribute omitted). Cross-subdomain sharing
   // (e.g. app./api.developershub.jp) is opt-in via an explicit COOKIE_DOMAIN var.
   cookieDomain: "",
+  allowedLoginDomain: "developershub.jp",
   accessTtlSec: 3600,
   absWebTtlSec: 30 * 24 * 60 * 60,
   absMobileTtlSec: 180 * 24 * 60 * 60,
-  stateTtlSec: 600,
 } as const;
 
 export interface AppConfig {
@@ -50,21 +46,15 @@ export interface AppConfig {
   testLoginEnabled: boolean;
   cookieName: string;
   cookieDomain: string;
-  spaSuccessUrl: string;
-  spaErrorUrl: string;
-  redirectAllowlist: string[];
+  allowedLoginDomain: string;
   accessTtlSec: number;
   absWebTtlSec: number;
   absMobileTtlSec: number;
-  stateTtlSec: number;
   passwordLogin: {
     maxFailures: number;
     windowSec: number;
   };
   google: {
-    clientId: string;
-    clientSecret: string;
-    redirectUri: string;
     iosClientId: string;
     androidClientId: string;
   };
@@ -86,24 +76,15 @@ export function configFromEnv(env: Env): AppConfig {
     testLoginEnabled: env.DUB_TEST_LOGIN === "1" && !isProduction,
     cookieName: "dub_session",
     cookieDomain: env.COOKIE_DOMAIN ?? DEFAULTS.cookieDomain,
-    spaSuccessUrl: env.SPA_SUCCESS_URL ?? "https://app.developershub.jp/",
-    spaErrorUrl: env.SPA_ERROR_URL ?? "https://app.developershub.jp/login?error=auth",
-    redirectAllowlist: (env.REDIRECT_ALLOWLIST ?? "https://app.developershub.jp")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
+    allowedLoginDomain: (env.ALLOWED_LOGIN_DOMAIN ?? DEFAULTS.allowedLoginDomain).trim().toLowerCase(),
     accessTtlSec: intVar(env.SESSION_ACCESS_TTL_SEC, DEFAULTS.accessTtlSec),
     absWebTtlSec: intVar(env.SESSION_ABS_WEB_TTL_SEC, DEFAULTS.absWebTtlSec),
     absMobileTtlSec: intVar(env.SESSION_ABS_MOBILE_TTL_SEC, DEFAULTS.absMobileTtlSec),
-    stateTtlSec: intVar(env.STATE_TTL_SEC, DEFAULTS.stateTtlSec),
     passwordLogin: {
       maxFailures: intVar(env.PWLOGIN_MAX_FAILURES, 5),
       windowSec: intVar(env.PWLOGIN_WINDOW_SEC, 900),
     },
     google: {
-      clientId: env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: env.GOOGLE_CLIENT_SECRET ?? "",
-      redirectUri: env.GOOGLE_REDIRECT_URI ?? "",
       iosClientId: env.GOOGLE_MOBILE_IOS_CLIENT_ID ?? "",
       androidClientId: env.GOOGLE_MOBILE_ANDROID_CLIENT_ID ?? "",
     },

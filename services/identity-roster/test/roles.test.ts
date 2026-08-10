@@ -47,11 +47,11 @@ describe("roles CRUD", () => {
     expect(res.status).toBe(204);
   });
 
-  it("lists roles including the 3 system roles", async () => {
+  it("lists roles including the system roles (admin/maintainer/organizer/member)", async () => {
     const h = await makeHarness();
     const res = await h.app.request("/identity/roles", asUser(h.adminId));
     const body = (await res.json()) as common.Paginated<identity.Role>;
     const names = body.items.map((r) => r.name).sort();
-    expect(names).toEqual(["admin", "member", "organizer"]);
+    expect(names).toEqual(["admin", "maintainer", "member", "organizer"]);
   });
 });

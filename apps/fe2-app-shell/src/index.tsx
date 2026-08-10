@@ -12,7 +12,6 @@ export {
   type ResourceClient,
   type RequestInput,
   type HttpMethod,
-  type AuthLoginStartResponse,
 } from "./lib/api-client.tsx";
 
 // ---- query conventions & optimistic mutation ----

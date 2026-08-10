@@ -38,41 +38,21 @@ paths:
                   service:
                     type: string
       security: []
-  /auth/login:
-    post:
-      operationId: authLoginStart
-      summary: Begin Google OAuth login
-      tags:
-        - auth
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AuthLoginStartRequest'
-      responses:
-        '200':
-          description: Authorization URL to redirect the user to.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LoginStartResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/Internal'
-      security: []
   /auth/password/login:
     post:
       operationId: authPasswordLogin
-      summary: Email + password login (self-owned credentials)
+      summary: Company email + password login (only interactive web login)
       description: |-
-        Verifies an email/password against a PBKDF2-hashed credential and, on success,
-        issues the same KV web session as the Google callback (Set-Cookie: dub_session).
-        identity-roster stays the source of truth (invite-only provision) for who may
-        log in and for the canonical user id + roles. Unknown-email and wrong-password
-        both return 401 AUTH_INVALID_CREDENTIALS (no account enumeration). Repeated
-        failures per email/IP are rate limited (429 RATE_LIMITED).
+        The only interactive web login (Google OAuth was removed). Access is
+        restricted to company mailboxes: only emails on ALLOWED_LOGIN_DOMAIN
+        (default developershub.jp) may authenticate — anything else is rejected
+        with 403 AUTH_DOMAIN_NOT_ALLOWED before any credential work. Otherwise the
+        email/password is verified against a PBKDF2-hashed credential and, on
+        success, issues a KV web session (Set-Cookie: dub_session). identity-roster
+        stays the source of truth (invite-only provision) for who may log in and for
+        the canonical user id + roles. Unknown-email and wrong-password both return
+        401 AUTH_INVALID_CREDENTIALS (no account enumeration). Repeated failures per
+        email/IP are rate limited (429 RATE_LIMITED).
       tags:
         - auth
       requestBody:
@@ -97,30 +77,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: AUTH_DOMAIN_NOT_ALLOWED — email is not on the allowed company login domain.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
-      security: []
-  /auth/callback:
-    get:
-      operationId: authCallback
-      summary: OAuth redirect callback
-      tags:
-        - auth
-      parameters:
-        - name: code
-          in: query
-          schema:
-            type: string
-        - name: state
-          in: query
-          schema:
-            type: string
-      responses:
-        '302':
-          description: Redirects to the SPA success URL (session cookie set) or an error URL. Never returns a body.
       security: []
   /verify:
     post:

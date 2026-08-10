@@ -5,7 +5,7 @@ import type { identity } from "@dub/types";
 import { configFromEnv, type AppConfig, type Env } from "../src/env";
 import { SessionService } from "../src/sessions";
 import type { Deps } from "../src/deps";
-import type { OAuthProvider, GoogleProfile, AuthorizeUrlParams } from "../src/oauth";
+import type { OAuthProvider, GoogleProfile } from "../src/oauth";
 import type { IdentityClient, ProvisionResult } from "../src/identity-client";
 import type { Auditor, AuditInput } from "../src/audit";
 import { KvPasswordStore } from "../src/passwords";
@@ -25,32 +25,13 @@ export class MemoryKV {
 }
 
 export class FakeOAuth implements OAuthProvider {
-  lastAuthorize?: AuthorizeUrlParams;
-  webProfile: GoogleProfile | Error = {
-    sub: "google-sub-1",
-    email: "alice@example.com",
-    displayName: "Alice",
-    avatarUrl: null,
-  };
+  // Mobile-only now that web Google OAuth is removed.
   mobileProfile: GoogleProfile | Error = {
     sub: "google-sub-2",
     email: "bob@example.com",
     displayName: "Bob",
     avatarUrl: null,
   };
-  buildAuthorizeUrl(p: AuthorizeUrlParams): string {
-    this.lastAuthorize = p;
-    const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    u.searchParams.set("state", p.state);
-    u.searchParams.set("code_challenge", p.codeChallenge);
-    u.searchParams.set("code_challenge_method", "S256");
-    u.searchParams.set("redirect_uri", p.redirectUri);
-    return u.toString();
-  }
-  async exchangeWebCode(): Promise<GoogleProfile> {
-    if (this.webProfile instanceof Error) throw this.webProfile;
-    return this.webProfile;
-  }
   async exchangeMobileCode(): Promise<GoogleProfile> {
     if (this.mobileProfile instanceof Error) throw this.mobileProfile;
     return this.mobileProfile;
@@ -103,16 +84,10 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
     ENVIRONMENT: "preview",
     DUB_TEST_LOGIN: "1",
     COOKIE_DOMAIN: ".test.dev",
-    SPA_SUCCESS_URL: "https://app.test/",
-    SPA_ERROR_URL: "https://app.test/login",
-    REDIRECT_ALLOWLIST: "https://app.test",
+    ALLOWED_LOGIN_DOMAIN: "developershub.jp",
     SESSION_ACCESS_TTL_SEC: "3600",
     SESSION_ABS_WEB_TTL_SEC: "2592000",
     SESSION_ABS_MOBILE_TTL_SEC: "15552000",
-    STATE_TTL_SEC: "600",
-    GOOGLE_CLIENT_ID: "web-client",
-    GOOGLE_CLIENT_SECRET: "web-secret",
-    GOOGLE_REDIRECT_URI: "https://auth.test/auth/callback",
     GOOGLE_MOBILE_IOS_CLIENT_ID: "ios-client",
     GOOGLE_MOBILE_ANDROID_CLIENT_ID: "android-client",
     ...envOverrides,
@@ -141,9 +116,6 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
     audit,
     passwords: new KvPasswordStore(kv as unknown as KVNamespace),
     rateLimiter: new KvRateLimiter({ get: kvGet, put: kvPut, delete: kvDelete }),
-    kvPut,
-    kvGet,
-    kvDelete,
   };
 
   return { deps, kv, oauth, identity, audit, config, setNow: (ms) => (now = ms) };

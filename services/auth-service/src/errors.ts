@@ -6,12 +6,12 @@ export const AuthErrorCodes = {
   INVALID_TOKEN: "AUTH_INVALID_TOKEN", // 401 malformed / not in KV
   SESSION_EXPIRED: "AUTH_SESSION_EXPIRED", // 401 access expired (refreshable)
   SESSION_REVOKED: "AUTH_SESSION_REVOKED", // 401 logged out / force-revoked / abs-expired
-  STATE_MISMATCH: "AUTH_STATE_MISMATCH", // 400 callback state invalid (CSRF)
-  OAUTH_EXCHANGE_FAILED: "AUTH_OAUTH_EXCHANGE_FAILED", // 502 Google token/id_token failure
+  OAUTH_EXCHANGE_FAILED: "AUTH_OAUTH_EXCHANGE_FAILED", // 502 Google token/id_token failure (mobile exchange)
   USER_REJECTED: "AUTH_USER_REJECTED", // 403 identity provision rejected (invite-only)
   INTERNAL_FORBIDDEN: "AUTH_INTERNAL_FORBIDDEN", // 403 x-dub-internal missing on internal route
   TEST_LOGIN_DISABLED: "AUTH_TEST_LOGIN_DISABLED", // 403 test-login off / production
   INVALID_CREDENTIALS: "AUTH_INVALID_CREDENTIALS", // 401 email/password login: unknown email OR wrong password (no enumeration)
+  DOMAIN_NOT_ALLOWED: "AUTH_DOMAIN_NOT_ALLOWED", // 403 email is not on the allowed company login domain
 } as const;
 
 export const authErrors = {
@@ -23,9 +23,6 @@ export const authErrors = {
   },
   sessionRevoked(message = "Session revoked"): DubError {
     return new DubError(AuthErrorCodes.SESSION_REVOKED, message, { status: 401 });
-  },
-  stateMismatch(message = "OAuth state mismatch"): DubError {
-    return new DubError(AuthErrorCodes.STATE_MISMATCH, message, { status: 400 });
   },
   oauthExchangeFailed(cause?: unknown): DubError {
     return new DubError(AuthErrorCodes.OAUTH_EXCHANGE_FAILED, "OAuth code exchange failed", {
@@ -47,5 +44,11 @@ export const authErrors = {
   // password is wrong) so the endpoint can't be used to enumerate accounts.
   invalidCredentials(message = "Invalid email or password"): DubError {
     return new DubError(AuthErrorCodes.INVALID_CREDENTIALS, message, { status: 401 });
+  },
+  // Email is not on the allowed company login domain. Distinct from invalidCredentials:
+  // this is a policy decision about the email's domain (public info), so it reveals
+  // nothing about whether the account exists.
+  domainNotAllowed(message = "Login is restricted to company accounts"): DubError {
+    return new DubError(AuthErrorCodes.DOMAIN_NOT_ALLOWED, message, { status: 403 });
   },
 };

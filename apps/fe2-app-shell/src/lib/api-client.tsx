@@ -12,12 +12,6 @@ import type { DisplayableError } from "@dub/ui";
 type MeResponse = gateway.MeResponse;
 type BffHomeResponse = gateway.BffHomeResponse;
 
-// auth-service exposes AuthLoginStartRequest but no frozen Response type yet;
-// the login-start reply is the OAuth authorize URL to redirect the browser to.
-export interface AuthLoginStartResponse {
-  authorizationUrl: string;
-}
-
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export interface RequestInput<TBody = unknown> {
@@ -97,7 +91,6 @@ export interface ResourceClient {
 export interface ApiClient {
   request<TRes, TBody = unknown>(input: RequestInput<TBody>): Promise<TRes>;
   auth: {
-    loginStart(redirectPath?: string): Promise<AuthLoginStartResponse>;
     passwordLogin(email: string, password: string): Promise<void>;
     logout(): Promise<void>;
     me(): Promise<MeResponse>;
@@ -241,13 +234,7 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
   return {
     request,
     auth: {
-      loginStart: (redirectPath?: string) =>
-        request<AuthLoginStartResponse, { redirectUri: string; client: "web" }>({
-          method: "POST",
-          path: "/api/v1/auth/login",
-          body: { redirectUri: redirectPath ?? "/", client: "web" },
-        }),
-      // Self-owned email+password login. The server sets the session cookie on 200;
+      // Company email+password login. The server sets the session cookie on 200;
       // the caller then re-enters the shell (a full nav lets /me pick up the cookie).
       passwordLogin: (email: string, password: string) =>
         request<void, { email: string; password: string }>({

@@ -104,3 +104,19 @@ export async function seedPasswordCredential(store: PasswordStore, email: string
   const hash = await hashPassword(password);
   await store.put({ email: normalized, hash, createdAt: now() });
 }
+
+// Demo login credentials for the 3 company-domain accounts (admin / maintainer /
+// member). These are the auth-service half of identity-roster's DEMO_USERS — the
+// emails MUST match. Passwords are demo-only plaintext here but are ALWAYS stored
+// as PBKDF2 hashes via seedDemoCredentials; they are never returned to a client.
+// All emails are on the allowed company domain so the domain gate accepts them.
+export const DEMO_CREDENTIALS: readonly { email: string; password: string }[] = [
+  { email: "admin@developershub.jp", password: "demo-admin-pw" },
+  { email: "maintainer@developershub.jp", password: "demo-maintainer-pw" },
+  { email: "member@developershub.jp", password: "demo-member-pw" },
+] as const;
+
+/** Idempotent: seed every demo credential's PBKDF2 hash into the store. */
+export async function seedDemoCredentials(store: PasswordStore, now: () => string = () => new Date().toISOString()): Promise<void> {
+  for (const c of DEMO_CREDENTIALS) await seedPasswordCredential(store, c.email, c.password, now);
+}

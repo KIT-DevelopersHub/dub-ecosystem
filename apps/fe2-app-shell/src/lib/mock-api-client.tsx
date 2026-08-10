@@ -79,8 +79,6 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
         return json(data.me);
       case "GET /api/v1/bff/home":
         return json(data.home);
-      case "POST /api/v1/auth/login":
-        return json({ authorizationUrl: "/auth/callback?code=mock" });
       case "POST /api/v1/auth/refresh":
         return json({}, 200);
       case "POST /api/v1/auth/logout":

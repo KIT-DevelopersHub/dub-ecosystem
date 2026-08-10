@@ -1,6 +1,5 @@
-// Login screen (design 2-1). Two paths that share the same KV session backend:
-//   1. Email + password (self-owned credentials — no Google dependency).
-//   2. Google OAuth (unchanged).
+// Login screen (design 2-1). Single path: company email + password (Google OAuth
+// was removed). Access is restricted server-side to @developershub.jp mailboxes.
 // On a successful password login the server has set the session cookie, so we do a
 // full navigation to redirectPath; the shell re-boots, /me returns 200 and the
 // authenticated app renders.
@@ -36,22 +35,6 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     }
   }
 
-  async function startGoogleLogin(): Promise<void> {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // Send an absolute, same-origin return URL so the auth-service redirect
-      // allowlist matches this SPA's origin (relative "/" is not allowlistable).
-      const returnTo = new URL(redirectPath, globalThis.location.origin).toString();
-      const { authorizationUrl } = await api.auth.loginStart(returnTo);
-      globalThis.location.assign(authorizationUrl);
-    } catch (e) {
-      setBusy(false);
-      setError(messageFor(e, "ログインを開始できませんでした。"));
-    }
-  }
-
   const canSubmit = email.trim().length > 0 && password.length > 0 && !busy;
 
   return (
@@ -82,7 +65,7 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
               type="email"
               value={email}
               onChange={setEmail}
-              placeholder="you@example.com"
+              placeholder="you@developershub.jp"
               disabled={busy}
               testId="fe2-login-email"
             />
@@ -112,21 +95,6 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
             ログイン
           </Button>
         </form>
-
-        <div className="fe2-login-divider" aria-hidden="true">
-          <span>または</span>
-        </div>
-
-        <Button
-          className="fe2-login-block"
-          variant="secondary"
-          size="lg"
-          testId="fe2-login-google"
-          disabled={busy}
-          onClick={() => void startGoogleLogin()}
-        >
-          Google でログイン
-        </Button>
 
         {error ? (
           <p role="alert" data-testid="fe2-login-error" className="fe2-login-error">
