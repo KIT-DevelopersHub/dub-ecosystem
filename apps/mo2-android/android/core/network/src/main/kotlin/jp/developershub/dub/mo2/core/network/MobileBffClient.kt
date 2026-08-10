@@ -4,8 +4,12 @@
 // Mirrors the method surface of bff-client.ts.
 package jp.developershub.dub.mo2.core.network
 
+import jp.developershub.dub.mo2.core.model.ChatChannel
+import jp.developershub.dub.mo2.core.model.ChatMessage
 import jp.developershub.dub.mo2.core.model.DeviceDto
 import jp.developershub.dub.mo2.core.model.EventSummary
+import jp.developershub.dub.mo2.core.model.GanttChartDTO
+import jp.developershub.dub.mo2.core.model.GanttViewState
 import jp.developershub.dub.mo2.core.model.InboxItem
 import jp.developershub.dub.mo2.core.model.ListInboxResponse
 import jp.developershub.dub.mo2.core.model.MobileAuthTokenResponse
@@ -13,10 +17,12 @@ import jp.developershub.dub.mo2.core.model.MobileEventOverviewResponse
 import jp.developershub.dub.mo2.core.model.MobileHomeResponse
 import jp.developershub.dub.mo2.core.model.Paginated
 import jp.developershub.dub.mo2.core.model.PreferenceEntry
+import jp.developershub.dub.mo2.core.model.PutGanttViewRequest
 import jp.developershub.dub.mo2.core.model.RegisterDeviceResponse
 import jp.developershub.dub.mo2.core.model.Task
 import jp.developershub.dub.mo2.core.model.TaskStatus
 import jp.developershub.dub.mo2.core.model.TaskSummary
+import jp.developershub.dub.mo2.core.model.WsTicketResponse
 
 interface MobileBffClient {
     // S1 auth
@@ -39,6 +45,17 @@ interface MobileBffClient {
     // S8 preferences
     suspend fun getPreferences(): List<PreferenceEntry>
     suspend fun updatePreferences(prefs: List<PreferenceEntry>): List<PreferenceEntry>
+    // S10 chat (channel/message; RT via ws-ticket -> DO-direct)
+    suspend fun listChannels(cursor: String? = null): Paginated<ChatChannel>
+    suspend fun listMessages(channelId: String, cursor: String? = null): Paginated<ChatMessage>
+    suspend fun postMessage(channelId: String, body: String): ChatMessage
+    /** Mint a short-lived WS ticket + DO URL for DO-direct realtime (gateway bypassed). */
+    suspend fun getChatWsTicket(channelId: String): WsTicketResponse
+    // S11 gantt (read model over task/event + persisted view prefs)
+    suspend fun getGantt(eventId: String): GanttChartDTO
+    suspend fun getGanttView(eventId: String): GanttViewState
+    /** Persist view prefs. PATCH (mobile transport has no PUT). */
+    suspend fun saveGanttView(eventId: String, req: PutGanttViewRequest): GanttViewState
     // devices (push)
     suspend fun registerDevice(pushToken: String): RegisterDeviceResponse
     suspend fun listDevices(): List<DeviceDto>
