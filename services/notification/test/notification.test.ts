@@ -22,10 +22,14 @@ import {
   fakeIdentity,
   fakeEvent,
   fakeMail,
+  fakeChat,
+  fakePush,
   fakeBatch,
   envelope,
   type TestEnvHandle,
   type RecordingMail,
+  type RecordingChat,
+  type RecordingPush,
 } from "./helpers";
 
 // ---- core deps builder (bypasses Fetcher; injects fake ports) ----
@@ -35,6 +39,8 @@ function coreDeps(
     identity?: ReturnType<typeof fakeIdentity>;
     event?: ReturnType<typeof fakeEvent>;
     mail?: RecordingMail;
+    chat?: RecordingChat;
+    push?: RecordingPush;
     adapters?: AdapterRegistry;
     maxAttempts?: number;
   } = {},
@@ -47,8 +53,8 @@ function coreDeps(
     opts.adapters ?? {
       in_app: makeInAppAdapter(h.db),
       email: makeEmailAdapter({ ...(opts.mail ? { mail: opts.mail } : {}), identity, ctx: c }),
-      chat: makeChatAdapter({ ctx: c }),
-      push: makePushAdapter({ ctx: c }),
+      chat: makeChatAdapter({ ...(opts.chat ? { chat: opts.chat } : {}), ctx: c }),
+      push: makePushAdapter({ ...(opts.push ? { push: opts.push } : {}), ctx: c }),
     };
   return {
     db: h.db,
@@ -190,6 +196,50 @@ describe("email adapter (stub swap)", () => {
     const res = await ingest(coreDeps(h), baseInput({ type: "x.y", recipients: { userIds: ["u1"] }, priority: "urgent", channels: ["email"] }));
     const rows = await deliveries(h.db, res.notificationId);
     expect(rows).toEqual([{ channel: "email", status: "skipped", attempts: 0 }]);
+  });
+});
+
+describe("chat adapter (stub swap)", () => {
+  it("#14 wired chat port receives postSystemMessage {userId,title,body}; delivery sent", async () => {
+    const h = makeTestEnv();
+    await upsertPreference(h.db, "u1", "*", "chat", true); // chat default is off
+    const chat = fakeChat();
+    const res = await ingest(
+      coreDeps(h, { chat }),
+      baseInput({ type: "x.y", recipients: { userIds: ["u1"] }, channels: ["chat"], title: "Hey", body: "look" }),
+    );
+    expect(chat.calls).toEqual([{ userId: "u1", title: "Hey", body: "look" }]);
+    const rows = await deliveries(h.db, res.notificationId);
+    expect(rows).toEqual([{ channel: "chat", status: "sent", attempts: 1 }]);
+  });
+
+  it("chat channel with no wired chat port is skipped (P0 default)", async () => {
+    const h = makeTestEnv();
+    await upsertPreference(h.db, "u1", "*", "chat", true);
+    const res = await ingest(coreDeps(h), baseInput({ type: "x.y", recipients: { userIds: ["u1"] }, channels: ["chat"] }));
+    const rows = await deliveries(h.db, res.notificationId);
+    expect(rows).toEqual([{ channel: "chat", status: "skipped", attempts: 0 }]);
+  });
+});
+
+describe("push adapter (stub swap)", () => {
+  it("#14 wired push port receives dispatch {userId,type,title,body}; delivery sent", async () => {
+    const h = makeTestEnv();
+    const push = fakePush(); // push default is on
+    const res = await ingest(
+      coreDeps(h, { push }),
+      baseInput({ type: "task.assigned", recipients: { userIds: ["u1"] }, channels: ["push"], title: "Assigned", body: "to you" }),
+    );
+    expect(push.calls).toEqual([{ userId: "u1", type: "task.assigned", title: "Assigned", body: "to you" }]);
+    const rows = await deliveries(h.db, res.notificationId);
+    expect(rows).toEqual([{ channel: "push", status: "sent", attempts: 1 }]);
+  });
+
+  it("push channel with no wired push port is skipped (P0 default)", async () => {
+    const h = makeTestEnv();
+    const res = await ingest(coreDeps(h), baseInput({ type: "x.y", recipients: { userIds: ["u1"] }, channels: ["push"] }));
+    const rows = await deliveries(h.db, res.notificationId);
+    expect(rows).toEqual([{ channel: "push", status: "skipped", attempts: 0 }]);
   });
 });
 
