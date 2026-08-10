@@ -34,7 +34,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24: ships the built-in `node:sqlite` (DatabaseSync) used by the D1
+          # test/dev adapters (@dub/infra-d1 + service tests). Node 20 lacks it and
+          # fails with ERR_UNKNOWN_BUILTIN_MODULE.
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
