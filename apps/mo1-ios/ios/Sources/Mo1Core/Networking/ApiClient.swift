@@ -15,6 +15,10 @@ public protocol MobileApi: Sendable {
     func getInbox(_ query: ListInboxQuery) async throws -> ListInboxResponse
     func registerDevice(_ req: RegisterDeviceRequest) async throws -> RegisterDeviceResponse
     func deleteDevice(_ deviceId: String) async throws
+    func getGantt(_ query: GetGanttQuery) async throws -> GanttChartDTO
+    func listChatChannels(_ query: CursorQuery) async throws -> ListChatChannelsResponse
+    func listChatMessages(_ channelId: String, _ query: CursorQuery) async throws -> ListChatMessagesResponse
+    func getChatWsTicket(_ channelId: String) async throws -> WsTicketResponse
 }
 
 public struct ApiClientConfig {
@@ -103,6 +107,34 @@ public final class MobileApiClient: MobileApi, @unchecked Sendable {
 
     public func deleteDevice(_ deviceId: String) async throws {
         try await requestVoid(.DELETE, "/devices/\(Self.encodeComponent(deviceId))")
+    }
+
+    // ---- S6 gantt / S8 chat reads (design §2-1) -----------------------------
+
+    /// S6 gantt chart read: rows + FS dependency lines for one event.
+    public func getGantt(_ query: GetGanttQuery) async throws -> GanttChartDTO {
+        try await request(.GET, "/gantt", query: ["eventId": query.eventId])
+    }
+
+    /// S8 chat: list the channels the caller can see.
+    public func listChatChannels(_ query: CursorQuery = CursorQuery()) async throws -> ListChatChannelsResponse {
+        try await request(.GET, "/chat/channels", query: [
+            "cursor": query.cursor,
+            "limit": query.limit.map(String.init),
+        ])
+    }
+
+    /// S8 chat: page a channel's message history (oldest resolved via cursor).
+    public func listChatMessages(_ channelId: String, _ query: CursorQuery = CursorQuery()) async throws -> ListChatMessagesResponse {
+        try await request(.GET, "/chat/channels/\(Self.encodeComponent(channelId))/messages", query: [
+            "cursor": query.cursor,
+            "limit": query.limit.map(String.init),
+        ])
+    }
+
+    /// S8 chat: short-lived ticket for the DO-direct (gateway-bypassing) WS.
+    public func getChatWsTicket(_ channelId: String) async throws -> WsTicketResponse {
+        try await request(.GET, "/chat/channels/\(Self.encodeComponent(channelId))/ws-ticket")
     }
 
     // ---- core ---------------------------------------------------------------
