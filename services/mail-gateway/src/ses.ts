@@ -10,6 +10,7 @@ import { DubError } from "@dub/errors";
 import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
 import type { Env } from "./env";
 import { retryableStatus, safeErrorDetail } from "./provider-error";
+import { rateLimitError } from "./rate-limit";
 import type { MailProvider, OutboundMail } from "./provider";
 import { parseTimeoutMs } from "./resilience";
 import { signRequest } from "./sigv4";
@@ -84,6 +85,8 @@ export class SesMailProvider implements MailProvider {
 
     if (!res.ok) {
       const detail = await safeErrorDetail(res, ["message", "Message", "__type"]);
+      // 429 / SES Throttling is a distinct quota signal (surfaced to the admin UI), not 502.
+      if (res.status === 429) throw rateLimitError("SES", res, detail);
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `SES rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,

@@ -399,3 +399,14 @@ export interface SkeletonLoaderProps extends TestableProps {
   lines?: number; // default 3
   width?: string;
 }
+
+// Rate-limit banner (FE1 §6 states family). Domain-agnostic: the consumer supplies the
+// label + the backend-derived state (mail-gateway GET /internal/status → rateLimit).
+// Renders nothing when `active` is false, so a surface can mount it unconditionally.
+export interface RateLimitNoticeProps extends TestableProps {
+  serviceLabel: string; // e.g. "メール送信API"
+  active: boolean; // false => renders nothing
+  recoversAt?: string | null; // ISO8601 recovery estimate (rateLimit.recoversAt)
+  now?: number; // injectable clock (ms) for tests; default Date.now()
+  tone?: BadgeTone; // default "warning"
+}

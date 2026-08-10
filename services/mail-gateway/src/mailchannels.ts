@@ -12,6 +12,7 @@ import type { mail } from "@dub/types";
 import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
 import type { Env } from "./env";
 import { retryableStatus, safeErrorDetail } from "./provider-error";
+import { rateLimitError } from "./rate-limit";
 import type { MailProvider, OutboundMail } from "./provider";
 import { parseTimeoutMs } from "./resilience";
 
@@ -80,6 +81,8 @@ export class MailChannelsMailProvider implements MailProvider {
 
     if (!res.ok) {
       const detail = await safeErrorDetail(res, ["errors", "message"]);
+      // 429 is a distinct quota signal (surfaced to the admin UI), not a generic 502.
+      if (res.status === 429) throw rateLimitError("MailChannels", res, detail);
       throw new DubError(
         "MAIL_PROVIDER_UNAVAILABLE",
         `MailChannels rejected the message (${res.status})${detail ? `: ${detail}` : ""}`,

@@ -42,7 +42,7 @@ export interface Harness {
   raw: ReturnType<typeof makeD1>["raw"];
 }
 
-export function makeHarness(providerOpts: { fail?: boolean } = {}): Harness {
+export function makeHarness(providerOpts: { fail?: boolean; rateLimit?: boolean } = {}): Harness {
   const { d1, raw } = makeD1();
   const db = createDbClient(d1, { namespace: "mail" });
   const mailAuto = recordingQueue<DubEventEnvelope>();

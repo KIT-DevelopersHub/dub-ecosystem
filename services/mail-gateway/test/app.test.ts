@@ -120,3 +120,50 @@ describe("health", () => {
     expect(await res.json()).toEqual({ status: "ok", service: "mail-gateway" });
   });
 });
+
+describe("GET /internal/status (rate-limit visibility)", () => {
+  const seedFailure = (raw: ReturnType<typeof makeEnv>["raw"], errorCode: string, updatedAt: string) => {
+    raw
+      .prepare(
+        `INSERT INTO mail_send_log
+           (id, idempotency_key, req_hash, requester, to_json, subject, thread_id,
+            provider, provider_message_id, status, error_code, created_at, updated_at)
+         VALUES (?, ?, 'h', 'notification', '[]', 'S', NULL, NULL, NULL, 'failed', ?, ?, ?)`,
+      )
+      .run(`maillog_${errorCode}_${updatedAt}`, `k_${updatedAt}`, errorCode, updatedAt, updatedAt);
+  };
+
+  it("403s without x-dub-internal", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/internal/status", { headers: headers() }), env);
+    expect(res.status).toBe(403);
+  });
+
+  it("reports rateLimit.active=false with no recent 429", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/internal/status", { headers: headers({ "x-dub-internal": "1" }) }), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { service: string; provider: string; rateLimit: { active: boolean } };
+    expect(body.service).toBe("mail-gateway");
+    expect(body.rateLimit.active).toBe(false);
+  });
+
+  it("reports rateLimit.active=true after a recent MAIL_RATE_LIMITED failure", async () => {
+    const { env, raw } = makeEnv();
+    seedFailure(raw, "MAIL_RATE_LIMITED", new Date().toISOString());
+    const res = await app.fetch(new Request("https://svc/internal/status", { headers: headers({ "x-dub-internal": "1" }) }), env);
+    const body = (await res.json()) as { rateLimit: { active: boolean; code?: string; recoversAt?: string } };
+    expect(body.rateLimit.active).toBe(true);
+    expect(body.rateLimit.code).toBe("MAIL_RATE_LIMITED");
+    expect(typeof body.rateLimit.recoversAt).toBe("string");
+  });
+
+  it("stays active=false when the latest failure is an old 429 (cooled down)", async () => {
+    const { env, raw } = makeEnv();
+    const old = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10 min ago > 60s default
+    seedFailure(raw, "MAIL_RATE_LIMITED", old);
+    const res = await app.fetch(new Request("https://svc/internal/status", { headers: headers({ "x-dub-internal": "1" }) }), env);
+    const body = (await res.json()) as { rateLimit: { active: boolean } };
+    expect(body.rateLimit.active).toBe(false);
+  });
+});

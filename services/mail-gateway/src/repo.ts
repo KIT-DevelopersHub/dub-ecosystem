@@ -97,6 +97,14 @@ export async function markSendSent(db: DbClient, id: string, provider: string, p
   );
 }
 
+/** Most recent FAILED send (error_code + updated_at only) — backs the rate-limit status
+ *  view. Uses idx_mail_send_log_status(status, updated_at) for an index-ordered read. */
+export async function latestFailedSend(db: DbClient): Promise<{ error_code: string | null; updated_at: string } | null> {
+  return db.first<{ error_code: string | null; updated_at: string }>(
+    `SELECT error_code, updated_at FROM mail_send_log WHERE status = 'failed' ORDER BY updated_at DESC LIMIT 1`,
+  );
+}
+
 export async function markSendFailed(db: DbClient, id: string, errorCode: string): Promise<void> {
   await db.run(
     `UPDATE mail_send_log SET status = 'failed', error_code = ?, updated_at = ? WHERE id = ?`,

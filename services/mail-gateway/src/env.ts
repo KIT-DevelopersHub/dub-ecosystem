@@ -33,6 +33,7 @@ export interface Env {
   // --- send resilience tuning (non-secret [vars]; optional, sane defaults) ---
   MAIL_SEND_MAX_ATTEMPTS?: string; // integer 1..6 (default 3)
   MAIL_SEND_TIMEOUT_MS?: string; // per-attempt upstream timeout ms (default 15000)
+  MAIL_RATE_LIMIT_COOLDOWN_SEC?: string; // "recently rate-limited" window, 5..86400 (default 60)
 }
 
 // Hono per-request variables.
