@@ -18,4 +18,21 @@ export default {
 
 export { createApp } from "./app";
 export { handleDeployJobs } from "./queue";
+export { buildDeps, SERVICE_NAME } from "./deps";
+export type { Deps, DepsFactory } from "./deps";
+export { createInMemoryDeployRepo } from "./memory-repo";
+export type { InMemoryDeployRepo } from "./memory-repo";
+export { createD1DeployRepo } from "./repo";
+export type {
+  DeployRepo,
+  SiteRow,
+  DeploymentRow,
+  AllowedZoneRow,
+  DnsChangeInput,
+  ListDeploymentsArgs,
+} from "./repo";
+export type { CfClient } from "./cf-client";
+export type { AuditGateway, IntentInput, ResultInput } from "./audit";
+export type { EventBus } from "./events";
+export type { DeployJobMessage } from "./jobs";
 export type { Env } from "./env";

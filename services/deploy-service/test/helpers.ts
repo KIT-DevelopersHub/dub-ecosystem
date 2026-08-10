@@ -3,17 +3,11 @@
 import { vi } from "vitest";
 import type { Fetcher } from "@cloudflare/workers-types";
 import { createAuthClient } from "@dub/auth-client";
-import { newId, nowIso } from "@dub/db";
+import { nowIso } from "@dub/db";
 import type { identity } from "@dub/types";
 import type { RequestContext } from "@dub/http";
-import type {
-  DeployRepo,
-  SiteRow,
-  DeploymentRow,
-  AllowedZoneRow,
-  DnsChangeInput,
-  ListDeploymentsArgs,
-} from "../src/repo";
+import { createInMemoryDeployRepo } from "../src/memory-repo";
+import type { InMemoryDeployRepo } from "../src/memory-repo";
 import type { CfClient } from "../src/cf-client";
 import type { AuditGateway, IntentInput, ResultInput } from "../src/audit";
 import type { EventBus } from "../src/events";
@@ -23,98 +17,11 @@ import type { DeployJobMessage } from "../src/jobs";
 import type { Env } from "../src/env";
 
 // ---- in-memory repo ----
-export function createInMemoryRepo(): DeployRepo & {
-  sites: SiteRow[];
-  deployments: DeploymentRow[];
-  allowedZones: AllowedZoneRow[];
-  dnsChanges: DnsChangeInput[];
-} {
-  const sites: SiteRow[] = [];
-  const deployments: DeploymentRow[] = [];
-  const allowedZones: AllowedZoneRow[] = [];
-  const dnsChanges: DnsChangeInput[] = [];
-
-  function cmpDesc(a: DeploymentRow, b: DeploymentRow): number {
-    if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
-    return a.id < b.id ? 1 : -1;
-  }
-
-  return {
-    sites,
-    deployments,
-    allowedZones,
-    dnsChanges,
-    async createSite(input) {
-      const now = nowIso();
-      const row: SiteRow = { id: newId("site"), ...input, createdAt: now, updatedAt: now };
-      sites.push(row);
-      return row;
-    },
-    async getSite(id) {
-      return sites.find((s) => s.id === id) ?? null;
-    },
-    async getSiteByName(name) {
-      return sites.find((s) => s.name === name) ?? null;
-    },
-    async listSites() {
-      return [...sites];
-    },
-    async createDeployment(input) {
-      const now = nowIso();
-      const row: DeploymentRow = {
-        id: newId("dep"),
-        siteId: input.siteId,
-        cfDeploymentId: null,
-        status: "queued",
-        branch: input.branch,
-        commitSha: input.commitSha,
-        url: null,
-        requestedBy: input.requestedBy,
-        errorMessage: null,
-        createdAt: now,
-        updatedAt: now,
-        finishedAt: null,
-      };
-      deployments.push(row);
-      return row;
-    },
-    async getDeployment(id) {
-      return deployments.find((d) => d.id === id) ?? null;
-    },
-    async listDeployments(args: ListDeploymentsArgs) {
-      let rows = [...deployments].sort(cmpDesc);
-      if (args.siteId) rows = rows.filter((d) => d.siteId === args.siteId);
-      if (args.status) rows = rows.filter((d) => d.status === args.status);
-      if (args.cursor) {
-        const decoded = Buffer.from(args.cursor, "base64url").toString("utf8").split("|");
-        const [ca, id] = decoded;
-        rows = rows.filter((d) => d.createdAt < ca! || (d.createdAt === ca && d.id < id!));
-      }
-      const page = rows.slice(0, args.limit);
-      const hasMore = rows.length > args.limit;
-      const last = page[page.length - 1];
-      const nextCursor =
-        hasMore && last ? Buffer.from(`${last.createdAt}|${last.id}`, "utf8").toString("base64url") : null;
-      return { rows: page, nextCursor };
-    },
-    async hasActiveDeployment(siteId) {
-      return deployments.some((d) => d.siteId === siteId && (d.status === "queued" || d.status === "building"));
-    },
-    async updateDeployment(id, patch) {
-      const row = deployments.find((d) => d.id === id);
-      if (!row) return;
-      Object.assign(row, patch, { updatedAt: nowIso() });
-    },
-    async isZoneAllowed(zone) {
-      return allowedZones.some((z) => z.zoneId === zone || z.zoneName === zone);
-    },
-    async listAllowedZones() {
-      return [...allowedZones];
-    },
-    async recordDnsChange(input) {
-      dnsChanges.push(input);
-    },
-  };
+// The concrete implementation now lives in src/memory-repo.ts (exported so the
+// cross-service integration harness can wire the REAL app against it). This helper
+// keeps its historical name for the unit suite.
+export function createInMemoryRepo(): InMemoryDeployRepo {
+  return createInMemoryDeployRepo();
 }
 
 // ---- fake CF client ----
