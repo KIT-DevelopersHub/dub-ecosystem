@@ -27,7 +27,7 @@ describe("createShellRouter", () => {
     expect(router).toBeDefined();
     const paths = Object.keys(router.routesByPath);
     expect(paths).toContain("/login");
-    expect(paths).toContain("/auth/callback");
+    expect(paths).not.toContain("/auth/callback");
     expect(paths).toContain("/events");
   });
 });

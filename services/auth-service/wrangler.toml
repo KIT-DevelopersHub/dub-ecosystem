@@ -42,19 +42,17 @@ service = "audit-log"
 crons = ["* * * * *"]
 
 # --- vars (non-secret) ---
+# Login is email+password only (web Google OAuth removed) and restricted to
+# ALLOWED_LOGIN_DOMAIN. SPA redirect/allowlist + oauth-state vars are gone with it.
 [vars]
 ENVIRONMENT = "production"
 COOKIE_DOMAIN = ".developershub.jp"
-SPA_SUCCESS_URL = "https://app.developershub.jp/"
-SPA_ERROR_URL = "https://app.developershub.jp/login?error=auth"
-REDIRECT_ALLOWLIST = "https://app.developershub.jp"
+ALLOWED_LOGIN_DOMAIN = "developershub.jp"
 SESSION_ACCESS_TTL_SEC = "3600"
 SESSION_ABS_WEB_TTL_SEC = "2592000"
 SESSION_ABS_MOBILE_TTL_SEC = "15552000"
-STATE_TTL_SEC = "600"
 
-# Secrets (set via `wrangler secret put`, never committed):
-#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI
+# Secrets (set via `wrangler secret put`, never committed) — MOBILE Google only:
 #   GOOGLE_MOBILE_IOS_CLIENT_ID / GOOGLE_MOBILE_ANDROID_CLIENT_ID
 # test-login is gated by DUB_TEST_LOGIN="1" and only in local/preview envs.
 
@@ -66,6 +64,3 @@ DUB_TEST_LOGIN = "1"
 ENVIRONMENT = "local"
 DUB_TEST_LOGIN = "1"
 COOKIE_DOMAIN = "localhost"
-SPA_SUCCESS_URL = "http://localhost:5173/"
-SPA_ERROR_URL = "http://localhost:5173/login?error=auth"
-REDIRECT_ALLOWLIST = "http://localhost:5173"

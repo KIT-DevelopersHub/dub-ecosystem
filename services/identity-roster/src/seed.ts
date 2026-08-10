@@ -1,6 +1,6 @@
-// Reference-data seed: the default org + the 3 system roles (admin/organizer/
-// member). Idempotent. Demo USERS are #28 seedDemo's job (kept out of here so no
-// demo rows leak into prod). Role permission bundles are an α-decision (§3 seed).
+// Reference-data seed: the default org + the system roles (admin / maintainer /
+// organizer / member). Idempotent. Demo USERS are #28 seedDemo's job (kept out of
+// here so no demo rows leak into prod). Role permission bundles are an α-decision.
 import { identity } from "@dub/types";
 import type { IdentityRepo } from "./repo/types";
 
@@ -10,8 +10,32 @@ import type { IdentityRepo } from "./repo/types";
 const ALL_KEYS = (): identity.PermissionKey[] =>
   identity.PERMISSION_CATALOG.map((e) => e.key);
 
+// maintainer sits between admin and member: full operational + editing power, but
+// NO org administration — cannot change identity/roles/member permissions
+// (identity:admin), org infra settings (infra:admin/infra:dns), or the
+// integration/mail admin surfaces. Deliberately extensible (future viewer/owner
+// slot in cleanly by adding another SYSTEM_ROLES entry).
+const MAINTAINER_KEYS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read", "event:write", "event:admin",
+  "task:read", "task:write", "task:delete",
+  "file:read", "file:write",
+  "notif:send", "notif:admin",
+  "mail:send", "mail:read",
+  "chat:create", "chat:moderate",
+  "infra:read", "infra:deploy",
+  "audit:read",
+  "github:read", "github:write", "github:sync",
+  "drive:read", "drive:write",
+  "webhook:read",
+];
+
 const SYSTEM_ROLES: { name: string; permissions: identity.PermissionKey[] }[] = [
   { name: "admin", permissions: ALL_KEYS() },
+  {
+    name: "maintainer",
+    permissions: MAINTAINER_KEYS,
+  },
   {
     name: "organizer",
     permissions: ["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "infra:read", "audit:read"],
@@ -40,19 +64,21 @@ export async function seedReferenceData(d: SeedDeps, orgId: string, orgName = "D
 }
 
 // ---- demo users -------------------------------------------------------------
-// Two active accounts for driving the ecosystem without Google: an admin and a
-// regular member (see [[dub-client-dual-mode-toggle]] — admin vs member views).
-// Kept OUT of the migration seed on purpose so no demo rows leak into a real
-// deployment; a deploy opts in by calling seedDemoUsers explicitly. The matching
-// password credentials live in auth-service KV (auth-service seedPasswordCredential).
+// Three active accounts for driving the ecosystem without Google, one per system
+// role (admin / maintainer / member). Company-domain emails so they pass the
+// auth-service domain gate (ALLOWED_LOGIN_DOMAIN=developershub.jp). Kept OUT of the
+// migration seed on purpose so no demo rows leak into a real deployment; a deploy
+// opts in by calling seedDemoUsers explicitly. The matching password credentials
+// live in auth-service KV (auth-service seedDemoCredentials / seedPasswordCredential).
 export interface DemoUserSpec {
   email: string;
   displayName: string;
-  roleName: "admin" | "member";
+  roleName: "admin" | "maintainer" | "member";
 }
 export const DEMO_USERS: readonly DemoUserSpec[] = [
-  { email: "admin@dub.local", displayName: "Demo Admin", roleName: "admin" },
-  { email: "member@dub.local", displayName: "Demo Member", roleName: "member" },
+  { email: "admin@developershub.jp", displayName: "Demo Admin", roleName: "admin" },
+  { email: "maintainer@developershub.jp", displayName: "Demo Maintainer", roleName: "maintainer" },
+  { email: "member@developershub.jp", displayName: "Demo Member", roleName: "member" },
 ] as const;
 
 export interface SeededDemoUser {

@@ -1,6 +1,11 @@
 // auth-service HTTP surface (Hono). Built from injected Deps so it is fully
 // testable without the Cloudflare runtime. Route table + guards follow the P0a
 // design and P0b frozen decisions (themes 6 / 8 / 13).
+//
+// Google OAuth (web) has been fully removed: login is now email+password only,
+// restricted to a single company domain (ALLOWED_LOGIN_DOMAIN, default
+// developershub.jp). The mobile exchange route (/mobile/exchange) is a separate
+// mobile-client track and is intentionally left untouched.
 import { Hono } from "hono";
 import { dubErrorHandler, errors, type FieldError } from "@dub/errors";
 import { extractContext, type RequestContext } from "@dub/http";
@@ -8,21 +13,9 @@ import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import type { auth, identity } from "@dub/types";
 import type { Deps } from "./deps";
 import { authErrors } from "./errors";
-import { newState, newPkce } from "./crypto";
 import { verifyPassword } from "./passwords";
 
-const OAUTH_STATE_PREFIX = "oauth_state:";
-
-interface OAuthStateRecord {
-  codeVerifier: string;
-  redirectUri: string;
-}
-
 // ---- local response shapes (requests + SessionInfo are frozen in @dub/types) ----
-interface LoginStartResponse {
-  authorizationUrl: string;
-  state: string;
-}
 type RefreshResponse = { session: auth.SessionInfo } | { token: string; session: auth.SessionInfo };
 interface TokenSessionResponse {
   token: string;
@@ -82,6 +75,12 @@ function bearerToken(header: string | undefined): string | null {
   return m ? m[1]!.trim() : null;
 }
 
+/** Domain of a normalized email (part after the last '@'), or "" when malformed. */
+function emailDomain(email: string): string {
+  const at = email.lastIndexOf("@");
+  return at === -1 ? "" : email.slice(at + 1);
+}
+
 async function readJson<T>(c: { req: { json: () => Promise<unknown> } }): Promise<T> {
   try {
     return (await c.req.json()) as T;
@@ -98,11 +97,7 @@ function requireString(value: unknown, field: string): string {
   return value;
 }
 
-function isRedirectAllowed(uri: string, allowlist: string[]): boolean {
-  return allowlist.some((prefix) => uri === prefix || uri.startsWith(prefix.endsWith("/") ? prefix : prefix + "/") || uri.startsWith(prefix + "?") || uri.startsWith(prefix + "#"));
-}
-
-/** Resolve the identity user for a Google profile (invite-only provision). */
+/** Resolve the identity user for a profile (invite-only provision). */
 async function provisionOrThrow(
   deps: Deps,
   ctx: RequestContext,
@@ -124,36 +119,28 @@ export function buildApp(deps: Deps): Hono {
 
   app.get("/health", (c) => c.json({ ok: true, service: "auth-service" }));
 
-  // ---- POST /auth/login (public) ----
-  app.post("/auth/login", async (c) => {
-    const body = await readJson<Partial<auth.AuthLoginStartRequest>>(c);
-    const redirectUri = requireString(body.redirectUri, "redirectUri");
-    if (!isRedirectAllowed(redirectUri, config.redirectAllowlist)) {
-      throw errors.validationFailed([{ field: "redirectUri", reason: "not_allowed" }]);
-    }
-    const state = newState();
-    const pkce = await newPkce();
-    const record: OAuthStateRecord = { codeVerifier: pkce.verifier, redirectUri };
-    await deps.kvPut(OAUTH_STATE_PREFIX + state, JSON.stringify(record), config.stateTtlSec);
-    const authorizationUrl = deps.oauth.buildAuthorizeUrl({
-      state,
-      codeChallenge: pkce.challenge,
-      redirectUri: config.google.redirectUri,
-    });
-    const res: LoginStartResponse = { authorizationUrl, state };
-    return c.json(res);
-  });
-
   // ---- POST /auth/password/login (public) ----
-  // Self-owned email+password login. Additive to Google OAuth; identity-roster
-  // stays the source of truth for who may log in (invite-only provision) and for
-  // the canonical user id + roles. Credentials are verified against PBKDF2 hashes.
+  // The ONLY interactive web login path (Google OAuth was removed). Access is
+  // restricted to company-issued mailboxes: only emails on ALLOWED_LOGIN_DOMAIN
+  // (default developershub.jp) may authenticate. identity-roster stays the source
+  // of truth for who may log in (invite-only provision) and for the canonical user
+  // id + roles. Credentials are verified against PBKDF2 hashes.
   app.post("/auth/password/login", async (c) => {
     const ctx = ctxOf(c);
     const body = await readJson<Partial<auth.AuthPasswordLoginRequest>>(c);
     const emailRaw = requireString(body.email, "email");
     const password = requireString(body.password, "password");
     const email = emailRaw.trim().toLowerCase();
+
+    // Domain gate (pre-check): reject anything not on the allowed company domain
+    // BEFORE any credential work. This is a policy decision about the email's
+    // domain (public information), so a distinct 403 leaks nothing about whether an
+    // account exists — the same-401 anti-enumeration policy still governs the
+    // credential-verification path below.
+    if (emailDomain(email) !== config.allowedLoginDomain) {
+      await deps.audit.record({ action: "auth.session.login", actorId: null, result: "failure", requestId: ctx.requestId, details: { method: "password", reason: "domain_not_allowed" } });
+      throw authErrors.domainNotAllowed();
+    }
 
     // Soft brute-force guard: block once either the email or the client IP has
     // already burned its failure budget in the window (counters bumped only on a
@@ -177,7 +164,7 @@ export function buildApp(deps: Deps): Hono {
     }
 
     // Password matched — resolve the canonical identity user (invite-only). This
-    // is the same gate the Google flow uses, so disabled/uninvited users are still
+    // is the same gate the mobile flow uses, so disabled/uninvited users are still
     // rejected even with a valid password.
     const user = await provisionOrThrow(deps, ctx, { email, displayName: email.split("@")[0]! });
     const created = await deps.sessions.create(user.id, "web");
@@ -193,55 +180,6 @@ export function buildApp(deps: Deps): Hono {
     c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
     const res: TokenSessionResponse = { token: created.token, session: created.session };
     return c.json(res);
-  });
-
-  // ---- GET /auth/callback (public; always 302, never JSON errors) ----
-  app.get("/auth/callback", async (c) => {
-    const ctx = ctxOf(c);
-    const code = c.req.query("code");
-    const state = c.req.query("state");
-    // Google may redirect back with its own ?error=... (e.g. access_denied when the
-    // user cancels consent) and NO code — surface that as an exchange failure (audited)
-    // rather than the misleading state-mismatch code.
-    const providerError = c.req.query("error");
-    const fail = (errorCode: string): Response => {
-      const url = new URL(config.spaErrorUrl);
-      url.searchParams.set("error", errorCode);
-      return c.redirect(url.toString(), 302);
-    };
-    try {
-      if (providerError) throw authErrors.oauthExchangeFailed(`google:${providerError}`);
-      if (!code || !state) return fail(authErrors.stateMismatch().code);
-      const raw = await deps.kvGet(OAUTH_STATE_PREFIX + state);
-      if (!raw) return fail(authErrors.stateMismatch().code);
-      await deps.kvDelete(OAUTH_STATE_PREFIX + state); // single-use
-      const stateRec = JSON.parse(raw) as OAuthStateRecord;
-
-      const profile = await deps.oauth.exchangeWebCode(code, stateRec.codeVerifier, config.google.redirectUri);
-      const user = await provisionOrThrow(deps, ctx, profile);
-      const created = await deps.sessions.create(user.id, "web");
-      await deps.audit.record({
-        action: "auth.session.login",
-        actorId: user.id,
-        result: "success",
-        requestId: ctx.requestId,
-        details: { client: "web" },
-      });
-
-      const maxAge = Math.ceil((created.absoluteExpiresAt - Date.now()) / 1000);
-      c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
-      return c.redirect(stateRec.redirectUri || config.spaSuccessUrl, 302);
-    } catch (err) {
-      const code2 = err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "AUTH_OAUTH_EXCHANGE_FAILED";
-      await deps.audit.record({
-        action: "auth.session.login",
-        actorId: null,
-        result: "failure",
-        requestId: ctx.requestId,
-        details: { reason: code2 },
-      });
-      return fail(code2);
-    }
   });
 
   // ---- POST /verify (internal: gateway / MO3 only) ----
@@ -327,6 +265,8 @@ export function buildApp(deps: Deps): Hono {
   });
 
   // ---- POST /mobile/exchange (internal: MO3 only — theme8) ----
+  // Mobile-client login track (native Google sign-in via MO3). Intentionally kept:
+  // the web-console Google removal does not touch the mobile exchange contract.
   app.post("/mobile/exchange", async (c) => {
     requireInternal(c);
     const ctx = ctxOf(c);

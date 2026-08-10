@@ -80,6 +80,9 @@ function rolePerms(roleId: string, keys: string[]): string {
 }
 
 const ADMIN_KEYS = ["identity:read", "identity:admin", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "file:admin", "notif:send", "notif:admin", "mail:send", "mail:read", "mail:admin", "chat:create", "chat:moderate", "infra:read", "infra:deploy", "infra:dns", "infra:admin", "audit:read"];
+// maintainer: full operational + editing power, but no org administration
+// (no identity:admin / infra:admin / infra:dns / *:admin integration surfaces).
+const MAINTAINER_KEYS = ["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "notif:admin", "mail:send", "mail:read", "chat:create", "chat:moderate", "infra:read", "infra:deploy", "audit:read", "github:read", "github:write", "github:sync", "drive:read", "drive:write", "webhook:read"];
 const ORGANIZER_KEYS = ["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "infra:read", "audit:read"];
 const MEMBER_KEYS = ["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create"];
 
@@ -89,11 +92,14 @@ INSERT OR IGNORE INTO identity_orgs (id, name, created_at) VALUES ('${SEED_ORG_I
 INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
   VALUES ('role_sys_admin', '${SEED_ORG_ID}', 'admin', 1, '${SEED_TS}', '${SEED_TS}');
 INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
+  VALUES ('role_sys_maintainer', '${SEED_ORG_ID}', 'maintainer', 1, '${SEED_TS}', '${SEED_TS}');
+INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
   VALUES ('role_sys_organizer', '${SEED_ORG_ID}', 'organizer', 1, '${SEED_TS}', '${SEED_TS}');
 INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
   VALUES ('role_sys_member', '${SEED_ORG_ID}', 'member', 1, '${SEED_TS}', '${SEED_TS}');
 
 ${rolePerms("role_sys_admin", ADMIN_KEYS)}
+${rolePerms("role_sys_maintainer", MAINTAINER_KEYS)}
 ${rolePerms("role_sys_organizer", ORGANIZER_KEYS)}
 ${rolePerms("role_sys_member", MEMBER_KEYS)}
 `;

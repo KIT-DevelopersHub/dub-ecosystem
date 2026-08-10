@@ -1,6 +1,8 @@
-// Google OAuth 2.0 provider. The interface is the seam the app depends on; the
-// Google HTTP impl is swapped for a fake in tests. id_token JWKS verification is
-// deferred (P0): the userinfo endpoint is used to resolve the profile — see notes.
+// Google OAuth 2.0 provider — MOBILE ONLY. Web Google login was removed; the only
+// remaining Google path is the mobile exchange (MO3 forwards an already-PKCE'd
+// code). The interface is the seam the app depends on; the Google HTTP impl is
+// swapped for a fake in tests. id_token JWKS verification is deferred (P0): the
+// userinfo endpoint is used to resolve the profile — see notes.
 import type { AppConfig } from "./env";
 import { authErrors } from "./errors";
 
@@ -11,25 +13,13 @@ export interface GoogleProfile {
   avatarUrl: string | null;
 }
 
-export interface AuthorizeUrlParams {
-  state: string;
-  codeChallenge: string;
-  redirectUri: string;
-  loginHint?: string;
-}
-
 export interface OAuthProvider {
-  buildAuthorizeUrl(p: AuthorizeUrlParams): string;
-  // Web flow: server-side PKCE verifier.
-  exchangeWebCode(code: string, codeVerifier: string, redirectUri: string): Promise<GoogleProfile>;
   // Mobile flow: MO3 forwards an already-PKCE'd code; single-token model (theme8).
   exchangeMobileCode(code: string): Promise<GoogleProfile>;
 }
 
-const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo";
-const SCOPE = "openid email profile";
 
 interface TokenResponse {
   access_token?: string;
@@ -45,33 +35,6 @@ interface UserInfoResponse {
 
 export class GoogleOAuthProvider implements OAuthProvider {
   constructor(private readonly config: AppConfig) {}
-
-  buildAuthorizeUrl(p: AuthorizeUrlParams): string {
-    const url = new URL(AUTH_ENDPOINT);
-    url.searchParams.set("client_id", this.config.google.clientId);
-    url.searchParams.set("redirect_uri", p.redirectUri);
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", SCOPE);
-    url.searchParams.set("state", p.state);
-    url.searchParams.set("code_challenge", p.codeChallenge);
-    url.searchParams.set("code_challenge_method", "S256");
-    url.searchParams.set("access_type", "online");
-    url.searchParams.set("prompt", "select_account");
-    if (p.loginHint) url.searchParams.set("login_hint", p.loginHint);
-    return url.toString();
-  }
-
-  async exchangeWebCode(code: string, codeVerifier: string, redirectUri: string): Promise<GoogleProfile> {
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      code_verifier: codeVerifier,
-      redirect_uri: redirectUri,
-      client_id: this.config.google.clientId,
-      client_secret: this.config.google.clientSecret,
-    });
-    return this.exchange(body);
-  }
 
   async exchangeMobileCode(code: string): Promise<GoogleProfile> {
     // Mobile clients are public (PKCE, no secret). client_id selection per platform

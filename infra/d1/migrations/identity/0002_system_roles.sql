@@ -1,12 +1,14 @@
 -- namespace: identity | owner: identity-roster (#3)
--- Reference data: default org (org_devhub = DUB_DEFAULT_ORG_ID) + 3 system roles
--- (admin/organizer/member) with α-decided permission bundles. Demo USERS are NOT
--- here (they belong to seed #28, so prod never gets demo accounts). Deterministic
--- fixed ids/timestamp. Idempotent via INSERT OR IGNORE.
+-- Reference data: default org (org_devhub = DUB_DEFAULT_ORG_ID) + system roles
+-- (admin/maintainer/organizer/member) with α-decided permission bundles. Demo USERS
+-- are NOT here (they belong to seed #28, so prod never gets demo accounts).
+-- Deterministic fixed ids/timestamp. Idempotent via INSERT OR IGNORE.
 INSERT OR IGNORE INTO identity_orgs (id, name, created_at) VALUES ('org_devhub', 'DevelopersHub', '2026-01-01T00:00:00.000Z');
 
 INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
   VALUES ('role_sys_admin', 'org_devhub', 'admin', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
+  VALUES ('role_sys_maintainer', 'org_devhub', 'maintainer', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
 INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
   VALUES ('role_sys_organizer', 'org_devhub', 'organizer', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
 INSERT OR IGNORE INTO identity_roles (id, org_id, name, is_system, created_at, updated_at)
@@ -22,6 +24,22 @@ INSERT OR IGNORE INTO identity_role_permissions (role_id, permission_key) VALUES
   ('role_sys_admin','chat:create'),('role_sys_admin','chat:moderate'),
   ('role_sys_admin','infra:read'),('role_sys_admin','infra:deploy'),('role_sys_admin','infra:dns'),
   ('role_sys_admin','infra:admin'),('role_sys_admin','audit:read');
+
+-- maintainer: full operational + editing power, but NO org administration
+-- (no identity:admin / infra:admin / infra:dns / *:admin integration surfaces).
+INSERT OR IGNORE INTO identity_role_permissions (role_id, permission_key) VALUES
+  ('role_sys_maintainer','identity:read'),
+  ('role_sys_maintainer','event:read'),('role_sys_maintainer','event:write'),('role_sys_maintainer','event:admin'),
+  ('role_sys_maintainer','task:read'),('role_sys_maintainer','task:write'),('role_sys_maintainer','task:delete'),
+  ('role_sys_maintainer','file:read'),('role_sys_maintainer','file:write'),
+  ('role_sys_maintainer','notif:send'),('role_sys_maintainer','notif:admin'),
+  ('role_sys_maintainer','mail:send'),('role_sys_maintainer','mail:read'),
+  ('role_sys_maintainer','chat:create'),('role_sys_maintainer','chat:moderate'),
+  ('role_sys_maintainer','infra:read'),('role_sys_maintainer','infra:deploy'),
+  ('role_sys_maintainer','audit:read'),
+  ('role_sys_maintainer','github:read'),('role_sys_maintainer','github:write'),('role_sys_maintainer','github:sync'),
+  ('role_sys_maintainer','drive:read'),('role_sys_maintainer','drive:write'),
+  ('role_sys_maintainer','webhook:read');
 
 INSERT OR IGNORE INTO identity_role_permissions (role_id, permission_key) VALUES
   ('role_sys_organizer','identity:read'),

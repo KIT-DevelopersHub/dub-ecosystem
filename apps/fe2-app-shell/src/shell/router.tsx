@@ -16,7 +16,6 @@ import { RequireAuth, RequirePermission } from "../auth/AuthProvider.tsx";
 import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
-import { AuthCallbackScreen } from "./screens/AuthCallbackScreen.tsx";
 import { HomeScreen } from "./screens/HomeScreen.tsx";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 
@@ -53,12 +52,6 @@ export function createShellRouter(
     getParentRoute: () => rootRoute,
     path: "/login",
     component: () => <LoginScreen api={api} />,
-  });
-
-  const callbackRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/auth/callback",
-    component: () => <AuthCallbackScreen api={api} onResolved={opts?.onNavigate} />,
   });
 
   // Authenticated shell layout wraps the home screen and all feature routes.
@@ -99,7 +92,6 @@ export function createShellRouter(
 
   const routeTree = rootRoute.addChildren([
     loginRoute,
-    callbackRoute,
     shellRoute.addChildren([homeRoute, ...featureRoutes]),
   ]);
 

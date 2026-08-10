@@ -18,9 +18,6 @@ export interface Deps {
   audit: Auditor;
   passwords: PasswordStore;
   rateLimiter: RateLimiter;
-  kvPut: (key: string, value: string, ttlSec: number) => Promise<void>;
-  kvGet: (key: string) => Promise<string | null>;
-  kvDelete: (key: string) => Promise<void>;
 }
 
 /** Wire the production dependencies from Worker bindings. */
@@ -38,8 +35,5 @@ export function buildDeps(env: Env): Deps {
     audit: new OutboxAuditor(env.OUTBOX_DB),
     passwords: new KvPasswordStore(env.AUTH_KV),
     rateLimiter: new KvRateLimiter({ get: kvGet, put: kvPut, delete: kvDelete }),
-    kvPut,
-    kvGet,
-    kvDelete,
   };
 }
