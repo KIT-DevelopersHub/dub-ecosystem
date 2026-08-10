@@ -24,6 +24,18 @@ import type { GatewayEnv } from "../../services/api-gateway/src/env";
 import { createApp as createIdentityApp, MemIdentityRepo, seedReferenceData } from "../../services/identity-roster/src/index";
 import { createApp as createEventApp, InMemoryEventRepo } from "../../services/event-service/src/index";
 import type { AppDeps as EventAppDeps } from "../../services/event-service/src/index";
+import {
+  createApp as createDeployApp,
+  handleDeployJobs,
+  createInMemoryDeployRepo,
+} from "../../services/deploy-service/src/index";
+import type {
+  Deps as DeployDeps,
+  CfClient as DeployCfClient,
+  AuditGateway as DeployAuditGateway,
+  EventBus as DeployEventBus,
+  DeployJobMessage,
+} from "../../services/deploy-service/src/index";
 import { createAuthClient } from "@dub/auth-client";
 import { buildApp as buildAuthApp } from "../../services/auth-service/src/app";
 import { SessionService } from "../../services/auth-service/src/sessions";
@@ -239,6 +251,103 @@ function makeEventAuthz(identityFetcher: Fetcher): EventAppDeps["authz"] {
     serviceName: "event-service",
     mode: "trustedHeader",
   }) as unknown as EventAppDeps["authz"];
+}
+
+// ============================ deploy (REAL) ============================
+// Wires the REAL deploy-service Hono app + all 7 routes against the exported
+// in-memory repo, a fake CF control plane (Pages deploys settle `live` at once),
+// audit records flowing into stores.audit, and the private deploy-jobs queue drained
+// in-process. Permissions resolve against the REAL identity roster (admin => full
+// infra:*, organizer => infra:read). This replaces the former inert SVC_DEPLOY stub
+// so the deploy endpoints are exercised end-to-end through the gateway.
+function buildDeploy(identityFetcher: Fetcher, stores: Stores): Fetcher {
+  const repo = createInMemoryDeployRepo();
+  repo.seedAllowedZone({ zoneId: "zone_devhub", zoneName: "devhub.test", registrarManaged: true });
+
+  const auth = createAuthClient({ identityBinding: identityFetcher, serviceName: "deploy-service" });
+
+  const cf: DeployCfClient = {
+    createPagesDeployment: async () => ({
+      cfDeploymentId: newId("cfdep"),
+      status: "live",
+      url: "https://preview.pages.dev",
+    }),
+    getPagesDeployment: async () => ({
+      cfDeploymentId: "cfdep",
+      status: "live",
+      url: "https://preview.pages.dev",
+    }),
+    createDnsRecord: async (i) => ({ id: newId("cfrec"), zone: i.zone, type: i.type, name: i.name, content: i.content }),
+    listZones: async () => [{ zoneId: "zone_devhub", zoneName: "devhub.test", status: "active", registrarManaged: true }],
+  };
+
+  const pushAudit = (rec: Record<string, unknown>): string => {
+    const id = newId("audit");
+    stores.audit.push({ id, recordedAt: nowIso(), occurredAt: nowIso(), orgId: ORG, ...rec } as (typeof stores.audit)[number]);
+    return id;
+  };
+  const audit: DeployAuditGateway = {
+    recordIntent: async (ctx, input) =>
+      pushAudit({
+        action: input.action,
+        actorId: input.actorId,
+        result: "intent",
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        details: input.details,
+        requestId: ctx.requestId,
+      }),
+    recordResult: async (ctx, input) => {
+      pushAudit({
+        action: input.action,
+        actorId: input.actorId,
+        result: input.result,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        details: { ...(input.details ?? {}), intent_id: input.intentId },
+        requestId: ctx.requestId,
+      });
+    },
+  };
+
+  const events: DeployEventBus = {
+    deploymentStatusChanged: async () => {},
+    dnsRecordChanged: async () => {},
+  };
+
+  const pending: DeployJobMessage[] = [];
+  const deps: DeployDeps = {
+    repo,
+    cf,
+    audit,
+    auth,
+    events,
+    enqueueJob: async (msg) => void pending.push(msg),
+  };
+  const app = createDeployApp(() => deps);
+  const env = {} as never; // deploy makeDeps ignores env (deps are injected)
+
+  // Drain the private deploy-jobs queue in-process. The fake CF settles `live` on the
+  // first execute pass, so no poll job is re-enqueued; the guard bounds any surprise.
+  const drain = async (): Promise<void> => {
+    let guard = 0;
+    while (pending.length > 0 && guard++ < 50) {
+      const batch = pending.splice(0, pending.length);
+      const wrapped = { messages: batch.map((body) => ({ body, ack() {}, retry() {} })) };
+      await handleDeployJobs(wrapped as never, env, () => deps);
+    }
+  };
+
+  return {
+    fetch: async (req: Request) => {
+      const res = await app.fetch(req, env, execCtx);
+      // The response body was already serialized (a queued 202 stays queued on the
+      // wire); draining now advances the deployment to its terminal state so a later
+      // GET observes `live` — faithful async execution, not a stub.
+      await drain();
+      return res;
+    },
+  } as unknown as Fetcher;
 }
 
 // ============================ STUBS (in-memory) ============================
@@ -485,6 +594,7 @@ export async function createHarness(opts: HarnessOptions = {}): Promise<Harness>
   const task = taskStub(stores);
   const notif = opts.breakNotification ? failingStub() : notificationStub(stores);
   const audit = auditStub(stores, identity);
+  const deploy = buildDeploy(identity, stores);
   const inert = inertStub();
 
   const env: GatewayEnv = {
@@ -497,7 +607,7 @@ export async function createHarness(opts: HarnessOptions = {}): Promise<Harness>
     SVC_FILE_META: inert,
     SVC_DRIVE_PROXY: inert,
     SVC_CHAT: inert,
-    SVC_DEPLOY: inert,
+    SVC_DEPLOY: deploy,
     SVC_GITHUB_SYNC: inert,
     SVC_AUDIT_LOG: audit,
     SVC_WEBHOOK_INGEST: inert,
