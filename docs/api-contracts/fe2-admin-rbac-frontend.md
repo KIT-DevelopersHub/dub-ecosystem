@@ -81,6 +81,41 @@ Non-2xx must return the standard envelope `{ error: { code, message, retryable, 
    of the user's role permissions (server-resolved). The demo computes this from
    the assigned roles; production resolves it in identity-roster.
 
+## Email Routing tab (メールアドレス管理)
+
+A second admin tool in the same console: manage the org's `@developershub.jp`
+addresses backed by **Cloudflare Email Routing** (each managed address = one
+Email Routing rule forwarding `localPart@developershub.jp` → `destination`).
+Reached from the launcher, **gated on `mail:admin`** (admin + maintainer hold it
+in the demo). UI: `EmailRoutingPage` + `NewEmailAddressDialog` (FE7). Backend is
+the separate Email Routing proxy service.
+
+| Action | Method & path | Permission | Request | Success | Errors |
+|---|---|---|---|---|---|
+| list | `GET /api/v1/admin/email-routing/addresses` | `mail:admin` | – | `Paginated<EmailRoutingAddress>` | – |
+| issue | `POST /api/v1/admin/email-routing/addresses` | `mail:admin` | `{ localPart, destination }` | `EmailRoutingAddress` (`enabled:true`) | `400` bad localPart (`^[a-z0-9._-]+$`) / bad destination email; `409` duplicate localPart |
+| enable/disable · repoint | `PATCH /api/v1/admin/email-routing/addresses/:id` | `mail:admin` | `{ enabled?, destination? }` | `EmailRoutingAddress` | `400` bad destination; `404` |
+| delete | `DELETE /api/v1/admin/email-routing/addresses/:id` | `mail:admin` | – | `204` | `404` |
+
+```ts
+interface EmailRoutingAddress {
+  id: string;          // Email Routing rule id
+  localPart: string;   // "info"
+  address: string;     // "info@developershub.jp" (server-derived)
+  destination: string; // forward-to address
+  enabled: boolean;    // rule enabled / paused
+  createdAt: string;   // ISO8601
+}
+```
+
+The org domain is fixed (`developershub.jp`); only the local part is client-set.
+Types are modeled in `apps/fe7-admin-roster/src/contracts/pending.ts`
+(`EmailRoutingAddress` / `CreateEmailAddressRequest` / `UpdateEmailAddressRequest`,
+`EMAIL_ROUTING_DOMAIN`) until the proxy service publishes them. The example
+paths the coordinator named (`/api/v1/admin/email-routing/addresses` and `/rules`)
+map to this surface — addresses are the primary resource; a "rule" is the
+Cloudflare object each address corresponds to.
+
 ## Not covered by this PR (backend to implement)
 
 The real `/api/v1/identity/*` + `/api/v1/audit/logs` handlers behind the gateway,

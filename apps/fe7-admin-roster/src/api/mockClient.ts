@@ -5,7 +5,8 @@
 import { identity } from "@dub/types"; // value import: identity.PERMISSION_CATALOG (runtime) + types
 import type { common, auditLog, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress } from "../contracts/pending";
+import { EMAIL_ROUTING_DOMAIN } from "../contracts/pending";
 import { CLEAR_MAIL_RATE_LIMIT, type MailRateLimitStatus, type MailStatusResponse } from "../lib/mailStatus";
 
 function err(code: string, message: string, details?: unknown): ErrorResponse {
@@ -25,6 +26,7 @@ interface MockState {
   roles: Map<string, identity.Role>;
   assignments: Map<string, RoleAssignment[]>; // userId -> assignments
   audits: auditLog.AuditRecord[];
+  emailAddresses: EmailRoutingAddress[];
   me: gateway.MeResponse;
   mailRateLimit: MailRateLimitStatus;
 }
@@ -33,7 +35,7 @@ const ORG = "org_devhub";
 
 function seedState(seed?: MockSeed): MockState {
   const roles = new Map<string, identity.Role>([
-    ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read"], isSystem: true }],
+    ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"], isSystem: true }],
     ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read"], isSystem: true }],
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
   ]);
@@ -49,13 +51,18 @@ function seedState(seed?: MockSeed): MockState {
   const audits: auditLog.AuditRecord[] = [
     { id: "aud_1", action: "identity.role.assigned", actorId: "user_alice", orgId: ORG, result: "success", resourceType: "user", resourceId: "user_bob", details: { roleId: "role_member" }, requestId: "req_1", occurredAt: now(), recordedAt: now() },
   ];
+  const emailAddresses: EmailRoutingAddress[] = [
+    { id: "eml_1", localPart: "info", address: `info@${EMAIL_ROUTING_DOMAIN}`, destination: "staff@example.com", enabled: true, createdAt: now() },
+    { id: "eml_2", localPart: "support", address: `support@${EMAIL_ROUTING_DOMAIN}`, destination: "help@example.com", enabled: true, createdAt: now() },
+    { id: "eml_3", localPart: "noreply", address: `noreply@${EMAIL_ROUTING_DOMAIN}`, destination: "void@example.com", enabled: false, createdAt: now() },
+  ];
   const me: gateway.MeResponse = seed?.me ?? {
     user: { id: "user_alice", displayName: "Alice Admin", avatarUrl: null },
     orgId: ORG,
-    permissions: ["identity:read", "identity:admin", "audit:read", "event:read"],
+    permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"],
     sessionExpiresAt: Date.now() + 3600_000,
   };
-  return { users, roles, assignments, audits, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT };
+  return { users, roles, assignments, audits, emailAddresses, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT };
 }
 
 function paginate<T>(items: T[]): common.Paginated<T> {
@@ -91,6 +98,9 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       const u = s.users.get(userMatch[1]!);
       if (!u) throw err("NOT_FOUND", "user not found");
       return u as unknown as T;
+    }
+    if (path.endsWith("/admin/email-routing/addresses")) {
+      return paginate([...s.emailAddresses]) as unknown as T;
     }
     if (path.endsWith("/audit/logs")) {
       const action = (query?.action as string | undefined) ?? "identity.";
@@ -150,6 +160,27 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       s.assignments.set(userId, [...list, asg]);
       return asg as unknown as T;
     }
+    if (path.endsWith("/admin/email-routing/addresses")) {
+      const req = body as { localPart: string; destination: string };
+      const localPart = req.localPart?.trim().toLowerCase();
+      if (!localPart || !/^[a-z0-9._-]+$/.test(localPart)) {
+        throw err("VALIDATION_FAILED", "invalid local part", [{ field: "localPart", reason: "format" }]);
+      }
+      if (!EMAIL_RE.test(req.destination ?? "")) {
+        throw err("VALIDATION_FAILED", "invalid destination", [{ field: "destination", reason: "format" }]);
+      }
+      if (s.emailAddresses.some((a) => a.localPart === localPart)) throw err("CONFLICT", "address already exists");
+      const addr: EmailRoutingAddress = {
+        id: `eml_${Math.random().toString(36).slice(2, 8)}`,
+        localPart,
+        address: `${localPart}@${EMAIL_ROUTING_DOMAIN}`,
+        destination: req.destination,
+        enabled: true,
+        createdAt: now(),
+      };
+      s.emailAddresses.push(addr);
+      return addr as unknown as T;
+    }
     throw err("NOT_FOUND", `unhandled POST ${path}`);
   }
 
@@ -173,6 +204,18 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       s.users.set(u.id, updated);
       return stripDetail(updated) as unknown as T;
     }
+    const emailMatch = path.match(/\/admin\/email-routing\/addresses\/([^/]+)$/);
+    if (emailMatch) {
+      const addr = s.emailAddresses.find((a) => a.id === emailMatch[1]!);
+      if (!addr) throw err("NOT_FOUND", "address not found");
+      const req = body as { enabled?: boolean; destination?: string };
+      if (req.destination !== undefined) {
+        if (!EMAIL_RE.test(req.destination)) throw err("VALIDATION_FAILED", "invalid destination", [{ field: "destination", reason: "format" }]);
+        addr.destination = req.destination;
+      }
+      if (req.enabled !== undefined) addr.enabled = req.enabled;
+      return addr as unknown as T;
+    }
     throw err("NOT_FOUND", `unhandled PATCH ${path}`);
   }
 
@@ -190,6 +233,11 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       const [, userId, asgId] = asgMatch;
       const list = s.assignments.get(userId!) ?? [];
       s.assignments.set(userId!, list.filter((a) => a.id !== asgId));
+      return;
+    }
+    const emailMatch = path.match(/\/admin\/email-routing\/addresses\/([^/]+)$/);
+    if (emailMatch) {
+      s.emailAddresses = s.emailAddresses.filter((a) => a.id !== emailMatch[1]!);
       return;
     }
     throw err("NOT_FOUND", `unhandled DELETE ${path}`);

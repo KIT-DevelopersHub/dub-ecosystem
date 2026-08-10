@@ -147,3 +147,49 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(after.items[0]!.action).toBe("identity.role.created");
   });
 });
+
+// メールアドレス管理 (Cloudflare Email Routing @developershub.jp) tab.
+describe("admin email routing (@developershub.jp address management)", () => {
+  interface Addr { id: string; localPart: string; address: string; destination: string; enabled: boolean }
+  interface Page<T> { items: T[] }
+  const BASE = "/api/v1/admin/email-routing/addresses";
+  const list = (a: ReturnType<typeof api>) => a.request<Page<Addr>>({ method: "GET", path: BASE });
+
+  it("the demo admin holds mail:admin (so the tab is reachable) and lists @developershub.jp addresses", async () => {
+    const a = api();
+    const me = await a.auth.me();
+    expect(me.permissions).toContain("mail:admin");
+    const addrs = await list(a);
+    expect(addrs.items.length).toBeGreaterThan(0);
+    expect(addrs.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
+  });
+
+  it("issue: POST creates an address; bad local part and bad destination 400", async () => {
+    const a = api();
+    const before = (await list(a)).items.length;
+    const created = await a.request<Addr>({ method: "POST", path: BASE, body: { localPart: "events", destination: "team@example.com" } });
+    expect(created.address).toBe("events@developershub.jp");
+    expect(created.enabled).toBe(true);
+    expect((await list(a)).items.length).toBe(before + 1);
+
+    for (const bad of [{ localPart: "Bad Space", destination: "team@example.com" }, { localPart: "ok", destination: "not-an-email" }]) {
+      let e: unknown;
+      try {
+        await a.request({ method: "POST", path: BASE, body: bad });
+      } catch (err) {
+        e = err;
+      }
+      expect((e as ApiError).status).toBe(400);
+    }
+  });
+
+  it("enable/disable via PATCH and delete via DELETE persist", async () => {
+    const a = api();
+    const target = (await list(a)).items.find((x) => x.enabled)!;
+    const toggled = await a.request<Addr>({ method: "PATCH", path: `${BASE}/${target.id}`, body: { enabled: false } });
+    expect(toggled.enabled).toBe(false);
+
+    await a.request({ method: "DELETE", path: `${BASE}/${target.id}` });
+    expect((await list(a)).items.some((x) => x.id === target.id)).toBe(false);
+  });
+});

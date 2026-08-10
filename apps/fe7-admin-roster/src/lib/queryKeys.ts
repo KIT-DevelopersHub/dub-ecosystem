@@ -19,4 +19,5 @@ export const queryKeys = {
   audit: (filters: AuditFilters) => [ADMIN_QK, "audit", "list", filters] as const,
   events: () => [ADMIN_QK, "events", "scope-options"] as const,
   mailStatus: () => [ADMIN_QK, "mail", "status"] as const,
+  emailAddresses: () => [ADMIN_QK, "email-routing", "list"] as const,
 } as const;

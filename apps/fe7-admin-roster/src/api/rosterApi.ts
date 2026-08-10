@@ -9,6 +9,9 @@ import type {
   UpdateRoleRequest,
   AssignRoleRequest,
   RoleAssignment,
+  EmailRoutingAddress,
+  CreateEmailAddressRequest,
+  UpdateEmailAddressRequest,
 } from "../contracts/pending";
 import { buildListUsersParams, type UserListFilters } from "../lib/listUsersQuery";
 import { buildAuditQuery, type AuditFilters } from "../lib/auditQuery";
@@ -16,6 +19,7 @@ import type { MailStatusResponse } from "../lib/mailStatus";
 
 const BASE = "/api/v1";
 const IDENTITY = `${BASE}/identity`;
+const EMAIL_ROUTING = `${BASE}/admin/email-routing`;
 
 export interface RosterApi {
   listUsers(filters: UserListFilters): Promise<common.Paginated<identity.IdentityUser>>;
@@ -37,6 +41,11 @@ export interface RosterApi {
   auditLogs(filters: AuditFilters): Promise<auditLog.AuditLogPage>;
   /** Mail-gateway rate-limit status, via the gateway boundary (proxied to /internal/status). */
   mailStatus(): Promise<MailStatusResponse>;
+  // ---- Email Routing (@developershub.jp address management) ----
+  listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
+  createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
+  updateEmailAddress(id: string, req: UpdateEmailAddressRequest): Promise<EmailRoutingAddress>;
+  deleteEmailAddress(id: string): Promise<void>;
 }
 
 export function createRosterApi(client: ResourceClient): RosterApi {
@@ -67,5 +76,9 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     auditLogs: (filters) =>
       client.get<auditLog.AuditLogPage>(`${BASE}/audit/logs`, { ...buildAuditQuery(filters) }),
     mailStatus: () => client.get<MailStatusResponse>(`${BASE}/mail/status`),
+    listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/addresses`),
+    createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses`, req),
+    updateEmailAddress: (id, req) => client.patch<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses/${id}`, req),
+    deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/addresses/${id}`),
   };
 }

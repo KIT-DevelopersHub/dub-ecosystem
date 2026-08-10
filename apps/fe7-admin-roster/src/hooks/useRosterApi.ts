@@ -17,6 +17,9 @@ import type {
   UpdateRoleRequest,
   AssignRoleRequest,
   RoleAssignment,
+  EmailRoutingAddress,
+  CreateEmailAddressRequest,
+  UpdateEmailAddressRequest,
 } from "../contracts/pending";
 
 // ---- queries ----
@@ -179,5 +182,55 @@ export function useInviteUser() {
   return useMutation({
     mutationFn: (req: identity.InviteUserRequest) => api.inviteUser(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users"] }),
+  });
+}
+
+// ---- Email Routing (@developershub.jp address management) ----
+
+export function useEmailAddresses(): UseQueryResult<common.Paginated<EmailRoutingAddress>> {
+  const { api } = useRosterContext();
+  return useQuery({ queryKey: queryKeys.emailAddresses(), queryFn: () => api.listEmailAddresses() });
+}
+
+/** NON-optimistic: issue a new @developershub.jp address (create Email Routing rule). */
+export function useCreateEmailAddress() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateEmailAddressRequest) => api.createEmailAddress(req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+  });
+}
+
+/** NON-optimistic: enable/disable or re-point an address (patch the rule). */
+export function useUpdateEmailAddress() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (input: { id: string; req: UpdateEmailAddressRequest }) => api.updateEmailAddress(input.id, input.req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+    onError: (err) => {
+      const p = presentError(err);
+      toast({ kind: "error", title: "更新に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
+}
+
+/** NON-optimistic: delete an address (destructive; called after ConfirmDialog). */
+export function useDeleteEmailAddress() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteEmailAddress(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() });
+      toast({ kind: "success", title: "アドレスを削除しました" });
+    },
+    onError: (err) => {
+      const p = presentError(err);
+      toast({ kind: "error", title: "削除に失敗しました", description: "message" in p ? p.message : undefined });
+    },
   });
 }

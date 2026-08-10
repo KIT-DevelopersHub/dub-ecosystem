@@ -45,6 +45,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "notif:prefs:self",
   "mail:read",
   "mail:send",
+  "mail:admin",
   "chat:create",
   "audit:read",
 ];
@@ -212,6 +213,7 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
   "file:write",
   "mail:read",
   "mail:send",
+  "mail:admin",
   "chat:create",
   "chat:moderate",
   "github:read",
@@ -256,7 +258,25 @@ const SEED_AUDITS: auditLog.AuditRecord[] = [
   { id: "aud_2", action: "identity.role.assigned", actorId: ME_ID, orgId: ORG, result: "success", resourceType: "user", resourceId: "usr_carol", details: { roleId: "role_member" }, requestId: "req_2", occurredAt: isoNow(), recordedAt: isoNow() },
 ];
 
+// Email Routing (@developershub.jp) seed — managed addresses / forwarding rules.
+const EMAIL_DOMAIN = "developershub.jp";
+interface DemoEmailAddress {
+  id: string;
+  localPart: string;
+  address: string;
+  destination: string;
+  enabled: boolean;
+  createdAt: string;
+}
+const SEED_EMAIL_ADDRESSES: DemoEmailAddress[] = [
+  { id: "eml_info", localPart: "info", address: `info@${EMAIL_DOMAIN}`, destination: "staff@example.com", enabled: true, createdAt: isoNow() },
+  { id: "eml_support", localPart: "support", address: `support@${EMAIL_DOMAIN}`, destination: "help@example.com", enabled: true, createdAt: isoNow() },
+  { id: "eml_press", localPart: "press", address: `press@${EMAIL_DOMAIN}`, destination: "pr@example.com", enabled: true, createdAt: isoNow() },
+  { id: "eml_noreply", localPart: "noreply", address: `noreply@${EMAIL_DOMAIN}`, destination: "void@example.com", enabled: false, createdAt: isoNow() },
+];
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LOCALPART_RE = /^[a-z0-9._-]+$/;
 
 /** A normalized error envelope so the api-client surfaces a meaningful message. */
 function problem(code: string, message: string, status: number, details?: unknown): Response {
@@ -274,6 +294,7 @@ function createRosterStore() {
   const assignments: Record<string, DemoRoleAssignment[]> = {};
   for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
   const audits: auditLog.AuditRecord[] = SEED_AUDITS.map((a) => ({ ...a }));
+  const emails: DemoEmailAddress[] = SEED_EMAIL_ADDRESSES.map((a) => ({ ...a }));
 
   const rid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
   const summaries = (): identity.UserSummary[] => users.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
@@ -317,6 +338,7 @@ function createRosterStore() {
       if (pathname === "/api/v1/mail/status") {
         return json({ service: "mail-gateway", provider: "resend", rateLimit: { active: false, cooldownSec: 60 } });
       }
+      if (pathname === "/api/v1/admin/email-routing/addresses") return json(page(emails));
       return null;
     }
 
@@ -357,6 +379,16 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         return json(user);
       }
+      if (pathname === "/api/v1/admin/email-routing/addresses") {
+        const req = body as { localPart?: string; destination?: string };
+        const localPart = req?.localPart?.trim().toLowerCase() ?? "";
+        if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
+        if (!EMAIL_RE.test(req?.destination ?? "")) return problem("VALIDATION_FAILED", "転送先のメール形式が不正です", 400, [{ field: "destination", reason: "format" }]);
+        if (emails.some((a) => a.localPart === localPart)) return problem("CONFLICT", "同名のアドレスが既に存在します", 409);
+        const addr: DemoEmailAddress = { id: rid("eml"), localPart, address: `${localPart}@${EMAIL_DOMAIN}`, destination: req!.destination!, enabled: true, createdAt: new Date().toISOString() };
+        emails.push(addr);
+        return json(addr);
+      }
       return null;
     }
 
@@ -383,6 +415,20 @@ function createRosterStore() {
           Object.assign(u, req, { updatedAt: new Date().toISOString() });
           audit("identity.user.updated", "user", u.id, {});
           return json(u);
+        }
+      }
+      {
+        const id = seg(/^\/api\/v1\/admin\/email-routing\/addresses\/([^/]+)$/);
+        if (id) {
+          const addr = emails.find((a) => a.id === id);
+          if (!addr) return problem("NOT_FOUND", "address not found", 404);
+          const req = body as { enabled?: boolean; destination?: string };
+          if (req?.destination !== undefined) {
+            if (!EMAIL_RE.test(req.destination)) return problem("VALIDATION_FAILED", "転送先のメール形式が不正です", 400, [{ field: "destination", reason: "format" }]);
+            addr.destination = req.destination;
+          }
+          if (req?.enabled !== undefined) addr.enabled = req.enabled;
+          return json(addr);
         }
       }
       return null;
@@ -415,6 +461,14 @@ function createRosterStore() {
             }
             audit("identity.role.revoked", "user", userId, { assignmentId: asgId });
           }
+          return json(null, 204);
+        }
+      }
+      {
+        const id = seg(/^\/api\/v1\/admin\/email-routing\/addresses\/([^/]+)$/);
+        if (id) {
+          const idx = emails.findIndex((a) => a.id === id);
+          if (idx >= 0) emails.splice(idx, 1);
           return json(null, 204);
         }
       }
