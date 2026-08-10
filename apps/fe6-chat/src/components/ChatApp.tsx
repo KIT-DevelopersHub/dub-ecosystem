@@ -1,5 +1,6 @@
-// Top-level chat screen: channel list + active channel. In admin-spa the routes
-// in feature.tsx drive channel selection via TanStack Router params; standalone we
+// Top-level chat screen: workspace rail + channel sidebar + active channel +
+// (when a thread is open) the right thread pane. In admin-spa the routes in
+// feature.tsx drive channel selection via TanStack Router params; standalone we
 // keep selection in local state and persist the last channel (design §3).
 import { useCallback, useEffect, useState } from "react";
 import type { common } from "@dub/types";
@@ -17,6 +18,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const setUnread = useChatStore((s) => s.setUnread);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [active, setActive] = useState<common.ChannelId | null>(initialChannelId ?? null);
+  const [threadOpen, setThreadOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,7 +29,6 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
       setUnread(unreadList);
       setActive((cur) => {
         if (cur) return cur;
-        // eventId query resolves to that event's channel (design §2-1 /chat?eventId=)
         if (eventId) {
           const evChannel = list.find((c) => c.eventId === eventId);
           if (evChannel) return evChannel.id;
@@ -48,7 +49,21 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   }, []);
 
   return (
-    <div className={styles.layout} data-testid="fe6-chat-app">
+    <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-testid="fe6-chat-app">
+      {/* leftmost workspace / team rail */}
+      <div className={styles.rail} aria-label="ワークスペース">
+        <button type="button" className={`${styles.railTile} ${styles.active}`} aria-label="DevHub ワークスペース" title="DevHub">
+          D
+        </button>
+        <button type="button" className={`${styles.railTile} ${styles.ghost}`} aria-label="ワークスペースを追加" title="追加">
+          ＋
+        </button>
+        <div className={styles.railSpacer} />
+        <button type="button" className={styles.railIconBtn} aria-label="自分" title="自分">
+          🙂
+        </button>
+      </div>
+
       <ChannelList
         channels={channels}
         unread={unread}
@@ -56,11 +71,12 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
         canCreate={can("chat:create")}
         onSelect={onSelect}
       />
+
       {active ? (
-        <ChannelPage key={active} channelId={active} />
+        <ChannelPage key={active} channelId={active} onThreadOpenChange={setThreadOpen} />
       ) : (
         <section className={styles.main}>
-          <div className={styles.dateDivider}>チャネルを選択してください</div>
+          <div className={styles.emptyState}>チャネルを選択してください</div>
         </section>
       )}
     </div>

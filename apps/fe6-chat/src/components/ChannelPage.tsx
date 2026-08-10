@@ -1,7 +1,9 @@
 /// <reference lib="dom" />
 // Container: wires channel detail + timeline + composer + connection/archived
-// banner + read tracking for one channel. Delete is confirmed (window.confirm as
-// the ConfirmDialog stand-in — FE1 ConfirmDialog when lifted into admin-spa).
+// banner + read tracking for one channel, plus the right-hand thread pane.
+// Delete is confirmed (window.confirm as the ConfirmDialog stand-in). The main
+// section and the ThreadPane are returned as sibling fragment children so both
+// land as columns of the ChatApp grid.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
@@ -15,9 +17,16 @@ import { ChannelHeader } from "./ChannelHeader";
 import { MessageTimeline } from "./MessageTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { ConnectionBanner } from "./ConnectionBanner";
+import { ThreadPane } from "./ThreadPane";
 import styles from "../styles/chat.module.css";
 
-export function ChannelPage({ channelId }: { channelId: common.ChannelId }) {
+export function ChannelPage({
+  channelId,
+  onThreadOpenChange,
+}: {
+  channelId: common.ChannelId;
+  onThreadOpenChange?: (open: boolean) => void;
+}) {
   const { api, can, currentUserId } = useChatRuntime();
   const view = useChannelView(channelId);
   const markRead = useChatStore((s) => s.markRead);
@@ -26,8 +35,17 @@ export function ChannelPage({ channelId }: { channelId: common.ChannelId }) {
   const [membership, setMembership] = useState<ChannelMember | null>(null);
   const [users, setUsers] = useState<Record<common.UserId, identity.UserSummary>>({});
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [thread, setThread] = useState<Message | null>(null);
 
   const canModerate = can("chat:moderate") || membership?.role === "admin";
+
+  useEffect(() => {
+    setThread(null);
+  }, [channelId]);
+
+  useEffect(() => {
+    onThreadOpenChange?.(thread !== null);
+  }, [thread, onThreadOpenChange]);
 
   // channel detail
   useEffect(() => {
@@ -61,7 +79,7 @@ export function ChannelPage({ channelId }: { channelId: common.ChannelId }) {
     };
   }, [api, view.state.messages, users]);
 
-  // read tracking: bottom visible -> debounced POST /read (skips hidden tab)
+  // read tracking
   const tracker = useRef<ReadTracker | null>(null);
   useEffect(() => {
     const t = new ReadTracker({
@@ -80,8 +98,6 @@ export function ChannelPage({ channelId }: { channelId: common.ChannelId }) {
     };
   }, [api, channelId, markRead]);
 
-  // when the newest message changes, treat the bottom as observed (simplified;
-  // a real IntersectionObserver drives this in the browser).
   const newestId = view.state.messages[view.state.messages.length - 1]?.id;
   useEffect(() => {
     if (newestId) tracker.current?.observeBottom(newestId);
@@ -91,7 +107,9 @@ export function ChannelPage({ channelId }: { channelId: common.ChannelId }) {
   const resolveMentionCandidates = useCallback(
     (query: string): identity.UserSummary[] => {
       const q = query.toLowerCase();
-      return Object.values(users).filter((u) => u.displayName.toLowerCase().includes(q)).slice(0, 8);
+      return Object.values(users)
+        .filter((u) => u.displayName.toLowerCase().includes(q))
+        .slice(0, 8);
     },
     [users],
   );
@@ -119,36 +137,53 @@ export function ChannelPage({ channelId }: { channelId: common.ChannelId }) {
   );
 
   const archived = channel?.archived ?? false;
-
   const bannerArchived = useMemo(() => archived, [archived]);
 
   return (
-    <section className={styles.main}>
-      {channel && <ChannelHeader channel={channel} canModerate={canModerate} />}
-      <ConnectionBanner status={view.state.rtStatus} />
-      {bannerArchived && <ConnectionBanner status={view.state.rtStatus} archived />}
-      <MessageTimeline
-        messages={view.state.messages}
-        pending={view.state.pending}
-        currentUserId={currentUserId}
-        canModerate={canModerate}
-        lastReadMessageId={view.state.lastReadMessageId}
-        hasOlder={view.state.nextCursor !== null}
-        resolveUser={resolveUser}
-        onLoadOlder={() => void view.loadOlder()}
-        onToggleReaction={(id, emoji) => void view.toggleReaction(id, emoji)}
-        onDelete={onDelete}
-        onResend={(id) => void view.resend(id)}
-        onDiscard={(id) => view.discard(id)}
-      />
-      <MessageComposer
-        channelId={channelId}
-        disabled={archived}
-        disabledReason="アーカイブ済みチャネルには投稿できません"
-        error={composerError}
-        resolveMentionCandidates={resolveMentionCandidates}
-        onSend={onSend}
-      />
-    </section>
+    <>
+      <section className={styles.main}>
+        {channel && <ChannelHeader channel={channel} canModerate={canModerate} />}
+        <ConnectionBanner status={view.state.rtStatus} />
+        {bannerArchived && <ConnectionBanner status={view.state.rtStatus} archived />}
+        <MessageTimeline
+          messages={view.state.messages}
+          pending={view.state.pending}
+          currentUserId={currentUserId}
+          canModerate={canModerate}
+          lastReadMessageId={view.state.lastReadMessageId}
+          hasOlder={view.state.nextCursor !== null}
+          resolveUser={resolveUser}
+          onLoadOlder={() => void view.loadOlder()}
+          onToggleReaction={(id, emoji) => void view.toggleReaction(id, emoji)}
+          onDelete={onDelete}
+          onReply={(m) => setThread(m)}
+          onOpenThread={(m) => setThread(m)}
+          onResend={(id) => void view.resend(id)}
+          onDiscard={(id) => view.discard(id)}
+        />
+        <MessageComposer
+          channelId={channelId}
+          disabled={archived}
+          disabledReason="アーカイブ済みチャネルには投稿できません"
+          placeholder={channel ? `#${channel.name} へメッセージ` : "メッセージを入力"}
+          error={composerError}
+          resolveMentionCandidates={resolveMentionCandidates}
+          onSend={onSend}
+        />
+      </section>
+
+      {thread && (
+        <ThreadPane
+          channelId={channelId}
+          root={thread}
+          currentUserId={currentUserId}
+          canModerate={canModerate}
+          resolveUser={resolveUser}
+          resolveMentionCandidates={resolveMentionCandidates}
+          onToggleReaction={(id, emoji) => void view.toggleReaction(id, emoji)}
+          onClose={() => setThread(null)}
+        />
+      )}
+    </>
   );
 }

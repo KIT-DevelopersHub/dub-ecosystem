@@ -13,7 +13,7 @@ describe("MockChatClient", () => {
   });
 
   it("lists channels and filters by eventId", async () => {
-    expect((await api.listChannels()).length).toBe(3);
+    expect((await api.listChannels()).length).toBe(8);
     const evChannels = await api.listChannels("evt_conf000000000000000000");
     expect(evChannels).toHaveLength(1);
     expect(evChannels[0]!.type).toBe("event");
@@ -91,7 +91,7 @@ describe("MockChatClient", () => {
     const res = await api.resolveUsers(ids);
     expect(res).toHaveLength(50);
     const known = await api.resolveUsers([OTHER]);
-    expect(known[0]!.displayName).toBe("運営メンバー");
+    expect(known[0]!.displayName).toBe("佐藤 花子");
   });
 
   it("issues a DO-direct ws ticket (doUrl absolute, gateway bypassed)", async () => {
