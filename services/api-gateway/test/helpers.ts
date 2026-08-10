@@ -1,4 +1,4 @@
-import type { Fetcher, Queue, ExecutionContext } from "@cloudflare/workers-types";
+import type { Fetcher, Queue, KVNamespace, ExecutionContext } from "@cloudflare/workers-types";
 import type { auth as authTypes } from "@dub/types";
 import type { ErrorResponse } from "@dub/errors";
 import type { GatewayEnv } from "../src/env";
@@ -85,6 +85,24 @@ export const execCtx = {
   waitUntil() {},
   passThroughOnException() {},
 } as unknown as ExecutionContext;
+
+/**
+ * In-memory KVNamespace fake covering the subset the gateway uses (get/put). Backed by
+ * a shared Map so two apps can point at the SAME store to simulate cross-isolate state.
+ * `expirationTtl` is accepted and ignored (tests drive time via the injectable clock).
+ */
+export function fakeKv(store: Map<string, string> = new Map()): { kv: KVNamespace; store: Map<string, string> } {
+  const kv = {
+    get: async (key: string) => (store.has(key) ? store.get(key)! : null),
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+    delete: async (key: string) => {
+      store.delete(key);
+    },
+  } as unknown as KVNamespace;
+  return { kv, store };
+}
 
 /** Build a full GatewayEnv; unspecified bindings are inert fetchers returning 200 {}. */
 export function makeEnv(overrides: Partial<GatewayEnv> = {}): GatewayEnv {
