@@ -14,6 +14,7 @@ export interface GatewayEnv {
   SVC_FILE_META: Fetcher;
   SVC_DRIVE_PROXY: Fetcher;
   SVC_CHAT: Fetcher;
+  SVC_MAIL_GATEWAY: Fetcher;
   SVC_DEPLOY: Fetcher;
   SVC_GITHUB_SYNC: Fetcher;
   SVC_AUDIT_LOG: Fetcher;

@@ -82,6 +82,59 @@ describe("POST /send", () => {
   });
 });
 
+describe("POST /outbox (user-facing compose)", () => {
+  it("401s without a trusted user header", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/outbox", { method: "POST", headers: headers(), body: JSON.stringify(sendBody) }), env);
+    expect(res.status).toBe(401);
+  });
+
+  it("403s when mail:send is denied", async () => {
+    const { env } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(false) });
+    const res = await app.fetch(
+      new Request("https://svc/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_bob" }), body: JSON.stringify(sendBody) }),
+      env,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("sends (202) for an authorized user with mail:send — no Idempotency-Key required", async () => {
+    const { env, sends } = makeEnv();
+    const res = await app.fetch(
+      new Request("https://svc/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify(sendBody) }),
+      env,
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as mail.SendMailResponse;
+    expect(body.messageId).toContain("@developershub.jp");
+    expect(sends.notif).toHaveLength(1);
+    expect(sends.notif[0]!.name).toBe("mail.message.sent");
+  });
+
+  it("400s on an invalid recipient", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(
+      new Request("https://svc/outbox", {
+        method: "POST",
+        headers: headers({ "x-dub-user-id": "usr_alice" }),
+        body: JSON.stringify({ to: [{ email: "nope" }], subject: "x", textBody: "y" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("dedupes on a repeated Idempotency-Key (二重送信ゼロ)", async () => {
+    const { env, sends } = makeEnv();
+    const h = headers({ "x-dub-user-id": "usr_alice", "x-dub-idempotency-key": "ob1" });
+    const first = await app.fetch(new Request("https://svc/outbox", { method: "POST", headers: h, body: JSON.stringify(sendBody) }), env);
+    expect(first.status).toBe(202);
+    const second = await app.fetch(new Request("https://svc/outbox", { method: "POST", headers: h, body: JSON.stringify(sendBody) }), env);
+    expect(second.status).toBe(200);
+    expect(sends.notif).toHaveLength(1);
+  });
+});
+
 describe("read routes", () => {
   it("401s without a trusted user header", async () => {
     const { env } = makeEnv();

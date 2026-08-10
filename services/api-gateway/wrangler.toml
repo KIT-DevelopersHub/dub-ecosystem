@@ -56,6 +56,10 @@ binding = "SVC_CHAT"
 service = "dub-chat-service"
 
 [[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "dub-mail-gateway"
+
+[[services]]
 binding = "SVC_DEPLOY"
 service = "dub-deploy-service"
 

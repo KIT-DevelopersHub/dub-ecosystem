@@ -24,10 +24,10 @@ function fakeApi(): { api: ApiClient; calls: RequestInput[] } {
 }
 
 describe("assembleFeatureModules", () => {
-  it("assembles the five features in canonical order", () => {
+  it("assembles the six features in canonical order", () => {
     const { api } = fakeApi();
     const modules = assembleFeatureModules(api);
-    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "admin"]);
+    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "mail", "admin"]);
   });
 
   it("merges into the shell registry with no duplicate route ownership", () => {
@@ -35,9 +35,20 @@ describe("assembleFeatureModules", () => {
     const registry = buildRegistry(assembleFeatureModules(api));
     const paths = registry.routes.map((r) => r.path);
     // core segments each feature owns
-    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/notifications", "/chat", "/admin/users"]));
+    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/notifications", "/chat", "/mail", "/admin/users"]));
     // no duplicates survived the flatten + ownership check
     expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("gates the mail routes: /mail on mail:read, /mail/compose on mail:send", () => {
+    const { api } = fakeApi();
+    const registry = buildRegistry(assembleFeatureModules(api));
+    const inbox = registry.routes.find((r) => r.path === "/mail");
+    const compose = registry.routes.find((r) => r.path === "/mail/compose");
+    expect(inbox?.requiredPermissions).toContain("mail:read");
+    expect(inbox?.auth).toBe("required");
+    expect(compose?.requiredPermissions).toContain("mail:send");
+    expect(compose?.auth).toBe("required");
   });
 
   it("splices FE4's real nested task routes under the FE3 events detail tree", () => {

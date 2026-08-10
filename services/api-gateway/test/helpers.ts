@@ -99,6 +99,7 @@ export function makeEnv(overrides: Partial<GatewayEnv> = {}): GatewayEnv {
     SVC_FILE_META: inert(),
     SVC_DRIVE_PROXY: inert(),
     SVC_CHAT: inert(),
+    SVC_MAIL_GATEWAY: inert(),
     SVC_DEPLOY: inert(),
     SVC_GITHUB_SYNC: inert(),
     SVC_AUDIT_LOG: inert(),
