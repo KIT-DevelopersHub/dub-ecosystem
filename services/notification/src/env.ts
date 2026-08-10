@@ -12,7 +12,10 @@ export interface Env {
   // --- queue producers ---
   AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13)
 
-  // --- service bindings (P0: identity/event live; mail/chat/push are stubs) ---
+  // --- service bindings ---
+  // identity/event are required. mail/chat/push are optional: their adapters call the
+  // real downstream port through this binding when present, and record "skipped"
+  // (detail=channel_not_wired) when the binding is absent — never a fake/stub delivery.
   SVC_IDENTITY: Fetcher; // roles expansion + email resolution + authz/check
   SVC_EVENT: Fetcher; // GET /events/:id/participants
   SVC_MAIL_GATEWAY?: Fetcher; // POST /send (absent = EmailAdapter -> skipped)
