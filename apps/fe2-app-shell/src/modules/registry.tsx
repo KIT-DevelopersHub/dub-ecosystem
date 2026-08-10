@@ -4,7 +4,7 @@
 // ownership is enforced: a duplicate route path is a STARTUP error (design 2-5).
 import type { identity } from "@dub/types";
 import type { ComponentType } from "react";
-import type { FeatureModule, FeatureRoute, NavEntry, Registry, ResolvedRoute } from "./types.tsx";
+import type { FeatureModule, FeatureRoute, HomeWidget, NavEntry, Registry, ResolvedRoute } from "./types.tsx";
 
 type PermissionKey = identity.PermissionKey;
 
@@ -33,6 +33,7 @@ export function buildRegistry(modules: FeatureModule[]): Registry {
   const routes: ResolvedRoute[] = [];
   const nav: NavEntry[] = [];
   const headerWidgets: ComponentType[] = [];
+  const homeWidgets: HomeWidget[] = [];
 
   for (const m of modules) {
     if (seenModuleIds.has(m.id)) {
@@ -42,6 +43,7 @@ export function buildRegistry(modules: FeatureModule[]): Registry {
     flatten(m.routes, m.id, m.requiredPermissions ?? [], routes);
     nav.push(...m.nav);
     if (m.headerWidget) headerWidgets.push(m.headerWidget);
+    if (m.homeWidget) homeWidgets.push(m.homeWidget);
   }
 
   // Segment ownership: duplicate route path across modules is a startup error.
@@ -55,7 +57,7 @@ export function buildRegistry(modules: FeatureModule[]): Registry {
   }
 
   nav.sort((a, b) => a.order - b.order);
-  return { modules: [...modules], nav, routes, headerWidgets };
+  return { modules: [...modules], nav, routes, headerWidgets, homeWidgets };
 }
 
 let current: Registry | null = null;

@@ -5,8 +5,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { actionTypeRegistry } from "@dub/fe3-event-action";
-import { registerTaskActionPlugin } from "@dub/fe4-task-gantt/src/features/task-gantt/public";
+// FE4 deep-import surface via the single boundary (composition/featureEntries.tsx).
+import { registerTaskActionPlugin } from "./composition/featureEntries.tsx";
 import { createApiClient } from "./lib/api-client.tsx";
+import { createMockFetch, isMockEnabled } from "./lib/mock-api-client.tsx";
 import { registerFeatureModules } from "./modules/registry.tsx";
 import { assembleFeatureModules } from "./composition/index.tsx";
 import { AppRoot } from "./shell/AppRoot.tsx";
@@ -14,11 +16,17 @@ import { createShellRouter } from "./shell/router.tsx";
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "https://api.developershub.jp";
 
+// Offline dev path: with VITE_API_MOCK=true the shell boots against a built-in
+// mock transport (no backend) — only fetch is swapped; the real api-client logic
+// runs unchanged. Default (unset) keeps the prod gateway wiring intact.
+const useMock = isMockEnabled(import.meta.env as { VITE_API_MOCK?: string });
+
 let redirectAfterLogin = "/";
 
 const api = createApiClient({
   baseUrl,
   requestIdFactory: () => crypto.randomUUID(),
+  ...(useMock ? { fetchImpl: createMockFetch() } : {}),
   onUnauthenticated: () => {
     redirectAfterLogin = globalThis.location.pathname + globalThis.location.search;
     router.navigate({ to: "/login" });

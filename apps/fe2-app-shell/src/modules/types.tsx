@@ -31,6 +31,19 @@ export interface FeatureModule {
   nav: NavEntry[];
   requiredPermissions?: PermissionKey[]; // applies to all module routes; fail-closed while /me loading
   headerWidget?: ComponentType; // e.g. FE5 NotificationBell
+  homeWidget?: HomeWidget; // dashboard body a feature contributes to HomeScreen (design 2-1)
+}
+
+/** A feature-contributed dashboard card. FE2 owns the HomeScreen frame; each
+ *  FE3–FE7 module may supply one body here (the comment on HomeScreen). The
+ *  shell renders it inside a titled frame with a per-widget error boundary, so
+ *  one failing widget never blanks the dashboard. `title` labels the frame;
+ *  `Body` is mounted already wrapped in the feature's runtime Provider (see
+ *  composition), so it may use the feature's own hooks. */
+export interface HomeWidget {
+  id: FeatureModuleId;
+  title: string;
+  Body: ComponentType;
 }
 
 /** Flattened route with module-level permissions merged in (shell-resolved). */
@@ -47,4 +60,5 @@ export interface Registry {
   nav: NavEntry[]; // sorted by order asc
   routes: ResolvedRoute[]; // flattened (children included)
   headerWidgets: ComponentType[];
+  homeWidgets: HomeWidget[]; // dashboard cards, in module registration order
 }
