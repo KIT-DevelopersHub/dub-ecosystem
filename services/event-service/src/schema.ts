@@ -1,6 +1,7 @@
 // D1 schema for the `event` namespace. Semantic source of truth for the physical
-// migration; the physical file belongs in infra/d1/migrations/event/ (theme12,
-// owned by infra-d1-seed #28 — NOT created here to respect unit boundaries).
+// migration, which is applied from infra/d1/migrations/event/0001_init.sql (owned
+// by infra-d1-seed). The two MUST stay byte-for-byte in lockstep: change this const
+// and that .sql together, or reads/writes here will drift from the deployed table.
 // Aligned to the FROZEN @dub/types event contract: no slug/venue (dropped in P0b);
 // created_by is an internal column (absent from the wire types, used for participants).
 import type { Migration } from "@dub/db";
