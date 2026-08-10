@@ -5,12 +5,17 @@ name = "dub-deploy-service"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
+# Internal service (no public hostname; mounted by api-gateway under /deploy). Never
+# expose a workers.dev route.
+workers_dev = false
 
 # --- D1 (shared dub-core DB; deploy_* namespace only) ---
+# database_id uses the repo-wide REPLACE_AT_APPLY sentinel: the real dub-core D1 id is
+# injected by infra (#27/#28) at Apply time and is never committed (secrets stay local).
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+database_id = "REPLACE_AT_APPLY"
 migrations_dir = "migrations"
 
 # --- Service Bindings (Service Binding calls only; never public) ---
