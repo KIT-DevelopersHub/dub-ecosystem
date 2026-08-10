@@ -22,7 +22,13 @@ import { assembleFeatureModules } from "./composition/index.tsx";
 import { AppRoot } from "./shell/AppRoot.tsx";
 import { createShellRouter } from "./shell/router.tsx";
 
-const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "https://api.developershub.jp";
+// Default points at the live free-tier gateway on workers.dev. The custom domain
+// api.developershub.jp is not DNS-configured (NXDOMAIN), so it must NOT be the
+// fallback — a build without VITE_API_BASE_URL would otherwise ship a prod bundle
+// whose every /api call (login included) fails with ERR_NAME_NOT_RESOLVED.
+const baseUrl =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  "https://dub-api-gateway.developershub-site.workers.dev";
 
 // Backend-free transports (only fetch is swapped; the real api-client logic runs
 // unchanged). Two opt-in flags, default (both unset) keeps the prod gateway wiring:
