@@ -12,8 +12,11 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     setBusy(true);
     setError(null);
     try {
-      const { authorizeUrl } = await api.auth.loginStart(redirectPath);
-      globalThis.location.assign(authorizeUrl);
+      // Send an absolute, same-origin return URL so the auth-service redirect
+      // allowlist matches this SPA's origin (relative "/" is not allowlistable).
+      const returnTo = new URL(redirectPath, globalThis.location.origin).toString();
+      const { authorizationUrl } = await api.auth.loginStart(returnTo);
+      globalThis.location.assign(authorizationUrl);
     } catch (e) {
       setBusy(false);
       setError(ApiError.isApiError(e) ? toDisplayableError(e).message : "ログインを開始できませんでした。");

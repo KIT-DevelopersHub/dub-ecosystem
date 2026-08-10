@@ -18,7 +18,7 @@ type Paginated<T> = common.Paginated<T>;
 // auth-service exposes AuthLoginStartRequest but no frozen Response type yet;
 // the login-start reply is the OAuth authorize URL to redirect the browser to.
 export interface AuthLoginStartResponse {
-  authorizeUrl: string;
+  authorizationUrl: string;
 }
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";

@@ -1,0 +1,42 @@
+# Free-tier deploy of auth-service as `dub-auth-service` (internal; reached only via
+# the api-gateway SVC_AUTH service binding — workers.dev disabled).
+# Mirrors the live worker's bindings (KV + SVC_IDENTITY, NO Queues) and applies the
+# OAuth wiring fixes for the *.workers.dev production:
+#   - REDIRECT_ALLOWLIST includes the fe2 SPA origin
+#   - SPA success/error redirects point at the fe2 SPA
+#   - COOKIE_DOMAIN unset -> host-only session cookie (Domain omitted); a shared
+#     .developershub.jp Domain attribute is rejected by the browser on workers.dev
+# Audit is best-effort: with no AUDIT_QUEUE binding, QueueAuditor.record swallows
+# the publish failure (auth flow is never blocked).
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config services/auth-service/wrangler.free.toml
+# Secrets (GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI) already set on the worker; persist across deploys.
+name = "dub-auth-service"
+main = "src/index.ts"
+compatibility_date = "2024-11-27"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "71e10ff553a24e0aa0b89929f6ed8643"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[vars]
+ENVIRONMENT = "production"
+# COOKIE_DOMAIN intentionally UNSET -> host-only cookie on the gateway origin.
+SPA_SUCCESS_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev/"
+SPA_ERROR_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev/login?error=auth"
+REDIRECT_ALLOWLIST = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
+SESSION_ACCESS_TTL_SEC = "3600"
+SESSION_ABS_WEB_TTL_SEC = "2592000"
+SESSION_ABS_MOBILE_TTL_SEC = "15552000"
+STATE_TTL_SEC = "600"
