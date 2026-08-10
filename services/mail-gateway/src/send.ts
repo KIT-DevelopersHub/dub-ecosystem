@@ -8,8 +8,9 @@ import { publishAudit, publishEvent, createEvent } from "@dub/events";
 import { nowIso } from "@dub/db";
 import { consoleSink } from "@dub/observability";
 import type { auditLog, mail } from "@dub/types";
-import { SERVICE_NAME } from "./config";
+import { DEFAULT_SEND_BASE_DELAY_MS, DEFAULT_SEND_MAX_ATTEMPTS, SERVICE_NAME } from "./config";
 import { assembleMime } from "./mime";
+import { withRetry } from "./retry";
 import {
   findSendByKey,
   insertSendClaim,
@@ -135,7 +136,12 @@ export async function sendMail(
   };
 
   try {
-    const { providerMessageId } = await provider.send(outbound);
+    // Bounded retry (transient failures only): a network reset / timeout / 429 / 5xx is
+    // retried with backoff+jitter; deterministic rejections (validation, unverified
+    // domain, 2xx-without-id) fail on the first try. The DB claim stays 'pending' across
+    // attempts, so a replay mid-retry still dedups against this same row.
+    const retry = deps.retry ?? { maxAttempts: DEFAULT_SEND_MAX_ATTEMPTS, baseDelayMs: DEFAULT_SEND_BASE_DELAY_MS };
+    const { providerMessageId } = await withRetry(() => provider.send(outbound), retry);
     await markSendSent(db, ownedId, provider.name, providerMessageId);
     await publishSent(deps, messageId, requester);
     await audit(deps, "success", messageId, requester, null);

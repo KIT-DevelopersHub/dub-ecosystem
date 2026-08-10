@@ -7,6 +7,7 @@ import type { Queue } from "@cloudflare/workers-types";
 import type { DbClient } from "@dub/db";
 import type { RequestContext } from "@dub/http";
 import type { MailProvider } from "./provider";
+import type { RetryOptions } from "./retry";
 
 // The publish targets publishEvent(env, ...) needs: keyed by the frozen queue binding
 // names in @dub/events CONSUMER_QUEUE_BINDINGS. The string index signature keeps it
@@ -29,6 +30,9 @@ export interface SendDeps {
   orgId: string;
   fromAddress: string;
   ctx: RequestContext;
+  /** Retry budget for the provider call (transient failures only). Optional — the send
+   *  core falls back to the built-in defaults when absent (tests omit it). */
+  retry?: Pick<RetryOptions, "maxAttempts" | "baseDelayMs">;
 }
 
 export interface InboundDeps {

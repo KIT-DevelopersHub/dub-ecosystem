@@ -4,6 +4,16 @@
 // so the caller passes the key priority list. Never throws and never logs creds:
 // the body is read at most once, capped at 200 chars, and falls back to the raw
 // text (then null) so a failing provider can still be reported without leaking.
+/**
+ * Whether an upstream HTTP status is worth a bounded retry. 429 (throttled) and 5xx
+ * (upstream fault) are transient — the message was not accepted, so a retry is safe-ish
+ * (see retry.ts for the 5xx double-send caveat). 4xx (validation / unverified domain /
+ * auth) are deterministic: retrying just burns quota, so they fail fast.
+ */
+export function retryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 export async function safeErrorDetail(res: Response, keys: readonly string[]): Promise<string | null> {
   try {
     const text = await res.text();
