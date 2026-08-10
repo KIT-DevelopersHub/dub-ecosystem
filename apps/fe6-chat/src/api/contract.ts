@@ -128,3 +128,68 @@ export interface UnreadSummary {
   lastReadMessageId: common.MessageId | null;
   mentioned: boolean;
 }
+
+// ==========================================================================
+// Slack-parity surface (chat-service feat/chat-backend-slack). Additive only —
+// nothing above changed. Shapes mirror the service wire DTOs (see
+// services/chat-service/src/types.ts + docs/openapi/chat-service.yaml).
+// ==========================================================================
+
+// ---- Mark as unread ----
+// POST /channels/:id/mark-unread — rewind the read cursor to just before messageId.
+export interface MarkUnreadRequest {
+  messageId: common.MessageId;
+}
+export type MarkUnreadResponse = UnreadSummary;
+
+// ---- Join a public channel ----
+// POST /channels/:id/join — self-join a public channel (private -> 404 hidden).
+export type JoinChannelResponse = GetChannelResponse;
+
+// ---- Search (Slack in:/from:) ----
+// GET /search?q=&in=&from=&cursor=&limit=
+export interface SearchMessagesRequest {
+  q: string; // case-insensitive substring; % and _ are literal
+  in?: common.ChannelId; // Slack in:#channel — scope to one channel (membership required)
+  from?: common.UserId; // Slack from:@user — filter by author
+  cursor?: string;
+  limit?: number;
+}
+export type SearchMessagesResponse = common.Paginated<Message>;
+
+// ---- Pins ----
+// POST /channels/:id/pins ; DELETE /channels/:id/pins/:messageId ; GET /channels/:id/pins
+export interface PinMessageRequest {
+  messageId: common.MessageId;
+}
+export interface PinnedItem {
+  channelId: common.ChannelId;
+  messageId: common.MessageId;
+  pinnedBy: common.UserId;
+  pinnedAt: common.ISODateTime;
+  message: Message; // embedded so the pins panel renders without extra fetches
+}
+export interface ListPinsResponse {
+  items: PinnedItem[];
+}
+
+// ---- Presence ----
+// PUT /presence (self write + heartbeat) ; GET /presence?userIds=a,b,c (batch read)
+export type PresenceSetting = "auto" | "away"; // user's manual choice
+export type PresenceState = "active" | "away"; // effective (derived from lastActiveAt)
+export interface SetPresenceRequest {
+  presence?: PresenceSetting; // omit = heartbeat only
+  statusEmoji?: string | null;
+  statusText?: string | null;
+  statusExpiresAt?: common.ISODateTime | null;
+}
+export interface PresenceView {
+  userId: common.UserId;
+  state: PresenceState;
+  statusEmoji: string | null;
+  statusText: string | null;
+  lastActiveAt: common.ISODateTime | null; // null = never seen
+}
+export interface GetPresenceResponse {
+  items: PresenceView[];
+}

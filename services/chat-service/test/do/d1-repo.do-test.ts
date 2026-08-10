@@ -13,7 +13,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
 import { createDbClient, applyMigrations, assertAllApplied } from "@dub/db";
 import { createD1ChatRepo } from "../../src/d1-repo";
-import { CHAT_SCHEMA_MIGRATION } from "../../src/schema";
+import { CHAT_SCHEMA_MIGRATION, CHAT_SLACK_PARITY_MIGRATION } from "../../src/schema";
 import type { ChatRepo, ChannelRow, MemberRow, MessageRow } from "../../src/types";
 
 const AT = "2026-08-10T05:00:00.000Z";
@@ -70,7 +70,7 @@ function message(over: Partial<MessageRow> & Pick<MessageRow, "id" | "channelId"
 
 beforeAll(async () => {
   // Apply the chat DDL to the empty miniflare D1 (idempotent via the ledger).
-  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION]);
+  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION, CHAT_SLACK_PARITY_MIGRATION]);
   assertAllApplied(results);
 });
 
@@ -336,5 +336,118 @@ describe("d1-repo: read state + unread", () => {
     await repo.setReadState(chan.id, me, m2.id, AT);
     expect((await repo.getReadState(chan.id, me))?.lastReadMessageId).toBe(m2.id);
     expect(await repo.countUnread(chan.id, me, m2.id)).toBe(0);
+
+    // clearReadState removes the row (back to "never read")
+    await repo.clearReadState(chan.id, me);
+    expect(await repo.getReadState(chan.id, me)).toBeNull();
+  });
+});
+
+describe("d1-repo: threads + mark-unread helpers", () => {
+  it("replyCountsFor groups visible replies by root (deleted excluded); previousMessageId walks back", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    await repo.createChannel(chan);
+    const root = message({ id: id.msg(1), channelId: chan.id, authorId: id.user(1) });
+    const r1 = message({ id: id.msg(2), channelId: chan.id, authorId: id.user(1), threadRootId: root.id });
+    const r2 = message({ id: id.msg(3), channelId: chan.id, authorId: id.user(1), threadRootId: root.id });
+    const rGone = message({ id: id.msg(4), channelId: chan.id, authorId: id.user(1), threadRootId: root.id, deletedAt: AT });
+    for (const m of [root, r1, r2, rGone]) await repo.createMessage(m);
+
+    const counts = await repo.replyCountsFor([root.id]);
+    expect(counts.get(root.id)).toBe(2); // rGone excluded
+    expect((await repo.replyCountsFor([])).size).toBe(0);
+
+    expect(await repo.previousMessageId(chan.id, r2.id)).toBe(r1.id);
+    expect(await repo.previousMessageId(chan.id, root.id)).toBeNull(); // first message
+  });
+});
+
+describe("d1-repo: search", () => {
+  it("LIKE match scoped to channels, author filter, keyset desc, wildcards escaped", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const c1 = channel({ id: id.chan(1), createdBy: id.user(1) });
+    const c2 = channel({ id: id.chan(2), createdBy: id.user(1) });
+    await repo.createChannel(c1);
+    await repo.createChannel(c2);
+    const uA = id.user(1);
+    const uB = id.user(2);
+    const m1 = message({ id: id.msg(1), channelId: c1.id, authorId: uA, body: "deploy widget" });
+    const m2 = message({ id: id.msg(2), channelId: c1.id, authorId: uB, body: "widget broke" });
+    const m3 = message({ id: id.msg(3), channelId: c2.id, authorId: uA, body: "off-topic widget" });
+    const gone = message({ id: id.msg(4), channelId: c1.id, authorId: uA, body: "old widget", deletedAt: AT });
+    const pct = message({ id: id.msg(5), channelId: c1.id, authorId: uA, body: "100% widget" });
+    for (const m of [m1, m2, m3, gone, pct]) await repo.createMessage(m);
+
+    // scoped to c1, desc by id, deleted excluded
+    const inC1 = await repo.searchMessages({ channelIds: [c1.id], text: "widget", limit: 50 });
+    expect(inC1.map((m) => m.id)).toEqual([pct.id, m2.id, m1.id]);
+
+    // author filter
+    const fromB = await repo.searchMessages({ channelIds: [c1.id], text: "widget", fromUserId: uB, limit: 50 });
+    expect(fromB.map((m) => m.id)).toEqual([m2.id]);
+
+    // "%" is literal, not a wildcard
+    const literal = await repo.searchMessages({ channelIds: [c1.id], text: "100%", limit: 50 });
+    expect(literal.map((m) => m.id)).toEqual([pct.id]);
+
+    // empty channel scope -> no rows (no SQL error)
+    expect(await repo.searchMessages({ channelIds: [], text: "widget", limit: 50 })).toEqual([]);
+  });
+});
+
+describe("d1-repo: pins", () => {
+  it("addPin is idempotent, listPins orders by pinned_at desc, removePin reports changes", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    await repo.createChannel(chan);
+    const mA = message({ id: id.msg(1), channelId: chan.id, authorId: id.user(1) });
+    const mB = message({ id: id.msg(2), channelId: chan.id, authorId: id.user(1) });
+    await repo.createMessage(mA);
+    await repo.createMessage(mB);
+
+    await repo.addPin({ channelId: chan.id, messageId: mA.id, pinnedBy: id.user(1), pinnedAt: "2026-08-10T05:00:00.000Z" });
+    await repo.addPin({ channelId: chan.id, messageId: mA.id, pinnedBy: id.user(2), pinnedAt: "2026-08-10T09:00:00.000Z" }); // ignored
+    await repo.addPin({ channelId: chan.id, messageId: mB.id, pinnedBy: id.user(1), pinnedAt: "2026-08-10T06:00:00.000Z" });
+
+    const pins = await repo.listPins(chan.id);
+    expect(pins.map((p) => p.messageId)).toEqual([mB.id, mA.id]); // pinned_at desc
+    expect(pins.find((p) => p.messageId === mA.id)?.pinnedBy).toBe(id.user(1)); // first pin kept
+
+    expect(await repo.removePin(chan.id, mA.id)).toBe(true);
+    expect(await repo.removePin(chan.id, mA.id)).toBe(false);
+    expect((await repo.listPins(chan.id)).map((p) => p.messageId)).toEqual([mB.id]);
+  });
+});
+
+describe("d1-repo: presence", () => {
+  it("putPresence upserts full row; getPresence batches by user id", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const uA = id.user(1);
+    const uB = id.user(2);
+    await repo.putPresence({
+      userId: uA, presence: "auto", statusEmoji: ":wave:", statusText: "hi",
+      statusExpiresAt: null, lastActiveAt: AT, updatedAt: AT,
+    });
+    // upsert: change status
+    await repo.putPresence({
+      userId: uA, presence: "away", statusEmoji: null, statusText: null,
+      statusExpiresAt: null, lastActiveAt: AT, updatedAt: AT,
+    });
+    await repo.putPresence({
+      userId: uB, presence: "auto", statusEmoji: null, statusText: null,
+      statusExpiresAt: null, lastActiveAt: AT, updatedAt: AT,
+    });
+
+    const rows = await repo.getPresence([uA, uB, id.user(9)]);
+    const a = rows.find((r) => r.userId === uA);
+    expect(a?.presence).toBe("away");
+    expect(a?.statusEmoji).toBeNull();
+    expect(rows.map((r) => r.userId).sort()).toEqual([uA, uB].sort()); // unknown user absent
+    expect(await repo.getPresence([])).toEqual([]);
   });
 });

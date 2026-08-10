@@ -410,6 +410,242 @@ paths:
                 $ref: '#/components/schemas/UnreadResponse'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /channels/{id}/mark-unread:
+    post:
+      operationId: markUnread
+      summary: Mark a channel unread from a message (Slack "Mark as unread")
+      description: Rewinds the caller's read cursor to just before messageId so it becomes the first unread. Membership required.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkUnreadRequest'
+      responses:
+        '200':
+          description: Updated unread summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /channels/{id}/join:
+    post:
+      operationId: joinChannel
+      summary: Self-join a public channel (Slack "Join channel")
+      description: Adds the caller as a member of a public channel. Private channels are invite-only and 404 (hidden). Archived channels 409.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Channel + the caller's membership
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatChannel'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /channels/{id}/pins:
+    get:
+      operationId: listPins
+      summary: List a channel's pinned items
+      description: Membership required. Each item embeds the pinned message.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pinned items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPinsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: pinMessage
+      summary: Pin a message to a channel
+      description: Membership required; message must belong to the channel and not be deleted. Idempotent.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinMessageRequest'
+      responses:
+        '201':
+          description: Pinned item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinnedItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /channels/{id}/pins/{messageId}:
+    delete:
+      operationId: unpinMessage
+      summary: Unpin a message
+      description: Membership required. Idempotent (204 even if not pinned).
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Unpinned.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /search:
+    get:
+      operationId: searchMessages
+      summary: Full-text message search (Slack in:/from:)
+      description: Substring match over message bodies across the channels the caller belongs to. `in` scopes to one channel (membership required); `from` filters by author. Cursor pagination, newest first.
+      tags:
+        - chat
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Case-insensitive substring; % and _ are treated literally.
+          schema:
+            type: string
+        - name: in
+          in: query
+          required: false
+          description: Restrict to one channel (Slack `in:#channel`).
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          description: Restrict to one author (Slack `from:@user`).
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page of matching messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /presence:
+    put:
+      operationId: setPresence
+      summary: Set the caller's presence / custom status (also a heartbeat)
+      description: Any call refreshes lastActiveAt. Omit `presence` to send a pure heartbeat. Fields left absent are preserved.
+      tags:
+        - chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPresenceRequest'
+      responses:
+        '200':
+          description: The caller's effective presence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresenceView'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    get:
+      operationId: getPresence
+      summary: Batch-read presence for a set of users
+      tags:
+        - chat
+      parameters:
+        - name: userIds
+          in: query
+          required: true
+          description: Comma-separated user ids.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Presence per requested user (unknown users read as away)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPresenceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
 components:
   schemas:
     Error:
@@ -490,8 +726,16 @@ components:
           type: string
         authorId:
           type: string
+        threadRootId:
+          type:
+            - string
+            - 'null'
+          description: null = top-level message; else the id of the thread root.
         body:
           type: string
+        replyCount:
+          type: integer
+          description: Visible thread replies on this root (0 for replies themselves) — Slack "N replies".
         createdAt:
           type: string
           format: date-time
@@ -591,6 +835,130 @@ components:
       properties:
         total:
           type: integer
+    UnreadSummary:
+      type: object
+      description: Per-channel unread state (returned by mark-unread).
+      required:
+        - channelId
+        - unreadCount
+        - lastReadMessageId
+      properties:
+        channelId:
+          type: string
+        unreadCount:
+          type: integer
+        lastReadMessageId:
+          type:
+            - string
+            - 'null'
+          description: null = nothing read yet (whole channel unread).
+    MarkUnreadRequest:
+      type: object
+      required:
+        - messageId
+      properties:
+        messageId:
+          type: string
+    PinMessageRequest:
+      type: object
+      required:
+        - messageId
+      properties:
+        messageId:
+          type: string
+    PinnedItem:
+      type: object
+      required:
+        - channelId
+        - messageId
+        - pinnedBy
+        - pinnedAt
+        - message
+      properties:
+        channelId:
+          type: string
+        messageId:
+          type: string
+        pinnedBy:
+          type: string
+        pinnedAt:
+          type: string
+          format: date-time
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+    ListPinsResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PinnedItem'
+    SetPresenceRequest:
+      type: object
+      description: All fields optional; absent fields are preserved. Omit everything for a pure heartbeat.
+      properties:
+        presence:
+          type: string
+          enum:
+            - auto
+            - away
+          description: The user's manual setting (auto = derive from activity).
+        statusEmoji:
+          type:
+            - string
+            - 'null'
+        statusText:
+          type:
+            - string
+            - 'null'
+        statusExpiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Custom status auto-clears at/after this instant.
+    PresenceView:
+      type: object
+      required:
+        - userId
+        - state
+        - statusEmoji
+        - statusText
+        - lastActiveAt
+      properties:
+        userId:
+          type: string
+        state:
+          type: string
+          enum:
+            - active
+            - away
+          description: Effective presence derived from the setting + last heartbeat.
+        statusEmoji:
+          type:
+            - string
+            - 'null'
+        statusText:
+          type:
+            - string
+            - 'null'
+        lastActiveAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: null = never seen (no presence row).
+    GetPresenceResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PresenceView'
     SystemMessageRequest:
       type: object
       required:
