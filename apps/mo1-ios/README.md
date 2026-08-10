@@ -77,9 +77,10 @@ pnpm --filter ./apps/mo1-ios typecheck
 
 ## Deferred (per design §8 / P0b, not in P0)
 
-- S6 gantt / S8 chat **screens** (SwiftUI) land in the Swift wave; the
-  client-core view-models (`gantt.ts` dependency ordering + date range, `chat.ts`
-  optimistic append + injectable WS transport) and their MO3 read methods ship
-  here. Live chat still waits on 9-C RT DO + WS RT-direct for the socket itself.
+- S6 gantt / S8 chat **screens** (SwiftUI) now ship in the Swift package
+  (`ios/` — `Gantt.swift`/`Chat.swift` domain ports + `GanttView`/`ChatView`
+  behind the Events tab, with a real `URLSessionChatSocketFactory`). This TS
+  layer stays the frozen vitest spec they mirror. Live chat still waits on the
+  9-C RT DO for the socket's server side.
 - `/sync` + `/mutations` offline write (STUB, MO3-owned, later wave).
 - APNs live dispatch (notification-service → MO3 → APNs; 9-E push timing).

@@ -53,6 +53,13 @@ func makeClient(_ steps: [UIStep], store: TokenStore = InMemoryTokenStore(), max
     ))
 }
 
+/// In-memory store pre-seeded with a live session (authenticated ViewModels).
+func seededUIStore(_ token: String = "tok") -> InMemoryTokenStore {
+    let store = InMemoryTokenStore()
+    store.write(StoredSession(token: token, sessionExpiresAt: Date().timeIntervalSince1970 * 1000 + 3_600_000))
+    return store
+}
+
 func uiSampleTask(version: Int = 3, status: TaskStatus = .inProgress) -> DubTask {
     DubTask(
         id: "task_1", eventId: "evt_1", title: "Ship it", description: "do the thing",

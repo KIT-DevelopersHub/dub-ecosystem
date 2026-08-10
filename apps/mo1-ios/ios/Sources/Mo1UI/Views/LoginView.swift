@@ -6,9 +6,9 @@ import Mo1Core
 
 public struct LoginView: View {
     @StateObject private var vm: LoginViewModel
-    private let onAuthenticated: () -> Void
+    private let onAuthenticated: (String?) -> Void
 
-    public init(vm: LoginViewModel, onAuthenticated: @escaping () -> Void) {
+    public init(vm: LoginViewModel, onAuthenticated: @escaping (String?) -> Void) {
         _vm = StateObject(wrappedValue: vm)
         self.onAuthenticated = onAuthenticated
     }
@@ -45,7 +45,7 @@ public struct LoginView: View {
         }
         .padding()
         .onChange(of: vm.isAuthenticated) { _, authenticated in
-            if authenticated { onAuthenticated() }
+            if authenticated { onAuthenticated(vm.userId) }
         }
     }
 }
