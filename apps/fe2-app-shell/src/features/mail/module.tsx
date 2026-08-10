@@ -5,12 +5,10 @@
 //   /mail/compose  → compose+send (mail:send)
 // Both are auth:"required" so an unauthenticated visitor is bounced to /login by
 // the shell — no per-request token, the session authorizes everything.
-import { createElement } from "react";
 import type { ComponentType } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
-import { InboxScreen } from "./InboxScreen.tsx";
+import { GmailApp } from "./gmail/GmailApp.tsx";
 import { ComposeScreen } from "./ComposeScreen.tsx";
 
 type PermissionKey = identity.PermissionKey;
@@ -27,14 +25,12 @@ export interface MailNavEntry {
   icon: IconName;
 }
 
-/** Inbox wired to the shell router so its "compose" affordance navigates. */
-function InboxRoute(): JSX.Element {
-  const navigate = useNavigate();
-  return createElement(InboxScreen, { onCompose: () => void navigate({ to: "/mail/compose" }) });
-}
-
 export const mailRoutes: MailSourceRoute[] = [
-  { path: "/mail", lazy: () => Promise.resolve({ Component: InboxRoute }), auth: "required", requiredPermissions: ["mail:read"] },
+  // /mail renders the Gmail-style 3-pane experience (list ↔ reading pane, left
+  // folder/label nav, floating compose). It carries its own compose affordance,
+  // so no navigation to a separate compose route is needed.
+  { path: "/mail", lazy: () => Promise.resolve({ Component: GmailApp }), auth: "required", requiredPermissions: ["mail:read"] },
+  // Standalone compose route retained for deep-links / mail:send gating.
   { path: "/mail/compose", lazy: () => Promise.resolve({ Component: ComposeScreen }), auth: "required", requiredPermissions: ["mail:send"] },
 ];
 
