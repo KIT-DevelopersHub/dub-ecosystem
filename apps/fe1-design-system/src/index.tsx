@@ -41,6 +41,8 @@ export type {
   ThemeName,
   ThemeProviderProps,
   AppShellProps,
+  AppLauncherItem,
+  AppLauncherProps,
   SidebarItem,
   SidebarProps,
   PageHeaderProps,
@@ -87,6 +89,7 @@ export { Modal, ConfirmDialog, Drawer } from "./components/Modal";
 export { ToastProvider, useToast } from "./components/Toast";
 export { ThemeProvider } from "./components/ThemeProvider";
 export { AppShell, PageHeader, Stack, Grid, Card, Divider } from "./components/Layout";
+export { AppLauncher } from "./components/AppLauncher";
 export { Sidebar } from "./components/Sidebar";
 export { Tabs } from "./components/Tabs";
 export { EmptyState, ErrorState, SkeletonLoader } from "./components/States";
