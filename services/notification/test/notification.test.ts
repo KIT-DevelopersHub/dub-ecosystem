@@ -268,6 +268,24 @@ describe("delivery runner failure", () => {
     expect(h.audit.sends[0]!.payload.action).toBe("notif.delivery.failed");
     expect(h.audit.sends[0]!.payload.result).toBe("failure");
   });
+
+  it("#13 real-wired chat port that throws is retried to the cap, failed + one audit", async () => {
+    // Proves the failure lane through a REAL adapter (not a hand-rolled one): a throwing
+    // downstream port propagates through makeChatAdapter into runDelivery's retry/audit.
+    const h = makeTestEnv();
+    await upsertPreference(h.db, "u1", "*", "chat", true); // chat default is off
+    const chat = fakeChat("throw");
+    const res = await ingest(
+      coreDeps(h, { chat, maxAttempts: 3 }),
+      baseInput({ type: "x.y", recipients: { userIds: ["u1"] }, channels: ["chat"], title: "Hey", body: "look" }),
+    );
+    expect(chat.calls).toHaveLength(3); // one call per attempt up to the cap
+    const rows = await deliveries(h.db, res.notificationId);
+    expect(rows).toEqual([{ channel: "chat", status: "failed", attempts: 3 }]);
+    expect(h.audit.sends).toHaveLength(1);
+    expect(h.audit.sends[0]!.payload.action).toBe("notif.delivery.failed");
+    expect(h.audit.sends[0]!.payload.result).toBe("failure");
+  });
 });
 
 describe("lane-A mapping", () => {
