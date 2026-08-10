@@ -48,15 +48,15 @@ dead_letter_queue = "dub-q-evt-github-sync-dlq"
 # ---- Service Bindings (internal RPC over @dub/http) ----
 [[services]]
 binding = "SVC_TASK"
-service = "dub-task-service"
+service = "task-service"
 
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
-service = "dub-event-service"
+service = "event-service"
 
 # ---- Reconciliation cron (8-N4: 6h; tune in ops) ----
 [triggers]

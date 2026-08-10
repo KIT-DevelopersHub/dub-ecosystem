@@ -21,27 +21,27 @@ FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8
 # infra binding registry, never routed by the gateway) and intentionally omitted.
 [[services]]
 binding = "SVC_AUTH"
-service = "dub-auth-service"
+service = "auth-service"
 
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
-service = "dub-event-service"
+service = "event-service"
 
 [[services]]
 binding = "SVC_TASK"
-service = "dub-task-service"
+service = "task-service"
 
 [[services]]
 binding = "SVC_GANTT"
-service = "dub-gantt-service"
+service = "gantt-service"
 
 [[services]]
 binding = "SVC_NOTIFICATION"
-service = "dub-notification-service"
+service = "notification"
 
 [[services]]
 binding = "SVC_FILE_META"
@@ -53,11 +53,11 @@ service = "dub-drive-proxy"
 
 [[services]]
 binding = "SVC_CHAT"
-service = "dub-chat-service"
+service = "chat-service"
 
 [[services]]
 binding = "SVC_MAIL_GATEWAY"
-service = "dub-mail-gateway"
+service = "mail-gateway"
 
 [[services]]
 binding = "SVC_DEPLOY"
@@ -69,7 +69,7 @@ service = "dub-github-sync"
 
 [[services]]
 binding = "SVC_AUDIT_LOG"
-service = "dub-audit-log"
+service = "audit-log"
 
 [[services]]
 binding = "SVC_WEBHOOK_INGEST"
