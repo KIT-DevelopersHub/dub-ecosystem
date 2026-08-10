@@ -1,7 +1,7 @@
 {
   "name": "@dub/observability",
   "version": "0.1.0",
-  "description": "DevHub (Dub) observability primitives — canonical x-dub-* header constants, secret redaction, structured log shape.",
+  "description": "DevHub (Dub) observability primitives — canonical x-dub-* header constants, secret redaction, structured logger (createLogger), request-id correlation, and lightweight metrics for Cloudflare Workers.",
   "type": "module",
   "sideEffects": false,
   "exports": {
