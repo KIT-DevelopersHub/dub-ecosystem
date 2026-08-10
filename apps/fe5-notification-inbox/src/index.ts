@@ -34,6 +34,27 @@ export { MarkAllReadButton } from "./components/MarkAllReadButton";
 export { createNotificationApi, NOTIFICATION_API_BASE } from "./api/client";
 export type { NotificationApi } from "./api/client";
 export { createMockApiClient, MockApiError, DEFAULT_PREFERENCES } from "./api/mock-client";
+// Real fetch-backed ApiClient (auth header + correlation id + ApiError
+// normalisation) for the shell to inject in place of the mock.
+export { createHttpApiClient, HttpApiError } from "./api/http-client";
+export type { HttpApiClientConfig } from "./api/http-client";
+
+// ---- Live unread-count transport (optional push path for the bell badge) ----
+export {
+  createReconnectingUnreadLive,
+  createSseUnreadConnector,
+  parseUnreadCount,
+} from "./lib/unread-live";
+export type {
+  LiveConnection,
+  LiveConnector,
+  LiveHandlers,
+  LiveStatus,
+  UnreadLiveSource,
+  EventSourceLike,
+  EventSourceCtor,
+  SseUnreadConnectorConfig,
+} from "./lib/unread-live";
 
 // ---- Contracts + pure lib (for the shell / tests) ----
 export type {
