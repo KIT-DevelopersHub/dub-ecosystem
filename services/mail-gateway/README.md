@@ -127,6 +127,51 @@ wrangler secret put RESEND_API_KEY        # paste re_… when prompted
 
 ---
 
+## 3.3 Email Routing admin (address issuance + forwarding rules)
+
+The admin console manages `@developershub.jp` addresses and forwarding rules through this
+service, which proxies the **Cloudflare Email Routing API** (rather than opening the
+Cloudflare dashboard). Surface (all `mail:admin`, reachable via api-gateway as
+`/api/v1/mail/admin/email-routing/*`):
+
+| Method + path | Cloudflare API |
+|---|---|
+| `GET /admin/email-routing/addresses` | list account destination addresses |
+| `POST /admin/email-routing/addresses` | create destination address (CF sends a verify mail) |
+| `DELETE /admin/email-routing/addresses/:id` | delete destination address |
+| `GET /admin/email-routing/rules` | list zone routing rules |
+| `POST /admin/email-routing/rules` | create rule (localpart matcher → forward action) |
+| `PATCH /admin/email-routing/rules/:id` | update rule (enable/disable, matchers, actions) |
+| `DELETE /admin/email-routing/rules/:id` | delete rule |
+
+Every mutation is written to the audit log (`mail.email_routing.*`, success/failure).
+Rule matchers are constrained to the managed zone (anti-spoof) and local parts to a strict
+charset (anti-abuse).
+
+**Token (Workers Secret, NEVER committed):**
+
+```
+wrangler secret put CF_EMAIL_ROUTING_TOKEN   # paste the API token when prompted
+```
+
+Required token scopes (create at Cloudflare → My Profile → API Tokens):
+
+| Scope | Why |
+|---|---|
+| **Account → Email Routing Addresses → Edit** | destination addresses are account-scoped |
+| **Zone → Email Routing Rules → Edit** (on `developershub.jp`) | routing rules are zone-scoped |
+
+Non-secret ids go in `wrangler.toml [vars]` (safe to commit): `CF_EMAIL_ROUTING_ZONE_ID`
+(developershub.jp zone id), `CF_EMAIL_ROUTING_ACCOUNT_ID` (account id),
+`CF_EMAIL_ROUTING_ZONE_NAME` (default `developershub.jp`).
+
+**Until the token is set, every admin endpoint returns `503 MAIL_EMAIL_ROUTING_UNCONFIGURED`**
+(fails loud, never a silent no-op). `GET /internal/health/ready` reports
+`emailRouting.configured` / `zoneConfigured` / `accountConfigured` (booleans only — the
+token value is never echoed).
+
+---
+
 ## 4. Workers free-tier verdict (9-E: is a paid plan required?)
 
 **Conclusion: the outbound send endpoint runs on the Workers FREE plan. A paid plan is

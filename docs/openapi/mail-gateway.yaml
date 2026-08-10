@@ -234,6 +234,199 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /admin/email-routing/addresses:
+    get:
+      operationId: listEmailRoutingAddresses
+      summary: List destination (forward-target) addresses
+      tags:
+        - mail
+      description: 'Requires mail:admin. Proxies the Cloudflare Email Routing account-scoped destination-addresses API. 503 (MAIL_EMAIL_ROUTING_UNCONFIGURED) when CF_EMAIL_ROUTING_TOKEN is unset.'
+      responses:
+        '200':
+          description: Destination addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailRoutingAddressList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+    post:
+      operationId: createEmailRoutingAddress
+      summary: Issue a destination address (Cloudflare sends a verification mail)
+      tags:
+        - mail
+      description: 'Requires mail:admin. Audited (mail.email_routing.address.create).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmailRoutingAddressRequest'
+      responses:
+        '201':
+          description: Created destination address (pending verification)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailRoutingAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+  /admin/email-routing/addresses/{id}:
+    delete:
+      operationId: deleteEmailRoutingAddress
+      summary: Remove a destination address
+      tags:
+        - mail
+      description: 'Requires mail:admin. Audited (mail.email_routing.address.delete).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailRoutingAddress'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+  /admin/email-routing/rules:
+    get:
+      operationId: listEmailRoutingRules
+      summary: List forwarding rules
+      tags:
+        - mail
+      description: 'Requires mail:admin. Proxies the Cloudflare Email Routing zone-scoped rules API.'
+      responses:
+        '200':
+          description: Routing rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailRoutingRuleList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+    post:
+      operationId: createEmailRoutingRule
+      summary: Create a forwarding rule
+      tags:
+        - mail
+      description: 'Requires mail:admin. Literal matchers must target the managed zone (anti-spoof). Audited (mail.email_routing.rule.create).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmailRoutingRuleRequest'
+      responses:
+        '201':
+          description: Created rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailRoutingRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+  /admin/email-routing/rules/{id}:
+    patch:
+      operationId: updateEmailRoutingRule
+      summary: Update a forwarding rule (enable/disable, matchers, actions)
+      tags:
+        - mail
+      description: 'Requires mail:admin. Partial patch; at least one field. Audited (mail.email_routing.rule.update).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEmailRoutingRuleRequest'
+      responses:
+        '200':
+          description: Updated rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailRoutingRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+    delete:
+      operationId: deleteEmailRoutingRule
+      summary: Delete a forwarding rule
+      tags:
+        - mail
+      description: 'Requires mail:admin. Audited (mail.email_routing.rule.delete).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailRoutingRule'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
   /internal/status:
     get:
       operationId: mailSendStatus
@@ -467,6 +660,154 @@ components:
           type: integer
         used:
           type: integer
+    EmailRoutingAddress:
+      type: object
+      description: A Cloudflare Email Routing destination (forward-target) address.
+      required:
+        - id
+        - email
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        verified:
+          type:
+            - string
+            - 'null'
+          description: ISO timestamp when the address was verified; null while pending.
+        created:
+          type: string
+        modified:
+          type: string
+    EmailRoutingAddressList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailRoutingAddress'
+    CreateEmailRoutingAddressRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          description: Forward-target inbox (any domain, e.g. a personal Gmail).
+    EmailRoutingRuleMatcher:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [literal, all]
+        field:
+          type: string
+          enum: [to]
+        value:
+          type: string
+          description: For a literal matcher, an address in the managed zone (@developershub.jp).
+    EmailRoutingRuleAction:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [forward, worker, drop]
+        value:
+          type: array
+          items:
+            type: string
+          description: forward -> destination emails; worker -> worker names; omitted for drop.
+    EmailRoutingRule:
+      type: object
+      required:
+        - id
+        - name
+        - enabled
+        - matchers
+        - actions
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+        matchers:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailRoutingRuleMatcher'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailRoutingRuleAction'
+    EmailRoutingRuleList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailRoutingRule'
+    CreateEmailRoutingRuleRequest:
+      type: object
+      required:
+        - name
+        - matchers
+        - actions
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
+          default: true
+        priority:
+          type: integer
+          minimum: 0
+        matchers:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/EmailRoutingRuleMatcher'
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/EmailRoutingRuleAction'
+    UpdateEmailRoutingRuleRequest:
+      type: object
+      description: Partial patch; at least one field must be present.
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+          minimum: 0
+        matchers:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailRoutingRuleMatcher'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailRoutingRuleAction'
   responses:
     BadRequest:
       description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
@@ -518,6 +859,18 @@ components:
             $ref: '#/components/schemas/Error'
     Internal:
       description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UpstreamUnavailable:
+      description: MAIL_EMAIL_ROUTING_UPSTREAM — the Cloudflare Email Routing API rejected the request or was unreachable. Detail carries Cloudflare's own message (never the token).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unconfigured:
+      description: MAIL_EMAIL_ROUTING_UNCONFIGURED — the CF_EMAIL_ROUTING_TOKEN secret (or the required zone/account id) is not set; the admin proxy is disabled.
       content:
         application/json:
           schema:

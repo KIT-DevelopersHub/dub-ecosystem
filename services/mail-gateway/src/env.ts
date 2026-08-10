@@ -34,6 +34,20 @@ export interface Env {
   RESEND_API_KEY?: string;
   MAILCHANNELS_API_KEY?: string;
 
+  // --- Cloudflare Email Routing admin (address issuance + forwarding rules) ---
+  // The proxy behind /mail/admin/email-routing/*. The API token is a Workers Secret
+  // (NEVER committed / logged / echoed). When it is absent every admin endpoint returns
+  // 503 (MAIL_EMAIL_ROUTING_UNCONFIGURED) so the feature fails loud, never silently.
+  //   CF_EMAIL_ROUTING_TOKEN  — secret. Needs `Zone:Email Routing Rules:Edit` on the
+  //     target zone AND `Account:Email Routing Addresses:Edit` (destination addresses are
+  //     account-scoped). See README "Email Routing admin" for the exact scopes.
+  CF_EMAIL_ROUTING_TOKEN?: string;
+  // Non-secret ids (safe as [vars]). Rules are zone-scoped, destination addresses are
+  // account-scoped, so both ids are required for the full surface.
+  CF_EMAIL_ROUTING_ZONE_ID?: string; // developershub.jp zone id (rules API)
+  CF_EMAIL_ROUTING_ACCOUNT_ID?: string; // account id (destination addresses API)
+  CF_EMAIL_ROUTING_ZONE_NAME?: string; // zone apex, default developershub.jp (anti-spoof matcher check)
+
   // --- send resilience tuning (non-secret [vars]; optional, sane defaults) ---
   MAIL_SEND_MAX_ATTEMPTS?: string; // integer 1..6 (default 3)
   MAIL_SEND_TIMEOUT_MS?: string; // per-attempt upstream timeout ms (default 15000)

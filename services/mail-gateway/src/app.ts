@@ -16,6 +16,8 @@ import { common, type identity, type mail } from "@dub/types";
 import type { AppBindings } from "./env";
 import { DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
 import { effectiveTuning, providerReadiness } from "./config-check";
+import { emailRoutingReadiness } from "./email-routing";
+import { registerEmailRoutingAdmin } from "./email-routing-routes";
 import { buildDb, buildSendDeps } from "./deps";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
@@ -40,7 +42,10 @@ export function createApp() {
   app.get("/internal/health/ready", (c) => {
     if (!c.req.header(HEADERS.internal)) throw errors.forbidden("internal-only");
     const readiness = providerReadiness(c.env);
-    return c.json({ service: SERVICE_NAME, ...readiness, tuning: effectiveTuning(c.env) }, readiness.ready ? 200 : 503);
+    return c.json(
+      { service: SERVICE_NAME, ...readiness, tuning: effectiveTuning(c.env), emailRouting: emailRoutingReadiness(c.env) },
+      readiness.ready ? 200 : 503,
+    );
   });
 
   // ---- POST /send: internal-binding only (design §2/§6). x-dub-internal absent -> 403
@@ -147,6 +152,10 @@ export function createApp() {
     await upsertMailbox(dbOf(c), id, body.address);
     return c.json({ id, address: body.address }, 200);
   });
+
+  // ---- email-routing admin: mail:admin. Proxies the Cloudflare Email Routing API to
+  // issue @developershub.jp addresses + manage forwarding rules from the admin console.
+  registerEmailRoutingAdmin(ext, withAuth);
 
   app.route("/mail", ext);
 
