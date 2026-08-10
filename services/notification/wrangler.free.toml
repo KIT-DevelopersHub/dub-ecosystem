@@ -1,0 +1,53 @@
+# Free-tier deploy of notification as `dub-notification-service` (internal; reached via
+# the api-gateway SVC_NOTIFICATION binding — workers.dev disabled). This is the name the
+# gateway routes /api/v1/notifications and /api/v1/feedback to.
+#
+# NO paid Cloudflare Queues (free tier): the domain-event consumer (dub-q-evt-notification)
+# and the publishAudit producer (AUDIT_QUEUE) are dropped. AUDIT_QUEUE is only touched on
+# the queue-consumer / ingest path (adapters.ts, ingest.ts); the HTTP surface used by the
+# app — inbox reads and the in-app feedback widget (POST/GET /feedback) — never touches it,
+# so dropping the Queue bindings does not affect the live product paths. Domain-event
+# fan-out (queue consumer) stays dormant until a free drain lands.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: apply the feedback table to dub-core (idempotent)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/notification/db/0002_feedback.sql
+#   npx wrangler deploy --config services/notification/wrangler.free.toml
+name = "dub-notification-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1 (notif_ namespace only). REAL dub-core id (verified via
+# `wrangler d1 list`): d663f9c6-… . (60a9b8ab-… is the separate `auth-outbox` DB.)
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service Bindings (all live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # GET /users/:id (email), GET /users?roleKey= + /authz/check
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"     # GET /events/:id/participants (eventId expansion)
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "dub-mail-gateway"      # POST /send — best-effort feedback admin alert
+
+[[services]]
+binding = "SVC_CHAT"
+service = "dub-chat-service"      # POST /internal/system-messages (ChatAdapter)
+
+# Retention purge Cron (03:00 UTC daily): inbox 90d / deliveries 30d / processed 7d.
+[triggers]
+crons = ["0 3 * * *"]
