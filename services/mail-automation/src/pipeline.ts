@@ -117,7 +117,7 @@ async function evaluate(
     return { outcome: "suppressed_loop", matchedRule: null, sentMessageId: null, suppressReasons: ["thread_max_replies"], rendered: null };
   }
 
-  // 7. rule evaluation (priority asc, first match). May throw MAILAUTO_INVALID_RULE.
+  // 6. rule evaluation (priority asc, first match). May throw MAILAUTO_INVALID_RULE.
   const rules = await deps.repo.listRules({ enabled: true });
   const matched = evaluateRules(rules, mail);
   if (!matched) {
@@ -131,7 +131,8 @@ async function evaluate(
   }
 
   // --- reply path ---
-  // 6. per-recipient daily rate (rule cap vs global default, smaller wins; 0 = off)
+  // 7. per-recipient daily rate (rule cap vs global default, smaller wins; a cap of
+  //    0 is disabled-equivalent per types.ts — used >= 0 always suppresses, never replies)
   const recipient = mail.from.email;
   const day = deps.now().slice(0, 10);
   const cap =
