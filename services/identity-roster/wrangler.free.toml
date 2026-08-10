@@ -1,0 +1,29 @@
+# Free-tier deploy of identity-roster as `dub-identity-roster` (internal; reached via
+# the api-gateway SVC_IDENTITY binding and by auth-service SVC_IDENTITY — workers.dev
+# disabled). Mirrors the live worker's topology minus paid Cloudflare Queues: the
+# best-effort audit producer (AUDIT_QUEUE) is dropped, and sinks.ts already degrades to
+# a no-op sink when the binding is absent (`env.AUDIT_QUEUE ?? null`), so nothing throws
+# and no identity mutation fails on a missing audit channel.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config services/identity-roster/wrangler.free.toml
+name = "dub-identity-roster"
+main = "src/index.ts"
+compatibility_date = "2025-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared core D1 (binding DB). identity-roster owns only the identity_* namespace.
+# database_id is the REAL dub-core D1 (verified via `wrangler d1 list`): dub-core is
+# d663f9c6-… . (60a9b8ab-… is the separate `auth-outbox` DB — NOT dub-core.)
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
