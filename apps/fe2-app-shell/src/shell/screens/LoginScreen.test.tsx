@@ -56,10 +56,12 @@ describe("LoginScreen — email/password", () => {
   });
 
   it("keeps the Google login path working", async () => {
-    const loginStart = vi.fn().mockResolvedValue({ authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth?x=1" });
+    const loginStart = vi.fn().mockResolvedValue({ authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?x=1" });
     render(<LoginScreen api={makeApi({ loginStart })} redirectPath="/" />);
     fireEvent.click(screen.getByTestId("fe2-login-google"));
-    await waitFor(() => expect(loginStart).toHaveBeenCalledWith("/"));
+    // The SPA sends an absolute, same-origin return URL (not the bare path) so the
+    // auth-service redirect allowlist can match this SPA's origin.
+    await waitFor(() => expect(loginStart).toHaveBeenCalledWith(expect.stringMatching(/^https?:\/\/[^/]+\/$/)));
     await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?x=1"));
   });
 
