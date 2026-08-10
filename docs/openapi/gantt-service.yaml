@@ -1,0 +1,387 @@
+# OpenAPI 3.1 contract for gantt-service. Generated from services/gantt-service/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Gantt Service API
+  version: 1.0.0
+  description: |-
+    Read model over task/event plus per-user gantt view state. External segment /api/v1/gantt.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/gantt/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: gantt
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /health:
+    get:
+      operationId: ganttHealth
+      summary: Liveness probe
+      tags:
+        - health
+      responses:
+        '200':
+          description: OK
+      security: []
+  /gantt:
+    get:
+      operationId: getGantt
+      summary: Get the gantt chart for an event
+      tags:
+        - gantt
+      description: Requires event:read (gantt reuses the event read permission).
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Gantt chart read model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GanttChartDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /gantt/dependencies:
+    get:
+      operationId: getGanttDependencies
+      summary: Get dependency lines for an event
+      tags:
+        - gantt
+      description: Requires event:read.
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dependency lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GanttDependencies'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /gantt/views:
+    get:
+      operationId: getGanttView
+      summary: Get the caller's saved view state
+      tags:
+        - gantt
+      description: Per-user view state.
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: View state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GanttViewState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: putGanttView
+      summary: Upsert the caller's view state
+      tags:
+        - gantt
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutGanttViewRequest'
+      responses:
+        '200':
+          description: Saved view state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GanttViewState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    GanttZoom:
+      type: string
+      enum:
+        - day
+        - week
+        - month
+    GanttRow:
+      type: object
+      required:
+        - taskId
+        - title
+        - progressPercent
+      properties:
+        taskId:
+          type: string
+        title:
+          type: string
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        endsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        progressPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        assigneeId:
+          type:
+            - string
+            - 'null'
+    GanttDependencyLine:
+      type: object
+      required:
+        - id
+        - fromTaskId
+        - toTaskId
+        - type
+        - lagDays
+      properties:
+        id:
+          type: string
+        fromTaskId:
+          type: string
+        toTaskId:
+          type: string
+        type:
+          type: string
+          enum:
+            - FS
+        lagDays:
+          type: integer
+    GanttChartDTO:
+      type: object
+      required:
+        - eventId
+        - rows
+        - dependencies
+      properties:
+        eventId:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/GanttRow'
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/GanttDependencyLine'
+    GanttViewState:
+      type: object
+      required:
+        - eventId
+        - zoom
+        - collapsedTaskIds
+      properties:
+        eventId:
+          type: string
+        zoom:
+          $ref: '#/components/schemas/GanttZoom'
+        collapsedTaskIds:
+          type: array
+          items:
+            type: string
+    PutGanttViewRequest:
+      type: object
+      required:
+        - zoom
+        - collapsedTaskIds
+      properties:
+        zoom:
+          $ref: '#/components/schemas/GanttZoom'
+        collapsedTaskIds:
+          type: array
+          items:
+            type: string
+    GanttDependencies:
+      type: object
+      required:
+        - eventId
+        - dependencies
+      properties:
+        eventId:
+          type: string
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/GanttDependencyLine'
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.

@@ -1,5 +1,15 @@
-// Worker entrypoint. Wires real bindings -> deps -> Hono app. NOT deployed in P0
-// (mock/stub波; real Google结线 waits on the integration wave). No D1 binding.
+// Worker entrypoint / composition root. buildApp wires the REAL bindings -> deps ->
+// Hono app: the real Google Drive/Sheets client, the real OAuth refresh-token
+// provider (refresh token from Workers Secrets, access token KV-cached), the real KV
+// response cache + soft rate-limiter, the real file-meta + audit queue publishers, and
+// the real identity /authz/check checker. There is NO stub/mock wiring here — the
+// injectable fetch/deps seams in the google/* and events modules exist only so unit
+// tests avoid the network. Owns no D1. What remains before this Worker can deploy is
+// apply-time provisioning ONLY (the KV namespace id in wrangler.toml + the three
+// GOOGLE_OAUTH_* secrets), not code wiring. Drive change-notification (files.watch)
+// channel registration is deliberately NOT implemented: it is reserved for P1
+// Drive-watch (contract §8 — the wh-google-drive consumer is contract-only in v1; the
+// path that would mint webhook-ingest's X-Goog-Channel-Token lives in that P1 work).
 import type { ExecutionContext, Fetcher } from "@cloudflare/workers-types";
 import { createServiceClient, newRequestId } from "@dub/http";
 import type { identity } from "@dub/types";

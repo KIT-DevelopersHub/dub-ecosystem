@@ -12,7 +12,10 @@ import type { D1Database } from "@cloudflare/workers-types";
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
 
-const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), "../db/0001_mail.sql");
+const HERE = dirname(fileURLToPath(import.meta.url));
+// Apply the base schema then every forward-only migration, in id order, so the
+// in-memory test DB matches the migrated production schema (adds body/read columns).
+const SCHEMA_PATHS = [join(HERE, "../db/0001_mail.sql"), join(HERE, "../db/0002_inbound_body_read.sql")];
 
 function norm(v: unknown): unknown {
   if (v === undefined) return null;
@@ -22,7 +25,7 @@ function norm(v: unknown): unknown {
 
 export function makeD1(): { d1: D1Database; raw: InstanceType<typeof DatabaseSync> } {
   const raw = new DatabaseSync(":memory:");
-  raw.exec(readFileSync(SCHEMA_PATH, "utf8"));
+  for (const path of SCHEMA_PATHS) raw.exec(readFileSync(path, "utf8"));
 
   const adapter = {
     prepare(sql: string) {

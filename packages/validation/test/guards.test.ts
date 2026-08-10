@@ -30,7 +30,9 @@ describe("contract enum guards", () => {
     expect([...ENUM_SETS.permissionKey].sort()).toEqual(
       identity.PERMISSION_CATALOG.map((e) => e.key).sort(),
     );
-    expect(ENUM_SETS.permissionKey.size).toBe(23);
+    expect(ENUM_SETS.permissionKey.size).toBe(
+      identity.PERMISSION_CATALOG.length,
+    );
   });
 
   it("isTaskPriority / isTaskOrigin", () => {

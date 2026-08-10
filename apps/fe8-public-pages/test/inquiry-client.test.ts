@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   submitInquiry,
+  resolveGatewayOrigin,
+  isValidGatewayOrigin,
   PUBLIC_INQUIRY_PATH,
   IDEMPOTENCY_HEADER,
   type FetchLike,
@@ -89,5 +91,72 @@ describe("submitInquiry", () => {
     const res = await submitInquiry(body, { fetchImpl: async () => jsonResponse(200, { weird: true }) });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("NETWORK_ERROR");
+  });
+
+  it("normalizes a baseUrl with a trailing slash so the URL has no double slash", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { accepted: true })) as unknown as FetchLike;
+    await submitInquiry(body, { fetchImpl, baseUrl: "https://api.example.com/", idempotencyKey: "K" });
+    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(url).toBe(`https://api.example.com${PUBLIC_INQUIRY_PATH}`);
+  });
+
+  it("drops a path on baseUrl down to the bare origin", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { accepted: true })) as unknown as FetchLike;
+    await submitInquiry(body, { fetchImpl, baseUrl: "https://api.example.com/ignored/path", idempotencyKey: "K" });
+    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(url).toBe(`https://api.example.com${PUBLIC_INQUIRY_PATH}`);
+  });
+
+  it("falls back to same-origin when baseUrl is invalid", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { accepted: true })) as unknown as FetchLike;
+    await submitInquiry(body, { fetchImpl, baseUrl: "not a url", idempotencyKey: "K" });
+    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(url).toBe(PUBLIC_INQUIRY_PATH);
+  });
+});
+
+describe("resolveGatewayOrigin", () => {
+  it("returns empty string for undefined / empty / whitespace (same-origin)", () => {
+    expect(resolveGatewayOrigin()).toBe("");
+    expect(resolveGatewayOrigin("")).toBe("");
+    expect(resolveGatewayOrigin("   ")).toBe("");
+  });
+
+  it("returns the bare origin, stripping trailing slash and path", () => {
+    expect(resolveGatewayOrigin("https://api.example.com")).toBe("https://api.example.com");
+    expect(resolveGatewayOrigin("https://api.example.com/")).toBe("https://api.example.com");
+    expect(resolveGatewayOrigin("https://api.example.com/v1/x")).toBe("https://api.example.com");
+    expect(resolveGatewayOrigin("  https://api.example.com  ")).toBe("https://api.example.com");
+  });
+
+  it("preserves an explicit port", () => {
+    expect(resolveGatewayOrigin("http://localhost:8787")).toBe("http://localhost:8787");
+  });
+
+  it("rejects non-http(s) schemes and unparseable values → same-origin", () => {
+    expect(resolveGatewayOrigin("ftp://api.example.com")).toBe("");
+    expect(resolveGatewayOrigin("javascript:alert(1)")).toBe("");
+    expect(resolveGatewayOrigin("not a url")).toBe("");
+    expect(resolveGatewayOrigin("/api/v1")).toBe("");
+  });
+});
+
+describe("isValidGatewayOrigin", () => {
+  it("treats empty as valid (same-origin)", () => {
+    expect(isValidGatewayOrigin()).toBe(true);
+    expect(isValidGatewayOrigin("")).toBe(true);
+    expect(isValidGatewayOrigin("   ")).toBe(true);
+  });
+
+  it("accepts well-formed http(s) origins", () => {
+    expect(isValidGatewayOrigin("https://api.example.com")).toBe(true);
+    expect(isValidGatewayOrigin("https://api.example.com/")).toBe(true);
+    expect(isValidGatewayOrigin("http://localhost:8787")).toBe(true);
+  });
+
+  it("rejects non-empty values that fail to resolve", () => {
+    expect(isValidGatewayOrigin("ftp://api.example.com")).toBe(false);
+    expect(isValidGatewayOrigin("not a url")).toBe(false);
+    expect(isValidGatewayOrigin("/api/v1")).toBe(false);
   });
 });

@@ -5,7 +5,15 @@ import type { RequestContext } from "@dub/http";
 import type { AuditRecordEnvelopeV1, DubEventEnvelope } from "@dub/events";
 import type { Queue, MessageBatch, Fetcher } from "@cloudflare/workers-types";
 import type { Env } from "../src/env";
-import type { EventPort, IdentityPort, MailPort } from "../src/clients";
+import type {
+  ChatPort,
+  ChatSystemMessage,
+  EventPort,
+  IdentityPort,
+  MailPort,
+  PushDispatch,
+  PushPort,
+} from "../src/clients";
 import { makeD1 } from "./d1";
 
 export interface FakeQueue {
@@ -99,6 +107,34 @@ export function fakeMail(behavior: "ok" | "throw" = "ok"): RecordingMail {
     async send(req, idempotencyKey) {
       calls.push({ req, idempotencyKey });
       if (behavior === "throw") throw new Error("mail send failed");
+    },
+  };
+}
+
+export interface RecordingChat extends ChatPort {
+  calls: ChatSystemMessage[];
+}
+export function fakeChat(behavior: "ok" | "throw" = "ok"): RecordingChat {
+  const calls: ChatSystemMessage[] = [];
+  return {
+    calls,
+    async postSystemMessage(msg) {
+      calls.push(msg);
+      if (behavior === "throw") throw new Error("chat post failed");
+    },
+  };
+}
+
+export interface RecordingPush extends PushPort {
+  calls: PushDispatch[];
+}
+export function fakePush(behavior: "ok" | "throw" = "ok"): RecordingPush {
+  const calls: PushDispatch[] = [];
+  return {
+    calls,
+    async dispatch(req) {
+      calls.push(req);
+      if (behavior === "throw") throw new Error("push dispatch failed");
     },
   };
 }

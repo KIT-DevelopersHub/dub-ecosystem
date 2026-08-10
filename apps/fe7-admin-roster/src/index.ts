@@ -8,3 +8,5 @@ export type { FeatureModule, FeatureRoute, NavEntry, ResourceClient } from "./sh
 export { usePermissions } from "./hooks/usePermissions";
 export { createRosterApi } from "./api/rosterApi";
 export { createMockClient } from "./api/mockClient";
+export { MailRateLimitBanner } from "./components/MailRateLimitBanner";
+export type { MailRateLimitStatus, MailStatusResponse } from "./lib/mailStatus";

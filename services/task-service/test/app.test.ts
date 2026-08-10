@@ -326,3 +326,127 @@ describe("routing + authz + correlation", () => {
     expect(h.events.byName("task.created")[0]!.requestId).toBe("req_custom");
   });
 });
+
+// Documented contract branches not exercised above (task-service.md §4). These lock in
+// the field-level validation reasons and per-endpoint guards so a regression in the
+// error contract fails loudly.
+type ErrEnvelope = { error: { code: string; details?: unknown } };
+async function errOf(res: Response): Promise<ErrEnvelope["error"]> {
+  return ((await res.json()) as ErrEnvelope).error;
+}
+function hasFieldReason(details: unknown, field: string, reason: string): boolean {
+  return (
+    Array.isArray(details) &&
+    details.some(
+      (d) =>
+        (d as { field?: string }).field === field && (d as { reason?: string }).reason === reason,
+    )
+  );
+}
+
+describe("contract branches — validation + guards", () => {
+  it("POST 400 assigneeId not_found when the assignee does not exist (no event emitted) [§4.2]", async () => {
+    const { h, app } = setup();
+    h.identity.unknown.add("usr_ghost");
+    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", assigneeId: "usr_ghost" }));
+    expect(res.status).toBe(400);
+    const e = await errOf(res);
+    expect(e.code).toBe("VALIDATION_FAILED");
+    expect(hasFieldReason(e.details, "assigneeId", "not_found")).toBe(true);
+    expect(h.events.published).toHaveLength(0);
+  });
+
+  it("PATCH 400 assigneeId not_found; task left unchanged [§4.4]", async () => {
+    const { h, app } = setup();
+    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const t = (await res0.json()) as task.Task;
+    h.identity.unknown.add("usr_ghost");
+    const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1, assigneeId: "usr_ghost" }));
+    expect(res.status).toBe(400);
+    expect((await errOf(res)).code).toBe("VALIDATION_FAILED");
+    const after = await h.repo.getById(t.id);
+    expect(after!.assigneeId).toBeNull();
+    expect(after!.version).toBe(1);
+  });
+
+  it("PATCH 400 when version is missing [§4.4]", async () => {
+    const { h, app } = setup();
+    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const t = (await res0.json()) as task.Task;
+    const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { title: "x" }));
+    expect(res.status).toBe(400);
+    const e = await errOf(res);
+    expect(e.code).toBe("VALIDATION_FAILED");
+    expect(hasFieldReason(e.details, "version", "required")).toBe(true);
+  });
+
+  it("PATCH version-only body is a no-op that returns the current task (no events) [§4.4]", async () => {
+    const { h, app } = setup();
+    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const t = (await res0.json()) as task.Task;
+    h.events.published = [];
+    const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1 }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.Task;
+    expect(body.version).toBe(1);
+    expect(body.title).toBe("T");
+    expect(h.events.published).toHaveLength(0);
+  });
+
+  it("GET 404 TASK_NOT_FOUND for a malformed (non task_-prefixed) id [§4.3]", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks/not-a-task-id", userInit("GET"));
+    expect(res.status).toBe(404);
+    expect((await errOf(res)).code).toBe("TASK_NOT_FOUND");
+  });
+
+  it("GET list 400 limit too_large when limit > 200 [§4.1]", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks?eventId=evt_1&limit=201", userInit("GET"));
+    expect(res.status).toBe(400);
+    const e = await errOf(res);
+    expect(e.code).toBe("VALIDATION_FAILED");
+    expect(hasFieldReason(e.details, "limit", "too_large")).toBe(true);
+  });
+
+  it("GET list 400 when a status filter value is not a valid TaskStatus [§4.1]", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks?eventId=evt_1&status=todo,bogus", userInit("GET"));
+    expect(res.status).toBe(400);
+    const e = await errOf(res);
+    expect(e.code).toBe("VALIDATION_FAILED");
+    expect(hasFieldReason(e.details, "status", "invalid_enum")).toBe(true);
+  });
+
+  it("GET list 403 when includeArchived=true but the caller lacks task:delete [§4.1]", async () => {
+    const { h, app } = setup();
+    h.authz.denied.add("task:delete");
+    const res = await app.request("/tasks?eventId=evt_1&includeArchived=true", userInit("GET"));
+    expect(res.status).toBe(403);
+    expect((await errOf(res)).code).toBe("FORBIDDEN");
+  });
+
+  it("GET /tasks/dependencies 400 when eventId is absent [§4.7]", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks/dependencies", userInit("GET"));
+    expect(res.status).toBe(400);
+    const e = await errOf(res);
+    expect(e.code).toBe("VALIDATION_FAILED");
+    expect(hasFieldReason(e.details, "eventId", "required")).toBe(true);
+  });
+
+  it("PUT dependencies 400 self_dependency when the task depends on itself [§4.6]", async () => {
+    const { h, app } = setup();
+    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "A" }));
+    const a = (await res0.json()) as task.Task;
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [a.id] }),
+    );
+    expect(res.status).toBe(400);
+    const e = await errOf(res);
+    expect(e.code).toBe("VALIDATION_FAILED");
+    expect(hasFieldReason(e.details, "dependsOnIds", "self_dependency")).toBe(true);
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+  });
+});

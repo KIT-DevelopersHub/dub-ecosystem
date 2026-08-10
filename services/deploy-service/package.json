@@ -6,8 +6,10 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@dub/auth-client": "workspace:*",

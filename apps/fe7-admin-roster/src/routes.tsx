@@ -9,6 +9,7 @@ import type { ComponentType } from "react";
 import type { FeatureModule, FeatureRoute, NavEntry } from "./shell/contract";
 import { useNavigation } from "./providers/NavigationContext";
 import { useRosterContext } from "./providers/RosterProvider";
+import { MailRateLimitBanner } from "./components/MailRateLimitBanner";
 
 function usersRoute(): Promise<{ Component: ComponentType }> {
   return import("./components/UserListPage").then(({ UserListPage }) => ({
@@ -77,4 +78,7 @@ export const nav: NavEntry[] = [
   { label: "変更履歴", path: "/admin/history", icon: "history", order: 30 },
 ];
 
-export const adminModule: FeatureModule = { id: "admin", routes, nav };
+// headerWidget: mounted by the FE2 shell above the module surface (same slot as FE5's
+// NotificationBell). It renders nothing until メール送信API is rate-limited, so the
+// admin screen carries the persistent banner in production, not just the dev harness.
+export const adminModule: FeatureModule = { id: "admin", routes, nav, headerWidget: MailRateLimitBanner };

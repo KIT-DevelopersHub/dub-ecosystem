@@ -138,12 +138,17 @@ export function buildApp(deps: Deps): Hono {
     const ctx = ctxOf(c);
     const code = c.req.query("code");
     const state = c.req.query("state");
+    // Google may redirect back with its own ?error=... (e.g. access_denied when the
+    // user cancels consent) and NO code — surface that as an exchange failure (audited)
+    // rather than the misleading state-mismatch code.
+    const providerError = c.req.query("error");
     const fail = (errorCode: string): Response => {
       const url = new URL(config.spaErrorUrl);
       url.searchParams.set("error", errorCode);
       return c.redirect(url.toString(), 302);
     };
     try {
+      if (providerError) throw authErrors.oauthExchangeFailed(`google:${providerError}`);
       if (!code || !state) return fail(authErrors.stateMismatch().code);
       const raw = await deps.kvGet(OAUTH_STATE_PREFIX + state);
       if (!raw) return fail(authErrors.stateMismatch().code);

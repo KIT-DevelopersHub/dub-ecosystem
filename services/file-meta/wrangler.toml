@@ -41,7 +41,7 @@ binding = "AUDIT_QUEUE"
 # --- Service bindings (synchronous internal calls) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_DRIVE_PROXY"

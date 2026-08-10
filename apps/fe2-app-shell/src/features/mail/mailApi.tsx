@@ -8,7 +8,10 @@ import type { ApiClient } from "../../lib/api-client.tsx";
 
 type SendMailRequest = mail.SendMailRequest;
 type SendMailResponse = mail.SendMailResponse;
-type MailMessage = mail.MailMessage;
+type MailMessageListItem = mail.MailMessageListItem;
+type MailMessageDetail = mail.MailMessageDetail;
+type MailMessageState = mail.MailMessageState;
+type MailThread = mail.MailThread;
 type Paginated<T> = common.Paginated<T>;
 
 export interface InboxQuery {
@@ -20,8 +23,14 @@ export interface InboxQuery {
 export interface MailApi {
   /** Compose + send via the gateway (session-authorized, mail:send). */
   send(req: SendMailRequest): Promise<SendMailResponse>;
-  /** List received messages (mail:read). */
-  listInbox(query?: InboxQuery): Promise<Paginated<MailMessage>>;
+  /** List received messages with their read flag (mail:read). */
+  listInbox(query?: InboxQuery): Promise<Paginated<MailMessageListItem>>;
+  /** Fetch one message's full detail — body + read state (mail:read). */
+  getMessage(id: string): Promise<MailMessageDetail>;
+  /** Fetch a whole thread (every message, bodies included) (mail:read). */
+  getThread(threadId: string): Promise<MailThread>;
+  /** Mark a message read (idempotent). Returns the resulting read state (mail:read). */
+  markRead(id: string): Promise<MailMessageState>;
 }
 
 const MAIL = "/api/v1/mail";
@@ -36,8 +45,11 @@ export function createMailApi(api: ApiClient): MailApi {
       if (query?.cursor !== undefined) q.cursor = query.cursor;
       if (query?.threadId !== undefined) q.threadId = query.threadId;
       const hasQuery = Object.keys(q).length > 0;
-      return api.request<Paginated<MailMessage>>({ method: "GET", path: `${MAIL}/messages`, ...(hasQuery ? { query: q } : {}) });
+      return api.request<Paginated<MailMessageListItem>>({ method: "GET", path: `${MAIL}/messages`, ...(hasQuery ? { query: q } : {}) });
     },
+    getMessage: (id) => api.request<MailMessageDetail>({ method: "GET", path: `${MAIL}/messages/${encodeURIComponent(id)}` }),
+    getThread: (threadId) => api.request<MailThread>({ method: "GET", path: `${MAIL}/threads/${encodeURIComponent(threadId)}` }),
+    markRead: (id) => api.request<MailMessageState>({ method: "POST", path: `${MAIL}/messages/${encodeURIComponent(id)}/read` }),
   };
 }
 

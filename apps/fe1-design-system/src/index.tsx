@@ -55,6 +55,14 @@ export type {
   ErrorStateProps,
   SkeletonLoaderProps,
   RateLimitNoticeProps,
+  TimelineScale,
+  TimelineRow,
+  TimelineDependency,
+  TimelineProps,
+  ChatMessageState,
+  ChatReaction,
+  ChatMessage,
+  MessageListProps,
 } from "./types";
 
 // Components
@@ -83,6 +91,26 @@ export { Sidebar } from "./components/Sidebar";
 export { Tabs } from "./components/Tabs";
 export { EmptyState, ErrorState, SkeletonLoader } from "./components/States";
 export { RateLimitNotice, formatRecoveryText } from "./components/RateLimitNotice";
+export { Timeline } from "./components/Timeline";
+export { MessageList } from "./components/MessageList";
+
+// Timeline geometry helpers (pure, data-agnostic — consumers reuse for D&D/ticks).
+export {
+  TIMELINE_PX_PER_DAY,
+  computeTimelineBounds,
+  timelineBars,
+  timelineTicks,
+  timelineDependencySegments,
+  pxToDayDelta,
+  shiftMsByDays,
+} from "./utils/timeline-geometry";
+export type {
+  TimelineBounds,
+  TimelineBar,
+  TimelineBarsOptions,
+  TimelineTick,
+  TimelineSegment,
+} from "./utils/timeline-geometry";
 
 // Icon registry (also available at @dub/ui/icons)
 export { iconRegistry } from "./icons";

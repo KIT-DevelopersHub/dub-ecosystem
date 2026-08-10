@@ -1,0 +1,855 @@
+# OpenAPI 3.1 contract for identity-roster. Generated from services/identity-roster/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Identity & Roster API
+  version: 1.0.0
+  description: |-
+    Users, orgs, roles and the frozen RBAC permission catalog. Owns /authz/check (the single authorization source). External segment /api/v1/identity.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/identity/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: identity
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /health:
+    get:
+      operationId: identityHealth
+      summary: Liveness probe
+      tags:
+        - health
+      responses:
+        '200':
+          description: OK
+      security: []
+  /identity/orgs:
+    get:
+      operationId: listOrgs
+      summary: List organizations
+      tags:
+        - identity
+      description: Requires identity:read.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page of orgs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrgs'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /identity/users:
+    get:
+      operationId: listUsers
+      summary: List / batch-fetch roster users
+      tags:
+        - identity
+      description: Requires identity:read.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: ids
+          in: query
+          description: Comma-separated user ids for batch fetch.
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/UserStatus'
+      responses:
+        '200':
+          description: Page of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUsers'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /identity/users/{id}:
+    get:
+      operationId: getUser
+      summary: Get user detail (effective permissions)
+      tags:
+        - identity
+      description: Self-read is always allowed; otherwise requires identity:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityUserDetail'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateUser
+      summary: Update a user
+      tags:
+        - identity
+      description: Requires identity:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /identity/users/invite:
+    post:
+      operationId: inviteUser
+      summary: Invite a user
+      tags:
+        - identity
+      description: Requires identity:admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteUserRequest'
+      responses:
+        '201':
+          description: Invited user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /identity/roles:
+    get:
+      operationId: listRoles
+      summary: List roles
+      tags:
+        - identity
+      description: Requires identity:read.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page of roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRoles'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createRole
+      summary: Create a role
+      tags:
+        - identity
+      description: Requires identity:admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '201':
+          description: Created role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /identity/roles/{id}:
+    patch:
+      operationId: updateRole
+      summary: Update a role
+      tags:
+        - identity
+      description: Requires identity:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleRequest'
+      responses:
+        '200':
+          description: Updated role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteRole
+      summary: Delete a role
+      tags:
+        - identity
+      description: Requires identity:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /identity/users/{id}/roles:
+    post:
+      operationId: assignRole
+      summary: Assign a role to a user
+      tags:
+        - identity
+      description: Requires identity:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRoleRequest'
+      responses:
+        '201':
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignmentId:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /identity/users/{id}/roles/{assignmentId}:
+    delete:
+      operationId: revokeRole
+      summary: Revoke a role assignment
+      tags:
+        - identity
+      description: Requires identity:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Revoked.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /identity/permissions/catalog:
+    get:
+      operationId: getPermissionCatalog
+      summary: Get the frozen permission catalog
+      tags:
+        - identity
+      description: Requires identity:read.
+      responses:
+        '200':
+          description: The 32-key catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PermissionCatalogEntry'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /users/provision:
+    post:
+      operationId: provisionUser
+      summary: Provision a user (first-login upsert)
+      tags:
+        - identity
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionUserRequest'
+      responses:
+        '200':
+          description: Provisioned user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      security: []
+  /authz/check:
+    post:
+      operationId: authzCheck
+      summary: Batch authorization check
+      tags:
+        - identity
+      description: |-
+        Single source used by @dub/auth-client.
+        
+        Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthzCheckRequest'
+      responses:
+        '200':
+          description: Decisions in request order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthzCheckResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      security: []
+  /internal/users/{id}/permissions:
+    get:
+      operationId: effectivePermissions
+      summary: Resolve a user's effective permissions
+      tags:
+        - identity
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Permission keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PermissionKey'
+      security: []
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    PermissionKey:
+      type: string
+      description: Permission key from the frozen 32-key PERMISSION_CATALOG, e.g. 'identity:read'.
+    UserStatus:
+      type: string
+      enum:
+        - active
+        - invited
+        - disabled
+        - rejected
+    IdentityUser:
+      type: object
+      required:
+        - id
+        - orgId
+        - displayName
+        - email
+        - status
+        - roleIds
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        githubLogin:
+          type:
+            - string
+            - 'null'
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        roleIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    IdentityUserDetail:
+      allOf:
+        - $ref: '#/components/schemas/IdentityUser'
+        - type: object
+          required:
+            - permissions
+          properties:
+            permissions:
+              type: array
+              items:
+                $ref: '#/components/schemas/PermissionKey'
+    UserSummary:
+      type: object
+      required:
+        - id
+        - displayName
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+    Org:
+      type: object
+      required:
+        - id
+        - name
+        - createdAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    Role:
+      type: object
+      required:
+        - id
+        - orgId
+        - name
+        - permissions
+        - isSystem
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionKey'
+        isSystem:
+          type: boolean
+    PermissionCatalogEntry:
+      type: object
+      required:
+        - key
+        - name
+        - description
+        - domain
+        - dangerous
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        domain:
+          type: string
+        dangerous:
+          type: boolean
+    InviteUserRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+        displayName:
+          type: string
+        roleIds:
+          type: array
+          items:
+            type: string
+    UpdateUserRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        roleIds:
+          type: array
+          items:
+            type: string
+    CreateRoleRequest:
+      type: object
+      required:
+        - name
+        - permissions
+      properties:
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionKey'
+    UpdateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionKey'
+    AssignRoleRequest:
+      type: object
+      required:
+        - roleId
+      properties:
+        roleId:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+    ProvisionUserRequest:
+      type: object
+      required:
+        - email
+        - displayName
+      properties:
+        email:
+          type: string
+        displayName:
+          type: string
+        githubLogin:
+          type: string
+    AuthzQuery:
+      type: object
+      required:
+        - permission
+      properties:
+        permission:
+          $ref: '#/components/schemas/PermissionKey'
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+    AuthzCheckRequest:
+      type: object
+      required:
+        - subjectUserId
+        - orgId
+        - checks
+      properties:
+        subjectUserId:
+          type: string
+        orgId:
+          type: string
+        checks:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/AuthzQuery'
+    AuthzDecision:
+      type: object
+      required:
+        - allowed
+        - evaluatedAt
+        - ttlSeconds
+      properties:
+        allowed:
+          type: boolean
+        evaluatedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        ttlSeconds:
+          type: integer
+    AuthzCheckResponse:
+      type: object
+      required:
+        - decisions
+      properties:
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthzDecision'
+    PaginatedUsers:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdentityUser'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+    PaginatedOrgs:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Org'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+    PaginatedRoles:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.

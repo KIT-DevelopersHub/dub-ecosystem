@@ -30,8 +30,12 @@ Foundation packages must be built first for `@dub/*` subpath resolution (`pnpm -
 
 ## Build-time env
 
-- `PUBLIC_GATEWAY_ORIGIN` — gateway origin for the inquiry POST (empty = same-origin).
-- `PUBLIC_TURNSTILE_SITE_KEY` — Cloudflare Turnstile site key (siteverify is gateway-side).
+All `PUBLIC_*` vars are inlined into the static bundle at `astro build` time, so they must contain **no secrets** (Turnstile siteverify + rate-limit stay gateway-side).
+
+- `PUBLIC_GATEWAY_ORIGIN` — gateway origin for the inquiry POST (`POST <origin>/api/v1/public/inquiries`). **Empty/unset = same-origin.** When set it must be a bare `http(s)` origin (`scheme://host[:port]`, no path, no trailing slash); `resolveGatewayOrigin` (in `lib/inquiry-client.ts`) normalizes it — any path/trailing slash is dropped, and a non-empty value that fails to parse falls back to same-origin (the `InquiryForm` island logs a `console.warn` so the misconfiguration is visible). Example: `PUBLIC_GATEWAY_ORIGIN=https://api.developershub.jp`.
+- `PUBLIC_TURNSTILE_SITE_KEY` — Cloudflare Turnstile site key (public, not a secret). When set the widget script loads and renders; the token is verified gateway-side. Empty = the widget is inert (dev/preview only).
+
+Local setup: create `apps/fe8-public-pages/.env` with these two keys (both may be blank for a same-origin, Turnstile-less dev build).
 
 ## Contract note (frozen vs P0a draft)
 

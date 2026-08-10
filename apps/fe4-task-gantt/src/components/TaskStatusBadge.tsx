@@ -1,5 +1,5 @@
 import type { task } from "@dub/types";
-import styles from "../styles/app.module.css";
+import { Badge, type BadgeTone } from "@dub/ui";
 
 const LABEL: Record<task.TaskStatus, string> = {
   todo: "未着手",
@@ -9,19 +9,25 @@ const LABEL: Record<task.TaskStatus, string> = {
   cancelled: "中止",
 };
 
+/** Task status → @dub/ui semantic tone (mirrors the old app.module.css colors). */
+const TONE: Record<task.TaskStatus, BadgeTone> = {
+  todo: "neutral",
+  in_progress: "info",
+  blocked: "warning",
+  done: "success",
+  cancelled: "neutral",
+};
+
 export interface TaskStatusBadgeProps {
   status: task.TaskStatus;
   testId?: string;
 }
 
-/** Public (FE3 reuses in action screens). */
+/** Public (FE3 reuses in action screens). Built on the @dub/ui design-system Badge. */
 export function TaskStatusBadge({ status, testId }: TaskStatusBadgeProps) {
   return (
-    <span
-      className={`${styles.badge} ${styles[`badge_${status}`]}`}
-      data-testid={testId ?? `fe4-status-${status}`}
-    >
+    <Badge tone={TONE[status]} testId={testId ?? `fe4-status-${status}`}>
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }

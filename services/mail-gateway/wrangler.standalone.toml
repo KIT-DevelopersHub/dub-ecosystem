@@ -1,0 +1,21 @@
+# Standalone "send-only" deploy of mail-gateway (browser compose page + send endpoint).
+# Unlike wrangler.toml (full service), this config binds NOTHING that needs provisioning:
+# no D1, no SVC_IDENTITY service binding, no Queues. So `wrangler deploy -c
+# wrangler.standalone.toml` succeeds with only Workers Secrets set out-of-band.
+#
+# Required before first send (set with `wrangler secret put ... -c wrangler.standalone.toml`):
+#   RESEND_API_KEY   -> the Resend API key (secret, never committed)
+#   COMPOSE_TOKEN    -> shared bearer that gates POST /compose/send (open-relay guard)
+name = "mail-gateway"
+main = "src/standalone.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Non-secret config only. From is onboarding@resend.dev until developershub.jp DNS is live.
+[vars]
+MAIL_OUTBOUND_PROVIDER = "resend"
+MAIL_FROM_ADDRESS = "onboarding@resend.dev"
+
+[observability]
+enabled = true

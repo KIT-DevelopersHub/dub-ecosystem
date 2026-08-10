@@ -176,6 +176,23 @@ export function extractSnippet(rawText: string): string {
   return text.slice(0, SNIPPET_MAX);
 }
 
+/** Best-effort plain-text body: everything after the header/body separator, with MIME
+ *  boundary + part-header lines dropped but line breaks PRESERVED (unlike the snippet,
+ *  which collapses whitespace). Capped to keep a runaway message off the D1 row. */
+export function extractBody(rawText: string, maxLen = 100_000): string {
+  const crlf = rawText.indexOf("\r\n\r\n");
+  const lf = rawText.indexOf("\n\n");
+  const sep = crlf >= 0 ? crlf + 4 : lf >= 0 ? lf + 2 : -1;
+  const body = sep >= 0 ? rawText.slice(sep) : rawText;
+  const text = body
+    .replace(/^--[^\r\n]*$/gm, "") // drop MIME boundary lines
+    .replace(/^Content-[^\r\n]*$/gim, "") // drop part headers
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n") // squeeze 3+ blank lines
+    .trim();
+  return text.slice(0, maxLen);
+}
+
 /** Lowercase-key header map from a Headers-like object (CF EmailMessage.headers). */
 export function headersToMap(headers: { forEach: (cb: (v: string, k: string) => void) => void }): Record<string, string> {
   const map: Record<string, string> = {};

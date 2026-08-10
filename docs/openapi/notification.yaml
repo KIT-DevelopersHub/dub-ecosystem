@@ -1,0 +1,459 @@
+# OpenAPI 3.1 contract for notification. Generated from services/notification/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Notification Service API
+  version: 1.0.0
+  description: |-
+    Notification dispatch (internal /notify) plus self-scoped inbox and preferences. External segment /api/v1/notifications; /notify is internal-only.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/notifications/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: notifications
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /internal/health:
+    get:
+      operationId: notifHealth
+      summary: Liveness probe
+      tags:
+        - health
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      responses:
+        '200':
+          description: OK
+      security: []
+  /notify:
+    post:
+      operationId: notify
+      summary: Dispatch a notification (service-to-service)
+      tags:
+        - notifications
+      description: |-
+        Requires notif:send when a user is on the call.
+        
+        Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotifyRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotifyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security: []
+  /inbox:
+    get:
+      operationId: listInbox
+      summary: List the caller's inbox
+      tags:
+        - notifications
+      description: Self-scoped (notif:inbox:self).
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Page of inbox items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedInbox'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /inbox/unread-count:
+    get:
+      operationId: unreadCount
+      summary: Caller's unread count
+      tags:
+        - notifications
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadCountResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /inbox/{id}/read:
+    patch:
+      operationId: markRead
+      summary: Mark one item read
+      tags:
+        - notifications
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Marked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /inbox/read-all:
+    post:
+      operationId: markAllRead
+      summary: Mark all read
+      tags:
+        - notifications
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadAllRequest'
+      responses:
+        '200':
+          description: Count updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /preferences:
+    get:
+      operationId: getPreferences
+      summary: Get notification preferences
+      tags:
+        - notifications
+      description: Self-scoped (notif:prefs:self).
+      responses:
+        '200':
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPreferencesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    patch:
+      operationId: updatePreferences
+      summary: Update notification preferences
+      tags:
+        - notifications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPreferencesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    NotificationChannel:
+      type: string
+      enum:
+        - in_app
+        - email
+        - chat
+        - push
+    NotifyRequest:
+      type: object
+      required:
+        - type
+        - recipientIds
+        - title
+        - body
+      properties:
+        type:
+          type: string
+        recipientIds:
+          type: array
+          items:
+            type: string
+        title:
+          type: string
+        body:
+          type: string
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationChannel'
+        dedupKey:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+    NotifyResponse:
+      type: object
+      description: Ingest result counts (shape is service-owned).
+      properties:
+        created:
+          type: integer
+        deduped:
+          type: integer
+    InboxItem:
+      type: object
+      required:
+        - id
+        - type
+        - title
+        - body
+        - readAt
+        - createdAt
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        readAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        resourceType:
+          type:
+            - string
+            - 'null'
+        resourceId:
+          type:
+            - string
+            - 'null'
+    PaginatedInbox:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InboxItem'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+    UnreadCountResponse:
+      type: object
+      required:
+        - count
+      properties:
+        count:
+          type: integer
+    PreferenceEntry:
+      type: object
+      required:
+        - type
+        - channels
+      properties:
+        type:
+          type: string
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationChannel'
+    GetPreferencesResponse:
+      type: object
+      required:
+        - userId
+        - entries
+      properties:
+        userId:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreferenceEntry'
+    UpdatePreferencesRequest:
+      type: object
+      required:
+        - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreferenceEntry'
+    ReadAllRequest:
+      type: object
+      description: 'Optional: restrict mark-all to a single type.'
+      properties:
+        type:
+          type: string
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.

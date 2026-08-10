@@ -1,0 +1,473 @@
+# OpenAPI 3.1 contract for auth-service. Generated from services/auth-service/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Auth Service API
+  version: 1.0.0
+  description: |-
+    Google OAuth login + KV session management. Public segment /api/v1/auth (auth-service is the only 'public' gateway route). Verify + revoke are internal-only.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/auth/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: auth
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /health:
+    get:
+      operationId: authHealth
+      summary: Liveness probe
+      tags:
+        - health
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  service:
+                    type: string
+      security: []
+  /auth/login:
+    post:
+      operationId: authLoginStart
+      summary: Begin Google OAuth login
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLoginStartRequest'
+      responses:
+        '200':
+          description: Authorization URL to redirect the user to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginStartResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/Internal'
+      security: []
+  /auth/callback:
+    get:
+      operationId: authCallback
+      summary: OAuth redirect callback
+      tags:
+        - auth
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirects to the SPA success URL (session cookie set) or an error URL. Never returns a body.
+      security: []
+  /verify:
+    post:
+      operationId: authVerify
+      summary: Verify a session token (one-shot, used by the gateway)
+      tags:
+        - auth
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthVerifyRequest'
+      responses:
+        '200':
+          description: Verification result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthVerifyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/Internal'
+      security: []
+  /auth/refresh:
+    post:
+      operationId: authRefresh
+      summary: Refresh a session
+      tags:
+        - auth
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRefreshRequest'
+      responses:
+        '200':
+          description: Refreshed session (and token for mobile).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/Internal'
+      security: []
+  /auth/logout:
+    post:
+      operationId: authLogout
+      summary: Log out / revoke the current session
+      tags:
+        - auth
+      responses:
+        '200':
+          description: Logged out.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+      security:
+        - sessionCookie: []
+        - gatewayIdentity: []
+  /auth/test-login:
+    post:
+      operationId: authTestLogin
+      summary: Mint a session without OAuth (preview/local only)
+      tags:
+        - auth
+      description: Excluded from production builds (theme8).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestLoginRequest'
+      responses:
+        '200':
+          description: Token + session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenSessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security: []
+  /mobile/exchange:
+    post:
+      operationId: authMobileExchange
+      summary: Exchange an OAuth code for a mobile token+session
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MobileExchangeRequest'
+      responses:
+        '200':
+          description: Token + session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenSessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+      security: []
+  /internal/revoke-user:
+    post:
+      operationId: authRevokeUser
+      summary: Revoke all sessions for a user
+      tags:
+        - auth
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestLoginRequest'
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      security: []
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    SessionInfo:
+      type: object
+      required:
+        - userId
+        - client
+        - sessionExpiresAt
+      properties:
+        userId:
+          type: string
+        client:
+          type: string
+          enum:
+            - web
+            - mobile
+        sessionExpiresAt:
+          type: integer
+          description: epoch-ms
+    AuthLoginStartRequest:
+      type: object
+      required:
+        - redirectUri
+      properties:
+        redirectUri:
+          type: string
+        client:
+          type: string
+          enum:
+            - web
+            - mobile
+    LoginStartResponse:
+      type: object
+      required:
+        - authorizationUrl
+        - state
+      properties:
+        authorizationUrl:
+          type: string
+        state:
+          type: string
+    AuthVerifyRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+    AuthVerifyResponse:
+      type: object
+      required:
+        - valid
+        - userId
+        - session
+        - reason
+      properties:
+        valid:
+          type: boolean
+        userId:
+          type:
+            - string
+            - 'null'
+        session:
+          oneOf:
+            - $ref: '#/components/schemas/SessionInfo'
+            - type: 'null'
+        reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - malformed
+            - expired
+            - revoked
+            - null
+    AuthRefreshRequest:
+      type: object
+      description: refreshToken is the mobile path; web uses the session cookie.
+      properties:
+        refreshToken:
+          type: string
+    RefreshResponse:
+      type: object
+      required:
+        - session
+      properties:
+        token:
+          type: string
+        session:
+          $ref: '#/components/schemas/SessionInfo'
+    TokenSessionResponse:
+      type: object
+      required:
+        - token
+        - session
+      properties:
+        token:
+          type: string
+        session:
+          $ref: '#/components/schemas/SessionInfo'
+    MobileExchangeRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+    TestLoginRequest:
+      type: object
+      required:
+        - userId
+      properties:
+        userId:
+          type: string
+    OkResponse:
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.
