@@ -14,6 +14,12 @@ export interface AuthLoginStartRequest {
   redirectUri: string;
   client?: AuthClient;
 }
+// email+password credential login (web). Additive to the Google OAuth path; on
+// success the session cookie is set exactly as the OAuth callback does.
+export interface AuthPasswordLoginRequest {
+  email: string;
+  password: string;
+}
 export interface AuthVerifyRequest {
   token: string;
 }

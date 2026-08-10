@@ -11,6 +11,7 @@ export const AuthErrorCodes = {
   USER_REJECTED: "AUTH_USER_REJECTED", // 403 identity provision rejected (invite-only)
   INTERNAL_FORBIDDEN: "AUTH_INTERNAL_FORBIDDEN", // 403 x-dub-internal missing on internal route
   TEST_LOGIN_DISABLED: "AUTH_TEST_LOGIN_DISABLED", // 403 test-login off / production
+  INVALID_CREDENTIALS: "AUTH_INVALID_CREDENTIALS", // 401 email/password login: unknown email OR wrong password (no enumeration)
 } as const;
 
 export const authErrors = {
@@ -41,5 +42,10 @@ export const authErrors = {
   },
   testLoginDisabled(message = "test-login is disabled"): DubError {
     return new DubError(AuthErrorCodes.TEST_LOGIN_DISABLED, message, { status: 403 });
+  },
+  // Deliberately generic (same code + message whether the email is unknown or the
+  // password is wrong) so the endpoint can't be used to enumerate accounts.
+  invalidCredentials(message = "Invalid email or password"): DubError {
+    return new DubError(AuthErrorCodes.INVALID_CREDENTIALS, message, { status: 401 });
   },
 };
