@@ -373,6 +373,29 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
       security: []
+  /users/{id}:
+    get:
+      operationId: getUserInternal
+      summary: Identity master by id (internal read)
+      tags:
+        - identity
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway /me composition calls this to resolve the caller''s own record; the gateway 404s this bare path for external clients (they use /identity/users/{id}).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Identity user master record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityUser'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security: []
   /authz/check:
     post:
       operationId: authzCheck

@@ -144,6 +144,13 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.provision(orgId, body, ctxOf(c)));
   });
 
+  // Identity master by id — internal S2S read for the gateway /me composition.
+  // External clients reach the user via /identity/users/:id (auth'd); the gateway
+  // 404s this bare path, and requireInternal is the second line of defence.
+  app.get("/users/:id", requireInternal, async (c) => {
+    return c.json(await svc.getUser(c.req.param("id"), orgId));
+  });
+
   app.post("/authz/check", requireInternal, async (c) => {
     const body = await readJson<identity.AuthzCheckRequest>(c);
     if (!body || typeof body.subjectUserId !== "string" || typeof body.orgId !== "string") {

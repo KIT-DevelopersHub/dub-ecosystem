@@ -105,6 +105,15 @@ export class IdentityService {
     return { ...base, permissions: effectiveOrgWidePermissions(ctx) };
   }
 
+  /** Identity master for a user (no permission fan-out). Internal S2S read — the
+   *  api-gateway /me composition calls this to resolve the caller's own record. */
+  async getUser(userId: string, orgId: string): Promise<identity.IdentityUser> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+    const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    return this.toIdentityUser(user, assignments);
+  }
+
   // ---------- invite / provision ----------
   async invite(orgId: string, req: { email: string; displayName?: string; roleIds?: string[] }, ctx: RequestCtx): Promise<InviteUserResponse> {
     const email = requireEmail(req.email);

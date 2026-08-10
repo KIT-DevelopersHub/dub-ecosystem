@@ -26,6 +26,14 @@ enabled = true
 binding = "AUTH_KV"
 id = "71e10ff553a24e0aa0b89929f6ed8643"
 
+# Free-tier audit outbox (@dub/freeq): replaces the paid AUDIT_QUEUE producer.
+# Best-effort — auth flow never fails on an outbox INSERT hiccup. Drain to
+# audit-log is a follow-up (Cron + SVC_AUDIT); rows stay durable in D1 until then.
+[[d1_databases]]
+binding = "OUTBOX_DB"
+database_name = "auth-outbox"
+database_id = "60a9b8ab-5904-4c1e-8821-e43e0192ce43"
+
 [[services]]
 binding = "SVC_IDENTITY"
 service = "dub-identity-roster"
