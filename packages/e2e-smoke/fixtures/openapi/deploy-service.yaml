@@ -1,0 +1,485 @@
+# OpenAPI 3.1 contract for deploy-service. Generated from services/deploy-service/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Deploy Service API
+  version: 1.0.0
+  description: |-
+    Source of truth for sites, deployments, DNS records and domains (Cloudflare-backed). External segment /api/v1/deploy.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/deploy/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: deploy
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /health:
+    get:
+      operationId: deployHealth
+      summary: Liveness probe
+      tags:
+        - health
+      responses:
+        '200':
+          description: OK
+      security: []
+  /deploy/sites:
+    get:
+      operationId: listSites
+      summary: List sites
+      tags:
+        - deploy
+      description: Requires infra:read.
+      responses:
+        '200':
+          description: Sites
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createSite
+      summary: Register a site
+      tags:
+        - deploy
+      description: Requires infra:admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSiteRequest'
+      responses:
+        '201':
+          description: Created site
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /deploy/domains:
+    get:
+      operationId: listDomains
+      summary: List domains
+      tags:
+        - deploy
+      description: Requires infra:read.
+      responses:
+        '200':
+          description: Domains
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /deploy/deployments:
+    get:
+      operationId: listDeployments
+      summary: List deployments
+      tags:
+        - deploy
+      description: Requires infra:read.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: siteId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DeploymentStatus'
+      responses:
+        '200':
+          description: Page of deployments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDeployments'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createDeployment
+      summary: Execute a deployment
+      tags:
+        - deploy
+      description: Requires infra:deploy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeploymentRequest'
+      responses:
+        '201':
+          description: Created deployment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /deploy/deployments/{id}:
+    get:
+      operationId: getDeployment
+      summary: Get a deployment
+      tags:
+        - deploy
+      description: Requires infra:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /deploy/dns/records:
+    post:
+      operationId: createDnsRecord
+      summary: Create a DNS record
+      tags:
+        - deploy
+      description: Requires infra:dns.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDnsRecordRequest'
+      responses:
+        '201':
+          description: Created record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DnsRecordResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    DeploymentStatus:
+      type: string
+      enum:
+        - queued
+        - building
+        - live
+        - failed
+    Deployment:
+      type: object
+      required:
+        - id
+        - siteId
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        siteId:
+          type: string
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
+        commitSha:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    Site:
+      type: object
+      required:
+        - id
+        - name
+        - createdAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        domain:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    Domain:
+      type: object
+      required:
+        - name
+        - siteId
+        - verified
+      properties:
+        name:
+          type: string
+        siteId:
+          type: string
+        verified:
+          type: boolean
+    SiteList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Site'
+    DomainList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Domain'
+    CreateDeploymentRequest:
+      type: object
+      required:
+        - siteId
+      properties:
+        siteId:
+          type: string
+        commitSha:
+          type: string
+    CreateSiteRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        domain:
+          type: string
+    CreateDnsRecordRequest:
+      type: object
+      required:
+        - zone
+        - type
+        - name
+        - content
+      properties:
+        zone:
+          type: string
+        type:
+          type: string
+          enum:
+            - A
+            - AAAA
+            - CNAME
+            - TXT
+        name:
+          type: string
+        content:
+          type: string
+    DnsRecordResponse:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        zone:
+          type: string
+        type:
+          type: string
+        name:
+          type: string
+        content:
+          type: string
+    PaginatedDeployments:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deployment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.

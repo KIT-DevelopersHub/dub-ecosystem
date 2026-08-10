@@ -51,19 +51,20 @@ function readCookie(header: string | undefined, name: string): string | null {
 }
 
 function buildSessionCookie(name: string, token: string, domain: string, maxAgeSec: number): string {
-  return [
-    `${name}=${token}`,
-    "HttpOnly",
-    "Secure",
-    "SameSite=Lax",
-    `Domain=${domain}`,
-    "Path=/",
-    `Max-Age=${maxAgeSec}`,
-  ].join("; ");
+  // Host-only cookie when no domain configured (domain === ""): omit the Domain
+  // attribute so the cookie binds to the serving host. Required on *.workers.dev,
+  // where a shared-suffix Domain attribute is rejected by the browser.
+  const parts = [`${name}=${token}`, "HttpOnly", "Secure", "SameSite=Lax"];
+  if (domain) parts.push(`Domain=${domain}`);
+  parts.push("Path=/", `Max-Age=${maxAgeSec}`);
+  return parts.join("; ");
 }
 
 function clearSessionCookie(name: string, domain: string): string {
-  return `${name}=; HttpOnly; Secure; SameSite=Lax; Domain=${domain}; Path=/; Max-Age=0`;
+  const parts = [`${name}=`, "HttpOnly", "Secure", "SameSite=Lax"];
+  if (domain) parts.push(`Domain=${domain}`);
+  parts.push("Path=/", "Max-Age=0");
+  return parts.join("; ");
 }
 
 /** Best-effort client IP for the password-login rate limiter (Cloudflare header). */

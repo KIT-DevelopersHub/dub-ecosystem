@@ -6,7 +6,7 @@ import { configFromEnv } from "./env";
 import { SessionService } from "./sessions";
 import { GoogleOAuthProvider, type OAuthProvider } from "./oauth";
 import { ServiceBindingIdentityClient, type IdentityClient } from "./identity-client";
-import { QueueAuditor, type Auditor } from "./audit";
+import { OutboxAuditor, type Auditor } from "./audit";
 import { KvPasswordStore, type PasswordStore } from "./passwords";
 import { KvRateLimiter, type RateLimiter } from "./ratelimit";
 
@@ -35,7 +35,7 @@ export function buildDeps(env: Env): Deps {
     sessions: new SessionService(env.AUTH_KV, config),
     oauth: new GoogleOAuthProvider(config),
     identity: new ServiceBindingIdentityClient(env.SVC_IDENTITY),
-    audit: new QueueAuditor(env),
+    audit: new OutboxAuditor(env.OUTBOX_DB),
     passwords: new KvPasswordStore(env.AUTH_KV),
     rateLimiter: new KvRateLimiter({ get: kvGet, put: kvPut, delete: kvDelete }),
     kvPut,

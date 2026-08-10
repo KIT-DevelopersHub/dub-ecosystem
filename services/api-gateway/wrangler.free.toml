@@ -1,0 +1,93 @@
+# Free-tier (workers.dev) deploy of api-gateway as `dub-api-gateway`.
+# Mirrors the LIVE worker's binding topology exactly (14 service bindings, all
+# targeting each service's `production` environment; NO Queues/KV/Turnstile — free
+# tier). Redeploys the current repo code, whose forwardRequest now uses
+# `redirect: "manual"` so the OAuth callback 302 (+ Set-Cookie) passes through to
+# the browser instead of being followed at the edge.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config services/api-gateway/wrangler.free.toml
+name = "dub-api-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[vars]
+GATEWAY_VERSION = "0.1.0"
+ALLOWED_ORIGINS = "https://app.developershub.jp,https://dub-fe2-app-shell.developershub-site.workers.dev,http://localhost:5173,http://localhost:3000"
+DEFAULT_MAX_BODY_BYTES = "10485760"
+FILES_MAX_BODY_BYTES = "26214400"
+
+[[services]]
+binding = "SVC_AUTH"
+service = "dub-auth-service"
+environment = "production"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+environment = "production"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"
+environment = "production"
+
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"
+environment = "production"
+
+[[services]]
+binding = "SVC_GANTT"
+service = "dub-gantt-service"
+environment = "production"
+
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
+environment = "production"
+
+[[services]]
+binding = "SVC_FILE_META"
+service = "dub-file-meta"
+environment = "production"
+
+[[services]]
+binding = "SVC_DRIVE_PROXY"
+service = "dub-drive-proxy"
+environment = "production"
+
+[[services]]
+binding = "SVC_CHAT"
+service = "dub-chat-service"
+environment = "production"
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "dub-mail-gateway"
+environment = "production"
+
+[[services]]
+binding = "SVC_DEPLOY"
+service = "dub-deploy-service"
+environment = "production"
+
+[[services]]
+binding = "SVC_GITHUB_SYNC"
+service = "dub-github-sync"
+environment = "production"
+
+[[services]]
+binding = "SVC_AUDIT_LOG"
+service = "dub-audit-log"
+environment = "production"
+
+[[services]]
+binding = "SVC_WEBHOOK_INGEST"
+service = "dub-webhook-ingest"
+environment = "production"

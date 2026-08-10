@@ -1,9 +1,16 @@
-// Audit is Queue-only for auth (theme13): publishAudit -> dub-q-audit-record.
-// Fire-and-forget — a publish failure must never break the auth flow.
-import type { Queue } from "@cloudflare/workers-types";
-import { publishAudit, type AuditRecordEnvelopeV1 } from "@dub/events";
+// Audit for auth is written to a free-tier D1 outbox (@dub/freeq), NOT a paid
+// Cloudflare Queue. The producer only INSERTs a row (fire-and-forget: a write
+// failure must never break the auth flow); a Cron-triggered drain (see drain.ts)
+// forwards rows to audit-log and owns retry/backoff durability. The row id is the
+// audit record's idempotency key, so at-least-once redelivery stays safe.
+import type { D1Database } from "@cloudflare/workers-types";
+import { enqueue } from "@dub/freeq";
+import { redactSecrets } from "@dub/observability";
 import type { auditLog } from "@dub/types";
 import { common } from "@dub/types";
+
+/** Outbox topic for audit records (mirrors the old dub-q-audit-record channel). */
+export const AUDIT_TOPIC = "audit.record";
 
 export interface AuditInput {
   action: string; // "auth.session.login" | "auth.session.logout" | ...
@@ -19,8 +26,8 @@ export interface Auditor {
   record(input: AuditInput): Promise<void>;
 }
 
-export class QueueAuditor implements Auditor {
-  constructor(private readonly env: { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> }) {}
+export class OutboxAuditor implements Auditor {
+  constructor(private readonly db: D1Database) {}
   async record(input: AuditInput): Promise<void> {
     const record: auditLog.AuditRecordInput = {
       action: input.action,
@@ -29,14 +36,16 @@ export class QueueAuditor implements Auditor {
       result: input.result,
       resourceType: input.resourceType ?? null,
       resourceId: input.resourceId ?? null,
-      details: input.details ?? null,
+      // Same sanitizer publishAudit applied before enqueue: strip secret keys (theme#13).
+      details: input.details ? redactSecrets(input.details) : null,
       requestId: input.requestId,
       occurredAt: new Date().toISOString(),
     };
     try {
-      await publishAudit(this.env, record);
+      await enqueue(this.db, AUDIT_TOPIC, record);
     } catch {
-      // swallow: audit is best-effort (Queue retry/DLQ owns durability)
+      // swallow: audit enqueue is best-effort; the login/session path must not fail
+      // because the outbox INSERT hiccuped. Delivered rows are durable in D1.
     }
   }
 }

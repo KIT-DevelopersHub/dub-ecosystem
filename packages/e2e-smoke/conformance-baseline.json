@@ -1,0 +1,46 @@
+{
+  "api-gateway": {
+    "missingInSpec": [],
+    "missingInCode": [
+      "GET /api/v1/{}/{}"
+    ]
+  },
+  "deploy-service": {
+    "missingInSpec": [],
+    "missingInCode": [
+      "GET /deploy/deployments",
+      "GET /deploy/deployments/{}",
+      "GET /deploy/domains",
+      "GET /deploy/sites",
+      "POST /deploy/deployments",
+      "POST /deploy/dns/records",
+      "POST /deploy/sites"
+    ]
+  },
+  "drive-proxy": {
+    "missingInSpec": [
+      "POST /drive/watch",
+      "POST /drive/watch/{}/stop"
+    ],
+    "missingInCode": []
+  },
+  "mail-gateway": {
+    "missingInSpec": [
+      "GET /mail/mailboxes",
+      "GET /mail/messages",
+      "GET /mail/messages/{}",
+      "GET /mail/threads/{}",
+      "POST /mail/mailboxes/{}",
+      "POST /mail/messages/{}/read",
+      "POST /mail/outbox"
+    ],
+    "missingInCode": [
+      "GET /mailboxes",
+      "GET /messages",
+      "GET /messages/{}",
+      "GET /threads/{}",
+      "POST /mailboxes/{}",
+      "POST /outbox"
+    ]
+  }
+}

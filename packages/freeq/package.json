@@ -1,0 +1,31 @@
+{
+  "name": "@dub/freeq",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) free-tier mini-queue — D1 outbox pattern (producer INSERT + Cron/DO drain with at-least-once delivery, exponential backoff, and a failed terminal state). Replaces paid Cloudflare Queues.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/db": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

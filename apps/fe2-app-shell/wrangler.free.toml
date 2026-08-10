@@ -1,0 +1,17 @@
+# Free-tier (workers.dev) deploy of the fe2 admin SPA as `dub-fe2-app-shell`.
+# Assets-only Worker; Cloudflare serves ./dist and falls back to index.html for
+# client-side routes (/login etc). Build first with the gateway base URL and mock OFF:
+#   export VITE_API_BASE_URL="https://dub-api-gateway.developershub-site.workers.dev"
+#   unset VITE_API_MOCK
+#   npx turbo run build --filter=@dub/fe2-app-shell
+# Then:
+#   npx wrangler deploy --config apps/fe2-app-shell/wrangler.free.toml
+name = "dub-fe2-app-shell"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = true
