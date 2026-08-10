@@ -15,7 +15,11 @@ const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlit
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Apply the base schema then every forward-only migration, in id order, so the
 // in-memory test DB matches the migrated production schema (adds body/read columns).
-const SCHEMA_PATHS = [join(HERE, "../db/0001_mail.sql"), join(HERE, "../db/0002_inbound_body_read.sql")];
+const SCHEMA_PATHS = [
+  join(HERE, "../db/0001_mail.sql"),
+  join(HERE, "../db/0002_inbound_body_read.sql"),
+  join(HERE, "../db/0003_gmail_ops.sql"),
+];
 
 function norm(v: unknown): unknown {
   if (v === undefined) return null;

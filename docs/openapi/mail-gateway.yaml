@@ -113,12 +113,28 @@ paths:
       summary: List inbound messages
       tags:
         - mail
-      description: Requires mail:read.
+      description: 'Requires mail:read. folder filters by Gmail folder (inbox default); q is free-text search (optional from:/subject: operators); label filters by label id. Items carry read/starred/archived/trashed flags + applied labels.'
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
         - name: threadId
           in: query
+          schema:
+            type: string
+        - name: folder
+          in: query
+          description: 'inbox (default) | starred | archived | trash | all'
+          schema:
+            type: string
+            enum: [inbox, starred, archived, trash, all]
+        - name: q
+          in: query
+          description: 'free-text search across subject/snippet/body/from; from: / subject: scope it'
+          schema:
+            type: string
+        - name: label
+          in: query
+          description: 'only messages carrying this label id'
           schema:
             type: string
       responses:
@@ -127,7 +143,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedMailMessages'
+                $ref: '#/components/schemas/PaginatedMailMessagesX'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -151,9 +167,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MailMessage'
+                $ref: '#/components/schemas/MailMessageDetailX'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteMessage
+      summary: Permanently delete a message
+      tags: [mail]
+      description: 'Requires mail:admin (destructive; removes the row + its label links).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedState'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -177,7 +215,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MailThread'
+                $ref: '#/components/schemas/MailThreadX'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -263,6 +301,156 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QuotaResponse'
+      security: []
+  # ============ Gmail-parity 操作系 (統合波; served under /api/v1/mail/*) ============
+  /messages/{id}/star:
+    post: { operationId: starMessage, summary: Star a message, tags: [mail], description: 'Requires mail:read. Idempotent.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: New star state, content: { application/json: { schema: { $ref: '#/components/schemas/MessageFlagState' } } } }, '401': { $ref: '#/components/responses/Unauthenticated' }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/unstar:
+    post: { operationId: unstarMessage, summary: Unstar a message, tags: [mail], description: 'Requires mail:read.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: New star state, content: { application/json: { schema: { $ref: '#/components/schemas/MessageFlagState' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/archive:
+    post: { operationId: archiveMessage, summary: Archive (remove from Inbox), tags: [mail], description: 'Requires mail:read. Idempotent.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: New archive state, content: { application/json: { schema: { $ref: '#/components/schemas/MessageFlagState' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/unarchive:
+    post: { operationId: unarchiveMessage, summary: Move back to Inbox, tags: [mail], description: 'Requires mail:read.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: New archive state, content: { application/json: { schema: { $ref: '#/components/schemas/MessageFlagState' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/trash:
+    post: { operationId: trashMessage, summary: Move to Trash, tags: [mail], description: 'Requires mail:read. Idempotent.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: New trash state, content: { application/json: { schema: { $ref: '#/components/schemas/MessageFlagState' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/untrash:
+    post: { operationId: untrashMessage, summary: Restore from Trash, tags: [mail], description: 'Requires mail:read.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: New trash state, content: { application/json: { schema: { $ref: '#/components/schemas/MessageFlagState' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/unread:
+    post: { operationId: markMessageUnread, summary: Mark unread (inverse of /read), tags: [mail], description: 'Requires mail:read.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: New read state, content: { application/json: { schema: { $ref: '#/components/schemas/MessageReadState' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/labels:
+    post:
+      operationId: applyMessageLabel
+      summary: Apply a label to a message
+      tags: [mail]
+      description: 'Requires mail:read. Idempotent.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ApplyLabelRequest' } } } }
+      responses: { '200': { description: Applied, content: { application/json: { schema: { $ref: '#/components/schemas/LabelApplyState' } } } }, '404': { description: 'message or label not found', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } } }
+  /messages/{id}/labels/{labelId}:
+    delete: { operationId: removeMessageLabel, summary: Remove a label from a message, tags: [mail], description: 'Requires mail:read.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: labelId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Removed, content: { application/json: { schema: { $ref: '#/components/schemas/LabelApplyState' } } } }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /messages/{id}/reply:
+    post:
+      operationId: replyToMessage
+      summary: Reply to a message (sender only)
+      tags: [mail]
+      description: 'Requires mail:send. Recipients + Re: subject + In-Reply-To threading derived from the original; body from the request. Idempotency-Key header optional. Shares the send core (二重送信ゼロ).'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReplyRequest' } } } }
+      responses: { '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SendMailResponse' } } } }, '200': { description: 'Idempotent replay', content: { application/json: { schema: { $ref: '#/components/schemas/SendMailResponse' } } } }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' } }
+  /messages/{id}/replyAll:
+    post:
+      operationId: replyAllToMessage
+      summary: Reply-all (sender + original recipients, minus self)
+      tags: [mail]
+      description: 'Requires mail:send.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReplyRequest' } } } }
+      responses: { '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SendMailResponse' } } } }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' } }
+  /messages/{id}/forward:
+    post:
+      operationId: forwardMessage
+      summary: Forward a message to new recipients
+      tags: [mail]
+      description: 'Requires mail:send. Fwd: subject + quoted original; caller supplies to[] and an optional note.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ForwardRequest' } } } }
+      responses: { '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SendMailResponse' } } } }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' } }
+  /threads/{id}/star:
+    post: { operationId: starThread, summary: Star a whole thread, tags: [mail], description: 'Requires mail:read.', parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Thread flag state, content: { application/json: { schema: { $ref: '#/components/schemas/ThreadFlagState' } } } } } }
+  /threads/{id}/unstar:
+    post: { operationId: unstarThread, summary: Unstar a whole thread, tags: [mail], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Thread flag state, content: { application/json: { schema: { $ref: '#/components/schemas/ThreadFlagState' } } } } } }
+  /threads/{id}/archive:
+    post: { operationId: archiveThread, summary: Archive a whole thread, tags: [mail], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Thread flag state, content: { application/json: { schema: { $ref: '#/components/schemas/ThreadFlagState' } } } } } }
+  /threads/{id}/unarchive:
+    post: { operationId: unarchiveThread, summary: Unarchive a whole thread, tags: [mail], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Thread flag state, content: { application/json: { schema: { $ref: '#/components/schemas/ThreadFlagState' } } } } } }
+  /threads/{id}/trash:
+    post: { operationId: trashThread, summary: Trash a whole thread, tags: [mail], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Thread flag state, content: { application/json: { schema: { $ref: '#/components/schemas/ThreadFlagState' } } } } } }
+  /threads/{id}/untrash:
+    post: { operationId: untrashThread, summary: Restore a whole thread, tags: [mail], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Thread flag state, content: { application/json: { schema: { $ref: '#/components/schemas/ThreadFlagState' } } } } } }
+  /labels:
+    get:
+      operationId: listLabels
+      summary: List labels
+      tags: [mail]
+      description: 'Requires mail:read.'
+      responses: { '200': { description: Labels, content: { application/json: { schema: { $ref: '#/components/schemas/LabelList' } } } } }
+    post:
+      operationId: createLabel
+      summary: Create a label
+      tags: [mail]
+      description: 'Requires mail:admin. Unique name; duplicate → 409.'
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateLabelRequest' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/MailLabel' } } } }, '403': { $ref: '#/components/responses/Forbidden' }, '409': { description: 'duplicate name', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } } }
+  /labels/{id}:
+    patch:
+      operationId: updateLabel
+      summary: Rename / recolor a label
+      tags: [mail]
+      description: 'Requires mail:admin.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateLabelRequest' } } } }
+      responses: { '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/MailLabel' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+    delete:
+      operationId: deleteLabel
+      summary: Delete a label (and unassign it)
+      tags: [mail]
+      description: 'Requires mail:admin.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/DeletedState' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+  /drafts:
+    get:
+      operationId: listDrafts
+      summary: List compose drafts
+      tags: [mail]
+      description: 'Requires mail:send.'
+      responses: { '200': { description: Drafts, content: { application/json: { schema: { $ref: '#/components/schemas/DraftList' } } } } }
+    post:
+      operationId: createDraft
+      summary: Save a draft
+      tags: [mail]
+      description: 'Requires mail:send. All fields optional (blank shell allowed).'
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DraftRequest' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/MailDraft' } } } } }
+  /drafts/{id}:
+    get:
+      operationId: getDraft
+      summary: Get a draft
+      tags: [mail]
+      description: 'Requires mail:send.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Draft, content: { application/json: { schema: { $ref: '#/components/schemas/MailDraft' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+    put:
+      operationId: updateDraft
+      summary: Replace a draft
+      tags: [mail]
+      description: 'Requires mail:send.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DraftRequest' } } } }
+      responses: { '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/MailDraft' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+    delete:
+      operationId: deleteDraft
+      summary: Delete a draft
+      tags: [mail]
+      description: 'Requires mail:send.'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/DeletedState' } } } }, '404': { $ref: '#/components/responses/NotFound' } }
+  /sent:
+    get:
+      operationId: listSent
+      summary: List sent mail (from the send-log)
+      tags: [mail]
+      description: 'Requires mail:read. Cursor-paginated projection of mail_send_log.'
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { description: Page of sent items, content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedSentMail' } } } } }
+  /internal/outbox/drain:
+    post:
+      operationId: drainOutbox
+      summary: Drain the freeq D1 outbox
+      tags: [health]
+      description: 'Internal-only (x-dub-internal). Publishes buffered mutation-audit rows to AUDIT_QUEUE. Also run by the daily cron. No Cloudflare Queue involved.'
+      responses: { '200': { description: Drain result, content: { application/json: { schema: { $ref: '#/components/schemas/OutboxDrainResult' } } } } }
       security: []
 components:
   schemas:
@@ -467,6 +655,174 @@ components:
           type: integer
         used:
           type: integer
+    # ---------- Gmail-parity 操作系 schemas ----------
+    MailLabel:
+      type: object
+      required: [id, name, color]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        color: { type: [string, 'null'], description: 'hex like #4285F4, or null' }
+    LabelList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MailLabel' } }
+    CreateLabelRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        color: { type: [string, 'null'], description: 'hex #RRGGBB' }
+    UpdateLabelRequest:
+      type: object
+      description: At least one field required.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        color: { type: [string, 'null'] }
+    ApplyLabelRequest:
+      type: object
+      required: [labelId]
+      properties:
+        labelId: { type: string }
+    MailMessageListItemX:
+      description: 'Frozen MailMessageListItem + Gmail flags + applied labels.'
+      allOf:
+        - $ref: '#/components/schemas/MailMessage'
+        - type: object
+          required: [read, starred, archived, trashed, labels]
+          properties:
+            read: { type: boolean }
+            starred: { type: boolean }
+            archived: { type: boolean }
+            trashed: { type: boolean }
+            labels: { type: array, items: { $ref: '#/components/schemas/MailLabel' } }
+    MailMessageDetailX:
+      description: 'MailMessageListItemX + full body.'
+      allOf:
+        - $ref: '#/components/schemas/MailMessageListItemX'
+        - type: object
+          required: [textBody]
+          properties:
+            textBody: { type: string }
+            htmlBody: { type: string }
+    MailThreadX:
+      type: object
+      required: [id, messages]
+      properties:
+        id: { type: string }
+        messages: { type: array, items: { $ref: '#/components/schemas/MailMessageDetailX' } }
+    PaginatedMailMessagesX:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MailMessageListItemX' } }
+        nextCursor: { type: [string, 'null'] }
+    MessageFlagState:
+      type: object
+      description: 'One-flag echo. Exactly one of starred/archived/trashed is present per endpoint.'
+      properties:
+        id: { type: string }
+        starred: { type: boolean }
+        archived: { type: boolean }
+        trashed: { type: boolean }
+    MessageReadState:
+      type: object
+      required: [id, read]
+      properties:
+        id: { type: string }
+        read: { type: boolean }
+    LabelApplyState:
+      type: object
+      required: [id, labelId, applied]
+      properties:
+        id: { type: string }
+        labelId: { type: string }
+        applied: { type: boolean }
+    ThreadFlagState:
+      type: object
+      required: [threadId, affected]
+      properties:
+        threadId: { type: string }
+        affected: { type: integer, description: 'messages updated' }
+        starred: { type: boolean }
+        archived: { type: boolean }
+        trashed: { type: boolean }
+    DeletedState:
+      type: object
+      required: [id, deleted]
+      properties:
+        id: { type: string }
+        deleted: { type: boolean }
+    ReplyRequest:
+      type: object
+      required: [textBody]
+      properties:
+        textBody: { type: string, minLength: 1 }
+        htmlBody: { type: string }
+    ForwardRequest:
+      type: object
+      required: [to]
+      properties:
+        to: { type: array, minItems: 1, items: { $ref: '#/components/schemas/MailAddress' } }
+        textBody: { type: string, description: 'optional leading note' }
+        htmlBody: { type: string }
+    DraftRequest:
+      type: object
+      description: 'All fields optional (blank shell allowed).'
+      properties:
+        to: { type: array, items: { $ref: '#/components/schemas/MailAddress' } }
+        cc: { type: array, items: { $ref: '#/components/schemas/MailAddress' } }
+        subject: { type: string }
+        textBody: { type: string }
+        htmlBody: { type: string }
+        inReplyTo: { type: string }
+        threadId: { type: string }
+    MailDraft:
+      type: object
+      required: [id, to, subject, textBody, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        to: { type: array, items: { $ref: '#/components/schemas/MailAddress' } }
+        cc: { type: array, items: { $ref: '#/components/schemas/MailAddress' } }
+        subject: { type: string }
+        textBody: { type: string }
+        htmlBody: { type: string }
+        inReplyTo: { type: string }
+        threadId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DraftList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MailDraft' } }
+    SentMailListItem:
+      type: object
+      required: [id, messageId, threadId, to, subject, provider, status, sentAt]
+      properties:
+        id: { type: string }
+        messageId: { type: string }
+        threadId: { type: [string, 'null'] }
+        to: { type: array, items: { $ref: '#/components/schemas/MailAddress' } }
+        subject: { type: string }
+        provider: { type: [string, 'null'] }
+        status: { type: string, enum: [pending, sent, failed] }
+        sentAt: { type: string, format: date-time }
+    PaginatedSentMail:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SentMailListItem' } }
+        nextCursor: { type: [string, 'null'] }
+    OutboxDrainResult:
+      type: object
+      required: [claimed, published, failed]
+      properties:
+        service: { type: string }
+        claimed: { type: integer }
+        published: { type: integer }
+        failed: { type: integer }
   responses:
     BadRequest:
       description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].

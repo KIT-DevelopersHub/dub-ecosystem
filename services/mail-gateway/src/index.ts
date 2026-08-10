@@ -7,6 +7,7 @@ import { buildInboundDeps } from "./deps";
 import { handleInbound } from "./inbound";
 import { headersToMap, type RawInbound } from "./mime";
 import { runRetentionPurge } from "./scheduled";
+import { runOutboxDrain } from "./outbox";
 import { INBOUND_RAW_READ_BYTES, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 
@@ -65,6 +66,8 @@ const handler = {
 
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     await runRetentionPurge(env);
+    // Drain the freeq D1 outbox (mutation audit fan-out) — no Cloudflare Queue involved.
+    await runOutboxDrain(env);
   },
 };
 

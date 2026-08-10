@@ -21,6 +21,7 @@ import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getInboundDetail, latestFailedSend, listInbound, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
+import { registerMailOps } from "./ops";
 
 export function createApp() {
   const app = new Hono<AppBindings>();
@@ -148,6 +149,10 @@ export function createApp() {
     return c.json({ id, address: body.address }, 200);
   });
 
+  // Gmail-parity操作系 routes (flags / labels / drafts / reply-forward / sent / freeq).
+  // Registered here so they inherit the same middleware groups on `ext`/`app`.
+  registerMailOps(app, ext, withAuth);
+
   app.route("/mail", ext);
 
   // ---- status: live send-health self-report (internal-only). Derives "directly rate-
@@ -176,7 +181,7 @@ export function createApp() {
 }
 
 /** requireAuth (trusted header) + requirePermission chained on one per-request client. */
-function withAuth(permission: identity.PermissionKey): MiddlewareHandler<AppBindings> {
+export function withAuth(permission: identity.PermissionKey): MiddlewareHandler<AppBindings> {
   return async (c, next) => {
     const client = createAuthClient({ identityBinding: c.env.SVC_IDENTITY, serviceName: SERVICE_NAME });
     c.set("authClient", client);
