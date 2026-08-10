@@ -1,8 +1,10 @@
 # drive-proxy — Cloudflare Worker. The composition root (src/index.ts) wires REAL deps
-# (real Google client + real OAuth refresh-token provider + real KV/queues/authz).
-# Not yet deployed: what is outstanding is apply-time provisioning ONLY — the KV
-# namespace id below + the GOOGLE_OAUTH_* secrets — not code wiring.
-# Owns NO D1 (binding name DB is intentionally absent). Holds KV + Queues + secrets only.
+# (real Google client + real OAuth refresh-token provider + real KV/queues/authz +, for
+# Drive-watch, the `DB` D1 watch registry). Not yet deployed: what is outstanding is
+# apply-time provisioning ONLY — the KV/D1 ids below + the GOOGLE_OAUTH_* and
+# DRIVE_WEBHOOK_TOKEN secrets — not code wiring.
+# The ONE D1 (`DB`) holds drive-proxy's OWN watch-channel registry (drive_watch_channels)
+# — channel lifecycle only. Drive FILE metadata still belongs to file-meta-service.
 name = "dub-drive-proxy"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
@@ -17,6 +19,14 @@ binding = "KV"
 id = "REPLACE_AT_APPLY"          # standard apply-time placeholder (shared ecosystem
                                  # convention); `wrangler kv namespace create drive-proxy-cache`
 
+# --- D1: watch-channel registry (drive_watch_channels). Migration:
+# migrations/drive/0001_init.sql (self-applied via applyDriveMigrations in local/preview;
+# infra #28 owns the physical apply in prod). Watch state only — NOT file metadata. ---
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-drive-proxy-watch"
+database_id = "REPLACE_AT_APPLY"
+
 # --- Producer queues (publish) ---
 # drive.file.* -> file-meta consumer (binding name = @dub/events CONSUMER_QUEUE_BINDINGS["file-meta"])
 [[queues.producers]]
@@ -28,14 +38,14 @@ queue = "dub-q-evt-file-meta"
 binding = "AUDIT_QUEUE"
 queue = "dub-q-audit-record"
 
-# --- Consumer (P1 only): contract reservation for wh-google-drive.
-# Declared here as documentation; the actual [[queues.consumers]] block stays
-# commented until P1 Drive-watch is enabled (contract §8, §8-2 old#7).
-# P1 seam (intentionally not built in v1): enabling Drive-watch requires a
-# files.watch channel-registration path in this service that mints the
-# X-Goog-Channel-Token which webhook-ingest's verifyGoogleDrive
-# (services/webhook-ingest/src/verify/stubs.ts) checks against its `driveTokens`
-# secret pool. Until that P1 path exists, no drive-proxy-issued channel token flows.
+# --- Consumer (P1): contract reservation for wh-google-drive.
+# drive-proxy is now the ISSUING side of the X-Goog-Channel-Token: POST /drive/watch
+# calls Drive files.watch with token = DRIVE_WEBHOOK_TOKEN and address =
+# DRIVE_WATCH_CALLBACK_URL, which webhook-ingest's verifyGoogleDrive
+# (services/webhook-ingest/src/verify/stubs.ts) checks against its `driveTokens` pool
+# (its DRIVE_WEBHOOK_TOKEN[_NEXT] — these MUST match this service's values).
+# The wh-google-drive CONSUMER (processing notifications) is still contract-only in v1,
+# so the block below stays commented until that consumer is enabled (contract §8).
 # [[queues.consumers]]
 # queue = "dub-q-wh-google-drive"
 # max_batch_size = 10
@@ -52,8 +62,14 @@ DRIVE_RATE_SOFT_LIMIT = "500"
 DRIVE_CACHE_TTL_LIST_SECONDS = "60"
 DRIVE_CACHE_TTL_FILE_SECONDS = "60"
 DRIVE_CACHE_TTL_SHEET_SECONDS = "30"
+DRIVE_WATCH_TTL_SECONDS = "86400"   # requested channel TTL; Google caps files.watch to ~24h
+# webhook-ingest google-drive ingress the channel posts to (set to the real URL at apply).
+DRIVE_WATCH_CALLBACK_URL = "REPLACE_AT_APPLY"
 
 # --- Secrets (set via `wrangler secret put`, never in this file) ---
 # GOOGLE_OAUTH_CLIENT_ID
 # GOOGLE_OAUTH_CLIENT_SECRET
 # GOOGLE_OAUTH_REFRESH_TOKEN
+# DRIVE_WEBHOOK_TOKEN         # channel token minted on files.watch; MUST equal
+#                            # webhook-ingest's DRIVE_WEBHOOK_TOKEN (verifier side)
+# DRIVE_WEBHOOK_TOKEN_NEXT   # optional rotation slot (matches webhook-ingest _NEXT)

@@ -3,10 +3,18 @@ import { errors } from "@dub/errors";
 import type { KVNamespace } from "@cloudflare/workers-types";
 import type { Cache } from "../src/cache";
 import type { RateLimiter } from "../src/ratelimit";
-import type { GoogleDriveApi, ListFilesParams, SheetReadResult, SheetWriteResult } from "../src/google/client";
+import type {
+  GoogleDriveApi,
+  ListFilesParams,
+  SheetReadResult,
+  SheetWriteResult,
+  WatchChannelParams,
+  WatchChannelResult,
+} from "../src/google/client";
 import type { GoogleFileResource } from "../src/google/mapper";
 import type { EventPublisher, PublishContext, DriveAuditAction } from "../src/events";
 import type { PermissionChecker, DrivePermission } from "../src/permissions";
+import type { WatchChannelRecord, WatchChannelRepo } from "../src/watch/repo";
 
 // ---- in-memory Cache ----
 export function memCache(now: () => number = Date.now): Cache & { store: Map<string, { v: string; exp: number }> } {
@@ -74,7 +82,9 @@ export function memGoogle(seed: GoogleFileResource[] = []) {
   const files = new Map<string, GoogleFileResource>();
   for (const f of seed) files.set(f.id, { ...f });
   const sheets = new Map<string, SheetReadResult["values"]>();
-  const calls = { list: 0, get: 0, create: 0, copy: 0, move: 0, trash: 0, sheetRead: 0, sheetUpdate: 0, sheetAppend: 0 };
+  const calls = { list: 0, get: 0, create: 0, copy: 0, move: 0, trash: 0, sheetRead: 0, sheetUpdate: 0, sheetAppend: 0, watch: 0, stop: 0 };
+  const watchArgs: WatchChannelParams[] = [];
+  const stopArgs: { channelId: string; resourceId: string }[] = [];
   let nextPageToken: string | null = null;
   let idSeq = 1000;
 
@@ -140,6 +150,20 @@ export function memGoogle(seed: GoogleFileResource[] = []) {
       sheets.set(spreadsheetId, [...prev, ...values]);
       return { updatedRange: range, updatedRows: values.length };
     },
+    async watchFile(p: WatchChannelParams): Promise<WatchChannelResult> {
+      calls.watch++;
+      watchArgs.push({ ...p });
+      return {
+        channelId: p.channelId,
+        resourceId: `res_${p.channelId}`,
+        resourceUri: `https://www.googleapis.com/drive/v3/files/${p.fileId}`,
+        expiration: p.expirationMs ? new Date(p.expirationMs).toISOString() : null,
+      };
+    },
+    async stopChannel(channelId: string, resourceId: string): Promise<void> {
+      calls.stop++;
+      stopArgs.push({ channelId, resourceId });
+    },
   };
 
   return {
@@ -147,7 +171,37 @@ export function memGoogle(seed: GoogleFileResource[] = []) {
     calls,
     files,
     sheets,
+    watchArgs,
+    stopArgs,
     setNextPageToken(t: string | null) { nextPageToken = t; },
+  };
+}
+
+// ---- in-memory WatchChannelRepo (mirrors the D1 impl's channel-id / status semantics) ----
+export function memWatchRepo(seed: WatchChannelRecord[] = []): WatchChannelRepo & { rows: Map<string, WatchChannelRecord> } {
+  const rows = new Map<string, WatchChannelRecord>(); // channelId -> record
+  for (const r of seed) rows.set(r.channelId, { ...r });
+  return {
+    rows,
+    async insert(rec) { rows.set(rec.channelId, { ...rec }); },
+    async getByChannelId(channelId) { const r = rows.get(channelId); return r ? { ...r } : null; },
+    async getActiveByFileId(fileId) {
+      const active = [...rows.values()].filter((r) => r.fileId === fileId && r.status === "active");
+      active.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      return active[0] ? { ...active[0] } : null;
+    },
+    async markStopped(channelId, at) {
+      const r = rows.get(channelId);
+      if (!r || r.status !== "active") return false;
+      rows.set(channelId, { ...r, status: "stopped", updatedAt: at });
+      return true;
+    },
+    async listActive() { return [...rows.values()].filter((r) => r.status === "active").map((r) => ({ ...r })); },
+    async listExpiringBefore(cutoffIso) {
+      return [...rows.values()]
+        .filter((r) => r.status === "active" && r.expiration !== null && r.expiration <= cutoffIso)
+        .map((r) => ({ ...r }));
+    },
   };
 }
 

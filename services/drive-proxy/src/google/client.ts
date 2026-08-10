@@ -23,6 +23,23 @@ export interface SheetReadResult {
   values: (string | number | boolean | null)[][];
 }
 
+/** Params for opening a Drive push channel (files.watch) on a file/folder. */
+export interface WatchChannelParams {
+  fileId: string;
+  channelId: string; // opaque id we mint; echoed back as X-Goog-Channel-Id
+  address: string; // https callback (webhook-ingest google-drive ingress)
+  token: string; // shared secret; echoed back as X-Goog-Channel-Token (never persisted)
+  expirationMs?: number; // absolute epoch-ms; Google caps it to its own max
+}
+
+/** Google Channel resource projection (token intentionally NOT surfaced). */
+export interface WatchChannelResult {
+  channelId: string; // Channel.id
+  resourceId: string; // opaque; required to stop the channel
+  resourceUri: string | null;
+  expiration: string | null; // ISO8601 (Google returns epoch-ms as string)
+}
+
 export interface GoogleDriveApi {
   listFiles(p: ListFilesParams): Promise<{ files: GoogleFileResource[]; nextPageToken: string | null }>;
   getFile(id: string): Promise<GoogleFileResource>;
@@ -41,6 +58,10 @@ export interface GoogleDriveApi {
     range: string,
     values: SheetReadResult["values"],
   ): Promise<SheetWriteResult>;
+  /** Open a push channel on a file/folder (Drive files.watch). */
+  watchFile(p: WatchChannelParams): Promise<WatchChannelResult>;
+  /** Close a previously opened channel (Drive channels.stop). Idempotent upstream: 404 tolerated. */
+  stopChannel(channelId: string, resourceId: string): Promise<void>;
 }
 
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
@@ -150,6 +171,42 @@ export function createGoogleClient(deps: {
         await call(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ range, values }) }),
       );
       return { updatedRange: data.updates?.updatedRange ?? range, updatedRows: data.updates?.updatedRows ?? values.length };
+    },
+    async watchFile(p): Promise<WatchChannelResult> {
+      const url = `${DRIVE_BASE}/files/${encodeURIComponent(p.fileId)}/watch?fields=id,resourceId,resourceUri,expiration`;
+      const body: Record<string, unknown> = {
+        id: p.channelId,
+        type: "web_hook",
+        address: p.address,
+        token: p.token,
+      };
+      if (p.expirationMs) body.expiration = String(p.expirationMs);
+      const data = await json<{ id?: string; resourceId?: string; resourceUri?: string; expiration?: string }>(
+        await call(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      );
+      if (!data.resourceId) {
+        // A 2xx without a resourceId means we cannot ever stop the channel — treat as upstream failure.
+        throw errors.upstreamUnavailable("google:watch");
+      }
+      const expMs = data.expiration ? Number(data.expiration) : NaN;
+      return {
+        channelId: data.id ?? p.channelId,
+        resourceId: data.resourceId,
+        resourceUri: data.resourceUri ?? null,
+        expiration: Number.isFinite(expMs) ? new Date(expMs).toISOString() : null,
+      };
+    },
+    async stopChannel(channelId, resourceId): Promise<void> {
+      const res = await call(`${DRIVE_BASE}/channels/stop`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: channelId, resourceId }),
+      });
+      // 204 No Content on success. 404 = channel already gone -> idempotent stop, tolerate.
+      if (res.ok || res.status === 404) return;
+      const errBody = await res.json().catch(() => null);
+      const retryAfter = Number(res.headers.get("retry-after")) || undefined;
+      throw mapGoogleError(res.status, errBody, retryAfter);
     },
   };
 }

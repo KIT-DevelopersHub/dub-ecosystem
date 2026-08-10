@@ -5,11 +5,12 @@
 // the whole surface is unit-testable without a live Worker env.
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
-import { errors, dubErrorHandler } from "@dub/errors";
+import { errors, DubError, dubErrorHandler } from "@dub/errors";
 import { newRequestId } from "@dub/http";
 import { HDR_REQUEST_ID, HDR_USER_ID, HDR_INTERNAL } from "@dub/observability";
 import { common } from "@dub/types";
 import type { DriveService } from "./service";
+import type { WatchService } from "./watch/service";
 import type { PermissionChecker, DrivePermission } from "./permissions";
 import { DRIVE_READ, DRIVE_WRITE } from "./permissions";
 import type { PublishContext } from "./events";
@@ -18,6 +19,8 @@ import type { MoveFileRequest, WriteSheetValuesRequest } from "./types";
 export interface AppDeps {
   service: DriveService;
   authz: PermissionChecker;
+  /** Drive-watch channel issuance. Absent when no D1 is bound; the routes 500 then. */
+  watch?: WatchService;
 }
 
 type Vars = { userId: string };
@@ -27,6 +30,10 @@ function requestId(c: Context): string {
 }
 function pubCtx(c: Context<{ Variables: Vars }>): PublishContext {
   return { requestId: requestId(c), actorId: c.get("userId") ?? null };
+}
+// Internal-only endpoints have no requireAuth; the actor is the forwarded caller id (if any).
+function internalCtx(c: Context): PublishContext {
+  return { requestId: requestId(c), actorId: c.req.header(HDR_USER_ID) ?? null };
 }
 
 async function parseBody<T>(c: Context): Promise<T> {
@@ -111,6 +118,32 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   // ---- internal-only monitoring ----
   app.get("/drive/health/quota", requireInternal, async (c) => {
     return c.json(await deps.service.quota());
+  });
+
+  // ---- internal-only Drive-watch channel administration (P1) ----
+  // These are operational endpoints (not user-facing): the caller must be internal.
+  // The response never carries the channel token (secret stays server-side).
+  const requireWatch = (): WatchService => {
+    if (!deps.watch) {
+      throw new DubError("DRIVE_WATCH_UNCONFIGURED", "drive watch is not configured (no D1 bound)", { status: 500 });
+    }
+    return deps.watch;
+  };
+
+  app.post("/drive/watch", requireInternal, async (c) => {
+    const watch = requireWatch();
+    const body = await parseBody<{ fileId: string; ttlSeconds?: number }>(c);
+    const view = await watch.create(internalCtx(c), {
+      fileId: body.fileId,
+      ...(body.ttlSeconds !== undefined ? { ttlSeconds: body.ttlSeconds } : {}),
+    });
+    return c.json({ channel: view }, 201);
+  });
+
+  app.post("/drive/watch/:channelId/stop", requireInternal, async (c) => {
+    const watch = requireWatch();
+    const result = await watch.stop(internalCtx(c), c.req.param("channelId"));
+    return c.json(result);
   });
 
   return app;
