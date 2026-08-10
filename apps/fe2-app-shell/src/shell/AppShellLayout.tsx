@@ -11,7 +11,9 @@ import { AppShell, PageHeader, AppLauncher, Button, Icon } from "@dub/ui";
 import type { AppLauncherItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
+import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
+import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -21,6 +23,9 @@ export interface AppShellLayoutProps {
   onNavigate?: (path: string) => void;
   onLogout?: () => void;
   title?: string;
+  // Shared api-client — when provided, the floating feedback widget is mounted for
+  // authenticated users. Optional so unit tests can render the shell without it.
+  api?: ApiClient;
   children: ReactNode; // routed <Outlet/>
 }
 
@@ -52,6 +57,7 @@ export function AppShellLayout({
   onNavigate,
   onLogout,
   title = "DevHub",
+  api,
   children,
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
@@ -93,6 +99,7 @@ export function AppShellLayout({
   return (
     <AppShell header={header} testId="fe2-shell">
       {children}
+      {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
     </AppShell>
   );
 }

@@ -433,3 +433,121 @@ svg {
   font-size: var(--dub-font-size-sm);
   color: var(--dub-color-text-primary);
 }
+
+/* ---- feedback widget (floating bottom-right, all authenticated screens) ---- */
+/* The FAB sits below the modal layer (z-index-sticky < z-index-modal) so opening
+ * the panel overlays it, and clear of the demo banner via safe-area padding. */
+.fe2-feedback-fab {
+  position: fixed;
+  right: max(var(--dub-space-5), env(safe-area-inset-right));
+  bottom: max(var(--dub-space-6), calc(env(safe-area-inset-bottom) + var(--dub-space-5)));
+  z-index: var(--dub-z-index-sticky);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: var(--dub-radius-full);
+  background: linear-gradient(135deg, var(--dub-color-brand-400), var(--dub-color-brand-600));
+  color: #fff;
+  cursor: pointer;
+  box-shadow: var(--dub-shadow-lg);
+  transition:
+    transform var(--dub-motion-fast) var(--dub-motion-easing),
+    box-shadow var(--dub-motion-fast) var(--dub-motion-easing),
+    filter var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.fe2-feedback-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--dub-shadow-overlay);
+  filter: brightness(1.05);
+}
+.fe2-feedback-fab:active {
+  transform: translateY(0);
+}
+.fe2-feedback-fab svg {
+  width: 24px;
+  height: 24px;
+}
+@media (max-width: 640px) {
+  .fe2-feedback-fab {
+    width: 48px;
+    height: 48px;
+    right: max(var(--dub-space-4), env(safe-area-inset-right));
+    bottom: max(var(--dub-space-5), calc(env(safe-area-inset-bottom) + var(--dub-space-4)));
+  }
+}
+
+.fe2-feedback-lead {
+  margin: 0 0 var(--dub-space-4);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+.fe2-feedback-context {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  margin: var(--dub-space-3) 0 0;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+  line-height: var(--dub-font-line-height-normal);
+}
+.fe2-feedback-context-page {
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-medium);
+}
+.fe2-feedback-context-path {
+  color: var(--dub-color-text-muted);
+}
+.fe2-feedback-error {
+  margin: var(--dub-space-3) 0 0;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-danger-50);
+  color: var(--dub-color-danger-700);
+  border: 1px solid var(--dub-color-danger-200);
+  font-size: var(--dub-font-size-sm);
+}
+.fe2-feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--dub-space-2);
+  margin-top: var(--dub-space-5);
+}
+.fe2-feedback-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-4) 0 var(--dub-space-2);
+}
+.fe2-feedback-done-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-success-100);
+  color: var(--dub-color-success-700);
+  margin-bottom: var(--dub-space-2);
+}
+.fe2-feedback-done-title {
+  margin: 0;
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.fe2-feedback-done-sub {
+  margin: 0;
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+.fe2-feedback-done .fe2-feedback-actions {
+  margin-top: var(--dub-space-4);
+  justify-content: center;
+}
