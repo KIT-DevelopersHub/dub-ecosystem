@@ -3,7 +3,7 @@
 // match. Unknown types fall back to the raw string + a generic icon (test 13:
 // must never crash).
 
-import type { IconName } from "../contracts/fe1";
+import type { IconName } from "@dub/ui";
 import type { NotificationType } from "../contracts/notification-api";
 import { matchSpecificity } from "./preference-merge";
 

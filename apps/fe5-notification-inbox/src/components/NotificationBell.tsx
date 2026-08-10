@@ -3,7 +3,7 @@
 // recent items with "See all" -> /notifications (FE5 §2-2, tests 9,16).
 
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Badge, Button, IconButton, Popover, Spinner } from "../contracts/fe1";
+import { Badge, Button, Icon, Popover, Spinner } from "@dub/ui";
 import type { InboxItem } from "../contracts/notification-api";
 import { useNotificationDeps } from "../context";
 import { useUnreadCount } from "../hooks/useUnreadCount";
@@ -60,17 +60,23 @@ export function NotificationBell(): ReactNode {
         onOpenChange={setOpen}
         testId="fe5-bell-popover"
         trigger={
+          // @dub/ui Popover renders `trigger` inside its own toggle <button>, so
+          // the trigger is non-interactive content (avoids nested buttons). The
+          // bell Icon carries the button testId; @dub/ui Badge always renders, so
+          // the "hide on zero + 99+ cap" logic that the old mirror owned lives here.
           <span className={styles.bell}>
-            <IconButton
-              icon="bell"
+            <Icon
+              name="bell"
               aria-label={`Notifications${count > 0 ? `, ${count} unread` : ""}`}
-              aria-expanded={open}
-              onClick={() => setOpen((o) => !o)}
               testId="fe5-bell-button"
             />
-            <span className={styles.badge}>
-              <Badge count={count} testId="fe5-bell-badge" aria-label={`${count} unread notifications`} />
-            </span>
+            {count > 0 ? (
+              <span className={styles.badge}>
+                <Badge tone="danger" testId="fe5-bell-badge">
+                  {count > 99 ? "99+" : count}
+                </Badge>
+              </span>
+            ) : null}
           </span>
         }
       >

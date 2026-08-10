@@ -3,7 +3,7 @@
 // (FE5 §2-1/§2-2, tests 1-8,14).
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { PageHeader, Stack } from "../contracts/fe1";
+import { PageHeader, Stack } from "@dub/ui";
 import type { InboxItem } from "../contracts/notification-api";
 import { useNotificationDeps } from "../context";
 import { useInbox } from "../hooks/useInbox";

@@ -46,7 +46,7 @@ export type {
   OptimisticMutationSpec,
 } from "./contracts/fe2";
 export { isApiError } from "./contracts/fe2";
-export type { IconName } from "./contracts/fe1";
+export type { IconName } from "@dub/ui";
 export * as inboxFilter from "./lib/inbox-filter";
 export * as preferenceMerge from "./lib/preference-merge";
 export * as typeDictionary from "./lib/type-dictionary";

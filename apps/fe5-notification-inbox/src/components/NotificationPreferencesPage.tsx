@@ -2,7 +2,7 @@
 // merged matrix, edits locally, and saves the diff (FE5 §2-1/§2-2, tests 11,12).
 
 import type { ReactNode } from "react";
-import { Button, Card, PageHeader, SkeletonLoader, Stack } from "../contracts/fe1";
+import { Button, Card, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
 import { usePreferences } from "../hooks/usePreferences";
 import { PreferenceMatrix } from "./PreferenceMatrix";
 
@@ -28,7 +28,7 @@ export function NotificationPreferencesPage(): ReactNode {
       />
       <Card testId="fe5-prefs-card">
         {prefs.loading ? (
-          <SkeletonLoader rows={6} testId="fe5-prefs-skeleton" />
+          <SkeletonLoader lines={6} testId="fe5-prefs-skeleton" />
         ) : (
           <PreferenceMatrix rows={prefs.merged} onToggle={prefs.toggle} />
         )}

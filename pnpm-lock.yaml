@@ -294,6 +294,9 @@ importers:
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@dub/ui':
+        specifier: workspace:*
+        version: link:../fe1-design-system
     devDependencies:
       '@tanstack/react-query':
         specifier: ^5.62.0

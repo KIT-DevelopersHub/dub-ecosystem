@@ -3,7 +3,7 @@
 // "display only" until MO3 (FE5 §2-2, tests 11,12,17).
 
 import type { ReactNode } from "react";
-import { Switch, Table, Tooltip } from "../contracts/fe1";
+import { DataTable, Switch, Tooltip, type ColumnDef } from "@dub/ui";
 import {
   NOTIFICATION_CHANNELS,
   type NotificationChannel,
@@ -33,50 +33,55 @@ export interface PreferenceMatrixProps {
 }
 
 export function PreferenceMatrix(props: PreferenceMatrixProps): ReactNode {
+  // @dub/ui DataTable is column-driven (ColumnDef<Row>), replacing the old
+  // head/rows Table. The type column owns the row-level testId + "customized"
+  // marker; each channel column renders a Switch cell.
+  const columns: ColumnDef<MergedPreference>[] = [
+    {
+      key: "type",
+      header: "Type",
+      cell: (row) => (
+        <span data-testid={`fe5-prefs-row-${row.type}`} data-overridden={row.overridden}>
+          {rowLabel(row.type)}
+          {row.overridden ? (
+            <span data-testid={`fe5-prefs-override-${row.type}`} title="Customized">
+              {" "}
+              (customized)
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    ...NOTIFICATION_CHANNELS.map(
+      (ch): ColumnDef<MergedPreference> => ({
+        key: ch,
+        align: "center",
+        header: DISPLAY_ONLY_CHANNELS.has(ch) ? (
+          <Tooltip content="Delivery coming soon (settings saved now)">
+            <span data-testid={`fe5-prefs-col-${ch}`}>{CHANNEL_LABEL[ch]} *</span>
+          </Tooltip>
+        ) : (
+          <span data-testid={`fe5-prefs-col-${ch}`}>{CHANNEL_LABEL[ch]}</span>
+        ),
+        cell: (row) => (
+          <Switch
+            id={`fe5-prefs-switch-${row.type}-${ch}`}
+            checked={row.channels.includes(ch)}
+            onChange={() => props.onToggle(row.type, ch)}
+            label={`${rowLabel(row.type)} — ${CHANNEL_LABEL[ch]}`}
+            testId={`fe5-prefs-toggle-${row.type}-${ch}`}
+          />
+        ),
+      }),
+    ),
+  ];
+
   return (
-    <Table
-      caption="Notification channels by type"
+    <DataTable
       testId="fe5-prefs-matrix"
-      head={
-        <tr>
-          <th scope="col">Type</th>
-          {NOTIFICATION_CHANNELS.map((ch) => (
-            <th key={ch} scope="col">
-              {DISPLAY_ONLY_CHANNELS.has(ch) ? (
-                <Tooltip text="Delivery coming soon (settings saved now)">
-                  <span data-testid={`fe5-prefs-col-${ch}`}>{CHANNEL_LABEL[ch]} *</span>
-                </Tooltip>
-              ) : (
-                <span data-testid={`fe5-prefs-col-${ch}`}>{CHANNEL_LABEL[ch]}</span>
-              )}
-            </th>
-          ))}
-        </tr>
-      }
-    >
-      {props.rows.map((row) => (
-        <tr key={row.type} data-testid={`fe5-prefs-row-${row.type}`} data-overridden={row.overridden}>
-          <th scope="row">
-            {rowLabel(row.type)}
-            {row.overridden ? (
-              <span data-testid={`fe5-prefs-override-${row.type}`} title="Customized">
-                {" "}
-                (customized)
-              </span>
-            ) : null}
-          </th>
-          {NOTIFICATION_CHANNELS.map((ch) => (
-            <td key={ch}>
-              <Switch
-                checked={row.channels.includes(ch)}
-                onChange={() => props.onToggle(row.type, ch)}
-                label={`${rowLabel(row.type)} — ${CHANNEL_LABEL[ch]}`}
-                testId={`fe5-prefs-toggle-${row.type}-${ch}`}
-              />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </Table>
+      columns={columns}
+      rows={props.rows}
+      rowKey={(row) => row.type}
+    />
   );
 }

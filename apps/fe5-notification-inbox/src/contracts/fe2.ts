@@ -13,7 +13,7 @@
 //   - OptimisticMutationSpec                    <- FE2 src/lib/optimistic.tsx (createOptimisticMutation)
 
 import type { ComponentType } from "react";
-import type { IconName } from "./fe1";
+import type { IconName } from "@dub/ui";
 
 // ---- @dub/api-client: normalised error (from @dub/errors ErrorResponse) ----
 // api-client normalises the wire ErrorResponse into this before throwing.

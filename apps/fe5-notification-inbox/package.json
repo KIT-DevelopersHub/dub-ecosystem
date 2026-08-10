@@ -21,7 +21,8 @@
   "dependencies": {
     "@dub/types": "workspace:*",
     "@dub/tokens": "workspace:*",
-    "@dub/errors": "workspace:*"
+    "@dub/errors": "workspace:*",
+    "@dub/ui": "workspace:*"
   },
   "peerDependencies": {
     "react": "^18.3.1",
