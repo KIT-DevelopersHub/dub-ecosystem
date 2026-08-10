@@ -55,7 +55,12 @@ export const ROUTES: readonly GatewayRoute[] = [
   },
   { segment: "deploy", binding: "SVC_DEPLOY", auth: "required" },
   { segment: "github", binding: "SVC_GITHUB_SYNC", auth: "required" },
-  { segment: "audit", binding: "SVC_AUDIT_LOG", auth: "required", internalOnlyPaths: ["/audit/internal/log"] },
+  // All of audit-log's write surface is internal-only: /internal/log (sync fail-close)
+  // and /internal/audit-async (the free-tier outbox drain landing). Prefix-match the
+  // whole /audit/internal/ tree (like identity/notifications/mail) so every current and
+  // future internal write route 404s at the edge — double-defense over the receiver's
+  // own x-dub-internal guard. (The drain itself uses the SVC_AUDIT binding, not the gateway.)
+  { segment: "audit", binding: "SVC_AUDIT_LOG", auth: "required", internalOnlyPaths: ["/audit/internal/"] },
   { segment: "webhooks", binding: "SVC_WEBHOOK_INGEST", auth: "required" },
 ] as const;
 
