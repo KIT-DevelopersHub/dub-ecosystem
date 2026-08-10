@@ -19,8 +19,11 @@ export interface MailGatewayClient {
 }
 
 /**
- * Real client backed by the SVC_MAIL_GATEWAY Service Binding. Not exercised by unit
- * tests (mail-gateway is STUB until 9-B); tests inject a fake MailGatewayClient.
+ * Real client backed by the SVC_MAIL_GATEWAY Service Binding. The wire contract
+ * (paths, query, x-dub-* + idempotency headers, JSON body/parse, upstream-error
+ * restoration) is verified against a fake Fetcher in test/gateway.test.ts; the live
+ * mail-gateway service stays a STUB until 9-B, where pipeline tests inject a fake
+ * MailGatewayClient instead of this binding-backed one.
  */
 export function createMailGatewayClient(binding: Fetcher): MailGatewayClient {
   const client = createServiceClient(binding, { service: "mail-gateway", caller: "mail-automation" });

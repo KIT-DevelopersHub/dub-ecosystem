@@ -54,6 +54,58 @@ describe("applyMutations — routing & idempotency", () => {
   });
 });
 
+describe("applyMutations — durable cross-request idempotency (mobile_mutations)", () => {
+  it("a key applied in an earlier request returns duplicate without re-hitting the service", async () => {
+    const h = makeHarness();
+    let hits = 0;
+    h.task.on("PATCH", "/tasks/tsk_1", () => {
+      hits++;
+      return { id: "tsk_1", version: 2 };
+    });
+    const req = { mutations: [{ idempotencyKey: "kD", op: "task.update" as const, id: "tsk_1", patch: { version: 1 } }] };
+
+    const first = await applyMutations(h.deps, ctx, req, h.mutations);
+    const second = await applyMutations(h.deps, ctx, req, h.mutations); // same batch re-sent as a new request
+
+    expect(hits).toBe(1); // service hit exactly once across both requests
+    expect(first.results[0]?.status).toBe("applied");
+    expect(second.results[0]).toMatchObject({ status: "duplicate", resource: { id: "tsk_1", version: 2 } });
+  });
+
+  it("does not persist a transient error, so a later retry can still apply", async () => {
+    const h = makeHarness();
+    let call = 0;
+    h.task.on("PATCH", "/tasks/tsk_1", () => {
+      call++;
+      if (call === 1) throw new DubError("UPSTREAM_UNAVAILABLE", "down", { status: 502 });
+      return { id: "tsk_1", version: 2 };
+    });
+    const req = { mutations: [{ idempotencyKey: "kE", op: "task.update" as const, id: "tsk_1", patch: { version: 1 } }] };
+
+    const first = await applyMutations(h.deps, ctx, req, h.mutations);
+    expect(first.results[0]?.status).toBe("error");
+    const retry = await applyMutations(h.deps, ctx, req, h.mutations);
+    expect(retry.results[0]?.status).toBe("applied"); // not blocked by a stored duplicate
+  });
+
+  it("persists a 409 conflict as terminal (replay returns duplicate, no re-dispatch)", async () => {
+    const h = makeHarness();
+    let hits = 0;
+    h.task.on("PATCH", "/tasks/tsk_1", () => {
+      hits++;
+      throw new DubError("TASK_VERSION_CONFLICT", "mismatch", { status: 409 });
+    });
+    const req = { mutations: [{ idempotencyKey: "kC", op: "task.update" as const, id: "tsk_1", patch: { version: 1 } }] };
+
+    const first = await applyMutations(h.deps, ctx, req, h.mutations);
+    const second = await applyMutations(h.deps, ctx, req, h.mutations);
+
+    expect(first.results[0]?.status).toBe("conflict");
+    expect(hits).toBe(1); // second request did not re-dispatch
+    expect(second.results[0]).toMatchObject({ status: "duplicate", error: { code: "TASK_VERSION_CONFLICT" } });
+  });
+});
+
 describe("applyMutations — conflict resolution & error isolation", () => {
   it("captures a 409 as a per-mutation conflict without aborting the batch", async () => {
     const h = makeHarness();

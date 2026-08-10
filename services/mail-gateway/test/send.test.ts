@@ -18,7 +18,7 @@ describe("sendMail — idempotency", () => {
     const { response, status } = await sendMail(deps, baseReq, "idem-1", "notification");
 
     expect(status).toBe("sent");
-    expect(response.provider).toBe("ses");
+    expect(response.provider).toBe("resend");
     expect(response.messageId).toContain("@developershub.jp");
     expect(h.provider.sent).toHaveLength(1);
 

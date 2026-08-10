@@ -15,7 +15,7 @@ database_id = "REPLACE_AT_APPLY"
 # Service Bindings (Service-to-Service, x-dub-* propagation via @dub/http).
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_TASK"

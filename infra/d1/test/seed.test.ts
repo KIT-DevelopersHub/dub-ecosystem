@@ -79,6 +79,28 @@ describe("seedScenario", () => {
     expect(exists(raw, "seed_runs", "run_id", b.runId)).toBe(true);
   });
 
+  it("conference-demo seeds a chat channel with a threaded conversation", async () => {
+    const { db, raw } = await migratedD1();
+    await seedScenario(db, "conference-demo");
+    expect(exists(raw, "chat_channels", "id", SEED.channel.general)).toBe(true);
+    expect(exists(raw, "chat_messages", "id", SEED.messages.welcome)).toBe(true);
+    // the reply threads onto the welcome message.
+    const reply = raw.prepare("SELECT thread_root_id FROM chat_messages WHERE id = ?").get(SEED.messages.reply) as { thread_root_id: string };
+    expect(reply.thread_root_id).toBe(SEED.messages.welcome);
+    // 3 primary users all become channel members with read states, admin is channel admin.
+    expect(count(raw, "chat_channel_members")).toBe(3);
+    expect(count(raw, "chat_read_states")).toBe(3);
+    const adminRole = raw.prepare("SELECT role FROM chat_channel_members WHERE channel_id = ? AND user_id = ?").get(SEED.channel.general, SEED.users.admin.id) as { role: string };
+    expect(adminRole.role).toBe("admin");
+    expect(fkViolations(raw)).toEqual([]);
+  });
+
+  it("minimal skips chat (channel-free minimal surface)", async () => {
+    const { db, raw } = await migratedD1();
+    await seedScenario(db, "minimal");
+    expect(count(raw, "chat_channels")).toBe(0);
+  });
+
   it("#12 audit_logs re-seed is idempotent despite the append-only trigger", async () => {
     const { db, raw } = await migratedD1();
     await seedScenario(db, "conference-demo");

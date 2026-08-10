@@ -13,11 +13,13 @@
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { EventApi } from "@dub/fe3-event-action";
 import { createHttpEventApi } from "@dub/fe3-event-action";
-import type { ApiClient as Fe4ApiClient } from "@dub/fe4-task-gantt/src/contracts/spa-shell";
 import type { NotificationApi } from "@dub/fe5-notification-inbox";
 import { createNotificationApi } from "@dub/fe5-notification-inbox";
-import type { ChatApiClient } from "@dub/fe6-chat/src/api/client";
+import { createRosterApi } from "@dub/admin-roster";
+// FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import type {
+  Fe4ApiClient,
+  ChatApiClient,
   Channel,
   ChannelMember,
   CreateChannelRequest,
@@ -33,8 +35,7 @@ import type {
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
-} from "@dub/fe6-chat/src/api/contract";
-import { createRosterApi } from "@dub/admin-roster";
+} from "./featureEntries.tsx";
 import type { common, identity } from "@dub/types";
 
 type ApiPath = `/api/v1/${string}`;

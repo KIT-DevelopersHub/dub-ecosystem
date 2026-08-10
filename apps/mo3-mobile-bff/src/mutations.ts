@@ -4,11 +4,12 @@
 // forwarding to the very same routes the transparent proxy exposes — MO3 adds no
 // business logic, it only fans the batch out and reports per-mutation outcomes.
 //
-// Idempotency: the key is (a) deduped within the batch so a replayed batch never
-// double-applies, and (b) forwarded downstream as x-dub-idempotency-key so the
-// owning service dedupes/retries across separate requests. Durable cross-request
-// dedup (mobile_mutations table) lands with the offline wave (#28); the header
-// contract is wired now so it is transparent when that table exists.
+// Idempotency has three layers: (a) an in-batch Map so a key repeated within one
+// request applies once; (b) a durable MutationStore (mobile_mutations) so the
+// same key re-sent across *separate* requests returns the first outcome instead
+// of double-applying; and (c) x-dub-idempotency-key forwarded downstream so the
+// owning service dedupes/retries too. Layer (b) is optional — when no store is
+// passed (unit tests, legacy) only the in-batch layer runs.
 //
 // Conflict handling: an optimistic-lock 409 from a service is captured as that
 // mutation's result (status "conflict") and the batch continues — one stale
@@ -17,6 +18,7 @@
 import type { ServiceClient, RequestContext, CallOptions } from "@dub/http";
 import { errors, isDubError } from "@dub/errors";
 import { mobileErrors } from "./errors";
+import type { MutationStore } from "./mutation-store";
 
 /** Same three services the proxy/sync surfaces route to. */
 export interface MutationSinks {
@@ -95,6 +97,7 @@ export async function applyMutations(
   sinks: MutationSinks,
   ctx: RequestContext,
   req: MutationsRequest,
+  store?: MutationStore,
 ): Promise<MutationsResponse> {
   if (!req || !Array.isArray(req.mutations)) {
     throw errors.validationFailed([{ field: "mutations", reason: "required" }]);
@@ -122,6 +125,17 @@ export async function applyMutations(
       continue;
     }
 
+    // Durable cross-request idempotency: a key already applied in an earlier
+    // request returns that stored outcome instead of double-applying.
+    if (store) {
+      const persisted = await store.get(m.idempotencyKey);
+      if (persisted) {
+        seen.set(m.idempotencyKey, persisted);
+        results.push({ ...persisted, status: "duplicate" });
+        continue;
+      }
+    }
+
     let result: MutationResult;
     try {
       const resource = await dispatch(sinks, ctx, m, { idempotencyKey: m.idempotencyKey });
@@ -136,6 +150,11 @@ export async function applyMutations(
     }
 
     seen.set(m.idempotencyKey, result);
+    // Persist only terminal, side-effecting outcomes so a re-sent batch does not
+    // double-apply; a transient error stays un-persisted so a retry can land.
+    if (store && ctx.userId && (result.status === "applied" || result.status === "conflict")) {
+      await store.save({ idempotencyKey: m.idempotencyKey, userId: ctx.userId, op: m.op, result });
+    }
     results.push(result);
   }
 

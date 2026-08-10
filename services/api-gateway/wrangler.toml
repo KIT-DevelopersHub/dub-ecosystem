@@ -12,6 +12,9 @@ GATEWAY_VERSION = "0.1.0"
 ALLOWED_ORIGINS = "https://app.developershub.jp,http://localhost:5173,http://localhost:3000"
 DEFAULT_MAX_BODY_BYTES = "10485760"    # 10 MiB default request body cap
 FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8-6 numeric agreement)
+# Rate-limit policy (optional; defaults 100 / 60000ms when unset). Wire-signal only — see §7.
+RATE_LIMIT_MAX = "100"
+RATE_LIMIT_WINDOW_MS = "60000"
 
 # ---- secrets (set via `wrangler secret put`, never committed) ----
 # TURNSTILE_SECRET  -> public inquiry siteverify
@@ -21,27 +24,27 @@ FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8
 # infra binding registry, never routed by the gateway) and intentionally omitted.
 [[services]]
 binding = "SVC_AUTH"
-service = "dub-auth-service"
+service = "auth-service"
 
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
-service = "dub-event-service"
+service = "event-service"
 
 [[services]]
 binding = "SVC_TASK"
-service = "dub-task-service"
+service = "task-service"
 
 [[services]]
 binding = "SVC_GANTT"
-service = "dub-gantt-service"
+service = "gantt-service"
 
 [[services]]
 binding = "SVC_NOTIFICATION"
-service = "dub-notification-service"
+service = "notification"
 
 [[services]]
 binding = "SVC_FILE_META"
@@ -53,11 +56,11 @@ service = "dub-drive-proxy"
 
 [[services]]
 binding = "SVC_CHAT"
-service = "dub-chat-service"
+service = "chat-service"
 
 [[services]]
 binding = "SVC_MAIL_GATEWAY"
-service = "dub-mail-gateway"
+service = "mail-gateway"
 
 [[services]]
 binding = "SVC_DEPLOY"
@@ -69,7 +72,7 @@ service = "dub-github-sync"
 
 [[services]]
 binding = "SVC_AUDIT_LOG"
-service = "dub-audit-log"
+service = "audit-log"
 
 [[services]]
 binding = "SVC_WEBHOOK_INGEST"
@@ -83,8 +86,20 @@ queue = "dub-q-evt-notification"
 [observability]
 enabled = true
 
-# ---- Rate limiting (R1: CF native binding is the first candidate; KV fallback).
-# Left unbound in P0 — the in-memory limiter is used until infra registers RATE_LIMITER.
+# ---- Rate limiting ----
+# The code path is live: bind a shared KV namespace as RATE_LIMIT_KV and the gateway
+# upgrades from the per-isolate in-memory fallback to a cross-isolate fixed-window
+# limiter automatically (no code change, no contract change). Left commented here
+# because the namespace id is infra-provisioned (this repo performs no deploy); infra
+# fills `id`/`preview_id` in the binding registry.
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT_KV"
+# id = "<infra-provisioned>"
+# preview_id = "<infra-provisioned>"
+#
+# Alternative R1 path — CF native Rate Limiting binding. It returns only { success },
+# so it cannot emit the exact RateLimit-Remaining/Reset signals the contract (§7)
+# requires; the KV limiter above is preferred for full wire-signal fidelity.
 # [[unsafe.bindings]]
 # name = "RATE_LIMITER"
 # type = "ratelimit"

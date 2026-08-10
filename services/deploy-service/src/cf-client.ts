@@ -80,11 +80,26 @@ export function mapPagesStage(stage: string | undefined): deploy.DeploymentStatu
   }
 }
 
+/** Fail-fast when a required CF secret is not wired (design §5/§8). Surfaces as the
+ *  contract's UPSTREAM_UNAVAILABLE (502) BEFORE any token-less request is sent to CF,
+ *  so a misconfigured deploy fails cleanly instead of leaking an empty-bearer call. */
+function requireSecret(value: string | undefined, what: string): string {
+  if (!value) {
+    throw new DubError(CommonErrorCodes.UPSTREAM_UNAVAILABLE, `Cloudflare ${what} not configured`, {
+      status: 502,
+      service: "cloudflare",
+    });
+  }
+  return value;
+}
+
 /** Real CF client. Uses retryFetch (external HTTPS discipline; no x-dub-* headers). */
 export function createCfClient(config: CfClientConfig): CfClient {
   const base = (config.apiBase ?? "https://api.cloudflare.com/client/v4").replace(/\/$/, "");
 
   async function call<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+    // secret-wiring gate: never send a token-less request to the CF control plane.
+    requireSecret(token, "API token");
     let res: Response;
     try {
       res = await retryFetch(`${base}${path}`, {
@@ -122,17 +137,19 @@ export function createCfClient(config: CfClientConfig): CfClient {
 
   return {
     async createPagesDeployment(input) {
+      const accountId = requireSecret(config.accountId, "account id");
       const r = await call<{ id: string; latest_stage?: { name?: string }; url?: string }>(
         config.tokenPages,
-        `/accounts/${config.accountId}/pages/projects/${encodeURIComponent(input.cfProjectName)}/deployments`,
+        `/accounts/${accountId}/pages/projects/${encodeURIComponent(input.cfProjectName)}/deployments`,
         { method: "POST", body: JSON.stringify({ branch: input.branch }) },
       );
       return { cfDeploymentId: r.id, status: mapPagesStage(r.latest_stage?.name), url: r.url ?? null };
     },
     async getPagesDeployment(input) {
+      const accountId = requireSecret(config.accountId, "account id");
       const r = await call<{ id: string; latest_stage?: { name?: string }; url?: string }>(
         config.tokenPages,
-        `/accounts/${config.accountId}/pages/projects/${encodeURIComponent(input.cfProjectName)}/deployments/${encodeURIComponent(input.cfDeploymentId)}`,
+        `/accounts/${accountId}/pages/projects/${encodeURIComponent(input.cfProjectName)}/deployments/${encodeURIComponent(input.cfDeploymentId)}`,
       );
       return { cfDeploymentId: r.id, status: mapPagesStage(r.latest_stage?.name), url: r.url ?? null };
     },

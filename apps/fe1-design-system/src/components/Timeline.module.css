@@ -1,0 +1,123 @@
+.root {
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+  width: 100%;
+}
+.toolbar {
+  display: flex;
+  gap: var(--dub-space-1);
+  margin-bottom: var(--dub-space-2);
+}
+.chip {
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-secondary);
+  border-radius: var(--dub-radius-full);
+  padding: var(--dub-space-1) var(--dub-space-3);
+  font: inherit;
+  font-size: var(--dub-font-size-xs);
+  cursor: pointer;
+  text-transform: capitalize;
+}
+.chip:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.chipActive {
+  background: var(--dub-color-brand-500);
+  border-color: var(--dub-color-brand-500);
+  color: var(--dub-color-text-inverse);
+}
+.banner {
+  background: var(--dub-color-warning-100);
+  color: var(--dub-color-warning-700);
+  border-radius: var(--dub-radius-md);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  font-size: var(--dub-font-size-xs);
+  margin-bottom: var(--dub-space-2);
+}
+.empty {
+  padding: var(--dub-space-8) var(--dub-space-4);
+  text-align: center;
+  color: var(--dub-color-text-muted);
+}
+.grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  overflow: hidden;
+}
+.labels {
+  border-right: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+}
+.rowLabel {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--dub-space-3);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-primary);
+}
+.rowLabelText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowLabelActive {
+  background: var(--dub-color-brand-100);
+  font-weight: var(--dub-font-weight-medium);
+}
+.clickable {
+  cursor: pointer;
+}
+.canvasScroll {
+  overflow-x: auto;
+  background: var(--dub-color-surface-base);
+}
+.canvas {
+  position: relative;
+}
+.tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--dub-color-border-default);
+  pointer-events: none;
+}
+.tickLabel {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  white-space: nowrap;
+}
+.deps {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.depNormal {
+  stroke: var(--dub-color-gray-400);
+  stroke-width: 1;
+}
+.depViolated {
+  stroke: var(--dub-color-danger-500);
+  stroke-width: 2;
+}
+.bar {
+  position: absolute;
+  background: var(--dub-color-brand-500);
+  border-radius: var(--dub-radius-sm);
+  overflow: hidden;
+  min-width: 4px;
+}
+.barActive {
+  outline: 2px solid var(--dub-color-brand-700);
+  outline-offset: 1px;
+}
+.barProgress {
+  height: 100%;
+  background: var(--dub-color-brand-700);
+}

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useNotificationDeps } from "../context";
 import { createUnreadPoller, type Poller } from "../lib/poller";
+import { createReconnectingUnreadLive } from "../lib/unread-live";
 import { useUnreadStore } from "../store/unread-store";
 
 export interface UseUnreadCountResult {
@@ -13,7 +14,7 @@ export interface UseUnreadCountResult {
 }
 
 export function useUnreadCount(): UseUnreadCountResult {
-  const { api, initialUnreadHint, pollIntervalMs } = useNotificationDeps();
+  const { api, initialUnreadHint, pollIntervalMs, unreadLiveConnect } = useNotificationDeps();
   const count = useUnreadStore((s) => s.count);
   const initialized = useUnreadStore((s) => s.initialized);
   const setCount = useUnreadStore((s) => s.setCount);
@@ -54,6 +55,19 @@ export function useUnreadCount(): UseUnreadCountResult {
       }
     };
   }, [api, setCount, pollIntervalMs]);
+
+  // Optional live push path: when the shell/dev harness supplies a connector,
+  // server-pushed counts update the badge immediately. Purely additive — the
+  // poller above remains the reconciliation fallback if the stream drops.
+  useEffect(() => {
+    if (!unreadLiveConnect) return;
+    const live = createReconnectingUnreadLive({
+      connect: unreadLiveConnect,
+      onValue: (c) => setCount(c),
+    });
+    live.start();
+    return () => live.stop();
+  }, [unreadLiveConnect, setCount]);
 
   return { count, refresh };
 }

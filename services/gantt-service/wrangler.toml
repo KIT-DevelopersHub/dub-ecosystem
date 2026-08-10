@@ -37,7 +37,7 @@ service = "event-service"
 
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "identity-roster"
 
 [observability]
 enabled = true

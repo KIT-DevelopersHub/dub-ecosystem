@@ -18,7 +18,7 @@ export interface Env {
   SVC_IDENTITY: Fetcher; // POST /authz/check (mail:* permissions)
 
   // --- outbound provider config (Workers Secrets; real send credentials) ---
-  MAIL_OUTBOUND_PROVIDER?: string; // "ses" (default) | "mailchannels" | "resend" | "mock"
+  MAIL_OUTBOUND_PROVIDER?: string; // "resend" (default, ADR-0001) | "ses" | "mailchannels" | "mock"
   MAIL_FROM_ADDRESS?: string; // default From (e.g. info@developershub.jp)
 
   // SES (SigV4-signed HTTPS). Secrets: SES_ACCESS_KEY_ID / SES_SECRET_ACCESS_KEY.

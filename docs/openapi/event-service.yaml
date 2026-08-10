@@ -1,0 +1,715 @@
+# OpenAPI 3.1 contract for event-service. Generated from services/event-service/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Event Service API
+  version: 1.0.0
+  description: |-
+    The 'Event > Action' hierarchy owner. Optimistic-locked event/action CRUD with a closed phase state machine. External segments /api/v1/events and /api/v1/actions.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/events/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: events
+  - name: actions
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /health:
+    get:
+      operationId: eventHealth
+      summary: Liveness probe
+      tags:
+        - health
+      responses:
+        '200':
+          description: OK
+      security: []
+  /events:
+    get:
+      operationId: listEvents
+      summary: List events
+      tags:
+        - events
+      description: Requires event:read.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: phase
+          in: query
+          schema:
+            $ref: '#/components/schemas/EventPhase'
+        - name: startsAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+            description: ISO8601 UTC
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              - startsAt
+        - name: includeArchived
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Page of event summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedEvents'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createEvent
+      summary: Create an event
+      tags:
+        - events
+      description: Requires event:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+      responses:
+        '201':
+          description: Created event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DubEvent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /events/{id}:
+    get:
+      operationId: getEvent
+      summary: Get event detail
+      tags:
+        - events
+      description: Requires event:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event with actions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventDetail'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateEvent
+      summary: Update an event (optimistic lock)
+      tags:
+        - events
+      description: Requires event:write; closed-phase & back transitions require event:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEventRequest'
+      responses:
+        '200':
+          description: Updated event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DubEvent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: archiveEvent
+      summary: Archive an event
+      tags:
+        - events
+      description: Requires event:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Archived.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /events/{id}/participants:
+    get:
+      operationId: listParticipants
+      summary: List event participants
+      tags:
+        - events
+      description: Requires event:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Participants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipantList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /events/{id}/actions:
+    get:
+      operationId: listActions
+      summary: List an event's actions
+      tags:
+        - actions
+      description: Requires event:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Actions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DubAction'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createAction
+      summary: Create an action under an event
+      tags:
+        - actions
+      description: Requires event:write.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateActionRequest'
+      responses:
+        '201':
+          description: Created action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DubAction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /actions/{id}:
+    get:
+      operationId: getAction
+      summary: Get an action
+      tags:
+        - actions
+      description: Requires event:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DubAction'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateAction
+      summary: Update an action (optimistic lock)
+      tags:
+        - actions
+      description: Requires event:write.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateActionRequest'
+      responses:
+        '200':
+          description: Updated action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DubAction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: archiveAction
+      summary: Archive an action
+      tags:
+        - actions
+      description: Requires event:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Archived.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    EventPhase:
+      type: string
+      enum:
+        - planning
+        - preparing
+        - open
+        - live
+        - wrapup
+        - closed
+    DubEvent:
+      type: object
+      required:
+        - id
+        - orgId
+        - title
+        - phase
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        phase:
+          $ref: '#/components/schemas/EventPhase'
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        endsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        archivedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        version:
+          type: integer
+    ActionSummary:
+      type: object
+      required:
+        - id
+        - eventId
+        - kind
+        - title
+      properties:
+        id:
+          type: string
+        eventId:
+          type: string
+        kind:
+          type: string
+        title:
+          type: string
+    DubAction:
+      type: object
+      required:
+        - id
+        - eventId
+        - kind
+        - title
+        - sortOrder
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        eventId:
+          type: string
+        kind:
+          type: string
+        title:
+          type: string
+        sortOrder:
+          type: integer
+        archivedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        version:
+          type: integer
+    EventSummary:
+      type: object
+      required:
+        - id
+        - title
+        - phase
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        phase:
+          $ref: '#/components/schemas/EventPhase'
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    EventDetail:
+      allOf:
+        - $ref: '#/components/schemas/DubEvent'
+        - type: object
+          required:
+            - actions
+          properties:
+            actions:
+              type: array
+              items:
+                $ref: '#/components/schemas/ActionSummary'
+    CreateEventRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+        endsAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    UpdateEventRequest:
+      type: object
+      description: version is the optimistic lock. phase is validated against EVENT_PHASE_TRANSITIONS.
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        phase:
+          $ref: '#/components/schemas/EventPhase'
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        endsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    CreateActionRequest:
+      type: object
+      required:
+        - kind
+        - title
+      properties:
+        kind:
+          type: string
+        title:
+          type: string
+        sortOrder:
+          type: integer
+    UpdateActionRequest:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+        title:
+          type: string
+        kind:
+          type: string
+        sortOrder:
+          type: integer
+    PaginatedEvents:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventSummary'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+    ParticipantList:
+      type: object
+      description: Event participants (UserSummary-shaped).
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventSummary'
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.

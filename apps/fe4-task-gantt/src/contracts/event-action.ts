@@ -12,26 +12,15 @@
 // and call `registerTaskActionPlugin(actionTypeRegistry)` at FE2 app init.
 import type { ComponentType } from "react";
 import type { event } from "@dub/types";
+import type { IconName } from "@dub/ui";
 
-/** Closed FE1 IconName union (mirror of FE3 contracts/fe1 `IconName`). */
-export type IconName =
-  | "calendar"
-  | "plus"
-  | "edit"
-  | "trash"
-  | "archive"
-  | "chevron-right"
-  | "chevron-down"
-  | "chat"
-  | "drag"
-  | "check"
-  | "clock"
-  | "user"
-  | "flag"
-  | "list"
-  | "settings"
-  | "warning"
-  | "task";
+/**
+ * Closed FE1 IconName union used by `ActionTypePlugin.icon`. Imported directly
+ * from the FE1 design system (@dub/ui) — the frozen source FE3 itself mirrors —
+ * so FE4's plugin icon can never drift from the real registry. (Previously a
+ * hand-maintained local subset.)
+ */
+export type { IconName };
 
 /** Props FE3 hands a type-specific action panel (mirror of FE3 ActionPanelProps). */
 export interface ActionPanelProps {
