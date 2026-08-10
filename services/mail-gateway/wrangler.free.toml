@@ -1,0 +1,54 @@
+# Free-tier deploy of mail-gateway as `dub-mail-gateway` (internal; reached via the
+# api-gateway SVC_MAIL_GATEWAY service binding). NO paid Cloudflare Queues: the audit +
+# domain-event fan-out that used Queue producers (AUDIT_QUEUE / EVT_MAIL_AUTOMATION /
+# EVT_NOTIFICATION) is now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core
+# DB). deps.ts falls back to the outbox shim when the Queue bindings are absent, so no
+# audit/event record is dropped; a Cron drain forwards audit rows to audit-log and
+# defers domain events (durable/pending) until their consumer routes land.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/mail-gateway/db/0003_freeq_outbox.sql
+#   npx wrangler deploy --config services/mail-gateway/wrangler.free.toml
+# Secrets (RESEND_API_KEY) are already set on the worker and persist across deploys.
+name = "dub-mail-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: mail_ namespace tables + the un-namespaced freeq_outbox table.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (mail:send / mail:read / mail:admin)
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# --- Crons: every-minute outbox drain + daily retention purge (03:20 UTC). ---
+# The scheduled handler drains on every tick and only purges on the "20 3 * * *" tick.
+[triggers]
+crons = ["* * * * *", "20 3 * * *"]
+
+# --- Outbound provider (Resend, ADR-0001). Matches the live secret set (RESEND_API_KEY).
+# From stays on Resend's shared onboarding sender until developershub.jp DKIM/SPF is
+# verified in Resend; then flip MAIL_FROM_ADDRESS to info@developershub.jp. ---
+[vars]
+MAIL_OUTBOUND_PROVIDER = "resend"
+SES_REGION = "ap-northeast-1"
+MAIL_FROM_ADDRESS = "onboarding@resend.dev"
+MAIL_SEND_MAX_ATTEMPTS = "3"
+MAIL_SEND_TIMEOUT_MS = "15000"
+MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
