@@ -42,12 +42,26 @@ Design source of truth: `設計_P0a/services_連携/drive-proxy.md` + P0b frozen
 - `src/{cache,ratelimit,events,env,permissions,types}.ts` — supporting modules.
 - `src/index.ts` — Worker entry wiring real bindings.
 
-## P0 scope / deferrals
+## Deploy readiness / deferrals
 
-- Not deployed in P0 (mock/stub wave). Real Google 结线 waits on the integration
-  wave; `wrangler.toml` is a scaffold with placeholder KV id.
-- Google credentials are STUBbed via injectable fetch in tests; the refresh_token
-  lives only in Workers Secrets in production (never in repo/KV/logs).
+- **Real wiring, not stubbed.** The composition root (`src/index.ts`) wires real
+  deps — real Google Drive/Sheets client, real OAuth refresh-token provider, real
+  KV cache + soft rate-limiter, real file-meta + audit queue publishers, and the
+  real identity `/authz/check` checker. The injectable `fetch`/deps seams in the
+  `google/*` and `events` modules exist only so unit tests avoid the network.
+- **Not yet deployed — apply-time provisioning only.** What is outstanding is not
+  code: replace the `REPLACE_AT_APPLY` KV namespace id in `wrangler.toml` (the
+  shared ecosystem apply-time placeholder; `wrangler kv namespace create
+  drive-proxy-cache`) and set the three `GOOGLE_OAUTH_*` secrets.
+- Google credentials use an injectable `fetch` in tests; the refresh_token lives
+  only in Workers Secrets in production (never in repo/KV/logs).
+- **Drive-watch (P1 — not in v1).** No `files.watch` channel registration exists in
+  this service. webhook-ingest's `verifyGoogleDrive`
+  (`services/webhook-ingest/src/verify/stubs.ts`) checks an inbound
+  `X-Goog-Channel-Token` against its `driveTokens` secret pool; the path that would
+  *mint* that token lives in the future P1 Drive-watch registration and is
+  deliberately absent here (contract §8 — the `wh-google-drive` consumer is
+  contract-only in v1). This seam is documented, not stubbed.
 
 ## Known contract discrepancies (documented, not resolved here)
 

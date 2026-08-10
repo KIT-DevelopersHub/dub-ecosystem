@@ -22,6 +22,7 @@ export function createHttpUpstream(env: Env): UpstreamPort {
     async listTasks(ctx: RequestContext, eventId: common.EventId): Promise<task.Task[]> {
       const out: task.Task[] = [];
       let cursor: string | undefined;
+      let truncated = false;
       for (let page = 0; page < MAX_PAGES; page++) {
         const res = await taskSvc.get<task.ListTasksResponse>(ctx, "/tasks", {
           query: { eventId, limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
@@ -29,6 +30,26 @@ export function createHttpUpstream(env: Env): UpstreamPort {
         for (const t of res.items) if (t.archivedAt === null) out.push(t);
         if (!res.nextCursor) break;
         cursor = res.nextCursor;
+        // Still more pages after consuming the last allowed page => hard truncation.
+        if (page === MAX_PAGES - 1) truncated = true;
+      }
+      // Silent truncation past MAX_PAGES drops tasks from the chart with no signal;
+      // surface it as a structured warning ([observability] captures console logs)
+      // so operators can detect events that have outgrown the read-model bound.
+      if (truncated) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            service: SERVICE_NAME,
+            event: "gantt.tasks.truncated",
+            message: "task pagination hit MAX_PAGES; gantt DTO omits tasks beyond the cap",
+            requestId: ctx.requestId,
+            eventId,
+            maxPages: MAX_PAGES,
+            pageLimit: PAGE_LIMIT,
+            loadedTasks: out.length,
+          }),
+        );
       }
       return out;
     },

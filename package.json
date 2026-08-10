@@ -12,7 +12,11 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "build": "turbo run build",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "db:lint": "pnpm --filter @dub/infra-d1 d1:lint",
+    "db:migrate": "pnpm --filter @dub/infra-d1 d1:migrate",
+    "db:seed": "pnpm --filter @dub/infra-d1 d1:seed",
+    "db:reset": "pnpm --filter @dub/infra-d1 d1:reset"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",

@@ -4,13 +4,13 @@
 import type { D1Database, Fetcher, Queue, ExecutionContext } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
-import { createServiceClient, type RequestContext } from "@dub/http";
 import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventPublisherEnv } from "@dub/events";
-import { common, type task, type auditLog } from "@dub/types";
+import { common, type auditLog } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1EventRepo } from "./d1-repo";
-import type { AppDeps, EventPublisher, AuditSink, TaskClient } from "./types";
+import { buildTaskClient } from "./task-client";
+import type { AppDeps, EventPublisher, AuditSink } from "./types";
 
 export interface Env {
   DB: D1Database;
@@ -47,20 +47,6 @@ function buildAudit(env: Env): AuditSink {
   };
 }
 
-function buildTaskClient(env: Env): TaskClient {
-  return {
-    async listAssigneeIds(ctx, eventId) {
-      if (!env.SVC_TASK) return [];
-      const client = createServiceClient(env.SVC_TASK, { service: "task-service", caller: "event-service" });
-      const rc: RequestContext = { requestId: ctx.requestId, ...(ctx.userId ? { userId: ctx.userId } : {}) };
-      const res = await client.get<task.ListTasksResponse>(rc, "/tasks", { query: { eventId, limit: 200 } });
-      const ids = new Set<string>();
-      for (const t of res.items) if (t.assigneeId) ids.add(t.assigneeId);
-      return [...ids];
-    },
-  };
-}
-
 export function buildDeps(env: Env, requestId?: string): AppDeps {
   const db = createDbClient(env.DB, {
     namespace: "event",
@@ -77,7 +63,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     authz,
     publisher: buildPublisher(env),
     audit: buildAudit(env),
-    taskClient: buildTaskClient(env),
+    taskClient: buildTaskClient(env.SVC_TASK),
     orgId: env.DUB_DEFAULT_ORG_ID ?? common.DUB_DEFAULT_ORG_ID,
     now: nowIso,
     newEventId: () => newId("event"),

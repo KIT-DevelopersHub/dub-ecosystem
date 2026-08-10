@@ -9,3 +9,5 @@ export { usePermissions } from "./hooks/usePermissions";
 export { createRosterApi } from "./api/rosterApi";
 export { createMockClient } from "./api/mockClient";
 export { createHttpClient, type HttpClientOptions } from "./api/httpClient";
+export { MailRateLimitBanner } from "./components/MailRateLimitBanner";
+export type { MailRateLimitStatus, MailStatusResponse } from "./lib/mailStatus";

@@ -9,7 +9,9 @@ import { configFromEnv, type AppConfig, type Env } from "./env";
 import { type Authenticator, DubAuthenticator } from "./authn";
 import { D1DeviceStore, type DeviceStore } from "./devices";
 import { D1DeliveryStore, type DeliveryStore } from "./deliveries";
-import { ApnsAdapter, FcmAdapter, type PushAdapter } from "./push";
+import { ApnsAdapter, FcmAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
+import { D1ChangeLogReader, type ChangeLogReader } from "./change-log";
+import { D1MutationStore, type MutationStore } from "./mutation-store";
 
 export interface Deps {
   config: AppConfig;
@@ -21,7 +23,10 @@ export interface Deps {
   notification: ServiceClient; // notification-service (transparent + unread)
   devices: DeviceStore;
   deliveries: DeliveryStore;
+  changeLog: ChangeLogReader; // differential delete feed for /sync
+  mutations: MutationStore; // durable idempotency for offline replay
   pushAdapters: Record<mobile.MobilePlatform, PushAdapter>;
+  pushRetry: PushRetryPolicy; // bounded retry/backoff for hard send failures
   audit: (input: auditLog.AuditRecordInput) => Promise<void>;
   newRequestId: () => string;
 }
@@ -49,10 +54,13 @@ export function buildDeps(env: Env): Deps {
     notification: createServiceClient(env.SVC_NOTIFICATION, { service: "notification-service", caller }),
     devices: new D1DeviceStore(db),
     deliveries: new D1DeliveryStore(db),
+    changeLog: new D1ChangeLogReader(db),
+    mutations: new D1MutationStore(db),
     pushAdapters: {
       ios: new ApnsAdapter(config.pushConfigured),
       android: new FcmAdapter(config.pushConfigured),
     },
+    pushRetry: { maxAttempts: 3 },
     audit: (input) => publishAudit({ AUDIT_QUEUE: env.AUDIT_QUEUE }, input),
     newRequestId,
   };

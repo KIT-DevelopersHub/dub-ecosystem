@@ -12,6 +12,7 @@ import type {
 } from "../contracts/pending";
 import { buildListUsersParams, type UserListFilters } from "../lib/listUsersQuery";
 import { buildAuditQuery, type AuditFilters } from "../lib/auditQuery";
+import type { MailStatusResponse } from "../lib/mailStatus";
 
 const BASE = "/api/v1";
 const IDENTITY = `${BASE}/identity`;
@@ -34,6 +35,8 @@ export interface RosterApi {
   revokeRole(userId: common.UserId, assignmentId: string): Promise<void>;
   permissionCatalog(): Promise<identity.PermissionCatalogEntry[]>;
   auditLogs(filters: AuditFilters): Promise<auditLog.AuditLogPage>;
+  /** Mail-gateway rate-limit status, via the gateway boundary (proxied to /internal/status). */
+  mailStatus(): Promise<MailStatusResponse>;
 }
 
 export function createRosterApi(client: ResourceClient): RosterApi {
@@ -63,5 +66,6 @@ export function createRosterApi(client: ResourceClient): RosterApi {
       client.get<identity.PermissionCatalogEntry[]>(`${IDENTITY}/permissions/catalog`),
     auditLogs: (filters) =>
       client.get<auditLog.AuditLogPage>(`${BASE}/audit/logs`, { ...buildAuditQuery(filters) }),
+    mailStatus: () => client.get<MailStatusResponse>(`${BASE}/mail/status`),
   };
 }

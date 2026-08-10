@@ -24,7 +24,7 @@ queue = "dub-q-audit-record"
 # --- Service binding: identity-roster (POST /users/provision) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "identity-roster"
 
 # --- vars (non-secret) ---
 [vars]

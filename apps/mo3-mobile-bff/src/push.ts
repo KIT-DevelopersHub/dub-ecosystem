@@ -32,12 +32,29 @@ export interface PushDispatchResult {
   deviceCount: number; // active devices targeted (0 is not an error)
 }
 
+/**
+ * Retry policy for a hard "failed" send (provider 5xx / network). A `token_invalid`
+ * or `sent` outcome is terminal and never retried. maxAttempts counts the first
+ * try, so 1 == the legacy single-attempt behavior. backoff/sleep are injectable so
+ * tests neither wait nor touch real timers.
+ */
+export interface PushRetryPolicy {
+  maxAttempts: number;
+  backoffMs?: (nextAttempt: number) => number; // delay before attempt N (>=2)
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_SLEEP = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// Exponential: 1s before attempt 2, 2s before attempt 3, ... capped at 30s.
+const DEFAULT_BACKOFF = (nextAttempt: number): number => Math.min(30_000, 1000 * 2 ** (nextAttempt - 2));
+
 export interface PushDeps {
   devices: DeviceStore;
   deliveries: DeliveryStore;
   adapters: Record<mobile.MobilePlatform, PushAdapter>;
   audit: (input: auditLog.AuditRecordInput) => Promise<void>;
   orgId: string;
+  retry?: PushRetryPolicy; // absent -> single attempt (legacy)
 }
 
 /**
@@ -52,31 +69,43 @@ export async function dispatchPush(
   req: mobile.PushDispatchRequest,
 ): Promise<PushDispatchResult> {
   const devices = await deps.devices.listActiveByUser(req.userId);
+  const maxAttempts = Math.max(1, deps.retry?.maxAttempts ?? 1);
+  const sleep = deps.retry?.sleep ?? DEFAULT_SLEEP;
+  const backoff = deps.retry?.backoffMs ?? DEFAULT_BACKOFF;
 
   for (const device of devices) {
     const deliveryId = await deps.deliveries.createQueued(notificationId, device.id);
     const adapter = deps.adapters[device.platform];
     let result: SendResult = "failed";
     let lastError = "";
-    try {
-      result = await adapter.send(device, req.payload);
-    } catch (err) {
-      result = "failed";
-      lastError = err instanceof Error ? err.message : String(err);
+    let attempts = 0;
+    // Retry only a hard "failed"; "sent"/"token_invalid" are terminal. Backoff
+    // sleeps between tries (not after the last), so `attempts` is the true count.
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      attempts = attempt;
+      try {
+        result = await adapter.send(device, req.payload);
+        lastError = "";
+      } catch (err) {
+        result = "failed";
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+      if (result === "sent" || result === "token_invalid") break;
+      if (attempt < maxAttempts) await sleep(backoff(attempt + 1));
     }
 
     if (result === "sent") {
-      await deps.deliveries.markStatus(deliveryId, "sent", 1, null);
+      await deps.deliveries.markStatus(deliveryId, "sent", attempts, null);
     } else if (result === "token_invalid") {
-      await deps.deliveries.markStatus(deliveryId, "token_invalid", 1, "provider reported invalid token");
+      await deps.deliveries.markStatus(deliveryId, "token_invalid", attempts, "provider reported invalid token");
       await deps.devices.disableById(device.id); // stop future push to a dead token
     } else {
-      await deps.deliveries.markStatus(deliveryId, "failed", 1, lastError || "send failed");
+      await deps.deliveries.markStatus(deliveryId, "failed", attempts, lastError || "send failed");
       const details: MobilePushDeliveryFailedAudit = {
         notificationId,
         deviceId: device.id,
         platform: device.platform,
-        attempts: 1,
+        attempts,
         lastError: lastError || "send failed",
       };
       await deps.audit({

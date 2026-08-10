@@ -58,13 +58,20 @@ const siteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ?? "";
     toInquiryRequest,
     type InquiryFormValues,
   } from "../lib/inquiry-validation";
-  import { submitInquiry } from "../lib/inquiry-client";
+  import { submitInquiry, resolveGatewayOrigin, isValidGatewayOrigin } from "../lib/inquiry-client";
   import { errorCodeToUserMessage, shouldResetTurnstile } from "../lib/error-messages";
   import { generateIdempotencyKey } from "../lib/idempotency";
 
   const form = document.getElementById("inquiry-form") as HTMLFormElement | null;
   if (form) {
-    const baseUrl = import.meta.env.PUBLIC_GATEWAY_ORIGIN ?? "";
+    const rawOrigin = import.meta.env.PUBLIC_GATEWAY_ORIGIN ?? "";
+    // Normalize once (drops any trailing slash / path). A non-empty value that
+    // fails to resolve is a build misconfiguration — warn, then fall back to
+    // same-origin so the form still renders rather than POSTing to a broken URL.
+    if (!isValidGatewayOrigin(rawOrigin)) {
+      console.warn(`[InquiryForm] invalid PUBLIC_GATEWAY_ORIGIN "${rawOrigin}" — falling back to same-origin`);
+    }
+    const baseUrl = resolveGatewayOrigin(rawOrigin);
     const statusEl = form.querySelector<HTMLElement>('[data-testid="fe8-inquiry-status"]')!;
     const submitBtn = form.querySelector<HTMLButtonElement>('[data-testid="fe8-inquiry-submit"]')!;
     // Stable across retries so the gateway dedups on x-dub-idempotency-key.

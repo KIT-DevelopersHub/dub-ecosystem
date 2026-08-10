@@ -40,7 +40,7 @@ service = "auth-service"
 
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
@@ -52,7 +52,7 @@ service = "task-service"
 
 [[services]]
 binding = "SVC_NOTIFICATION"
-service = "notification-service"
+service = "notification"
 
 # --- vars (non-secret) ---
 [vars]

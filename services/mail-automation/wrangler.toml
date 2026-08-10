@@ -15,15 +15,15 @@ migrations_dir = "migrations"
 # --- Service Bindings (dependencies) ---
 [[services]]
 binding = "SVC_MAIL_GATEWAY"
-service = "dub-mail-gateway"
+service = "mail-gateway"
 
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
-service = "dub-event-service"
+service = "event-service"
 
 # --- Queue consumer: inbound decisions (contract frozen; creation post-9-B) ---
 [[queues.consumers]]

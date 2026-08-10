@@ -1,38 +1,71 @@
-// Mail inbox screen. Received messages come from GET /api/v1/mail/messages
-// (mail:read) via the shell api-client. Read-only list container (design leaves
-// full thread view to a later slice); empty / error / loading states use @dub/ui.
-import { useQuery } from "@tanstack/react-query";
-import { Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
+// Mail inbox screen (mail:read). Lists received messages (GET /api/v1/mail/messages)
+// with an unread badge, and drives a master→detail flow: selecting a row opens the
+// thread detail (ThreadDetail) and marks that message read (POST …/read), then
+// invalidates the list so the badge clears. Empty / error / loading use @dub/ui.
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
+import { ThreadDetail } from "./MessageDetail.tsx";
 
 function formatReceived(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("ja-JP");
 }
 
-function MessageRow({ message }: { message: mail.MailMessage }): JSX.Element {
+function MessageRow({ message, onOpen }: { message: mail.MailMessageListItem; onOpen: () => void }): JSX.Element {
   const fromLabel = message.from.name ? `${message.from.name} <${message.from.email}>` : message.from.email;
   return (
-    <Card testId="fe2-mail-inbox-item">
-      <Stack gap={2}>
-        <strong>{message.subject || "(件名なし)"}</strong>
-        <span>{fromLabel}</span>
-        <small>{message.snippet}</small>
-        <small>{formatReceived(message.receivedAt)}</small>
-      </Stack>
-    </Card>
+    <button
+      type="button"
+      data-testid="fe2-mail-inbox-item"
+      onClick={onOpen}
+      style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
+      aria-label={`${message.subject || "(件名なし)"} — ${message.read ? "既読" : "未読"}`}
+    >
+      <Card>
+        <Stack gap={2}>
+          <Stack direction="row" gap={2} align="center">
+            <strong style={{ fontWeight: message.read ? 400 : 700 }}>{message.subject || "(件名なし)"}</strong>
+            {!message.read ? <Badge tone="info" testId="fe2-mail-inbox-unread">未読</Badge> : null}
+          </Stack>
+          <span>{fromLabel}</span>
+          <small>{message.snippet}</small>
+          <small>{formatReceived(message.receivedAt)}</small>
+        </Stack>
+      </Card>
+    </button>
   );
 }
 
 export function InboxScreen({ onCompose }: { onCompose?: () => void }): JSX.Element {
   const mailApi = useMailApi();
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<{ id: string; threadId: string } | null>(null);
+  const inboxKey = queryKeys.feature("mail", "inbox");
+
   const query = useQuery({
-    queryKey: queryKeys.feature("mail", "inbox"),
+    queryKey: inboxKey,
     queryFn: () => mailApi.listInbox({ limit: 50 }),
   });
+
+  const markRead = useMutation({
+    mutationFn: (id: string) => mailApi.markRead(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: inboxKey }),
+  });
+
+  const openMessage = (m: mail.MailMessageListItem): void => {
+    setSelected({ id: m.id, threadId: m.threadId });
+    if (!m.read) markRead.mutate(m.id);
+  };
+
+  // Detail takes over the surface; "back" returns to the list (already invalidated).
+  if (selected) {
+    return <ThreadDetail threadId={selected.threadId} onBack={() => setSelected(null)} />;
+  }
 
   const composeAction = onCompose ? (
     <Button testId="fe2-mail-inbox-compose" onClick={onCompose}>
@@ -62,7 +95,7 @@ export function InboxScreen({ onCompose }: { onCompose?: () => void }): JSX.Elem
     body = (
       <Stack gap={3}>
         {query.data.items.map((m) => (
-          <MessageRow key={m.id} message={m} />
+          <MessageRow key={m.id} message={m} onOpen={() => openMessage(m)} />
         ))}
       </Stack>
     );

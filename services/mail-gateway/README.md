@@ -35,8 +35,8 @@ Free plan runs the Worker). See §4 for the paid-vs-free verdict.
 
 | Provider | Cost to start | Setup effort | Notes |
 |---|---|---|---|
-| **Resend** (recommended) | Free 100/day, 3000/mo | Lowest | Copy-paste DNS from dashboard; Bearer API key. Best first Go-Live. |
-| **Amazon SES** | ~$0 (62k/mo from AWS infra tiers vary) | Medium | Sandbox by default (verified recipients only) → request production access. SigV4, no SMTP. ADR-001 default. |
+| **Resend** (recommended, default) | Free 100/day, 3000/mo | Lowest | Copy-paste DNS from dashboard; Bearer API key. Best first Go-Live. Code default when `MAIL_OUTBOUND_PROVIDER` is unset (ADR-0001). |
+| **Amazon SES** | ~$0 (62k/mo from AWS infra tiers vary) | Medium | Sandbox by default (verified recipients only) → request production access. SigV4, no SMTP. Supported path for future/high-volume. |
 | **MailChannels** | Paid | Medium | Free Cloudflare-Workers integration was discontinued (mid-2024); now needs a paid MailChannels account + API key + Domain Lockdown TXT. |
 
 All three are already implemented (`src/resend.ts`, `src/ses.ts`, `src/mailchannels.ts`).

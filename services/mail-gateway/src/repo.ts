@@ -34,6 +34,9 @@ export interface InboundRow {
   loop_marker: string | null;
   received_at: string;
   created_at: string;
+  body_text: string | null; // 0002: full plain-text body (detail view)
+  html_body: string | null; // 0002: HTML part when present (sanitized before render)
+  read_at: string | null; // 0002: ISO8601 when first opened; NULL = unread
 }
 
 export interface MailboxRow {
@@ -122,12 +125,16 @@ export async function seenInbound(db: DbClient, messageId: string): Promise<bool
 
 /** Persist a normalized inbound message. INSERT OR IGNORE on message_id makes an
  *  Email-Routing redelivery a no-op; returns changes (0 = duplicate). */
-export async function insertInbound(db: DbClient, m: mail.MailMessage, extra: { mailbox: string | null; autoSubmitted: string | null; loopMarker: string | null }): Promise<number> {
+export async function insertInbound(
+  db: DbClient,
+  m: mail.MailMessage,
+  extra: { mailbox: string | null; autoSubmitted: string | null; loopMarker: string | null; bodyText: string; htmlBody: string | null },
+): Promise<number> {
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_inbound
        (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
-        auto_submitted, loop_marker, received_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     m.id,
     m.messageId,
     m.threadId,
@@ -140,6 +147,8 @@ export async function insertInbound(db: DbClient, m: mail.MailMessage, extra: { 
     extra.loopMarker,
     m.receivedAt,
     nowIso(),
+    extra.bodyText,
+    extra.htmlBody,
   );
   return res.meta.changes;
 }
@@ -157,15 +166,52 @@ function rowToMailMessage(r: InboundRow): mail.MailMessage {
   };
 }
 
+/** List item = frozen message + read flag (read := read_at IS NOT NULL). */
+function rowToListItem(r: InboundRow): mail.MailMessageListItem {
+  return { ...rowToMailMessage(r), read: r.read_at !== null };
+}
+
+/** Detail = list item + full body. htmlBody omitted (not set) when the row has none. */
+function rowToDetail(r: InboundRow): mail.MailMessageDetail {
+  const detail: mail.MailMessageDetail = { ...rowToListItem(r), textBody: r.body_text ?? "" };
+  if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
+  return detail;
+}
+
+/** Frozen-message read (kept for callers that only need the base DTO). */
 export async function getInboundById(db: DbClient, id: string): Promise<mail.MailMessage | null> {
   const row = await db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE id = ?`, id);
   return row ? rowToMailMessage(row) : null;
 }
 
+/** Full detail (body + read state) — backs GET /messages/:id. */
+export async function getInboundDetail(db: DbClient, id: string): Promise<mail.MailMessageDetail | null> {
+  const row = await db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE id = ?`, id);
+  return row ? rowToDetail(row) : null;
+}
+
+/** Every message in a thread, oldest→newest, as full details — backs GET /threads/:id. */
+export async function listThread(db: DbClient, threadId: string): Promise<mail.MailMessageDetail[]> {
+  const rows = await db.all<InboundRow>(
+    `SELECT * FROM mail_inbound WHERE thread_id = ? ORDER BY received_at ASC, id ASC`,
+    threadId,
+  );
+  return rows.map(rowToDetail);
+}
+
+/** Mark a message read (idempotent): stamps read_at only on the first open. Returns
+ *  whether the message exists so the route can 404 an unknown id. */
+export async function markInboundRead(db: DbClient, id: string): Promise<{ found: boolean }> {
+  const row = await db.first<{ id: string }>(`SELECT id FROM mail_inbound WHERE id = ?`, id);
+  if (!row) return { found: false };
+  await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND read_at IS NULL`, nowIso(), id);
+  return { found: true };
+}
+
 export async function listInbound(
   db: DbClient,
   q: { threadId?: string; cursor?: string; limit: number },
-): Promise<common.Paginated<mail.MailMessage>> {
+): Promise<common.Paginated<mail.MailMessageListItem>> {
   const where: string[] = [];
   const binds: unknown[] = [];
   if (q.threadId !== undefined) {
@@ -186,7 +232,7 @@ export async function listInbound(
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
   return {
-    items: page.map(rowToMailMessage),
+    items: page.map(rowToListItem),
     nextCursor: hasMore && last ? encodeCursor(last.id) : null,
   };
 }
