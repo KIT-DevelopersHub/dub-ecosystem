@@ -1,7 +1,7 @@
 // Real in-memory SQLite adapter exposing the subset of the D1Database interface that
 // @dub/db createDbClient uses. Runs the actual notif schema (CHECKs + partial unique
 // indexes included) so the delivery-layer guarantees are tested authentically.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
@@ -12,7 +12,16 @@ import type { D1Database } from "@cloudflare/workers-types";
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
 
-const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), "../db/0001_notif.sql");
+// Apply every notif migration (0001_notif, 0002_feedback, …) in id order so the test
+// DB stays in lockstep with the physical schema as additive slices land.
+const DB_DIR = join(dirname(fileURLToPath(import.meta.url)), "../db");
+function loadSchema(): string {
+  return readdirSync(DB_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => readFileSync(join(DB_DIR, f), "utf8"))
+    .join("\n");
+}
 
 function norm(v: unknown): unknown {
   if (v === undefined) return null;
@@ -22,7 +31,7 @@ function norm(v: unknown): unknown {
 
 export function makeD1(): { d1: D1Database; raw: InstanceType<typeof DatabaseSync> } {
   const raw = new DatabaseSync(":memory:");
-  raw.exec(readFileSync(SCHEMA_PATH, "utf8"));
+  raw.exec(loadSchema());
 
   const adapter = {
     prepare(sql: string) {

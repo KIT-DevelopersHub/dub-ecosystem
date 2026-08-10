@@ -4,7 +4,18 @@
 // with the NOTIF_VALIDATION_FAILED envelope (design §6).
 import { DubError, errors, type FieldError } from "@dub/errors";
 import type { notification } from "@dub/types";
-import { CHANNELS, MAX_DIRECT_RECIPIENTS, MAX_QUERY_LIMIT, DEFAULT_QUERY_LIMIT, TITLE_MAX, TITLE_MIN } from "./config";
+import {
+  CHANNELS,
+  MAX_DIRECT_RECIPIENTS,
+  MAX_QUERY_LIMIT,
+  DEFAULT_QUERY_LIMIT,
+  TITLE_MAX,
+  TITLE_MIN,
+  FEEDBACK_CATEGORIES,
+  FEEDBACK_MESSAGE_MAX,
+  FEEDBACK_PAGE_URL_MAX,
+  FEEDBACK_PAGE_NAME_MAX,
+} from "./config";
 import { isValidTypePattern } from "./preferences";
 import type { NotificationChannel } from "./types";
 
@@ -139,6 +150,81 @@ export function parsePreferencesUpdate(body: unknown): notification.PreferenceEn
     }
     out.push({ type, channels: channels as NotificationChannel[] });
   });
+  if (fe.length > 0) throw notifValidationFailed(fe);
+  return out;
+}
+
+const FEEDBACK_CATEGORY_SET: ReadonlySet<string> = new Set(FEEDBACK_CATEGORIES);
+
+/** Validate POST /feedback body (notification.CreateFeedbackRequest). */
+export function parseCreateFeedback(body: unknown): notification.CreateFeedbackRequest {
+  if (!isPlainObject(body)) throw notifValidationFailed([{ field: "(root)", reason: "invalid_type" }]);
+  const fe: FieldError[] = [];
+  const b = body;
+
+  const message = typeof b.message === "string" ? b.message.trim() : "";
+  if (!message) fe.push({ field: "message", reason: "required" });
+  else if (message.length > FEEDBACK_MESSAGE_MAX) {
+    fe.push({ field: "message", reason: "too_long", message: `<= ${FEEDBACK_MESSAGE_MAX}` });
+  }
+
+  let category: notification.FeedbackCategory | undefined;
+  if (b.category !== undefined) {
+    if (typeof b.category !== "string" || !FEEDBACK_CATEGORY_SET.has(b.category)) {
+      fe.push({ field: "category", reason: "invalid_enum", message: `one of ${FEEDBACK_CATEGORIES.join(",")}` });
+    } else {
+      category = b.category as notification.FeedbackCategory;
+    }
+  }
+
+  let page: { url?: string; name?: string } | undefined;
+  if (b.page !== undefined && b.page !== null) {
+    if (!isPlainObject(b.page)) {
+      fe.push({ field: "page", reason: "invalid_type" });
+    } else {
+      const url = b.page.url;
+      const name = b.page.name;
+      if (url !== undefined) {
+        if (typeof url !== "string") fe.push({ field: "page.url", reason: "invalid_type" });
+        else if (url.length > FEEDBACK_PAGE_URL_MAX) fe.push({ field: "page.url", reason: "too_long", message: `<= ${FEEDBACK_PAGE_URL_MAX}` });
+      }
+      if (name !== undefined) {
+        if (typeof name !== "string") fe.push({ field: "page.name", reason: "invalid_type" });
+        else if (name.length > FEEDBACK_PAGE_NAME_MAX) fe.push({ field: "page.name", reason: "too_long", message: `<= ${FEEDBACK_PAGE_NAME_MAX}` });
+      }
+      const p: { url?: string; name?: string } = {};
+      if (typeof url === "string" && url.trim()) p.url = url.trim();
+      if (typeof name === "string" && name.trim()) p.name = name.trim();
+      if (p.url !== undefined || p.name !== undefined) page = p;
+    }
+  }
+
+  if (fe.length > 0) throw notifValidationFailed(fe);
+
+  const out: notification.CreateFeedbackRequest = { message };
+  if (category !== undefined) out.category = category;
+  if (page !== undefined) out.page = page;
+  return out;
+}
+
+/** Validate GET /feedback query params (notification.ListFeedbackQuery + CursorQuery). */
+export function parseListFeedbackQuery(q: Record<string, string | undefined>): notification.ListFeedbackQuery & { limit: number } {
+  const fe: FieldError[] = [];
+  const out: notification.ListFeedbackQuery & { limit: number } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.unreadOnly !== undefined && q.unreadOnly !== "") {
+    if (q.unreadOnly !== "true" && q.unreadOnly !== "false") fe.push({ field: "unreadOnly", reason: "invalid_bool" });
+    else out.unreadOnly = q.unreadOnly === "true";
+  }
+  if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
+
+  if (q.limit !== undefined && q.limit !== "") {
+    const n = Number(q.limit);
+    if (!Number.isInteger(n) || n < 1) fe.push({ field: "limit", reason: "invalid_range" });
+    else if (n > MAX_QUERY_LIMIT) fe.push({ field: "limit", reason: "too_large", message: `<= ${MAX_QUERY_LIMIT}` });
+    else out.limit = n;
+  }
+
   if (fe.length > 0) throw notifValidationFailed(fe);
   return out;
 }
