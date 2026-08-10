@@ -67,6 +67,22 @@ export function createApp() {
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
 
+  // ---- POST /outbox: USER-FACING compose+send (design 統合波). Unlike /send (internal
+  // binding, system-origin), this is reachable through api-gateway with the caller's
+  // session identity: requireAuth (trusted x-dub-user-id) + mail:send. Idempotency-Key
+  // is optional here (UI submit) — a fresh one is minted when absent so a retried submit
+  // is still safe. Shares the exact send core, so 二重送信ゼロ still holds per key.
+  app.use("/outbox", withAuth("mail:send"));
+  app.post("/outbox", async (c) => {
+    const ctx = ctxOf(c);
+    const idempotencyKey = c.req.header(HEADERS.idempotencyKey) ?? crypto.randomUUID();
+    const req = parseSendMailRequest(await c.req.json().catch(() => null));
+    const requester = c.req.header(HEADERS.userId) ?? "unknown";
+    const deps = buildSendDeps(c.env, ctx);
+    const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
+    return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
+  });
+
   // ---- read routes: mail:read (organizer 以上). requireAuth (trusted header) first.
   app.use("/messages", withAuth("mail:read"));
   app.use("/messages/*", withAuth("mail:read"));

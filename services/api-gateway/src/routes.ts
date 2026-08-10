@@ -43,6 +43,16 @@ export const ROUTES: readonly GatewayRoute[] = [
   { segment: "files", binding: "SVC_FILE_META", auth: "required" }, // body cap resolved from env at runtime
   { segment: "drive", binding: "SVC_DRIVE_PROXY", auth: "required" },
   { segment: "chat", binding: "SVC_CHAT", auth: "required" }, // HTTP only; WS upgrade is rejected
+  {
+    // User-facing mail: inbox reads (/mail/messages, /mail/threads) + compose
+    // (/mail/outbox) reach mail-gateway with the session's x-dub-user-id, which it
+    // authorizes (mail:read / mail:send). The raw system send (/mail/send) and any
+    // /mail/internal/* stay internal-only → 404 externally (open-relay guard).
+    segment: "mail",
+    binding: "SVC_MAIL_GATEWAY",
+    auth: "required",
+    internalOnlyPaths: ["/mail/send", "/mail/internal/"],
+  },
   { segment: "deploy", binding: "SVC_DEPLOY", auth: "required" },
   { segment: "github", binding: "SVC_GITHUB_SYNC", auth: "required" },
   { segment: "audit", binding: "SVC_AUDIT_LOG", auth: "required", internalOnlyPaths: ["/audit/internal/log"] },

@@ -49,6 +49,35 @@ describe("transparent routing", () => {
     expect(new URL(event.requests[0]!.url).pathname).toBe("/actions/a1");
   });
 
+  it("[mail] forwards user-facing mail paths and forwards x-dub-user-id", async () => {
+    const mailSvc = fakeBinding((req) => json(200, { path: new URL(req.url).pathname, user: req.headers.get(HDR_USER_ID) }));
+    const env = makeEnv({ SVC_AUTH: authBinding(validSession("usr_m")).fetcher, SVC_MAIL_GATEWAY: mailSvc.fetcher });
+    const a = app();
+
+    const inbox = await a.fetch(new Request("https://x/api/v1/mail/messages", { headers: { authorization: "Bearer t" } }), env, execCtx);
+    expect(await inbox.json()).toMatchObject({ path: "/mail/messages", user: "usr_m" });
+
+    const outbox = await a.fetch(
+      new Request("https://x/api/v1/mail/outbox", { method: "POST", headers: { authorization: "Bearer t", "content-type": "application/json" }, body: "{}" }),
+      env,
+      execCtx,
+    );
+    expect(await outbox.json()).toMatchObject({ path: "/mail/outbox", user: "usr_m" });
+  });
+
+  it("[mail] raw /mail/send is internal-only -> 404 externally", async () => {
+    const mailSvc = fakeBinding(() => json(200, { ok: true }));
+    const env = makeEnv({ SVC_AUTH: authBinding(validSession()).fetcher, SVC_MAIL_GATEWAY: mailSvc.fetcher });
+    const res = await app().fetch(
+      new Request("https://x/api/v1/mail/send", { method: "POST", headers: { authorization: "Bearer t" }, body: "{}" }),
+      env,
+      execCtx,
+    );
+    expect(res.status).toBe(404);
+    expect((await errOf(res)).code).toBe("GATEWAY_ROUTE_NOT_FOUND");
+    expect(mailSvc.requests).toHaveLength(0);
+  });
+
   it("[case2] unknown path and internal-only paths -> 404 GATEWAY_ROUTE_NOT_FOUND", async () => {
     const env = makeEnv({ SVC_AUTH: authBinding(validSession()).fetcher });
     const a = app();
