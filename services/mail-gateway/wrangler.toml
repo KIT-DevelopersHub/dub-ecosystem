@@ -40,7 +40,7 @@ binding = "AUDIT_QUEUE"
 # Bind at Apply: `wrangler.toml` email routing rule maps info@developershub.jp here.
 # (Section commented out until the integration波 provisions the domain/rule.)
 # send_email binding for outbound reply-through-CF is NOT used; outbound = managed
-# provider (SES暫定) via Workers Secrets (SES_* / MAIL_FROM_ADDRESS).
+# provider (Resend; see [vars]) via Workers Secrets (RESEND_API_KEY / MAIL_FROM_ADDRESS).
 
 # --- Outbound provider. Non-secret config only; credentials are Workers Secrets set
 # out-of-band at Apply (NEVER committed — 機密はローカルのみ). See README.md "Go-Live
@@ -56,10 +56,16 @@ binding = "AUDIT_QUEUE"
 #
 # If the selected provider's secrets are absent the provider falls back to a LOUD stub
 # (no silent drop) and GET /internal/health/ready returns 503 with the missing config.
+# Provider = Resend (ADR-0001 first Go-Live). Matches the code default and the live
+# secret set (RESEND_API_KEY). Keeping SES here while only RESEND_API_KEY is provisioned
+# would route sends to the loud SES stub (502) — hence resend. From stays on Resend's
+# shared onboarding sender until developershub.jp DKIM/SPF is verified in Resend, then
+# flip MAIL_FROM_ADDRESS back to info@developershub.jp. (SES_REGION retained for an
+# eventual SES switch; harmless while provider=resend.)
 [vars]
-MAIL_OUTBOUND_PROVIDER = "ses"
+MAIL_OUTBOUND_PROVIDER = "resend"
 SES_REGION = "ap-northeast-1"
-MAIL_FROM_ADDRESS = "info@developershub.jp"
+MAIL_FROM_ADDRESS = "onboarding@resend.dev"
 # Send resilience tuning (optional; defaults shown). Retries transient provider failures
 # (network / timeout / 429 / 5xx) with backoff+jitter; deterministic 4xx fail fast.
 MAIL_SEND_MAX_ATTEMPTS = "3"      # total attempts (1 try + 2 retries); range 1..6
