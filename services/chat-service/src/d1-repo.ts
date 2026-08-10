@@ -133,11 +133,20 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
 
     // ---- members ----
     async addMember(row: MemberRow): Promise<void> {
-      await db.run(
-        `INSERT INTO chat_channel_members (channel_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(channel_id, user_id) DO UPDATE SET role = excluded.role`,
-        row.channelId, row.userId, row.role, row.joinedAt,
+      // UPDATE-then-INSERT rather than "ON CONFLICT DO UPDATE SET": the @dub/db
+      // namespace guard parses the token after "UPDATE", and in "DO UPDATE SET"
+      // that token is "SET" -> a false DB_NAMESPACE_VIOLATION under strict mode.
+      // This preserves the upsert semantics (role updated, joined_at kept on conflict).
+      const upd = await db.run(
+        `UPDATE chat_channel_members SET role = ? WHERE channel_id = ? AND user_id = ?`,
+        row.role, row.channelId, row.userId,
       );
+      if (upd.meta.changes === 0) {
+        await db.run(
+          `INSERT OR IGNORE INTO chat_channel_members (channel_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)`,
+          row.channelId, row.userId, row.role, row.joinedAt,
+        );
+      }
     },
     async removeMember(channelId: common.ChannelId, userId: common.UserId): Promise<boolean> {
       const res = await db.run(`DELETE FROM chat_channel_members WHERE channel_id = ? AND user_id = ?`, channelId, userId);
@@ -245,11 +254,18 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
 
     // ---- read states ----
     async setReadState(channelId, userId, lastReadMessageId, at): Promise<void> {
-      await db.run(
-        `INSERT INTO chat_read_states (channel_id, user_id, last_read_message_id, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(channel_id, user_id) DO UPDATE SET last_read_message_id = excluded.last_read_message_id, updated_at = excluded.updated_at`,
-        channelId, userId, lastReadMessageId, at,
+      // UPDATE-then-INSERT (see addMember): "DO UPDATE SET" trips the @dub/db
+      // strict namespace guard, so the upsert is expressed as two guard-safe stmts.
+      const upd = await db.run(
+        `UPDATE chat_read_states SET last_read_message_id = ?, updated_at = ? WHERE channel_id = ? AND user_id = ?`,
+        lastReadMessageId, at, channelId, userId,
       );
+      if (upd.meta.changes === 0) {
+        await db.run(
+          `INSERT OR IGNORE INTO chat_read_states (channel_id, user_id, last_read_message_id, updated_at) VALUES (?, ?, ?, ?)`,
+          channelId, userId, lastReadMessageId, at,
+        );
+      }
     },
     async getReadState(channelId, userId): Promise<{ lastReadMessageId: common.MessageId | null } | null> {
       const r = await db.first<{ last_read_message_id: string | null }>(
