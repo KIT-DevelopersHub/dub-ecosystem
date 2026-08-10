@@ -50,34 +50,40 @@ function renderShell(onNavigate?: (p: string) => void, onLogout?: () => void) {
 describe("AppShellLayout", () => {
   beforeEach(() => useUiStore.setState({ sidebarOpen: true, theme: "system" }));
 
-  it("renders nav entries, header widget slot and routed content", () => {
+  it("renders header widget slot and routed content; tools live behind the launcher", async () => {
     renderShell();
-    expect(screen.getByText("Events")).toBeInTheDocument();
-    expect(screen.getByText("Chat")).toBeInTheDocument();
     expect(screen.getByTestId("header-widget")).toBeInTheDocument();
     expect(screen.getByTestId("outlet")).toBeInTheDocument();
+    // No persistent left rail: tool labels are hidden until the launcher opens.
+    expect(screen.queryByText("Events")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
+    expect(screen.getByText("Events")).toBeInTheDocument();
+    expect(screen.getByText("Chat")).toBeInTheDocument();
   });
 
-  it("renders injected nav badge from badgeSource", () => {
+  it("renders injected nav badge from badgeSource inside the launcher", async () => {
     renderShell();
-    // badgeSource() -> SidebarItem.badgeCount -> @dub/ui Sidebar renders a Badge
+    await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
+    // badgeSource() -> AppLauncherItem.badgeCount -> @dub/ui Badge on the tile.
     expect(screen.getByText("5")).toBeInTheDocument();
   });
 
-  it("calls onNavigate on nav click and onLogout on logout", async () => {
+  it("calls onNavigate on launcher tile click and onLogout on logout", async () => {
     const onNavigate = vi.fn();
     const onLogout = vi.fn();
     renderShell(onNavigate, onLogout);
+    await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
     await userEvent.click(screen.getByText("Events"));
     expect(onNavigate).toHaveBeenCalledWith("/events");
     await userEvent.click(screen.getByTestId("fe2-logout"));
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
-  it("toggles the sidebar via the store", async () => {
-    renderShell();
-    expect(useUiStore.getState().sidebarOpen).toBe(true);
-    await userEvent.click(screen.getByTestId("fe2-sidebar-toggle"));
-    expect(useUiStore.getState().sidebarOpen).toBe(false);
+  it("closes the launcher after selecting a tool", async () => {
+    renderShell(vi.fn());
+    await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
+    expect(screen.getByText("Events")).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Events"));
+    expect(screen.queryByText("Events")).not.toBeInTheDocument();
   });
 });
