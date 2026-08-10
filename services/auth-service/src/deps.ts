@@ -6,7 +6,7 @@ import { configFromEnv } from "./env";
 import { SessionService } from "./sessions";
 import { GoogleOAuthProvider, type OAuthProvider } from "./oauth";
 import { ServiceBindingIdentityClient, type IdentityClient } from "./identity-client";
-import { QueueAuditor, type Auditor } from "./audit";
+import { OutboxAuditor, type Auditor } from "./audit";
 
 export interface Deps {
   config: AppConfig;
@@ -27,7 +27,7 @@ export function buildDeps(env: Env): Deps {
     sessions: new SessionService(env.AUTH_KV, config),
     oauth: new GoogleOAuthProvider(config),
     identity: new ServiceBindingIdentityClient(env.SVC_IDENTITY),
-    audit: new QueueAuditor(env),
+    audit: new OutboxAuditor(env.OUTBOX_DB),
     kvPut: (k, v, ttlSec) => env.AUTH_KV.put(k, v, { expirationTtl: ttlSec }).then(() => undefined),
     kvGet: (k) => env.AUTH_KV.get(k),
     kvDelete: (k) => env.AUTH_KV.delete(k),

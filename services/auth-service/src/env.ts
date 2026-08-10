@@ -1,15 +1,16 @@
 // Worker bindings + derived runtime config for auth-service.
-// KV-only (no D1). Google OAuth secrets are Workers Secrets; TTLs are vars (theme8).
-import type { KVNamespace, Queue, Fetcher } from "@cloudflare/workers-types";
-import type { AuditRecordEnvelopeV1 } from "@dub/events";
+// KV for sessions + a small D1 for the free-tier audit outbox (no paid Queues).
+// Google OAuth secrets are Workers Secrets; TTLs are vars (theme8).
+import type { KVNamespace, D1Database, Fetcher } from "@cloudflare/workers-types";
 
 export interface Env {
   // --- data ---
   AUTH_KV: KVNamespace; // sessions / oauth_state / revoked_user (binding name pending infra registry)
-  AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13)
+  OUTBOX_DB: D1Database; // @dub/freeq audit outbox (replaces the AUDIT_QUEUE producer, theme13)
 
   // --- service bindings ---
   SVC_IDENTITY: Fetcher; // identity-roster (POST /users/provision) — stubbed until 9-x結線
+  SVC_AUDIT: Fetcher; // audit-log (drain delivery target for the audit outbox)
 
   // --- vars ---
   ENVIRONMENT?: string; // "local" | "preview" | "production" (default production)

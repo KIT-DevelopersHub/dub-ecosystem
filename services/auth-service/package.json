@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@dub/errors": "workspace:*",
-    "@dub/events": "workspace:*",
+    "@dub/freeq": "workspace:*",
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*",
     "@dub/types": "workspace:*",

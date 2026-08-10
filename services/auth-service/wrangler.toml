@@ -1,6 +1,8 @@
 # auth-service — Cloudflare Worker scaffold (P0: DO NOT DEPLOY from here).
-# Binding names (AUTH_KV / AUDIT_QUEUE / SVC_IDENTITY) follow the design; the
-# infra binding-name registry may rename AUTH_KV -> KV_SESSION at Apply time
+# FREE-TIER config: no paid Cloudflare Queues. Audit is written to a small D1
+# outbox (@dub/freeq) and forwarded to audit-log by a free Cron Trigger drain.
+# Binding names (AUTH_KV / OUTBOX_DB / SVC_IDENTITY / SVC_AUDIT) follow the design;
+# the infra binding-name registry may rename AUTH_KV -> KV_SESSION at Apply time
 # (auth-service.md §8 #2) — mechanical rename when it lands.
 name = "auth-service"
 main = "src/index.ts"
@@ -16,15 +18,28 @@ enabled = true
 binding = "AUTH_KV"
 id = "REPLACE_AT_APPLY"
 
-# --- Queue producer: audit-record (theme13 publishAudit) ---
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# --- D1: audit outbox (@dub/freeq freeq_outbox). Its own small DB; free tier.
+#     database_id filled at infra Apply. Apply db/0001_freeq_outbox.sql to create
+#     the table (or call ensureOutbox() at deploy). ---
+[[d1_databases]]
+binding = "OUTBOX_DB"
+database_name = "auth-outbox"
+database_id = "REPLACE_AT_APPLY"
 
 # --- Service binding: identity-roster (POST /users/provision) ---
 [[services]]
 binding = "SVC_IDENTITY"
 service = "identity-roster"
+
+# --- Service binding: audit-log (audit outbox drain delivery target) ---
+[[services]]
+binding = "SVC_AUDIT"
+service = "audit-log"
+
+# --- Cron Trigger: drain the audit outbox every minute (free tier; replaces the
+#     paid Queue's push delivery). ---
+[triggers]
+crons = ["* * * * *"]
 
 # --- vars (non-secret) ---
 [vars]
