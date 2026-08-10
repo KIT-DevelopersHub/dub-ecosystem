@@ -9,8 +9,11 @@
 import type { ComponentType, ReactNode } from "react";
 import { AppShell, PageHeader, AppLauncher, Button, Icon } from "@dub/ui";
 import type { AppLauncherItem } from "@dub/ui";
+import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
-import { useAuth } from "../auth/AuthProvider.tsx";
+import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
+
+type Can = (permission: identity.PermissionKey) => boolean;
 
 export interface AppShellLayoutProps {
   navEntries: NavEntry[];
@@ -23,10 +26,12 @@ export interface AppShellLayoutProps {
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
 // injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal), sorted by
-// order. Role/permission filtering already happened upstream in the registry, so
-// whatever nav the shell hands us is exactly what this role may see.
-function toLauncherItems(navEntries: NavEntry[]): AppLauncherItem[] {
+// order. Entries carrying requiredPermissions are hidden unless the viewer holds
+// them all (can() is fail-closed while /me loads), so the admin (ロール管理) tools
+// appear for admins only — mirroring each route's own guard (defense in depth).
+function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
   return [...navEntries]
+    .filter((entry) => (entry.requiredPermissions ?? []).every((p) => can(p)))
     .sort((a, b) => a.order - b.order)
     .map((entry) => {
       const badge = entry.badgeSource?.();
@@ -50,6 +55,7 @@ export function AppShellLayout({
   children,
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
+  const { can } = usePermissions();
 
   const header = (
     <PageHeader
@@ -61,7 +67,7 @@ export function AppShellLayout({
             testId="fe2-app-launcher"
             title="アプリ"
             label="アプリ一覧"
-            items={toLauncherItems(navEntries)}
+            items={toLauncherItems(navEntries, can)}
             {...(onNavigate ? { onSelect: (item: AppLauncherItem) => onNavigate(item.href ?? item.id) } : {})}
           />
           {headerWidgets.map((Widget, i) => (

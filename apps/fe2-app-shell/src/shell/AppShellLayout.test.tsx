@@ -86,4 +86,50 @@ describe("AppShellLayout", () => {
     await userEvent.click(screen.getByText("Events"));
     expect(screen.queryByText("Events")).not.toBeInTheDocument();
   });
+
+  it("hides launcher items whose requiredPermissions the viewer lacks (admin-only tools)", async () => {
+    const me: gateway.MeResponse = { ...ME, permissions: ["event:read"] };
+    const gatedApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "Events", path: "/events", icon: "calendar", order: 10 },
+      { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50, requiredPermissions: ["identity:read"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={gatedApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    // /me resolves async; wait for the launcher trigger then open it.
+    const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
+    await userEvent.click(trigger);
+    expect(screen.getByText("Events")).toBeInTheDocument();
+    // Viewer lacks identity:read -> the admin tool is filtered out.
+    expect(screen.queryByText("ロール管理")).not.toBeInTheDocument();
+  });
+
+  it("shows admin launcher items once the viewer holds the required permission", async () => {
+    const me: gateway.MeResponse = { ...ME, permissions: ["event:read", "identity:read"] };
+    const adminApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50, requiredPermissions: ["identity:read"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={adminApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
+    await userEvent.click(trigger);
+    expect(await screen.findByText("ロール管理")).toBeInTheDocument();
+  });
 });

@@ -199,13 +199,18 @@ function adaptMail(api: ApiClient): FeatureModule {
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
-  const routes = (adminModule.routes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => ({
-    label: n.label,
-    path: n.path,
-    icon: n.icon as IconName,
-    order: 50 + i, // admin section sits after the primary features
-  }));
+  const src = adminModule.routes as readonly SourceRoute[];
+  const routes = src.map((r) => wrapRoute(r, wrap));
+  // Map each admin route path -> its own requiredPermissions so the launcher can
+  // hide the admin tools (ユーザー名簿 / ロール管理 / 変更履歴) from non-admins, matching
+  // the route guard (defense in depth; a non-admin can neither see nor open them).
+  const permByPath = new Map(src.map((r) => [r.path, r.requiredPermissions]));
+  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => {
+    const perms = permByPath.get(n.path);
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
+    if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
+    return e;
+  });
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 

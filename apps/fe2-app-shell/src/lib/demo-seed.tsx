@@ -21,7 +21,7 @@
 // boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
 // screen), so "what is seeded vs. still stubbed" stays honest.
 import type { ErrorResponse } from "@dub/errors";
-import type { event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
+import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
@@ -187,28 +187,245 @@ const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
 };
 
-// ── identity / roster (admin) ─────────────────────────────────────────────────
+// ── identity / roster (admin RBAC console) ────────────────────────────────────
+// The admin console (FE7 @dub/admin-roster) is fully INTERACTIVE in the demo:
+// permission-matrix edit, role add and user role assignment all persist in an
+// in-session store (createRosterStore), so a viewer can toggle a role's
+// permissions and save, create a new role, and assign it to a user end-to-end.
+// Nothing leaves the browser. Roles are the 3 agreed tiers admin / maintainer /
+// member (system, read-only) plus any custom role the viewer creates.
 function isoNow(): string {
   return "2026-08-01T00:00:00Z";
 }
-const USERS: identity.IdentityUser[] = [
+
+// maintainer: broad operational write across the product, but NOT identity admin
+// (cannot manage roles/users) — the middle tier between admin and member.
+const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "event:write",
+  "event:admin",
+  "task:read",
+  "task:write",
+  "task:delete",
+  "file:read",
+  "file:write",
+  "mail:read",
+  "mail:send",
+  "chat:create",
+  "chat:moderate",
+  "github:read",
+  "notif:send",
+];
+const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
+
+const SEED_USERS: identity.IdentityUser[] = [
   { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
-  { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
-  { id: "usr_carol", orgId: ORG, displayName: "鈴木 一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_carol", orgId: ORG, displayName: "鈴木 一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_dave", orgId: ORG, displayName: "田中 次郎", email: "jiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
 ];
 
-const ROLES: identity.Role[] = [
+const SEED_ROLES: identity.Role[] = [
   { id: "role_admin", orgId: ORG, name: "admin", permissions: DEMO_PERMISSIONS, isSystem: true },
-  { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write", "task:read", "task:write", "mail:read"], isSystem: true },
-  { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read", "task:read"], isSystem: true },
+  { id: "role_maintainer", orgId: ORG, name: "maintainer", permissions: MAINTAINER_PERMISSIONS, isSystem: true },
+  { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true },
 ];
 
-const USER_ROLES: Record<string, unknown[]> = {
+// FE7's RoleAssignment (contracts/pending) — org-wide (resource fields null) here.
+interface DemoRoleAssignment {
+  id: string;
+  userId: string;
+  roleId: string;
+  roleName: string;
+  resourceType: "event" | null;
+  resourceId: string | null;
+  grantedBy: string;
+  grantedAt: string;
+}
+
+const SEED_USER_ROLES: Record<string, DemoRoleAssignment[]> = {
   [ME_ID]: [{ id: "asg_1", userId: ME_ID, roleId: "role_admin", roleName: "admin", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
-  usr_bob: [{ id: "asg_2", userId: "usr_bob", roleId: "role_member", roleName: "member", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
+  usr_bob: [{ id: "asg_2", userId: "usr_bob", roleId: "role_maintainer", roleName: "maintainer", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
+  usr_carol: [{ id: "asg_3", userId: "usr_carol", roleId: "role_member", roleName: "member", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
 };
 
-const USER_SUMMARIES: identity.UserSummary[] = USERS.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
+// Change-history seed (FE7 変更履歴 tab shows identity.* actions).
+const SEED_AUDITS: auditLog.AuditRecord[] = [
+  { id: "aud_1", action: "identity.role.assigned", actorId: ME_ID, orgId: ORG, result: "success", resourceType: "user", resourceId: "usr_bob", details: { roleId: "role_maintainer" }, requestId: "req_1", occurredAt: isoNow(), recordedAt: isoNow() },
+  { id: "aud_2", action: "identity.role.assigned", actorId: ME_ID, orgId: ORG, result: "success", resourceType: "user", resourceId: "usr_carol", details: { roleId: "role_member" }, requestId: "req_2", occurredAt: isoNow(), recordedAt: isoNow() },
+];
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** A normalized error envelope so the api-client surfaces a meaningful message. */
+function problem(code: string, message: string, status: number, details?: unknown): Response {
+  const body: ErrorResponse = { error: { code, message, retryable: false, ...(details !== undefined ? { details } : {}) } };
+  return json(body, status);
+}
+
+/** In-session, mutable roster store powering the interactive admin console.
+ *  A fresh store per createDemoFetch() call → tests get isolated state and a
+ *  page reload resets the demo. Mirrors the identity-roster contract surface
+ *  (GET/POST/PATCH/DELETE identity/roles + users + assignments, audit, mail). */
+function createRosterStore() {
+  const roles: identity.Role[] = SEED_ROLES.map((r) => ({ ...r, permissions: [...r.permissions] }));
+  const users: identity.IdentityUser[] = SEED_USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+  const assignments: Record<string, DemoRoleAssignment[]> = {};
+  for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
+  const audits: auditLog.AuditRecord[] = SEED_AUDITS.map((a) => ({ ...a }));
+
+  const rid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
+  const summaries = (): identity.UserSummary[] => users.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
+  const detail = (u: identity.IdentityUser): identity.IdentityUserDetail => ({
+    ...u,
+    permissions: [...new Set(roles.filter((r) => u.roleIds.includes(r.id)).flatMap((r) => r.permissions))],
+  });
+  function audit(action: string, resourceType: string, resourceId: string, details: Record<string, unknown>): void {
+    const ts = new Date().toISOString();
+    audits.unshift({ id: rid("aud"), action, actorId: ME_ID, orgId: ORG, result: "success", resourceType, resourceId, details, requestId: rid("req"), occurredAt: ts, recordedAt: ts });
+  }
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    const seg = (re: RegExp): string | null => {
+      const m = re.exec(pathname);
+      return m ? decodeURIComponent(m[1]!) : null;
+    };
+
+    if (method === "GET") {
+      if (pathname === "/api/v1/identity/users") {
+        // FE3/FE6 resolve display names via ?ids=; roster lists the full set.
+        return json(page(url.searchParams.has("ids") ? summaries() : users));
+      }
+      {
+        const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)\/roles$/);
+        if (id) return json(assignments[id] ?? []);
+      }
+      {
+        const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)$/);
+        if (id) {
+          const u = users.find((x) => x.id === id);
+          return u ? json(detail(u)) : problem("NOT_FOUND", "user not found", 404);
+        }
+      }
+      if (pathname === "/api/v1/identity/roles") return json(page(roles));
+      if (pathname === "/api/v1/identity/permissions/catalog") return json(identityValues.PERMISSION_CATALOG);
+      if (pathname === "/api/v1/audit/logs") {
+        const action = url.searchParams.get("action") ?? "identity.";
+        return json(page(audits.filter((a) => a.action.startsWith(action))));
+      }
+      if (pathname === "/api/v1/mail/status") {
+        return json({ service: "mail-gateway", provider: "resend", rateLimit: { active: false, cooldownSec: 60 } });
+      }
+      return null;
+    }
+
+    if (method === "POST") {
+      if (pathname === "/api/v1/identity/roles") {
+        const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+        if (!req?.name?.trim()) return problem("VALIDATION_FAILED", "ロール名を入力してください", 400, [{ field: "name", reason: "required" }]);
+        if (roles.some((r) => r.name === req.name)) return problem("CONFLICT", "同名のロールが既に存在します", 409);
+        const role: identity.Role = { id: rid("role"), orgId: ORG, name: req.name.trim(), permissions: req.permissions ?? [], isSystem: false };
+        roles.push(role);
+        audit("identity.role.created", "role", role.id, { name: role.name, permissions: role.permissions.length });
+        return json(role);
+      }
+      {
+        const userId = seg(/^\/api\/v1\/identity\/users\/([^/]+)\/roles$/);
+        if (userId) {
+          const req = body as { roleId?: string; resourceType?: "event"; resourceId?: string };
+          const role = roles.find((r) => r.id === req?.roleId);
+          if (!role) return problem("VALIDATION_FAILED", "不明なロールです", 400, [{ field: "roleId", reason: "not_found" }]);
+          const list = assignments[userId] ?? (assignments[userId] = []);
+          if (list.some((a) => a.roleId === role.id && a.resourceId === (req.resourceId ?? null))) {
+            return problem("CONFLICT", "このロールは既に付与されています", 409);
+          }
+          const asg: DemoRoleAssignment = { id: rid("asg"), userId, roleId: role.id, roleName: role.name, resourceType: req.resourceType ?? null, resourceId: req.resourceId ?? null, grantedBy: ME_ID, grantedAt: new Date().toISOString() };
+          list.push(asg);
+          const u = users.find((x) => x.id === userId);
+          if (u && !u.roleIds.includes(role.id)) u.roleIds.push(role.id);
+          audit("identity.role.assigned", "user", userId, { roleId: role.id });
+          return json(asg);
+        }
+      }
+      if (pathname === "/api/v1/identity/users/invite") {
+        const req = body as { email?: string; displayName?: string; roleIds?: string[] };
+        if (!EMAIL_RE.test(req?.email ?? "")) return problem("VALIDATION_FAILED", "メール形式が不正です", 400, [{ field: "email", reason: "format" }]);
+        if (users.some((u) => u.email === req.email)) return problem("CONFLICT", "既に登録済みのメールです", 409);
+        const user: identity.IdentityUser = { id: rid("usr"), orgId: ORG, displayName: req.displayName ?? req.email!, email: req.email!, githubLogin: null, avatarUrl: null, status: "invited", roleIds: req.roleIds ?? [], createdAt: isoNow(), updatedAt: new Date().toISOString() };
+        users.push(user);
+        audit("identity.user.provisioned", "user", user.id, { email: user.email });
+        return json(user);
+      }
+      return null;
+    }
+
+    if (method === "PATCH") {
+      {
+        const id = seg(/^\/api\/v1\/identity\/roles\/([^/]+)$/);
+        if (id) {
+          const role = roles.find((r) => r.id === id);
+          if (!role) return problem("NOT_FOUND", "role not found", 404);
+          if (role.isSystem) return problem("CONFLICT", "システムロールは編集できません", 409);
+          const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+          if (req?.name !== undefined) role.name = req.name;
+          if (req?.permissions !== undefined) role.permissions = req.permissions;
+          audit("identity.role.updated", "role", role.id, { permissions: role.permissions.length });
+          return json(role);
+        }
+      }
+      {
+        const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)$/);
+        if (id) {
+          const u = users.find((x) => x.id === id);
+          if (!u) return problem("NOT_FOUND", "user not found", 404);
+          const req = body as Partial<identity.IdentityUser>;
+          Object.assign(u, req, { updatedAt: new Date().toISOString() });
+          audit("identity.user.updated", "user", u.id, {});
+          return json(u);
+        }
+      }
+      return null;
+    }
+
+    if (method === "DELETE") {
+      {
+        const id = seg(/^\/api\/v1\/identity\/roles\/([^/]+)$/);
+        if (id) {
+          const role = roles.find((r) => r.id === id);
+          if (!role) return problem("NOT_FOUND", "role not found", 404);
+          if (role.isSystem) return problem("CONFLICT", "システムロールは削除できません", 409);
+          roles.splice(roles.indexOf(role), 1);
+          audit("identity.role.deleted", "role", role.id, { name: role.name });
+          return json(null, 204);
+        }
+      }
+      {
+        const m = /^\/api\/v1\/identity\/users\/([^/]+)\/roles\/([^/]+)$/.exec(pathname);
+        if (m) {
+          const userId = decodeURIComponent(m[1]!);
+          const asgId = decodeURIComponent(m[2]!);
+          const list = assignments[userId] ?? [];
+          const removed = list.find((a) => a.id === asgId);
+          assignments[userId] = list.filter((a) => a.id !== asgId);
+          if (removed) {
+            const u = users.find((x) => x.id === userId);
+            if (u && !(assignments[userId] ?? []).some((a) => a.roleId === removed.roleId)) {
+              u.roleIds = u.roleIds.filter((r) => r !== removed.roleId);
+            }
+            audit("identity.role.revoked", "user", userId, { assignmentId: asgId });
+          }
+          return json(null, 204);
+        }
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
 
 // ── transport helpers ─────────────────────────────────────────────────────────
 function json(body: unknown, status = 200): Response {
@@ -276,25 +493,9 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
       const id = seg(/^\/api\/v1\/mail\/threads\/([^/]+)$/);
       if (id) return MAIL_THREAD[id] ? json(MAIL_THREAD[id]) : notFound(`GET ${pathname}`);
     }
-    // identity / roster
-    if (pathname === "/api/v1/identity/users") {
-      // FE3/FE6 resolve display names via ?ids=; roster lists via filters.
-      if (url.searchParams.has("ids")) return json(page(USER_SUMMARIES));
-      return json(page(USERS));
-    }
-    {
-      const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)\/roles$/);
-      if (id) return json(USER_ROLES[id] ?? []);
-    }
-    {
-      const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)$/);
-      if (id) {
-        const u = USERS.find((x) => x.id === id);
-        return u ? json({ ...u, permissions: ROLES.filter((r) => u.roleIds.includes(r.id)).flatMap((r) => r.permissions) }) : notFound(`GET ${pathname}`);
-      }
-    }
-    if (pathname === "/api/v1/identity/roles") return json(page(ROLES));
-    if (pathname === "/api/v1/identity/permissions/catalog") return json(identityValues.PERMISSION_CATALOG);
+    // identity / roster (users, roles, assignments, catalog, audit, mail-status)
+    // are served by the stateful roster store (createRosterStore) so the admin
+    // console's mutations persist — see createDemoFetch below.
     // chat: seed empty so the screen renders its empty state (no WS in demo).
     if (pathname === "/api/v1/chat/channels") return json([]);
     if (pathname === "/api/v1/chat/unread") return json([]);
@@ -328,12 +529,23 @@ export function createDemoFetch(): typeof fetch {
       partialErrors: [],
     },
   });
+  // Mutable roster state for the interactive admin console (create/edit/assign).
+  const roster = createRosterStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href);
     const method = (init?.method ?? "GET").toUpperCase();
-    const hit = matchDemoRoute(method, url.pathname, url);
+    // Parse the JSON body once for the roster store's mutation handlers.
+    let parsedBody: unknown;
+    if (typeof init?.body === "string" && init.body.length > 0) {
+      try {
+        parsedBody = JSON.parse(init.body);
+      } catch {
+        parsedBody = undefined;
+      }
+    }
+    const hit = roster.handle(method, url.pathname, url, parsedBody) ?? matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
     // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.
     return boot(input, init);
