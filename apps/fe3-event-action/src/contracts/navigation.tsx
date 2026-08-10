@@ -1,7 +1,9 @@
-// Navigation contract shim. FE2 owns the TanStack Router instance; FE3 only needs
+// Navigation contract. FE2 owns the TanStack Router instance; FE3 only needs
 // "navigate" + "read the current route params/search". This abstracts that so FE3
-// pages never import a concrete router, and tests can inject fixed params. On
-// integration, back these with FE2's router (useNavigate/useParams/useSearch).
+// pages never import a concrete router, and tests can inject fixed params. The
+// provider is re-exported from the package entry (src/index.ts): on integration
+// FE2 wraps FE3's routes with NavigationProvider fed from its router
+// (useNavigate/useParams/useSearch), backing the fail-soft fallback below.
 import * as React from "react";
 
 export interface NavigationApi {

@@ -21,6 +21,18 @@ export {
 } from "./context/EventContext";
 export { EventApiProvider, RegistryProvider } from "./context/ApiContext";
 
+// Navigation contract — FE2 owns the router; it wraps FE3's pages with
+// NavigationProvider fed from its TanStack Router (navigate/useParams/useSearch),
+// backing the no-op fallback shim. Exported so the shell can inject it without a
+// deep import; hooks are re-exported for units that render FE3 pages standalone.
+export {
+  NavigationProvider,
+  useNavigation,
+  useNavigate,
+  useRouteParams,
+  type NavigationApi,
+} from "./contracts/navigation";
+
 // Route builders (other units link into the hierarchy)
 export { eventRoutes, chatHref, routePaths } from "./lib/routes";
 
