@@ -15,7 +15,7 @@ import type { ErrorResponse } from "@dub/errors";
 
 // ---- FE1 icon union (frozen 1-1-7). Local subset used by FE7 nav entries. In FE2
 // the real NavEntry.icon is FE1's IconName; FE7 only needs this handful. ----
-export type IconName = "users" | "shield" | "history" | "key";
+export type IconName = "users" | "shield" | "history" | "key" | "inbox";
 
 // ---- Feature module identifiers (FE2 real: FeatureModuleId union). ----
 export type FeatureModuleId = "events" | "tasks" | "notifications" | "chat" | "admin";
