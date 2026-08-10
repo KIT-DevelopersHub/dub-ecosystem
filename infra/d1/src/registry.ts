@@ -25,7 +25,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   {
     ns: "notif",
     ownerUnit: "notification#8",
-    tables: ["notif_notifications", "notif_inbox", "notif_preferences", "notif_deliveries", "notif_processed_events"],
+    tables: ["notif_notifications", "notif_inbox", "notif_preferences", "notif_deliveries", "notif_processed_events", "notif_feedback"],
   },
   {
     ns: "chat",

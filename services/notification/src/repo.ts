@@ -320,4 +320,108 @@ export async function purgeOlderThan(
   return { inbox, deliveries, processed };
 }
 
-export type { NotificationRow, InboxRow, PreferenceRow };
+// ---- in-app feedback (append-only content; read_at is the sole mutable column) ----
+
+interface FeedbackRow {
+  id: string;
+  user_id: string;
+  category: notification.FeedbackCategory;
+  message: string;
+  page_url: string | null;
+  page_name: string | null;
+  user_agent: string | null;
+  request_id: string;
+  read_at: string | null;
+  created_at: string;
+}
+
+function rowToFeedbackItem(r: FeedbackRow): notification.FeedbackItem {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    category: r.category,
+    message: r.message,
+    pageUrl: r.page_url,
+    pageName: r.page_name,
+    readAt: r.read_at,
+    createdAt: r.created_at,
+  };
+}
+
+export interface InsertFeedbackInput {
+  userId: string;
+  category: notification.FeedbackCategory;
+  message: string;
+  pageUrl: string | null;
+  pageName: string | null;
+  userAgent: string | null;
+  requestId: string;
+}
+
+/** Append one feedback record. Returns the persisted item. */
+export async function insertFeedback(db: DbClient, input: InsertFeedbackInput): Promise<notification.FeedbackItem> {
+  const id = newId("nfb");
+  const now = nowIso();
+  await db.run(
+    `INSERT INTO notif_feedback
+       (id, user_id, category, message, page_url, page_name, user_agent, request_id, read_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    id,
+    input.userId,
+    input.category,
+    input.message,
+    input.pageUrl,
+    input.pageName,
+    input.userAgent,
+    input.requestId,
+    now,
+  );
+  const row = await db.first<FeedbackRow>(
+    `SELECT id, user_id, category, message, page_url, page_name, user_agent, request_id, read_at, created_at
+     FROM notif_feedback WHERE id = ?`,
+    id,
+  );
+  if (!row) throw new Error("feedback insert readback failed");
+  return rowToFeedbackItem(row);
+}
+
+/** Admin list, newest-first, opaque id cursor. `unreadOnly` restricts to read_at IS NULL. */
+export async function listFeedback(
+  db: DbClient,
+  q: notification.ListFeedbackQuery & { limit: number },
+): Promise<notification.ListFeedbackResponse> {
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (q.unreadOnly) where.push("read_at IS NULL");
+  if (q.cursor !== undefined) {
+    where.push("id < ?");
+    binds.push(decodeCursor(q.cursor));
+  }
+  const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = await db.all<FeedbackRow>(
+    `SELECT id, user_id, category, message, page_url, page_name, user_agent, request_id, read_at, created_at
+     FROM notif_feedback ${clause}
+     ORDER BY id DESC
+     LIMIT ?`,
+    ...binds,
+    q.limit + 1,
+  );
+  const hasMore = rows.length > q.limit;
+  const page = hasMore ? rows.slice(0, q.limit) : rows;
+  const last = page[page.length - 1];
+  return {
+    items: page.map(rowToFeedbackItem),
+    nextCursor: hasMore && last ? encodeCursor(last.id) : null,
+  };
+}
+
+/** Mark a feedback item read (idempotent: read_at keeps its first value). Returns
+ *  false when the id does not exist. */
+export async function markFeedbackRead(db: DbClient, id: string): Promise<boolean> {
+  const row = await db.first<{ id: string }>(`SELECT id FROM notif_feedback WHERE id = ?`, id);
+  if (!row) return false;
+  await db.run(`UPDATE notif_feedback SET read_at = ? WHERE id = ? AND read_at IS NULL`, nowIso(), id);
+  return true;
+}
+
+export type { NotificationRow, InboxRow, PreferenceRow, FeedbackRow };
