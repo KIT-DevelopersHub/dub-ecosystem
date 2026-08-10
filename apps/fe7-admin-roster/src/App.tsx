@@ -11,6 +11,7 @@ import { Button } from "@dub/ui";
 import { RosterProvider } from "./providers/RosterProvider";
 import { NavigationProvider, type Navigation } from "./providers/NavigationContext";
 import { createMockClient } from "./api/mockClient";
+import { createHttpClient } from "./api/httpClient";
 import { routes, nav } from "./routes";
 import type { FeatureRoute } from "./shell/contract";
 import { usePermissions } from "./hooks/usePermissions";
@@ -59,7 +60,14 @@ function Sidebar({ navigate }: { navigate: (p: string) => void }) {
 }
 
 export function App() {
-  const client = useMemo(() => createMockClient({ me: MOCK_ME }), []);
+  // Default: in-memory mock so the harness runs offline. Set VITE_ROSTER_API_BASE
+  // (e.g. "http://localhost:8787") to exercise the real fetch client against a
+  // live/stub gateway — the same createHttpClient FE2 wires in production.
+  const apiBase = import.meta.env.VITE_ROSTER_API_BASE as string | undefined;
+  const client = useMemo(
+    () => (apiBase ? createHttpClient({ baseUrl: apiBase }) : createMockClient({ me: MOCK_ME })),
+    [apiBase],
+  );
   const qc = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }), []);
   const [path, setPath] = useState("/admin/users");
 
