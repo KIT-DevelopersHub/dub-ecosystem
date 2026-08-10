@@ -41,7 +41,7 @@ describe("POST /send", () => {
     );
     expect(res.status).toBe(202);
     const body = (await res.json()) as mail.SendMailResponse;
-    expect(body.provider).toBe("ses");
+    expect(body.provider).toBe("resend");
     expect(sends.notif).toHaveLength(1);
     expect(sends.notif[0]!.name).toBe("mail.message.sent");
   });

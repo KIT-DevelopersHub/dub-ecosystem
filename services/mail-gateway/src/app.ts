@@ -145,7 +145,7 @@ export function createApp() {
   // ---- ops: quota/health self-report (internal-only, minimal in the CF-routing model).
   app.get("/health/quota", (c) => {
     if (!c.req.header(HEADERS.internal)) throw errors.forbidden("internal-only");
-    return c.json({ service: SERVICE_NAME, provider: c.env.MAIL_OUTBOUND_PROVIDER ?? "ses", inboundTransport: "cf-email-routing" });
+    return c.json({ service: SERVICE_NAME, provider: c.env.MAIL_OUTBOUND_PROVIDER ?? DEFAULT_OUTBOUND_PROVIDER, inboundTransport: "cf-email-routing" });
   });
 
   return app;
