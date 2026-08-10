@@ -17,7 +17,7 @@ pnpm --filter @dub/fe3-event-action build
 ## 実装メモ / 前提
 
 - **基盤契約に厳密準拠**: `@dub/types` の実体は `event.DubEvent` / `event.DubAction`（`kind` フィールド）。設計ドラフトの理想名 `Event`/`Action`/`type` ではなく、実装済みパッケージの名前に合わせている。
-- **FE1/FE2 は未ビルドのためコントラクト shim を同梱**（`src/contracts/fe1.tsx` `fe2.ts` `navigation.tsx`）。形（IconName/Button/Modal/useToast、FeatureModule/HttpClient/createOptimisticMutation/can/toDisplayableError、navigate/params）は FE3 向け契約。統合時に `@dub/ui` / `@dub/app-shell` / `@dub/api-client` へ差し替える。
+- **FE2 契約の shim を同梱**（`src/contracts/fe2.ts` `navigation.tsx`）。形（FeatureModule/ApiClient/createOptimisticMutation/can、navigate/params）は FE3 向け契約。統合時に `@dub/app-shell` / `@dub/api-client` へ差し替える。`navigation.tsx` の `NavigationProvider` は公開surface（`src/index.ts`）から re-export 済み — FE2 は自身の TanStack Router で `NavigationProvider` を包み、no-op fallback を実ルーターで裏付ける（deep import 不要）。
 - **API は型に対して実装**: `EventApi` インターフェース＋実HTTP実装（`createHttpEventApi`）＋Phase0契約スタブ（`createMockEventApi`、version lock / phase 検証 / archive 不変 / cursor paging を実装）。
 - **楽観的UI**: 編集は `createOptimisticMutation`（先に反映→失敗ロールバック＋トースト、409 `EVENT_VERSION_CONFLICT` で rollback＋再取得）。破壊的操作（アーカイブ・closed 遷移）は `ConfirmDialog` 後の非楽観。
 - **ActionTypeRegistry**: 未知 kind は `GenericActionPanel` にフォールバック。FE4 が `taskActionPlugin()` を app init で登録（FE6 は P0a 登録なし）。
