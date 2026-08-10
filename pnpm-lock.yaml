@@ -1154,6 +1154,9 @@ importers:
       '@dub/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@dub/freeq':
+        specifier: workspace:*
+        version: link:../../packages/freeq
       '@dub/http':
         specifier: workspace:*
         version: link:../../packages/http
