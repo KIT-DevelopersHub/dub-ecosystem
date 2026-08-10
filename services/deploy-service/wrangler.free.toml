@@ -1,0 +1,55 @@
+# Free-tier deploy of deploy-service as `dub-deploy-service` (internal; reached via the
+# api-gateway SVC_DEPLOY_SERVICE service binding under /deploy). NO paid Cloudflare Queues:
+# the result-stage audit (AUDIT_QUEUE), the deploy.* domain-event fan-out (EVT_NOTIFICATION)
+# and the PRIVATE deploy-jobs queue (DEPLOY_JOBS) are now a @dub/freeq D1 outbox
+# (freeq_outbox on the shared dub-core DB). deps.ts falls back to the outbox shim when the
+# Queue bindings are absent, so no audit/event/job record is dropped; a Cron drain forwards
+# audit rows to audit-log, runs deploy jobs in process (same handler, idempotent), and
+# defers domain events (durable/pending) until the notification consumer route lands.
+#
+# The PAID topology (wrangler.toml) is unchanged and still authoritative for the queue-wiring
+# conformance guard; this free config is Queue-free and intentionally NOT read by that test.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core (idempotent; a no-op if another free
+#   # service already created it — the DDL is CREATE TABLE IF NOT EXISTS)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/deploy-service/db/0001_freeq_outbox.sql
+#   npx wrangler deploy --config services/deploy-service/wrangler.free.toml
+# Secrets (CF_ACCOUNT_ID, CF_DEPLOY_TOKEN_*) are set via `wrangler secret put`, LOCAL only.
+name = "dub-deploy-service"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: deploy_ namespace tables + the un-namespaced freeq_outbox table.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (infra:read / infra:deploy / infra:dns / infra:admin)
+
+[[services]]
+binding = "SVC_AUDIT_LOG"
+service = "dub-audit-log"         # sync intent (/internal/log) + free-tier outbox drain (/internal/audit-async)
+
+# --- Cron: drains the freeq outbox on every tick (forwards audit rows to audit-log, runs
+# deploy jobs in process, defers domain events). The Workers FREE plan caps the account at
+# 5 cron triggers; deploy-service owns this single schedule. A 1-minute cadence keeps the
+# async deploy exec + poll loop responsive without a paid Queue. ---
+[triggers]
+crons = ["* * * * *"]
+
+# --- Vars (non-secret). CF_ACCOUNT_ID is a secret (set per-environment). ---
+[vars]
+CF_API_BASE = "https://api.cloudflare.com/client/v4"
+DUB_DEFAULT_ORG_ID = "org_devhub"
