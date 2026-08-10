@@ -29,6 +29,8 @@ FE2〜FE7 が `@dub/ui` + `@dub/tokens` を、FE8 が `@dub/tokens/css` のみ�
 | Overlay | Modal / ConfirmDialog / Drawer / Popover / Toast(ToastProvider + useToast) |
 | Layout | ThemeProvider / AppShell / Sidebar / PageHeader / Stack / Grid / Card / Tabs / Divider |
 | 状態表示 | EmptyState / ErrorState / SkeletonLoader |
+| データ可視化 | Timeline（Gantt: バー + 依存線 + スケール切替。純粋ジオメトリ `timeline-geometry` を同梱） |
+| チャット | MessageList（タイムライン: 日付/未読区切り + リアクション + pending/failed + アクション注入） |
 
 ## 凍結契約のポイント
 
@@ -38,6 +40,7 @@ FE2〜FE7 が `@dub/ui` + `@dub/tokens` を、FE8 が `@dub/tokens/css` のみ�
 - **Sidebar は router-free**。`renderLink` 注入で FE2 が TanStack Router の Link を差す。`icon` は `IconName`。
 - **ErrorState は表示専用**。`DisplayableError`（FE2 api-client の `toDisplayableError` が生成）だけを受け、`@dub/types` / `@dub/errors` を import しない（凍結案 1-4-4）。
 - **Pagination = totalCount API 限定 / LoadMore = cursor（自動発火なし）**（凍結案 1-6-3）。DatePicker は v1 ネイティブ `input type=date`（凍結案 1-6-4）。
+- **Timeline / MessageList はデータ非依存**。`@dub/types` を import せず、Timeline は行を epoch-ms 数値（`startMs`/`endMs`）で受け、MessageList は本文を描画済み `ReactNode` で受ける。FE4 が自前実装していた raw-SVG Gantt と FE6 の自前チャット CSS を吸収し、契約非破壊で結線できる（バー D&D 用に `pxToDayDelta` / `shiftMsByDays` 等の純関数も公開）。認可依存のアクション（編集/削除・再送/破棄）は `renderActions` / `renderFailedActions` で消費側が注入する。
 
 ## スクリプト
 
