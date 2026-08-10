@@ -630,6 +630,8 @@ importers:
         specifier: workspace:*
         version: link:../errors
 
+  packages/e2e-smoke: {}
+
   packages/errors:
     dependencies:
       hono:

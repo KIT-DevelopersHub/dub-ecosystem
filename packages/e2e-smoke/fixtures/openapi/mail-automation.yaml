@@ -1,0 +1,615 @@
+# OpenAPI 3.1 contract for mail-automation. Generated from services/mail-automation/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Mail Automation API
+  version: 1.0.0
+  description: |-
+    Inbound-mail rules, templates and the decision pipeline (route/reply/ignore/escalate). Not directly exposed as a gateway segment in P0 (organizer tooling); all endpoints require mail:admin.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://mail-automation.internal
+    description: Service-internal base. No public /api/v1 segment in P0 (reached service-to-service / admin tooling).
+tags:
+  - name: mail-automation
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /rules:
+    get:
+      operationId: listRules
+      summary: List automation rules
+      tags:
+        - mail-automation
+      description: Requires mail:admin.
+      responses:
+        '200':
+          description: Rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createRule
+      summary: Create a rule
+      tags:
+        - mail-automation
+      description: Requires mail:admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRuleRequest'
+      responses:
+        '201':
+          description: Created rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAutomationRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /rules/{id}:
+    get:
+      operationId: getRule
+      summary: Get a rule
+      tags:
+        - mail-automation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAutomationRule'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateRule
+      summary: Update a rule
+      tags:
+        - mail-automation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRuleRequest'
+      responses:
+        '200':
+          description: Updated rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAutomationRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteRule
+      summary: Delete a rule
+      tags:
+        - mail-automation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /templates:
+    get:
+      operationId: listTemplates
+      summary: List templates
+      tags:
+        - mail-automation
+      responses:
+        '200':
+          description: Templates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createTemplate
+      summary: Create a template
+      tags:
+        - mail-automation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /templates/{id}:
+    patch:
+      operationId: updateTemplate
+      summary: Update a template
+      tags:
+        - mail-automation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTemplateRequest'
+      responses:
+        '200':
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /process:
+    post:
+      operationId: processMessage
+      summary: Run the pipeline on a message
+      tags:
+        - mail-automation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessRequest'
+      responses:
+        '200':
+          description: Outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAutomationOutcome'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /dry-run:
+    post:
+      operationId: dryRun
+      summary: Simulate the pipeline
+      tags:
+        - mail-automation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DryRunRequest'
+      responses:
+        '200':
+          description: Simulated outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAutomationOutcome'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /decisions:
+    get:
+      operationId: listDecisions
+      summary: List recent automation decisions
+      tags:
+        - mail-automation
+      responses:
+        '200':
+          description: Decisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /settings:
+    get:
+      operationId: getSettings
+      summary: Get automation settings
+      tags:
+        - mail-automation
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      operationId: updateSettings
+      summary: Update automation settings
+      tags:
+        - mail-automation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSettingsRequest'
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    MailAutomationDecision:
+      type: string
+      enum:
+        - route
+        - reply
+        - ignore
+        - escalate
+    MailAutomationRule:
+      type: object
+      required:
+        - id
+        - match
+        - decision
+        - enabled
+      properties:
+        id:
+          type: string
+        match:
+          type: string
+        decision:
+          $ref: '#/components/schemas/MailAutomationDecision'
+        enabled:
+          type: boolean
+    MailAutomationOutcome:
+      type: object
+      required:
+        - ruleId
+        - decision
+        - decidedAt
+      properties:
+        ruleId:
+          type:
+            - string
+            - 'null'
+        decision:
+          $ref: '#/components/schemas/MailAutomationDecision'
+        decidedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    RuleList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAutomationRule'
+    CreateRuleRequest:
+      type: object
+      required:
+        - match
+        - decision
+      properties:
+        match:
+          type: string
+        decision:
+          $ref: '#/components/schemas/MailAutomationDecision'
+        enabled:
+          type: boolean
+    UpdateRuleRequest:
+      type: object
+      properties:
+        match:
+          type: string
+        decision:
+          $ref: '#/components/schemas/MailAutomationDecision'
+        enabled:
+          type: boolean
+    MailTemplate:
+      type: object
+      required:
+        - id
+        - name
+        - subject
+        - body
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+    TemplateList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailTemplate'
+    CreateTemplateRequest:
+      type: object
+      required:
+        - name
+        - subject
+        - body
+      properties:
+        name:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+    UpdateTemplateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+    ProcessRequest:
+      type: object
+      description: Process a specific inbound message through the rule pipeline.
+      required:
+        - messageId
+      properties:
+        messageId:
+          type: string
+    DryRunRequest:
+      type: object
+      description: Simulate the pipeline against a synthetic message.
+      properties:
+        from:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+    DecisionList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAutomationOutcome'
+    Settings:
+      type: object
+      description: Automation settings (shape service-owned).
+      properties:
+        enabled:
+          type: boolean
+        autoReply:
+          type: boolean
+    UpdateSettingsRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        autoReply:
+          type: boolean
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.
