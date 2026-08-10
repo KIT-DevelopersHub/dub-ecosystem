@@ -4,6 +4,7 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import type { NotificationApi } from "./api/client";
+import type { LiveConnector } from "./lib/unread-live";
 
 export type ToastKind = "info" | "success" | "error";
 export interface Toast {
@@ -18,6 +19,11 @@ export interface NotificationDeps {
   initialUnreadHint?: number;
   // Poll interval override (tests inject a short one).
   pollIntervalMs?: number;
+  // Optional live push transport for the unread badge. When provided, the badge
+  // updates the instant the server pushes a new count; the poller stays as the
+  // reconciliation fallback. Absent -> polling only (prior behaviour). The SPA
+  // shell (FE2) or dev harness supplies this — e.g. createSseUnreadConnector.
+  unreadLiveConnect?: LiveConnector;
 }
 
 const Ctx = createContext<NotificationDeps | null>(null);
