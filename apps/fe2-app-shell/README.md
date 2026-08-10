@@ -15,6 +15,9 @@ CSS Modules (`@dub/tokens`). Types from `@dub/types`, error envelope from `@dub/
 | Area | File | Notes |
 |---|---|---|
 | API client | `src/lib/api-client.tsx` | Single gateway surface. `credentials:"include"`, `x-dub-request-id`, 401→silent refresh(once)→retry, GET-only 5xx/network exponential retry, `ApiError`, `toDisplayableError` (ja copy) |
+| Offline transport | `src/lib/mock-api-client.tsx` | `createMockFetch()` — MSW-style `fetch` serving the boot surface (`/me`, `/bff/home`, `/auth/*`) from seed data; only transport is swapped, the api-client logic runs unchanged. Enabled by `VITE_API_MOCK=true` (see below) |
+| Home dashboard | `src/shell/screens/HomeScreen.tsx` + `HomeWidgetFrame.tsx` | FE2-owned cards (upcoming events, unread count) from `/bff/home` + feature-contributed `FeatureModule.homeWidget`s, each boxed in a per-widget error boundary |
+| Feature deep-import boundary | `src/composition/featureEntries.tsx` | The single place reaching into FE4/FE6 `src/...` paths (they have no `exports` map yet). Swap for package roots here when fe4/fe6 ship export maps |
 | Query conventions | `src/lib/queryKeys.tsx` | `me` / `bffHome` / `feature(id, …)` |
 | Optimistic mutation | `src/lib/optimistic.tsx` | `createOptimisticMutation` — FE3–FE7 must route edits through it; destructive ops stay non-optimistic |
 | Auth guards | `src/auth/AuthProvider.tsx` | `useAuth` / `useRequireAuth` / `usePermissions` / `RequireAuth` / `RequirePermission` — **fail-closed while `/me` loads** |
@@ -27,6 +30,15 @@ CSS Modules (`@dub/tokens`). Types from `@dub/types`, error envelope from `@dub/
 ## Scripts
 
 `pnpm --filter ./apps/fe2-app-shell test` · `… typecheck` · `… build` · `… dev`
+
+### Offline dev (no backend)
+
+`VITE_API_MOCK=true pnpm --filter ./apps/fe2-app-shell dev` boots the assembled
+shell against the built-in mock transport (`createMockFetch`): the shell
+authenticates and the home dashboard renders from seed data with no gateway.
+Unset (the default) keeps the prod wiring (`VITE_API_BASE_URL` → `api.developershub.jp`).
+The mock covers the boot surface only; unknown feature routes resolve to a
+`NOT_FOUND` envelope so feature screens show their own in-frame fallback.
 
 ## Deviations & stubs (deliberate; noted for the integration wave)
 
@@ -51,7 +63,7 @@ CSS Modules (`@dub/tokens`). Types from `@dub/types`, error envelope from `@dub/
 
 ## Tests
 
-34 unit/component tests (vitest + jsdom, co-located `*.test.tsx`). Real-browser E2E
+69 unit/component tests (vitest + jsdom, co-located `*.test.tsx`). Real-browser E2E
 (`POST /auth/test-login`) is deferred to the integration wave (#29) per design §7.
 Tests are co-located under `src/` (not `test/`) so the root vitest glob
 (`apps/*/test/**/*.test.ts`, node env) never picks up these jsdom tests.

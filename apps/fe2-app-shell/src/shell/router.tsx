@@ -84,7 +84,7 @@ export function createShellRouter(
   const homeRoute = createRoute({
     getParentRoute: () => shellRoute,
     path: "/",
-    component: () => <HomeScreen api={api} />,
+    component: () => <HomeScreen api={api} homeWidgets={registry.homeWidgets} />,
   });
 
   const featureRoutes = registry.routes.map((r) => {

@@ -10,11 +10,10 @@ import { useMemo, type ReactNode } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { gateway } from "@dub/types";
 import { EventApiProvider, RegistryProvider, actionTypeRegistry } from "@dub/fe3-event-action";
-import { ApiClientProvider as TaskApiClientProvider } from "@dub/fe4-task-gantt/src/api/client-context";
 import { NotificationProvider, type NotificationDeps } from "@dub/fe5-notification-inbox";
-import { ChatRuntimeProvider, type ChatRuntime } from "@dub/fe6-chat/src/feature";
-import { WsChatClient } from "@dub/fe6-chat/src/realtime/ws-client";
 import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
+// FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
+import { TaskApiClientProvider, ChatRuntimeProvider, WsChatClient, type ChatRuntime } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { useToast } from "@dub/ui";
