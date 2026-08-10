@@ -52,8 +52,19 @@ describe.each(providers)("$name — retryable classification", ({ make }) => {
   it("network/transport error is retryable", async () => {
     await expect(make(boom()).send(outbound())).rejects.toMatchObject({ retryable: true, status: 502 });
   });
-  it("429 is retryable", async () => {
-    await expect(make(status(429)).send(outbound())).rejects.toMatchObject({ retryable: true });
+  it("429 is retryable and surfaces the MAIL_RATE_LIMITED code (not a generic 502)", async () => {
+    await expect(make(status(429)).send(outbound())).rejects.toMatchObject({
+      retryable: true,
+      status: 429,
+      code: "MAIL_RATE_LIMITED",
+    });
+  });
+  it("429 carries the provider Retry-After as details.retryAfterSec", async () => {
+    const f = vi.fn<typeof fetch>(async () => new Response("{}", { status: 429, headers: { "retry-after": "42" } }));
+    await expect(make(f).send(outbound())).rejects.toMatchObject({
+      code: "MAIL_RATE_LIMITED",
+      details: { retryAfterSec: 42 },
+    });
   });
   it("500 is retryable", async () => {
     await expect(make(status(500)).send(outbound())).rejects.toMatchObject({ retryable: true });

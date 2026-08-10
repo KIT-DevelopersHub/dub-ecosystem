@@ -54,6 +54,7 @@ export type {
   DisplayableError,
   ErrorStateProps,
   SkeletonLoaderProps,
+  RateLimitNoticeProps,
 } from "./types";
 
 // Components
@@ -81,6 +82,7 @@ export { AppShell, PageHeader, Stack, Grid, Card, Divider } from "./components/L
 export { Sidebar } from "./components/Sidebar";
 export { Tabs } from "./components/Tabs";
 export { EmptyState, ErrorState, SkeletonLoader } from "./components/States";
+export { RateLimitNotice, formatRecoveryText } from "./components/RateLimitNotice";
 
 // Icon registry (also available at @dub/ui/icons)
 export { iconRegistry } from "./icons";

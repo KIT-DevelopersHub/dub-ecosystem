@@ -192,6 +192,13 @@ Supports `resend`, `mailchannels`, and `ses` (full SigV4). Env knobs: `MAIL_FROM
 - **Readiness**: `GET /internal/health/ready` (internal-only) reports the selected provider,
   whether its credentials are present, the effective From, and the tuning — `200 ready:true`
   or `503` with a secret-free issue list.
+- **Rate-limit visibility**: a provider `429` is raised as its own code
+  `MAIL_RATE_LIMITED` (HTTP 429, `retryable:true`) carrying the provider's `Retry-After` as
+  `details.retryAfterSec` — distinct from a generic `502`. `GET /internal/status`
+  (internal-only) derives a `rateLimit` view from the send-log so the admin UI can surface
+  "directly rate-limited": `{ active, code, since, recoversAt, cooldownSec }`. A send is
+  considered still limited for `MAIL_RATE_LIMIT_COOLDOWN_SEC` (default 60, range 5..86400)
+  after the last `429`. The FE renders this via `@dub/ui` `RateLimitNotice`.
 - **Safe-side failure**: mail is never silently dropped. A misconfigured provider serves a
   loud stub that throws; a send failure records the row, publishes `mail.message.send_failed`,
   audits it, and returns `502`.

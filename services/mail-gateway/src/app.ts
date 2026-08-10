@@ -8,11 +8,12 @@ import { createAuthClient } from "@dub/auth-client";
 import { HEADERS } from "@dub/observability";
 import { common, type identity, type mail } from "@dub/types";
 import type { AppBindings } from "./env";
-import { SERVICE_NAME } from "./config";
+import { DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
 import { effectiveTuning, providerReadiness } from "./config-check";
 import { buildDb, buildSendDeps } from "./deps";
 import { sendMail } from "./send";
-import { getInboundById, listInbound, listMailboxes, upsertMailbox } from "./repo";
+import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
+import { getInboundById, latestFailedSend, listInbound, listMailboxes, upsertMailbox } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -107,6 +108,22 @@ export function createApp() {
     }
     await upsertMailbox(dbOf(c), id, body.address);
     return c.json({ id, address: body.address }, 200);
+  });
+
+  // ---- status: live send-health self-report (internal-only). Derives "directly rate-
+  // limited" from the send-log so an operator dashboard (fe7 admin) can surface it. The
+  // provider's own 429 already carries the exact Retry-After to the caller; this endpoint
+  // reports whether we are still inside the cooldown window plus an ETA estimate.
+  app.get("/internal/status", async (c) => {
+    if (!c.req.header(HEADERS.internal)) throw errors.forbidden("internal-only");
+    const cooldownSec = parseCooldownSec(c.env.MAIL_RATE_LIMIT_COOLDOWN_SEC);
+    const latest = await latestFailedSend(dbOf(c));
+    const rateLimit = deriveRateLimitStatus(latest, Date.now(), cooldownSec);
+    return c.json({
+      service: SERVICE_NAME,
+      provider: (c.env.MAIL_OUTBOUND_PROVIDER ?? DEFAULT_OUTBOUND_PROVIDER).toLowerCase(),
+      rateLimit,
+    });
   });
 
   // ---- ops: quota/health self-report (internal-only, minimal in the CF-routing model).

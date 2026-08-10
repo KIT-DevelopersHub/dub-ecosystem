@@ -64,6 +64,9 @@ MAIL_FROM_ADDRESS = "info@developershub.jp"
 # (network / timeout / 429 / 5xx) with backoff+jitter; deterministic 4xx fail fast.
 MAIL_SEND_MAX_ATTEMPTS = "3"      # total attempts (1 try + 2 retries); range 1..6
 MAIL_SEND_TIMEOUT_MS = "15000"    # per-attempt upstream timeout (ms); range 1000..120000
+# How long after the last provider 429 GET /internal/status keeps reporting rateLimit.active
+# (drives the admin "メール送信APIが制限中" banner). Range 5..86400.
+MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
 
 # Retention purge Cron (03:20 UTC daily): send_log 30d / inbound 30d.
 [triggers]

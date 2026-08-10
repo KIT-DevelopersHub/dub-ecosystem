@@ -6,6 +6,7 @@
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
 import { DEFAULT_OUTBOUND_PROVIDER } from "./config";
+import { MAIL_RATE_LIMITED } from "./rate-limit";
 import type { Env } from "./env";
 import { MailChannelsMailProvider, mailchannelsConfigFromEnv } from "./mailchannels";
 import { ResendMailProvider, resendConfigFromEnv } from "./resend";
@@ -43,14 +44,20 @@ export class MockMailProvider implements MailProvider {
   readonly name: ProviderName;
   readonly sent: OutboundMail[] = [];
   private failNext: boolean;
-  constructor(opts: { name?: ProviderName; fail?: boolean } = {}) {
+  private rateLimitNext: boolean;
+  constructor(opts: { name?: ProviderName; fail?: boolean; rateLimit?: boolean } = {}) {
     this.name = opts.name ?? "ses";
     this.failNext = opts.fail ?? false;
+    this.rateLimitNext = opts.rateLimit ?? false;
   }
   setFail(fail: boolean): void {
     this.failNext = fail;
   }
+  setRateLimit(rateLimit: boolean): void {
+    this.rateLimitNext = rateLimit;
+  }
   async send(mail: OutboundMail): Promise<{ providerMessageId: string }> {
+    if (this.rateLimitNext) throw new DubError(MAIL_RATE_LIMITED, "mock provider rate-limited", { status: 429, retryable: true, details: { retryAfterSec: 30 } });
     if (this.failNext) throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "mock provider forced failure", { status: 502 });
     this.sent.push(mail);
     return { providerMessageId: `mock-${mail.messageId}` };

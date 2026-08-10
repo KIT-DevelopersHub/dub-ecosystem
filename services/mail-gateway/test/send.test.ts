@@ -78,6 +78,20 @@ describe("sendMail — provider failure", () => {
     expect(h.auditQ.sends[0]!.payload.result).toBe("failure");
   });
 
+  it("records error_code MAIL_RATE_LIMITED on a provider 429 (so status can surface it)", async () => {
+    const h = makeHarness({ rateLimit: true });
+    const deps = sendDeps(h);
+    await expect(sendMail(deps, baseReq, "idem-429", "notification")).rejects.toMatchObject({
+      code: "MAIL_RATE_LIMITED",
+      status: 429,
+    });
+    const row = await findSendByKey(h.db, "idem-429");
+    expect(row?.status).toBe("failed");
+    expect(row?.error_code).toBe("MAIL_RATE_LIMITED");
+    expect(h.notif.sends[0]!.name).toBe("mail.message.send_failed");
+    expect((h.notif.sends[0]!.payload as { error: string }).error).toBe("MAIL_RATE_LIMITED");
+  });
+
   it("allows a later retry on the same key after a failure (recovers to sent)", async () => {
     const h = makeHarness({ fail: true });
     const deps = sendDeps(h);
