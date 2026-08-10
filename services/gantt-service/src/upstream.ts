@@ -10,8 +10,10 @@ import type { UpstreamPort } from "./ports";
 const PAGE_LIMIT = 200; // common.CursorQuery max
 const MAX_PAGES = 25; // safety bound (<= 5000 tasks; calc/gantt upper bound)
 
-interface DependenciesResponse {
-  dependencies: task.TaskDependency[];
+// task-service GET /tasks/dependencies wire shape (frozen): { items: TaskDependency[] }.
+// Edge id/type/lagDays are NOT carried here — gantt composes those in dto.ts.
+interface ListDependenciesResponse {
+  items: task.TaskDependency[];
 }
 
 export function createHttpUpstream(env: Env): UpstreamPort {
@@ -55,10 +57,10 @@ export function createHttpUpstream(env: Env): UpstreamPort {
     },
 
     async listDependencies(ctx: RequestContext, eventId: common.EventId): Promise<task.TaskDependency[]> {
-      const res = await taskSvc.get<DependenciesResponse | task.TaskDependency[]>(ctx, "/tasks/dependencies", {
+      const res = await taskSvc.get<ListDependenciesResponse>(ctx, "/tasks/dependencies", {
         query: { eventId },
       });
-      return Array.isArray(res) ? res : res.dependencies;
+      return res.items;
     },
 
     async eventExists(ctx: RequestContext, eventId: common.EventId): Promise<boolean> {
