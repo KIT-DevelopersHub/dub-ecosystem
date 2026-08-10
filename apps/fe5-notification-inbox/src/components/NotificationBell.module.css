@@ -1,12 +1,31 @@
-.bell {
+.bellRoot {
+  display: inline-flex;
+}
+
+/* Match the header IconButton hit-area (36px square) so the bell aligns with the
+ * sidebar toggle and logout button instead of floating as a bare 20px glyph. */
+.bellButton {
   position: relative;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--dub-radius-md);
+  color: var(--dub-color-text-secondary);
+  transition:
+    background-color var(--dub-motion-fast) var(--dub-motion-easing),
+    color var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.bellButton:hover {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
 }
 
 .badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
+  top: var(--dub-space-1);
+  right: var(--dub-space-1);
   min-width: 16px;
   height: 16px;
   padding: 0 4px;

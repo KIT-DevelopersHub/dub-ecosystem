@@ -2,7 +2,7 @@
 // nav aggregation, auth-driven user menu, badge injection, headerWidget slots and
 // the routed content. FE2 does composition & wiring only — the visuals are FE1's.
 import type { ComponentType, ReactNode } from "react";
-import { AppShell, Sidebar, PageHeader, Button, Icon } from "@dub/ui";
+import { AppShell, Sidebar, PageHeader, Button, IconButton, Icon } from "@dub/ui";
 import type { SidebarItem } from "@dub/ui";
 import type { NavEntry } from "../modules/types.tsx";
 import { useUiStore } from "../store/uiStore.tsx";
@@ -94,9 +94,13 @@ export function AppShellLayout({
       title={title}
       actions={
         <>
-          <Button testId="fe2-sidebar-toggle" variant="ghost" aria-label="サイドバーを開閉" onClick={toggleSidebar}>
-            <Icon name="menu" aria-label="サイドバーを開閉" />
-          </Button>
+          <IconButton
+            testId="fe2-sidebar-toggle"
+            name="menu"
+            variant="ghost"
+            aria-label="サイドバーを開閉"
+            onClick={toggleSidebar}
+          />
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
@@ -108,8 +112,12 @@ export function AppShellLayout({
               {displayName}
             </span>
           ) : null}
-          <Button testId="fe2-logout" variant="secondary" onClick={onLogout}>
-            <Icon name="log-out" />
+          <Button
+            testId="fe2-logout"
+            variant="secondary"
+            iconLeft={<Icon name="log-out" />}
+            onClick={onLogout}
+          >
             ログアウト
           </Button>
         </>
