@@ -54,4 +54,15 @@ describe("roles CRUD", () => {
     const names = body.items.map((r) => r.name).sort();
     expect(names).toEqual(["admin", "maintainer", "member", "organizer"]);
   });
+
+  it("reports member counts per role (admin=1, member=1, organizer=0)", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request("/identity/roles", asUser(h.adminId));
+    const body = (await res.json()) as common.Paginated<identity.Role & { memberCount: number }>;
+    const byName = new Map(body.items.map((r) => [r.name, r.memberCount]));
+    // harness seeds one admin + one member; organizer role has no holders.
+    expect(byName.get("admin")).toBe(1);
+    expect(byName.get("member")).toBe(1);
+    expect(byName.get("organizer")).toBe(0);
+  });
 });

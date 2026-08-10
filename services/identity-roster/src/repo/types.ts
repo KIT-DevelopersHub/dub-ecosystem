@@ -48,6 +48,8 @@ export interface ListUsersFilter {
   orgId: string;
   ids?: string[];
   status?: identity.UserStatus;
+  roleId?: string; // filter to users holding this role (any scope) — GET /users?role=
+  q?: string; // free-text over displayName/email (case-insensitive) — GET /users?q=
   limit: number;
   cursor?: string;
 }
@@ -77,6 +79,8 @@ export interface IdentityRepo {
   createRole(row: RoleRow): Promise<void>;
   updateRolePermissions(roleId: string, name: string | undefined, permissions: identity.PermissionKey[] | undefined, updatedAt: string): Promise<void>;
   deleteRole(roleId: string): Promise<void>; // cascades assignments + role_permissions
+  /** roleId -> distinct users holding it (any scope) in the org. Roles with zero members are omitted. */
+  roleMemberCounts(orgId: string): Promise<Map<string, number>>;
 
   // assignments
   listAssignmentsByUser(userId: string, orgId: string): Promise<AssignmentRow[]>;

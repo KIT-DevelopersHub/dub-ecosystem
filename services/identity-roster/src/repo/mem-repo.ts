@@ -54,6 +54,16 @@ export class MemIdentityRepo implements IdentityRepo {
       rows = rows.filter((u) => set.has(u.id));
     }
     if (filter.status) rows = rows.filter((u) => u.status === filter.status);
+    if (filter.roleId) {
+      const holders = new Set(
+        [...this.assignments.values()].filter((a) => a.orgId === filter.orgId && a.roleId === filter.roleId).map((a) => a.userId),
+      );
+      rows = rows.filter((u) => holders.has(u.id));
+    }
+    if (filter.q) {
+      const needle = filter.q.toLowerCase();
+      rows = rows.filter((u) => u.displayName.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle));
+    }
     return pageSlice(rows.map((u) => ({ ...u })), filter.limit, filter.cursor);
   }
   async createUser(row: UserRow): Promise<void> {
@@ -104,6 +114,16 @@ export class MemIdentityRepo implements IdentityRepo {
   async deleteRole(roleId: string): Promise<void> {
     this.roles.delete(roleId);
     for (const [id, a] of this.assignments) if (a.roleId === roleId) this.assignments.delete(id); // CASCADE
+  }
+  async roleMemberCounts(orgId: string): Promise<Map<string, number>> {
+    const perRole = new Map<string, Set<string>>();
+    for (const a of this.assignments.values()) {
+      if (a.orgId !== orgId) continue;
+      let holders = perRole.get(a.roleId);
+      if (!holders) perRole.set(a.roleId, (holders = new Set()));
+      holders.add(a.userId);
+    }
+    return new Map([...perRole].map(([roleId, holders]) => [roleId, holders.size]));
   }
 
   async listAssignmentsByUser(userId: string, orgId: string): Promise<AssignmentRow[]> {
