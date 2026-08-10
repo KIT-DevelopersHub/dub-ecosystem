@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { verifyGithub } from "../src/verify/github";
-import { verifyGoogleDrive, verifyStripe, verifyGmail } from "../src/verify/stubs";
+import { verifyGoogleDrive } from "../src/verify/google-drive";
+import { verifyStripe } from "../src/verify/stripe";
+import { verifyGmail } from "../src/verify/gmail";
 import { hmacSha256Hex, timingSafeEqual } from "../src/crypto";
 import { signGithub } from "./helpers";
 
@@ -75,7 +77,7 @@ describe("stripe stub verifier (test #4)", () => {
   });
 });
 
-describe("google-drive stub verifier (test #5)", () => {
+describe("google-drive verifier (test #5)", () => {
   it("rejects a channel-token mismatch", async () => {
     const h = new Headers({
       "x-goog-channel-id": "chan-1",
@@ -100,8 +102,8 @@ describe("google-drive stub verifier (test #5)", () => {
   });
 });
 
-describe("gmail stub verifier", () => {
-  it("stays closed until 9-B", async () => {
+describe("gmail verifier", () => {
+  it("fails closed with no audience/service-account configured", async () => {
     const res = await verifyGmail({ rawBytes: enc("{}"), headers: new Headers() }, {});
     expect(res.ok).toBe(false);
   });
