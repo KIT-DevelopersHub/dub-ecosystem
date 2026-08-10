@@ -1,11 +1,16 @@
-# chat-service Worker — SKELETON ONLY. Deploy is out of scope for this unit
-# (P0b: no deploy until the integration wave). account_id / database_id / queue
-# ids / DO class binding are filled by infra at Apply.
+# chat-service Worker. Bindings are declared and wired in code; deploy is out of
+# scope for this unit (P0b: no deploy until the integration wave). Only the Apply-
+# time IDs remain placeholders (database_id / queue ids / account_id), marked
+# REPLACE_AT_APPLY and filled by infra.
 #
 # Boundary note (design 4-8 / theme11): this Worker is the conversation MASTER
 # (HTTP: channels/threads/messages + chat_* D1 + chat.* Queue publish). The
-# realtime side (ChatRoom DO: WS fanout / presence / ws-ticket verify) is a
-# SEPARATE chat-owned Worker and is NOT wired here (STUB via RealtimePublisher).
+# realtime side (ChatRoom DO: WS fanout / presence / ws-ticket verify) is chat-
+# owned and REAL-WIRED here: the CHAT_ROOM DO namespace is bound below and routed
+# via DoRealtimePublisher (src/realtime.ts) / the /ws upgrade in src/index.ts.
+# Co-hosted with the HTTP master for P0; production may split the DO into a
+# dedicated `chat-rt` Worker (CHAT_RT_DO_URL_BASE) via a cross-script binding —
+# the DO class and the RealtimePublisher contract are unchanged.
 name = "chat-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
