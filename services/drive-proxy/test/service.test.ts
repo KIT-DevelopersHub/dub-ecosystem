@@ -11,6 +11,7 @@ const config: DriveConfig = {
   listTtlSeconds: 60,
   fileTtlSeconds: 60,
   sheetTtlSeconds: 30,
+  watchTtlSeconds: 86400,
 };
 const ctx = { requestId: "req_1", actorId: "usr_1" };
 const ROOT = "folder_root";
