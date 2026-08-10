@@ -18,4 +18,5 @@ export const queryKeys = {
   permissionCatalog: () => [ADMIN_QK, "permissions", "catalog"] as const,
   audit: (filters: AuditFilters) => [ADMIN_QK, "audit", "list", filters] as const,
   events: () => [ADMIN_QK, "events", "scope-options"] as const,
+  mailStatus: () => [ADMIN_QK, "mail", "status"] as const,
 } as const;

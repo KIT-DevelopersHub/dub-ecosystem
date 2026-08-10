@@ -9,6 +9,7 @@ import { useToast } from "./useToast";
 import { queryKeys } from "../lib/queryKeys";
 import { type UserListFilters } from "../lib/listUsersQuery";
 import { type AuditFilters } from "../lib/auditQuery";
+import { type MailStatusResponse } from "../lib/mailStatus";
 import { presentError } from "../lib/errorDisplay";
 import { applyRoleGrant, makePendingAssignment } from "../lib/optimistic";
 import type {
@@ -47,6 +48,24 @@ export function usePermissionCatalog(): UseQueryResult<identity.PermissionCatalo
 export function useAuditLogs(filters: AuditFilters): UseQueryResult<auditLog.AuditLogPage> {
   const { api } = useRosterContext();
   return useQuery({ queryKey: queryKeys.audit(filters), queryFn: () => api.auditLogs(filters) });
+}
+
+/** Polling interval for the mail rate-limit status (ms). 45s: fresh enough to clear the
+ *  banner soon after recovery, light enough for an always-mounted admin surface. */
+export const MAIL_STATUS_POLL_MS = 45_000;
+
+/** Polls the mail-gateway rate-limit status. Errors are swallowed by the caller (banner
+ *  is fail-safe: no data => not shown), so a not-yet-wired gateway route never breaks the UI. */
+export function useMailRateLimitStatus(): UseQueryResult<MailStatusResponse> {
+  const { api } = useRosterContext();
+  return useQuery({
+    queryKey: queryKeys.mailStatus(),
+    queryFn: () => api.mailStatus(),
+    refetchInterval: MAIL_STATUS_POLL_MS,
+    refetchOnWindowFocus: true,
+    staleTime: MAIL_STATUS_POLL_MS / 2,
+    retry: false,
+  });
 }
 
 // ---- mutations ----

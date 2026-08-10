@@ -15,6 +15,7 @@ import { routes, nav } from "./routes";
 import type { FeatureRoute } from "./shell/contract";
 import { usePermissions } from "./hooks/usePermissions";
 import { RouteGuard } from "./components/RouteGuard";
+import { MailRateLimitBanner } from "./components/MailRateLimitBanner";
 import { Toaster } from "./ui/Toaster";
 
 function matchRoute(path: string): { route: FeatureRoute; params: Record<string, string> } | null {
@@ -76,6 +77,10 @@ export function App() {
     <QueryClientProvider client={qc}>
       <RosterProvider client={client} me={MOCK_ME}>
         <NavigationProvider value={navigation}>
+          {/* Persistent rate-limit banner pinned to the top of the admin shell. */}
+          <div style={{ padding: "24px 24px 0", fontFamily: "var(--dub-font-family-sans)" }} data-testid="fe7-shell-top">
+            <MailRateLimitBanner />
+          </div>
           <div style={{ display: "flex", gap: 24, padding: 24, fontFamily: "var(--dub-font-family-sans)" }}>
             <Sidebar navigate={setPath} />
             <main style={{ flex: 1 }} data-testid="fe7-main">
