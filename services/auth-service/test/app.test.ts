@@ -55,6 +55,17 @@ describe("GET /auth/callback", () => {
     expect(h.audit.records.some((r) => r.action === "auth.session.login" && r.result === "success")).toBe(true);
   });
 
+  it("host-only cookie: COOKIE_DOMAIN unset -> Set-Cookie has no Domain attribute", async () => {
+    const h = makeHarness({ COOKIE_DOMAIN: undefined });
+    const state = await startLogin(h);
+    const app = buildApp(h.deps);
+    const res = await app.request(`/auth/callback?code=code123&state=${state}`);
+    expect(res.status).toBe(302);
+    const cookie = res.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("dub_session=");
+    expect(cookie).not.toContain("Domain=");
+  });
+
   it("state mismatch -> 302 to error page with AUTH_STATE_MISMATCH", async () => {
     const h = makeHarness();
     const app = buildApp(h.deps);

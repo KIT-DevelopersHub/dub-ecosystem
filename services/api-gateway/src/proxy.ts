@@ -55,6 +55,10 @@ export async function forwardRequest(
       headers,
       body: body && body.byteLength > 0 ? body : undefined,
       signal: ac.signal,
+      // Do NOT follow downstream redirects at the edge: the OAuth callback returns
+      // a 302 (+ Set-Cookie) that must reach the browser verbatim. "follow" would
+      // consume it server-side, dropping the session cookie and breaking login.
+      redirect: "manual",
     });
     const fetcher = binding as unknown as { fetch: (r: Request) => Promise<Response> };
     const res = await fetcher.fetch(req);

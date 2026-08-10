@@ -6,7 +6,9 @@ import type { GatewayEnv } from "./env";
 const DEFAULT_ORIGINS = ["https://app.developershub.jp", "http://localhost:5173", "http://localhost:3000"];
 
 const ALLOW_METHODS = "GET,POST,PATCH,DELETE,OPTIONS";
-const ALLOW_HEADERS = "authorization,content-type,x-dub-idempotency-key";
+// x-dub-request-id is sent by the SPA api-client on every request (correlation id),
+// so it must be preflight-allowed or the browser blocks all cross-origin calls.
+const ALLOW_HEADERS = "authorization,content-type,x-dub-idempotency-key,x-dub-request-id";
 const MAX_AGE = "600";
 
 export function allowedOrigins(env: GatewayEnv): string[] {

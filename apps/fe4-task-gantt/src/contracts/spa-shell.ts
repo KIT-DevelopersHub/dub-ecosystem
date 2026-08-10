@@ -39,7 +39,7 @@ export interface RequestInput<TBody = unknown> {
 
 /** login-start reply is the OAuth authorize URL to redirect the browser to. */
 export interface AuthLoginStartResponse {
-  authorizeUrl: string;
+  authorizationUrl: string;
 }
 
 /** Resource sub-client (prefix-scoped convenience over `request`). */
