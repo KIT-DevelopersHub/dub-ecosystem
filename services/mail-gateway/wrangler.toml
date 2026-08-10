@@ -74,6 +74,17 @@ MAIL_SEND_TIMEOUT_MS = "15000"    # per-attempt upstream timeout (ms); range 100
 # (drives the admin "メール送信APIが制限中" banner). Range 5..86400.
 MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
 
+# --- Cloudflare Email Routing admin proxy (address issuance + forwarding rules) ---
+# Backs /mail/admin/email-routing/* (mail:admin). The API TOKEN is a Workers Secret set
+# out-of-band (NEVER committed): `wrangler secret put CF_EMAIL_ROUTING_TOKEN`. Scopes:
+#   - Account > Email Routing Addresses > Edit   (destination addresses are account-scoped)
+#   - Zone    > Email Routing Rules     > Edit   (rules are zone-scoped; on developershub.jp)
+# The ids below are NOT secret. Fill them at Apply from the Cloudflare dashboard / API.
+# While CF_EMAIL_ROUTING_TOKEN is unset every admin endpoint returns 503 (fails loud).
+CF_EMAIL_ROUTING_ZONE_ID = ""        # developershub.jp zone id (rules API)
+CF_EMAIL_ROUTING_ACCOUNT_ID = ""     # account id (destination addresses API)
+CF_EMAIL_ROUTING_ZONE_NAME = "developershub.jp"  # anti-spoof matcher check
+
 # Retention purge Cron (03:20 UTC daily): send_log 30d / inbound 30d.
 [triggers]
 crons = ["20 3 * * *"]
