@@ -70,8 +70,12 @@ export function AppShellLayout({
           {auth.status === "authenticated" ? (
             <span data-testid="fe2-shell-user">{auth.me.user.displayName}</span>
           ) : null}
-          <Button testId="fe2-logout" variant="secondary" onClick={onLogout}>
-            <Icon name="log-out" />
+          <Button
+            testId="fe2-logout"
+            variant="secondary"
+            iconLeft={<Icon name="log-out" />}
+            onClick={onLogout}
+          >
             ログアウト
           </Button>
         </>

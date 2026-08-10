@@ -63,7 +63,10 @@
   background: var(--dub-color-danger-600);
 }
 
-.iconButton {
+/* Compound `.button.iconButton` (0,2,0) so it ties — and, being later in source,
+ * wins — against `.button[data-size="md"]` (0,2,0), whose horizontal padding would
+ * otherwise widen the icon button into a non-square rectangle. */
+.button.iconButton {
   padding: var(--dub-space-2);
   aspect-ratio: 1;
 }
