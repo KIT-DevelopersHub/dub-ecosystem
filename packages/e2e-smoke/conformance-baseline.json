@@ -1,0 +1,27 @@
+{
+  "api-gateway": {
+    "missingInSpec": [
+      "GET /api/v1/bff/home",
+      "GET /api/v1/me",
+      "POST /api/v1/public/inquiries"
+    ],
+    "missingInCode": [
+      "GET /bff/home",
+      "GET /me",
+      "GET /{}/{}",
+      "POST /public/inquiries"
+    ]
+  },
+  "deploy-service": {
+    "missingInSpec": [],
+    "missingInCode": [
+      "GET /deploy/deployments",
+      "GET /deploy/deployments/{}",
+      "GET /deploy/domains",
+      "GET /deploy/sites",
+      "POST /deploy/deployments",
+      "POST /deploy/dns/records",
+      "POST /deploy/sites"
+    ]
+  }
+}

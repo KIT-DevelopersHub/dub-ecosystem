@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "@cloudflare/workers-types"],
+    "paths": {
+      "@dub/types": ["packages/types/src/index.ts"],
+      "@dub/errors": ["packages/errors/src/index.ts"],
+      "@dub/observability": ["packages/observability/src/index.ts"],
+      "@dub/http": ["packages/http/src/index.ts"],
+      "@dub/db": ["packages/db/src/index.ts"],
+      "@dub/events": ["packages/events/src/index.ts"],
+      "@dub/auth-client": ["packages/auth-client/src/index.ts"],
+      "@dub/tokens": ["packages/tokens/src/index.ts"],
+      "@dub/tokens/css": ["packages/tokens/src/css.ts"],
+      "@dub/gantt-calc": ["packages/gantt-calc/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

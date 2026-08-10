@@ -1,0 +1,12 @@
+{
+  "name": "@dub/e2e-smoke",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) e2e-smoke — cross-service integration smoke over a seeded node:sqlite D1, plus OpenAPI↔route contract-conformance. Owns only packages/e2e-smoke.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc --noEmit -p tsconfig.json"
+  }
+}
