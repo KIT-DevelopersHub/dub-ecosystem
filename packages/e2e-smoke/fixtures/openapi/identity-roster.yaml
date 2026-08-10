@@ -62,13 +62,23 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - name: ids
           in: query
-          description: Comma-separated user ids for batch fetch.
+          description: Comma-separated user ids for batch fetch (exclusive with the other filters).
           schema:
             type: string
         - name: status
           in: query
           schema:
             $ref: '#/components/schemas/UserStatus'
+        - name: role
+          in: query
+          description: Filter to users holding this roleId (any scope). Alias 'roleKey' is also accepted.
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: Case-insensitive free-text over displayName/email.
+          schema:
+            type: string
       responses:
         '200':
           description: Page of users
@@ -267,6 +277,33 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
   /identity/users/{id}/roles:
+    get:
+      operationId: listUserRoles
+      summary: List a user's role assignments
+      tags:
+        - identity
+      description: Requires identity:read. Returns the user's assignments (org-wide and resource-scoped) with the role name joined in.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The user's role assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RoleAssignment'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     post:
       operationId: assignRole
       summary: Assign a role to a user
@@ -291,10 +328,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  assignmentId:
-                    type: string
+                $ref: '#/components/schemas/RoleAssignment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -585,6 +619,46 @@ components:
             $ref: '#/components/schemas/PermissionKey'
         isSystem:
           type: boolean
+        memberCount:
+          type: integer
+          description: >-
+            Distinct users holding this role (any scope) in the org. Present on
+            list responses; a superset of the frozen identity.Role (FE clients
+            typing identity.Role ignore it).
+    RoleAssignment:
+      type: object
+      required:
+        - id
+        - userId
+        - roleId
+        - roleName
+        - resourceType
+        - resourceId
+        - grantedBy
+        - grantedAt
+      properties:
+        id:
+          type: string
+          description: Assignment id.
+        userId:
+          type: string
+        roleId:
+          type: string
+        roleName:
+          type: string
+        resourceType:
+          type:
+            - string
+            - 'null'
+          description: null = org-wide grant. P0 resource scope = "event".
+        resourceId:
+          type:
+            - string
+            - 'null'
+        grantedBy:
+          type: string
+        grantedAt:
+          type: string
     PermissionCatalogEntry:
       type: object
       required:

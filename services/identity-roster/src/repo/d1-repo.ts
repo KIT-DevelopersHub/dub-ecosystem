@@ -138,6 +138,17 @@ export class D1IdentityRepo implements IdentityRepo {
       clauses.push("status = ?");
       binds.push(filter.status);
     }
+    if (filter.roleId) {
+      clauses.push(
+        "EXISTS (SELECT 1 FROM identity_role_assignments a WHERE a.user_id = identity_users.id AND a.org_id = identity_users.org_id AND a.role_id = ?)",
+      );
+      binds.push(filter.roleId);
+    }
+    if (filter.q) {
+      clauses.push("(lower(display_name) LIKE ? OR lower(email) LIKE ?)");
+      const like = `%${filter.q.toLowerCase()}%`;
+      binds.push(like, like);
+    }
     const rows = await this.db.all<UserDb>(
       `SELECT * FROM identity_users WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`,
       ...binds,
@@ -246,6 +257,16 @@ export class D1IdentityRepo implements IdentityRepo {
       { sql: "DELETE FROM identity_role_permissions WHERE role_id = ?", binds: [roleId] },
       { sql: "DELETE FROM identity_roles WHERE id = ?", binds: [roleId] },
     ]);
+  }
+  async roleMemberCounts(orgId: string): Promise<Map<string, number>> {
+    const rows = await this.db.all<{ role_id: string; n: number }>(
+      `SELECT role_id, COUNT(DISTINCT user_id) AS n
+         FROM identity_role_assignments
+        WHERE org_id = ?
+        GROUP BY role_id`,
+      orgId,
+    );
+    return new Map(rows.map((r) => [r.role_id, Number(r.n)]));
   }
 
   async listAssignmentsByUser(userId: string, orgId: string): Promise<AssignmentRow[]> {
