@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { handleInbound, parseInbound } from "../src/inbound";
 import type { RawInbound } from "../src/mime";
-import { getInboundById, listInbound } from "../src/repo";
+import { getInboundById, getInboundDetail, listInbound } from "../src/repo";
 import { makeHarness, inboundDeps } from "./helpers";
 
 function rawMessage(over: Partial<RawInbound> = {}, headers: Record<string, string> = {}): RawInbound {
@@ -68,6 +68,16 @@ describe("handleInbound", () => {
     expect(page.items).toHaveLength(1);
     const stored = await getInboundById(h.db, page.items[0]!.id);
     expect(stored?.messageId).toBe("inbound-1@outside.com");
+  });
+
+  it("persists the plain-text body (unread) for the detail view", async () => {
+    const h = makeHarness();
+    await handleInbound(inboundDeps(h), rawMessage());
+    const page = await listInbound(h.db, { limit: 10 });
+    const detail = await getInboundDetail(h.db, page.items[0]!.id);
+    expect(detail?.textBody).toContain("I have a question");
+    expect(detail?.read).toBe(false); // fresh inbound is unread
+    expect(detail?.htmlBody).toBeUndefined(); // Email Routing text-only in this slice
   });
 
   it("dedups an Email-Routing redelivery — no second publish (受信取りこぼしゼロ, no double-process)", async () => {
