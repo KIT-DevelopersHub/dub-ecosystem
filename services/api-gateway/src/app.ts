@@ -1,5 +1,5 @@
 // App wiring. Middleware order: CORS (answers preflight) -> requestId -> rate limit,
-// then gateway-owned routes, then the transparent /api/v1/* catch-all, then 404.
+// then gateway-owned routes, then the transparent API_PREFIX/* catch-all, then 404.
 import { Hono } from "hono";
 import type { GatewayEnv } from "./env";
 import { requestIdMiddleware, gatewayErrorHandler, gatewayError, GATEWAY_ROUTE_NOT_FOUND, type GatewayVariables } from "./context";
@@ -10,6 +10,7 @@ import { meHandler } from "./handlers/me";
 import { bffHomeHandler } from "./handlers/bff-home";
 import { createPublicInquiryHandler } from "./handlers/public-inquiry";
 import { gatewayRouteHandler } from "./gateway-route";
+import { API_PREFIX } from "./routes";
 import type { TurnstileVerifier } from "./turnstile";
 
 export interface CreateAppOptions {
@@ -35,16 +36,17 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.use("*", requestIdMiddleware());
   app.use("*", rateLimitMiddleware(fallback, { preferEnv: injected === undefined }));
 
-  // liveness (public, not under API_PREFIX)
+  // liveness (public, deliberately NOT under API_PREFIX — root-mounted probe).
   app.get("/healthz", healthzHandler);
 
-  // gateway-owned (composition / public receipt)
-  app.get("/api/v1/me", meHandler);
-  app.get("/api/v1/bff/home", bffHomeHandler);
-  app.post("/api/v1/public/inquiries", createPublicInquiryHandler(options.turnstile));
+  // gateway-owned (composition / public receipt). Mounts derive from the single
+  // API_PREFIX source of truth so they can never drift from stripApiPrefix (routes.ts).
+  app.get(`${API_PREFIX}/me`, meHandler);
+  app.get(`${API_PREFIX}/bff/home`, bffHomeHandler);
+  app.post(`${API_PREFIX}/public/inquiries`, createPublicInquiryHandler(options.turnstile));
 
   // transparent routing for everything else under the API prefix
-  app.all("/api/v1/*", gatewayRouteHandler);
+  app.all(`${API_PREFIX}/*`, gatewayRouteHandler);
 
   // anything not under the API prefix
   app.all("*", (c) => {
