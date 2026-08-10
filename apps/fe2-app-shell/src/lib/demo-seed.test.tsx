@@ -64,3 +64,86 @@ describe("isDemoEnabled", () => {
     expect(isDemoEnabled(undefined)).toBe(false);
   });
 });
+
+// The admin RBAC console (FE7) drives these endpoints through the demo transport.
+// Each `api()` gets a fresh in-session roster store, so mutations here are isolated.
+describe("admin RBAC console (interactive roster surface)", () => {
+  interface Role { id: string; name: string; permissions: string[]; isSystem: boolean }
+  interface Page<T> { items: T[] }
+  const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
+
+  it("serves the 3 agreed tiers admin / maintainer / member and the 32-key catalog", async () => {
+    const a = api();
+    const list = await roles(a);
+    expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
+    expect(list.items.every((r) => r.isSystem)).toBe(true);
+    const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
+    expect(catalog).toHaveLength(32);
+  });
+
+  it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
+    const a = api();
+    // system role is read-only
+    let denied: unknown;
+    try {
+      await a.request({ method: "PATCH", path: "/api/v1/identity/roles/role_member", body: { permissions: ["identity:admin"] } });
+    } catch (e) {
+      denied = e;
+    }
+    expect(ApiError.isApiError(denied)).toBe(true);
+    expect((denied as ApiError).status).toBe(409);
+
+    // create then edit a custom role — the new permission set is read back
+    const created = await a.request<Role>({ method: "POST", path: "/api/v1/identity/roles", body: { name: "広報", permissions: ["event:read"] } });
+    const updated = await a.request<Role>({ method: "PATCH", path: `/api/v1/identity/roles/${created.id}`, body: { permissions: ["event:read", "mail:read", "mail:send"] } });
+    expect(updated.permissions).toEqual(["event:read", "mail:read", "mail:send"]);
+  });
+
+  it("② role add: POST creates a custom role that appears in the list; duplicate name 409s", async () => {
+    const a = api();
+    const before = (await roles(a)).items.length;
+    const created = await a.request<Role>({ method: "POST", path: "/api/v1/identity/roles", body: { name: "会場", permissions: ["file:read"] } });
+    expect(created.isSystem).toBe(false);
+    expect((await roles(a)).items.length).toBe(before + 1);
+
+    let dup: unknown;
+    try {
+      await a.request({ method: "POST", path: "/api/v1/identity/roles", body: { name: "会場", permissions: [] } });
+    } catch (e) {
+      dup = e;
+    }
+    expect((dup as ApiError).status).toBe(409);
+  });
+
+  it("③ user assignment: POST assigns a role, reflected in the user's roles + effective permissions", async () => {
+    const a = api();
+    // usr_dave starts unassigned (invited)
+    const beforeRoles = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/users/usr_dave/roles" });
+    expect(beforeRoles).toHaveLength(0);
+
+    const asg = await a.request<{ id: string; roleName: string }>({ method: "POST", path: "/api/v1/identity/users/usr_dave/roles", body: { roleId: "role_member" } });
+    expect(asg.roleName).toBe("member");
+
+    const afterRoles = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/users/usr_dave/roles" });
+    expect(afterRoles).toHaveLength(1);
+    const detail = await a.request<{ roleIds: string[]; permissions: string[] }>({ method: "GET", path: "/api/v1/identity/users/usr_dave" });
+    expect(detail.roleIds).toContain("role_member");
+    expect(detail.permissions).toContain("event:read");
+
+    // revoke it back out
+    await a.request({ method: "DELETE", path: `/api/v1/identity/users/usr_dave/roles/${asg.id}` });
+    expect(await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/users/usr_dave/roles" })).toHaveLength(0);
+  });
+
+  it("change history (audit) surfaces identity.* actions and grows after a mutation", async () => {
+    const a = api();
+    const seeded = await a.request<Page<{ action: string }>>({ method: "GET", path: "/api/v1/audit/logs", query: { action: "identity." } });
+    expect(seeded.items.length).toBeGreaterThan(0);
+    expect(seeded.items.every((r) => r.action.startsWith("identity."))).toBe(true);
+
+    await a.request({ method: "POST", path: "/api/v1/identity/roles", body: { name: "監査テスト", permissions: [] } });
+    const after = await a.request<Page<{ action: string }>>({ method: "GET", path: "/api/v1/audit/logs", query: { action: "identity." } });
+    expect(after.items.length).toBe(seeded.items.length + 1);
+    expect(after.items[0]!.action).toBe("identity.role.created");
+  });
+});

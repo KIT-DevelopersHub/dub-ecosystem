@@ -23,6 +23,11 @@ export interface NavEntry {
   icon: IconName;
   order: number;
   badgeSource?: () => number; // hook injection: FE5 useUnreadCount / FE6 useChatUnreadTotal
+  // Permissions the viewer must hold for this launcher item to be shown (AND
+  // semantics; omitted = visible to any authed user). The shell filters the
+  // launcher by can() so e.g. the admin (ロール管理) tools appear for admins only,
+  // matching each route's own requiredPermissions guard (defense in depth).
+  requiredPermissions?: PermissionKey[];
 }
 
 export interface FeatureModule {
