@@ -2,7 +2,7 @@
 // skeleton on first load, and empty/error states (FE5 §2-2, tests 1,2,14).
 
 import type { ReactNode } from "react";
-import { EmptyState, LoadMore, SkeletonLoader } from "../contracts/fe1";
+import { Button, EmptyState, LoadMore, SkeletonLoader } from "@dub/ui";
 import type { ApiError } from "../contracts/fe2";
 import type { InboxItem } from "../contracts/notification-api";
 import { NotificationListItem } from "./NotificationListItem";
@@ -26,14 +26,14 @@ export function NotificationList(props: NotificationListProps): ReactNode {
         icon="alert"
         title="Couldn’t load notifications"
         description="Something went wrong while loading your inbox."
-        action={{ label: "Retry", onClick: props.onRetry }}
+        action={<Button onClick={props.onRetry}>Retry</Button>}
         testId="fe5-inbox-error"
       />
     );
   }
 
   if (loading && items.length === 0) {
-    return <SkeletonLoader rows={5} testId="fe5-inbox-skeleton" />;
+    return <SkeletonLoader lines={5} testId="fe5-inbox-skeleton" />;
   }
 
   if (items.length === 0) {
@@ -54,9 +54,12 @@ export function NotificationList(props: NotificationListProps): ReactNode {
           <NotificationListItem item={item} onActivate={props.onActivate} />
         </div>
       ))}
-      {hasMore ? (
-        <LoadMore onClick={props.onLoadMore} loading={loading} testId="fe5-inbox-loadmore" />
-      ) : null}
+      <LoadMore
+        hasMore={hasMore}
+        loading={loading}
+        onLoadMore={props.onLoadMore}
+        testId="fe5-inbox-loadmore"
+      />
     </div>
   );
 }
