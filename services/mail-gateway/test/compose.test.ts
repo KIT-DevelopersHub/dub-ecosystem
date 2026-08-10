@@ -34,6 +34,13 @@ describe("GET /", () => {
     expect(html).toContain("メール送信");
     expect(html).toContain("/compose/send");
   });
+
+  it("links back to the integrated Dub app (not a disconnected standalone)", async () => {
+    const res = await app.fetch(new Request("https://svc/"), envWith());
+    const html = await res.text();
+    expect(html).toContain("https://fe2-app-shell.developershub-site.workers.dev");
+    expect(html).toContain("統合アプリ");
+  });
 });
 
 describe("POST /compose/send auth + guard", () => {
