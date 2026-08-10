@@ -98,6 +98,7 @@ export interface ApiClient {
   request<TRes, TBody = unknown>(input: RequestInput<TBody>): Promise<TRes>;
   auth: {
     loginStart(redirectPath?: string): Promise<AuthLoginStartResponse>;
+    passwordLogin(email: string, password: string): Promise<void>;
     logout(): Promise<void>;
     me(): Promise<MeResponse>;
   };
@@ -245,6 +246,14 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           method: "POST",
           path: "/api/v1/auth/login",
           body: { redirectUri: redirectPath ?? "/", client: "web" },
+        }),
+      // Self-owned email+password login. The server sets the session cookie on 200;
+      // the caller then re-enters the shell (a full nav lets /me pick up the cookie).
+      passwordLogin: (email: string, password: string) =>
+        request<void, { email: string; password: string }>({
+          method: "POST",
+          path: "/api/v1/auth/password/login",
+          body: { email, password },
         }),
       logout: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/logout", body: {} }),
       me: () => request<MeResponse>({ method: "GET", path: "/api/v1/me" }),

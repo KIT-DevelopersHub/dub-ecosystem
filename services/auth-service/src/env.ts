@@ -22,6 +22,8 @@ export interface Env {
   SESSION_ABS_WEB_TTL_SEC?: string; // web absolute (default 2592000 = 30d)
   SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute (default 15552000 = 180d)
   STATE_TTL_SEC?: string; // oauth_state lifetime (default 600 = 10m)
+  PWLOGIN_MAX_FAILURES?: string; // password-login failures per window before 429 (default 5)
+  PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
 
   // --- Google OAuth secrets ---
   GOOGLE_CLIENT_ID?: string; // web client
@@ -52,6 +54,10 @@ export interface AppConfig {
   absWebTtlSec: number;
   absMobileTtlSec: number;
   stateTtlSec: number;
+  passwordLogin: {
+    maxFailures: number;
+    windowSec: number;
+  };
   google: {
     clientId: string;
     clientSecret: string;
@@ -87,6 +93,10 @@ export function configFromEnv(env: Env): AppConfig {
     absWebTtlSec: intVar(env.SESSION_ABS_WEB_TTL_SEC, DEFAULTS.absWebTtlSec),
     absMobileTtlSec: intVar(env.SESSION_ABS_MOBILE_TTL_SEC, DEFAULTS.absMobileTtlSec),
     stateTtlSec: intVar(env.STATE_TTL_SEC, DEFAULTS.stateTtlSec),
+    passwordLogin: {
+      maxFailures: intVar(env.PWLOGIN_MAX_FAILURES, 5),
+      windowSec: intVar(env.PWLOGIN_WINDOW_SEC, 900),
+    },
     google: {
       clientId: env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: env.GOOGLE_CLIENT_SECRET ?? "",

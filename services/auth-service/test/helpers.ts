@@ -8,6 +8,8 @@ import type { Deps } from "../src/deps";
 import type { OAuthProvider, GoogleProfile, AuthorizeUrlParams } from "../src/oauth";
 import type { IdentityClient, ProvisionResult } from "../src/identity-client";
 import type { Auditor, AuditInput } from "../src/audit";
+import { KvPasswordStore } from "../src/passwords";
+import { KvRateLimiter } from "../src/ratelimit";
 
 export class MemoryKV {
   store = new Map<string, string>();
@@ -124,19 +126,24 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
   let now = Date.parse("2026-08-09T12:00:00Z");
   const clock = () => now;
 
+  const kvPut = async (k: string, v: string): Promise<void> => {
+    kv.store.set(k, v);
+  };
+  const kvGet = async (k: string): Promise<string | null> => (kv.store.has(k) ? kv.store.get(k)! : null);
+  const kvDelete = async (k: string): Promise<void> => {
+    kv.store.delete(k);
+  };
   const deps: Deps = {
     config,
     sessions: new SessionService(kv as unknown as KVNamespace, config, clock),
     oauth,
     identity,
     audit,
-    kvPut: async (k, v) => {
-      kv.store.set(k, v);
-    },
-    kvGet: async (k) => (kv.store.has(k) ? kv.store.get(k)! : null),
-    kvDelete: async (k) => {
-      kv.store.delete(k);
-    },
+    passwords: new KvPasswordStore(kv as unknown as KVNamespace),
+    rateLimiter: new KvRateLimiter({ get: kvGet, put: kvPut, delete: kvDelete }),
+    kvPut,
+    kvGet,
+    kvDelete,
   };
 
   return { deps, kv, oauth, identity, audit, config, setNow: (ms) => (now = ms) };

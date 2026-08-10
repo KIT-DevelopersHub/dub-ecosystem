@@ -9,6 +9,7 @@ import type { auth, identity } from "@dub/types";
 import type { Deps } from "./deps";
 import { authErrors } from "./errors";
 import { newState, newPkce } from "./crypto";
+import { verifyPassword } from "./passwords";
 
 const OAUTH_STATE_PREFIX = "oauth_state:";
 
@@ -63,6 +64,15 @@ function buildSessionCookie(name: string, token: string, domain: string, maxAgeS
 
 function clearSessionCookie(name: string, domain: string): string {
   return `${name}=; HttpOnly; Secure; SameSite=Lax; Domain=${domain}; Path=/; Max-Age=0`;
+}
+
+/** Best-effort client IP for the password-login rate limiter (Cloudflare header). */
+function clientIp(c: { req: { header: (n: string) => string | undefined } }): string {
+  const cf = c.req.header("cf-connecting-ip");
+  if (cf) return cf;
+  const xff = c.req.header("x-forwarded-for");
+  if (xff) return xff.split(",")[0]!.trim();
+  return "unknown";
 }
 
 function bearerToken(header: string | undefined): string | null {
@@ -130,6 +140,57 @@ export function buildApp(deps: Deps): Hono {
       redirectUri: config.google.redirectUri,
     });
     const res: LoginStartResponse = { authorizationUrl, state };
+    return c.json(res);
+  });
+
+  // ---- POST /auth/password/login (public) ----
+  // Self-owned email+password login. Additive to Google OAuth; identity-roster
+  // stays the source of truth for who may log in (invite-only provision) and for
+  // the canonical user id + roles. Credentials are verified against PBKDF2 hashes.
+  app.post("/auth/password/login", async (c) => {
+    const ctx = ctxOf(c);
+    const body = await readJson<Partial<auth.AuthPasswordLoginRequest>>(c);
+    const emailRaw = requireString(body.email, "email");
+    const password = requireString(body.password, "password");
+    const email = emailRaw.trim().toLowerCase();
+
+    // Soft brute-force guard: block once either the email or the client IP has
+    // already burned its failure budget in the window (counters bumped only on a
+    // failed attempt below, so a stream of correct logins is never throttled).
+    const ip = clientIp(c);
+    const emailKey = `e:${email}`;
+    const ipKey = `i:${ip}`;
+    const { maxFailures, windowSec } = config.passwordLogin;
+    if ((await deps.rateLimiter.peek(emailKey)) >= maxFailures || (await deps.rateLimiter.peek(ipKey)) >= maxFailures) {
+      await deps.audit.record({ action: "auth.session.login", actorId: null, result: "failure", requestId: ctx.requestId, details: { method: "password", reason: "rate_limited" } });
+      throw errors.rateLimited(windowSec);
+    }
+
+    const cred = await deps.passwords.get(email);
+    const ok = cred ? await verifyPassword(password, cred.hash) : false;
+    if (!ok) {
+      await deps.rateLimiter.hit(emailKey, windowSec);
+      await deps.rateLimiter.hit(ipKey, windowSec);
+      await deps.audit.record({ action: "auth.session.login", actorId: null, result: "failure", requestId: ctx.requestId, details: { method: "password", reason: "invalid_credentials" } });
+      throw authErrors.invalidCredentials();
+    }
+
+    // Password matched — resolve the canonical identity user (invite-only). This
+    // is the same gate the Google flow uses, so disabled/uninvited users are still
+    // rejected even with a valid password.
+    const user = await provisionOrThrow(deps, ctx, { email, displayName: email.split("@")[0]! });
+    const created = await deps.sessions.create(user.id, "web");
+    await deps.rateLimiter.reset(`e:${email}`);
+    await deps.audit.record({
+      action: "auth.session.login",
+      actorId: user.id,
+      result: "success",
+      requestId: ctx.requestId,
+      details: { client: "web", method: "password" },
+    });
+    const maxAge = Math.ceil((created.absoluteExpiresAt - Date.now()) / 1000);
+    c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
+    const res: TokenSessionResponse = { token: created.token, session: created.session };
     return c.json(res);
   });
 

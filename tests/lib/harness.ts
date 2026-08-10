@@ -21,7 +21,7 @@ import type { identity, task, notification, auditLog, event } from "@dub/types";
 // --- real service factories (relative source imports; @dub/* resolve via tsconfig paths) ---
 import { createApp as createGatewayApp } from "../../services/api-gateway/src/app";
 import type { GatewayEnv } from "../../services/api-gateway/src/env";
-import { createApp as createIdentityApp, MemIdentityRepo, seedReferenceData } from "../../services/identity-roster/src/index";
+import { createApp as createIdentityApp, MemIdentityRepo, seedReferenceData, seedDemoUsers } from "../../services/identity-roster/src/index";
 import { createApp as createEventApp, InMemoryEventRepo } from "../../services/event-service/src/index";
 import type { AppDeps as EventAppDeps } from "../../services/event-service/src/index";
 import {
@@ -41,6 +41,9 @@ import { buildApp as buildAuthApp } from "../../services/auth-service/src/app";
 import { SessionService } from "../../services/auth-service/src/sessions";
 import { configFromEnv as authConfigFromEnv, type Env as AuthEnv } from "../../services/auth-service/src/env";
 import type { Deps as AuthDeps } from "../../services/auth-service/src/deps";
+import { KvPasswordStore, seedPasswordCredential } from "../../services/auth-service/src/passwords";
+import { KvRateLimiter } from "../../services/auth-service/src/ratelimit";
+import { ServiceBindingIdentityClient } from "../../services/auth-service/src/identity-client";
 
 export const ORG = common.DUB_DEFAULT_ORG_ID; // "org_devhub"
 const OTHER_ORG = "org_other";
@@ -60,6 +63,13 @@ export const TEST_USERS: Record<TestUserKey, TestUser> = {
   organizer: { key: "organizer", userId: "usr_org00000000000000000000", orgId: ORG, email: "organizer@devhub.test", displayName: "Organizer" },
   member: { key: "member", userId: "usr_member0000000000000000000", orgId: ORG, email: "member@devhub.test", displayName: "Member" },
   outsider: { key: "outsider", userId: "usr_outsider00000000000000000", orgId: OTHER_ORG, email: "outsider@other.test", displayName: "Outsider" },
+};
+
+// Demo self-owned accounts (seeded in both identity-roster and auth-service KV).
+// Local demo passwords only — deliberately simple; never a real secret.
+export const DEMO_LOGINS: Record<string, string> = {
+  "admin@dub.local": "demo-admin-pw",
+  "member@dub.local": "demo-member-pw",
 };
 
 // ---- shared in-memory stores (cross-service side effects observed here) ----
@@ -132,6 +142,9 @@ async function buildIdentity(stores: Stores): Promise<Fetcher> {
   await mkUser(TEST_USERS.member);
   await mkUser(TEST_USERS.outsider); // active but orgId=OTHER_ORG => devhub non-member
 
+  // self-owned demo accounts (admin@dub.local / member@dub.local) with roles.
+  await seedDemoUsers({ repo, now, newId }, ORG);
+
   const grant = async (userId: string, rid: string): Promise<void> => {
     await repo.createAssignment({
       id: newId("ra"),
@@ -167,7 +180,11 @@ async function buildIdentity(stores: Stores): Promise<Fetcher> {
 }
 
 // ============================ auth (REAL) ============================
-function buildAuth(): { fetcher: Fetcher } {
+// `identityFetcher` is the REAL identity-roster app so credential login resolves
+// the canonical user via the actual invite-only provision path (not a stub). The
+// demo password credentials (DEMO_LOGINS) are seeded into the same KV the session
+// service uses, so POST /auth/password/login works end-to-end through the gateway.
+async function buildAuth(identityFetcher: Fetcher): Promise<{ fetcher: Fetcher }> {
   const env = {
     ENVIRONMENT: "preview",
     DUB_TEST_LOGIN: "1",
@@ -194,6 +211,12 @@ function buildAuth(): { fetcher: Fetcher } {
     delete: async (k: string) => void kv.delete(k),
   } as unknown as import("@cloudflare/workers-types").KVNamespace;
 
+  const passwords = new KvPasswordStore(kvNs);
+  // seed demo credentials (plaintext hashed here and discarded)
+  for (const [email, password] of Object.entries(DEMO_LOGINS)) {
+    await seedPasswordCredential(passwords, email, password);
+  }
+
   const clock = makeClock();
   const deps: AuthDeps = {
     config,
@@ -203,8 +226,14 @@ function buildAuth(): { fetcher: Fetcher } {
       exchangeWebCode: async () => ({ sub: "s", email: "x@x", displayName: "X", avatarUrl: null }),
       exchangeMobileCode: async () => ({ sub: "s", email: "x@x", displayName: "X", avatarUrl: null }),
     } as unknown as AuthDeps["oauth"],
-    identity: { provision: async () => ({ status: "existing", user: null }) } as unknown as AuthDeps["identity"],
+    identity: new ServiceBindingIdentityClient(identityFetcher),
     audit: { record: async () => {} } as unknown as AuthDeps["audit"],
+    passwords,
+    rateLimiter: new KvRateLimiter({
+      get: async (k) => (kv.has(k) ? kv.get(k)! : null),
+      put: async (k, v) => void kv.set(k, v),
+      delete: async (k) => void kv.delete(k),
+    }),
     kvPut: async (k, v) => void kv.set(k, v),
     kvGet: async (k) => (kv.has(k) ? kv.get(k)! : null),
     kvDelete: async (k) => void kv.delete(k),
@@ -589,7 +618,7 @@ export async function createHarness(opts: HarnessOptions = {}): Promise<Harness>
   const stores: Stores = { audit: [], inbox: new Map(), tasks: new Map() };
 
   const identity = await buildIdentity(stores);
-  const auth = buildAuth().fetcher;
+  const auth = (await buildAuth(identity)).fetcher;
   const event = buildEvent(identity, stores);
   const task = taskStub(stores);
   const notif = opts.breakNotification ? failingStub() : notificationStub(stores);
