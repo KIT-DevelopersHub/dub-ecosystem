@@ -10,10 +10,13 @@ import type {
   AppDeps,
   AddMemberRequest,
   CreateChannelRequest,
+  MarkUnreadRequest,
+  PinMessageRequest,
   PostMessageRequest,
   PostSystemMessageRequest,
   ReactionToggleRequest,
   ReadStateUpdateRequest,
+  SetPresenceRequest,
   UpdateChannelRequest,
 } from "./types";
 import { ChatService, type ReqCtx } from "./service";
@@ -74,6 +77,8 @@ export function createApp(deps: AppDeps): Hono {
   app.use("/messages", authz.requireAuth());
   app.use("/messages/*", authz.requireAuth());
   app.use("/unread", authz.requireAuth());
+  app.use("/search", authz.requireAuth());
+  app.use("/presence", authz.requireAuth());
 
   // ---- channels ----
   app.get("/channels", async (c) => {
@@ -116,6 +121,30 @@ export function createApp(deps: AppDeps): Hono {
     const body = await readJson<ReadStateUpdateRequest>(c);
     // path id is authoritative for the channel scope
     return c.json(await svc.updateReadState(reqCtx(c), c.req.param("id"), { ...body, channelId: c.req.param("id") }));
+  });
+
+  app.post("/channels/:id/mark-unread", async (c) => {
+    const body = await readJson<MarkUnreadRequest>(c);
+    return c.json(await svc.markUnread(reqCtx(c), c.req.param("id"), body));
+  });
+
+  app.post("/channels/:id/join", async (c) => {
+    return c.json(await svc.joinChannel(reqCtx(c), c.req.param("id")));
+  });
+
+  // ---- pins ----
+  app.get("/channels/:id/pins", async (c) => {
+    return c.json(await svc.listPins(reqCtx(c), c.req.param("id")));
+  });
+
+  app.post("/channels/:id/pins", async (c) => {
+    const body = await readJson<PinMessageRequest>(c);
+    return c.json(await svc.pinMessage(reqCtx(c), c.req.param("id"), body), 201);
+  });
+
+  app.delete("/channels/:id/pins/:messageId", async (c) => {
+    await svc.unpinMessage(reqCtx(c), c.req.param("id"), c.req.param("messageId"));
+    return c.body(null, 204);
   });
 
   app.get("/channels/:id/ws-ticket", async (c) => {
@@ -161,6 +190,34 @@ export function createApp(deps: AppDeps): Hono {
   // ---- unread (caller-scoped; no userId param, design §2) ----
   app.get("/unread", async (c) => {
     return c.json(await svc.unread(reqCtx(c)));
+  });
+
+  // ---- search (Slack in:/from: — full-text over the caller's channels) ----
+  app.get("/search", async (c) => {
+    const q = c.req.query();
+    if (!q.q) throw errors.validationFailed([{ field: "q", reason: "required" }]);
+    return c.json(
+      await svc.searchMessages(reqCtx(c), {
+        q: q.q,
+        ...(q.in ? { in: q.in } : {}),
+        ...(q.from ? { from: q.from } : {}),
+        ...(q.cursor ? { cursor: q.cursor } : {}),
+        ...(q.limit !== undefined ? { limit: qNum(q.limit) } : {}),
+      }),
+    );
+  });
+
+  // ---- presence (self write; batch read via ?userIds=a,b,c) ----
+  app.put("/presence", async (c) => {
+    const body = await readJson<SetPresenceRequest>(c);
+    return c.json(await svc.setPresence(reqCtx(c), body));
+  });
+
+  app.get("/presence", async (c) => {
+    const raw = c.req.query("userIds");
+    if (!raw) throw errors.validationFailed([{ field: "userIds", reason: "required" }]);
+    const userIds = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    return c.json(await svc.getPresence(reqCtx(c), userIds));
   });
 
   return app;

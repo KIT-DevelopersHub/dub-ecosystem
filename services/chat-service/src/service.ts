@@ -15,15 +15,24 @@ import type {
   UpdateChannelRequest,
   AddMemberRequest,
   GetChannelResponse,
+  GetPresenceResponse,
   ListChannelsResponse,
   ListMessagesResponse,
+  ListPinsResponse,
+  MarkUnreadRequest,
   Message,
   MessageRow,
   MemberRow,
+  PinMessageRequest,
+  PinnedItem,
   PostMessageRequest,
   PostSystemMessageRequest,
+  PresenceRow,
+  PresenceView,
   ReactionToggleResponse,
   ReadStateUpdateRequest,
+  SearchMessagesResponse,
+  SetPresenceRequest,
   UnreadResponse,
   UnreadSummary,
   WsTicketResponse,
@@ -34,6 +43,7 @@ import {
   MAX_BODY_LEN,
   buildDoUrl,
   decodeCursor,
+  derivePresence,
   dmKey as deriveDmKey,
   encodeCursor,
   toChannel,
@@ -276,6 +286,21 @@ export class ChatService {
     await this.audit(ctx, "chat.member.remove", "channel", id, { userId, self: isSelf });
   }
 
+  // Enrich a page of rows with reactions + thread reply counts (batched). Only
+  // top-level rows (threadRootId null) can carry replies; replies stay at 0.
+  private async enrichMessages(rows: MessageRow[]): Promise<Message[]> {
+    if (rows.length === 0) return [];
+    const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.id));
+    const rootIds = rows.filter((r) => r.threadRootId === null).map((r) => r.id);
+    const replies = await this.deps.repo.replyCountsFor(rootIds);
+    return rows.map((r) => toMessage(r, reactions.get(r.id) ?? {}, replies.get(r.id) ?? 0));
+  }
+
+  private async enrichOne(row: MessageRow): Promise<Message> {
+    const [msg] = await this.enrichMessages([row]);
+    return msg!;
+  }
+
   // ---- messages ----
   async postMessage(ctx: ReqCtx, body: PostMessageRequest): Promise<Message> {
     const text = requireBody(body.body);
@@ -345,8 +370,7 @@ export class ChatService {
         afterMessageId: q.afterMessageId,
         limit,
       });
-      const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.id));
-      return { items: rows.map((r) => toMessage(r, reactions.get(r.id) ?? {})), nextCursor: null };
+      return { items: await this.enrichMessages(rows), nextCursor: null };
     }
 
     const beforeId = q.cursor ? decodeCursor(q.cursor) ?? invalidCursor(q.cursor) : undefined;
@@ -359,9 +383,8 @@ export class ChatService {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
-    const reactions = await this.deps.repo.reactionsFor(page.map((r) => r.id));
     return {
-      items: page.map((r) => toMessage(r, reactions.get(r.id) ?? {})),
+      items: await this.enrichMessages(page),
       nextCursor: hasMore && last ? encodeCursor(last.id) : null,
     };
   }
@@ -379,10 +402,9 @@ export class ChatService {
     const now = this.deps.now();
     const next: MessageRow = { ...msg, body: text, editedAt: now, version: msg.version + 1 };
     if (!(await this.deps.repo.updateMessage(next, body.version))) throw errVersionConflict(id);
-    const reactions = await this.deps.repo.reactionsFor([id]);
     // No chat.message.updated in the frozen catalog and no RT variant -> audit only.
     await this.audit(ctx, "chat.message.update", "message", id, null);
-    return toMessage(next, reactions.get(id) ?? {});
+    return this.enrichOne(next);
   }
 
   async deleteMessage(ctx: ReqCtx, id: common.MessageId): Promise<void> {
@@ -438,6 +460,143 @@ export class ChatService {
       items.push({ channelId: m.channelId, unreadCount, lastReadMessageId });
     }
     return { items };
+  }
+
+  // Mark a channel unread from a message (Slack "Mark as unread"): rewind the read
+  // cursor to just before `messageId` so it becomes the first unread.
+  async markUnread(ctx: ReqCtx, id: common.ChannelId, body: MarkUnreadRequest): Promise<UnreadSummary> {
+    const messageId = nonEmptyString(body.messageId, "messageId");
+    const { channel } = await this.loadReadable(id, ctx.userId);
+    await this.requireMember(channel, ctx.userId);
+    const msg = await this.deps.repo.getMessage(messageId);
+    if (!msg || msg.channelId !== channel.id) {
+      throw errors.validationFailed([{ field: "messageId", reason: "not_in_channel" }]);
+    }
+    const prev = await this.deps.repo.previousMessageId(channel.id, messageId);
+    if (prev) await this.deps.repo.setReadState(channel.id, ctx.userId, prev, this.deps.now());
+    else await this.deps.repo.clearReadState(channel.id, ctx.userId);
+    const unreadCount = await this.deps.repo.countUnread(channel.id, ctx.userId, prev);
+    return { channelId: channel.id, unreadCount, lastReadMessageId: prev };
+  }
+
+  // ---- join (self-join a public channel; Slack "Join channel") ----
+  async joinChannel(ctx: ReqCtx, id: common.ChannelId): Promise<GetChannelResponse> {
+    const channel = await this.deps.repo.getChannel(id);
+    if (!channel) throw errors.notFound("channel", id);
+    const existing = await this.deps.repo.getMember(id, ctx.userId);
+    // Private channels are invite-only: non-members can't see or self-join (hide -> 404).
+    if (channel.visibility === "private") {
+      if (!existing) throw errors.notFound("channel", id);
+      return { channel: toChannel(channel), membership: toMember(existing) };
+    }
+    if (existing) return { channel: toChannel(channel), membership: toMember(existing) }; // idempotent
+    if (channel.archivedAt) throw errArchived(id);
+    const now = this.deps.now();
+    await this.deps.repo.addMember({ channelId: id, userId: ctx.userId, role: "member", joinedAt: now });
+    await this.deps.publisher.publish("chat.member.added", { channelId: id, userId: ctx.userId, change: "added" }, this.actor(ctx));
+    await this.deps.realtime.publishToChannel(id, { kind: "member.added", channelId: id, userId: ctx.userId, at: now });
+    await this.audit(ctx, "chat.member.join", "channel", id, { self: true });
+    const membership = await this.deps.repo.getMember(id, ctx.userId);
+    return { channel: toChannel(channel), membership: membership ? toMember(membership) : null };
+  }
+
+  // ---- search (full-text over the caller's channels; Slack in:/from:) ----
+  async searchMessages(
+    ctx: ReqCtx,
+    q: { q: string; in?: common.ChannelId; from?: common.UserId; cursor?: string; limit?: number },
+  ): Promise<SearchMessagesResponse> {
+    const text = nonEmptyString(q.q, "q");
+    const limit = requireLimit(q.limit);
+    const beforeId = q.cursor ? decodeCursor(q.cursor) ?? invalidCursor(q.cursor) : undefined;
+
+    let channelIds: common.ChannelId[];
+    if (q.in) {
+      // `in:#channel` — the caller must be a member (private stays hidden via loadReadable).
+      const { channel } = await this.loadReadable(q.in, ctx.userId);
+      await this.requireMember(channel, ctx.userId);
+      channelIds = [channel.id];
+    } else {
+      const memberships = await this.deps.repo.membershipsForUser(ctx.userId);
+      channelIds = memberships.map((m) => m.channelId);
+    }
+
+    const rows = await this.deps.repo.searchMessages({
+      channelIds,
+      text,
+      ...(q.from ? { fromUserId: q.from } : {}),
+      ...(beforeId ? { beforeId } : {}),
+      limit: limit + 1,
+    });
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const last = page[page.length - 1];
+    return { items: await this.enrichMessages(page), nextCursor: hasMore && last ? encodeCursor(last.id) : null };
+  }
+
+  // ---- pins (channel pinned items) ----
+  async pinMessage(ctx: ReqCtx, channelId: common.ChannelId, body: PinMessageRequest): Promise<PinnedItem> {
+    const messageId = nonEmptyString(body.messageId, "messageId");
+    const { channel } = await this.loadReadable(channelId, ctx.userId);
+    await this.requireMember(channel, ctx.userId);
+    if (channel.archivedAt) throw errArchived(channel.id);
+    const msg = await this.deps.repo.getMessage(messageId);
+    if (!msg || msg.channelId !== channel.id || msg.deletedAt) throw errors.notFound("message", messageId);
+    const now = this.deps.now();
+    await this.deps.repo.addPin({ channelId: channel.id, messageId, pinnedBy: ctx.userId, pinnedAt: now });
+    await this.audit(ctx, "chat.pin.add", "message", messageId, { channelId: channel.id });
+    // Read back the stored pin so an already-pinned message returns its original pinner/time.
+    const pin = (await this.deps.repo.listPins(channel.id)).find((p) => p.messageId === messageId)
+      ?? { channelId: channel.id, messageId, pinnedBy: ctx.userId, pinnedAt: now };
+    return { ...pin, message: await this.enrichOne(msg) };
+  }
+
+  async unpinMessage(ctx: ReqCtx, channelId: common.ChannelId, messageId: common.MessageId): Promise<void> {
+    const { channel } = await this.loadReadable(channelId, ctx.userId);
+    await this.requireMember(channel, ctx.userId);
+    const removed = await this.deps.repo.removePin(channel.id, messageId);
+    if (removed) await this.audit(ctx, "chat.pin.remove", "message", messageId, { channelId: channel.id });
+  }
+
+  async listPins(ctx: ReqCtx, channelId: common.ChannelId): Promise<ListPinsResponse> {
+    const { channel } = await this.loadReadable(channelId, ctx.userId);
+    await this.requireMember(channel, ctx.userId);
+    const pins = await this.deps.repo.listPins(channel.id);
+    const items: PinnedItem[] = [];
+    for (const p of pins) {
+      const msg = await this.deps.repo.getMessage(p.messageId);
+      if (!msg) continue; // pinned message hard-gone -> drop from the list
+      items.push({ ...p, message: await this.enrichOne(msg) });
+    }
+    return { items };
+  }
+
+  // ---- presence (online/away + status emoji/text) ----
+  async setPresence(ctx: ReqCtx, body: SetPresenceRequest): Promise<PresenceView> {
+    if (body.presence !== undefined && body.presence !== "auto" && body.presence !== "away") {
+      throw errors.validationFailed([{ field: "presence", reason: "invalid" }]);
+    }
+    const now = this.deps.now();
+    const existing = (await this.deps.repo.getPresence([ctx.userId]))[0] ?? null;
+    const row: PresenceRow = {
+      userId: ctx.userId,
+      presence: body.presence ?? existing?.presence ?? "auto",
+      statusEmoji: body.statusEmoji !== undefined ? body.statusEmoji : existing?.statusEmoji ?? null,
+      statusText: body.statusText !== undefined ? body.statusText : existing?.statusText ?? null,
+      statusExpiresAt: body.statusExpiresAt !== undefined ? body.statusExpiresAt : existing?.statusExpiresAt ?? null,
+      lastActiveAt: now, // any presence write is also a heartbeat
+      updatedAt: now,
+    };
+    await this.deps.repo.putPresence(row);
+    return derivePresence(ctx.userId, row, Date.parse(now));
+  }
+
+  async getPresence(ctx: ReqCtx, userIds: common.UserId[]): Promise<GetPresenceResponse> {
+    const unique = [...new Set(userIds.filter((u) => typeof u === "string" && u.length > 0))];
+    if (unique.length === 0) throw errors.validationFailed([{ field: "userIds", reason: "required" }]);
+    const rows = await this.deps.repo.getPresence(unique);
+    const byId = new Map(rows.map((r) => [r.userId, r]));
+    const nowMs = Date.parse(this.deps.now());
+    return { items: unique.map((id) => derivePresence(id, byId.get(id) ?? null, nowMs)) };
   }
 
   // ---- ws-ticket (RT connect; DO-direct) ----
