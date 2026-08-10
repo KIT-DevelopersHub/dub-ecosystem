@@ -6,9 +6,14 @@
 # mail/roster. It is a MOCK — no gateway, no real data, no mail is ever sent.
 #
 # Build + deploy (assets-only, no `main`):
+#   # @dub/ui (fe1-design-system) must be built to dist/ FIRST — the shell imports
+#   # `@dub/ui/style.css` + `@dub/ui` components (via fe6-chat), and those `exports`
+#   # resolve only to dist/. A bare `--filter build` does NOT build deps, so build the
+#   # dependency graph via turbo's ^build (this is what CI does) before the vite build.
+#   pnpm exec turbo run build --filter=@dub/ui
 #   VITE_DEMO=1 pnpm --filter @dub/fe2-app-shell build
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
-#   npx wrangler deploy --config apps/fe2-app-shell/wrangler.demo.toml
+#   pnpm dlx wrangler deploy --config apps/fe2-app-shell/wrangler.demo.toml
 name = "fe2-demo"
 compatibility_date = "2026-08-01"
 
