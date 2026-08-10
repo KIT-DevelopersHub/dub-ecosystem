@@ -21,16 +21,25 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
   }
 
   return (
-    <main data-testid="fe2-login">
-      <h1>DevHub 管理コンソール</h1>
-      <Button testId="fe2-login-submit" disabled={busy} onClick={() => void startLogin()}>
-        Google でログイン
-      </Button>
-      {error ? (
-        <p role="alert" data-testid="fe2-login-error">
-          {error}
-        </p>
-      ) : null}
+    <main data-testid="fe2-login" className="fe2-login">
+      <div className="fe2-login-card">
+        <span className="fe2-login-mark" aria-hidden="true">
+          D
+        </span>
+        <div className="fe2-login-head">
+          <h1 className="fe2-login-title">DevHub 管理コンソール</h1>
+          <p className="fe2-login-sub">運営メンバー専用のサインインです</p>
+        </div>
+        <Button testId="fe2-login-submit" size="lg" disabled={busy} onClick={() => void startLogin()}>
+          {busy ? "リダイレクトしています…" : "Google でログイン"}
+        </Button>
+        {error ? (
+          <p role="alert" data-testid="fe2-login-error" className="fe2-login-error">
+            {error}
+          </p>
+        ) : null}
+        <p className="fe2-login-foot">DevelopersHub 北陸ITカンファレンス 運営基盤</p>
+      </div>
     </main>
   );
 }

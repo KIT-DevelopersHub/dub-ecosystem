@@ -2,6 +2,7 @@
 // auth-service on the 302; confirm via /me then return to the saved path.
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Spinner } from "@dub/ui";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 
@@ -26,8 +27,13 @@ export function AuthCallbackScreen({
   }, [data, isError, returnTo, onResolved]);
 
   return (
-    <main data-testid="fe2-auth-callback" aria-busy={!data && !isError}>
-      サインインを完了しています…
+    <main data-testid="fe2-auth-callback" aria-busy={!data && !isError} className="fe2-center">
+      <div className="fe2-center-inner">
+        <span className="fe2-spin-row">
+          <Spinner />
+          サインインを完了しています…
+        </span>
+      </div>
     </main>
   );
 }
