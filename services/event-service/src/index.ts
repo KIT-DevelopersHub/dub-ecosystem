@@ -1,48 +1,42 @@
 // Worker entrypoint. Wires the runtime env (D1, Service Bindings, Queues) into
-// AppDeps and serves the Hono app. Deploy is out of scope for this unit (wrangler
-// config is a skeleton); this file must stay import-clean for `wrangler dev`.
-import type { D1Database, Fetcher, Queue, ExecutionContext } from "@cloudflare/workers-types";
+// AppDeps and serves the Hono app. A Cron Trigger drains the free-tier @dub/freeq
+// outbox (replacement for the paid EVT_* / AUDIT_QUEUE producers). This file must
+// stay import-clean for `wrangler dev`.
+import type { ExecutionContext, Queue, ScheduledController } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
-import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventPublisherEnv } from "@dub/events";
+import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
 import { common, type auditLog } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1EventRepo } from "./d1-repo";
 import { buildTaskClient } from "./task-client";
+import { runOutboxDrain } from "./drain";
+import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
+import type { Env } from "./env";
 import type { AppDeps, EventPublisher, AuditSink } from "./types";
 
-export interface Env {
-  DB: D1Database;
-  SVC_IDENTITY: Fetcher;
-  SVC_TASK?: Fetcher;
-  // event fan-out queues (only the ones event.* / action.* target need to exist)
-  EVT_NOTIFICATION?: Queue;
-  EVT_TASK?: Queue;
-  EVT_GANTT?: Queue;
-  EVT_FILE_META?: Queue;
-  EVT_GITHUB_SYNC?: Queue;
-  EVT_MOBILE_BFF?: Queue;
-  AUDIT_QUEUE?: Queue;
-  DUB_DEFAULT_ORG_ID?: string;
-}
+export type { Env } from "./env";
 
 function buildPublisher(env: Env): EventPublisher {
+  // Prefer real (paid) Queue bindings when present; otherwise fan out into the
+  // free-tier @dub/freeq D1 outbox so no subscriber's event is dropped.
+  const pubEnv = buildPublisherEnv(env.DB, env as unknown as Partial<Record<string, Queue<DubEventEnvelope>>>);
   return {
     async publish(name, payload, ctx) {
       const envelope = createEvent(name, payload, ctx);
-      // publishEvent fans out to subscriber queues; missing bindings for a
-      // subscriber throw (fail-loud). Unsubscribed events are a no-op.
-      await publishEvent(env as unknown as DubEventPublisherEnv, envelope);
+      await publishEvent(pubEnv, envelope);
     },
   };
 }
 
 function buildAudit(env: Env): AuditSink {
+  // Real AUDIT_QUEUE when present, else the freeq outbox — audit is now always
+  // durably persisted (never silently dropped when the queue binding is absent).
+  const auditQueue = (env.AUDIT_QUEUE ?? outboxQueue<AuditRecordEnvelopeV1>(env.DB, AUDIT_TOPIC)) as Queue<AuditRecordEnvelopeV1>;
   return {
     async record(input: auditLog.AuditRecordInput) {
-      if (!env.AUDIT_QUEUE) return; // audit queue optional in local/preview
-      await publishAudit({ AUDIT_QUEUE: env.AUDIT_QUEUE as Queue<AuditRecordEnvelopeV1> }, input);
+      await publishAudit({ AUDIT_QUEUE: auditQueue }, input);
     },
   };
 }
@@ -76,6 +70,24 @@ export default {
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
     const app = createApp(buildDeps(env, requestId));
     return app.fetch(request as unknown as Request) as unknown as Response;
+  },
+
+  // Free-tier Cron drain: forward audit rows to audit-log, defer domain events
+  // (kept durable/pending). On a paid deploy with real Queues this is a harmless
+  // no-op tick (the outbox stays empty). Best-effort: a drain hiccup is logged, not
+  // thrown, so it never trips the scheduled invocation into a retry storm.
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      const result = await runOutboxDrain(env);
+      consoleSink({ level: "info", message: "event-service outbox drained", service: "event-service", fields: { ...result } });
+    } catch (err) {
+      consoleSink({
+        level: "error",
+        message: "event-service outbox drain failed",
+        service: "event-service",
+        fields: { error: err instanceof Error ? err.message : String(err) },
+      });
+    }
   },
 };
 
