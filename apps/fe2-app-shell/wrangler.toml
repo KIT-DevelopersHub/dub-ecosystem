@@ -8,9 +8,10 @@
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
 #   npx wrangler deploy --config apps/fe2-app-shell/wrangler.toml
 #
-# API wiring: the SPA calls VITE_API_BASE_URL (default https://api.developershub.jp)
-# for /api/v1/*. Until the gateway is deployed those calls 404; the shell/login UI
-# still renders. To point at another gateway, rebuild with VITE_API_BASE_URL set.
+# API wiring: the SPA calls VITE_API_BASE_URL (default the live free-tier gateway
+# https://dub-api-gateway.developershub-site.workers.dev) for /api/v1/*. The custom
+# domain api.developershub.jp is NOT DNS-configured, so it must never be the default.
+# To point at another gateway, rebuild with VITE_API_BASE_URL set.
 name = "fe2-app-shell"
 compatibility_date = "2026-08-01"
 

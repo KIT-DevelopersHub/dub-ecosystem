@@ -36,7 +36,8 @@ CSS Modules (`@dub/tokens`). Types from `@dub/types`, error envelope from `@dub/
 `VITE_API_MOCK=true pnpm --filter ./apps/fe2-app-shell dev` boots the assembled
 shell against the built-in mock transport (`createMockFetch`): the shell
 authenticates and the home dashboard renders from seed data with no gateway.
-Unset (the default) keeps the prod wiring (`VITE_API_BASE_URL` → `api.developershub.jp`).
+Unset (the default) keeps the prod wiring (`VITE_API_BASE_URL` → the live gateway
+`dub-api-gateway.developershub-site.workers.dev`).
 The mock covers the boot surface only; unknown feature routes resolve to a
 `NOT_FOUND` envelope so feature screens show their own in-frame fallback.
 
