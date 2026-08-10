@@ -7,15 +7,19 @@ import type { RequestContext } from "@dub/http";
 
 export interface Env {
   // --- data ---
-  DB: D1Database; // shared dub-core D1 (mail_ namespace only)
+  DB: D1Database; // shared dub-core D1 (mail_ namespace + freeq_outbox on free tier)
 
-  // --- queue producers ---
-  AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13)
-  EVT_MAIL_AUTOMATION: Queue<DubEventEnvelope>; // mail.message.received consumer
-  EVT_NOTIFICATION: Queue<DubEventEnvelope>; // mail.message.sent / send_failed consumer
+  // --- queue producers (PAID plan only) ---
+  // Optional: on the Workers FREE plan these bindings are absent and deps.ts falls
+  // back to a @dub/freeq D1 outbox shim (see outbox.ts / drain.ts). When present
+  // (paid deploy, wrangler.toml) the real Queues are used unchanged.
+  AUDIT_QUEUE?: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13)
+  EVT_MAIL_AUTOMATION?: Queue<DubEventEnvelope>; // mail.message.received consumer
+  EVT_NOTIFICATION?: Queue<DubEventEnvelope>; // mail.message.sent / send_failed consumer
 
   // --- service bindings ---
   SVC_IDENTITY: Fetcher; // POST /authz/check (mail:* permissions)
+  SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain skips audit
 
   // --- outbound provider config (Workers Secrets; real send credentials) ---
   MAIL_OUTBOUND_PROVIDER?: string; // "resend" (default, ADR-0001) | "ses" | "mailchannels" | "mock"

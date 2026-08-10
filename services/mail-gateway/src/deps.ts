@@ -8,17 +8,23 @@ import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS } from "./config";
 import { buildProvider, type MailProvider } from "./provider";
 import { sendRetryOptions } from "./resilience";
+import { AUDIT_TOPIC, TOPIC_MAIL_AUTOMATION, TOPIC_NOTIFICATION, outboxQueue } from "./outbox";
 import type { AuditEnv, EventPublishEnv, InboundDeps, SendDeps } from "./types";
 
 export function buildDb(env: Env, requestId: string): DbClient {
   return createDbClient(env.DB, { namespace: "mail", requestId });
 }
 
+// Prefer a real (paid) Queue binding when present; otherwise fall back to the free-tier
+// @dub/freeq D1 outbox shim so audit/event records are durably persisted, never dropped.
 function eventEnv(env: Env): EventPublishEnv {
-  return { EVT_MAIL_AUTOMATION: env.EVT_MAIL_AUTOMATION, EVT_NOTIFICATION: env.EVT_NOTIFICATION };
+  return {
+    EVT_MAIL_AUTOMATION: env.EVT_MAIL_AUTOMATION ?? outboxQueue(env.DB, TOPIC_MAIL_AUTOMATION),
+    EVT_NOTIFICATION: env.EVT_NOTIFICATION ?? outboxQueue(env.DB, TOPIC_NOTIFICATION),
+  };
 }
 function auditEnv(env: Env): AuditEnv {
-  return { AUDIT_QUEUE: env.AUDIT_QUEUE };
+  return { AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue(env.DB, AUDIT_TOPIC) };
 }
 
 export function buildSendDeps(env: Env, ctx: RequestContext, provider: MailProvider = buildProvider(env)): SendDeps {

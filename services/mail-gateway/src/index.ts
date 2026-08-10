@@ -7,8 +7,13 @@ import { buildInboundDeps } from "./deps";
 import { handleInbound } from "./inbound";
 import { headersToMap, type RawInbound } from "./mime";
 import { runRetentionPurge } from "./scheduled";
+import { runOutboxDrain } from "./drain";
+import { consoleSink } from "@dub/observability";
 import { INBOUND_RAW_READ_BYTES, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
+
+// Daily retention purge cron; every other invocation drains the free-tier outbox.
+const RETENTION_CRON = "20 3 * * *";
 
 const app = createApp();
 
@@ -63,8 +68,22 @@ const handler = {
     await handleInbound(buildInboundDeps(env, ctx), raw);
   },
 
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    await runRetentionPurge(env);
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    // Free-tier outbox drain runs on every tick (forwards audit rows to audit-log;
+    // defers domain events). Best-effort: a drain hiccup must not abort the purge.
+    try {
+      const result = await runOutboxDrain(env);
+      consoleSink({ level: "info", message: "mail-gateway outbox drained", service: SERVICE_NAME, fields: { ...result } });
+    } catch (err) {
+      consoleSink({
+        level: "error",
+        message: "mail-gateway outbox drain failed",
+        service: SERVICE_NAME,
+        fields: { error: err instanceof Error ? err.message : String(err) },
+      });
+    }
+    // Retention purge only on its daily schedule (skipped on the every-minute drain tick).
+    if (controller.cron === RETENTION_CRON) await runRetentionPurge(env);
   },
 };
 
