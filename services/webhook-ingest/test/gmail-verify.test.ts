@@ -1,7 +1,7 @@
 // Gmail Pub/Sub push OIDC verifier: real RS256 JWT verification against an injected
 // JWKS (fake fetch), covering sig / iss / aud / exp and the "偽物を通さない" property.
 import { describe, it, expect, beforeAll } from "vitest";
-import { createGmailVerifier } from "../src/verify/stubs";
+import { createGmailVerifier } from "../src/verify/gmail";
 
 const AUD = "https://hooks.developershub.jp/hooks/gmail";
 const SA_EMAIL = "gmail-push@dub-project.iam.gserviceaccount.com";

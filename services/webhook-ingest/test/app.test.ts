@@ -85,9 +85,12 @@ describe("POST /hooks/github", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 for a known-but-disabled source (gmail, gated until 9-B)", async () => {
+  it("gmail is enabled (9-B): unauthenticated push -> 401, not 404, nothing published", async () => {
+    // The gate is open, so gmail no longer 404s; the OIDC verifier rejects a bearer-less
+    // request (and, here, an env with no gmail audience/SA) => 401 before any publish.
     const res = await h.app.fetch(new Request("https://hooks/hooks/gmail", { method: "POST", body: "{}" }), h.env);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("UNAUTHENTICATED");
     expect(h.queue.sent).toHaveLength(0);
   });
 

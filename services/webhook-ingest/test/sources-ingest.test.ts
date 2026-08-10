@@ -137,20 +137,60 @@ describe("stripe ingress (enabled)", () => {
   });
 });
 
+describe("gmail ingress (enabled in 9-B)", () => {
+  it("accepts an authenticated push -> 200 published to the gmail queue", async () => {
+    // Drive the app-level path with an injected gmail verifier (the real OIDC verifier is
+    // exercised in gmail-verify.test.ts); this proves the 9-B gate is open end-to-end.
+    const repo = new FakeRepo();
+    const gmailQ = new FakeQueue<WebhookEnvelope>();
+    const deps: IngestDeps = {
+      repo,
+      raw: new FakeR2() as unknown as R2Bucket,
+      queues: { WH_GMAIL: gmailQ as unknown as Queue<WebhookEnvelope> } as IngestDeps["queues"],
+    };
+    const app = createApp({
+      buildDeps: () => deps,
+      buildRepo: () => repo,
+      verifiers: {
+        gmail: async () => ({ ok: true, externalId: "msg-42", eventKind: "gmail.push" }),
+      },
+      requireWebhookRead: async (_c, next) => {
+        await next();
+      },
+    });
+    const env: Env = fakeEnv({
+      GMAIL_WEBHOOK_AUDIENCE: "https://hooks.developershub.jp/hooks/gmail",
+      GMAIL_PUSH_SA_EMAIL: "gmail-push@dub-project.iam.gserviceaccount.com",
+    });
+    const body = JSON.stringify({ message: { messageId: "msg-42" }, subscription: "s" });
+    const res = await app.fetch(
+      new Request("https://hooks/hooks/gmail", {
+        method: "POST",
+        body,
+        headers: new Headers({ "content-type": "application/json", authorization: "Bearer x" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { accepted: boolean }).accepted).toBe(true);
+    expect(gmailQ.sent).toHaveLength(1);
+    expect(gmailQ.sent[0]!.source).toBe("gmail");
+    expect(gmailQ.sent[0]!.externalId).toBe("msg-42");
+  });
+});
+
 describe("GET /hooks/:source handshake", () => {
-  it("answers 200 for enabled sources (google-drive, stripe, github)", async () => {
+  it("answers 200 for enabled sources (github, google-drive, gmail, stripe)", async () => {
     const h = harness();
-    for (const source of ["github", "google-drive", "stripe"] as const) {
+    for (const source of ["github", "google-drive", "gmail", "stripe"] as const) {
       const res = await h.app.fetch(new Request(`https://hooks/hooks/${source}`), h.env);
       expect(res.status).toBe(200);
       expect(((await res.json()) as { status: string; source: string }).source).toBe(source);
     }
   });
 
-  it("answers 404 for a disabled known source (gmail) and an unknown source", async () => {
+  it("answers 404 for an unknown source", async () => {
     const h = harness();
-    const gmail = await h.app.fetch(new Request("https://hooks/hooks/gmail"), h.env);
-    expect(gmail.status).toBe(404);
     const unknown = await h.app.fetch(new Request("https://hooks/hooks/telegram"), h.env);
     expect(unknown.status).toBe(404);
   });
