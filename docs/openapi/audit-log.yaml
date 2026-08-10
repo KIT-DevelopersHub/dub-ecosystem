@@ -6,7 +6,7 @@ info:
   title: Audit Log API
   version: 1.0.0
   description: |-
-    Append-only audit trail: synchronous /internal/log for the 5 critical actions, Queue-backed for the rest, plus authorized search. External segment /api/v1/audit.
+    Append-only audit trail: synchronous /internal/log for the 5 critical actions, asynchronous /internal/audit-async (outbox drain landing) for the rest, plus authorized search. External segment /api/v1/audit.
     
     All responses echo the correlation id in the x-dub-request-id header.
 servers:
@@ -49,6 +49,32 @@ paths:
       responses:
         '201':
           description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogWriteResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      security: []
+  /internal/audit-async:
+    post:
+      operationId: ingestAuditAsync
+      summary: Asynchronous audit ingest (outbox drain landing)
+      tags:
+        - audit
+      description: |-
+        Open-catalog async ingest. The free-tier @dub/freeq outbox drain (auth-service and other producers) forwards each due record here over its SVC_AUDIT service binding as an AuditRecordEnvelopeV1 — the same envelope the retired Cloudflare Queue consumer understood. Unlike /internal/log there is no SYNC_AUDIT_ACTIONS gate: this is the landing route for open-vocabulary actions such as auth.session.login / auth.session.logout. The envelope id is the producer idempotency key (INSERT OR IGNORE ⇒ at-least-once re-delivery is safe); a non-2xx makes the drain keep the row pending and retry, so a record is never lost.
+
+        Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditRecordEnvelopeV1'
+      responses:
+        '202':
+          description: Accepted and durably recorded
           content:
             application/json:
               schema:
@@ -234,6 +260,24 @@ components:
           type: string
           format: date-time
           description: ISO8601 UTC
+    AuditRecordEnvelopeV1:
+      type: object
+      description: |-
+        The special audit channel envelope (@dub/events AuditRecordEnvelopeV1 / @dub/freeq outbox topic "audit.record"). Delivered to POST /internal/audit-async by the outbox drain. `id` is the producer-assigned idempotency key.
+      required:
+        - type
+        - version
+        - id
+        - payload
+      properties:
+        type:
+          const: audit.record
+        version:
+          const: 1
+        id:
+          type: string
+        payload:
+          $ref: '#/components/schemas/AuditRecordInput'
     AuditRecord:
       allOf:
         - $ref: '#/components/schemas/AuditRecordInput'

@@ -148,6 +148,90 @@ describe("POST /internal/log (sync fail-close)", () => {
   });
 });
 
+// ---- async ingest write route (free-tier outbox drain landing) -----------
+// POST /internal/audit-async receives the AuditRecordEnvelopeV1 that auth-service's
+// @dub/freeq Cron drain forwards over its SVC_AUDIT binding (PR #106). Contract mirror:
+//   path    = /internal/audit-async
+//   headers = x-dub-internal:"1" (presence marker) + content-type: application/json
+//   body    = { type:"audit.record", version:1, id, payload: AuditRecordInput }
+// Open catalog (no SYNC_AUDIT_ACTIONS gate) so auth.session.* lands here, not /internal/log.
+
+describe("POST /internal/audit-async (async ingest, open catalog)", () => {
+  // Exact byte shape the drain emits (services/auth-service/src/drain.ts makeAuditDeliver).
+  const post = (env: Env, body: unknown, internal = true) =>
+    createApp().fetch(
+      new Request("https://svc/internal/audit-async", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(internal ? { [HEADERS.internal]: "1" } : {}),
+        },
+        body: JSON.stringify(body),
+      }),
+      env,
+    );
+
+  it("accepts auth.session.login (a non-sync action) and persists it (202 + {id})", async () => {
+    const { d1 } = makeD1();
+    const res = await post(makeEnv(d1), envelope("SESS_LOGIN_1", { action: "auth.session.login", actorId: "user_42", resourceType: null, resourceId: null, details: null }));
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as auditLog.AuditLogWriteResponse;
+    expect(body.id).toBe("SESS_LOGIN_1");
+    const rec = await getById(auditDb(d1), "SESS_LOGIN_1");
+    expect(rec?.action).toBe("auth.session.login");
+    expect(rec?.actorId).toBe("user_42");
+    expect(rec?.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+  });
+
+  it("also accepts auth.session.logout (proves the sync catalog gate does NOT apply)", async () => {
+    const { d1 } = makeD1();
+    const res = await post(makeEnv(d1), envelope("SESS_LOGOUT_1", { action: "auth.session.logout" }));
+    expect(res.status).toBe(202);
+    expect((await getById(auditDb(d1), "SESS_LOGOUT_1"))?.action).toBe("auth.session.logout");
+  });
+
+  it("is idempotent on at-least-once re-delivery (same envelope id => one row, first wins)", async () => {
+    const { d1 } = makeD1();
+    await post(makeEnv(d1), envelope("REDELIVER_1", { action: "auth.session.login", result: "success" }));
+    await post(makeEnv(d1), envelope("REDELIVER_1", { action: "auth.session.login", result: "failure" }));
+    const page = await queryLogs(auditDb(d1), {});
+    expect(page.items.length).toBe(1);
+    expect(page.items[0]!.result).toBe("success");
+  });
+
+  it("rejects a malformed envelope (400) and inserts nothing => drain retries, not loses", async () => {
+    const { d1 } = makeD1();
+    // Missing `type` — parseAuditEnvelope must reject before touching the payload.
+    const res = await post(makeEnv(d1), { version: 1, id: "NOPE", payload: input({ action: "auth.session.login" }) });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect((await queryLogs(auditDb(d1), {})).items.length).toBe(0);
+  });
+
+  it("rejects an envelope whose payload fails validation (400), no insert", async () => {
+    const { d1 } = makeD1();
+    const res = await post(makeEnv(d1), envelope("BAD_PAYLOAD_1", { orgId: "" as auditLog.AuditRecordInput["orgId"] }));
+    expect(res.status).toBe(400);
+    expect((await queryLogs(auditDb(d1), {})).items.length).toBe(0);
+  });
+
+  it("returns 404 when the x-dub-internal marker is absent (never publicly reachable)", async () => {
+    const { d1 } = makeD1();
+    const res = await post(makeEnv(d1), envelope("PUBLIC_1", { action: "auth.session.login" }), /* internal */ false);
+    expect(res.status).toBe(404);
+    expect((await queryLogs(auditDb(d1), {})).items.length).toBe(0);
+  });
+
+  it("append-only holds for async-ingested rows: UPDATE and in-window DELETE are rejected", async () => {
+    const { d1, raw } = makeD1();
+    await post(makeEnv(d1), envelope("APPEND_1", { action: "auth.session.login", occurredAt: new Date().toISOString() }));
+    expect(() => raw.exec("UPDATE audit_logs SET action='hacked' WHERE id='APPEND_1'")).toThrow(/append-only/);
+    expect(() => raw.exec("DELETE FROM audit_logs WHERE id='APPEND_1'")).toThrow(/append-only/);
+    expect((await getById(auditDb(d1), "APPEND_1"))?.action).toBe("auth.session.login");
+  });
+});
+
 // ---- 7,8,13  Read query route --------------------------------------------
 
 describe("GET /audit/logs (read, audit:read gated)", () => {

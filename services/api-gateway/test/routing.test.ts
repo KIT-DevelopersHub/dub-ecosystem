@@ -78,6 +78,18 @@ describe("transparent routing", () => {
     expect(mailSvc.requests).toHaveLength(0);
   });
 
+  it("[audit] /audit/internal/* (log + audit-async) is internal-only -> 404 externally", async () => {
+    const auditSvc = fakeBinding(() => json(200, { ok: true }));
+    const env = makeEnv({ SVC_AUTH: authBinding(validSession()).fetcher, SVC_AUDIT_LOG: auditSvc.fetcher });
+    const a = app();
+    for (const p of ["/api/v1/audit/internal/log", "/api/v1/audit/internal/audit-async"]) {
+      const res = await a.fetch(new Request(`https://x${p}`, { method: "POST", headers: { authorization: "Bearer t" }, body: "{}" }), env, execCtx);
+      expect(res.status).toBe(404);
+      expect((await errOf(res)).code).toBe("GATEWAY_ROUTE_NOT_FOUND");
+    }
+    expect(auditSvc.requests).toHaveLength(0); // never proxied to the receiver
+  });
+
   it("[case2] unknown path and internal-only paths -> 404 GATEWAY_ROUTE_NOT_FOUND", async () => {
     const env = makeEnv({ SVC_AUTH: authBinding(validSession()).fetcher });
     const a = app();
