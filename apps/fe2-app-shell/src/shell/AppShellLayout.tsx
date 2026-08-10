@@ -11,7 +11,7 @@ import { AppShell, PageHeader, AppLauncher, Button, Icon } from "@dub/ui";
 import type { AppLauncherItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
-import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
+import { usePermissions } from "../auth/AuthProvider.tsx";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -54,7 +54,6 @@ export function AppShellLayout({
   title = "DevHub",
   children,
 }: AppShellLayoutProps): JSX.Element {
-  const auth = useAuth();
   const { can } = usePermissions();
 
   const header = (
@@ -73,9 +72,6 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
-          {auth.status === "authenticated" ? (
-            <span data-testid="fe2-shell-user">{auth.me.user.displayName}</span>
-          ) : null}
           <Button
             testId="fe2-logout"
             variant="secondary"
