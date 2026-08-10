@@ -1,5 +1,11 @@
-// Hono app: POST /send (internal-only, idempotent), read routes (/messages, /threads),
-// mailbox admin, health. Auth: trusted-header authn + identity /authz/check (theme6).
+// Hono app. Two disjoint surfaces on one Worker:
+//   - internal (bare paths, reached via Service Binding): POST /send (idempotent),
+//     /internal/*, /health/quota. Gated by x-dub-internal.
+//   - external (mounted under /mail): /mail/outbox, /mail/messages, /mail/threads,
+//     /mail/mailboxes. The gateway strips only API_PREFIX and preserves the segment,
+//     forwarding /api/v1/mail/* -> the binding as /mail/*, so external routes must live
+//     under /mail (mirrors identity-roster's /identity). Gated by trusted-header authn +
+//     identity /authz/check (theme6).
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { DubError, errors, dubErrorHandler } from "@dub/errors";
 import { dubContext } from "@dub/http";
@@ -67,13 +73,19 @@ export function createApp() {
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
 
+  // ===================== external surface (/mail/*) =====================
+  // Mounted under /mail so gateway-forwarded /api/v1/mail/* (segment preserved) matches.
+  // Internal callers (Service Bindings) address /send and /internal/* directly — those
+  // stay at bare paths on the root app below and are unaffected.
+  const ext = new Hono<AppBindings>();
+
   // ---- POST /outbox: USER-FACING compose+send (design 統合波). Unlike /send (internal
   // binding, system-origin), this is reachable through api-gateway with the caller's
   // session identity: requireAuth (trusted x-dub-user-id) + mail:send. Idempotency-Key
   // is optional here (UI submit) — a fresh one is minted when absent so a retried submit
   // is still safe. Shares the exact send core, so 二重送信ゼロ still holds per key.
-  app.use("/outbox", withAuth("mail:send"));
-  app.post("/outbox", async (c) => {
+  ext.use("/outbox", withAuth("mail:send"));
+  ext.post("/outbox", async (c) => {
     const ctx = ctxOf(c);
     const idempotencyKey = c.req.header(HEADERS.idempotencyKey) ?? crypto.randomUUID();
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
@@ -84,23 +96,23 @@ export function createApp() {
   });
 
   // ---- read routes: mail:read (organizer 以上). requireAuth (trusted header) first.
-  app.use("/messages", withAuth("mail:read"));
-  app.use("/messages/*", withAuth("mail:read"));
-  app.use("/threads/*", withAuth("mail:read"));
+  ext.use("/messages", withAuth("mail:read"));
+  ext.use("/messages/*", withAuth("mail:read"));
+  ext.use("/threads/*", withAuth("mail:read"));
 
-  app.get("/messages", async (c) => {
+  ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
     const page = await listInbound(dbOf(c), q);
     return c.json(page satisfies common.Paginated<mail.MailMessage>);
   });
 
-  app.get("/messages/:id", async (c) => {
+  ext.get("/messages/:id", async (c) => {
     const msg = await getInboundById(dbOf(c), c.req.param("id"));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json(msg satisfies mail.MailMessage);
   });
 
-  app.get("/threads/:id", async (c) => {
+  ext.get("/threads/:id", async (c) => {
     const threadId = c.req.param("id");
     const page = await listInbound(dbOf(c), { threadId, limit: 200 });
     if (page.items.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
@@ -108,15 +120,15 @@ export function createApp() {
   });
 
   // ---- mailbox admin: mail:admin.
-  app.use("/mailboxes", withAuth("mail:admin"));
-  app.use("/mailboxes/*", withAuth("mail:admin"));
+  ext.use("/mailboxes", withAuth("mail:admin"));
+  ext.use("/mailboxes/*", withAuth("mail:admin"));
 
-  app.get("/mailboxes", async (c) => {
+  ext.get("/mailboxes", async (c) => {
     const items = await listMailboxes(dbOf(c));
     return c.json({ items } satisfies { items: mail.Mailbox[] });
   });
 
-  app.post("/mailboxes/:id", async (c) => {
+  ext.post("/mailboxes/:id", async (c) => {
     const id = c.req.param("id");
     const body = (await c.req.json().catch(() => null)) as { address?: unknown } | null;
     if (!body || typeof body.address !== "string") {
@@ -125,6 +137,8 @@ export function createApp() {
     await upsertMailbox(dbOf(c), id, body.address);
     return c.json({ id, address: body.address }, 200);
   });
+
+  app.route("/mail", ext);
 
   // ---- status: live send-health self-report (internal-only). Derives "directly rate-
   // limited" from the send-log so an operator dashboard (fe7 admin) can surface it. The

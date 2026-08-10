@@ -82,17 +82,17 @@ describe("POST /send", () => {
   });
 });
 
-describe("POST /outbox (user-facing compose)", () => {
+describe("POST /mail/outbox (user-facing compose)", () => {
   it("401s without a trusted user header", async () => {
     const { env } = makeEnv();
-    const res = await app.fetch(new Request("https://svc/outbox", { method: "POST", headers: headers(), body: JSON.stringify(sendBody) }), env);
+    const res = await app.fetch(new Request("https://svc/mail/outbox", { method: "POST", headers: headers(), body: JSON.stringify(sendBody) }), env);
     expect(res.status).toBe(401);
   });
 
   it("403s when mail:send is denied", async () => {
     const { env } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(false) });
     const res = await app.fetch(
-      new Request("https://svc/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_bob" }), body: JSON.stringify(sendBody) }),
+      new Request("https://svc/mail/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_bob" }), body: JSON.stringify(sendBody) }),
       env,
     );
     expect(res.status).toBe(403);
@@ -101,7 +101,7 @@ describe("POST /outbox (user-facing compose)", () => {
   it("sends (202) for an authorized user with mail:send — no Idempotency-Key required", async () => {
     const { env, sends } = makeEnv();
     const res = await app.fetch(
-      new Request("https://svc/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify(sendBody) }),
+      new Request("https://svc/mail/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify(sendBody) }),
       env,
     );
     expect(res.status).toBe(202);
@@ -114,7 +114,7 @@ describe("POST /outbox (user-facing compose)", () => {
   it("400s on an invalid recipient", async () => {
     const { env } = makeEnv();
     const res = await app.fetch(
-      new Request("https://svc/outbox", {
+      new Request("https://svc/mail/outbox", {
         method: "POST",
         headers: headers({ "x-dub-user-id": "usr_alice" }),
         body: JSON.stringify({ to: [{ email: "nope" }], subject: "x", textBody: "y" }),
@@ -127,24 +127,24 @@ describe("POST /outbox (user-facing compose)", () => {
   it("dedupes on a repeated Idempotency-Key (二重送信ゼロ)", async () => {
     const { env, sends } = makeEnv();
     const h = headers({ "x-dub-user-id": "usr_alice", "x-dub-idempotency-key": "ob1" });
-    const first = await app.fetch(new Request("https://svc/outbox", { method: "POST", headers: h, body: JSON.stringify(sendBody) }), env);
+    const first = await app.fetch(new Request("https://svc/mail/outbox", { method: "POST", headers: h, body: JSON.stringify(sendBody) }), env);
     expect(first.status).toBe(202);
-    const second = await app.fetch(new Request("https://svc/outbox", { method: "POST", headers: h, body: JSON.stringify(sendBody) }), env);
+    const second = await app.fetch(new Request("https://svc/mail/outbox", { method: "POST", headers: h, body: JSON.stringify(sendBody) }), env);
     expect(second.status).toBe(200);
     expect(sends.notif).toHaveLength(1);
   });
 });
 
-describe("read routes", () => {
+describe("read routes (/mail/messages)", () => {
   it("401s without a trusted user header", async () => {
     const { env } = makeEnv();
-    const res = await app.fetch(new Request("https://svc/messages", { headers: headers() }), env);
+    const res = await app.fetch(new Request("https://svc/mail/messages", { headers: headers() }), env);
     expect(res.status).toBe(401);
   });
 
   it("lists messages (empty) with mail:read", async () => {
     const { env } = makeEnv();
-    const res = await app.fetch(new Request("https://svc/messages", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    const res = await app.fetch(new Request("https://svc/mail/messages", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: unknown[]; nextCursor: null };
     expect(body).toEqual({ items: [], nextCursor: null });
@@ -152,16 +152,33 @@ describe("read routes", () => {
 
   it("403s when mail:read is denied", async () => {
     const { env } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(false) });
-    const res = await app.fetch(new Request("https://svc/messages", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    const res = await app.fetch(new Request("https://svc/mail/messages", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
     expect(res.status).toBe(403);
   });
 
   it("404s for a missing message", async () => {
     const { env } = makeEnv();
-    const res = await app.fetch(new Request("https://svc/messages/does-not-exist", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    const res = await app.fetch(new Request("https://svc/mail/messages/does-not-exist", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("MAIL_MESSAGE_NOT_FOUND");
+  });
+});
+
+// The external surface is mounted under /mail so the gateway-forwarded /api/v1/mail/*
+// (segment preserved, API_PREFIX stripped) reaches the Worker. Guard against a
+// regression to bare external paths (which would 404 every gateway-forwarded request).
+describe("external routes require the /mail mount", () => {
+  it("bare /messages (no /mail) is not routed → 404", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/messages", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    expect(res.status).toBe(404);
+  });
+
+  it("bare /outbox (no /mail) is not routed → 404", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify(sendBody) }), env);
+    expect(res.status).toBe(404);
   });
 });
 
