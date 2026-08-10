@@ -10,7 +10,7 @@ login state, session handling, and permission gating depends on this. Read
 |---|---|
 | Auth request/response types | `packages/types/src/auth.ts` |
 | Permission catalog + authz types | `packages/types/src/identity.ts` |
-| `/auth/me` (gateway) shape | `packages/types/src/gateway.ts` (`MeResponse`) |
+| `GET /api/v1/me` (gateway) shape | `packages/types/src/gateway.ts` (`MeResponse`) |
 | auth-service routes | `services/auth-service/src/app.ts` |
 | Session lifecycle (KV) | `services/auth-service/src/sessions.ts` |
 | authn/authz client helpers | `packages/auth-client/src/index.ts` |
@@ -40,21 +40,24 @@ Two token transports, one session model:
 
 ## 2. Endpoint map
 
-Public web endpoints are reached through the gateway; auth-service also exposes
-internal-only routes used by the entrypoints and identity. `GET /auth/me` is served by the
-**gateway** (it composes session + permissions), not auth-service.
+Public web endpoints are reached **through the gateway**, so every web path below is
+served under the gateway prefix `/api/v1` (`common.API_PREFIX`). The `/api/v1/auth/*`
+routes proxy 1:1 to auth-service (prefix stripped); **`GET /api/v1/me` is gateway-owned**
+(it composes session + permissions) — it is **not** an `/auth/*` route and has no
+auth-service counterpart. `GET /auth/callback` is registered on auth-service's own public
+hostname because Google redirects to it directly, not through the gateway.
 
-| Method & path | Exposed on | Auth | Purpose |
+| Method & path (external) | Exposed on | Auth | Purpose |
 |---|---|---|---|
-| `POST /auth/login` | gateway (public) | none | Begin OAuth; returns the Google `authorizationUrl` |
+| `POST /api/v1/auth/login` | gateway -> auth-service | none | Begin OAuth; returns the Google `authorizationUrl` |
 | `GET /auth/callback` | auth-service (public) | none | OAuth redirect target; sets cookie, 302s back to the SPA |
-| `POST /auth/refresh` | gateway (public) | cookie or bearer | Slide the session; rotate token |
-| `POST /auth/logout` | gateway (public) | cookie or bearer | Revoke the current session |
-| `GET /auth/me` | **gateway** (public) | cookie or bearer | Current user + org + effective permissions |
+| `POST /api/v1/auth/refresh` | gateway -> auth-service | cookie or bearer | Slide the session; rotate token |
+| `POST /api/v1/auth/logout` | gateway -> auth-service | cookie or bearer | Revoke the current session |
+| `GET /api/v1/me` | **gateway (owned)** | cookie or bearer | Current user + org + effective permissions |
 | `POST /mobile/exchange` | auth-service (internal, MO3 only) | `x-dub-internal` | Exchange a mobile OAuth code for a bearer token |
 | `POST /verify` | auth-service (internal, gateway/BFF only) | `x-dub-internal` | Verify a token -> session (used by entrypoints) |
 | `POST /authz/check` | identity-roster (internal) | `x-dub-internal` | Batch permission decisions |
-| `POST /auth/test-login` | auth-service (**local/preview only**) | none | Mint a session for a user id without OAuth |
+| `POST /api/v1/auth/test-login` | gateway -> auth-service (**local/preview only**) | none | Mint a session for a user id without OAuth |
 
 Internal-only routes reject any request lacking `x-dub-internal: 1` with
 `AUTH_INTERNAL_FORBIDDEN` (403). `test-login` is compiled out of production builds (theme8).
@@ -157,10 +160,11 @@ not parse it. Internally auth-service keeps richer bookkeeping (`issuedAt`,
 
 ---
 
-## 5. Who am I: `GET /auth/me`
+## 5. Who am I: `GET /api/v1/me`
 
-Served by the **gateway**, which verifies the session and composes the identity
-permission set. Response is `gateway.MeResponse`:
+Gateway-owned (registered directly on the gateway, **not** proxied to auth-service and
+**not** an `/auth/*` path). It verifies the session and composes the identity permission
+set. Response is `gateway.MeResponse`:
 
 ```json
 {
@@ -182,7 +186,7 @@ permission set. Response is `gateway.MeResponse`:
 | `permissions` | `PermissionKey[]` | **Effective** permissions resolved from the user's roles — the FE gates UI on this list |
 | `sessionExpiresAt` | number (epoch-ms) | Access-token expiry |
 
-Unauthenticated call -> `401 UNAUTHENTICATED`. The FE treats 401 on `/auth/me` as
+Unauthenticated call -> `401 UNAUTHENTICATED`. The FE treats 401 on `/api/v1/me` as
 "logged out" and routes to login.
 
 ---
@@ -318,7 +322,7 @@ Self-service keys carry a `:self` scope segment. Every entry declares `dangerous
 
 Roles bundle permission keys. System roles: `admin`, `organizer`, `member` (plus custom
 roles). A user's **effective** permissions are the union of their roles' keys — that list
-is what `/auth/me` returns and what the FE gates on.
+is what `GET /api/v1/me` returns and what the FE gates on.
 
 ---
 
@@ -371,7 +375,7 @@ A denied permission at an endpoint surfaces to the client as `403 FORBIDDEN`.
 
 | Code | HTTP | Meaning / when |
 |---|---|---|
-| `UNAUTHENTICATED` | 401 | No session on a route that needs one (e.g. `/auth/me`) |
+| `UNAUTHENTICATED` | 401 | No session on a route that needs one (e.g. `/api/v1/me`) |
 | `AUTH_INVALID_TOKEN` | 401 | Missing / malformed / unverifiable token |
 | `AUTH_SESSION_EXPIRED` | 401 | Access token past expiry (refresh to recover) |
 | `AUTH_SESSION_REVOKED` | 401 | Session revoked or past absolute lifetime (re-login) |
