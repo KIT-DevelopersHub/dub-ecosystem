@@ -20,6 +20,29 @@ describe("healthz", () => {
   });
 });
 
+describe("prefix mount alignment (spec <-> impl drift lock)", () => {
+  // These pin the exact boundary the OpenAPI spec declares: /healthz is root-mounted
+  // (outside API_PREFIX); every gateway-owned route lives under API_PREFIX. If the mount
+  // prefix in app.ts ever drifts from routes.ts / the spec, one of these flips to 404.
+  it("/healthz is served at the root, NOT under the API prefix", async () => {
+    const app = createApp(NO_RL);
+    const root = await app.fetch(new Request("https://x/healthz"), makeEnv(), execCtx);
+    expect(root.status).toBe(200);
+
+    const prefixed = await app.fetch(new Request("https://x/api/v1/healthz"), makeEnv(), execCtx);
+    expect(prefixed.status).toBe(404);
+    expect((await errOf(prefixed)).code).toBe("GATEWAY_ROUTE_NOT_FOUND");
+  });
+
+  it("gateway-owned routes are only reachable under the API prefix", async () => {
+    const app = createApp(NO_RL);
+    // /me without the prefix must not resolve (it is mounted at API_PREFIX/me).
+    const bare = await app.fetch(new Request("https://x/me"), makeEnv(), execCtx);
+    expect(bare.status).toBe(404);
+    expect((await errOf(bare)).code).toBe("GATEWAY_ROUTE_NOT_FOUND");
+  });
+});
+
 describe("[case8] rate limiting", () => {
   it("allows up to the limit, 429s beyond it with RateLimit-*/Retry-After, recovers after window", async () => {
     let clock = 1_000_000;
