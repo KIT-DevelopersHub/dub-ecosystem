@@ -8,8 +8,11 @@
 //
 // This module layers a richer, read-mostly seed on top of the same MSW-style
 // transport swap. It:
-//   1. auto-completes login — the demo `/me` returns a broad-permission session,
-//      so RequireAuth passes without any OAuth round-trip;
+//   1. gates the demo behind a credential login — the demo `/me` returns a
+//      session ONLY after `demoLogin(email, password)` matched one of the two
+//      seeded accounts (admin / member); before that it returns 401 so
+//      RequireAuth redirects to /login. The chosen account's role decides the
+//      permission set, so the same demo UI renders an admin vs. a member view;
 //   2. answers each feature's primary list endpoint (events / tasks / gantt /
 //      notifications / mail / identity) from in-memory seed data;
 //   3. answers the common detail + benign mutation endpoints (mail thread/read,
@@ -55,6 +58,84 @@ const DEMO_ME: gateway.MeResponse = {
   permissions: DEMO_PERMISSIONS,
   sessionExpiresAt: Date.now() + 60 * 60 * 1000,
 };
+
+// ── demo credential login (client-only session) ───────────────────────────────
+// The demo is fully backend-free, so the "login" is a client-side credential
+// check against two seeded accounts. The chosen role is persisted in
+// sessionStorage so a hard refresh keeps the session; the demo `/me` reads it and
+// returns the matching MeResponse (or 401 when logged out). Real prod uses the
+// gateway's Google OAuth + cookie session instead (see LoginScreen / main.tsx).
+const MEMBER_ID = "usr_member";
+
+// A general member sees the app read-only: dashboards, events, tasks,
+// notifications and mail — but NOT the admin roster (no identity:admin) and no
+// write scopes. This makes the admin/member role difference visible in the UI.
+const MEMBER_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "file:read",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "mail:read",
+];
+
+const DEMO_ME_MEMBER: gateway.MeResponse = {
+  user: { id: MEMBER_ID, displayName: "デモ 一般メンバー", avatarUrl: null },
+  orgId: ORG,
+  permissions: MEMBER_PERMISSIONS,
+  sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+};
+
+export type DemoRole = "admin" | "member";
+
+interface DemoAccount {
+  email: string;
+  password: string;
+  role: DemoRole;
+  label: string;
+}
+
+// Public, non-secret demo credentials (shown on the login screen for reviewers).
+export const DEMO_ACCOUNTS: readonly DemoAccount[] = [
+  { email: "admin@dub.local", password: "demo-admin-pw", role: "admin", label: "管理者ビュー（全機能）" },
+  { email: "member@dub.local", password: "demo-member-pw", role: "member", label: "一般メンバービュー（閲覧中心）" },
+];
+
+const SESSION_KEY = "dub-demo-role";
+
+function sessionStore(): Storage | null {
+  try {
+    return globalThis.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Current demo session role, or null when logged out. */
+export function demoSessionRole(): DemoRole | null {
+  const v = sessionStore()?.getItem(SESSION_KEY);
+  return v === "admin" || v === "member" ? v : null;
+}
+
+/** Validate demo credentials; on success persist the role and return true. */
+export function demoLogin(email: string, password: string): boolean {
+  const match = DEMO_ACCOUNTS.find(
+    (a) => a.email === email.trim().toLowerCase() && a.password === password,
+  );
+  if (!match) return false;
+  sessionStore()?.setItem(SESSION_KEY, match.role);
+  return true;
+}
+
+/** Clear the demo session. */
+export function demoLogout(): void {
+  sessionStore()?.removeItem(SESSION_KEY);
+}
+
+function meForRole(role: DemoRole): gateway.MeResponse {
+  return role === "admin" ? DEMO_ME : DEMO_ME_MEMBER;
+}
 
 // ── events ────────────────────────────────────────────────────────────────────
 const EVENTS: event.EventSummary[] = [
@@ -218,6 +299,10 @@ function notFound(route: string): Response {
   const body: ErrorResponse = { error: { code: "NOT_FOUND", message: `demo: no handler for ${route}`, retryable: false } };
   return json(body, 404);
 }
+function unauthorized(): Response {
+  const body: ErrorResponse = { error: { code: "UNAUTHENTICATED", message: "demo: not logged in", retryable: false } };
+  return json(body, 401);
+}
 function page<T>(items: T[]): { items: T[]; nextCursor: string | null } {
   return { items, nextCursor: null };
 }
@@ -228,6 +313,24 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
     const m = re.exec(pathname);
     return m ? decodeURIComponent(m[1]!) : null;
   };
+
+  // ── session gate ──────────────────────────────────────────────────────────
+  // /me is the demo's login gate: no session → 401 → RequireAuth → /login. When
+  // logged in, the role decides admin vs. member permissions (visible出し分け).
+  if (method === "GET" && pathname === "/api/v1/me") {
+    const role = demoSessionRole();
+    return role ? json(meForRole(role)) : unauthorized();
+  }
+  // Logout clears the demo session before the boot mock acks it.
+  if (method === "POST" && pathname === "/api/v1/auth/logout") {
+    demoLogout();
+    return json(null, 204);
+  }
+  // A logged-out demo must not silently pass /me via refresh: fail the refresh so
+  // the api-client's 401→refresh→retry lands on onUnauthenticated (→ /login).
+  if (method === "POST" && pathname === "/api/v1/auth/refresh" && !demoSessionRole()) {
+    return unauthorized();
+  }
 
   if (method === "GET") {
     // events

@@ -1,22 +1,59 @@
-// Demo transport (backend-free showcase). Verifies createDemoFetch auto-logs-in
-// with a broad permission session and serves each feature's primary list/detail
-// endpoint from seed data, driven end-to-end through the REAL api-client (so the
-// mock exercises retry/refresh/error handling, not a bypass). Unknown routes
-// still fall through to a NOT_FOUND envelope (in-frame fallback, never blank).
-import { describe, expect, it } from "vitest";
+// Demo transport (backend-free showcase). Verifies createDemoFetch gates /me
+// behind a credential login (admin / member) and serves each feature's primary
+// list/detail endpoint from seed data, driven end-to-end through the REAL
+// api-client (so the mock exercises retry/refresh/error handling, not a bypass).
+// Unknown routes still fall through to a NOT_FOUND envelope (never blank).
+import { beforeEach, describe, expect, it } from "vitest";
 import { createApiClient, ApiError } from "./api-client.tsx";
-import { createDemoFetch, isDemoEnabled } from "./demo-seed.tsx";
+import { createDemoFetch, demoLogin, demoLogout, isDemoEnabled } from "./demo-seed.tsx";
 
 function api() {
   return createApiClient({ baseUrl: "https://demo.local", fetchImpl: createDemoFetch() });
 }
 
 describe("createDemoFetch", () => {
-  it("auto-completes login with a broad-permission session", async () => {
+  beforeEach(() => demoLogout());
+
+  it("gates /me behind login: 401 when logged out (→ redirect to /login)", async () => {
+    let caught: unknown;
+    try {
+      await api().auth.me();
+    } catch (e) {
+      caught = e;
+    }
+    expect(ApiError.isApiError(caught)).toBe(true);
+    expect((caught as ApiError).status).toBe(401);
+  });
+
+  it("admin credentials unlock a broad-permission session", async () => {
+    expect(demoLogin("admin@dub.local", "demo-admin-pw")).toBe(true);
     const me = await api().auth.me();
     expect(me.user.displayName).toBe("デモ 管理者");
     expect(me.permissions).toContain("mail:send");
     expect(me.permissions).toContain("identity:admin");
+  });
+
+  it("member credentials unlock a read-mostly session without admin scopes", async () => {
+    expect(demoLogin("member@dub.local", "demo-member-pw")).toBe(true);
+    const me = await api().auth.me();
+    expect(me.user.displayName).toBe("デモ 一般メンバー");
+    expect(me.permissions).toContain("event:read");
+    expect(me.permissions).not.toContain("identity:admin");
+    expect(me.permissions).not.toContain("mail:send");
+  });
+
+  it("rejects wrong credentials and logout clears the session", async () => {
+    expect(demoLogin("admin@dub.local", "wrong")).toBe(false);
+    expect(demoLogin("nobody@dub.local", "demo-admin-pw")).toBe(false);
+    demoLogin("admin@dub.local", "demo-admin-pw");
+    demoLogout();
+    let status = 0;
+    try {
+      await api().auth.me();
+    } catch (e) {
+      status = ApiError.isApiError(e) ? e.status : -1;
+    }
+    expect(status).toBe(401);
   });
 
   it("serves seeded feature lists so every nav item renders data", async () => {
