@@ -29,9 +29,11 @@ export const SNIPPET_MAX = 200;
 // Anything else in SendMailRequest.headers-shaped input is rejected.
 export const OUTBOUND_HEADER_ALLOWLIST = ["x-dub-mail-loop", "auto-submitted"] as const;
 
-// Managed outbound providers (frozen SendMailResponse.provider union). SES暫定 (ADR-001).
+// Managed outbound providers (frozen SendMailResponse.provider union). Resend is the
+// first-choice provider (ADR-0001); SES remains a supported path for future/high-volume
+// needs. The active provider is chosen via MAIL_OUTBOUND_PROVIDER; unset falls back here.
 export const OUTBOUND_PROVIDERS = ["ses", "mailchannels", "resend"] as const;
-export const DEFAULT_OUTBOUND_PROVIDER = "ses";
+export const DEFAULT_OUTBOUND_PROVIDER = "resend";
 
 // Outbound send resilience (production hardening). A provider call is retried with
 // exponential backoff + jitter ONLY when it fails with a transient (retryable) error

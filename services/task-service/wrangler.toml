@@ -51,7 +51,7 @@ queue = "dub-q-audit-record"
 # --- Service bindings: identity-roster (authz/users) + event-service (validate) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"

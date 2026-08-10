@@ -80,7 +80,10 @@ export interface LogEntry {
   message: string;
   requestId?: string;
   userId?: string;
+  caller?: string;
   service?: string;
+  /** ISO-8601 emit timestamp (set by createLogger). */
+  time?: string;
   fields?: Record<string, unknown>;
 }
 
@@ -91,3 +94,31 @@ export const consoleSink: LogSink = (entry) => {
   const safe = redactSecrets(entry);
   console.log(JSON.stringify(safe));
 };
+
+// Higher-level helpers built on the primitives above. Placed at the bottom so the
+// value bindings they import from this module (consoleSink, redactSecrets, HDR_*)
+// are already initialized when their modules evaluate.
+export {
+  createLogger,
+  requestLogger,
+  type Logger,
+  type LoggerContext,
+  type HeaderSource,
+} from "./logger";
+export {
+  readHeader,
+  readRequestId,
+  readCorrelation,
+  correlationHeaders,
+  type Correlation,
+} from "./request";
+export {
+  createMetrics,
+  metricsFor,
+  consoleMetricSink,
+  type Metrics,
+  type MetricsContext,
+  type MetricEntry,
+  type MetricSink,
+  type MetricType,
+} from "./metrics";

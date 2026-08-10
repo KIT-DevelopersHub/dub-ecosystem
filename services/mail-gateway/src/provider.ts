@@ -46,7 +46,7 @@ export class MockMailProvider implements MailProvider {
   private failNext: boolean;
   private rateLimitNext: boolean;
   constructor(opts: { name?: ProviderName; fail?: boolean; rateLimit?: boolean } = {}) {
-    this.name = opts.name ?? "ses";
+    this.name = opts.name ?? DEFAULT_OUTBOUND_PROVIDER;
     this.failNext = opts.fail ?? false;
     this.rateLimitNext = opts.rateLimit ?? false;
   }
@@ -87,7 +87,7 @@ export function buildProvider(env: Env): MailProvider {
   if (name === "ses") return buildSesProvider(env);
   if (name === "mailchannels") return buildMailChannelsProvider(env);
   if (name === "resend") return buildResendProvider(env);
-  return buildSesProvider(env);
+  return buildResendProvider(env);
 }
 
 /** SES client when credentials are configured, else the loud stub (never silent-drop). */

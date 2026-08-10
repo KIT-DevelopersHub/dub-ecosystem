@@ -410,3 +410,84 @@ export interface RateLimitNoticeProps extends TestableProps {
   now?: number; // injectable clock (ms) for tests; default Date.now()
   tone?: BadgeTone; // default "warning"
 }
+
+// ── Timeline / Gantt (FE1 data-viz family). The data-viz primitive the design
+// system was missing: FE4 previously hand-rolled the Gantt as raw SVG + a local
+// gantt-layout module. This primitive is data-agnostic — consumers convert their
+// DTO to numeric epoch-ms rows (FE1 never imports @dub/types). Bar geometry,
+// timeline ticks, and dependency segments are computed inside from these props;
+// the pure math is exported (see `timeline-geometry`) for drag/quantization use.
+export type TimelineScale = "day" | "week" | "month";
+
+export interface TimelineRow {
+  id: string;
+  label: ReactNode;
+  /** epoch ms. null keeps the row listed with no bar (unscheduled task — FE4 §7). */
+  startMs: number | null;
+  endMs: number | null;
+  progressPercent?: number; // 0–100, clamped; drives the progress overlay
+}
+
+export interface TimelineDependency {
+  id: string;
+  fromId: string;
+  toId: string;
+  // FS violation (successor starts before predecessor finishes +lag). The consumer
+  // owns the date math and passes the flag; the primitive only draws the stroke.
+  violated?: boolean;
+}
+
+export interface TimelineProps extends TestableProps {
+  rows: TimelineRow[];
+  dependencies?: TimelineDependency[];
+  scale?: TimelineScale; // default "week"
+  onScaleChange?: (scale: TimelineScale) => void; // renders a scale switcher when set
+  rowHeight?: number; // px, default 28
+  minBarWidth?: number; // px, default 4 (same-day bar stays clickable)
+  truncated?: boolean; // renders a banner above the grid (e.g. gantt row cap §8-8)
+  truncatedLabel?: ReactNode;
+  onRowClick?: (id: string) => void;
+  selectedRowId?: string | null;
+  emptyState?: ReactNode; // shown when no rows have dates
+}
+
+// ── Chat message list (FE1 chat family). The chat primitive the design system was
+// missing: FE6 previously hand-rolled the timeline + message rows in local CSS.
+// Data-agnostic — `body` is a pre-rendered ReactNode (the consumer owns Md-subset /
+// mention rendering) and auth-gated actions are injected via render props, so FE1
+// stays domain-free. Day dividers, an unread divider, reactions, and pending/failed
+// send states are handled here.
+export type ChatMessageState = "sent" | "pending" | "failed";
+
+export interface ChatReaction {
+  emoji: string;
+  count: number;
+  mine?: boolean; // highlights the pill when the current user reacted
+}
+
+export interface ChatMessage {
+  id: string;
+  authorName: ReactNode;
+  body: ReactNode; // already-rendered (mentions/code resolved by the consumer)
+  timeLabel: ReactNode; // e.g. "13:42"
+  dayKey?: string; // groups messages; a date divider shows when it changes
+  dayLabel?: ReactNode; // divider label (defaults to dayKey)
+  edited?: boolean;
+  deleted?: boolean; // renders a redacted tombstone instead of the body
+  deletedLabel?: ReactNode; // default "このメッセージは削除されました"
+  reactions?: ChatReaction[];
+  state?: ChatMessageState; // default "sent"; "pending"/"failed" style the row
+}
+
+export interface MessageListProps extends TestableProps {
+  messages: ChatMessage[];
+  unreadBeforeId?: string | null; // renders an unread divider before this message
+  unreadLabel?: ReactNode; // default "ここから未読"
+  hasOlder?: boolean; // shows a "load older" affordance (no auto-firing)
+  onLoadOlder?: () => void;
+  loadOlderLabel?: ReactNode; // default "以前のメッセージを読み込む"
+  onToggleReaction?: (messageId: string, emoji: string) => void;
+  renderActions?: (message: ChatMessage) => ReactNode; // edit/delete slot (consumer gates auth)
+  renderFailedActions?: (message: ChatMessage) => ReactNode; // resend/discard slot
+  emptyState?: ReactNode;
+}

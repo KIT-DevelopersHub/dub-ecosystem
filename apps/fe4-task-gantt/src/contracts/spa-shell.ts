@@ -7,13 +7,15 @@
 // Integration swap (when FE2 ships):
 //   - `import type { ApiClient, RequestInput, ResourceClient } from "@dub/api-client";`
 //   - `import { ApiError } from "@dub/api-client";`
-//   - `import type { FeatureModule, FeatureRoute, NavEntry, FeatureModuleId, IconName } from "@dub/fe2-app-shell";`
+//   - `import type { FeatureModule, FeatureRoute, NavEntry, FeatureModuleId } from "@dub/fe2-app-shell";`
+//     (IconName is already sourced from @dub/ui below — FE2 re-exports the same union.)
 // The *shapes* below are the FE2-facing contract and mirror
 // `apps/fe2-app-shell/src/lib/api-client.tsx` + `.../modules/types.tsx`.
 import type { ComponentType } from "react";
 import type { ErrorResponse } from "@dub/errors";
 import { CommonErrorCodes } from "@dub/errors";
 import type { identity, gateway } from "@dub/types";
+import type { IconName } from "@dub/ui";
 
 type PermissionKey = identity.PermissionKey;
 
@@ -141,19 +143,13 @@ export function toDisplayableError(e: unknown): DisplayableError {
 // via `FeatureRoute.children`. Distributed via the in-app alias @spa/shell.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Closed FE1 IconName union used by `NavEntry.icon` (mirror of FE2 stubs/icons). */
-export type IconName =
-  | "home"
-  | "calendar"
-  | "check-square"
-  | "bell"
-  | "message-square"
-  | "shield"
-  | "settings"
-  | "users"
-  | "file"
-  | "alert-triangle"
-  | "log-out";
+/**
+ * Closed FE1 IconName union used by `NavEntry.icon`. Imported directly from the
+ * FE1 design system (@dub/ui) — the single frozen source (凍結案 1-1-7) that FE2
+ * re-exports and FE3 mirrors — so FE4's nav icons can never drift from the real
+ * registry. (Previously a hand-maintained local subset; that drift risk is gone.)
+ */
+export type { IconName };
 
 export type FeatureModuleId = "events" | "tasks" | "notifications" | "chat" | "admin";
 

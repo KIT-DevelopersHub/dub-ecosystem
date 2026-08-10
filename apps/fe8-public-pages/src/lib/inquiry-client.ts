@@ -15,6 +15,40 @@ export const IDEMPOTENCY_HEADER = "x-dub-idempotency-key";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+/**
+ * Normalize a build-time PUBLIC_GATEWAY_ORIGIN value into a base ready for URL
+ * concatenation. Returns the bare origin (scheme://host[:port]) with no trailing
+ * slash and no path, so `origin + PUBLIC_INQUIRY_PATH` is always well-formed.
+ *
+ * - undefined / "" / whitespace → "" (same-origin; design default).
+ * - a valid http(s) URL → its `.origin` (drops any path / trailing slash).
+ * - anything else (bad scheme, unparseable) → "" so a misconfigured deploy falls
+ *   back to same-origin instead of building a broken URL. Callers that need to
+ *   surface the misconfiguration can compare against {@link isValidGatewayOrigin}.
+ */
+export function resolveGatewayOrigin(raw?: string): string {
+  const value = (raw ?? "").trim();
+  if (!value) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "";
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+  return parsed.origin;
+}
+
+/**
+ * True when `raw` is a usable gateway origin: either empty (same-origin) or a
+ * well-formed http(s) origin. A non-empty value that fails to resolve is a
+ * deploy misconfiguration.
+ */
+export function isValidGatewayOrigin(raw?: string): boolean {
+  const value = (raw ?? "").trim();
+  return value === "" || resolveGatewayOrigin(value) !== "";
+}
+
 export interface SubmitInquiryOk {
   ok: true;
   data: PublicInquiryResponse;
@@ -53,7 +87,7 @@ export async function submitInquiry(
     return { ok: false, code: NETWORK_ERROR, status: 0 };
   }
 
-  const url = (options.baseUrl ?? "") + PUBLIC_INQUIRY_PATH;
+  const url = resolveGatewayOrigin(options.baseUrl) + PUBLIC_INQUIRY_PATH;
   const key = options.idempotencyKey ?? generateIdempotencyKey();
 
   let res: Response;

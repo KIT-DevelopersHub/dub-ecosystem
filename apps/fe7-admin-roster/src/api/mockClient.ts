@@ -6,6 +6,7 @@ import { identity } from "@dub/types"; // value import: identity.PERMISSION_CATA
 import type { common, auditLog, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
 import type { RoleAssignment } from "../contracts/pending";
+import { CLEAR_MAIL_RATE_LIMIT, type MailRateLimitStatus, type MailStatusResponse } from "../lib/mailStatus";
 
 function err(code: string, message: string, details?: unknown): ErrorResponse {
   return { error: { code, message, retryable: false, ...(details !== undefined ? { details } : {}) } };
@@ -15,6 +16,8 @@ const now = () => new Date().toISOString();
 
 export interface MockSeed {
   me?: gateway.MeResponse;
+  /** Seed the /api/v1/mail/status rate-limit view (default: not limited). */
+  mailRateLimit?: MailRateLimitStatus;
 }
 
 interface MockState {
@@ -23,6 +26,7 @@ interface MockState {
   assignments: Map<string, RoleAssignment[]>; // userId -> assignments
   audits: auditLog.AuditRecord[];
   me: gateway.MeResponse;
+  mailRateLimit: MailRateLimitStatus;
 }
 
 const ORG = "org_devhub";
@@ -51,7 +55,7 @@ function seedState(seed?: MockSeed): MockState {
     permissions: ["identity:read", "identity:admin", "audit:read", "event:read"],
     sessionExpiresAt: Date.now() + 3600_000,
   };
-  return { users, roles, assignments, audits, me };
+  return { users, roles, assignments, audits, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT };
 }
 
 function paginate<T>(items: T[]): common.Paginated<T> {
@@ -94,6 +98,10 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       return paginate(filtered) as unknown as T;
     }
     if (path.endsWith("/me")) return s.me as unknown as T;
+    if (path.endsWith("/mail/status")) {
+      const body: MailStatusResponse = { service: "mail-gateway", provider: "resend", rateLimit: s.mailRateLimit };
+      return body as unknown as T;
+    }
     throw err("NOT_FOUND", `unhandled GET ${path}`);
   }
 

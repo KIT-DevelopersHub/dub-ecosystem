@@ -1,6 +1,8 @@
-// Standalone bootstrap (Phase0). Wires the mock ChatApiClient + mock realtime so
-// the feature runs without chat-service. In admin-spa this file is replaced by the
-// shell registering `chatFeature` and injecting the real runtime.
+// Standalone bootstrap (Phase0). Default: mock ChatApiClient + mock realtime so the
+// feature runs without chat-service. Set VITE_CHAT_LIVE=1 to wire the REAL runtime
+// (HttpChatClient over the gateway + WsChatClient DO-direct) against a live backend —
+// this exercises the same clients FE2 injects in admin-spa. In admin-spa this file is
+// replaced by the shell registering `chatFeature` and injecting the real runtime.
 /// <reference lib="dom" />
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -9,7 +11,11 @@ import cssText from "@dub/tokens/css";
 import type { identity } from "@dub/types";
 import { ChatRuntimeProvider, type ChatRuntime } from "./context";
 import { ChatApp } from "./components/ChatApp";
+import type { ChatApiClient } from "./api/client";
+import { HttpChatClient } from "./api/client";
 import { MockChatClient } from "./api/mock-client";
+import type { ChatRealtimeClient } from "./realtime/client";
+import { WsChatClient } from "./realtime/ws-client";
 import { MockRealtimeClient } from "./realtime/mock-client";
 import { demoSeed, ME } from "./dev/seed";
 
@@ -18,15 +24,24 @@ const style = document.createElement("style");
 style.textContent = cssText;
 document.head.appendChild(style);
 
-const seed = demoSeed();
-const api = new MockChatClient(seed);
+const live = import.meta.env.VITE_CHAT_LIVE === "1" || import.meta.env.VITE_CHAT_LIVE === "true";
 const grants: identity.PermissionKey[] = ["chat:create", "chat:moderate"];
+
+// Live: real HTTP client + real DO-direct WS client (fresh ws-ticket per connect,
+// fetched through the same api). Mock: in-memory demo seed, no network.
+const api: ChatApiClient = live
+  ? new HttpChatClient({ baseUrl: import.meta.env.VITE_CHAT_API_BASE ?? "" })
+  : new MockChatClient(demoSeed());
+
+const createRealtimeClient: () => ChatRealtimeClient = live
+  ? () => new WsChatClient({ getTicket: (channelId) => api.getWsTicket(channelId) })
+  : () => new MockRealtimeClient();
 
 const runtime: ChatRuntime = {
   api,
   currentUserId: ME,
   can: (permission) => grants.includes(permission),
-  createRealtimeClient: () => new MockRealtimeClient(),
+  createRealtimeClient,
 };
 
 const queryClient = new QueryClient();

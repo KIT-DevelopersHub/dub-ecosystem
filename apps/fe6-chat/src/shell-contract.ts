@@ -8,6 +8,10 @@
 // real "@spa/shell" alias.
 import type { ComponentType } from "react";
 import type { identity } from "@dub/types";
+// IconName is the ONE piece of FE2's shell contract that lives in a shared leaf
+// package (@dub/ui, FE1 §2-3), so FE6 depends on the real closed union directly
+// instead of mirroring it as a plain string. FE2 re-exports this same IconName.
+import type { IconName } from "@dub/ui";
 
 export type FeatureModuleId = "events" | "tasks" | "notifications" | "chat" | "admin";
 
@@ -23,9 +27,10 @@ export interface FeatureRoute {
 export interface NavEntry {
   label: string;
   path: string;
-  // Canonical type is FE2's IconName string union (stubs/icons.tsx). Mirrored as a
-  // plain string here to keep FE6 self-contained — the icon set lives in FE2 (cross-PR).
-  icon: string;
+  // FE2's canonical IconName closed union (sourced from @dub/ui, which FE2 re-exports).
+  // Compile-time membership: an icon outside the set (e.g. "chat") fails typecheck here
+  // instead of only surfacing when FE2 integrates.
+  icon: IconName;
   order: number;
   // Hook injection point: FE6 supplies useChatUnreadTotal.
   badgeSource?: () => number;

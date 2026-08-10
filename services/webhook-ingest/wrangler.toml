@@ -45,7 +45,7 @@ queue = "dub-q-wh-stripe"
 # ---- Service binding: identity-roster (authz /authz/check for admin query) ----
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"
+service = "identity-roster"
 
 # ---- Cron: daily retention sweep (30-day dedup/record window + R2 objects) ----
 [triggers]

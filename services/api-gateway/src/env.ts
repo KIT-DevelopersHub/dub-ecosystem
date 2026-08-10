@@ -1,6 +1,6 @@
 // Worker bindings (c.env). Service Bindings are Fetchers; EVT_NOTIFICATION is the
 // single Queue producer (public.inquiry.received). Secrets/vars are plain strings.
-import type { Fetcher, Queue } from "@cloudflare/workers-types";
+import type { Fetcher, Queue, KVNamespace } from "@cloudflare/workers-types";
 import type { DubEventEnvelope } from "@dub/events";
 
 export interface GatewayEnv {
@@ -23,12 +23,21 @@ export interface GatewayEnv {
   // ---- Queue producer (the one publish exception) ----
   EVT_NOTIFICATION?: Queue<DubEventEnvelope>;
 
+  // ---- Shared rate-limit state (optional; infra-provisioned) ----
+  // When bound, the gateway uses a cross-isolate KV fixed-window limiter instead of
+  // the per-isolate in-memory fallback — real limiting without a contract change (§7).
+  RATE_LIMIT_KV?: KVNamespace;
+
   // ---- vars / secrets ----
   GATEWAY_VERSION?: string;
   ALLOWED_ORIGINS?: string;
   DEFAULT_MAX_BODY_BYTES?: string;
   FILES_MAX_BODY_BYTES?: string;
   TURNSTILE_SECRET?: string;
+  // Rate-limit policy tuning (both optional; defaults 100 / 60_000 ms). Env-tunable
+  // without a contract change — clients depend only on the wire signals (§7).
+  RATE_LIMIT_MAX?: string;
+  RATE_LIMIT_WINDOW_MS?: string;
 }
 
 /** Look up a Service Binding by its canonical name; undefined if not bound. */

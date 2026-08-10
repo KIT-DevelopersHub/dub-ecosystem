@@ -47,6 +47,6 @@ All routes require `x-dub-internal` (else 404), trusted-header auth, and a
 ## Test / typecheck
 
 ```
-pnpm --filter ./services/mail-automation test       # 44 tests
+pnpm --filter ./services/mail-automation test       # 51 tests
 pnpm --filter ./services/mail-automation typecheck
 ```

@@ -200,6 +200,17 @@ describe("GET /audit/logs (read, audit:read gated)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects an un-decodable cursor (400 invalid_cursor)", async () => {
+    const { d1 } = makeD1();
+    // "!!!" is not valid base64url; decodeCursor must surface a VALIDATION_FAILED
+    // with details field "cursor" / reason "invalid_cursor" (contract §5.1).
+    const res = await get(makeEnv(d1), "?cursor=%21%21%21", { [HEADERS.userId]: "admin" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; details?: { field: string; reason: string }[] } };
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.details).toContainEqual(expect.objectContaining({ field: "cursor", reason: "invalid_cursor" }));
+  });
+
   it("#13 GET /audit/logs/:id returns the contract shape (404 when absent)", async () => {
     const { d1 } = makeD1();
     await insertRecord(auditDb(d1), "C1", input());

@@ -7,6 +7,9 @@ import type { Authenticator, CapabilityScope } from "../src/authn";
 import type { DeviceRecord, DeviceStore, UpsertDeviceInput, UpsertDeviceResult } from "../src/devices";
 import type { DeliveryStatus, DeliveryStore } from "../src/deliveries";
 import type { PushAdapter, SendResult } from "../src/push";
+import type { ChangeLogReader, DeleteTombstone } from "../src/change-log";
+import type { MutationStore, SaveMutationInput } from "../src/mutation-store";
+import type { MutationResult } from "../src/mutations";
 
 export const GOOD_TOKEN = "tok_good";
 export const ALICE = "usr_alice";
@@ -144,6 +147,32 @@ export class MemoryDeliveryStore implements DeliveryStore {
   }
 }
 
+// ---- in-memory change-log reader (differential delete feed) ----
+export class MemoryChangeLogReader implements ChangeLogReader {
+  tombstones: DeleteTombstone[] = []; // seed delete rows; seq should be ascending
+
+  async headSeq(): Promise<number> {
+    return this.tombstones.reduce((max, t) => Math.max(max, t.seq), 0);
+  }
+  async deletesSince(afterSeq: number, upToSeq: number): Promise<DeleteTombstone[]> {
+    if (upToSeq <= afterSeq) return [];
+    return this.tombstones.filter((t) => t.seq > afterSeq && t.seq <= upToSeq).sort((a, b) => a.seq - b.seq);
+  }
+}
+
+// ---- in-memory mutation store (durable idempotency) ----
+export class MemoryMutationStore implements MutationStore {
+  rows = new Map<string, { userId: string; op: string; result: MutationResult }>();
+
+  async get(idempotencyKey: string): Promise<MutationResult | null> {
+    return this.rows.get(idempotencyKey)?.result ?? null;
+  }
+  async save({ idempotencyKey, userId, op, result }: SaveMutationInput): Promise<void> {
+    if (this.rows.has(idempotencyKey)) return; // first writer wins
+    this.rows.set(idempotencyKey, { userId, op, result });
+  }
+}
+
 // ---- fake push adapter ----
 export class FakePushAdapter implements PushAdapter {
   result: SendResult = "sent";
@@ -175,6 +204,8 @@ export interface Harness {
   authenticator: FakeAuthenticator;
   devices: MemoryDeviceStore;
   deliveries: MemoryDeliveryStore;
+  changeLog: MemoryChangeLogReader;
+  mutations: MemoryMutationStore;
   ios: FakePushAdapter;
   android: FakePushAdapter;
   audit: AuditSink;
@@ -196,6 +227,8 @@ export function makeHarness(): Harness {
   const authenticator = new FakeAuthenticator();
   const devices = new MemoryDeviceStore();
   const deliveries = new MemoryDeliveryStore();
+  const changeLog = new MemoryChangeLogReader();
+  const mutations = new MemoryMutationStore();
   const ios = new FakePushAdapter();
   const android = new FakePushAdapter();
   const audit = new AuditSink();
@@ -211,12 +244,15 @@ export function makeHarness(): Harness {
     notification,
     devices,
     deliveries,
+    changeLog,
+    mutations,
     pushAdapters: { ios, android },
+    pushRetry: { maxAttempts: 1 },
     audit: audit.fn,
     newRequestId: () => `req_${++seq}`,
   };
 
-  return { deps, auth: authService, identity, event, task, notification, authenticator, devices, deliveries, ios, android, audit };
+  return { deps, auth: authService, identity, event, task, notification, authenticator, devices, deliveries, changeLog, mutations, ios, android, audit };
 }
 
 // ---- request builders ----

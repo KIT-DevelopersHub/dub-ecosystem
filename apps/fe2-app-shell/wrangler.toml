@@ -1,0 +1,23 @@
+# fe2-app-shell — static SPA delivery via Cloudflare Workers static assets.
+# Assets-only Worker (no `main`): Cloudflare serves ./dist directly and, for any
+# unmatched path, falls back to index.html so TanStack Router client-side routes
+# (e.g. /login) resolve. Deployed under the DevHub account's workers.dev subdomain.
+#
+# Deploy:
+#   pnpm --filter @dub/fe2-app-shell build
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config apps/fe2-app-shell/wrangler.toml
+#
+# API wiring: the SPA calls VITE_API_BASE_URL (default https://api.developershub.jp)
+# for /api/v1/*. Until the gateway is deployed those calls 404; the shell/login UI
+# still renders. To point at another gateway, rebuild with VITE_API_BASE_URL set.
+name = "fe2-app-shell"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./dist"
+# SPA fallback: serve index.html for non-asset paths so client-side routes work.
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = true
