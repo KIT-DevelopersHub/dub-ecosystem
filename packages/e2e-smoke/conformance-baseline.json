@@ -35,10 +35,17 @@
       "POST /mail/outbox"
     ],
     "missingInCode": [
+      "DELETE /admin/email-routing/addresses/{}",
+      "DELETE /admin/email-routing/rules/{}",
+      "GET /admin/email-routing/addresses",
+      "GET /admin/email-routing/rules",
       "GET /mailboxes",
       "GET /messages",
       "GET /messages/{}",
       "GET /threads/{}",
+      "PATCH /admin/email-routing/rules/{}",
+      "POST /admin/email-routing/addresses",
+      "POST /admin/email-routing/rules",
       "POST /mailboxes/{}",
       "POST /outbox"
     ]
