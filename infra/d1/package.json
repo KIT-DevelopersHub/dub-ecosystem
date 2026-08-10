@@ -11,12 +11,16 @@
     "d1:lint": "node --import tsx scripts/verify.ts lint",
     "d1:migrate": "node --import tsx scripts/migrate.ts",
     "d1:verify": "node --import tsx scripts/verify.ts",
-    "d1:seed": "node --import tsx scripts/migrate.ts seed"
+    "d1:seed": "node --import tsx scripts/migrate.ts seed",
+    "d1:reset": "node --import tsx scripts/migrate.ts reset"
   },
   "dependencies": {
     "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/types": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
   },
   "peerDependencies": {
     "@cloudflare/workers-types": "^4"

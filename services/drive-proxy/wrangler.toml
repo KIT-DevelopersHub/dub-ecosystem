@@ -1,4 +1,7 @@
-# drive-proxy — Cloudflare Worker scaffold (P0b). NOT deployed in P0 (mock/stub波).
+# drive-proxy — Cloudflare Worker. The composition root (src/index.ts) wires REAL deps
+# (real Google client + real OAuth refresh-token provider + real KV/queues/authz).
+# Not yet deployed: what is outstanding is apply-time provisioning ONLY — the KV
+# namespace id below + the GOOGLE_OAUTH_* secrets — not code wiring.
 # Owns NO D1 (binding name DB is intentionally absent). Holds KV + Queues + secrets only.
 name = "dub-drive-proxy"
 main = "src/index.ts"
@@ -11,7 +14,8 @@ enabled = true
 # --- KV: Google token cache + short-TTL response cache + rate counter (§3) ---
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_AT_APPLY"          # `wrangler kv namespace create drive-proxy-cache`
+id = "REPLACE_AT_APPLY"          # standard apply-time placeholder (shared ecosystem
+                                 # convention); `wrangler kv namespace create drive-proxy-cache`
 
 # --- Producer queues (publish) ---
 # drive.file.* -> file-meta consumer (binding name = @dub/events CONSUMER_QUEUE_BINDINGS["file-meta"])
@@ -26,7 +30,12 @@ queue = "dub-q-audit-record"
 
 # --- Consumer (P1 only): contract reservation for wh-google-drive.
 # Declared here as documentation; the actual [[queues.consumers]] block stays
-# commented until P1 Drive-watch is enabled (§8-2 old#7).
+# commented until P1 Drive-watch is enabled (contract §8, §8-2 old#7).
+# P1 seam (intentionally not built in v1): enabling Drive-watch requires a
+# files.watch channel-registration path in this service that mints the
+# X-Goog-Channel-Token which webhook-ingest's verifyGoogleDrive
+# (services/webhook-ingest/src/verify/stubs.ts) checks against its `driveTokens`
+# secret pool. Until that P1 path exists, no drive-proxy-issued channel token flows.
 # [[queues.consumers]]
 # queue = "dub-q-wh-google-drive"
 # max_batch_size = 10
@@ -34,7 +43,7 @@ queue = "dub-q-audit-record"
 # --- Service Bindings ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"   # identity-roster /authz/check
+service = "identity-roster"   # identity-roster /authz/check
 
 # --- Tunable numbers (frozen semantics, values adjusted at P2 with real metrics) ---
 [vars]

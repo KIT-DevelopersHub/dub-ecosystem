@@ -4,14 +4,24 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import type { chat, identity } from "@dub/types";
+import type { Channel, Message } from "./contract";
 import { MockChatClient } from "./mock-client";
 import { demoSeed } from "../dev/seed";
 import { chatFeature } from "../feature";
 
-// FE2's canonical IconName union (fe2-app-shell/src/stubs/icons.tsx). FE6's local
-// shell-contract mirrors nav.icon as a plain string, so the compiler cannot catch an
-// icon that FE2's closed set rejects (e.g. "chat"). Assert membership at test time so
-// this contract mismatch is caught here instead of only when FE2 integrates.
+// Compile-time conformance to the frozen @dub/types chat STUB shells. FE6 implements
+// against the *expected* (richer) contract while chat-service is △ 9-C, but the fields
+// the stub already froze (chat.ChatChannel / chat.ChatMessage) must stay a subset of
+// FE6's shapes — so FE6's Channel/Message remain assignable to them. When 9-C activates
+// and replaces the stub with the real shape, any drift breaks this assignment at tsc.
+const _channelConformsToFrozenStub: (c: Channel) => chat.ChatChannel = (c) => c;
+const _messageConformsToFrozenStub: (m: Message) => chat.ChatMessage = (m) => m;
+void _channelConformsToFrozenStub;
+void _messageConformsToFrozenStub;
+
+// A representative slice of @dub/ui's IconName union. NavEntry.icon is now typed as
+// IconName, so an out-of-set icon (e.g. "chat") already fails typecheck; this runtime
+// list is a defense-in-depth check that the icons FE6 ships stay in the canonical set.
 const ICON_NAMES = [
   "home",
   "calendar",
@@ -79,6 +89,21 @@ describe("contract conformance", () => {
   it("messages match the Message schema", async () => {
     const page = await api.listMessages({ channelId: "chn_general00000000000000000", limit: 50 });
     for (const m of page.items) expect(messageSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("channels/messages carry every field frozen in the @dub/types chat STUB", async () => {
+    // Only the fields chat.ChatChannel / chat.ChatMessage already froze (9-C pending).
+    const stubChannel = z.object({ id: z.string(), name: z.string(), createdAt: z.string() });
+    const stubMessage = z.object({
+      id: z.string(),
+      channelId: z.string(),
+      authorId: z.string(),
+      body: z.string(),
+      createdAt: z.string(),
+    });
+    for (const c of await api.listChannels()) expect(stubChannel.safeParse(c).success).toBe(true);
+    const page = await api.listMessages({ channelId: "chn_general00000000000000000", limit: 50 });
+    for (const m of page.items) expect(stubMessage.safeParse(m).success).toBe(true);
   });
 
   it("unread summaries match the UnreadSummary schema", async () => {

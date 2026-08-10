@@ -1,0 +1,493 @@
+# OpenAPI 3.1 contract for drive-proxy. Generated from services/drive-proxy/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Drive Proxy API
+  version: 1.0.0
+  description: |-
+    Thin proxy over Google Drive/Sheets (list, embed, sheet read/write). External segment /api/v1/drive.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/drive/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: drive
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /drive/files:
+    get:
+      operationId: listDriveFiles
+      summary: List Drive files
+      tags:
+        - drive
+      description: Requires drive:read. limit max 100 (Drive API constraint).
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: parentId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of Drive files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDriveFiles'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createDriveFile
+      summary: Create a Drive file
+      tags:
+        - drive
+      description: Requires drive:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFileRequest'
+      responses:
+        '200':
+          description: Created file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveFileWrap'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /drive/files/{id}:
+    get:
+      operationId: getDriveFile
+      summary: Get a Drive file
+      tags:
+        - drive
+      description: Requires drive:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Drive file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveFile'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /drive/files/{id}/embed:
+    get:
+      operationId: getDriveEmbed
+      summary: Get an embeddable URL
+      tags:
+        - drive
+      description: Requires drive:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Embed URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetEmbedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /drive/files/{id}/move:
+    post:
+      operationId: moveDriveFile
+      summary: Move a Drive file
+      tags:
+        - drive
+      description: Requires drive:write.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveFileRequest'
+      responses:
+        '200':
+          description: Moved file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveFileWrap'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /drive/files/{id}/trash:
+    post:
+      operationId: trashDriveFile
+      summary: Trash a Drive file
+      tags:
+        - drive
+      description: Requires drive:write.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trashed file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveFileWrap'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /drive/sheets/{id}/values:
+    get:
+      operationId: getSheetValues
+      summary: Read sheet values
+      tags:
+        - drive
+      description: Requires drive:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: range
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cell values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSheetValuesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: writeSheetValues
+      summary: Write sheet values
+      tags:
+        - drive
+      description: Requires drive:write.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WriteSheetRequest'
+      responses:
+        '200':
+          description: Write result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSheetValuesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /drive/health/quota:
+    get:
+      operationId: driveQuota
+      summary: Drive storage quota
+      tags:
+        - drive
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      responses:
+        '200':
+          description: Quota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaResponse'
+      security: []
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    DriveFile:
+      type: object
+      required:
+        - id
+        - name
+        - mimeType
+        - modifiedAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        mimeType:
+          type: string
+        modifiedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    CreateFileRequest:
+      type: object
+      required:
+        - name
+        - mimeType
+      properties:
+        name:
+          type: string
+        mimeType:
+          type: string
+        parentId:
+          type: string
+    PaginatedDriveFiles:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriveFile'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+    GetEmbedResponse:
+      type: object
+      required:
+        - embedUrl
+      properties:
+        embedUrl:
+          type: string
+    GetSheetValuesResponse:
+      type: object
+      required:
+        - values
+      properties:
+        values:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+    DriveFileWrap:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          $ref: '#/components/schemas/DriveFile'
+    MoveFileRequest:
+      type: object
+      required:
+        - newParentId
+      properties:
+        newParentId:
+          type: string
+    WriteSheetRequest:
+      type: object
+      required:
+        - values
+      properties:
+        range:
+          type: string
+        values:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+    QuotaResponse:
+      type: object
+      description: Drive storage quota snapshot.
+      properties:
+        limitBytes:
+          type: integer
+        usageBytes:
+          type: integer
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.

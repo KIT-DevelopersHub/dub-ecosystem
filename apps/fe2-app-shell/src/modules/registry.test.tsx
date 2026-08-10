@@ -64,4 +64,14 @@ describe("buildRegistry", () => {
     const reg = buildRegistry([mod({ id: "notifications", headerWidget: Widget })]);
     expect(reg.headerWidgets).toEqual([Widget]);
   });
+
+  it("collects homeWidgets in module registration order", () => {
+    const Body = () => <span />;
+    const reg = buildRegistry([
+      mod({ id: "tasks", homeWidget: { id: "tasks", title: "タスク", Body } }),
+      mod({ id: "events" }), // no homeWidget → skipped
+      mod({ id: "chat", homeWidget: { id: "chat", title: "チャット", Body } }),
+    ]);
+    expect(reg.homeWidgets.map((w) => w.id)).toEqual(["tasks", "chat"]);
+  });
 });

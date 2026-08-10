@@ -31,6 +31,13 @@ export const SEED = {
   actions: { venue: "action_01SEED00000000000000VENUE", sponsor: "action_01SEED0000000000000SPNSR" },
   tasks: { root: "task_01SEED0000000000000000ROOT", blocked: "task_01SEED00000000000000BLOCK" },
   channel: { general: "chan_01SEED000000000000000GENRL" },
+  // chat messages seeded into the general (event) channel: a system "channel created"
+  // notice, a welcome message from the admin, and a threaded reply from the member.
+  messages: {
+    system: "msg_01SEED0000000000000SYSTEM",
+    welcome: "msg_01SEED000000000000WELCOM",
+    reply: "msg_01SEED0000000000000REPLY0",
+  },
 } as const;
 
 export type TestUserKey = "admin" | "organizer" | "member" | "outsider";

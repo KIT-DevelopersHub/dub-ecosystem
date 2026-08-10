@@ -23,13 +23,17 @@ export type GatewayApp = Hono<{ Bindings: GatewayEnv; Variables: GatewayVariable
 
 export function createApp(options: CreateAppOptions = {}): GatewayApp {
   const app = new Hono<{ Bindings: GatewayEnv; Variables: GatewayVariables }>();
-  const limiter = options.rateLimiter ?? createInMemoryRateLimiter();
+  // An explicitly injected limiter is authoritative (deterministic tests / infra native
+  // binding). Otherwise fall back to the per-isolate in-memory limiter, but prefer a
+  // shared KV limiter per request when RATE_LIMIT_KV is bound (see rate-limit.ts).
+  const injected = options.rateLimiter;
+  const fallback = injected ?? createInMemoryRateLimiter();
 
   app.onError(gatewayErrorHandler);
 
   app.use("*", corsMiddleware());
   app.use("*", requestIdMiddleware());
-  app.use("*", rateLimitMiddleware(limiter));
+  app.use("*", rateLimitMiddleware(fallback, { preferEnv: injected === undefined }));
 
   // liveness (public, not under API_PREFIX)
   app.get("/healthz", healthzHandler);

@@ -19,7 +19,7 @@ import { effectiveTuning, providerReadiness } from "./config-check";
 import { buildDb, buildSendDeps } from "./deps";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getInboundById, latestFailedSend, listInbound, listMailboxes, upsertMailbox } from "./repo";
+import { getInboundDetail, latestFailedSend, listInbound, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -103,20 +103,30 @@ export function createApp() {
   ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
     const page = await listInbound(dbOf(c), q);
-    return c.json(page satisfies common.Paginated<mail.MailMessage>);
+    return c.json(page satisfies common.Paginated<mail.MailMessageListItem>);
   });
 
   ext.get("/messages/:id", async (c) => {
-    const msg = await getInboundById(dbOf(c), c.req.param("id"));
+    const msg = await getInboundDetail(dbOf(c), c.req.param("id"));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
-    return c.json(msg satisfies mail.MailMessage);
+    return c.json(msg satisfies mail.MailMessageDetail);
+  });
+
+  // Mark a message read (opened in the inbox). Idempotent: re-opening is a no-op.
+  // mail:read is sufficient — reading a message you can see also flips its own read flag.
+  // External (user-facing via gateway) so it lives on `ext` under /mail and inherits the
+  // ext.use("/messages/*", withAuth("mail:read")) guard above.
+  ext.post("/messages/:id/read", async (c) => {
+    const { found } = await markInboundRead(dbOf(c), c.req.param("id"));
+    if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
+    return c.json({ read: true } satisfies mail.MailMessageState);
   });
 
   ext.get("/threads/:id", async (c) => {
     const threadId = c.req.param("id");
-    const page = await listInbound(dbOf(c), { threadId, limit: 200 });
-    if (page.items.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
-    return c.json({ id: threadId, messages: page.items });
+    const messages = await listThread(dbOf(c), threadId);
+    if (messages.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
+    return c.json({ id: threadId, messages } satisfies mail.MailThread);
   });
 
   // ---- mailbox admin: mail:admin.
@@ -159,7 +169,7 @@ export function createApp() {
   // ---- ops: quota/health self-report (internal-only, minimal in the CF-routing model).
   app.get("/health/quota", (c) => {
     if (!c.req.header(HEADERS.internal)) throw errors.forbidden("internal-only");
-    return c.json({ service: SERVICE_NAME, provider: c.env.MAIL_OUTBOUND_PROVIDER ?? "ses", inboundTransport: "cf-email-routing" });
+    return c.json({ service: SERVICE_NAME, provider: c.env.MAIL_OUTBOUND_PROVIDER ?? DEFAULT_OUTBOUND_PROVIDER, inboundTransport: "cf-email-routing" });
   });
 
   return app;

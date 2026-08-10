@@ -30,7 +30,7 @@ service = "chat-service"         # POST /internal/system-messages (ChatAdapter �
 
 [[services]]
 binding = "SVC_MOBILE_BFF"
-service = "mobile-bff"           # POST /internal/push/dispatch (PushAdapter — P0 stub)
+service = "mo3-mobile-bff"           # POST /internal/push/dispatch (PushAdapter — P0 stub)
 
 # --- Queues ---
 # Domain event subscription (frozen: dub-q-evt-notification / EVT_NOTIFICATION).

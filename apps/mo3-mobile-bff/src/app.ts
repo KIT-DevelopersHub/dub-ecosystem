@@ -232,7 +232,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
     const q = c.req.query();
     const limitRaw = q.limit !== undefined ? Number(q.limit) : undefined;
     const res = await buildSync(
-      { event: deps.event, task: deps.task, notification: deps.notification },
+      { event: deps.event, task: deps.task, notification: deps.notification, changeLog: deps.changeLog },
       ctx,
       ctx.userId!,
       { cursor: q.cursor, since: q.since, limit: limitRaw },
@@ -244,7 +244,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
   app.post("/m/v1/mutations", requireAuth, async (c) => {
     const ctx = authedCtx(c);
     const body = await readJson<MutationsRequest>(c);
-    const res = await applyMutations({ event: deps.event, task: deps.task, notification: deps.notification }, ctx, body);
+    const res = await applyMutations({ event: deps.event, task: deps.task, notification: deps.notification }, ctx, body, deps.mutations);
     return c.json(res);
   });
 
@@ -268,6 +268,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
         adapters: deps.pushAdapters,
         audit: deps.audit,
         orgId: deps.config.defaultOrgId,
+        retry: deps.pushRetry,
       },
       ctx,
       notificationId,

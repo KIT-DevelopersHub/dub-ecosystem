@@ -3,6 +3,8 @@
 // Worker. node:sqlite is loaded via createRequire so Vitest/Vite's transform never
 // tries to resolve the "node:" specifier as a bundleable module.
 import { createRequire } from "node:module";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { D1Database } from "@cloudflare/workers-types";
 
 const nodeRequire = createRequire(import.meta.url);
@@ -57,8 +59,10 @@ export function memoryD1(): { db: D1Database; raw: Raw } {
   return { db: wrapD1(raw), raw };
 }
 
-/** File-backed D1 (local dev / scripts). */
+/** File-backed D1 (local dev / scripts). Creates the parent dir (e.g. .wrangler/) so a
+ *  fresh checkout can `pnpm db:reset` without a manual mkdir. Skipped for ":memory:". */
 export function fileD1(path: string): { db: D1Database; raw: Raw } {
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const raw = new DatabaseSync(path);
   return { db: wrapD1(raw), raw };
 }

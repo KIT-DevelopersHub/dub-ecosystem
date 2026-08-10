@@ -228,6 +228,58 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
       );
     }
 
+    // 6b. chat channel + members + a short threaded conversation (chat is a DRAFT
+    //     namespace with no cross-namespace FK, so user/event ids are plain references).
+    const channelId = SEED.channel.general + sfx;
+    await w.upsert(
+      "chat_channels",
+      { id: channelId, type: "event", visibility: "public", name: "general", topic: "Conference-wide chatter", event_id: eventId, dm_key: null, created_by: adminId, archived_at: null, version: 1, created_at: SEED_TS, updated_at: SEED_TS },
+      "replace",
+      ["id"],
+    );
+    for (const key of userKeys) {
+      const uid = SEED.users[key].id + sfx;
+      await w.upsert(
+        "chat_channel_members",
+        { channel_id: channelId, user_id: uid, role: key === "admin" ? "admin" : "member", joined_at: SEED_TS },
+        "replace",
+        ["channel_id", "user_id"],
+      );
+    }
+    const memberId = SEED.users.member.id + sfx;
+    const systemMsgId = SEED.messages.system + sfx;
+    const welcomeMsgId = SEED.messages.welcome + sfx;
+    const replyMsgId = SEED.messages.reply + sfx;
+    const messageSpecs = [
+      { id: systemMsgId, author: null, kind: "system", body: "Channel #general created.", thread: null },
+      { id: welcomeMsgId, author: adminId, kind: "user", body: "Welcome to the Hokuriku IT Conference channel!", thread: null },
+      { id: replyMsgId, author: memberId, kind: "user", body: "Thanks — excited to help out.", thread: welcomeMsgId },
+    ];
+    for (const m of messageSpecs) {
+      await w.upsert(
+        "chat_messages",
+        { id: m.id, channel_id: channelId, thread_root_id: m.thread, author_id: m.author, kind: m.kind, body: m.body, attachment_file_ids: "[]", version: 1, edited_at: null, deleted_at: null, created_at: SEED_TS },
+        "replace",
+        ["id"],
+      );
+    }
+    // one reaction on the welcome message, and per-user read states pinned to the reply.
+    await w.upsert(
+      "chat_reactions",
+      { message_id: welcomeMsgId, emoji: "👍", user_id: SEED.users.organizer.id + sfx, created_at: SEED_TS },
+      "replace",
+      ["message_id", "emoji", "user_id"],
+    );
+    for (const key of userKeys) {
+      const uid = SEED.users[key].id + sfx;
+      await w.upsert(
+        "chat_read_states",
+        { channel_id: channelId, user_id: uid, last_read_message_id: replyMsgId, updated_at: SEED_TS },
+        "replace",
+        ["channel_id", "user_id"],
+      );
+    }
+
     // 7. audit sample logs (INSERT OR IGNORE; backdated so cleanup may delete them).
     const auditSpecs = [
       { action: "identity.role.assigned", result: "success", rt: "user", rid: SEED.users.member.id + sfx },

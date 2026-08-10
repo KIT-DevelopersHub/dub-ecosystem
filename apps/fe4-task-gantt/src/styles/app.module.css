@@ -55,19 +55,8 @@
   border-color: var(--dub-color-brand-500);
 }
 
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--dub-color-text-inverse);
-}
-.badge_todo { background: var(--dub-color-gray-500); }
-.badge_in_progress { background: var(--dub-color-info-500); }
-.badge_blocked { background: var(--dub-color-warning-500); }
-.badge_done { background: var(--dub-color-success-500); }
-.badge_cancelled { background: var(--dub-color-gray-400); }
+/* Status badges now render via the @dub/ui <Badge> design-system component
+   (see TaskStatusBadge.tsx); the local .badge* rules were removed with it. */
 
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td {

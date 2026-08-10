@@ -17,10 +17,11 @@ import { createElement, type ComponentType, type ReactNode } from "react";
 import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { eventFeatureModule, routePaths } from "@dub/fe3-event-action";
-import { taskModule, eventTaskRoutes } from "@dub/fe4-task-gantt/src/features/task-gantt/public";
 import { notificationsModule } from "@dub/fe5-notification-inbox";
-import { chatFeature } from "@dub/fe6-chat/src/feature";
 import { adminModule } from "@dub/admin-roster";
+// FE4/FE6 have no package export map yet — reached via the single deep-import
+// boundary (featureEntries.tsx), never directly.
+import { taskModule, eventTaskRoutes, chatFeature } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { FeatureModule, FeatureRoute, NavEntry } from "../modules/types.tsx";
 import { mailRoutes, mailNav } from "../features/mail/index.tsx";

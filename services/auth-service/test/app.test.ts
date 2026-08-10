@@ -227,3 +227,73 @@ describe("POST /internal/revoke-user (internal)", () => {
     expect(h.audit.records.some((r) => r.action === "auth.session.revoked")).toBe(true);
   });
 });
+
+// ---- Additional contract-conformance coverage (auth.md §3/§5/§6) ----
+
+async function startLoginState(h: ReturnType<typeof makeHarness>): Promise<string> {
+  const app = buildApp(h.deps);
+  const res = await app.request("/auth/login", jsonInit({ redirectUri: "https://app.test/home" }));
+  return ((await res.json()) as { state: string }).state;
+}
+
+describe("POST /auth/login — missing redirectUri", () => {
+  it("rejects a missing redirectUri with VALIDATION_FAILED on that field", async () => {
+    const h = makeHarness();
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/login", jsonInit({}));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; details?: { fields?: Array<{ field: string }> } } };
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+  });
+});
+
+describe("GET /auth/callback — provider error + single-use state", () => {
+  it("maps Google's own ?error=access_denied to AUTH_OAUTH_EXCHANGE_FAILED and audits failure", async () => {
+    const h = makeHarness();
+    const state = await startLoginState(h);
+    const app = buildApp(h.deps);
+    // Google cancelled consent: it returns ?error=... and NO code, state still present.
+    const res = await app.request(`/auth/callback?error=access_denied&state=${state}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("error=AUTH_OAUTH_EXCHANGE_FAILED");
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(h.audit.records.some((r) => r.action === "auth.session.login" && r.result === "failure")).toBe(true);
+  });
+
+  it("consumes the oauth state single-use (replay of the same callback fails AUTH_STATE_MISMATCH)", async () => {
+    const h = makeHarness();
+    const state = await startLoginState(h);
+    const app = buildApp(h.deps);
+    const first = await app.request(`/auth/callback?code=code123&state=${state}`);
+    expect(first.status).toBe(302);
+    expect(first.headers.get("location")).toBe("https://app.test/home");
+    // second use of the same state must be rejected (state was deleted on first use)
+    const replay = await app.request(`/auth/callback?code=code123&state=${state}`);
+    expect(replay.status).toBe(302);
+    expect(replay.headers.get("location")).toContain("error=AUTH_STATE_MISMATCH");
+    expect(replay.headers.get("set-cookie")).toBeNull();
+  });
+});
+
+describe("POST /auth/refresh — malformed + body-token paths", () => {
+  it("malformed token -> 401 AUTH_INVALID_TOKEN (auth.md §6)", async () => {
+    const h = makeHarness();
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/refresh", jsonInit({}, { bearer: "###not-a-token###" }));
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_INVALID_TOKEN");
+  });
+
+  it("accepts the token from the { refreshToken } body (bearer path, rotates in body)", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_body", "mobile");
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/refresh", jsonInit({ refreshToken: created.token }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { token?: string; session?: { userId: string } };
+    expect(body.token).toBeTruthy();
+    expect(body.token).not.toBe(created.token);
+    expect(body.session?.userId).toBe("usr_body");
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+});
