@@ -69,3 +69,32 @@ CREATE TABLE chat_read_states (
 );
 `.trim(),
 };
+
+// Slack-parity backend tables (pins + presence). A SEPARATE migration id so 0001 is
+// never mutated after apply (migration immutability); infra-d1-seed materializes both
+// physical files. Search re-uses chat_messages (LIKE keyset scan) — no new table.
+// Timestamps are app-supplied (D2); no FK to other namespaces (chat DB-split rule).
+export const CHAT_SLACK_PARITY_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0002_slack_parity",
+  up: `
+CREATE TABLE chat_pins (
+  channel_id TEXT NOT NULL REFERENCES chat_channels(id),
+  message_id TEXT NOT NULL REFERENCES chat_messages(id),
+  pinned_by  TEXT NOT NULL,
+  pinned_at  TEXT NOT NULL,
+  PRIMARY KEY (channel_id, message_id)
+);
+CREATE INDEX idx_chat_pins_channel ON chat_pins(channel_id, pinned_at DESC);
+
+CREATE TABLE chat_presence (
+  user_id           TEXT PRIMARY KEY,
+  presence          TEXT NOT NULL CHECK (presence IN ('auto','away')),
+  status_emoji      TEXT,
+  status_text       TEXT,
+  status_expires_at TEXT,
+  last_active_at    TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+`.trim(),
+};

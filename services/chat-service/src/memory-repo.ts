@@ -1,7 +1,7 @@
 // In-memory ChatRepo: backs unit tests and local runs. Mirrors the D1 repo's
 // keyset (by ULID id) so pagination / gap-fill tests are representative.
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, PinRow, PresenceRow } from "./types";
 
 function cmpStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -19,6 +19,8 @@ export class InMemoryChatRepo implements ChatRepo {
   private messages = new Map<common.MessageId, MessageRow>();
   private reactions = new Map<common.MessageId, ReactionKey[]>();
   private reads = new Map<string, { lastReadMessageId: common.MessageId | null }>(); // channelId|userId
+  private pins = new Map<string, PinRow>(); // key: channelId|messageId
+  private presence = new Map<common.UserId, PresenceRow>();
 
   private mkey(channelId: string, userId: string): string {
     return `${channelId}|${userId}`;
@@ -126,6 +128,46 @@ export class InMemoryChatRepo implements ChatRepo {
     this.messages.set(next.id, { ...next, attachmentFileIds: [...next.attachmentFileIds] });
     return true;
   }
+  async replyCountsFor(rootIds: common.MessageId[]): Promise<Map<common.MessageId, number>> {
+    const want = new Set(rootIds);
+    const out = new Map<common.MessageId, number>();
+    for (const m of this.messages.values()) {
+      if (m.threadRootId === null || m.deletedAt !== null) continue;
+      if (!want.has(m.threadRootId)) continue;
+      out.set(m.threadRootId, (out.get(m.threadRootId) ?? 0) + 1);
+    }
+    return out;
+  }
+  async previousMessageId(channelId: common.ChannelId, messageId: common.MessageId): Promise<common.MessageId | null> {
+    let best: common.MessageId | null = null;
+    for (const m of this.messages.values()) {
+      if (m.channelId !== channelId) continue;
+      if (m.id >= messageId) continue;
+      if (best === null || m.id > best) best = m.id;
+    }
+    return best;
+  }
+  async searchMessages(q: {
+    channelIds: common.ChannelId[];
+    text: string;
+    fromUserId?: common.UserId;
+    beforeId?: string;
+    limit: number;
+  }): Promise<MessageRow[]> {
+    if (q.channelIds.length === 0) return [];
+    const allowed = new Set(q.channelIds);
+    const needle = q.text.toLowerCase();
+    let rows = [...this.messages.values()].filter((m) => {
+      if (!allowed.has(m.channelId)) return false;
+      if (m.deletedAt !== null || m.kind !== "user") return false;
+      if (!m.body.toLowerCase().includes(needle)) return false;
+      if (q.fromUserId !== undefined && m.authorId !== q.fromUserId) return false;
+      if (q.beforeId !== undefined && !(m.id < q.beforeId)) return false;
+      return true;
+    });
+    rows.sort((a, b) => cmpStr(b.id, a.id)); // desc
+    return rows.slice(0, q.limit).map((m) => ({ ...m, attachmentFileIds: [...m.attachmentFileIds] }));
+  }
 
   // ---- reactions ----
   async hasReaction(messageId: common.MessageId, emoji: string, userId: common.UserId): Promise<boolean> {
@@ -160,6 +202,9 @@ export class InMemoryChatRepo implements ChatRepo {
   async setReadState(channelId: common.ChannelId, userId: common.UserId, lastReadMessageId: common.MessageId, _at: string): Promise<void> {
     this.reads.set(this.mkey(channelId, userId), { lastReadMessageId });
   }
+  async clearReadState(channelId: common.ChannelId, userId: common.UserId): Promise<void> {
+    this.reads.delete(this.mkey(channelId, userId));
+  }
   async getReadState(channelId: common.ChannelId, userId: common.UserId): Promise<{ lastReadMessageId: common.MessageId | null } | null> {
     const r = this.reads.get(this.mkey(channelId, userId));
     return r ? { ...r } : null;
@@ -173,5 +218,33 @@ export class InMemoryChatRepo implements ChatRepo {
       if (lastReadMessageId === null || m.id > lastReadMessageId) n++;
     }
     return n;
+  }
+
+  // ---- pins ----
+  async addPin(row: PinRow): Promise<void> {
+    const key = this.mkey(row.channelId, row.messageId);
+    if (!this.pins.has(key)) this.pins.set(key, { ...row }); // first pin wins (idempotent)
+  }
+  async removePin(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean> {
+    return this.pins.delete(this.mkey(channelId, messageId));
+  }
+  async listPins(channelId: common.ChannelId): Promise<PinRow[]> {
+    return [...this.pins.values()]
+      .filter((p) => p.channelId === channelId)
+      .sort((a, b) => cmpStr(b.pinnedAt + b.messageId, a.pinnedAt + a.messageId)) // pinned_at desc
+      .map((p) => ({ ...p }));
+  }
+
+  // ---- presence ----
+  async getPresence(userIds: common.UserId[]): Promise<PresenceRow[]> {
+    const out: PresenceRow[] = [];
+    for (const id of userIds) {
+      const r = this.presence.get(id);
+      if (r) out.push({ ...r });
+    }
+    return out;
+  }
+  async putPresence(row: PresenceRow): Promise<void> {
+    this.presence.set(row.userId, { ...row });
   }
 }

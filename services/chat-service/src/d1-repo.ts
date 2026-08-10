@@ -3,7 +3,8 @@
 // No cross-namespace joins (chat is the DB-split first candidate).
 import type { DbClient } from "@dub/db";
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, PinRow, PresenceRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind, PresenceSetting } from "./types";
+import { escapeLike } from "./domain";
 
 interface ChannelDbRow {
   id: string;
@@ -37,6 +38,28 @@ interface MessageDbRow {
   edited_at: string | null;
   deleted_at: string | null;
   created_at: string;
+}
+
+interface PresenceDbRow {
+  user_id: string;
+  presence: string;
+  status_emoji: string | null;
+  status_text: string | null;
+  status_expires_at: string | null;
+  last_active_at: string;
+  updated_at: string;
+}
+
+function toPresenceRow(r: PresenceDbRow): PresenceRow {
+  return {
+    userId: r.user_id,
+    presence: r.presence as PresenceSetting,
+    statusEmoji: r.status_emoji,
+    statusText: r.status_text,
+    statusExpiresAt: r.status_expires_at,
+    lastActiveAt: r.last_active_at,
+    updatedAt: r.updated_at,
+  };
 }
 
 function toChannelRow(r: ChannelDbRow): ChannelRow {
@@ -213,6 +236,51 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       );
       return res.meta.changes > 0;
     },
+    async replyCountsFor(rootIds: common.MessageId[]): Promise<Map<common.MessageId, number>> {
+      const out = new Map<common.MessageId, number>();
+      if (rootIds.length === 0) return out;
+      const placeholders = rootIds.map(() => "?").join(", ");
+      const rows = await db.all<{ thread_root_id: string; n: number }>(
+        `SELECT thread_root_id, COUNT(*) AS n FROM chat_messages
+          WHERE thread_root_id IN (${placeholders}) AND deleted_at IS NULL
+          GROUP BY thread_root_id`,
+        ...rootIds,
+      );
+      for (const r of rows) out.set(r.thread_root_id, r.n);
+      return out;
+    },
+    async previousMessageId(channelId: common.ChannelId, messageId: common.MessageId): Promise<common.MessageId | null> {
+      const r = await db.first<{ id: string }>(
+        `SELECT id FROM chat_messages WHERE channel_id = ? AND id < ? ORDER BY id DESC LIMIT 1`,
+        channelId, messageId,
+      );
+      return r ? r.id : null;
+    },
+    async searchMessages(q): Promise<MessageRow[]> {
+      if (q.channelIds.length === 0) return [];
+      const chanPlaceholders = q.channelIds.map(() => "?").join(", ");
+      const where: string[] = [
+        `channel_id IN (${chanPlaceholders})`,
+        "deleted_at IS NULL",
+        "kind = 'user'",
+        `body LIKE ? ESCAPE '\\'`,
+      ];
+      const binds: unknown[] = [...q.channelIds, `%${escapeLike(q.text)}%`];
+      if (q.fromUserId !== undefined) {
+        where.push("author_id = ?");
+        binds.push(q.fromUserId);
+      }
+      if (q.beforeId !== undefined) {
+        where.push("id < ?");
+        binds.push(q.beforeId);
+      }
+      binds.push(q.limit);
+      const rows = await db.all<MessageDbRow>(
+        `SELECT * FROM chat_messages WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ?`,
+        ...binds,
+      );
+      return rows.map(toMessageRow);
+    },
 
     // ---- reactions ----
     async hasReaction(messageId, emoji, userId): Promise<boolean> {
@@ -267,6 +335,9 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
         );
       }
     },
+    async clearReadState(channelId, userId): Promise<void> {
+      await db.run(`DELETE FROM chat_read_states WHERE channel_id = ? AND user_id = ?`, channelId, userId);
+    },
     async getReadState(channelId, userId): Promise<{ lastReadMessageId: common.MessageId | null } | null> {
       const r = await db.first<{ last_read_message_id: string | null }>(
         `SELECT last_read_message_id FROM chat_read_states WHERE channel_id = ? AND user_id = ?`,
@@ -281,6 +352,52 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       const binds: unknown[] = lastReadMessageId === null ? [channelId, userId] : [channelId, userId, lastReadMessageId];
       const r = await db.first<{ n: number }>(sql, ...binds);
       return r?.n ?? 0;
+    },
+
+    // ---- pins ----
+    async addPin(row: PinRow): Promise<void> {
+      await db.run(
+        `INSERT OR IGNORE INTO chat_pins (channel_id, message_id, pinned_by, pinned_at) VALUES (?, ?, ?, ?)`,
+        row.channelId, row.messageId, row.pinnedBy, row.pinnedAt,
+      );
+    },
+    async removePin(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean> {
+      const res = await db.run(`DELETE FROM chat_pins WHERE channel_id = ? AND message_id = ?`, channelId, messageId);
+      return res.meta.changes > 0;
+    },
+    async listPins(channelId: common.ChannelId): Promise<PinRow[]> {
+      const rows = await db.all<{ channel_id: string; message_id: string; pinned_by: string; pinned_at: string }>(
+        `SELECT * FROM chat_pins WHERE channel_id = ? ORDER BY pinned_at DESC, message_id DESC`,
+        channelId,
+      );
+      return rows.map((r) => ({ channelId: r.channel_id, messageId: r.message_id, pinnedBy: r.pinned_by, pinnedAt: r.pinned_at }));
+    },
+
+    // ---- presence ----
+    async getPresence(userIds: common.UserId[]): Promise<PresenceRow[]> {
+      if (userIds.length === 0) return [];
+      const placeholders = userIds.map(() => "?").join(", ");
+      const rows = await db.all<PresenceDbRow>(
+        `SELECT * FROM chat_presence WHERE user_id IN (${placeholders})`,
+        ...userIds,
+      );
+      return rows.map(toPresenceRow);
+    },
+    async putPresence(row: PresenceRow): Promise<void> {
+      // UPDATE-then-INSERT (see addMember): "DO UPDATE SET" trips the @dub/db strict
+      // namespace guard, so the upsert is two guard-safe statements.
+      const upd = await db.run(
+        `UPDATE chat_presence SET presence = ?, status_emoji = ?, status_text = ?, status_expires_at = ?, last_active_at = ?, updated_at = ?
+         WHERE user_id = ?`,
+        row.presence, row.statusEmoji, row.statusText, row.statusExpiresAt, row.lastActiveAt, row.updatedAt, row.userId,
+      );
+      if (upd.meta.changes === 0) {
+        await db.run(
+          `INSERT OR IGNORE INTO chat_presence (user_id, presence, status_emoji, status_text, status_expires_at, last_active_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          row.userId, row.presence, row.statusEmoji, row.statusText, row.statusExpiresAt, row.lastActiveAt, row.updatedAt,
+        );
+      }
     },
   } satisfies ChatRepo;
 }

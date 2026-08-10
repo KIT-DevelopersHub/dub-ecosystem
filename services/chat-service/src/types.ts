@@ -52,6 +52,7 @@ export interface Message {
   body: string; // logically-deleted messages return a redacted body
   attachmentFileIds: common.FileId[];
   reactions: Record<string, common.UserId[]>; // emoji -> userId[]
+  replyCount: number; // visible thread replies (0 for replies themselves) — Slack "N replies"
   version: number;
   editedAt: common.ISODateTime | null;
   deletedAt: common.ISODateTime | null;
@@ -120,6 +121,56 @@ export interface ReactionToggleResponse {
   reactions: Record<string, common.UserId[]>;
 }
 
+// ---- mark-unread (Slack "Mark as unread") ----
+// Sets the caller's read cursor to just BEFORE `messageId`, so `messageId` becomes the
+// first unread. If it is the channel's first message the cursor is cleared (all unread).
+export interface MarkUnreadRequest {
+  messageId: common.MessageId;
+}
+
+// ---- search (full-text over the caller's channels; Slack in:/from: filters) ----
+export interface SearchMessagesQuery extends common.CursorQuery {
+  q: string; // substring match over message body (case-insensitive)
+  in?: common.ChannelId; // Slack `in:#channel` — restrict to one channel (membership required)
+  from?: common.UserId; // Slack `from:@user` — restrict to one author
+}
+export type SearchMessagesResponse = common.Paginated<Message>;
+
+// ---- pins (channel pinned items) ----
+export interface PinMessageRequest {
+  messageId: common.MessageId;
+}
+export interface PinnedItem {
+  channelId: common.ChannelId;
+  messageId: common.MessageId;
+  pinnedBy: common.UserId;
+  pinnedAt: common.ISODateTime;
+  message: Message; // embedded so the FE renders the pinned list without N extra fetches
+}
+export interface ListPinsResponse {
+  items: PinnedItem[];
+}
+
+// ---- presence (online/away + status emoji/text) ----
+export type PresenceSetting = "auto" | "away"; // what the user chose
+export type PresenceState = "active" | "away"; // effective (derived from lastActiveAt)
+export interface SetPresenceRequest {
+  presence?: PresenceSetting; // omit = heartbeat only (refresh lastActiveAt)
+  statusEmoji?: string | null;
+  statusText?: string | null;
+  statusExpiresAt?: common.ISODateTime | null; // status auto-clears at/after this instant
+}
+export interface PresenceView {
+  userId: common.UserId;
+  state: PresenceState;
+  statusEmoji: string | null;
+  statusText: string | null;
+  lastActiveAt: common.ISODateTime | null; // null = never seen (no presence row)
+}
+export interface GetPresenceResponse {
+  items: PresenceView[];
+}
+
 // WsTicketResponse is frozen in @dub/types (chat); re-export under the local name.
 export type WsTicketResponse = chat.WsTicketResponse;
 
@@ -156,6 +207,21 @@ export interface MessageRow {
   editedAt: common.ISODateTime | null;
   deletedAt: common.ISODateTime | null;
   createdAt: common.ISODateTime;
+}
+export interface PinRow {
+  channelId: common.ChannelId;
+  messageId: common.MessageId;
+  pinnedBy: common.UserId;
+  pinnedAt: common.ISODateTime;
+}
+export interface PresenceRow {
+  userId: common.UserId;
+  presence: PresenceSetting;
+  statusEmoji: string | null;
+  statusText: string | null;
+  statusExpiresAt: common.ISODateTime | null;
+  lastActiveAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
 }
 
 // ---- injected dependencies (enables full HTTP-level tests with fakes) ----
@@ -241,6 +307,18 @@ export interface ChatRepo {
     limit: number;
   }): Promise<MessageRow[]>;
   updateMessage(next: MessageRow, expectedVersion: number): Promise<boolean>;
+  // thread reply counts (visible replies grouped by root) — Slack "N replies"
+  replyCountsFor(rootIds: common.MessageId[]): Promise<Map<common.MessageId, number>>;
+  // id of the message immediately before `messageId` in the channel (mark-unread)
+  previousMessageId(channelId: common.ChannelId, messageId: common.MessageId): Promise<common.MessageId | null>;
+  // full-text search over the caller's channels (LIKE keyset scan, desc by id)
+  searchMessages(q: {
+    channelIds: common.ChannelId[];
+    text: string;
+    fromUserId?: common.UserId;
+    beforeId?: string;
+    limit: number;
+  }): Promise<MessageRow[]>;
 
   // reactions
   hasReaction(messageId: common.MessageId, emoji: string, userId: common.UserId): Promise<boolean>;
@@ -250,8 +328,18 @@ export interface ChatRepo {
 
   // read states
   setReadState(channelId: common.ChannelId, userId: common.UserId, lastReadMessageId: common.MessageId, at: string): Promise<void>;
+  clearReadState(channelId: common.ChannelId, userId: common.UserId): Promise<void>;
   getReadState(channelId: common.ChannelId, userId: common.UserId): Promise<{ lastReadMessageId: common.MessageId | null } | null>;
   countUnread(channelId: common.ChannelId, userId: common.UserId, lastReadMessageId: common.MessageId | null): Promise<number>;
+
+  // pins
+  addPin(row: PinRow): Promise<void>;
+  removePin(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean>;
+  listPins(channelId: common.ChannelId): Promise<PinRow[]>;
+
+  // presence
+  getPresence(userIds: common.UserId[]): Promise<PresenceRow[]>;
+  putPresence(row: PresenceRow): Promise<void>;
 }
 
 export interface AppDeps {
