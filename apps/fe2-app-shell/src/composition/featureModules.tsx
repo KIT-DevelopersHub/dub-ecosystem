@@ -23,6 +23,8 @@ import { chatFeature } from "@dub/fe6-chat/src/feature";
 import { adminModule } from "@dub/admin-roster";
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { FeatureModule, FeatureRoute, NavEntry } from "../modules/types.tsx";
+import { mailRoutes, mailNav } from "../features/mail/index.tsx";
+import { MailProvider } from "../features/mail/MailProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -180,6 +182,19 @@ function adaptChat(api: ApiClient): FeatureModule {
   return withModulePerms(chatFeature, { id: "chat", routes, nav });
 }
 
+// ── mail (FE2-local feature module) ───────────────────────────────────────────
+// Unlike FE3–FE7, mail has no separate front-end package: it lives in the shell
+// (apps/fe2-app-shell/src/features/mail). It still ships a canonical FeatureModule
+// so it registers, routes, and authz-gates exactly like the others. Its routes are
+// wrapped in MailProvider (MailApi built from the one shell api-client); nav sits
+// after chat (order 45) and before admin.
+function adaptMail(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(MailProvider, api);
+  const routes = (mailRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = mailNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 45 }));
+  return { id: "mail", routes, nav };
+}
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
@@ -195,12 +210,12 @@ function adaptAdmin(api: ApiClient): FeatureModule {
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, admin]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
 export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
-  return [adaptEvents(api), adaptTasks(api), adaptNotifications(api), adaptChat(api), adaptAdmin(api)];
+  return [adaptEvents(api), adaptTasks(api), adaptNotifications(api), adaptChat(api), adaptMail(api), adaptAdmin(api)];
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptAdmin, toIcon };
