@@ -165,6 +165,106 @@ describe("read routes", () => {
   });
 });
 
+describe("inbox detail (body + read state)", () => {
+  const seedInbound = (
+    raw: ReturnType<typeof makeEnv>["raw"],
+    over: { id?: string; messageId?: string; threadId?: string; bodyText?: string; htmlBody?: string | null; readAt?: string | null; receivedAt?: string } = {},
+  ) => {
+    const id = over.id ?? "mailin_1";
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at)
+         VALUES (?, ?, ?, 'info', ?, ?, 'Hello', 'snip', NULL, NULL, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        over.messageId ?? `<${id}@x>`,
+        over.threadId ?? "thr_1",
+        JSON.stringify({ email: "sender@x.com", name: "Sender" }),
+        JSON.stringify([{ email: "info@developershub.jp" }]),
+        over.receivedAt ?? "2026-08-10T00:00:00.000Z",
+        "2026-08-10T00:00:00.000Z",
+        over.bodyText ?? "Full body text here.",
+        over.htmlBody === undefined ? null : over.htmlBody,
+        over.readAt === undefined ? null : over.readAt,
+      );
+    return id;
+  };
+  const h = (over: Record<string, string> = {}) => ({ "content-type": "application/json", "x-dub-request-id": "req_d", "x-dub-user-id": "usr_alice", ...over });
+
+  it("GET /messages returns read:false for a fresh message", async () => {
+    const { env, raw } = makeEnv();
+    seedInbound(raw);
+    const res = await app.fetch(new Request("https://svc/messages", { headers: h() }), env);
+    const body = (await res.json()) as { items: mail.MailMessageListItem[] };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.read).toBe(false);
+  });
+
+  it("GET /messages/:id returns the full body + read state", async () => {
+    const { env, raw } = makeEnv();
+    seedInbound(raw, { bodyText: "Dear team, please review." });
+    const res = await app.fetch(new Request("https://svc/messages/mailin_1", { headers: h() }), env);
+    expect(res.status).toBe(200);
+    const detail = (await res.json()) as mail.MailMessageDetail;
+    expect(detail.textBody).toBe("Dear team, please review.");
+    expect(detail.read).toBe(false);
+    expect(detail.htmlBody).toBeUndefined();
+  });
+
+  it("GET /messages/:id surfaces an htmlBody when the row has one", async () => {
+    const { env, raw } = makeEnv();
+    seedInbound(raw, { htmlBody: "<p>hi</p>" });
+    const res = await app.fetch(new Request("https://svc/messages/mailin_1", { headers: h() }), env);
+    const detail = (await res.json()) as mail.MailMessageDetail;
+    expect(detail.htmlBody).toBe("<p>hi</p>");
+  });
+
+  it("POST /messages/:id/read flips read to true (idempotently) and 404s an unknown id", async () => {
+    const { env, raw } = makeEnv();
+    seedInbound(raw);
+    const mark = await app.fetch(new Request("https://svc/messages/mailin_1/read", { method: "POST", headers: h() }), env);
+    expect(mark.status).toBe(200);
+    expect(await mark.json()).toEqual({ read: true });
+
+    const after = await app.fetch(new Request("https://svc/messages/mailin_1", { headers: h() }), env);
+    expect(((await after.json()) as mail.MailMessageDetail).read).toBe(true);
+
+    // second call is a no-op (still 200) — first-open stamp is not overwritten
+    const again = await app.fetch(new Request("https://svc/messages/mailin_1/read", { method: "POST", headers: h() }), env);
+    expect(again.status).toBe(200);
+
+    const missing = await app.fetch(new Request("https://svc/messages/nope/read", { method: "POST", headers: h() }), env);
+    expect(missing.status).toBe(404);
+  });
+
+  it("POST /messages/:id/read requires mail:read (403 when denied)", async () => {
+    const { env, raw } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(false) });
+    seedInbound(raw);
+    const res = await app.fetch(new Request("https://svc/messages/mailin_1/read", { method: "POST", headers: h() }), env);
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /threads/:id returns every message in the thread with bodies (oldest→newest)", async () => {
+    const { env, raw } = makeEnv();
+    seedInbound(raw, { id: "mailin_a", messageId: "<a@x>", threadId: "thr_9", bodyText: "first", receivedAt: "2026-08-10T00:00:00.000Z" });
+    seedInbound(raw, { id: "mailin_b", messageId: "<b@x>", threadId: "thr_9", bodyText: "second", receivedAt: "2026-08-10T01:00:00.000Z" });
+    const res = await app.fetch(new Request("https://svc/threads/thr_9", { headers: h() }), env);
+    expect(res.status).toBe(200);
+    const thread = (await res.json()) as mail.MailThread;
+    expect(thread.id).toBe("thr_9");
+    expect(thread.messages.map((m) => m.textBody)).toEqual(["first", "second"]);
+  });
+
+  it("GET /threads/:id 404s an unknown thread", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/threads/missing", { headers: h() }), env);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("health", () => {
   it("reports ok", async () => {
     const { env } = makeEnv();

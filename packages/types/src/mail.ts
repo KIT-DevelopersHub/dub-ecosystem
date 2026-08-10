@@ -48,6 +48,32 @@ export interface InboundMailContext {
   receivedAt: ISODateTime;
 }
 
+// ---- ③ inbox read-state + body (統合波 next slice; ADDITIVE — frozen ① untouched) ----
+// The frozen `MailMessage` carries no read flag and no body (snippet only). Rather
+// than mutate it, the inbox-detail slice layers read-state / body on as SUPERSETS:
+// every type below `extends MailMessage`, so anything typed `MailMessage` still
+// accepts them and existing consumers keep working. Populated from mail_inbound's
+// added columns (read_at / body_text / html_body).
+
+/** Per-message read state. read = (mail_inbound.read_at IS NOT NULL). */
+export interface MailMessageState {
+  read: boolean;
+}
+/** List/row view: the frozen message plus its read flag (drives the unread badge). */
+export interface MailMessageListItem extends MailMessage, MailMessageState {}
+/** Detail view: list item plus the full body. Inbound persists text; htmlBody is
+ *  optional (present only when a message carried an HTML part) and MUST be sanitized
+ *  before rendering. */
+export interface MailMessageDetail extends MailMessageListItem {
+  textBody: string;
+  htmlBody?: string;
+}
+/** A thread = its id plus every message in receipt order (each a full detail). */
+export interface MailThread {
+  id: string;
+  messages: MailMessageDetail[];
+}
+
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----
 export interface Mailbox {
   address: string; // STUB

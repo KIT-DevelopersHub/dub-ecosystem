@@ -11,6 +11,7 @@ import type { mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import {
   decodeHeaderWord,
+  extractBody,
   extractSnippet,
   parseAddress,
   parseAddressList,
@@ -64,7 +65,10 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
   if (h["auto-submitted"]) loop["auto-submitted"] = h["auto-submitted"];
   if (h["x-dub-mail-loop"]) loop["x-dub-mail-loop"] = h["x-dub-mail-loop"];
 
-  return { message, loop, mailbox: localPart(raw.to) };
+  // Body is persisted for the inbox detail view (frozen MailMessage still carries only
+  // the snippet). Email Routing hands us the raw RFC822 as text; we keep the plain-text
+  // body. HTML-part extraction is out of this slice's scope → htmlBody stays null.
+  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null };
 }
 
 /**
@@ -73,7 +77,7 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw);
-  const { message, loop, mailbox } = parsed;
+  const { message, loop, mailbox, bodyText, htmlBody } = parsed;
 
   if (await seenInbound(deps.db, message.messageId)) {
     return { processed: false, message };
@@ -83,6 +87,8 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     mailbox,
     autoSubmitted: loop["auto-submitted"] ?? null,
     loopMarker: loop["x-dub-mail-loop"] ?? null,
+    bodyText,
+    htmlBody,
   });
   if (changes === 0) {
     // lost the race with a concurrent redelivery — already persisted, do not re-publish.

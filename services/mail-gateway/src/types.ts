@@ -48,6 +48,8 @@ export interface ParsedInbound {
   message: mail.MailMessage; // frozen DTO (no body field — snippet only)
   loop: mail.MailLoopHeaders; // loop-prevention hints (passthrough; no logic here)
   mailbox: string | null; // destination mailbox id (best-effort local-part)
+  bodyText: string; // full plain-text body (persisted alongside; powers the detail view)
+  htmlBody: string | null; // HTML part when present (sanitized before render); NULL otherwise
 }
 
 // ---- reconciled cross-service inbound DTO (統合波 reconcile, 2026-08) ----
