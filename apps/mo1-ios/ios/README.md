@@ -14,8 +14,8 @@ here maps 1:1 to that reference and to the design refs it cites.
 
 | Target | Contents |
 |---|---|
-| `Mo1Core` | Contracts (mirrors `@dub/types` consumed subset), `Transport`/`URLSessionTransport`, `MobileApiClient`, `TokenStore` + `KeychainTokenStore`, `DubClientError`/`ErrorMapper`, and the pure domain (`Optimistic`, `HomeReducer`, `DeepLink`, `Push`, `SwrCache`, `Capabilities`, `PKCE`). No UI. |
-| `Mo1UI` | `ObservableObject` ViewModels (`Home`, `TaskDetail`, `Login`), SwiftUI views (S1 login, S2 home, task detail), `WebAuthService` (ASWebAuthenticationSession), `AppSession` composition root. |
+| `Mo1Core` | Contracts (mirrors `@dub/types` consumed subset, incl. `GanttModels`/`ChatModels`), `Transport`/`URLSessionTransport`, `MobileApiClient`, `URLSessionChatSocket` (DO-direct WS), `TokenStore` + `KeychainTokenStore`, `DubClientError`/`ErrorMapper`, and the pure domain (`Optimistic`, `HomeReducer`, `Gantt`, `Chat`, `DeepLink`, `Push`, `SwrCache`, `Capabilities`, `PKCE`). No UI. |
+| `Mo1UI` | `ObservableObject` ViewModels (`Home`, `TaskDetail`, `Gantt`, `Chat`, `EventDetail`, `EventsList`, `Inbox`, `Login`), SwiftUI views (S1 login, S2 home, S3 events, S4 event detail, S6 gantt, S8 chat, inbox, settings, task detail) behind a tab shell, `WebAuthService` (ASWebAuthenticationSession), `AppSession` composition root. |
 | `Mo1App` | `@main` app entry → `RootView`. |
 
 ## TS reference ⇄ Swift map
@@ -28,6 +28,8 @@ here maps 1:1 to that reference and to the design refs it cites.
 | `transport.ts` | `Mo1Core/Networking/Transport.swift` |
 | `optimistic.ts` | `Mo1Core/Domain/Optimistic.swift` + `TaskDetailViewModel` |
 | `home.ts` | `Mo1Core/Domain/HomeReducer.swift` + `HomeViewModel` |
+| `gantt.ts` | `Mo1Core/Domain/Gantt.swift` + `GanttViewModel`/`GanttView` (S6) |
+| `chat.ts` | `Mo1Core/Domain/Chat.swift` (+ `URLSessionChatSocket`) + `ChatViewModel`/`ChatView` (S8) |
 | `deeplink.ts` / `push.ts` | `Mo1Core/Domain/DeepLink.swift` / `Push.swift` |
 | `cache.ts` | `Mo1Core/Domain/Cache.swift` |
 | `capabilities.ts` | `Mo1Core/Domain/Capabilities.swift` |
@@ -47,7 +49,7 @@ here maps 1:1 to that reference and to the design refs it cites.
 
 ```
 cd apps/mo1-ios/ios
-swift test     # 58 unit tests (Core + ViewModel + ErrorMapper), all green
+swift test     # 96 unit tests (Core domain + ViewModels + ErrorMapper), all green
 swift build    # compiles Core + UI + the @main app
 ```
 
@@ -61,5 +63,9 @@ For a real iOS build, open the package in Xcode and select an iOS 17 simulator;
   `mobile.MobileAuthSession` once MO3 freezes the exchange/refresh envelope
   (see `apps/mo1-ios/README.md` "Contract gap").
 - `KeychainTokenStore` is the production store; tests use `InMemoryTokenStore`.
-- Push registration/APNs dispatch, SwiftData persistence, and the gantt/chat
-  screens land in the mobile implementation wave.
+- The S6 gantt + S8 chat screens now ship (domain ported from `gantt.ts`/`chat.ts`,
+  ViewModels + SwiftUI views reachable from the Events tab). Chat's DO-direct
+  socket is a real `URLSessionChatSocketFactory`, but **live** delivery still
+  waits on the 9-C ChatRoom DO; tests drive `StubChatSocketFactory`.
+- Push registration/APNs dispatch, SwiftData persistence, offline `/sync` +
+  `/mutations`, and inbox read-state writes land in later waves.

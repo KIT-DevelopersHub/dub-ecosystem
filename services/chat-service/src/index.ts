@@ -1,6 +1,8 @@
-// Worker entrypoint. Wires the runtime env (D1, Service Bindings, Queues) into
-// AppDeps and serves the Hono app. Deploy is out of scope for this unit (wrangler
-// config is a skeleton); this file stays import-clean for `wrangler dev`.
+// Worker entrypoint. Wires the runtime env (D1, Service Bindings, Queues, and the
+// CHAT_ROOM Durable Object) into AppDeps and serves the Hono app; also routes the
+// /ws upgrade straight to the channel's ChatRoom DO. Deploy is out of scope for
+// this unit (only Apply-time IDs in wrangler.toml remain placeholders); this file
+// stays import-clean for `wrangler dev`.
 import type { D1Database, Fetcher, Queue, ExecutionContext, DurableObjectNamespace } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";

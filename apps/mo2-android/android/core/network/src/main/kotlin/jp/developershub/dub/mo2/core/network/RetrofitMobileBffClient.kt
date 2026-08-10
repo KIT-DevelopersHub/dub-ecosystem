@@ -6,8 +6,12 @@
 package jp.developershub.dub.mo2.core.network
 
 import jp.developershub.dub.mo2.core.common.SessionStore
+import jp.developershub.dub.mo2.core.model.ChatChannel
+import jp.developershub.dub.mo2.core.model.ChatMessage
 import jp.developershub.dub.mo2.core.model.DeviceDto
 import jp.developershub.dub.mo2.core.model.EventSummary
+import jp.developershub.dub.mo2.core.model.GanttChartDTO
+import jp.developershub.dub.mo2.core.model.GanttViewState
 import jp.developershub.dub.mo2.core.model.InboxItem
 import jp.developershub.dub.mo2.core.model.ListInboxResponse
 import jp.developershub.dub.mo2.core.model.MobileAuthExchangeBody
@@ -18,11 +22,13 @@ import jp.developershub.dub.mo2.core.model.MobileHomeResponse
 import jp.developershub.dub.mo2.core.model.MobilePlatform
 import jp.developershub.dub.mo2.core.model.Paginated
 import jp.developershub.dub.mo2.core.model.PreferenceEntry
+import jp.developershub.dub.mo2.core.model.PutGanttViewRequest
 import jp.developershub.dub.mo2.core.model.RegisterDeviceRequest
 import jp.developershub.dub.mo2.core.model.RegisterDeviceResponse
 import jp.developershub.dub.mo2.core.model.Task
 import jp.developershub.dub.mo2.core.model.TaskStatus
 import jp.developershub.dub.mo2.core.model.TaskSummary
+import jp.developershub.dub.mo2.core.model.WsTicketResponse
 import retrofit2.HttpException
 import java.io.IOException
 
@@ -88,6 +94,29 @@ class RetrofitMobileBffClient(
 
     override suspend fun updatePreferences(prefs: List<PreferenceEntry>): List<PreferenceEntry> =
         guarded { api.updatePreferences(UpdatePreferencesBody(prefs)) }
+
+    // ---- S10 chat ----
+    override suspend fun listChannels(cursor: String?): Paginated<ChatChannel> =
+        guarded { api.listChannels(cursor) }
+
+    override suspend fun listMessages(channelId: String, cursor: String?): Paginated<ChatMessage> =
+        guarded { api.listMessages(channelId, cursor) }
+
+    override suspend fun postMessage(channelId: String, body: String): ChatMessage =
+        guarded { api.postMessage(channelId, PostMessageBody(body)) }
+
+    override suspend fun getChatWsTicket(channelId: String): WsTicketResponse =
+        guarded { api.getChatWsTicket(channelId) }
+
+    // ---- S11 gantt ----
+    override suspend fun getGantt(eventId: String): GanttChartDTO =
+        guarded { api.getGantt(eventId) }
+
+    override suspend fun getGanttView(eventId: String): GanttViewState =
+        guarded { api.getGanttView(eventId) }
+
+    override suspend fun saveGanttView(eventId: String, req: PutGanttViewRequest): GanttViewState =
+        guarded { api.saveGanttView(eventId, req) }
 
     // ---- device registration (push) ----
     override suspend fun registerDevice(pushToken: String): RegisterDeviceResponse = guarded {

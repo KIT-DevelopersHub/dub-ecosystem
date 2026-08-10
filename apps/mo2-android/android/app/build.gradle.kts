@@ -52,6 +52,12 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":feature:home"))
     implementation(project(":feature:tasks"))
+    implementation(project(":feature:events"))
+    implementation(project(":feature:gantt"))
+    implementation(project(":feature:chat"))
+    implementation(project(":feature:inbox"))
+    implementation(project(":feature:preferences"))
+    implementation(project(":feature:devices"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)

@@ -12,7 +12,8 @@
     "./icons": {
       "types": "./dist/icons.d.ts",
       "import": "./dist/icons.js"
-    }
+    },
+    "./style.css": "./dist/style.css"
   },
   "files": ["dist"],
   "scripts": {

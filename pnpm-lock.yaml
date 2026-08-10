@@ -871,6 +871,9 @@ importers:
       '@dub/auth-client':
         specifier: workspace:*
         version: link:../../packages/auth-client
+      '@dub/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors

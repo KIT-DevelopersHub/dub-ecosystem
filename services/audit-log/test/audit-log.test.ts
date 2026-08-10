@@ -8,7 +8,7 @@ import { makeD1 } from "./d1";
 import { createApp } from "../src/app";
 import { consumeAuditQueue } from "../src/queue";
 import { archiveOldRecords, retentionCutoffIso } from "../src/archive";
-import { insertRecord, getById, queryLogs } from "../src/repo";
+import { insertRecord, getById, queryLogs, deleteBefore } from "../src/repo";
 import type { Env } from "../src/env";
 
 // ---- fixtures -------------------------------------------------------------
@@ -241,6 +241,23 @@ describe("append-only guarantees (DB triggers)", () => {
     await insertRecord(auditDb(d1), "OLD1", input({ occurredAt: "2020-01-01T00:00:00.000Z" }));
     expect(() => raw.exec("DELETE FROM audit_logs WHERE id='OLD1'")).not.toThrow();
     expect(await getById(auditDb(d1), "OLD1")).toBeNull();
+  });
+
+  it("#6 deleteBefore() cannot prune in-window rows: the trigger guards the archive path", async () => {
+    const { d1 } = makeD1();
+    const db = auditDb(d1);
+    // A recent (in-window) row and an old (out-of-window) row.
+    await insertRecord(db, "RECENT1", input({ occurredAt: new Date().toISOString() }));
+    await insertRecord(db, "ANCIENT1", input({ occurredAt: "2020-01-01T00:00:00.000Z" }));
+    // A mis-computed cutoff in the future would sweep the recent row too — the
+    // audit_logs_no_delete trigger ABORTs the whole statement (all-or-nothing),
+    // so the archive delete path can never breach append-only regardless of cutoff.
+    // (@dub/db wraps the trigger's ABORT into a generic "D1 query failed"; the
+    // load-bearing proof is that BOTH rows survive — the statement rolled back.)
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    await expect(deleteBefore(db, future)).rejects.toThrow();
+    expect((await getById(db, "RECENT1"))?.id).toBe("RECENT1"); // in-window: protected
+    expect((await getById(db, "ANCIENT1"))?.id).toBe("ANCIENT1"); // statement rolled back
   });
 });
 

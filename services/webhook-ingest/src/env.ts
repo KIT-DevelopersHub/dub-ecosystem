@@ -48,11 +48,12 @@ export const QUEUE_NAME_BY_SOURCE: Record<webhook.WebhookSource, string> = {
   stripe: "dub-q-wh-stripe",
 };
 
-// Enabled ingress sources. github/google-drive/stripe accept live traffic; gmail stays
-// gated (its verifier is implemented but the endpoint is not yet activated — see 9-B).
+// Enabled ingress sources — all accept live traffic. gmail was activated in 9-B once its
+// Pub/Sub push OIDC verifier (JWKS + RS256 + pinned service-account identity) landed.
 export const ENABLED_SOURCES: ReadonlySet<webhook.WebhookSource> = new Set([
   "github",
   "google-drive",
+  "gmail",
   "stripe",
 ]);
 

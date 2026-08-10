@@ -118,18 +118,18 @@ describe("createHttpUpstream.listTasks pagination", () => {
   });
 });
 
-describe("createHttpUpstream.listDependencies response-shape tolerance", () => {
+describe("createHttpUpstream.listDependencies contract", () => {
   const dep = (taskId: string, dependsOnId: string): task.TaskDependency => ({ taskId, dependsOnId });
 
-  it("accepts a bare array response", async () => {
-    const up = createHttpUpstream(envWith(fakeTaskFetcher({ dependencies: () => [dep("t1", "t0")] })));
+  it("reads the task-service { items } wire shape", async () => {
+    const up = createHttpUpstream(
+      envWith(fakeTaskFetcher({ dependencies: () => ({ items: [dep("t1", "t0")] }) })),
+    );
     expect(await up.listDependencies(ctx, "event_1")).toEqual([dep("t1", "t0")]);
   });
 
-  it("accepts a { dependencies } wrapper response", async () => {
-    const up = createHttpUpstream(
-      envWith(fakeTaskFetcher({ dependencies: () => ({ dependencies: [dep("t1", "t0")] }) })),
-    );
-    expect(await up.listDependencies(ctx, "event_1")).toEqual([dep("t1", "t0")]);
+  it("returns an empty edge set when the event has no dependencies", async () => {
+    const up = createHttpUpstream(envWith(fakeTaskFetcher({ dependencies: () => ({ items: [] }) })));
+    expect(await up.listDependencies(ctx, "event_1")).toEqual([]);
   });
 });

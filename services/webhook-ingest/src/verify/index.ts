@@ -2,7 +2,9 @@
 import type { webhook } from "@dub/types";
 import type { Env } from "../env";
 import { verifyGithub } from "./github";
-import { verifyGoogleDrive, verifyGmail, verifyStripe } from "./stubs";
+import { verifyGoogleDrive } from "./google-drive";
+import { verifyStripe } from "./stripe";
+import { verifyGmail } from "./gmail";
 import type { Verifier, VerifierSecrets } from "./types";
 
 export const VERIFIERS: Record<webhook.WebhookSource, Verifier> = {

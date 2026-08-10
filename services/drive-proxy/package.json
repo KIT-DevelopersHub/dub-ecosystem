@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@dub/auth-client": "workspace:*",
+    "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/events": "workspace:*",
     "@dub/http": "workspace:*",

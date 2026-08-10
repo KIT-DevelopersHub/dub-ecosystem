@@ -2,6 +2,7 @@
   background: var(--dub-color-surface-raised);
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg);
+  box-shadow: var(--dub-shadow-sm);
   overflow: hidden;
 }
 .cardHeader {
@@ -41,7 +42,7 @@
 }
 .pageHeaderRow {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--dub-space-4);
   flex-wrap: wrap;
@@ -64,12 +65,17 @@
 .shell {
   display: flex;
   min-height: 100vh;
-  background: var(--dub-color-surface-base);
+  background: var(--dub-color-surface-sunken);
 }
 .shellSidebar {
   flex-shrink: 0;
   border-right: 1px solid var(--dub-color-border-default);
   background: var(--dub-color-surface-raised);
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
 }
 .shellMain {
   flex: 1;
@@ -78,11 +84,18 @@
   min-width: 0;
 }
 .shellHeader {
+  position: sticky;
+  top: 0;
+  z-index: var(--dub-z-index-sticky);
+  padding: var(--dub-space-3) var(--dub-space-6) 0;
   border-bottom: 1px solid var(--dub-color-border-default);
-  background: var(--dub-color-surface-raised);
+  background: color-mix(in srgb, var(--dub-color-surface-raised) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(8px);
+  -webkit-backdrop-filter: saturate(180%) blur(8px);
 }
 .shellContent {
   flex: 1;
   padding: var(--dub-space-6);
   min-width: 0;
+  background: var(--dub-color-surface-sunken);
 }

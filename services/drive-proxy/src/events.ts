@@ -17,7 +17,9 @@ export type DriveAuditAction =
   | "drive.file.create"
   | "drive.file.move"
   | "drive.file.trash"
-  | "drive.sheet.write";
+  | "drive.sheet.write"
+  | "drive.watch.create"
+  | "drive.watch.stop";
 
 export interface EventPublisher {
   fileCreated(ctx: PublishContext, driveFileId: string): Promise<void>;

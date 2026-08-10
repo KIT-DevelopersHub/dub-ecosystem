@@ -4,8 +4,12 @@
 // Base URL already carries the MOBILE_API_PREFIX, so paths are prefix-relative.
 package jp.developershub.dub.mo2.core.network
 
+import jp.developershub.dub.mo2.core.model.ChatChannel
+import jp.developershub.dub.mo2.core.model.ChatMessage
 import jp.developershub.dub.mo2.core.model.DeviceDto
 import jp.developershub.dub.mo2.core.model.EventSummary
+import jp.developershub.dub.mo2.core.model.GanttChartDTO
+import jp.developershub.dub.mo2.core.model.GanttViewState
 import jp.developershub.dub.mo2.core.model.InboxItem
 import jp.developershub.dub.mo2.core.model.ListInboxResponse
 import jp.developershub.dub.mo2.core.model.MobileAuthExchangeBody
@@ -15,11 +19,13 @@ import jp.developershub.dub.mo2.core.model.MobileEventOverviewResponse
 import jp.developershub.dub.mo2.core.model.MobileHomeResponse
 import jp.developershub.dub.mo2.core.model.Paginated
 import jp.developershub.dub.mo2.core.model.PreferenceEntry
+import jp.developershub.dub.mo2.core.model.PutGanttViewRequest
 import jp.developershub.dub.mo2.core.model.RegisterDeviceRequest
 import jp.developershub.dub.mo2.core.model.RegisterDeviceResponse
 import jp.developershub.dub.mo2.core.model.Task
 import jp.developershub.dub.mo2.core.model.TaskStatus
 import jp.developershub.dub.mo2.core.model.TaskSummary
+import jp.developershub.dub.mo2.core.model.WsTicketResponse
 import kotlinx.serialization.Serializable
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -34,6 +40,9 @@ data class UpdateTaskStatusBody(val version: Int, val status: TaskStatus)
 
 @Serializable
 data class UpdatePreferencesBody(val preferences: List<PreferenceEntry>)
+
+@Serializable
+data class PostMessageBody(val body: String)
 
 interface MobileBffApi {
     // ---- S1 auth (unauthenticated) ----
@@ -86,6 +95,35 @@ interface MobileBffApi {
 
     @PATCH("preferences")
     suspend fun updatePreferences(@Body body: UpdatePreferencesBody): List<PreferenceEntry>
+
+    // ---- S10 chat (channel/message; RT ticket -> DO-direct) ----
+    @GET("chat/channels")
+    suspend fun listChannels(@Query("cursor") cursor: String?): Paginated<ChatChannel>
+
+    @GET("chat/channels/{id}/messages")
+    suspend fun listMessages(
+        @Path("id") channelId: String,
+        @Query("cursor") cursor: String?,
+    ): Paginated<ChatMessage>
+
+    @POST("chat/channels/{id}/messages")
+    suspend fun postMessage(@Path("id") channelId: String, @Body body: PostMessageBody): ChatMessage
+
+    @POST("chat/channels/{id}/ws-ticket")
+    suspend fun getChatWsTicket(@Path("id") channelId: String): WsTicketResponse
+
+    // ---- S11 gantt (read model + persisted view prefs) ----
+    @GET("gantt")
+    suspend fun getGantt(@Query("event") eventId: String): GanttChartDTO
+
+    @GET("gantt/view")
+    suspend fun getGanttView(@Query("event") eventId: String): GanttViewState
+
+    @PATCH("gantt/view")
+    suspend fun saveGanttView(
+        @Query("event") eventId: String,
+        @Body body: PutGanttViewRequest,
+    ): GanttViewState
 
     // ---- device registration (push) ----
     @POST("devices")

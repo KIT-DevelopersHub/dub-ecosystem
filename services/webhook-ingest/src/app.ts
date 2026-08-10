@@ -54,9 +54,9 @@ function defaultDeps(env: Env): IngestDeps {
   return { repo: defaultRepo(env), raw: env.WEBHOOK_RAW, queues };
 }
 
-// webhook:read is a pending PERMISSION_CATALOG addition (受口一本化 波及タスク; not yet in
-// the frozen @dub/types union). Cast until identity-roster (#3) registers the key.
-const WEBHOOK_READ = "webhook:read" as identity.PermissionKey;
+// webhook:read is a registered PERMISSION_CATALOG key in @dub/types (identity-roster #3),
+// so this is a plain typed literal — the identity union checks it at compile time.
+const WEBHOOK_READ: identity.PermissionKey = "webhook:read";
 
 function defaultRequireWebhookRead(): MiddlewareHandler {
   return async (c, next) => {

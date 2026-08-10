@@ -10,6 +10,8 @@ public final class LoginViewModel: ObservableObject {
     @Published public private(set) var isAuthenticating = false
     @Published public private(set) var isAuthenticated = false
     @Published public private(set) var errorKind: ClientErrorKind?
+    /// userId of the exchanged session (nil until a successful exchange).
+    @Published public private(set) var userId: String?
 
     private let api: MobileApi
     private let tokenStore: TokenStore
@@ -74,6 +76,7 @@ public final class LoginViewModel: ObservableObject {
         do {
             let session = try await api.exchange(MobileExchangeRequest(code: code))
             tokenStore.write(StoredSession(token: session.token, sessionExpiresAt: session.session.sessionExpiresAt))
+            userId = session.session.userId
             isAuthenticated = true
             errorKind = nil
         } catch let err as DubClientError {

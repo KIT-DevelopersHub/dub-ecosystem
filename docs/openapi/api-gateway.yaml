@@ -10,8 +10,11 @@ info:
     
     All responses echo the correlation id in the x-dub-request-id header.
 servers:
-  - url: https://api.dub.example/api/v1
-    description: Public API base (external clients).
+  - url: https://api.developershub.jp
+    description: |-
+      External origin (host root). Paths are written in full: /healthz is root-mounted
+      (outside the API prefix), everything else lives under /api/v1 — matching the
+      gateway's actual route table (services/api-gateway/src/app.ts + routes.ts).
 tags:
   - name: gateway
   - name: proxy
@@ -37,7 +40,7 @@ paths:
                   ok:
                     type: boolean
       security: []
-  /me:
+  /api/v1/me:
     get:
       operationId: getMe
       summary: Current user, org, permissions and session expiry
@@ -58,7 +61,7 @@ paths:
       security:
         - sessionCookie: []
         - gatewayIdentity: []
-  /bff/home:
+  /api/v1/bff/home:
     get:
       operationId: getBffHome
       summary: Home screen aggregate (events + unread)
@@ -79,7 +82,7 @@ paths:
       security:
         - sessionCookie: []
         - gatewayIdentity: []
-  /public/inquiries:
+  /api/v1/public/inquiries:
     post:
       operationId: createPublicInquiry
       summary: Submit a public contact inquiry
@@ -106,26 +109,32 @@ paths:
         '500':
           $ref: '#/components/responses/Internal'
       security: []
-  /{segment}/{path}:
+  /api/v1/{segment}/{path}:
+    parameters:
+      - name: segment
+        in: path
+        required: true
+        description: 'First path segment selecting the backing service: auth, identity, events, actions, tasks, gantt, notifications, files, drive, chat, mail, deploy, github, audit, webhooks.'
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: Remaining sub-path, forwarded verbatim to the service after stripping the /api/v1 prefix.
+        schema:
+          type: string
     get:
-      operationId: proxyGet
+      operationId: proxyRequest
       summary: Transparent proxy to a backing service
       tags:
         - proxy
-      description: Catch-all under /api/v1. Resolves the route, applies guards (WebSocket-upgrade rejected as 400, body cap, internal-only sub-paths 404'd), runs a one-shot session verify for auth:required segments, then forwards with x-dub-request-id + x-dub-user-id. Per-service request/response schemas live in that service's own spec. See each <service>.yaml.
-      parameters:
-        - name: segment
-          in: path
-          required: true
-          description: 'First path segment selecting the backing service: auth, identity, events, actions, tasks, gantt, notifications, files, drive, chat, mail, deploy, github, audit, webhooks.'
-          schema:
-            type: string
-        - name: path
-          in: path
-          required: true
-          description: Remaining sub-path, forwarded to the service after stripping /api/v1.
-          schema:
-            type: string
+      description: |-
+        Catch-all for every /api/v1/<segment>/* request the gateway does not own itself.
+        Applies to all HTTP methods (GET/POST/PUT/PATCH/DELETE) — one operation documents
+        the shared behaviour. Resolves the route, applies guards (WebSocket-upgrade rejected
+        as 400, body cap, internal-only sub-paths 404'd), runs a one-shot session verify for
+        auth:required segments, then forwards with x-dub-request-id + x-dub-user-id. Per-service
+        request/response schemas live in that service's own spec. See each <service>.yaml.
       responses:
         '200':
           description: The upstream service response is returned verbatim (status, body and headers passed through).

@@ -1,0 +1,348 @@
+// Demo transport for the composed shell (backend-free showcase build).
+//
+// The offline `createMockFetch` (mock-api-client.tsx) only answers the shell BOOT
+// surface (/me, /bff/home, /auth/*); every feature route falls through to a 404
+// envelope so screens show their in-frame fallback. That is right for CI smoke,
+// but a *demo* build wants the feature screens populated: navigate to メール /
+// イベント / タスク / 通知 / 名簿 and see representative data.
+//
+// This module layers a richer, read-mostly seed on top of the same MSW-style
+// transport swap. It:
+//   1. auto-completes login — the demo `/me` returns a broad-permission session,
+//      so RequireAuth passes without any OAuth round-trip;
+//   2. answers each feature's primary list endpoint (events / tasks / gantt /
+//      notifications / mail / identity) from in-memory seed data;
+//   3. answers the common detail + benign mutation endpoints (mail thread/read,
+//      event detail/actions, notification read) so clicking a row still works.
+//
+// It is a MOCK: no real gateway, no real data, no real mail is ever sent. Only
+// the transport is swapped; the real api-client (session/refresh/requestId/retry/
+// error-normalization) runs unchanged over it. Unhandled routes delegate to the
+// boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
+// screen), so "what is seeded vs. still stubbed" stays honest.
+import type { ErrorResponse } from "@dub/errors";
+import type { event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
+// Value import (namespace) for the frozen RBAC catalog served to the admin screen.
+import { identity as identityValues } from "@dub/types";
+import { createMockFetch } from "./mock-api-client.tsx";
+
+const ORG = "org_demo";
+const ME_ID = "usr_demo";
+
+// Broad permission set: every primary nav item + its detail screens render.
+// Demo-only — the real gateway is authoritative; this just unlocks the UI.
+const DEMO_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "identity:admin",
+  "event:read",
+  "event:write",
+  "event:admin",
+  "task:read",
+  "task:write",
+  "task:delete",
+  "file:read",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "mail:read",
+  "mail:send",
+  "chat:create",
+  "audit:read",
+];
+
+const DEMO_ME: gateway.MeResponse = {
+  user: { id: ME_ID, displayName: "デモ 管理者", avatarUrl: null },
+  orgId: ORG,
+  permissions: DEMO_PERMISSIONS,
+  sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+};
+
+// ── events ────────────────────────────────────────────────────────────────────
+const EVENTS: event.EventSummary[] = [
+  { id: "evt_1", title: "北陸ITカンファレンス 2026", phase: "preparing", startsAt: "2026-08-05T01:00:00Z" },
+  { id: "evt_2", title: "運営定例ミーティング", phase: "planning", startsAt: "2026-08-12T09:00:00Z" },
+  { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-09-01T00:00:00Z" },
+];
+
+const EVENT_DETAIL: Record<string, event.EventDetail> = {
+  evt_1: {
+    version: 3,
+    id: "evt_1",
+    orgId: ORG,
+    title: "北陸ITカンファレンス 2026",
+    description: "北陸最大級の技術カンファレンス。会場運営・登壇者調整・広報を横断で進行中。",
+    phase: "preparing",
+    startsAt: "2026-08-05T01:00:00Z",
+    endsAt: "2026-08-05T09:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-05-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    actions: [
+      { id: "act_1", eventId: "evt_1", kind: "task_management", title: "会場設営タスク" },
+      { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
+    ],
+  },
+};
+
+const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
+  evt_1: [
+    {
+      version: 1,
+      id: "act_1",
+      eventId: "evt_1",
+      kind: "task_management",
+      title: "会場設営タスク",
+      sortOrder: 0,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+    {
+      version: 1,
+      id: "act_2",
+      eventId: "evt_1",
+      kind: "announcement",
+      title: "参加者への案内メール",
+      sortOrder: 1,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+  ],
+};
+
+// ── tasks ───────────────────────────────────────────────────────────────────
+const TASKS: task.Task[] = [
+  {
+    version: 2, id: "tsk_1", eventId: "evt_1", title: "登壇者スケジュール確定", description: "全12セッションの時間割を確定する",
+    status: "in_progress", priority: "high", assigneeId: ME_ID, dueAt: "2026-08-03T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_2", eventId: "evt_1", title: "会場レイアウト図作成", description: null,
+    status: "todo", priority: "medium", assigneeId: ME_ID, dueAt: "2026-08-04T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-05T00:00:00Z", updatedAt: "2026-07-20T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_3", eventId: "evt_1", title: "スポンサー請求書送付", description: "確定した3社へ請求",
+    status: "done", priority: "urgent", assigneeId: "usr_bob", dueAt: "2026-07-25T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-02T00:00:00Z", updatedAt: "2026-07-24T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_4", eventId: "evt_1", title: "受付システム連携確認", description: null,
+    status: "blocked", priority: "medium", assigneeId: null, dueAt: null, origin: "github",
+    archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z",
+  },
+];
+
+const GANTT: Record<string, gantt.GanttChartDTO> = {
+  evt_1: {
+    eventId: "evt_1",
+    rows: [
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID },
+      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null },
+    ],
+    dependencies: [
+      { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
+    ],
+  },
+};
+
+// ── notifications ─────────────────────────────────────────────────────────────
+const NOTIFICATIONS: notification.InboxItem[] = [
+  { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
+  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
+  { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
+];
+
+// ── mail ────────────────────────────────────────────────────────────────────
+const MAIL_LIST: mail.MailMessageListItem[] = [
+  {
+    id: "msg_1", messageId: "<m1@demo>", threadId: "thr_1", from: { email: "hanako@example.com", name: "山田 花子" },
+    to: [{ email: "demo@developershub.jp" }], subject: "登壇のご相談", snippet: "カンファレンスでの登壇について相談させてください。",
+    receivedAt: "2026-08-02T01:30:00Z", read: false,
+  },
+  {
+    id: "msg_2", messageId: "<m2@demo>", threadId: "thr_2", from: { email: "sponsor@acme.co.jp", name: "ACME株式会社" },
+    to: [{ email: "demo@developershub.jp" }], subject: "スポンサー契約書の送付", snippet: "契約書を添付いたします。ご確認ください。",
+    receivedAt: "2026-08-01T05:00:00Z", read: false,
+  },
+  {
+    id: "msg_3", messageId: "<m3@demo>", threadId: "thr_3", from: { email: "staff@developershub.jp", name: "運営スタッフ" },
+    to: [{ email: "demo@developershub.jp" }], subject: "会場下見の日程", snippet: "来週の下見日程を共有します。",
+    receivedAt: "2026-07-30T08:00:00Z", read: true,
+  },
+];
+
+const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
+  msg_1: { ...MAIL_LIST[0]!, textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。\n\nよろしくお願いいたします。" },
+  msg_2: { ...MAIL_LIST[1]!, textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。" },
+  msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
+};
+
+const MAIL_THREAD: Record<string, mail.MailThread> = {
+  thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
+  thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
+  thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
+};
+
+// ── identity / roster (admin) ─────────────────────────────────────────────────
+function isoNow(): string {
+  return "2026-08-01T00:00:00Z";
+}
+const USERS: identity.IdentityUser[] = [
+  { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_carol", orgId: ORG, displayName: "鈴木 一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+];
+
+const ROLES: identity.Role[] = [
+  { id: "role_admin", orgId: ORG, name: "admin", permissions: DEMO_PERMISSIONS, isSystem: true },
+  { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write", "task:read", "task:write", "mail:read"], isSystem: true },
+  { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read", "task:read"], isSystem: true },
+];
+
+const USER_ROLES: Record<string, unknown[]> = {
+  [ME_ID]: [{ id: "asg_1", userId: ME_ID, roleId: "role_admin", roleName: "admin", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
+  usr_bob: [{ id: "asg_2", userId: "usr_bob", roleId: "role_member", roleName: "member", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
+};
+
+const USER_SUMMARIES: identity.UserSummary[] = USERS.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
+
+// ── transport helpers ─────────────────────────────────────────────────────────
+function json(body: unknown, status = 200): Response {
+  return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+function notFound(route: string): Response {
+  const body: ErrorResponse = { error: { code: "NOT_FOUND", message: `demo: no handler for ${route}`, retryable: false } };
+  return json(body, 404);
+}
+function page<T>(items: T[]): { items: T[]; nextCursor: string | null } {
+  return { items, nextCursor: null };
+}
+
+/** Match a demo feature route; return a Response or null to fall through to boot. */
+function matchDemoRoute(method: string, pathname: string, url: URL): Response | null {
+  const seg = (re: RegExp): string | null => {
+    const m = re.exec(pathname);
+    return m ? decodeURIComponent(m[1]!) : null;
+  };
+
+  if (method === "GET") {
+    // events
+    if (pathname === "/api/v1/events") return json(page(EVENTS));
+    {
+      const id = seg(/^\/api\/v1\/events\/([^/]+)\/actions$/);
+      if (id) return json(page(EVENT_ACTIONS[id] ?? []));
+    }
+    {
+      const id = seg(/^\/api\/v1\/events\/([^/]+)$/);
+      if (id) return EVENT_DETAIL[id] ? json(EVENT_DETAIL[id]) : notFound(`GET ${pathname}`);
+    }
+    // tasks
+    if (pathname === "/api/v1/tasks") return json(page(TASKS));
+    {
+      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      if (id) {
+        const t = TASKS.find((x) => x.id === id);
+        return t ? json(t) : notFound(`GET ${pathname}`);
+      }
+    }
+    // gantt
+    if (pathname === "/api/v1/gantt") {
+      const ev = url.searchParams.get("event") ?? "evt_1";
+      return json(GANTT[ev] ?? { eventId: ev, rows: [], dependencies: [] });
+    }
+    if (pathname === "/api/v1/gantt/dependencies") {
+      const ev = url.searchParams.get("event") ?? "evt_1";
+      return json(GANTT[ev]?.dependencies ?? []);
+    }
+    // notifications
+    if (pathname === "/api/v1/notifications/inbox") {
+      const unreadOnly = url.searchParams.get("unreadOnly") === "true";
+      return json(page(unreadOnly ? NOTIFICATIONS.filter((n) => n.readAt === null) : NOTIFICATIONS));
+    }
+    if (pathname === "/api/v1/notifications/inbox/unread-count") {
+      return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
+    }
+    // mail
+    if (pathname === "/api/v1/mail/messages") return json(page(MAIL_LIST));
+    {
+      const id = seg(/^\/api\/v1\/mail\/messages\/([^/]+)$/);
+      if (id) return MAIL_DETAIL[id] ? json(MAIL_DETAIL[id]) : notFound(`GET ${pathname}`);
+    }
+    {
+      const id = seg(/^\/api\/v1\/mail\/threads\/([^/]+)$/);
+      if (id) return MAIL_THREAD[id] ? json(MAIL_THREAD[id]) : notFound(`GET ${pathname}`);
+    }
+    // identity / roster
+    if (pathname === "/api/v1/identity/users") {
+      // FE3/FE6 resolve display names via ?ids=; roster lists via filters.
+      if (url.searchParams.has("ids")) return json(page(USER_SUMMARIES));
+      return json(page(USERS));
+    }
+    {
+      const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)\/roles$/);
+      if (id) return json(USER_ROLES[id] ?? []);
+    }
+    {
+      const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)$/);
+      if (id) {
+        const u = USERS.find((x) => x.id === id);
+        return u ? json({ ...u, permissions: ROLES.filter((r) => u.roleIds.includes(r.id)).flatMap((r) => r.permissions) }) : notFound(`GET ${pathname}`);
+      }
+    }
+    if (pathname === "/api/v1/identity/roles") return json(page(ROLES));
+    if (pathname === "/api/v1/identity/permissions/catalog") return json(identityValues.PERMISSION_CATALOG);
+    // chat: seed empty so the screen renders its empty state (no WS in demo).
+    if (pathname === "/api/v1/chat/channels") return json([]);
+    if (pathname === "/api/v1/chat/unread") return json([]);
+  }
+
+  if (method === "POST") {
+    // mail: mark read + "send" both acknowledged (no real mail leaves the browser).
+    if (/^\/api\/v1\/mail\/messages\/[^/]+\/read$/.test(pathname)) return json({ read: true });
+    if (pathname === "/api/v1/mail/outbox") {
+      return json({ messageId: `<demo-${Date.now()}@developershub.jp>`, provider: "resend", acceptedAt: new Date().toISOString() });
+    }
+    if (pathname === "/api/v1/notifications/inbox/read-all") return json(null, 204);
+  }
+
+  if (method === "PATCH") {
+    if (/^\/api\/v1\/notifications\/inbox\/[^/]+\/read$/.test(pathname)) return json(null, 204);
+    if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
+  }
+
+  return null;
+}
+
+/** A `fetch` that serves the demo feature surface, delegating boot + unknown
+ *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
+export function createDemoFetch(): typeof fetch {
+  const boot = createMockFetch({
+    me: DEMO_ME,
+    home: {
+      upcomingEvents: EVENTS.slice(0, 2),
+      unreadCount: NOTIFICATIONS.filter((n) => n.readAt === null).length,
+      partialErrors: [],
+    },
+  });
+
+  const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const url = new URL(href);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const hit = matchDemoRoute(method, url.pathname, url);
+    if (hit) return hit;
+    // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.
+    return boot(input, init);
+  };
+
+  return demoFetch as unknown as typeof fetch;
+}
+
+/** True when the shell should boot the demo transport (VITE_DEMO=1 / true). */
+export function isDemoEnabled(env: { VITE_DEMO?: string } | undefined): boolean {
+  return env?.VITE_DEMO === "true" || env?.VITE_DEMO === "1";
+}

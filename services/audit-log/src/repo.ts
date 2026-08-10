@@ -3,6 +3,7 @@
 import { type DbClient, nowIso } from "@dub/db";
 import { errors } from "@dub/errors";
 import type { auditLog } from "@dub/types";
+import { DEFAULT_QUERY_LIMIT } from "./config";
 
 interface AuditRow {
   id: string;
@@ -94,7 +95,7 @@ export async function queryLogs(db: DbClient, q: auditLog.AuditLogQuery): Promis
   if (q.until !== undefined) { where.push("occurred_at < ?"); binds.push(q.until); }
   if (q.cursor !== undefined) { where.push("id < ?"); binds.push(decodeCursor(q.cursor)); }
 
-  const limit = q.limit ?? 50;
+  const limit = q.limit ?? DEFAULT_QUERY_LIMIT;
   const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `SELECT * FROM audit_logs ${clause} ORDER BY id DESC LIMIT ?`;
   const rows = await db.all<AuditRow>(sql, ...binds, limit + 1);
