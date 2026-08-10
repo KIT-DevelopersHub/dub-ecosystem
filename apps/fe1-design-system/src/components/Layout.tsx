@@ -97,11 +97,13 @@ export function PageHeader({ title, description, actions, breadcrumbs, testId }:
   );
 }
 
-/** Visual shell (凍結案 1-4-1): FE1 owns the chrome; FE2 AppShellLayout wires nav/auth. */
+/** Visual shell (凍結案 1-4-1): FE1 owns the chrome; FE2 AppShellLayout wires nav/auth.
+ *  `sidebar` is optional — when omitted the left rail is not rendered and the main
+ *  column spans full width (app-launcher model, 凍結案 1-4-3). */
 export function AppShell({ sidebar, header, testId, children }: AppShellProps) {
   return (
     <div className={cx(styles.shell)} data-testid={testId}>
-      <aside className={cx(styles.shellSidebar)}>{sidebar}</aside>
+      {sidebar != null && <aside className={cx(styles.shellSidebar)}>{sidebar}</aside>}
       <div className={cx(styles.shellMain)}>
         {header && <div className={cx(styles.shellHeader)}>{header}</div>}
         <main className={cx(styles.shellContent)}>{children}</main>

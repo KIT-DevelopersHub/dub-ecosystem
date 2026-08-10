@@ -1,11 +1,15 @@
-// AppShellLayout (design 2-2). Composes @dub/ui AppShell/Sidebar/PageHeader and wires
-// nav aggregation, auth-driven user menu, badge injection, headerWidget slots and
-// the routed content. FE2 does composition & wiring only — the visuals are FE1's.
+// AppShellLayout (design 2-2, app-launcher model 凍結案 1-4-3). Composes @dub/ui
+// AppShell/PageHeader/AppLauncher and wires nav aggregation, auth-driven user menu,
+// badge injection, headerWidget slots and the routed content. FE2 does composition
+// & wiring only — the visuals are FE1's.
+//
+// The persistent left sidebar is gone: tools now live behind the header AppLauncher
+// (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
+// with no nested/double sidebar.
 import type { ComponentType, ReactNode } from "react";
-import { AppShell, Sidebar, PageHeader, Button, IconButton, Icon } from "@dub/ui";
-import type { SidebarItem } from "@dub/ui";
+import { AppShell, PageHeader, AppLauncher, Button, Icon } from "@dub/ui";
+import type { AppLauncherItem } from "@dub/ui";
 import type { NavEntry } from "../modules/types.tsx";
-import { useUiStore } from "../store/uiStore.tsx";
 import { useAuth } from "../auth/AuthProvider.tsx";
 
 export interface AppShellLayoutProps {
@@ -17,14 +21,16 @@ export interface AppShellLayoutProps {
   children: ReactNode; // routed <Outlet/>
 }
 
-// NavEntry[] -> @dub/ui SidebarItem[]: id keyed by path, badgeSource() hook injected
-// as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal), sorted by order.
-function toSidebarItems(navEntries: NavEntry[]): SidebarItem[] {
+// NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
+// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal), sorted by
+// order. Role/permission filtering already happened upstream in the registry, so
+// whatever nav the shell hands us is exactly what this role may see.
+function toLauncherItems(navEntries: NavEntry[]): AppLauncherItem[] {
   return [...navEntries]
     .sort((a, b) => a.order - b.order)
     .map((entry) => {
       const badge = entry.badgeSource?.();
-      const item: SidebarItem = {
+      const item: AppLauncherItem = {
         id: entry.path,
         label: entry.label,
         icon: entry.icon,
@@ -43,50 +49,7 @@ export function AppShellLayout({
   title = "DevHub",
   children,
 }: AppShellLayoutProps): JSX.Element {
-  const sidebarOpen = useUiStore((s) => s.sidebarOpen);
-  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const auth = useAuth();
-
-  // @dub/ui Sidebar is router-free; renderLink lets FE2 intercept navigation so the
-  // host router (not a full page load) handles it. FE1 renders the <a href> node.
-  const renderLink = onNavigate
-    ? (item: SidebarItem, node: ReactNode): ReactNode => (
-        <span
-          data-testid={`fe2-nav-${item.id.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}`}
-          onClick={(e) => {
-            e.preventDefault();
-            onNavigate(item.href ?? item.id);
-          }}
-        >
-          {node}
-        </span>
-      )
-    : undefined;
-
-  const displayName = auth.status === "authenticated" ? auth.me.user.displayName : "";
-  const initial = displayName.trim().charAt(0).toUpperCase() || "U";
-
-  const sidebar = (
-    <>
-      <div className="fe2-brand">
-        <span className="fe2-brand-mark" aria-hidden="true">
-          D
-        </span>
-        {sidebarOpen ? (
-          <span className="fe2-brand-text">
-            <span className="fe2-brand-title">DevHub</span>
-            <span className="fe2-brand-sub">管理コンソール</span>
-          </span>
-        ) : null}
-      </div>
-      <Sidebar
-        items={toSidebarItems(navEntries)}
-        collapsed={!sidebarOpen}
-        testId="fe2-shell-sidebar"
-        {...(renderLink ? { renderLink } : {})}
-      />
-    </>
-  );
 
   const header = (
     <PageHeader
@@ -94,23 +57,18 @@ export function AppShellLayout({
       title={title}
       actions={
         <>
-          <IconButton
-            testId="fe2-sidebar-toggle"
-            name="menu"
-            variant="ghost"
-            aria-label="サイドバーを開閉"
-            onClick={toggleSidebar}
+          <AppLauncher
+            testId="fe2-app-launcher"
+            title="アプリ"
+            label="アプリ一覧"
+            items={toLauncherItems(navEntries)}
+            {...(onNavigate ? { onSelect: (item: AppLauncherItem) => onNavigate(item.href ?? item.id) } : {})}
           />
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
           {auth.status === "authenticated" ? (
-            <span className="fe2-header-user" data-testid="fe2-shell-user">
-              <span className="fe2-avatar" aria-hidden="true">
-                {initial}
-              </span>
-              {displayName}
-            </span>
+            <span data-testid="fe2-shell-user">{auth.me.user.displayName}</span>
           ) : null}
           <Button
             testId="fe2-logout"
@@ -125,8 +83,9 @@ export function AppShellLayout({
     />
   );
 
+  // No `sidebar` prop -> @dub/ui AppShell renders no left rail; main spans full width.
   return (
-    <AppShell sidebar={sidebar} header={header} testId="fe2-shell">
+    <AppShell header={header} testId="fe2-shell">
       {children}
     </AppShell>
   );

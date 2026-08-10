@@ -2,15 +2,15 @@
   display: inline-flex;
 }
 
-/* Match the header IconButton hit-area (36px square) so the bell aligns with the
- * sidebar toggle and logout button instead of floating as a bare 20px glyph. */
+/* Match the header AppLauncher trigger (40px square) so the bell reads as the
+ * same class of icon control instead of floating as a bare 20px glyph. */
 .bellButton {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--dub-radius-md);
   color: var(--dub-color-text-secondary);
   transition:

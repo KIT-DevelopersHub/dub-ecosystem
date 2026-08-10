@@ -37,10 +37,12 @@ service = "dub-identity-roster"   # POST /authz/check (mail:send / mail:read / m
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
-# --- Crons: every-minute outbox drain + daily retention purge (03:20 UTC). ---
-# The scheduled handler drains on every tick and only purges on the "20 3 * * *" tick.
+# --- Cron: daily (03:20 UTC). The scheduled handler drains the outbox on every tick
+# and additionally runs the retention purge on the "20 3 * * *" tick. The Workers FREE
+# plan caps the account at 5 cron triggers, so we reuse this one existing schedule for
+# both the drain and the purge instead of adding an every-minute drain trigger. ---
 [triggers]
-crons = ["* * * * *", "20 3 * * *"]
+crons = ["20 3 * * *"]
 
 # --- Outbound provider (Resend, ADR-0001). Matches the live secret set (RESEND_API_KEY).
 # From stays on Resend's shared onboarding sender until developershub.jp DKIM/SPF is

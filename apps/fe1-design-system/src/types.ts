@@ -312,9 +312,27 @@ export interface ThemeProviderProps {
 }
 
 export interface AppShellProps extends TestableProps {
-  sidebar: ReactNode;
+  // Optional (凍結案 1-4-3): when omitted the shell renders no left rail and the
+  // main column spans full width. FE2's app-launcher model drops the persistent
+  // sidebar in favour of the header AppLauncher, so mail/chat get the full canvas.
+  sidebar?: ReactNode;
   header?: ReactNode;
   children: ReactNode; // main content
+}
+
+/** One tool tile in the header AppLauncher (Chrome-waffle model). */
+export interface AppLauncherItem {
+  id: string;
+  label: string;
+  icon?: IconName; // resolved via FE1 Icon
+  href?: string; // consumer's renderLink/onSelect maps this to router navigation
+  badgeCount?: number;
+}
+export interface AppLauncherProps extends TestableProps {
+  items: AppLauncherItem[];
+  onSelect?: (item: AppLauncherItem) => void; // click/Enter on a tile
+  label?: string; // aria-label for the waffle trigger (default: "アプリ")
+  title?: string; // heading shown atop the popover grid
 }
 
 export interface SidebarItem {
