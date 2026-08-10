@@ -1,6 +1,7 @@
 // Event publishing + audit seams. The app builds canonical envelopes via
 // @dub/events createEvent (ULID id / requestId / actorId) and hands them to the
-// publisher; production fans out through the Queue producer bindings.
+// publisher; a paid deploy fans out through the Queue producer bindings, while a
+// free-tier deploy (no Queues) falls back to the @dub/freeq D1 outbox shim.
 import type { Queue } from "@cloudflare/workers-types";
 import {
   createEvent,
@@ -13,6 +14,8 @@ import {
   type AuditRecordEnvelopeV1,
 } from "@dub/events";
 import type { auditLog } from "@dub/types";
+import type { Env } from "./env";
+import { AUDIT_TOPIC, EVENT_BINDING_TOPIC, outboxQueue } from "./outbox";
 
 export interface EventSpec<N extends DubEventName = DubEventName> {
   name: N;
@@ -51,6 +54,22 @@ export async function emit(
 }
 
 // ---- production wiring ----
+// Prefer a real (paid) Queue binding when present; otherwise fall back to the free-tier
+// @dub/freeq D1 outbox shim so task/audit records are durably persisted, never dropped.
+// The resulting env is exactly the DubEventPublisherEnv publishEvents reads by binding name.
+export function buildPublisherEnv(env: Env): DubEventPublisherEnv {
+  const out: DubEventPublisherEnv = {};
+  for (const [binding, topic] of Object.entries(EVENT_BINDING_TOPIC)) {
+    const real = (env as unknown as Record<string, Queue<DubEventEnvelope> | undefined>)[binding];
+    out[binding] = real ?? outboxQueue<DubEventEnvelope>(env.DB, topic);
+  }
+  return out;
+}
+
+export function buildAuditEnv(env: Env): { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> } {
+  return { AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue<AuditRecordEnvelopeV1>(env.DB, AUDIT_TOPIC) };
+}
+
 export function createQueueEventPublisher(env: DubEventPublisherEnv): EventPublisher {
   return {
     publish: (envelopes) => publishEvents(env, envelopes),

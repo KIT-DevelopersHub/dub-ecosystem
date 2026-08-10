@@ -6,11 +6,14 @@ import type { Context } from "hono";
 import { dubErrorHandler, errors, type FieldError } from "@dub/errors";
 import { extractContext, type RequestContext } from "@dub/http";
 import { newId, nowIso } from "@dub/db";
+import { HEADERS } from "@dub/observability";
+import type { DubEventEnvelope } from "@dub/events";
 import type { task, common, auditLog } from "@dub/types";
 import type { Deps } from "./deps";
 import { taskErrors } from "./errors";
 import { resolvePrincipal, isServiceRole, actorIdOf, type Principal } from "./principal";
 import { emit, type EventSpec } from "./events";
+import { dispatchEvent } from "./consumer";
 import { validateDependencies } from "@dub/gantt-calc";
 import {
   assertStatusTransition,
@@ -68,6 +71,29 @@ export function buildApp(deps: Deps): Hono {
   const principalOf = (c: Context): Principal => resolvePrincipal(c, config.serviceCallers);
 
   app.get("/health", (c) => c.json({ ok: true, service: "task-service" }));
+
+  // ---- internal-only guard: /internal/* requires the x-dub-internal marker.
+  // Mirrors the gateway internalOnlyPaths 404 (never expose the compensation route
+  // publicly). Same pattern as audit-log /internal/*. ----
+  app.use("/internal/*", async (c, next) => {
+    if (!c.req.header(HEADERS.internal)) throw errors.notFound("route", c.req.path);
+    await next();
+  });
+
+  // ---- POST /internal/events-async (free-tier consumer landing route) ----
+  // Free-plan replacement for the dub-q-evt-task Queue consumer: event-service's own
+  // @dub/freeq drain POSTs each due event.archived envelope here. Runs the SAME
+  // compensation + envelope.id idempotency as the Queue path (dispatchEvent). A non-2xx
+  // response tells the caller's drain to retry, so an event is never lost. task-service
+  // does NOT call event-service back, so no event↔task cycle is reintroduced.
+  app.post("/internal/events-async", async (c) => {
+    const body = await readJson<Partial<DubEventEnvelope>>(c);
+    if (!body || typeof body.name !== "string" || typeof body.id !== "string") {
+      throw errors.validationFailed([{ field: "body", reason: "invalid_envelope" }]);
+    }
+    await dispatchEvent(deps, body as DubEventEnvelope);
+    return c.json({ ok: true }, 202);
+  });
 
   // ---- GET /tasks/dependencies (LITERAL route registered before :id) ----
   app.get("/tasks/dependencies", async (c) => {
