@@ -10,7 +10,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 migrations_dir = "migrations"
 
 # --- Service Bindings (Service Binding calls only; never public) ---
@@ -23,24 +23,24 @@ binding = "SVC_AUDIT_LOG"
 service = "dub-audit-log"
 
 # --- Queue producers ---
-[[queues.producers]]
-binding = "EVT_NOTIFICATION"
-queue = "dub-q-evt-notification"
+# [[queues.producers]]
+# binding = "EVT_NOTIFICATION"
+# queue = "dub-q-evt-notification"
 
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
-[[queues.producers]]
-binding = "DEPLOY_JOBS"
-queue = "dub-q-deploy-jobs"
+# [[queues.producers]]
+# binding = "DEPLOY_JOBS"
+# queue = "dub-q-deploy-jobs"
 
 # --- Queue consumer: this service's PRIVATE job queue ---
-[[queues.consumers]]
-queue = "dub-q-deploy-jobs"
-max_batch_size = 10
-max_retries = 5
-dead_letter_queue = "dub-q-deploy-jobs-dlq"
+# [[queues.consumers]]
+# queue = "dub-q-deploy-jobs"
+# max_batch_size = 10
+# max_retries = 5
+# dead_letter_queue = "dub-q-deploy-jobs-dlq"
 
 [observability]
 enabled = true

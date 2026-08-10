@@ -18,41 +18,41 @@ enabled = true
 [[d1_databases]]
 binding = "DB_MOBILE"
 database_name = "dub-core"
-database_id = "REPLACE_AT_APPLY"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 # --- Queue producer: audit-record (theme13 publishAudit; push delivery failure) ---
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
 # --- Queue consumer: mobile-bff domain-event subscription (theme1). ENABLED in the
 #     differential-sync wave; handler is a STUB no-op in P0 (change_log not created). ---
-[[queues.consumers]]
-queue = "dub-q-evt-mobile-bff"
-dead_letter_queue = "dub-q-evt-mobile-bff-dlq"
-max_batch_size = 10
-max_retries = 5
+# [[queues.consumers]]
+# queue = "dub-q-evt-mobile-bff"
+# dead_letter_queue = "dub-q-evt-mobile-bff-dlq"
+# max_batch_size = 10
+# max_retries = 5
 
 # --- Service bindings (stubbed until 9-x結線) ---
 [[services]]
 binding = "SVC_AUTH"
-service = "auth-service"
+service = "dub-auth-service"
 
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "dub-identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
-service = "event-service"
+service = "dub-event-service"
 
 [[services]]
 binding = "SVC_TASK"
-service = "task-service"
+service = "dub-task-service"
 
 [[services]]
 binding = "SVC_NOTIFICATION"
-service = "notification-service"
+service = "dub-notification-service"
 
 # --- vars (non-secret) ---
 [vars]

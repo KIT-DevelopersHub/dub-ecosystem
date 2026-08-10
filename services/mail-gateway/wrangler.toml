@@ -4,7 +4,7 @@
 # provision the queues / Email-Routing rule per README.md "Go-Live runbook".
 # NOTE: the Queue producer bindings below require Workers PAID only if you keep the
 # audit/event fan-out; the send endpoint itself needs no Queue (README §Free-tier).
-name = "mail-gateway"
+name = "dub-mail-gateway"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
@@ -13,28 +13,28 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 # --- Service Bindings (contract-only; real targets wired in the infra波) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster"      # POST /authz/check (mail:send / mail:read / mail:admin)
+service = "dub-identity-roster"      # POST /authz/check (mail:send / mail:read / mail:admin)
 
 # --- Queue producers ---
 # Domain events (frozen catalog): mail.message.received -> mail-automation,
 # mail.message.sent / send_failed -> notification.
-[[queues.producers]]
-queue = "dub-q-evt-mail-automation"
-binding = "EVT_MAIL_AUTOMATION"
+# [[queues.producers]]
+# queue = "dub-q-evt-mail-automation"
+# binding = "EVT_MAIL_AUTOMATION"
 
-[[queues.producers]]
-queue = "dub-q-evt-notification"
-binding = "EVT_NOTIFICATION"
+# [[queues.producers]]
+# queue = "dub-q-evt-notification"
+# binding = "EVT_NOTIFICATION"
 
 # publishAudit channel (theme#13) — send success/failure audit records.
-[[queues.producers]]
-queue = "dub-q-audit-record"
-binding = "AUDIT_QUEUE"
+# [[queues.producers]]
+# queue = "dub-q-audit-record"
+# binding = "AUDIT_QUEUE"
 
 # --- Inbound (9-B: Cloudflare Email Routing -> this Worker's email() handler) ---
 # Bind at Apply: `wrangler.toml` email routing rule maps info@developershub.jp here.
@@ -57,7 +57,7 @@ binding = "AUDIT_QUEUE"
 # If the selected provider's secrets are absent the provider falls back to a LOUD stub
 # (no silent drop) and GET /internal/health/ready returns 503 with the missing config.
 [vars]
-MAIL_OUTBOUND_PROVIDER = "ses"
+MAIL_OUTBOUND_PROVIDER = "resend"
 SES_REGION = "ap-northeast-1"
 MAIL_FROM_ADDRESS = "info@developershub.jp"
 # Send resilience tuning (optional; defaults shown). Retries transient provider failures

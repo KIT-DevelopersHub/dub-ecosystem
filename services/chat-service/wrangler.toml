@@ -6,7 +6,7 @@
 # (HTTP: channels/threads/messages + chat_* D1 + chat.* Queue publish). The
 # realtime side (ChatRoom DO: WS fanout / presence / ws-ticket verify) is a
 # SEPARATE chat-owned Worker and is NOT wired here (STUB via RealtimePublisher).
-name = "chat-service"
+name = "dub-chat-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
@@ -17,7 +17,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "REPLACE_AT_APPLY"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 # Realtime (9-C): the chat-owned ChatRoom Durable Object. One instance per channel
 # (getByName(channelId)). It verifies ws-tickets (HMAC) + Origin and fans out
@@ -37,25 +37,25 @@ new_sqlite_classes = ["ChatRoom"]
 # Service Bindings (Service-to-Service, x-dub-* propagation via @dub/http).
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "dub-identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
-service = "event-service"
+service = "dub-event-service"
 
 [[services]]
 binding = "SVC_FILE_META"
-service = "file-meta-service"
+service = "dub-file-meta"
 
 # Producer queues (chat.* fan-out targets — dub-q- prefix). The chat.* rows are
 # △ in the frozen catalog (active after 9-C); the only subscriber is notification.
-[[queues.producers]]
-binding = "EVT_NOTIFICATION"
-queue = "dub-q-evt-notification"
+# [[queues.producers]]
+# binding = "EVT_NOTIFICATION"
+# queue = "dub-q-evt-notification"
 
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
 [observability]
 enabled = true

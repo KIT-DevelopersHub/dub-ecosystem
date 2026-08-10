@@ -11,32 +11,32 @@ workers_dev = false
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "REPLACE_WITH_D1_ID" # infra-d1-seed (#28) owns provisioning
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d" # infra-d1-seed (#28) owns provisioning
 
 # R2 attachment body store (metadata stays in this service; body lives in R2).
-[[r2_buckets]]
-binding = "R2_FILES"
-bucket_name = "dub-file-attachments"
+# [[r2_buckets]]
+# binding = "R2_FILES"
+# bucket_name = "dub-file-attachments"
 
 # --- Queue consumer: events this service subscribes to (drive.* + *.archived) ---
-[[queues.consumers]]
-queue = "dub-q-evt-file-meta"
-max_retries = 5
-max_batch_size = 25
-max_batch_timeout = 5
-dead_letter_queue = "dub-q-evt-file-meta-dlq"
+# [[queues.consumers]]
+# queue = "dub-q-evt-file-meta"
+# max_retries = 5
+# max_batch_size = 25
+# max_batch_timeout = 5
+# dead_letter_queue = "dub-q-evt-file-meta-dlq"
 
 # --- Queue producers ---
 # EVT_FILE_META: this service's own inbound queue binding (present so the entry
 # can be self-referential in tooling; producers of drive.*/*.archived target it).
-[[queues.producers]]
-queue = "dub-q-evt-file-meta"
-binding = "EVT_FILE_META"
+# [[queues.producers]]
+# queue = "dub-q-evt-file-meta"
+# binding = "EVT_FILE_META"
 
 # Audit channel (publishAudit → audit-log consumer).
-[[queues.producers]]
-queue = "dub-q-audit-record"
-binding = "AUDIT_QUEUE"
+# [[queues.producers]]
+# queue = "dub-q-audit-record"
+# binding = "AUDIT_QUEUE"
 
 # --- Service bindings (synchronous internal calls) ---
 [[services]]

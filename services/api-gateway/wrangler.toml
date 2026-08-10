@@ -9,7 +9,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 GATEWAY_VERSION = "0.1.0"
 # comma-separated; dev localhost origins included for local SPA work.
-ALLOWED_ORIGINS = "https://app.developershub.jp,http://localhost:5173,http://localhost:3000"
+ALLOWED_ORIGINS = "https://app.developershub.jp,https://dub-fe2-app-shell.developershub-site.workers.dev,http://localhost:5173,http://localhost:3000"
 DEFAULT_MAX_BODY_BYTES = "10485760"    # 10 MiB default request body cap
 FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8-6 numeric agreement)
 
@@ -76,9 +76,9 @@ binding = "SVC_WEBHOOK_INGEST"
 service = "dub-webhook-ingest"
 
 # ---- Queue producer (the single publish exception: public.inquiry.received) ----
-[[queues.producers]]
-binding = "EVT_NOTIFICATION"
-queue = "dub-q-evt-notification"
+# [[queues.producers]]
+# binding = "EVT_NOTIFICATION"
+# queue = "dub-q-evt-notification"
 
 [observability]
 enabled = true

@@ -1,7 +1,7 @@
 # task-service — Cloudflare Worker scaffold (P0: DO NOT DEPLOY from here).
 # Binding names follow the P0a design + P0b frozen decisions; the infra binding
 # registry (#28) may rename queue bindings at Apply time (mechanical).
-name = "task-service"
+name = "dub-task-service"
 main = "src/index.ts"
 compatibility_date = "2024-11-27"
 compatibility_flags = ["nodejs_compat"]
@@ -14,48 +14,48 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "REPLACE_AT_APPLY"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 # --- Queue consumer: task lane (event.archived / action.* compensation) ---
-[[queues.consumers]]
-queue = "dub-q-evt-task"
-max_retries = 5
-dead_letter_queue = "dub-q-evt-task-dlq"
+# [[queues.consumers]]
+# queue = "dub-q-evt-task"
+# max_retries = 5
+# dead_letter_queue = "dub-q-evt-task-dlq"
 
 # --- Queue producers: task.* fan-out targets (see @dub/events SUBSCRIPTIONS) ---
-[[queues.producers]]
-binding = "EVT_NOTIFICATION"
-queue = "dub-q-evt-notification"
+# [[queues.producers]]
+# binding = "EVT_NOTIFICATION"
+# queue = "dub-q-evt-notification"
 
-[[queues.producers]]
-binding = "EVT_GITHUB_SYNC"
-queue = "dub-q-evt-github-sync"
+# [[queues.producers]]
+# binding = "EVT_GITHUB_SYNC"
+# queue = "dub-q-evt-github-sync"
 
-[[queues.producers]]
-binding = "EVT_GANTT"
-queue = "dub-q-evt-gantt"
+# [[queues.producers]]
+# binding = "EVT_GANTT"
+# queue = "dub-q-evt-gantt"
 
-[[queues.producers]]
-binding = "EVT_MOBILE_BFF"
-queue = "dub-q-evt-mobile-bff"
+# [[queues.producers]]
+# binding = "EVT_MOBILE_BFF"
+# queue = "dub-q-evt-mobile-bff"
 
-[[queues.producers]]
-binding = "EVT_FILE_META"
-queue = "dub-q-evt-file-meta"
+# [[queues.producers]]
+# binding = "EVT_FILE_META"
+# queue = "dub-q-evt-file-meta"
 
 # --- Queue producer: audit-record (theme13 publishAudit) ---
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
 # --- Service bindings: identity-roster (authz/users) + event-service (validate) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "dub-identity-roster"
 
 [[services]]
 binding = "SVC_EVENT"
-service = "event-service"
+service = "dub-event-service"
 
 # --- cron: due-soon scan (task.due_soon, 24h window) ---
 [triggers]

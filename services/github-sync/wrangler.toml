@@ -13,37 +13,37 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "REPLACE_AT_DEPLOY"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 migrations_dir = "../../infra/d1/migrations/github"
 
 # ---- R2 (read-only fallback for >96KB webhook payloads) ----
-[[r2_buckets]]
-binding = "WEBHOOK_RAW"
-bucket_name = "dub-r2-webhook-raw"
+# [[r2_buckets]]
+# binding = "WEBHOOK_RAW"
+# bucket_name = "dub-r2-webhook-raw"
 
 # ---- Queue producers (publish github.* domain + audit) ----
-[[queues.producers]]
-binding = "EVT_NOTIFICATION"
-queue = "dub-q-evt-notification"
+# [[queues.producers]]
+# binding = "EVT_NOTIFICATION"
+# queue = "dub-q-evt-notification"
 
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
 # ---- Queue consumers (two inbound queues, dispatched by batch.queue) ----
-[[queues.consumers]]
-queue = "dub-q-wh-github"
-max_batch_size = 10
-max_batch_timeout = 5
-max_retries = 5
-dead_letter_queue = "dub-q-wh-github-dlq"
+# [[queues.consumers]]
+# queue = "dub-q-wh-github"
+# max_batch_size = 10
+# max_batch_timeout = 5
+# max_retries = 5
+# dead_letter_queue = "dub-q-wh-github-dlq"
 
-[[queues.consumers]]
-queue = "dub-q-evt-github-sync"
-max_batch_size = 10
-max_batch_timeout = 5
-max_retries = 5
-dead_letter_queue = "dub-q-evt-github-sync-dlq"
+# [[queues.consumers]]
+# queue = "dub-q-evt-github-sync"
+# max_batch_size = 10
+# max_batch_timeout = 5
+# max_retries = 5
+# dead_letter_queue = "dub-q-evt-github-sync-dlq"
 
 # ---- Service Bindings (internal RPC over @dub/http) ----
 [[services]]

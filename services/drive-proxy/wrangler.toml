@@ -11,18 +11,18 @@ enabled = true
 # --- KV: Google token cache + short-TTL response cache + rate counter (§3) ---
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_AT_APPLY"          # `wrangler kv namespace create drive-proxy-cache`
+id = "b969e6ef6c034ed4ab3b9800f1a0e9ce"          # `wrangler kv namespace create drive-proxy-cache`
 
 # --- Producer queues (publish) ---
 # drive.file.* -> file-meta consumer (binding name = @dub/events CONSUMER_QUEUE_BINDINGS["file-meta"])
-[[queues.producers]]
-binding = "EVT_FILE_META"
-queue = "dub-q-evt-file-meta"
+# [[queues.producers]]
+# binding = "EVT_FILE_META"
+# queue = "dub-q-evt-file-meta"
 
 # write-op audit records (publishAudit special channel)
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
 # --- Consumer (P1 only): contract reservation for wh-google-drive.
 # Declared here as documentation; the actual [[queues.consumers]] block stays

@@ -17,30 +17,30 @@ enabled = true
 [[d1_databases]]
 binding = "DUB_DB"
 database_name = "dub-core"
-database_id = "PLACEHOLDER_dub_core_d1_id"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 migrations_dir = "migrations/webhook"
 
 # ---- R2 (large-body offload; RW here, read-only on consumers) ----
-[[r2_buckets]]
-binding = "WEBHOOK_RAW"
-bucket_name = "dub-r2-webhook-raw"
+# [[r2_buckets]]
+# binding = "WEBHOOK_RAW"
+# bucket_name = "dub-r2-webhook-raw"
 
 # ---- Queue producers (per-source; 1 Queue = 1 consumer). github live in P0. ----
-[[queues.producers]]
-binding = "WH_GITHUB"
-queue = "dub-q-wh-github"
+# [[queues.producers]]
+# binding = "WH_GITHUB"
+# queue = "dub-q-wh-github"
 
-[[queues.producers]]
-binding = "WH_GOOGLE_DRIVE"
-queue = "dub-q-wh-google-drive"
+# [[queues.producers]]
+# binding = "WH_GOOGLE_DRIVE"
+# queue = "dub-q-wh-google-drive"
 
-[[queues.producers]]
-binding = "WH_GMAIL"
-queue = "dub-q-wh-gmail"
+# [[queues.producers]]
+# binding = "WH_GMAIL"
+# queue = "dub-q-wh-gmail"
 
-[[queues.producers]]
-binding = "WH_STRIPE"
-queue = "dub-q-wh-stripe"
+# [[queues.producers]]
+# binding = "WH_STRIPE"
+# queue = "dub-q-wh-stripe"
 
 # ---- Service binding: identity-roster (authz /authz/check for admin query) ----
 [[services]]

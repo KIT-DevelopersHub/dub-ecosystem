@@ -2,7 +2,7 @@
 # Binding names (AUTH_KV / AUDIT_QUEUE / SVC_IDENTITY) follow the design; the
 # infra binding-name registry may rename AUTH_KV -> KV_SESSION at Apply time
 # (auth-service.md §8 #2) — mechanical rename when it lands.
-name = "auth-service"
+name = "dub-auth-service"
 main = "src/index.ts"
 compatibility_date = "2024-11-27"
 compatibility_flags = ["nodejs_compat"]
@@ -14,17 +14,17 @@ enabled = true
 # --- KV: sessions / oauth_state / revoked_user (id filled at infra Apply) ---
 [[kv_namespaces]]
 binding = "AUTH_KV"
-id = "REPLACE_AT_APPLY"
+id = "71e10ff553a24e0aa0b89929f6ed8643"
 
 # --- Queue producer: audit-record (theme13 publishAudit) ---
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
 # --- Service binding: identity-roster (POST /users/provision) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster-service"
+service = "dub-identity-roster"
 
 # --- vars (non-secret) ---
 [vars]

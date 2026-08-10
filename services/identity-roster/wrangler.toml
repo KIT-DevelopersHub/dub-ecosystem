@@ -1,5 +1,5 @@
 # identity-roster-service — Cloudflare Worker skeleton (deploy is NOT part of P0 unit work).
-name = "identity-roster"
+name = "dub-identity-roster"
 main = "src/index.ts"
 compatibility_date = "2025-08-01"
 compatibility_flags = ["nodejs_compat"]
@@ -8,12 +8,12 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "REPLACE_AT_DEPLOY"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 # Queue producer for best-effort audit records (@dub/events publishAudit).
-[[queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "dub-q-audit-record"
+# [[queues.producers]]
+# binding = "AUDIT_QUEUE"
+# queue = "dub-q-audit-record"
 
 [observability]
 enabled = true
