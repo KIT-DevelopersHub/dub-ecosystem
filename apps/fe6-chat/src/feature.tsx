@@ -20,7 +20,7 @@ export const chatFeature: FeatureModule = {
     {
       label: "チャット",
       path: "/chat",
-      // Must be a member of FE2's canonical IconName union (fe2 stubs/icons.tsx);
+      // Compile-checked against @dub/ui's IconName union (NavEntry.icon: IconName);
       // "chat" is not in that set — FE2 uses "message-square" for the chat nav.
       icon: "message-square",
       order: 40,
