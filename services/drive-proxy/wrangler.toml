@@ -43,7 +43,7 @@ queue = "dub-q-audit-record"
 # --- Service Bindings ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"   # identity-roster /authz/check
+service = "identity-roster"   # identity-roster /authz/check
 
 # --- Tunable numbers (frozen semantics, values adjusted at P2 with real metrics) ---
 [vars]

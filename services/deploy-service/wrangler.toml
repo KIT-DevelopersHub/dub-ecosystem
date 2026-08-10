@@ -16,11 +16,11 @@ migrations_dir = "migrations"
 # --- Service Bindings (Service Binding calls only; never public) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"
+service = "identity-roster"
 
 [[services]]
 binding = "SVC_AUDIT_LOG"
-service = "dub-audit-log"
+service = "audit-log"
 
 # --- Queue producers ---
 [[queues.producers]]
