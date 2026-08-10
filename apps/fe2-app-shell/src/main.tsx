@@ -4,6 +4,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
+// Global styles — order matters: token custom properties (:root + [data-theme]),
+// then the @dub/ui component rules that consume them, then FE2's own base/reset
+// and shell chrome. Without these three the SPA renders as unstyled markup
+// (component class names present, no stylesheet defining them).
+import "@dub/tokens/tokens.css";
+import "@dub/ui/style.css";
+import "./styles/global.css";
 import { actionTypeRegistry } from "@dub/fe3-event-action";
 // FE4 deep-import surface via the single boundary (composition/featureEntries.tsx).
 import { registerTaskActionPlugin } from "./composition/featureEntries.tsx";

@@ -63,13 +63,29 @@ export function AppShellLayout({
       )
     : undefined;
 
+  const displayName = auth.status === "authenticated" ? auth.me.user.displayName : "";
+  const initial = displayName.trim().charAt(0).toUpperCase() || "U";
+
   const sidebar = (
-    <Sidebar
-      items={toSidebarItems(navEntries)}
-      collapsed={!sidebarOpen}
-      testId="fe2-shell-sidebar"
-      {...(renderLink ? { renderLink } : {})}
-    />
+    <>
+      <div className="fe2-brand">
+        <span className="fe2-brand-mark" aria-hidden="true">
+          D
+        </span>
+        {sidebarOpen ? (
+          <span className="fe2-brand-text">
+            <span className="fe2-brand-title">DevHub</span>
+            <span className="fe2-brand-sub">管理コンソール</span>
+          </span>
+        ) : null}
+      </div>
+      <Sidebar
+        items={toSidebarItems(navEntries)}
+        collapsed={!sidebarOpen}
+        testId="fe2-shell-sidebar"
+        {...(renderLink ? { renderLink } : {})}
+      />
+    </>
   );
 
   const header = (
@@ -78,14 +94,19 @@ export function AppShellLayout({
       title={title}
       actions={
         <>
-          <Button testId="fe2-sidebar-toggle" variant="secondary" onClick={toggleSidebar}>
+          <Button testId="fe2-sidebar-toggle" variant="ghost" aria-label="サイドバーを開閉" onClick={toggleSidebar}>
             <Icon name="menu" aria-label="サイドバーを開閉" />
           </Button>
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
           {auth.status === "authenticated" ? (
-            <span data-testid="fe2-shell-user">{auth.me.user.displayName}</span>
+            <span className="fe2-header-user" data-testid="fe2-shell-user">
+              <span className="fe2-avatar" aria-hidden="true">
+                {initial}
+              </span>
+              {displayName}
+            </span>
           ) : null}
           <Button testId="fe2-logout" variant="secondary" onClick={onLogout}>
             <Icon name="log-out" />
