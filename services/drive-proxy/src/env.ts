@@ -10,11 +10,20 @@ export interface Env {
   // Watch-channel registry (drive_watch_channels only). Optional so P0 wiring without
   // Drive-watch still builds; the watch routes 500 if it is absent.
   DB?: D1Database;
-  // Producer queues.
-  EVT_FILE_META: Queue<DubEventEnvelope>; // drive.file.* -> file-meta consumer
-  AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1>; // write-op audit records
+  // Free-tier @dub/freeq outbox DB (freeq_outbox on the shared dub-core D1). Optional:
+  // bound ONLY on the free plan (wrangler.free.toml) where the Queue producers below are
+  // absent and buildPublisherEnv() falls back to the D1 outbox shim (see outbox.ts).
+  OUTBOX_DB?: D1Database;
+  // Producer queues (PAID plan only). Optional: on the Workers FREE plan these bindings
+  // are absent and buildPublisherEnv() falls back to a @dub/freeq D1 outbox shim
+  // (outbox.ts / drain.ts). When present (paid deploy, wrangler.toml) the real Queues
+  // are used unchanged — the paid wrangler.toml is intentionally left untouched so the
+  // queue-wiring conformance guard keeps passing.
+  EVT_FILE_META?: Queue<DubEventEnvelope>; // drive.file.* -> file-meta consumer
+  AUDIT_QUEUE?: Queue<AuditRecordEnvelopeV1>; // write-op audit records
   // Service Bindings.
   SVC_IDENTITY: Fetcher; // identity-roster /authz/check
+  SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain defers audit
   // Secrets (never logged; §3 run-book).
   GOOGLE_OAUTH_CLIENT_ID: string;
   GOOGLE_OAUTH_CLIENT_SECRET: string;
