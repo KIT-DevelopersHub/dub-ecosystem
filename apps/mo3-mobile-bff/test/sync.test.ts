@@ -99,6 +99,63 @@ describe("buildSync — incremental pull (cursor round-trip)", () => {
   });
 });
 
+describe("buildSync — differential deletions (change_log tombstones)", () => {
+  const CTX = { requestId: "r1", userId: ALICE };
+
+  it("emits op:delete tombstones for removed events/tasks on an incremental pull", async () => {
+    const h = makeHarness();
+    seedEmpty(h);
+    const first = await buildSync(h.deps, CTX, ALICE, {}, () => "2026-08-09T00:00:00.000Z");
+
+    // upstream deletes happened after the first pull; change_log recorded them
+    h.changeLog.tombstones = [
+      { seq: 1, entityType: "task", entityId: "tsk_gone" },
+      { seq: 2, entityType: "event", entityId: "evt_gone" },
+      { seq: 3, entityType: "action", entityId: "act_x" }, // not mirrored by base sync -> skipped
+    ];
+    seedEmpty(h);
+    const res = await buildSync(h.deps, CTX, ALICE, { cursor: first.nextCursor! });
+
+    expect(res.items).toEqual([
+      { resource: "task", id: "tsk_gone", data: null, op: "delete" },
+      { resource: "event", id: "evt_gone", data: null, op: "delete" },
+    ]);
+  });
+
+  it("does not emit tombstones on a first pull (full rebuild -> deleted rows just absent)", async () => {
+    const h = makeHarness();
+    h.changeLog.tombstones = [{ seq: 1, entityType: "task", entityId: "tsk_gone" }];
+    seedEmpty(h);
+    const res = await buildSync(h.deps, CTX, ALICE, {});
+    expect(res.items).toEqual([]);
+  });
+
+  it("suppresses a tombstone when the resource is live again (archive -> un-archive)", async () => {
+    const h = makeHarness();
+    h.event.on("GET", "/events", { items: [{ id: "evt_1", title: "E", phase: "live", startsAt: null }], nextCursor: null });
+    h.task.on("GET", "/tasks", { items: [], nextCursor: null });
+    h.notification.on("GET", "/inbox", { items: [], nextCursor: null });
+    const first = await buildSync(h.deps, CTX, ALICE, {});
+
+    h.changeLog.tombstones = [{ seq: 1, entityType: "event", entityId: "evt_1" }]; // archived then un-archived
+    const res = await buildSync(h.deps, CTX, ALICE, { cursor: first.nextCursor! });
+
+    // upsert wins: evt_1 present, no delete tombstone
+    expect(res.items).toEqual([{ resource: "event", id: "evt_1", data: { id: "evt_1", title: "E", phase: "live", startsAt: null } }]);
+  });
+
+  it("round-trips the change_log head seq: a replay past head yields no repeat tombstones", async () => {
+    const h = makeHarness();
+    h.changeLog.tombstones = [{ seq: 5, entityType: "task", entityId: "t" }];
+    seedEmpty(h);
+    const first = await buildSync(h.deps, CTX, ALICE, {});
+
+    seedEmpty(h);
+    const second = await buildSync(h.deps, CTX, ALICE, { cursor: first.nextCursor! });
+    expect(second.items).toEqual([]); // seq advanced to head (5) -> deletesSince(5,5) is empty
+  });
+});
+
 describe("buildSync — failure semantics", () => {
   it("is fail-closed: one upstream error rejects the pull (cursor unchanged)", async () => {
     const h = makeHarness();

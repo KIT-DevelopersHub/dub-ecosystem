@@ -85,6 +85,51 @@ export function changeLogEntryFromEvent(env: DubEventEnvelope): ChangeLogEntry |
   };
 }
 
+/** One delete tombstone from the feed: the offline client removes this entity. */
+export interface DeleteTombstone {
+  seq: number;
+  entityType: ChangeEntityType;
+  entityId: string;
+}
+
+/**
+ * Read seam for differential sync. sync.ts uses it to (a) learn the current head
+ * seq (the watermark it stamps into the next cursor) and (b) pull delete
+ * tombstones since the client's last seq so deletions propagate — a full snapshot
+ * only returns live rows, so without this an offline client never learns a
+ * resource was removed. Upserts are intentionally NOT read here: the live snapshot
+ * already carries their current data, so only deletions need the change_log.
+ */
+export interface ChangeLogReader {
+  /** Highest assigned seq (0 when the feed is empty). */
+  headSeq(): Promise<number>;
+  /** Delete tombstones in (afterSeq, upToSeq], ascending by seq. */
+  deletesSince(afterSeq: number, upToSeq: number): Promise<DeleteTombstone[]>;
+}
+
+/** D1-backed reader (mobile namespace). Reads only mobile_change_log. */
+export class D1ChangeLogReader implements ChangeLogReader {
+  constructor(private readonly db: DbClient) {}
+
+  async headSeq(): Promise<number> {
+    const row = await this.db.first<{ seq: number | null }>("SELECT MAX(seq) AS seq FROM mobile_change_log");
+    return row?.seq ?? 0;
+  }
+
+  async deletesSince(afterSeq: number, upToSeq: number): Promise<DeleteTombstone[]> {
+    // Half-open lower / closed upper bound: (afterSeq, upToSeq]. An empty window
+    // (a fresh pull with nothing new) short-circuits without touching D1.
+    if (!Number.isFinite(upToSeq) || upToSeq <= afterSeq) return [];
+    const rows = await this.db.all<{ seq: number; entity_type: string; entity_id: string }>(
+      "SELECT seq, entity_type, entity_id FROM mobile_change_log " +
+        "WHERE op = 'delete' AND seq > ? AND seq <= ? ORDER BY seq ASC",
+      afterSeq,
+      upToSeq,
+    );
+    return rows.map((r) => ({ seq: r.seq, entityType: r.entity_type as ChangeEntityType, entityId: r.entity_id }));
+  }
+}
+
 /** Append seam so the consumer can be tested without a D1 runtime. */
 export interface ChangeLogStore {
   append(entry: ChangeLogEntry): Promise<void>;
