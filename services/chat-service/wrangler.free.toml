@@ -1,0 +1,81 @@
+# Free-tier deploy of chat-service as `dub-chat-service` (internal; reached via the
+# api-gateway SVC_CHAT service binding — workers.dev disabled). NO paid Cloudflare
+# Queues: the chat.* fan-out + audit that used Queue producers (EVT_NOTIFICATION /
+# AUDIT_QUEUE) is now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB).
+# index.ts falls back to the outbox shim when the Queue bindings are absent, so no
+# event/audit record is dropped; a Cron drain forwards audit rows to audit-log and
+# defers domain events (durable/pending) until the notification consumer route lands.
+#
+# The ChatRoom Durable Object (RT hub: WS fanout / presence / ws-ticket verify) is
+# PRESERVED here — SQLite-backed DOs run on the Workers FREE plan, so only the Queue
+# dependency needed freeq'ing, not the realtime side.
+#
+# Deploy (only on 高岡's go — 本番反映は直列):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core (idempotent, shared by all services)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/chat-service/db/0001_freeq_outbox.sql
+#   # one-time: set the ws-ticket HMAC secret (never in this toml)
+#   npx wrangler secret put WS_TICKET_SECRET --config services/chat-service/wrangler.free.toml
+#   npx wrangler deploy --config services/chat-service/wrangler.free.toml
+name = "dub-chat-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: chat_* namespace tables + the un-namespaced freeq_outbox table.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# Realtime: the chat-owned ChatRoom Durable Object (one instance per channel). Free-
+# tier compatible (SQLite-backed DO). Co-hosted with the HTTP master for P0.
+[[durable_objects.bindings]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+
+# SQLite-backed DO class registration (required to create the DO).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatRoom"]
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (chat authz)
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"     # read-only eventExists check for event-scoped channels
+
+[[services]]
+binding = "SVC_FILE_META"
+service = "dub-file-meta"         # best-effort message<->file link registration
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# --- Cron: every 5 minutes. The scheduled handler drains the freeq outbox (forwards
+# audit rows to audit-log; defers domain events). The Workers FREE plan caps the
+# account at 5 cron triggers total; this is one modest schedule. ---
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+# Absolute base for the ws-ticket doUrl (gateway-bypassing / DO-direct). ":id" is
+# replaced with the channel id.
+CHAT_RT_DO_URL_BASE = "wss://chat-rt.developershub.jp/ws/:id"
+# Origin allow-list enforced by the ChatRoom DO (comma-separated). Browser clients
+# must match; native/mobile clients send no Origin and are allowed.
+CHAT_RT_ALLOWED_ORIGINS = "https://app.developershub.jp"
+
+# NOTE: WS_TICKET_SECRET is a Worker Secret (never in this toml). Set via
+# `wrangler secret put WS_TICKET_SECRET` at Apply. The ChatRoom DO verifies with
+# the same secret (chat self-owned HMAC, theme11).
