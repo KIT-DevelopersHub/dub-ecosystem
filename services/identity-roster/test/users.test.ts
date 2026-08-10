@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { common, identity } from "@dub/types";
-import { makeHarness, asUser, jsonBody, ORG_ID } from "./harness";
+import { makeHarness, asUser, internal, jsonBody, ORG_ID } from "./harness";
 
 describe("users listing & detail", () => {
   it("lists users (paginated shape)", async () => {
@@ -36,6 +36,32 @@ describe("users listing & detail", () => {
     // but cannot read someone else without identity:read
     const other = await h.app.request(`/identity/users/${h.adminId}`, asUser("user_bare"));
     expect(other.status).toBe(403);
+  });
+});
+
+describe("identity master (GET /users/:id, internal)", () => {
+  it("returns the IdentityUser master for the gateway /me composition", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/users/${h.memberId}`, internal());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as identity.IdentityUser;
+    expect(body.id).toBe(h.memberId);
+    expect(body.orgId).toBe(ORG_ID);
+    expect(body.displayName).toBe("Member");
+    expect(body.email).toBe("member@devhub.jp");
+    expect(Array.isArray(body.roleIds)).toBe(true);
+  });
+
+  it("requires x-dub-internal (403 without it)", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/users/${h.memberId}`, { headers: { "x-dub-request-id": "r" } });
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 404 for an unknown user", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request("/users/ghost", internal());
+    expect(res.status).toBe(404);
   });
 });
 
