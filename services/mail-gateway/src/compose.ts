@@ -193,10 +193,17 @@ const COMPOSE_HTML = `<!doctype html>
   button:disabled { opacity: .55; cursor: default; }
   #status { margin-top: 1rem; font-size: .85rem; white-space: pre-wrap; word-break: break-all; }
   .ok { color: #12855b; } .err { color: #c0392b; }
+  .appnote { margin: 0 0 1.1rem; padding: .6rem .75rem; border: 1px solid #cfd4dc;
+    border-radius: 8px; font-size: .78rem; line-height: 1.5; opacity: .85; }
+  @media (prefers-color-scheme: dark) { .appnote { border-color: #3a414d; } }
+  .appnote a { color: #2563eb; font-weight: 600; text-decoration: none; }
+  .appnote a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
   <div class="card">
+    <p class="appnote">これは暫定の送信専用ページです。統合アプリ(Dub 管理フロント)はこちら &rarr;
+      <a href="https://fe2-app-shell.developershub-site.workers.dev" target="_blank" rel="noopener">fe2-app-shell.developershub-site.workers.dev</a></p>
     <h1>メール送信</h1>
     <p class="hint">mail-gateway 送信専用画面。送信トークンを貼り付けて 1 通送れます。</p>
     <label for="token">送信トークン (COMPOSE_TOKEN)</label>
