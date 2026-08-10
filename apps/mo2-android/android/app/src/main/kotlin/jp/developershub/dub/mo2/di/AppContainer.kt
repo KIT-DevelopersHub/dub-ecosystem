@@ -10,6 +10,7 @@ import jp.developershub.dub.mo2.core.common.SessionStore
 import jp.developershub.dub.mo2.core.database.EncryptedDataStore
 import jp.developershub.dub.mo2.core.network.MobileBffClient
 import jp.developershub.dub.mo2.core.network.NetworkModule
+import jp.developershub.dub.mo2.feature.chat.ChatRepository
 import jp.developershub.dub.mo2.feature.tasks.TaskRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +31,21 @@ class AppContainer(context: Context) {
     )
 
     val taskRepository: TaskRepository = TaskRepository(bffClient)
+
+    /**
+     * Chat repository (S10). The realtime transport is left null here: the OkHttp
+     * WebSocket transport (DO-direct, minted via getChatWsTicket) is wired in the
+     * chat wave; until then the repo works pull-only (optimistic send + refresh),
+     * and connectRealtime is a no-op.
+     */
+    val chatRepository: ChatRepository = ChatRepository(bffClient, transport = null)
+
+    /**
+     * Current user id for optimistic chat authorship. The BFF attributes the author
+     * server-side from the bearer, so this is only the cosmetic id shown on a pending
+     * row until the POST ack promotes it. Resolved from the session in the auth wave.
+     */
+    val currentUserId: String = "me"
 
     fun acknowledgeLogout() {
         _loggedOut.value = false

@@ -20,7 +20,15 @@ the top-level `README.md` are owned elsewhere and are not touched by this app.
 | `core:database` | `session-store.ts` | `EncryptedDataStore` — Keystore-backed `EncryptedSharedPreferences` session vault |
 | `feature:home` | `home-view-model.ts` | S2 home aggregate — MVI `HomeViewModel` (loading / content / error + stale-while-error) + `HomeScreen` |
 | `feature:tasks` | `task-repository.ts` | S5/S6 — `TaskRepository` optimistic status change + HTTP 409 rollback/refetch (theme3 D4), `TasksViewModel`, `TaskDetailViewModel`, screens |
+| `feature:events` | `bff-client.ts` (S3/S4) | events list (`EventsViewModel`) + event overview (`EventDetailViewModel`, summary + effective capabilities) + screens |
+| `feature:gantt` | `gantt.ts` | S11 per-event gantt — MVI `GanttViewModel` (chart read model + optimistic view prefs, best-effort persist) + `GanttScreen` |
+| `feature:chat` | `chat.ts` | S10 — `ChatRepository` (channel list + per-channel store, optimistic send, DO-direct realtime reconcile via injected `ChatRealtimeTransport`), `ChannelListViewModel`, `ChatViewModel`, screens |
+| `feature:inbox` | `bff-client.ts` (S7) | notification inbox — `InboxViewModel` (optimistic mark-read / mark-all-read + rollback) + `InboxScreen` |
+| `feature:preferences` | `bff-client.ts` (S8) | notification preferences — `PreferencesViewModel` (optimistic channel toggle + PATCH persist) + `PreferencesScreen` |
+| `feature:devices` | `bff-client.ts` (devices) | registered push devices — `DevicesViewModel` (optimistic revoke + rollback) + `DevicesScreen` |
 | `app` | `deep-link.ts`, `push.ts` | `MainActivity`, Compose `NavHost` (App Links + `dub://` fallback), FCM messaging service (stub), manual DI (`AppContainer`) |
+
+The `feature:chat` realtime WebSocket is a **DO-direct** transport (theme11, gateway-bypassed): `ChatRepository` owns only the reconcile logic and takes an injected `ChatRealtimeTransport`. The production OkHttp WebSocket that mints a ws-ticket (`MobileBffClient.getChatWsTicket` → `WsTicketResponse.doUrl`) and decodes frames into `ChatRealtimeEvent` is supplied by `:app`; until it lands, `AppContainer` injects `null` and the repo runs pull-only (optimistic send + refresh).
 
 ## Architecture
 
@@ -69,6 +77,12 @@ directory:
 - `core:network` — `ErrorMapperTest`, `AuthInterceptorTest`
 - `feature:home` — `HomeViewModelTest`
 - `feature:tasks` — `TaskRepositoryTest`, `TasksViewModelTest`
+- `feature:events` — `EventsViewModelTest`
+- `feature:gantt` — `GanttViewModelTest`
+- `feature:chat` — `ChatRepositoryTest`
+- `feature:inbox` — `InboxViewModelTest`
+- `feature:preferences` — `PreferencesViewModelTest`
+- `feature:devices` — `DevicesViewModelTest`
 - `app` — `DeepLinkTest`, `PushParserTest`
 
 ## Contract parity note

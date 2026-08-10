@@ -15,6 +15,8 @@ typealias ActionId = String
 typealias TaskId = String
 typealias NotificationId = String
 typealias RequestId = String
+typealias ChannelId = String // S10 chat channel (prefix-ULID)
+typealias MessageId = String // S10 chat message (prefix-ULID)
 
 // ---- time (D2) ----
 typealias ISODateTime = String // ISO8601 UTC, e.g. "2026-08-09T05:00:00Z"
