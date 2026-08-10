@@ -1,0 +1,553 @@
+# OpenAPI 3.1 contract for mail-gateway. Generated from services/mail-gateway/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: Mail Gateway API
+  version: 1.0.0
+  description: |-
+    Outbound send (managed provider, SES暫定) + inbound message/thread reads + mailbox admin. External segment /api/v1/mail exposes /outbox, /messages, /threads, /mailboxes; /send and /internal/* are internal-only (open-relay guard).
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://gateway.example/api/v1
+    description: Public base via api-gateway (external clients call /api/v1/mail/...). Paths below are service-internal (post-prefix-strip); the gateway strips /api/v1 before forwarding.
+tags:
+  - name: mail
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /internal/health:
+    get:
+      operationId: mailHealth
+      summary: Liveness probe
+      tags:
+        - health
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      responses:
+        '200':
+          description: OK
+      security: []
+  /internal/health/ready:
+    get:
+      operationId: mailReady
+      summary: Readiness probe
+      tags:
+        - health
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      responses:
+        '200':
+          description: Ready
+      security: []
+  /send:
+    post:
+      operationId: sendMail
+      summary: Raw system send
+      tags:
+        - mail
+      description: |-
+        Internal-only open-relay guard. Requires the x-dub-idempotency-key header (二重送信ゼロ). If x-dub-user-id is present, mail:send is enforced fresh.
+        
+        Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMailRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMailResponse'
+        '200':
+          description: Duplicate (idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security: []
+  /outbox:
+    post:
+      operationId: composeMail
+      summary: User-facing compose + send
+      tags:
+        - mail
+      description: Requires mail:send. Reachable via the gateway with the caller's session; Idempotency-Key is optional (minted when absent).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMailRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMailResponse'
+        '200':
+          description: Duplicate replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /messages:
+    get:
+      operationId: listMailMessages
+      summary: List inbound messages
+      tags:
+        - mail
+      description: Requires mail:read.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: threadId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMailMessages'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /messages/{id}:
+    get:
+      operationId: getMailMessage
+      summary: Get an inbound message
+      tags:
+        - mail
+      description: Requires mail:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessage'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /threads/{id}:
+    get:
+      operationId: getMailThread
+      summary: Get a thread's messages
+      tags:
+        - mail
+      description: Requires mail:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThread'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /mailboxes:
+    get:
+      operationId: listMailboxes
+      summary: List mailboxes
+      tags:
+        - mail
+      description: Requires mail:admin.
+      responses:
+        '200':
+          description: Mailboxes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /mailboxes/{id}:
+    post:
+      operationId: upsertMailbox
+      summary: Create/update a mailbox
+      tags:
+        - mail
+      description: Requires mail:admin.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertMailboxRequest'
+      responses:
+        '200':
+          description: Upserted mailbox
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mailbox'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /internal/status:
+    get:
+      operationId: mailSendStatus
+      summary: Live send-health self-report
+      tags:
+        - mail
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailStatus'
+      security: []
+  /health/quota:
+    get:
+      operationId: mailQuota
+      summary: Send quota snapshot
+      tags:
+        - mail
+      description: 'Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.'
+      responses:
+        '200':
+          description: Quota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaResponse'
+      security: []
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    MailAddress:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+        name:
+          type: string
+    SendMailRequest:
+      type: object
+      required:
+        - to
+        - subject
+        - textBody
+      properties:
+        to:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAddress'
+        cc:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAddress'
+        subject:
+          type: string
+        textBody:
+          type: string
+        htmlBody:
+          type: string
+        inReplyTo:
+          type: string
+        loopHeaders:
+          type: object
+          additionalProperties:
+            type: string
+    SendMailResponse:
+      type: object
+      required:
+        - messageId
+        - provider
+        - acceptedAt
+      properties:
+        messageId:
+          type: string
+        provider:
+          type: string
+          enum:
+            - ses
+            - mailchannels
+            - resend
+        acceptedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    MailMessage:
+      type: object
+      required:
+        - id
+        - messageId
+        - threadId
+        - from
+        - to
+        - subject
+        - snippet
+        - receivedAt
+      properties:
+        id:
+          type: string
+        messageId:
+          type: string
+        threadId:
+          type: string
+        from:
+          $ref: '#/components/schemas/MailAddress'
+        to:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAddress'
+        subject:
+          type: string
+        snippet:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    MailThread:
+      type: object
+      required:
+        - id
+        - messages
+      properties:
+        id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailMessage'
+    Mailbox:
+      type: object
+      required:
+        - address
+      properties:
+        address:
+          type: string
+    MailboxList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mailbox'
+    UpsertMailboxRequest:
+      type: object
+      required:
+        - address
+      properties:
+        address:
+          type: string
+    PaginatedMailMessages:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailMessage'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+    MailStatus:
+      type: object
+      description: Send-health self-report.
+      properties:
+        rateLimited:
+          type: boolean
+        cooldownSec:
+          type: integer
+    QuotaResponse:
+      type: object
+      description: Send quota snapshot.
+      properties:
+        limit:
+          type: integer
+        used:
+          type: integer
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.

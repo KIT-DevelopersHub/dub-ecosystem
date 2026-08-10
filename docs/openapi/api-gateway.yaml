@@ -1,0 +1,397 @@
+# OpenAPI 3.1 contract for api-gateway. Generated from services/api-gateway/src route tables
+# and packages/types/src contract namespaces. Envelope: raw JSON on success,
+# @dub/errors ErrorResponse on failure. Cursor pagination (opaque cursor + nextCursor).
+openapi: 3.1.0
+info:
+  title: API Gateway (public boundary)
+  version: 1.0.0
+  description: |-
+    The only external HTTP boundary. Public base is /api/v1. It (1) serves its own composition routes (/me, /bff/home, /public/inquiries) and /healthz, and (2) transparently proxies every other /api/v1/<segment>/* request to the backing service after auth + guards. WebSocket upgrades are rejected (chat realtime is Durable-Object-direct). Per-service contracts are documented in the sibling <service>.yaml files.
+    
+    All responses echo the correlation id in the x-dub-request-id header.
+servers:
+  - url: https://api.dub.example/api/v1
+    description: Public API base (external clients).
+tags:
+  - name: gateway
+  - name: proxy
+  - name: health
+security:
+  - sessionCookie: []
+  - gatewayIdentity: []
+paths:
+  /healthz:
+    get:
+      operationId: gatewayHealth
+      summary: Gateway liveness probe
+      tags:
+        - health
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+      security: []
+  /me:
+    get:
+      operationId: getMe
+      summary: Current user, org, permissions and session expiry
+      tags:
+        - gateway
+      description: Gateway-owned composition (identity + session). Requires an authenticated session.
+      responses:
+        '200':
+          description: Composed identity view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/Internal'
+      security:
+        - sessionCookie: []
+        - gatewayIdentity: []
+  /bff/home:
+    get:
+      operationId: getBffHome
+      summary: Home screen aggregate (events + unread)
+      tags:
+        - gateway
+      description: Gateway-owned BFF composition across event + notification. Degraded upstreams surface in partialErrors rather than failing the whole response.
+      responses:
+        '200':
+          description: Home aggregate (partial-failure tolerant)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BffHomeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/Internal'
+      security:
+        - sessionCookie: []
+        - gatewayIdentity: []
+  /public/inquiries:
+    post:
+      operationId: createPublicInquiry
+      summary: Submit a public contact inquiry
+      tags:
+        - gateway
+      description: Unauthenticated public endpoint. Protected by Cloudflare Turnstile (turnstileToken) and IP rate limiting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicInquiryRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicInquiryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+      security: []
+  /{segment}/{path}:
+    get:
+      operationId: proxyGet
+      summary: Transparent proxy to a backing service
+      tags:
+        - proxy
+      description: Catch-all under /api/v1. Resolves the route, applies guards (WebSocket-upgrade rejected as 400, body cap, internal-only sub-paths 404'd), runs a one-shot session verify for auth:required segments, then forwards with x-dub-request-id + x-dub-user-id. Per-service request/response schemas live in that service's own spec. See each <service>.yaml.
+      parameters:
+        - name: segment
+          in: path
+          required: true
+          description: 'First path segment selecting the backing service: auth, identity, events, actions, tasks, gantt, notifications, files, drive, chat, mail, deploy, github, audit, webhooks.'
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          description: Remaining sub-path, forwarded to the service after stripping /api/v1.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The upstream service response is returned verbatim (status, body and headers passed through).
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - sessionCookie: []
+        - gatewayIdentity: []
+components:
+  schemas:
+    Error:
+      type: object
+      description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: SCREAMING_SNAKE code. Common set or <SERVICE>_<REASON>.
+            message:
+              type: string
+            details:
+              description: Code-specific payload (e.g. FieldError[] for VALIDATION_FAILED, RateLimitDetails for RATE_LIMITED).
+            requestId:
+              type: string
+              description: x-dub-request-id origin.
+            service:
+              type: string
+            retryable:
+              type: boolean
+    FieldError:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          example: title
+        reason:
+          type: string
+          example: required
+        message:
+          type: string
+    RateLimitDetails:
+      type: object
+      required:
+        - retryAfterSec
+      properties:
+        retryAfterSec:
+          type: integer
+    PermissionKey:
+      type: string
+      description: Permission key from the frozen catalog.
+    UserSummary:
+      type: object
+      required:
+        - id
+        - displayName
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+    EventSummary:
+      type: object
+      required:
+        - id
+        - title
+        - phase
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        phase:
+          type: string
+          enum:
+            - planning
+            - preparing
+            - open
+            - live
+            - wrapup
+            - closed
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    MeResponse:
+      type: object
+      required:
+        - user
+        - orgId
+        - permissions
+        - sessionExpiresAt
+      properties:
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        orgId:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionKey'
+        sessionExpiresAt:
+          type: integer
+          description: epoch-ms
+    UpstreamPartialError:
+      type: object
+      required:
+        - source
+        - code
+      properties:
+        source:
+          type: string
+        code:
+          type: string
+    BffHomeResponse:
+      type: object
+      description: BFF aggregation tolerates partial upstream failure (partialErrors lists the degraded sources).
+      required:
+        - upcomingEvents
+        - unreadCount
+        - partialErrors
+      properties:
+        upcomingEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventSummary'
+        unreadCount:
+          type: integer
+        partialErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpstreamPartialError'
+    PublicInquiryRequest:
+      type: object
+      required:
+        - kind
+        - name
+        - email
+        - message
+        - turnstileToken
+      properties:
+        kind:
+          type: string
+          enum:
+            - general
+            - sponsor
+            - press
+        name:
+          type: string
+        email:
+          type: string
+        message:
+          type: string
+        turnstileToken:
+          type: string
+    PublicInquiryResponse:
+      type: object
+      required:
+        - accepted
+      properties:
+        accepted:
+          type: boolean
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthenticated:
+      description: UNAUTHENTICATED — missing/invalid session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: FORBIDDEN — authenticated but lacking the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: CONFLICT / <SERVICE>_VERSION_CONFLICT — optimistic-lock version mismatch or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: PRECONDITION_FAILED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: PAYLOAD_TOO_LARGE — body exceeds the route cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: RATE_LIMITED — error.details is RateLimitDetails; Retry-After header set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: INTERNAL — unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous response's nextCursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dub_session
+      description: Web session cookie minted by auth-service; verified at the gateway.
+    gatewayIdentity:
+      type: apiKey
+      in: header
+      name: x-dub-user-id
+      description: Trusted authn header injected by the gateway after session verification (mode:trustedHeader). Internal boundary only — never accepted from the public internet.
