@@ -160,12 +160,30 @@ export class D1ChangeLogStore implements ChangeLogStore {
   }
 }
 
+// Set form of the subscribed names — cheap membership test for the HTTP landing route.
+const SUBSCRIBED_EVENTS = new Set<string>(MOBILE_CHANGE_LOG_EVENTS);
+
+/**
+ * The single append path shared by BOTH lanes — the paid Queue consumer
+ * (dub-q-evt-mobile-bff, via buildChangeLogHandlers) and the free-tier HTTP landing
+ * route (POST /internal/events-async). A name outside the subscribed set is ACKed as an
+ * unknown event (forward-compat) — never appended as a garbage row. Append is idempotent
+ * on event_id (ON CONFLICT DO NOTHING), so an at-least-once redelivery from either lane
+ * does not double-append. Returns whether a row was appended (for the endpoint's body).
+ */
+export async function ingestChangeLogEvent(store: ChangeLogStore, env: DubEventEnvelope): Promise<boolean> {
+  if (!SUBSCRIBED_EVENTS.has(env.name)) return false; // unknown -> ack (no append)
+  const entry = changeLogEntryFromEvent(env);
+  if (!entry) return false;
+  await store.append(entry);
+  return true;
+}
+
 /** Build the handler map that appends a change-log row per subscribed event. */
 export function buildChangeLogHandlers(store: ChangeLogStore): DubEventHandlerMap {
   const handlers: Record<string, (env: DubEventEnvelope) => Promise<void>> = {};
   const append = async (env: DubEventEnvelope): Promise<void> => {
-    const entry = changeLogEntryFromEvent(env);
-    if (entry) await store.append(entry);
+    await ingestChangeLogEvent(store, env);
   };
   for (const name of MOBILE_CHANGE_LOG_EVENTS) handlers[name] = append;
   return handlers as DubEventHandlerMap;

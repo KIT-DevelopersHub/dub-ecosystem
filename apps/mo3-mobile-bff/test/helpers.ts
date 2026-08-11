@@ -7,7 +7,7 @@ import type { Authenticator, CapabilityScope } from "../src/authn";
 import type { DeviceRecord, DeviceStore, UpsertDeviceInput, UpsertDeviceResult } from "../src/devices";
 import type { DeliveryStatus, DeliveryStore } from "../src/deliveries";
 import type { PushAdapter, SendResult } from "../src/push";
-import type { ChangeLogReader, DeleteTombstone } from "../src/change-log";
+import type { ChangeLogEntry, ChangeLogReader, ChangeLogStore, DeleteTombstone } from "../src/change-log";
 import type { MutationStore, SaveMutationInput } from "../src/mutation-store";
 import type { MutationResult } from "../src/mutations";
 
@@ -160,6 +160,16 @@ export class MemoryChangeLogReader implements ChangeLogReader {
   }
 }
 
+// ---- in-memory change-log append store (writer; idempotent on eventId) ----
+export class MemoryChangeLogStore implements ChangeLogStore {
+  entries: ChangeLogEntry[] = [];
+
+  async append(entry: ChangeLogEntry): Promise<void> {
+    if (this.entries.some((e) => e.eventId === entry.eventId)) return; // ON CONFLICT DO NOTHING
+    this.entries.push(entry);
+  }
+}
+
 // ---- in-memory mutation store (durable idempotency) ----
 export class MemoryMutationStore implements MutationStore {
   rows = new Map<string, { userId: string; op: string; result: MutationResult }>();
@@ -205,6 +215,7 @@ export interface Harness {
   devices: MemoryDeviceStore;
   deliveries: MemoryDeliveryStore;
   changeLog: MemoryChangeLogReader;
+  changeLogStore: MemoryChangeLogStore;
   mutations: MemoryMutationStore;
   ios: FakePushAdapter;
   android: FakePushAdapter;
@@ -228,6 +239,7 @@ export function makeHarness(): Harness {
   const devices = new MemoryDeviceStore();
   const deliveries = new MemoryDeliveryStore();
   const changeLog = new MemoryChangeLogReader();
+  const changeLogStore = new MemoryChangeLogStore();
   const mutations = new MemoryMutationStore();
   const ios = new FakePushAdapter();
   const android = new FakePushAdapter();
@@ -245,6 +257,7 @@ export function makeHarness(): Harness {
     devices,
     deliveries,
     changeLog,
+    changeLogStore,
     mutations,
     pushAdapters: { ios, android },
     pushRetry: { maxAttempts: 1 },
@@ -252,7 +265,7 @@ export function makeHarness(): Harness {
     newRequestId: () => `req_${++seq}`,
   };
 
-  return { deps, auth: authService, identity, event, task, notification, authenticator, devices, deliveries, changeLog, mutations, ios, android, audit };
+  return { deps, auth: authService, identity, event, task, notification, authenticator, devices, deliveries, changeLog, changeLogStore, mutations, ios, android, audit };
 }
 
 // ---- request builders ----
