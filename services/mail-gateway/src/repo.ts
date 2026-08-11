@@ -19,6 +19,11 @@ export interface SendLogRow {
   error_code: string | null;
   created_at: string;
   updated_at: string;
+  text_body: string | null; // 0004: plain-text body as submitted (Sent detail)
+  html_body: string | null; // 0004: HTML part when present (sanitized before render)
+  cc_json: string | null; // 0004: JSON MailAddress[] of Cc recipients
+  snippet: string | null; // 0004: first ~140 chars of text_body (Sent list preview)
+  from_address: string | null; // 0004: envelope From used for the send
 }
 
 export interface InboundRow {
@@ -64,18 +69,40 @@ export async function findSendByKey(db: DbClient, idempotencyKey: string): Promi
   return db.first<SendLogRow>(`SELECT * FROM mail_send_log WHERE idempotency_key = ?`, idempotencyKey);
 }
 
+/** First ~140 chars of the body on a single line — the Sent-list preview text. */
+export function snippetOf(textBody: string, max = 140): string {
+  const oneLine = textBody.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
+}
+
 /** Claim a send: INSERT OR IGNORE on the UNIQUE idempotency_key. changes===0 means a
- *  concurrent/prior claim won the race (the caller then re-reads and dedups). */
+ *  concurrent/prior claim won the race (the caller then re-reads and dedups). The body
+ *  columns (text/html/cc/snippet/from — migration 0004) are persisted at claim time so
+ *  a later status='sent' row can back the Sent folder. The idempotency contract is
+ *  unchanged: still one INSERT OR IGNORE on UNIQUE(idempotency_key), added columns only. */
 export async function insertSendClaim(
   db: DbClient,
-  row: { id: string; idempotencyKey: string; reqHash: string; requester: string; toJson: string; subject: string; threadId: string | null },
+  row: {
+    id: string;
+    idempotencyKey: string;
+    reqHash: string;
+    requester: string;
+    toJson: string;
+    subject: string;
+    threadId: string | null;
+    textBody: string;
+    htmlBody: string | null;
+    ccJson: string;
+    fromAddress: string;
+  },
 ): Promise<number> {
   const now = nowIso();
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_send_log
        (id, idempotency_key, req_hash, requester, to_json, subject, thread_id,
-        provider, provider_message_id, status, error_code, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?)`,
+        provider, provider_message_id, status, error_code, created_at, updated_at,
+        text_body, html_body, cc_json, snippet, from_address)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.idempotencyKey,
     row.reqHash,
@@ -85,6 +112,11 @@ export async function insertSendClaim(
     row.threadId,
     now,
     now,
+    row.textBody,
+    row.htmlBody,
+    row.ccJson,
+    snippetOf(row.textBody),
+    row.fromAddress,
   );
   return res.meta.changes;
 }
@@ -115,6 +147,73 @@ export async function markSendFailed(db: DbClient, id: string, errorCode: string
     nowIso(),
     id,
   );
+}
+
+// ---- sent folder (projects status='sent' send-log rows into read DTOs) ----
+function parseAddresses(json: string | null): mail.MailAddress[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? (v as mail.MailAddress[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function sendRowToListItem(r: SendLogRow): mail.MailSentListItem {
+  const item: mail.MailSentListItem = {
+    id: r.id,
+    to: parseAddresses(r.to_json),
+    subject: r.subject,
+    snippet: r.snippet ?? "",
+    sentAt: r.updated_at, // when the row flipped to 'sent'
+    provider: (r.provider as mail.SendMailResponse["provider"]) ?? "ses",
+    status: "sent",
+  };
+  const cc = parseAddresses(r.cc_json);
+  if (cc.length > 0) item.cc = cc;
+  if (r.from_address) item.from = { email: r.from_address };
+  if (r.provider_message_id) item.providerMessageId = r.provider_message_id;
+  return item;
+}
+
+function sendRowToDetail(r: SendLogRow): mail.MailSentDetail {
+  const detail: mail.MailSentDetail = { ...sendRowToListItem(r), textBody: r.text_body ?? "" };
+  if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
+  return detail;
+}
+
+/** List sent mail (status='sent'), newest first. id-based opaque cursor (like
+ *  listInbound); ULID ids sort in creation order so the id cursor tracks created_at. */
+export async function listSent(
+  db: DbClient,
+  q: { cursor?: string; limit: number },
+): Promise<common.Paginated<mail.MailSentListItem>> {
+  const where: string[] = ["status = 'sent'"];
+  const binds: unknown[] = [];
+  if (q.cursor !== undefined) {
+    where.push("id < ?");
+    binds.push(decodeCursor(q.cursor));
+  }
+  const rows = await db.all<SendLogRow>(
+    `SELECT * FROM mail_send_log WHERE ${where.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ...binds,
+    q.limit + 1,
+  );
+  const hasMore = rows.length > q.limit;
+  const page = hasMore ? rows.slice(0, q.limit) : rows;
+  const last = page[page.length - 1];
+  return {
+    items: page.map(sendRowToListItem),
+    nextCursor: hasMore && last ? encodeCursor(last.id) : null,
+  };
+}
+
+/** Full sent detail (body included) — backs GET /sent/:id. Only a delivered
+ *  (status='sent') row is returned; a pending/failed row reads as not-found. */
+export async function getSentDetail(db: DbClient, id: string): Promise<mail.MailSentDetail | null> {
+  const row = await db.first<SendLogRow>(`SELECT * FROM mail_send_log WHERE id = ? AND status = 'sent'`, id);
+  return row ? sendRowToDetail(row) : null;
 }
 
 // ---- inbound ----
