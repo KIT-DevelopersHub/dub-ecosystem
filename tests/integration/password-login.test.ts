@@ -25,7 +25,7 @@ describe("password login (gateway E2E)", () => {
 
     // POST /api/v1/auth/password/login with the seeded admin demo credential
     const login = await h.gw("POST", "/api/v1/auth/password/login", {
-      body: { email: "admin@dub.local", password: DEMO_LOGINS["admin@dub.local"] },
+      body: { email: "admin@developershub.jp", password: DEMO_LOGINS["admin@developershub.jp"] },
     });
     expect(login.status).toBe(200);
     expect(login.headers.get("set-cookie") ?? "").toContain("dub_session=");
@@ -45,7 +45,7 @@ describe("password login (gateway E2E)", () => {
   it("member demo account: logs in, can read, but is denied the admin-only route", async () => {
     const h = await createHarness();
     const login = await h.gw("POST", "/api/v1/auth/password/login", {
-      body: { email: "member@dub.local", password: DEMO_LOGINS["member@dub.local"] },
+      body: { email: "member@developershub.jp", password: DEMO_LOGINS["member@developershub.jp"] },
     });
     expect(login.status).toBe(200);
     const { token } = login.json<{ token: string }>();
@@ -62,7 +62,7 @@ describe("password login (gateway E2E)", () => {
   it("wrong password is rejected (401 AUTH_INVALID_CREDENTIALS) and issues no session", async () => {
     const h = await createHarness();
     const login = await h.gw("POST", "/api/v1/auth/password/login", {
-      body: { email: "admin@dub.local", password: "not-the-password" },
+      body: { email: "admin@developershub.jp", password: "not-the-password" },
     });
     expect(login.status).toBe(401);
     expect(login.json<{ error: { code: string } }>().error.code).toBe("AUTH_INVALID_CREDENTIALS");

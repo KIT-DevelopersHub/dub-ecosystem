@@ -13,7 +13,7 @@ import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import type { auth, identity } from "@dub/types";
 import type { Deps } from "./deps";
 import { authErrors } from "./errors";
-import { verifyPassword } from "./passwords";
+import { verifyPassword, setCredential, decryptSecret, generatePassword } from "./passwords";
 
 // ---- local response shapes (requests + SessionInfo are frozen in @dub/types) ----
 type RefreshResponse = { session: auth.SessionInfo } | { token: string; session: auth.SessionInfo };
@@ -121,10 +121,10 @@ export function buildApp(deps: Deps): Hono {
 
   // ---- POST /auth/password/login (public) ----
   // The ONLY interactive web login path (Google OAuth was removed). Access is
-  // restricted to company-issued mailboxes: only emails on ALLOWED_LOGIN_DOMAIN
-  // (default developershub.jp) may authenticate. identity-roster stays the source
-  // of truth for who may log in (invite-only provision) and for the canonical user
-  // id + roles. Credentials are verified against PBKDF2 hashes.
+  // restricted to the identity-roster ALLOWLIST (theme #4): only emails that map to
+  // an ACTIVE roster user may authenticate — not a whole email domain. identity-roster
+  // stays the source of truth for who may log in and for the canonical user id + roles.
+  // Credentials are verified against PBKDF2 hashes.
   app.post("/auth/password/login", async (c) => {
     const ctx = ctxOf(c);
     const body = await readJson<Partial<auth.AuthPasswordLoginRequest>>(c);
@@ -132,43 +132,51 @@ export function buildApp(deps: Deps): Hono {
     const password = requireString(body.password, "password");
     const email = emailRaw.trim().toLowerCase();
 
-    // Domain gate (pre-check): reject anything not on the allowed company domain
-    // BEFORE any credential work. This is a policy decision about the email's
-    // domain (public information), so a distinct 403 leaks nothing about whether an
-    // account exists — the same-401 anti-enumeration policy still governs the
-    // credential-verification path below.
-    if (emailDomain(email) !== config.allowedLoginDomain) {
+    const ip = clientIp(c);
+    const emailKey = `e:${email}`;
+    const ipKey = `i:${ip}`;
+    const { maxFailures, windowSec } = config.passwordLogin;
+    const bumpFailure = async (): Promise<void> => {
+      await deps.rateLimiter.hit(emailKey, windowSec);
+      await deps.rateLimiter.hit(ipKey, windowSec);
+    };
+
+    // OPTIONAL domain filter: only applied when ALLOWED_LOGIN_DOMAIN is configured.
+    // It is a coarse extra layer, never the sole gate (the roster allowlist below is
+    // authoritative). The email domain is public info, so a distinct 403 leaks nothing.
+    if (config.allowedLoginDomain && emailDomain(email) !== config.allowedLoginDomain) {
       await deps.audit.record({ action: "auth.session.login", actorId: null, result: "failure", requestId: ctx.requestId, details: { method: "password", reason: "domain_not_allowed" } });
       throw authErrors.domainNotAllowed();
     }
 
     // Soft brute-force guard: block once either the email or the client IP has
     // already burned its failure budget in the window (counters bumped only on a
-    // failed attempt below, so a stream of correct logins is never throttled).
-    const ip = clientIp(c);
-    const emailKey = `e:${email}`;
-    const ipKey = `i:${ip}`;
-    const { maxFailures, windowSec } = config.passwordLogin;
+    // failed/blocked attempt, so a stream of correct logins is never throttled).
     if ((await deps.rateLimiter.peek(emailKey)) >= maxFailures || (await deps.rateLimiter.peek(ipKey)) >= maxFailures) {
       await deps.audit.record({ action: "auth.session.login", actorId: null, result: "failure", requestId: ctx.requestId, details: { method: "password", reason: "rate_limited" } });
       throw errors.rateLimited(windowSec);
     }
 
+    // Allowlist gate (theme #4): the email MUST resolve to an ACTIVE roster user.
+    // Non-roster / invited / disabled emails are rejected (403) BEFORE any credential
+    // work. A failed allowlist check bumps the IP counter to blunt roster enumeration.
+    const { user } = await deps.identity.lookupByEmail(ctx, email);
+    if (!user || user.status !== "active") {
+      await deps.rateLimiter.hit(ipKey, windowSec);
+      await deps.audit.record({ action: "auth.session.login", actorId: null, result: "failure", requestId: ctx.requestId, details: { method: "password", reason: "not_on_allowlist" } });
+      throw authErrors.notOnAllowlist();
+    }
+
     const cred = await deps.passwords.get(email);
     const ok = cred ? await verifyPassword(password, cred.hash) : false;
     if (!ok) {
-      await deps.rateLimiter.hit(emailKey, windowSec);
-      await deps.rateLimiter.hit(ipKey, windowSec);
+      await bumpFailure();
       await deps.audit.record({ action: "auth.session.login", actorId: null, result: "failure", requestId: ctx.requestId, details: { method: "password", reason: "invalid_credentials" } });
       throw authErrors.invalidCredentials();
     }
 
-    // Password matched — resolve the canonical identity user (invite-only). This
-    // is the same gate the mobile flow uses, so disabled/uninvited users are still
-    // rejected even with a valid password.
-    const user = await provisionOrThrow(deps, ctx, { email, displayName: email.split("@")[0]! });
     const created = await deps.sessions.create(user.id, "web");
-    await deps.rateLimiter.reset(`e:${email}`);
+    await deps.rateLimiter.reset(emailKey);
     await deps.audit.record({
       action: "auth.session.login",
       actorId: user.id,
@@ -180,6 +188,132 @@ export function buildApp(deps: Deps): Hono {
     c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
     const res: TokenSessionResponse = { token: created.token, session: created.session };
     return c.json(res);
+  });
+
+  // ---- POST /auth/password (public; self password change — #5b) ----
+  // The logged-in user changes their OWN password: verify the current password, then
+  // store a fresh PBKDF2 hash (+ encrypted copy when the server key is configured).
+  app.post("/auth/password", async (c) => {
+    const ctx = ctxOf(c);
+    const bearer = bearerToken(c.req.header("authorization"));
+    const cookieToken = readCookie(c.req.header("cookie"), config.cookieName);
+    const token = bearer ?? cookieToken ?? "";
+    const verified = await deps.sessions.verify(token);
+    if (!verified.valid || !verified.userId) throw authErrors.invalidToken();
+    const userId = verified.userId;
+
+    const body = await readJson<{ currentPassword?: string; newPassword?: string }>(c);
+    const currentPassword = requireString(body.currentPassword, "currentPassword");
+    const newPassword = requireString(body.newPassword, "newPassword");
+    if (newPassword.length < config.passwordMinLength) {
+      throw errors.validationFailed([{ field: "newPassword", reason: "too_short", message: `min ${config.passwordMinLength} chars` }]);
+    }
+
+    const me = await deps.identity.getUser(ctx, userId);
+    if (!me) throw authErrors.invalidToken();
+    const email = me.email.trim().toLowerCase();
+
+    const cred = await deps.passwords.get(email);
+    const ok = cred ? await verifyPassword(currentPassword, cred.hash) : false;
+    if (!ok) {
+      await deps.audit.record({ action: "auth.password.changed", actorId: userId, result: "failure", requestId: ctx.requestId, details: { reason: "current_password_mismatch" } });
+      throw authErrors.invalidCredentials();
+    }
+
+    await setCredential(deps.passwords, {
+      email,
+      password: newPassword,
+      encKey: config.passwordEncKey || undefined,
+      setBy: "self",
+      mustChange: false,
+    });
+    await deps.audit.record({ action: "auth.password.changed", actorId: userId, result: "success", requestId: ctx.requestId, resourceType: "user", resourceId: userId });
+    const res: OkResponse = { ok: true };
+    return c.json(res);
+  });
+
+  // ---- POST /internal/admin/users/:userId/password (internal + identity:admin — #5a) ----
+  // An admin sets or re-issues a user's initial password (e.g. the roster's
+  // github-synced accounts that have no credential yet). Body: { password?, generate?,
+  // mustChange? }. When no password is supplied (or generate=true) a strong random one
+  // is generated and returned ONCE so the admin can hand it over.
+  app.post("/internal/admin/users/:userId/password", async (c) => {
+    requireInternal(c);
+    const ctx = ctxOf(c);
+    const actor = ctx.userId;
+    if (!actor) throw errors.unauthenticated();
+    if (!(await deps.identity.hasPermission(ctx, actor, "identity:admin"))) throw errors.forbidden("identity:admin required");
+
+    const targetId = c.req.param("userId");
+    const target = await deps.identity.getUser(ctx, targetId);
+    if (!target) throw errors.notFound("user", targetId);
+
+    const body = await readJson<{ password?: string; generate?: boolean; mustChange?: boolean }>(c).catch(() => ({}) as { password?: string; generate?: boolean; mustChange?: boolean });
+    const supplied = typeof body.password === "string" && body.password.length > 0 ? body.password : "";
+    const generated = supplied === "" || body.generate === true;
+    let password = supplied;
+    if (generated) {
+      password = generatePassword();
+    } else if (password.length < config.passwordMinLength) {
+      throw errors.validationFailed([{ field: "password", reason: "too_short", message: `min ${config.passwordMinLength} chars` }]);
+    }
+
+    const email = target.email.trim().toLowerCase();
+    await setCredential(deps.passwords, {
+      email,
+      password,
+      encKey: config.passwordEncKey || undefined,
+      setBy: actor,
+      mustChange: body.mustChange ?? true,
+    });
+    await deps.audit.record({
+      action: "auth.password.set",
+      actorId: actor,
+      result: "success",
+      requestId: ctx.requestId,
+      resourceType: "user",
+      resourceId: targetId,
+      details: { method: generated ? "generated" : "specified" },
+    });
+    const res = generated ? { ok: true as const, password } : { ok: true as const };
+    return c.json(res);
+  });
+
+  // ---- GET /internal/admin/users/:userId/password (internal + identity:admin — #5c) ----
+  // An admin views a user's current password (decision B, risk accepted). The plaintext
+  // is NEVER stored: it is decrypted on demand from the AES-GCM copy under the server
+  // key, and every view is audited (auth.password.viewed).
+  app.get("/internal/admin/users/:userId/password", async (c) => {
+    requireInternal(c);
+    const ctx = ctxOf(c);
+    const actor = ctx.userId;
+    if (!actor) throw errors.unauthenticated();
+    if (!(await deps.identity.hasPermission(ctx, actor, "identity:admin"))) throw errors.forbidden("identity:admin required");
+
+    const targetId = c.req.param("userId");
+    const target = await deps.identity.getUser(ctx, targetId);
+    if (!target) throw errors.notFound("user", targetId);
+    const email = target.email.trim().toLowerCase();
+
+    const cred = await deps.passwords.get(email);
+    if (!cred || !cred.enc) throw authErrors.passwordNotViewable();
+    if (!config.passwordEncKey) throw authErrors.encKeyUnavailable();
+    let password: string;
+    try {
+      password = await decryptSecret(cred.enc, config.passwordEncKey);
+    } catch {
+      throw authErrors.encKeyUnavailable();
+    }
+    // Audit BEFORE returning: the sensitive read is recorded even if the response is lost.
+    await deps.audit.record({
+      action: "auth.password.viewed",
+      actorId: actor,
+      result: "success",
+      requestId: ctx.requestId,
+      resourceType: "user",
+      resourceId: targetId,
+    });
+    return c.json({ userId: targetId, email, password });
   });
 
   // ---- POST /verify (internal: gateway / MO3 only) ----

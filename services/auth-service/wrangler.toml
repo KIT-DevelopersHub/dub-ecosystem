@@ -43,18 +43,22 @@ service = "audit-log"
 # holds the ONE freeq cron. Removing it here frees a cron slot on the free-plan account cap.
 
 # --- vars (non-secret) ---
-# Login is email+password only (web Google OAuth removed) and restricted to
-# ALLOWED_LOGIN_DOMAIN. SPA redirect/allowlist + oauth-state vars are gone with it.
+# Login is email+password only (web Google OAuth removed). Access is gated by the
+# identity-roster ACTIVE allowlist (theme #4), NOT by email domain — so roster
+# members on any domain (e.g. github-synced accounts) can log in. Set the optional
+# ALLOWED_LOGIN_DOMAIN var to re-enable a coarse extra domain filter if ever wanted.
 [vars]
 ENVIRONMENT = "production"
 COOKIE_DOMAIN = ".developershub.jp"
-ALLOWED_LOGIN_DOMAIN = "developershub.jp"
 SESSION_ACCESS_TTL_SEC = "3600"
 SESSION_ABS_WEB_TTL_SEC = "2592000"
 SESSION_ABS_MOBILE_TTL_SEC = "15552000"
 
-# Secrets (set via `wrangler secret put`, never committed) — MOBILE Google only:
-#   GOOGLE_MOBILE_IOS_CLIENT_ID / GOOGLE_MOBILE_ANDROID_CLIENT_ID
+# Secrets (set via `wrangler secret put`, never committed):
+#   PASSWORD_ENC_KEY  — base64 of 32 random bytes (AES-256-GCM). Enables admin
+#                       password view (#5c) + encrypted-at-rest copies. Generate with:
+#                         openssl rand -base64 32
+#   GOOGLE_MOBILE_IOS_CLIENT_ID / GOOGLE_MOBILE_ANDROID_CLIENT_ID  — MOBILE Google only.
 # test-login is gated by DUB_TEST_LOGIN="1" and only in local/preview envs.
 
 [env.preview.vars]
