@@ -21,6 +21,7 @@ import {
   type AdapterRegistry,
 } from "./adapters";
 import { makeRecipientResolver } from "./recipients";
+import { resolveAuditQueue } from "./outbox";
 import type { IngestDeps } from "./ingest";
 
 export function buildDb(env: Env, requestId: string): DbClient {
@@ -51,7 +52,9 @@ export function buildIngestDeps(env: Env, ctx: RequestContext): IngestDeps {
     db,
     resolver,
     adapters,
-    auditEnv: env,
+    // Paid Queue when bound; else free-tier @dub/freeq outbox shim; else null (no sink →
+    // publish is skipped, never dropped-with-a-throw). See outbox.ts / env.ts.
+    auditEnv: resolveAuditQueue(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     ctx,
   };

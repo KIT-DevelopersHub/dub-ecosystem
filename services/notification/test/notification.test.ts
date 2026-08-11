@@ -7,6 +7,7 @@ import { mappingToIngest } from "../src/queue";
 import { EVENT_MAPPINGS } from "../src/mapping";
 import { resolveEnabled, defaultEnabled } from "../src/preferences";
 import { makeRecipientResolver } from "../src/recipients";
+import { resolveAuditQueue } from "../src/outbox";
 import {
   makeInAppAdapter,
   makeEmailAdapter,
@@ -60,7 +61,7 @@ function coreDeps(
     db: h.db,
     resolver,
     adapters,
-    auditEnv: h.env,
+    auditEnv: resolveAuditQueue(h.env),
     orgId: "org_devhub",
     ctx: c,
     ...(opts.maxAttempts !== undefined ? { maxAttempts: opts.maxAttempts } : {}),

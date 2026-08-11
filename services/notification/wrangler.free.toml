@@ -2,18 +2,27 @@
 # the api-gateway SVC_NOTIFICATION binding — workers.dev disabled). This is the name the
 # gateway routes /api/v1/notifications and /api/v1/feedback to.
 #
-# NO paid Cloudflare Queues (free tier): the domain-event consumer (dub-q-evt-notification)
-# and the publishAudit producer (AUDIT_QUEUE) are dropped. AUDIT_QUEUE is only touched on
-# the queue-consumer / ingest path (adapters.ts, ingest.ts); the HTTP surface used by the
-# app — inbox reads and the in-app feedback widget (POST/GET /feedback) — never touches it,
-# so dropping the Queue bindings does not affect the live product paths. Domain-event
-# fan-out (queue consumer) stays dormant until a free drain lands.
+# NO paid Cloudflare Queues (free tier). Two Queue channels are involved:
+#   * publishAudit producer (AUDIT_QUEUE): delivery-failed audit records. This is now
+#     REPLACED by a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB, bound as
+#     OUTBOX_DB). deps.ts falls back to the outbox shim when AUDIT_QUEUE is absent, so
+#     audit records are durably persisted — no longer silently dropped — and the daily
+#     Cron drain (scheduled handler) forwards them to audit-log over SVC_AUDIT
+#     (/internal/audit-async). This closes the free-tier audit degrade.
+#   * domain-event consumer (dub-q-evt-notification): the notification-delivery trigger,
+#     NOT an audit path. It stays dormant on the free tier — free-ifying it would need
+#     producer-side outbox writes in the services that publish domain events plus a
+#     notification-side /internal/events-async drain (cross-service), which is out of
+#     scope for this audit-focused change. The HTTP surface the live app uses (POST /notify
+#     ingest, inbox reads, the feedback widget) is unaffected.
 #
 # Deploy:
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
-#   # one-time: apply the feedback table to dub-core (idempotent)
+#   # one-time: apply the feedback table + the freeq audit outbox table to dub-core (both idempotent)
 #   npx wrangler d1 execute dub-core --remote \
 #     --file services/notification/db/0002_feedback.sql
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/notification/db/0003_freeq_outbox.sql
 #   npx wrangler deploy --config services/notification/wrangler.free.toml
 name = "dub-notification-service"
 main = "src/index.ts"
@@ -28,6 +37,13 @@ enabled = true
 # `wrangler d1 list`): d663f9c6-… . (60a9b8ab-… is the separate `auth-outbox` DB.)
 [[d1_databases]]
 binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# @dub/freeq audit outbox. Same physical dub-core D1 as `DB`, bound separately as infra
+# plumbing for the un-namespaced freeq_outbox table (create it once with db/0003…sql).
+[[d1_databases]]
+binding = "OUTBOX_DB"
 database_name = "dub-core"
 database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
@@ -48,6 +64,15 @@ service = "dub-mail-gateway"      # POST /send — best-effort feedback admin al
 binding = "SVC_CHAT"
 service = "dub-chat-service"      # POST /internal/system-messages (ChatAdapter)
 
-# Retention purge Cron (03:00 UTC daily): inbox 90d / deliveries 30d / processed 7d.
+# audit-log service binding: the drain forwards outbox rows to POST /internal/audit-async.
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"
+
+# Daily Cron (03:00 UTC): the scheduled handler runs retention purge (inbox 90d /
+# deliveries 30d / processed 7d) AND drains the @dub/freeq audit outbox on the same tick.
+# The Workers FREE plan caps the account at 5 cron triggers, so this stays a single
+# low-rate schedule (delivery-failed audit volume is small; rows stay durable between
+# ticks and are never dropped).
 [triggers]
 crons = ["0 3 * * *"]
