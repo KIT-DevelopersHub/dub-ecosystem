@@ -58,14 +58,14 @@ binding = "AUDIT_QUEUE"
 # (no silent drop) and GET /internal/health/ready returns 503 with the missing config.
 # Provider = Resend (ADR-0001 first Go-Live). Matches the code default and the live
 # secret set (RESEND_API_KEY). Keeping SES here while only RESEND_API_KEY is provisioned
-# would route sends to the loud SES stub (502) — hence resend. From stays on Resend's
-# shared onboarding sender until developershub.jp DKIM/SPF is verified in Resend, then
-# flip MAIL_FROM_ADDRESS back to info@developershub.jp. (SES_REGION retained for an
-# eventual SES switch; harmless while provider=resend.)
+# would route sends to the loud SES stub (502) — hence resend. developershub.jp is now
+# DKIM/SPF-verified in Resend (2026-08-11), so MAIL_FROM_ADDRESS sends from the company
+# domain (real delivery to arbitrary recipients). (SES_REGION retained for an eventual
+# SES switch; harmless while provider=resend.)
 [vars]
 MAIL_OUTBOUND_PROVIDER = "resend"
 SES_REGION = "ap-northeast-1"
-MAIL_FROM_ADDRESS = "onboarding@resend.dev"
+MAIL_FROM_ADDRESS = "info@developershub.jp"
 # Send resilience tuning (optional; defaults shown). Retries transient provider failures
 # (network / timeout / 429 / 5xx) with backoff+jitter; deterministic 4xx fail fast.
 MAIL_SEND_MAX_ATTEMPTS = "3"      # total attempts (1 try + 2 retries); range 1..6

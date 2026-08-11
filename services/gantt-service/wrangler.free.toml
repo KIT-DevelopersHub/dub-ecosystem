@@ -30,7 +30,7 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 # DTO short-lived cache (gantt:dto:<eventId>, TTL 60s).
 [[kv_namespaces]]
 binding = "GANTT_KV"
-id = "00000000000000000000000000000000" # placeholder; infra sets the real free-tier KV id
+id = "fc2d133f9b9f458ab5746f7b40b4bcde" # gantt-cache KV (free tier)
 
 # --- Service bindings (all targets are live free-tier workers) ---
 [[services]]

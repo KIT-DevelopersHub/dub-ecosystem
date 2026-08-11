@@ -45,12 +45,12 @@ service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/aud
 crons = ["20 3 * * *"]
 
 # --- Outbound provider (Resend, ADR-0001). Matches the live secret set (RESEND_API_KEY).
-# From stays on Resend's shared onboarding sender until developershub.jp DKIM/SPF is
-# verified in Resend; then flip MAIL_FROM_ADDRESS to info@developershub.jp. ---
+# developershub.jp is DKIM/SPF-verified in Resend (2026-08-11), so MAIL_FROM_ADDRESS is
+# the company domain and real delivery to arbitrary recipients is unlocked. ---
 [vars]
 MAIL_OUTBOUND_PROVIDER = "resend"
 SES_REGION = "ap-northeast-1"
-MAIL_FROM_ADDRESS = "onboarding@resend.dev"
+MAIL_FROM_ADDRESS = "info@developershub.jp"
 MAIL_SEND_MAX_ATTEMPTS = "3"
 MAIL_SEND_TIMEOUT_MS = "15000"
 MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
