@@ -94,6 +94,9 @@ export interface ApiClient {
     passwordLogin(email: string, password: string): Promise<void>;
     logout(): Promise<void>;
     me(): Promise<MeResponse>;
+    /** Self password change (#5b): the logged-in user rotates their OWN password.
+     *  The gateway re-verifies the session + current password before storing. */
+    changePassword(currentPassword: string, newPassword: string): Promise<void>;
   };
   bff: { home(): Promise<BffHomeResponse> };
   events: ResourceClient;
@@ -244,6 +247,12 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
         }),
       logout: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/logout", body: {} }),
       me: () => request<MeResponse>({ method: "GET", path: "/api/v1/me" }),
+      changePassword: (currentPassword: string, newPassword: string) =>
+        request<void, { currentPassword: string; newPassword: string }>({
+          method: "POST",
+          path: "/api/v1/me/password",
+          body: { currentPassword, newPassword },
+        }),
     },
     bff: {
       home: () => request<BffHomeResponse>({ method: "GET", path: "/api/v1/bff/home" }),

@@ -6,7 +6,7 @@
 // The persistent left sidebar is gone: tools now live behind the header AppLauncher
 // (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
 // with no nested/double sidebar.
-import type { ComponentType, ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { AppShell, PageHeader, AppLauncher, Button, Icon } from "@dub/ui";
 import type { AppLauncherItem } from "@dub/ui";
 import type { identity } from "@dub/types";
@@ -14,6 +14,7 @@ import type { NavEntry } from "../modules/types.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
+import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -62,6 +63,10 @@ export function AppShellLayout({
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
   const { can } = usePermissions();
+  const [pwOpen, setPwOpen] = useState(false);
+  // Self settings导线: offered only when a shared api-client is wired and the viewer is
+  // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
+  const showAccount = Boolean(api) && auth.status === "authenticated";
 
   const header = (
     <PageHeader
@@ -79,6 +84,16 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
+          {showAccount ? (
+            <Button
+              testId="fe2-change-password-open"
+              variant="ghost"
+              iconLeft={<Icon name="settings" />}
+              onClick={() => setPwOpen(true)}
+            >
+              パスワード変更
+            </Button>
+          ) : null}
           <Button
             testId="fe2-logout"
             variant="secondary"
@@ -97,6 +112,7 @@ export function AppShellLayout({
     <AppShell header={header} testId="fe2-shell">
       {children}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
+      {showAccount && api ? <ChangePasswordDialog api={api} open={pwOpen} onClose={() => setPwOpen(false)} /> : null}
     </AppShell>
   );
 }

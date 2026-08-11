@@ -193,6 +193,9 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
         return json({}, 200);
       case "POST /api/v1/auth/logout":
         return json(null, 204);
+      // Self password change (#5b): acknowledge so the demo/offline build shows success.
+      case "POST /api/v1/me/password":
+        return json({ ok: true }, 200);
       // Feedback widget (shell chrome): acknowledge so the offline/demo build shows
       // the success state. No real feedback leaves the browser under the mock.
       case "POST /api/v1/feedback":
