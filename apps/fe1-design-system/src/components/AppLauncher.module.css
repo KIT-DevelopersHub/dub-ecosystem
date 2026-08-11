@@ -34,7 +34,7 @@
 /* Right-aligned popover (waffle sits at the top-right of the bar). */
 .panel {
   position: absolute;
-  z-index: var(--dub-z-index-dropdown);
+  z-index: var(--dub-zIndex-dropdown);
   top: calc(100% + var(--dub-space-2));
   right: 0;
   width: 320px;
