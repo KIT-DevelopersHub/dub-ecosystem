@@ -49,8 +49,8 @@ describe("PermissionMatrix — Japanese, grouped, on/off legible", () => {
 
   it("shows an N / M 有効 count on each group header", () => {
     render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} onChange={() => {}} />);
-    // mail domain has 3 keys (send/read/admin), 1 selected
-    expect(screen.getByTestId("fe7-matrix-count-mail")).toHaveTextContent("1 / 3 有効");
+    // mail domain has 4 keys (send/read/read_all/admin), 1 selected
+    expect(screen.getByTestId("fe7-matrix-count-mail")).toHaveTextContent("1 / 4 有効");
   });
 
   it("keeps matrix-key testids + on/off + disabled semantics intact (behavior-preserving)", () => {

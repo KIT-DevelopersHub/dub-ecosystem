@@ -214,10 +214,25 @@ const B_INBOX: mail.MailMessageDetail[] = [
   },
 ];
 
+// Fixed archive address auto-CC'd on every send (mirrors the mail-gateway MAIL_ARCHIVE_CC
+// behavior so the demo/E2E shows the archive copy in the Sent detail's Cc).
+const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+
+// Oversight account (info@): an INDIVIDUAL admin account holding mail:read_all, so it
+// sees EVERY account's inbox + sent mail — the supervisor / archive view. Contrast with
+// the two personal accounts above, which each see only their own mail.
+const OVERSIGHT_PERMISSIONS: identity.PermissionKey[] = [...DEMO_PERMISSIONS, "mail:read_all"];
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
+  { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
 ];
+
+/** True when the account holds the mail:read_all oversight permission. */
+function isOversight(a: DemoAccount): boolean {
+  return a.permissions.includes("mail:read_all");
+}
 
 const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
 
@@ -296,12 +311,18 @@ function createMailStore() {
 
   function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
     const me = currentAccount();
-    const inbox = inboxOf(me.id);
     const outbox = sentOf(me.id);
+    // Oversight (mail:read_all): the read views aggregate EVERY account's mail; personal
+    // accounts stay scoped to their own. `readInbox` / `readSent` are the visible sets for
+    // the current viewer. Writes (send / mark-read) still target the account they belong to.
+    const oversight = isOversight(me);
+    const readInbox: mail.MailMessageDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)) : inboxOf(me.id);
+    const readSent: mail.MailSentDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)) : outbox;
 
-    // received: list / detail / mark-read (read state persists in-session) — this account only
+    // received: list / detail / mark-read (read state persists in-session). Scoped to the
+    // account, or every account under oversight (mail:read_all).
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
-      const items: mail.MailMessageListItem[] = inbox.map(({ textBody, htmlBody, ...li }) => {
+      const items: mail.MailMessageListItem[] = readInbox.map(({ textBody, htmlBody, ...li }) => {
         void textBody;
         void htmlBody;
         return li;
@@ -311,25 +332,25 @@ function createMailStore() {
     {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
-        const found = inbox.find((r) => r.id === decodeURIComponent(m[1]!));
+        const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
     if (method === "POST") {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)\/read$/.exec(pathname);
       if (m) {
-        const found = inbox.find((r) => r.id === decodeURIComponent(m[1]!));
-        if (!found) return notFound(`POST ${pathname}`); // another account's message → 404
+        const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
+        if (!found) return notFound(`POST ${pathname}`); // another account's message (no oversight) → 404
         found.read = true;
         return json({ read: true });
       }
     }
-    // thread: only this account's messages in the thread (a foreign thread → 404)
+    // thread: this account's messages in the thread (every account's under oversight).
     {
       const m = /^\/api\/v1\/mail\/threads\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const threadId = decodeURIComponent(m[1]!);
-        const messages = inbox.filter((r) => r.threadId === threadId);
+        const messages = readInbox.filter((r) => r.threadId === threadId);
         return messages.length > 0 ? json({ id: threadId, messages } satisfies mail.MailThread) : notFound(`GET ${pathname}`);
       }
     }
@@ -339,11 +360,15 @@ function createMailStore() {
       const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
       const sentAt = new Date().toISOString();
       const providerMessageId = `<demo-${Date.now()}@developershub.jp>`;
+      // Auto-CC the archive address (dedup against To/Cc) — mirrors MAIL_ARCHIVE_CC.
+      const baseCc = req.cc ?? [];
+      const alreadyArchived = [...(req.to ?? []), ...baseCc].some((a) => a.email?.trim().toLowerCase() === DEMO_ARCHIVE_CC);
+      const cc = alreadyArchived ? baseCc : [...baseCc, { email: DEMO_ARCHIVE_CC }];
       const detail: mail.MailSentDetail = {
         id,
         from: { email: me.email, name: me.displayName },
         to: req.to ?? [],
-        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        ...(cc.length > 0 ? { cc } : {}),
         subject: req.subject ?? "(件名なし)",
         snippet: firstLine(req.textBody ?? ""),
         sentAt,
@@ -359,7 +384,7 @@ function createMailStore() {
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
-      const items: mail.MailSentListItem[] = outbox.map(({ textBody, htmlBody, ...listItem }) => {
+      const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
         return listItem;
@@ -369,7 +394,7 @@ function createMailStore() {
     if (method === "GET") {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
       if (m) {
-        const found = outbox.find((s) => s.id === decodeURIComponent(m[1]!));
+        const found = readSent.find((s) => s.id === decodeURIComponent(m[1]!));
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }

@@ -5,7 +5,7 @@ import { createDbClient, type DbClient } from "@dub/db";
 import { common } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import type { Env } from "./env";
-import { DEFAULT_FROM_ADDRESS } from "./config";
+import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_FROM_ADDRESS } from "./config";
 import { buildProvider, type MailProvider } from "./provider";
 import { sendRetryOptions } from "./resilience";
 import { AUDIT_TOPIC, TOPIC_MAIL_AUTOMATION, TOPIC_NOTIFICATION, outboxQueue } from "./outbox";
@@ -48,6 +48,9 @@ export function buildSendDeps(
     fromAddress: fromOverride ?? env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ctx,
     ownerUserId,
+    // Archive CC: env override, else the frozen default. An explicit empty string
+    // disables the archive CC (opt-out) without falling back to the default.
+    archiveCc: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     retry: sendRetryOptions(env),
   };
 }

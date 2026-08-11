@@ -45,6 +45,20 @@ function domainOf(fromAddress: string): string {
   return fromAddress.split("@")[1] ?? "developershub.jp";
 }
 
+/** Auto-CC the fixed archive address on every send (compliance archive). Returns a new
+ *  request with the archive appended to Cc, UNLESS it is already present in To or Cc
+ *  (case-insensitive) — a caller who addressed it is never double-CC'd. A null/empty
+ *  archive address is a no-op (feature disabled). Applied before hashRequest so the
+ *  idempotency hash, persisted ccJson, MIME and provider recipients all agree. */
+export function withArchiveCc(req: mail.SendMailRequest, archiveCc: string | null | undefined): mail.SendMailRequest {
+  const addr = archiveCc?.trim();
+  if (!addr) return req;
+  const target = addr.toLowerCase();
+  const already = [...req.to, ...(req.cc ?? [])].some((a) => a.email.trim().toLowerCase() === target);
+  if (already) return req;
+  return { ...req, cc: [...(req.cc ?? []), { email: addr }] };
+}
+
 /** Stable RFC Message-Id reconstructed from the send-log id, so a replay reproduces
  *  the exact same messageId the first attempt returned. */
 function rfcMessageId(logId: string, fromAddress: string): string {
@@ -70,11 +84,14 @@ export interface SendResult {
  */
 export async function sendMail(
   deps: SendDeps,
-  req: mail.SendMailRequest,
+  rawReq: mail.SendMailRequest,
   idempotencyKey: string,
   requester: string,
 ): Promise<SendResult> {
   const { db, provider, fromAddress } = deps;
+  // Auto-CC the archive address (compliance) on every send, deduped against To/Cc. Done
+  // first so every downstream use (hash, claim, MIME, provider) sees the same recipients.
+  const req = withArchiveCc(rawReq, deps.archiveCc);
   const reqHash = hashRequest(req);
   const threadId = req.inReplyTo ?? null;
 

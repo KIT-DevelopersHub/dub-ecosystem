@@ -98,7 +98,12 @@ export function inboundDeps(h: Harness, over: Partial<InboundDeps> = {}): Inboun
 export function fakeIdentityFetcher(
   allow: boolean,
   users: Record<string, { email: string; displayName?: string }> = {},
+  // When provided, /authz/check answers PER permission: a check is allowed iff its
+  // permission key is in this set. Lets a test grant mail:read but deny mail:read_all
+  // (own-mail scope) vs grant both (oversight). When omitted, every check uses `allow`.
+  grantedPermissions?: readonly string[],
 ): Fetcher {
+  const grantSet = grantedPermissions ? new Set(grantedPermissions) : null;
   const toIdentityUser = (id: string, email: string, displayName?: string): identity.IdentityUser => ({
     id,
     orgId: "org_devhub",
@@ -124,7 +129,14 @@ export function fakeIdentityFetcher(
       if (url.pathname === "/authz/check") {
         const body = (await req.json()) as identity.AuthzCheckRequest;
         const res: identity.AuthzCheckResponse = {
-          decisions: body.checks.map(() => ({ allowed: allow, evaluatedAt: new Date().toISOString(), ttlSeconds: 60 })),
+          decisions: body.checks.map((q) => ({
+            // Default (allow boolean) mode grants everything EXCEPT the special oversight
+            // key mail:read_all — a test must opt into it via grantedPermissions so the
+            // per-account isolation cases stay scoped even under a blanket allow=true.
+            allowed: grantSet ? grantSet.has(q.permission) : allow && q.permission !== "mail:read_all",
+            evaluatedAt: new Date().toISOString(),
+            ttlSeconds: 60,
+          })),
         };
         return new Response(JSON.stringify(res), { status: 200, headers: { "content-type": "application/json" } });
       }
