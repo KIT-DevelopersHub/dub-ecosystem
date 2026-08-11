@@ -63,6 +63,11 @@ service = "dub-drive-proxy"
 environment = "production"
 
 [[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "dub-drive-share-service"
+environment = "production"
+
+[[services]]
 binding = "SVC_CHAT"
 service = "dub-chat-service"
 environment = "production"

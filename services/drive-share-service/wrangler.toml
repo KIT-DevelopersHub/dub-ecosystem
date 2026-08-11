@@ -1,0 +1,30 @@
+# drive-share-service — Cloudflare Worker. GUI-driven Google Drive sharing manager for
+# the Hackit shared Gmail (hackit@gmail.com). Owns NO D1 and NO Queues ($0): Drive holds
+# the files/permissions, identity-roster is the only dependency (authz). The composition
+# root (src/index.ts) wires the REAL Google Drive v3 client ONLY when the three
+# GOOGLE_HACKIT_OAUTH_* secrets are bound; until then (or DRIVESHARE_MOCK=1) an in-memory
+# mock client runs so the surface builds/deploys/E2Es at $0. Reached externally via the
+# api-gateway SVC_DRIVE_SHARE service binding.
+name = "dub-drive-share-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# --- Service Bindings ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"   # identity-roster /authz/check (drive:read / drive:write)
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+DRIVESHARE_LIST_PAGE_SIZE = "50"
+
+# --- Secrets (set via `wrangler secret put`, never in this file; 機密はローカルのみ) ---
+# Hackit shared-Gmail personal-account OAuth (all three required to enable the real
+# client; absent => in-memory mock). See README for how to obtain the refresh token.
+# GOOGLE_HACKIT_OAUTH_CLIENT_ID
+# GOOGLE_HACKIT_OAUTH_CLIENT_SECRET
+# GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN

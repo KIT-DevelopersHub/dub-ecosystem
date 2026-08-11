@@ -1,0 +1,23 @@
+{
+  "name": "@dub/drive-share-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) drive-share-service — GUI-driven Google Drive sharing (permissions) manager for the Hackit shared Gmail (hackit@gmail.com). Personal-account OAuth refresh-token grant; Drive API v3 permissions.* via raw fetch. Owns no D1 ($0).",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*",
+    "hono": "^4"
+  }
+}

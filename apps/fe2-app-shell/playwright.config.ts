@@ -5,7 +5,9 @@
 // primary regression; this proves the flow in a real browser + captures screenshots.
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 5174; // distinct from the default dev port (5173) to avoid clashes
+// Default 5174 (distinct from the dev port 5173). Overridable via E2E_PORT so a
+// single vertical slice can be driven on a dedicated port (e.g. driveshare on 5211).
+const PORT = Number(process.env.E2E_PORT ?? 5174);
 const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({

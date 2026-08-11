@@ -55,6 +55,10 @@ binding = "SVC_DRIVE_PROXY"
 service = "dub-drive-proxy"
 
 [[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "dub-drive-share-service"
+
+[[services]]
 binding = "SVC_CHAT"
 service = "chat-service"
 

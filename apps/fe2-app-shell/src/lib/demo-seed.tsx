@@ -653,6 +653,139 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
   return null;
 }
 
+// ── driveshare: stateful Hackit Drive sharing manager ─────────────────────────
+// A tiny in-session store so the Drive sharing manager behaves end-to-end without a
+// backend: list files (name filter), list a file's permissions, grant/change/revoke,
+// and toggle link (anyone) sharing — all persist in-session (a reload resets). Mirrors
+// drive-share-service's mock client seed. No real Drive is touched.
+interface DemoDrivePermission {
+  id: string;
+  type: "user" | "group" | "domain" | "anyone";
+  role: "reader" | "commenter" | "writer" | "owner";
+  emailAddress: string | null;
+  displayName: string | null;
+  domain: string | null;
+}
+interface DemoDriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  ownerName: string;
+  modifiedTime: string;
+  webViewLink: string;
+  permissions: DemoDrivePermission[];
+}
+const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
+
+function createDriveShareStore() {
+  const owner = (id: string): DemoDrivePermission => ({
+    id,
+    type: "user",
+    role: "owner",
+    emailAddress: "hackit@gmail.com",
+    displayName: "Hackit 運営",
+    domain: null,
+  });
+  const link = (id: string) => `https://drive.google.com/file/d/${id}/view`;
+  const files: DemoDriveFile[] = [
+    {
+      id: "fld_root", name: "Hackit 2026 共有", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-10T09:00:00Z", webViewLink: link("fld_root"),
+      permissions: [owner("perm_1"), { id: "perm_2", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null }],
+    },
+    {
+      id: "fld_designs", name: "デザイン素材", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T02:30:00Z", webViewLink: link("fld_designs"), permissions: [owner("perm_3")],
+    },
+    {
+      id: "fil_budget", name: "予算管理.xlsx", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T23:10:00Z", webViewLink: link("fil_budget"),
+      permissions: [owner("perm_4"), { id: "perm_5", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null }],
+    },
+    {
+      id: "fil_flyer", name: "当日チラシ.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-12T01:00:00Z", webViewLink: link("fil_flyer"),
+      permissions: [owner("perm_6"), { id: "perm_anyone_flyer", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null }],
+    },
+    {
+      id: "fil_runsheet", name: "進行台本.gdoc", mimeType: "application/vnd.google-apps.document", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-12T03:45:00Z", webViewLink: link("fil_runsheet"),
+      permissions: [owner("perm_7"), { id: "perm_8", type: "user", role: "commenter", emailAddress: "mc@example.com", displayName: "司会", domain: null }],
+    },
+  ];
+  const byId = new Map(files.map((f) => [f.id, f]));
+  let seq = 100;
+
+  const fileView = (f: DemoDriveFile) => ({
+    id: f.id, name: f.name, mimeType: f.mimeType, isFolder: f.mimeType === DRIVE_FOLDER_MIME_DEMO,
+    ownerName: f.ownerName, modifiedTime: f.modifiedTime, webViewLink: f.webViewLink,
+    linkShared: f.permissions.some((p) => p.type === "anyone"),
+  });
+  const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p })) });
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (method === "GET" && pathname === "/api/v1/driveshare/files") {
+      const needle = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const matched = files
+        .filter((f) => (needle ? f.name.toLowerCase().includes(needle) : true))
+        .slice()
+        .sort((a, b) => {
+          const af = a.mimeType === DRIVE_FOLDER_MIME_DEMO ? 0 : 1;
+          const bf = b.mimeType === DRIVE_FOLDER_MIME_DEMO ? 0 : 1;
+          return af !== bf ? af - bf : a.name.localeCompare(b.name, "ja");
+        });
+      return json({ files: matched.map(fileView), nextCursor: null });
+    }
+    const permsMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/permissions$/.exec(pathname);
+    if (permsMatch) {
+      const f = byId.get(permsMatch[1]!);
+      if (!f) return notFound(`${method} ${pathname}`);
+      if (method === "GET") return json(permsView(f));
+      if (method === "POST") {
+        const req = body as { emailAddress?: string; role?: DemoDrivePermission["role"] };
+        const perm: DemoDrivePermission = {
+          id: `perm_demo_${seq++}`, type: "user", role: req.role ?? "reader",
+          emailAddress: req.emailAddress ?? null, displayName: req.emailAddress ? req.emailAddress.split("@")[0]! : null, domain: null,
+        };
+        f.permissions.push(perm);
+        return json({ permission: perm }, 201);
+      }
+    }
+    const permMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/permissions\/([^/]+)$/.exec(pathname);
+    if (permMatch) {
+      const f = byId.get(permMatch[1]!);
+      if (!f) return notFound(`${method} ${pathname}`);
+      const perm = f.permissions.find((p) => p.id === permMatch[2]!);
+      if (method === "PATCH") {
+        if (!perm) return notFound(`${method} ${pathname}`);
+        perm.role = (body as { role?: DemoDrivePermission["role"] }).role ?? perm.role;
+        return json({ permission: { ...perm } });
+      }
+      if (method === "DELETE") {
+        if (perm) f.permissions = f.permissions.filter((p) => p.id !== perm.id);
+        return json({ revoked: true });
+      }
+    }
+    const linkMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/link$/.exec(pathname);
+    if (linkMatch && method === "PUT") {
+      const f = byId.get(linkMatch[1]!);
+      if (!f) return notFound(`${method} ${pathname}`);
+      const req = body as { enabled?: boolean; role?: DemoDrivePermission["role"] };
+      const existing = f.permissions.find((p) => p.type === "anyone");
+      if (req.enabled) {
+        if (existing) existing.role = req.role ?? "reader";
+        else f.permissions.push({ id: `perm_anyone_${seq++}`, type: "anyone", role: req.role ?? "reader", emailAddress: null, displayName: null, domain: null });
+      } else if (existing) {
+        f.permissions = f.permissions.filter((p) => p.id !== existing.id);
+      }
+      return json(permsView(f));
+    }
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -668,6 +801,8 @@ export function createDemoFetch(): typeof fetch {
   const roster = createRosterStore();
   // Mutable Inbox + Sent folders (read-state persists; a demo send lands in Sent).
   const mailStore = createMailStore();
+  // Mutable Hackit Drive sharing state (grant/change/revoke/link toggle persist).
+  const driveShareStore = createDriveShareStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -685,6 +820,7 @@ export function createDemoFetch(): typeof fetch {
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
+      driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
     // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.

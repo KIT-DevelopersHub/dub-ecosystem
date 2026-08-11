@@ -28,6 +28,8 @@ import { mailRoutes, mailNav } from "../features/mail/index.tsx";
 import { MailProvider } from "../features/mail/MailProvider.tsx";
 import { usageRoutes, usageNav } from "../features/usage/index.tsx";
 import { UsageProvider } from "../features/usage/UsageProvider.tsx";
+import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
+import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -211,6 +213,19 @@ function adaptUsage(api: ApiClient): FeatureModule {
   return { id: "usage", routes, nav };
 }
 
+// ── driveshare (FE2-local feature module) ─────────────────────────────────────
+// Like mail/usage, the Hackit Drive sharing manager lives in the shell
+// (apps/fe2-app-shell/src/features/driveshare) rather than a separate FE package. Its
+// route is wrapped in DriveShareProvider (DriveShareApi built from the one shell
+// api-client); nav sits after usage (order 47), before admin. The backend
+// (drive-share-service) is the authoritative drive:read/drive:write gate.
+function adaptDriveShare(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(DriveShareProvider, api);
+  const routes = (driveShareRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = driveShareNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 47 }));
+  return { id: "driveshare", routes, nav };
+}
+
 // 一旦非表示にする admin ナビの path 集合（機能・ルートは残し、ランチャー/ナビからだけ隠す）。
 // 社長判断: ロール管理・ユーザー名簿はまだ使わないので当面出さない。
 // ★戻すには: この集合から該当 path を消す（空配列にすれば全て再表示）。
@@ -255,8 +270,9 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptChat(api),
     adaptMail(api),
     adaptUsage(api),
+    adaptDriveShare(api),
     adaptAdmin(api),
   ];
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptDriveShare, adaptAdmin, toIcon };

@@ -27,7 +27,7 @@ describe("assembleFeatureModules", () => {
   it("assembles the seven features in canonical order", () => {
     const { api } = fakeApi();
     const modules = assembleFeatureModules(api);
-    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "mail", "usage", "admin"]);
+    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "mail", "usage", "driveshare", "admin"]);
   });
 
   it("merges into the shell registry with no duplicate route ownership", () => {
