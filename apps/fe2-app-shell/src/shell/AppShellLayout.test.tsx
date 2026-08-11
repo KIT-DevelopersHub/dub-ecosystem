@@ -5,12 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { gateway } from "@dub/types";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { AuthProvider } from "../auth/AuthProvider.tsx";
-import { AppShellLayout } from "./AppShellLayout.tsx";
+import { AppShellLayout, truncateEmail } from "./AppShellLayout.tsx";
 import { useUiStore } from "../store/uiStore.tsx";
 import type { NavEntry } from "../modules/types.tsx";
 
 const ME: gateway.MeResponse = {
-  user: { id: "usr_1", displayName: "Kota", avatarUrl: null },
+  user: { id: "usr_1", displayName: "Kota", avatarUrl: null, email: "kota@developershub.jp" },
   orgId: "org_devhub",
   permissions: [],
   sessionExpiresAt: Date.now() + 60_000,
@@ -49,6 +49,40 @@ function renderShell(onNavigate?: (p: string) => void, onLogout?: () => void) {
 
 describe("AppShellLayout", () => {
   beforeEach(() => useUiStore.setState({ sidebarOpen: true, theme: "system" }));
+
+  it("shows the signed-in user's email as the shell header title once /me resolves", async () => {
+    renderShell();
+    // Header title starts on the brand fallback while /me is pending, then swaps
+    // to the resolved email (never a blank title in between).
+    const header = screen.getByTestId("fe2-shell-header");
+    expect(header).toHaveTextContent("DevHub");
+    expect(await screen.findByText("kota@developershub.jp")).toBeInTheDocument();
+    expect(screen.queryByText("DevHub")).not.toBeInTheDocument();
+  });
+
+  it("keeps the brand title when unauthenticated (no /me user)", async () => {
+    const anonApi = { auth: { me: () => Promise.resolve(null) } } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={anonApi}>
+          <AppShellLayout navEntries={NAV}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("DevHub")).toBeInTheDocument();
+  });
+
+  it("truncateEmail keeps short addresses and elides long local parts, preserving the domain", () => {
+    expect(truncateEmail("a@b.jp")).toBe("a@b.jp");
+    const long = "an.extremely.long.local.part.address@developershub.jp";
+    const out = truncateEmail(long);
+    expect(out.length).toBeLessThanOrEqual(30);
+    expect(out).toContain("…");
+    expect(out.endsWith("@developershub.jp")).toBe(true);
+  });
 
   it("renders header widget slot and routed content; tools live behind the launcher", async () => {
     renderShell();
