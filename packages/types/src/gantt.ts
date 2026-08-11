@@ -24,6 +24,9 @@ export interface GanttChartDTO {
   eventId: EventId;
   rows: GanttRow[];
   dependencies: GanttDependencyLine[];
+  /** Zero-slack tasks on the critical path (CPM over durations+FS deps). Optional
+   *  & additive: absent/[] means "not computed" — UI colors these bars distinctly. */
+  criticalTaskIds?: TaskId[];
 }
 
 export interface GanttViewState {

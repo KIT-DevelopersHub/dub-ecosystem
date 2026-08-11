@@ -1029,6 +1029,9 @@ importers:
       '@dub/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@dub/gantt-calc':
+        specifier: workspace:*
+        version: link:../../packages/gantt-calc
       '@dub/http':
         specifier: workspace:*
         version: link:../../packages/http
