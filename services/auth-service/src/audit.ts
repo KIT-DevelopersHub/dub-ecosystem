@@ -12,6 +12,20 @@ import { common } from "@dub/types";
 /** Outbox topic for audit records (mirrors the old dub-q-audit-record channel). */
 export const AUDIT_TOPIC = "audit.record";
 
+/**
+ * Canonical audit envelope (byte-identical to @dub/events `AuditRecordEnvelopeV1`, the
+ * shape audit-log's `/internal/audit-async` validates). Declared locally so auth-service
+ * keeps its lean dependency set (no @dub/events). The OUTBOX row payload IS this envelope:
+ * the shared freeq-drain forwards the payload VERBATIM, so what we enqueue is exactly what
+ * audit-log receives.
+ */
+export interface AuditRecordEnvelopeV1 {
+  type: "audit.record";
+  version: 1;
+  id: string;
+  payload: auditLog.AuditRecordInput;
+}
+
 export interface AuditInput {
   action: string; // "auth.session.login" | "auth.session.logout" | ...
   actorId: string | null;
@@ -41,8 +55,19 @@ export class OutboxAuditor implements Auditor {
       requestId: input.requestId,
       occurredAt: new Date().toISOString(),
     };
+    // Wrap the record in the canonical AuditRecordEnvelopeV1 BEFORE enqueue (identical to
+    // @dub/events publishAudit). The shared freeq-drain forwards the outbox payload verbatim,
+    // so audit-log receives the envelope its validator expects — not the bare record (which
+    // it rejects with 400). The envelope id is the idempotency key; we reuse it as the outbox
+    // row id so a retried enqueue AND an at-least-once redelivery both dedupe on the same id.
+    const envelope: AuditRecordEnvelopeV1 = {
+      type: "audit.record",
+      version: 1,
+      id: crypto.randomUUID(),
+      payload: record,
+    };
     try {
-      await enqueue(this.db, AUDIT_TOPIC, record);
+      await enqueue(this.db, AUDIT_TOPIC, envelope, { id: envelope.id });
     } catch {
       // swallow: audit enqueue is best-effort; the login/session path must not fail
       // because the outbox INSERT hiccuped. Delivered rows are durable in D1.

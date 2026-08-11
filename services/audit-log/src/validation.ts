@@ -90,6 +90,45 @@ export function parseAuditEnvelope(msg: unknown): { id: string; input: auditLog.
   return { id: msg.id, input: parseAuditRecordInput(msg.payload) };
 }
 
+/**
+ * Ingest for POST /internal/audit-async. Accepts BOTH shapes the freeq-drain may forward:
+ *   1. the canonical AuditRecordEnvelopeV1 wrapper `{type,version,id,payload}` (discriminated
+ *      by `type`) — id = the producer's envelope id; or
+ *   2. a LEGACY FLAT `AuditRecordInput` (the pre-fix auth-outbox producer shape). These rows
+ *      predate the producer wrapping its records, so they arrive un-wrapped. We validate the
+ *      flat body and derive a DETERMINISTIC idempotency id from its content, so at-least-once
+ *      redelivery of the same legacy row dedupes on insertRecord's INSERT OR IGNORE — no dup,
+ *      no loss. New producers always emit shape (1); this compat path drains the backlog.
+ */
+export async function parseAuditIngest(msg: unknown): Promise<{ id: string; input: auditLog.AuditRecordInput }> {
+  if (!isPlainObject(msg)) throw errors.validationFailed([{ field: "(root)", reason: "invalid_type" }]);
+  if ("type" in msg) return parseAuditEnvelope(msg); // wrapped envelope: strict, unchanged
+  const input = parseAuditRecordInput(msg); // legacy flat record
+  return { id: await deriveFlatAuditId(input), input };
+}
+
+/**
+ * Stable idempotency id for a legacy FLAT record (no producer-assigned envelope id). Hash of
+ * the record's canonical, fixed-order serialization: the same stored row hashes identically
+ * on every redelivery (dedupe), while distinct events hash differently (no false-merge).
+ */
+async function deriveFlatAuditId(input: auditLog.AuditRecordInput): Promise<string> {
+  const canonical = JSON.stringify([
+    input.action,
+    input.actorId,
+    input.orgId,
+    input.result,
+    input.resourceType,
+    input.resourceId,
+    input.requestId,
+    input.occurredAt,
+    input.details,
+  ]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  return `aud_legacy_${hex}`;
+}
+
 // ---- query parsing (GET /audit/logs) ----
 
 function optStr(v: string | undefined): string | undefined {
