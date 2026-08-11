@@ -1,136 +1,294 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { common, gantt, task } from "@dub/types";
 import {
-  computeDateBounds,
-  ganttGeometry,
-  dependencySegments,
-  timelineTicks,
-  todayLineX,
-  pxToDayDelta,
-  type BarBox,
-} from "../domain/gantt-layout";
+  type AxisWindow,
+  type TimelineBar,
+  ROW_HEIGHT,
+  BAR_HEIGHT,
+  bottomTicks,
+  canvasWidth,
+  dayAtX,
+  extendWindow,
+  initialWindow,
+  pxToDays,
+  shiftBar,
+  timelineBars,
+  todayX,
+  topSegments,
+  weekendBands,
+  withGranularity,
+} from "../domain/timeline-axis";
 import styles from "../styles/app.module.css";
 
-const ROW_HEIGHT = 38;
-const BAR_H = 22;
-const LABEL_COL = 236;
+const HEADER_TOP = 28;
+const HEADER_BOTTOM = 26;
+const HEADER_H = HEADER_TOP + HEADER_BOTTOM;
 const CLICK_THRESHOLD_PX = 4;
+const DEFAULT_LEFT_W = 264;
+const MIN_LEFT_W = 176;
+const MAX_LEFT_W = 460;
 
 export interface GanttViewProps {
   dto: gantt.GanttChartDTO;
-  /** initial zoom; the view then owns zoom locally (chips switch instantly). */
+  /** initial granularity; the view then owns it locally (chips switch instantly). */
   zoom: gantt.GanttZoom;
   onZoomChange?: (z: gantt.GanttZoom) => void;
-  /** gantt-service may cap rows at 2000; container passes the flag (design 8-8). */
+  /** gantt-service may cap rows; container passes the flag. */
   truncated?: boolean;
-  /** Drag a bar N whole days: container patches the task's dueAt (optimistic). */
-  onReschedule?: (taskId: common.TaskId, deltaDays: number) => void;
-  /** Click a bar or row label to open the detail panel. */
+  /** Commit a bar move/resize: whole-day start/end after the drag. */
+  onSchedule?: (taskId: common.TaskId, startsAt: common.ISODateTime, endsAt: common.ISODateTime) => void;
+  /** Click a bar or row to open the detail panel. */
   onSelect?: (taskId: common.TaskId) => void;
+  /** Click an empty timeline cell / the add-row button to create (date preset). */
+  onCreateOnDate?: (dueAt: common.ISODateTime | null) => void;
   /** taskId -> status, for status-legible bar colouring. */
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
+  /** taskId -> assignee display name, shown as a left-pane property. */
+  assigneeNameById?: ReadonlyMap<common.TaskId, string>;
+  canWrite?: boolean;
 }
 
 const ZOOMS: { key: gantt.GanttZoom; label: string }[] = [
-  { key: "day", label: "日" },
-  { key: "week", label: "週" },
   { key: "month", label: "月" },
+  { key: "week", label: "週" },
+  { key: "day", label: "日" },
 ];
 
-const STATUS_BAR_CLASS: Record<task.TaskStatus, string | undefined> = {
-  todo: styles.barTodo,
-  in_progress: styles.barInProgress,
-  blocked: styles.barBlocked,
-  done: styles.barDone,
-  cancelled: styles.barCancelled,
+const STATUS_BAR_CLASS: Record<task.TaskStatus, string> = {
+  todo: styles.barTodo!,
+  in_progress: styles.barInProgress!,
+  blocked: styles.barBlocked!,
+  done: styles.barDone!,
+  cancelled: styles.barCancelled!,
 };
 
-/** Tick label granularity: day shows M/D, week/month show the ISO date. */
-function tickLabel(iso: string, zoom: gantt.GanttZoom): string {
-  const d = new Date(iso);
-  if (zoom === "day") return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
-  return iso;
+type DragMode = "move" | "resize-start" | "resize-end";
+interface DragState {
+  taskId: common.TaskId;
+  mode: DragMode;
+  startsAt: string;
+  endsAt: string;
+  dxPx: number;
 }
 
-export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onReschedule, onSelect, statusById }: GanttViewProps) {
+export function GanttView({
+  dto,
+  zoom: zoomProp,
+  onZoomChange,
+  truncated,
+  onSchedule,
+  onSelect,
+  onCreateOnDate,
+  statusById,
+  assigneeNameById,
+  canWrite = true,
+}: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
-  useEffect(() => setZoom(zoomProp), [zoomProp]);
+  const [win, setWin] = useState<AxisWindow>(() => initialWindow(dto.rows, zoomProp));
+  const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
+  const [collapsed, setCollapsed] = useState(false);
+  const [drag, setDrag] = useState<DragState | null>(null);
 
-  // pointer session on a bar: tracks drag distance to disambiguate click vs drag.
-  const [drag, setDrag] = useState<{ taskId: common.TaskId; dxPx: number } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
   const movedRef = useRef(false);
+  const resizeStartX = useRef(0);
+  const resizeStartW = useRef(0);
+  const centeredForZoom = useRef<gantt.GanttZoom | null>(null);
+  const extendPending = useRef(false);
 
-  const criticalIds = useMemo(() => new Set(dto.criticalTaskIds ?? []), [dto.criticalTaskIds]);
-  const bounds = useMemo(() => computeDateBounds(dto.rows), [dto.rows]);
-  const boxes = useMemo(
-    () => (bounds ? ganttGeometry(dto.rows, bounds, { zoom, rowHeight: ROW_HEIGHT }, criticalIds) : []),
-    [bounds, dto.rows, zoom, criticalIds],
-  );
-  const segs = useMemo(
-    () => (bounds ? dependencySegments(dto.dependencies, boxes, dto.rows, ROW_HEIGHT) : []),
-    [bounds, dto.dependencies, boxes, dto.rows],
-  );
-  const ticks = useMemo(() => (bounds ? timelineTicks(bounds, zoom) : []), [bounds, zoom]);
-  const todayX = bounds ? todayLineX(bounds, zoom) : null;
+  useEffect(() => setZoom(zoomProp), [zoomProp]);
 
-  const canvasWidth = ticks.length ? ticks[ticks.length - 1]!.x + 80 : 400;
-  const canvasHeight = Math.max(dto.rows.length * ROW_HEIGHT, ROW_HEIGHT);
+  // granularity change keeps the same span, swaps px; re-centre on today after.
+  useEffect(() => {
+    setWin((w) => withGranularity(w, zoom));
+    centeredForZoom.current = null;
+  }, [zoom]);
+
+  // grow-only: ensure the window always covers the current rows (+ buffers).
+  useEffect(() => {
+    setWin((w) => {
+      const base = initialWindow(dto.rows, zoom);
+      const originMs = Math.min(w.originMs, base.originMs);
+      const endMs = Math.max(w.endMs, base.endMs);
+      return originMs === w.originMs && endMs === w.endMs ? w : { ...w, originMs, endMs };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dto.rows]);
+
+  const width = canvasWidth(win);
+  const bars = useMemo(() => timelineBars(dto.rows, win), [dto.rows, win]);
+  const tops = useMemo(() => topSegments(win, zoom), [win, zoom]);
+  const ticks = useMemo(() => bottomTicks(win, zoom), [win, zoom]);
+  const weekends = useMemo(() => weekendBands(win, zoom), [win, zoom]);
+  const tX = todayX(win);
+  const rowsH = Math.max(dto.rows.length * ROW_HEIGHT, ROW_HEIGHT);
+
   const titleById = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r.title])), [dto.rows]);
+  const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
+
+  const segs = useMemo(() => {
+    return dto.dependencies
+      .map((d) => {
+        const from = barById.get(d.fromTaskId);
+        const to = barById.get(d.toTaskId);
+        if (!from || !to || !from.hasBar || !to.hasBar) return null;
+        return {
+          id: d.id,
+          x1: from.x + from.width,
+          y1: from.y + ROW_HEIGHT / 2,
+          x2: to.x,
+          y2: to.y + ROW_HEIGHT / 2,
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+  }, [dto.dependencies, barById]);
+
+  // ---- centre on today (initial + on zoom change) ----
+  const scrollToToday = useCallback(
+    (smooth = false) => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const target = Math.max(0, todayX(win) - (el.clientWidth - (collapsed ? 0 : leftW)) * 0.28);
+      if (typeof el.scrollTo === "function") el.scrollTo({ left: target, behavior: smooth ? "smooth" : "auto" });
+      else el.scrollLeft = target;
+    },
+    [win, leftW, collapsed],
+  );
+
+  useLayoutEffect(() => {
+    if (centeredForZoom.current !== zoom) {
+      centeredForZoom.current = zoom;
+      scrollToToday(false);
+    }
+  }, [zoom, scrollToToday]);
+
+  // ---- endless right edge: extend when the user nears it ----
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (extendPending.current) return;
+    if (el.scrollLeft + el.clientWidth >= el.scrollWidth - 500) {
+      extendPending.current = true;
+      requestAnimationFrame(() => {
+        setWin((w) => extendWindow(w));
+        extendPending.current = false;
+      });
+    }
+  };
 
   const changeZoom = (z: gantt.GanttZoom) => {
     setZoom(z);
     onZoomChange?.(z);
   };
 
-  // ---- bar pointer: drag to reschedule, tap (no move) to open detail ----
-  const onBarPointerDown = (e: React.PointerEvent, taskId: common.TaskId) => {
+  // ---- bar pointer session (move + resize + click-to-open) ----
+  const beginDrag = (e: React.PointerEvent, bar: TimelineBar, mode: DragMode) => {
+    if (!canWrite || !onSchedule) {
+      // read-only: a tap still opens detail
+      if (mode === "move") onSelect?.(bar.taskId);
+      return;
+    }
+    const row = dto.rows.find((r) => r.taskId === bar.taskId);
+    if (!row?.startsAt || !row?.endsAt) return;
     e.preventDefault();
+    e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     dragStartX.current = e.clientX;
+    resizeStartX.current = bar.x;
+    resizeStartW.current = bar.width;
     movedRef.current = false;
-    setDrag({ taskId, dxPx: 0 });
+    setDrag({ taskId: bar.taskId, mode, startsAt: row.startsAt, endsAt: row.endsAt, dxPx: 0 });
   };
-  const onBarPointerMove = (e: React.PointerEvent) => {
+
+  const onPointerMove = (e: React.PointerEvent) => {
     if (!drag) return;
     const dx = e.clientX - dragStartX.current;
     if (Math.abs(dx) > CLICK_THRESHOLD_PX) movedRef.current = true;
-    setDrag({ ...drag, dxPx: onReschedule ? dx : 0 });
+    setDrag({ ...drag, dxPx: dx });
   };
-  const onBarPointerUp = () => {
+
+  const onPointerUp = () => {
     if (!drag) return;
-    const { taskId, dxPx } = drag;
+    const { taskId, mode, startsAt, endsAt, dxPx } = drag;
     if (!movedRef.current) {
-      onSelect?.(taskId);
-    } else if (onReschedule) {
-      const deltaDays = pxToDayDelta(dxPx, zoom);
-      if (deltaDays !== 0) onReschedule(taskId, deltaDays);
+      if (mode === "move") onSelect?.(taskId);
+    } else {
+      const deltaDays = pxToDays(dxPx, win);
+      if (deltaDays !== 0 && onSchedule) {
+        const next = shiftBar(startsAt, endsAt, deltaDays, mode);
+        onSchedule(taskId, next.startsAt, next.endsAt);
+      }
     }
     setDrag(null);
     movedRef.current = false;
   };
 
-  const barLeft = (b: BarBox) => b.x + (drag?.taskId === b.taskId ? drag.dxPx : 0);
-  const barClass = (b: BarBox) => {
-    const status = statusById?.get(b.taskId);
-    const statusClass = (status ? STATUS_BAR_CLASS[status] : "") ?? "";
-    return `${styles.bar} ${statusClass} ${b.isCritical ? styles.barCritical : ""} ${
-      drag?.taskId === b.taskId && movedRef.current ? styles.barDragging : ""
-    }`;
+  // live-preview geometry for the bar under an active drag
+  const previewGeom = (bar: TimelineBar): { left: number; width: number } => {
+    if (!drag || drag.taskId !== bar.taskId) return { left: bar.x, width: bar.width };
+    const d = drag.dxPx;
+    if (drag.mode === "move") return { left: bar.x + d, width: bar.width };
+    if (drag.mode === "resize-start")
+      return { left: bar.x + Math.min(d, bar.width - BAR_HEIGHT), width: Math.max(bar.width - d, BAR_HEIGHT) };
+    return { left: bar.x, width: Math.max(bar.width + d, BAR_HEIGHT) };
   };
+
+  const barClassOf = (taskId: common.TaskId) => {
+    const status = statusById?.get(taskId);
+    const cls = status ? STATUS_BAR_CLASS[status] : "";
+    const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
+    return `${styles.bar} ${cls} ${dragging}`;
+  };
+
+  // ---- left-pane resize ----
+  const onResizerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    const startX = e.clientX;
+    const startW = leftW;
+    const move = (ev: PointerEvent) => {
+      const next = Math.min(MAX_LEFT_W, Math.max(MIN_LEFT_W, startW + (ev.clientX - startX)));
+      setLeftW(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  // click an empty timeline cell -> create with that day preset
+  const onCanvasBackgroundClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canWrite || !onCreateOnDate) return;
+    if (e.target !== e.currentTarget) return; // ignore clicks that bubbled from a bar
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const day = dayAtX(x, win);
+    onCreateOnDate(new Date(day).toISOString());
+  };
+
+  const effLeftW = collapsed ? 0 : leftW;
 
   return (
     <div data-testid="fe4-gantt-view" className={styles.ganttView}>
-      <div className={styles.ganttControls}>
-        <div className={styles.zoomControl}>
-          <span className={styles.zoomLabel}>表示粒度</span>
-          <div className={styles.zoomSwitcher} role="tablist" aria-label="表示粒度">
+      {/* Notion-style toolbar: view name + jump-to-today + granularity */}
+      <div className={styles.tlToolbar}>
+        <div className={styles.tlToolbarLeft}>
+          <span className={styles.tlViewName}>タイムライン</span>
+          <span className={styles.tlCount}>{dto.rows.length} 件</span>
+        </div>
+        <div className={styles.tlToolbarRight}>
+          <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
+            今日
+          </button>
+          <div className={styles.tlSeg} role="tablist" aria-label="時間軸の単位">
             {ZOOMS.map((z) => (
               <button
                 key={z.key}
                 role="tab"
                 aria-selected={z.key === zoom}
-                className={`${styles.zoomBtn} ${z.key === zoom ? styles.zoomBtnActive : ""}`}
+                className={`${styles.tlSegBtn} ${z.key === zoom ? styles.tlSegBtnOn : ""}`}
                 onClick={() => changeZoom(z.key)}
                 data-testid={`fe4-gantt-zoom-${z.key}`}
               >
@@ -139,14 +297,6 @@ export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onResc
             ))}
           </div>
         </div>
-        <span className={styles.ganttLegend}>
-          <span className={styles.legendItem}>
-            <span className={`${styles.legendSwatch} ${styles.legendCritical}`} />クリティカルパス
-          </span>
-          <span className={styles.legendItem}>
-            <span className={`${styles.legendSwatch} ${styles.legendToday}`} />今日
-          </span>
-        </span>
       </div>
 
       {truncated && (
@@ -155,114 +305,151 @@ export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onResc
         </div>
       )}
 
-      {!bounds ? (
-        <div className={styles.ganttEmpty} data-testid="fe4-gantt-empty">
-          <p className={styles.ganttEmptyTitle}>表示できるバーがありません</p>
-          <p className={styles.ganttEmptyBody}>
-            期日が設定されたタスクがまだありません。「＋ タスク作成」から期日つきのタスクを追加すると、ここにバーが表示されます。
-          </p>
-        </div>
-      ) : (
-        <div className={styles.gantt}>
-          <div className={styles.ganttGrid} style={{ gridTemplateColumns: `${LABEL_COL}px ${canvasWidth}px` }}>
-            {/* row 1: sticky corner + timeline header */}
-            <div className={styles.ganttCorner}>タスク</div>
-            <div className={styles.ganttHeader} style={{ width: canvasWidth }} data-testid="fe4-gantt-header">
-              {ticks.map((t) => (
-                <div key={t.ms} className={styles.ganttTick} style={{ left: t.x }}>
-                  {tickLabel(t.label, zoom)}
+      <div className={styles.tlFrame}>
+        <div className={styles.tlScroll} ref={scrollRef} data-testid="fe4-gantt-scroll" onScroll={onScroll} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+          <div className={styles.tlInner} style={{ width: effLeftW + width, minWidth: "100%" }}>
+            {/* ---- left pane (sticky) ---- */}
+            {!collapsed && (
+              <div className={styles.tlLeft} style={{ width: leftW, flexBasis: leftW }}>
+                <div className={styles.tlLeftHead} style={{ height: HEADER_H }}>
+                  <span className={styles.tlLeftHeadTitle}>タスク</span>
+                  <button
+                    type="button"
+                    className={styles.tlCollapseBtn}
+                    onClick={() => setCollapsed(true)}
+                    aria-label="リストを折りたたむ"
+                    title="リストを折りたたむ"
+                  >
+                    ‹
+                  </button>
                 </div>
-              ))}
-              {todayX !== null && (
-                <div className={styles.ganttTodayLabel} style={{ left: todayX }} data-testid="fe4-gantt-today-label">
-                  今日
-                </div>
-              )}
-            </div>
+                {dto.rows.map((r) => (
+                  <button
+                    key={r.taskId}
+                    type="button"
+                    className={styles.tlRow}
+                    style={{ height: ROW_HEIGHT }}
+                    title={r.title}
+                    onClick={() => onSelect?.(r.taskId)}
+                    data-testid={`fe4-gantt-row-${r.taskId}`}
+                  >
+                    <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+                    <span className={styles.tlRowName}>{r.title}</span>
+                    {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
+                  </button>
+                ))}
+                {canWrite && onCreateOnDate && (
+                  <button type="button" className={styles.tlAddRow} style={{ height: ROW_HEIGHT }} onClick={() => onCreateOnDate(null)} data-testid="fe4-gantt-addrow">
+                    ＋ 新規タスク
+                  </button>
+                )}
+                <div className={styles.tlResizer} onPointerDown={onResizerDown} aria-hidden />
+              </div>
+            )}
 
-            {/* row 2: labels + canvas */}
-            <div className={styles.ganttLabels}>
-              {dto.rows.map((r) => (
-                <button
-                  key={r.taskId}
-                  type="button"
-                  className={styles.ganttRowLabel}
-                  style={{ height: ROW_HEIGHT }}
-                  title={r.title}
-                  onClick={() => onSelect?.(r.taskId)}
-                  data-testid={`fe4-gantt-row-${r.taskId}`}
-                >
-                  {criticalIds.has(r.taskId) && <span className={styles.criticalDot} aria-hidden />}
-                  <span className={styles.ganttRowLabelText}>{r.title}</span>
+            {/* ---- timeline pane ---- */}
+            <div className={styles.tlRight} style={{ width, flexBasis: width, position: "relative" }}>
+              {/* header: two tiers */}
+              <div className={styles.tlHeader} style={{ width, height: HEADER_H }} data-testid="fe4-gantt-header">
+                <div className={styles.tlHeaderTop} style={{ height: HEADER_TOP }}>
+                  {tops.map((s) => (
+                    <div key={s.key} className={styles.tlMonth} style={{ left: s.x, width: s.width }}>
+                      <span className={styles.tlMonthLabel}>{s.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className={styles.tlHeaderBottom} style={{ top: HEADER_TOP, height: HEADER_BOTTOM }}>
+                  {ticks.map((t) => (
+                    <div key={t.key} className={`${styles.tlTick} ${t.isToday ? styles.tlTickToday : ""}`} style={{ left: t.x, width: t.width }}>
+                      {t.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {collapsed && (
+                <button type="button" className={styles.tlExpandBtn} onClick={() => setCollapsed(false)} title="リストを開く" aria-label="リストを開く">
+                  ›
                 </button>
-              ))}
-            </div>
+              )}
 
-            <div
-              className={styles.ganttCanvas}
-              style={{ width: canvasWidth, height: canvasHeight }}
-              onPointerMove={onBarPointerMove}
-              onPointerUp={onBarPointerUp}
-            >
-              {/* zebra rows */}
-              {dto.rows.map((_, i) => (
-                <div
-                  key={i}
-                  className={styles.ganttRowStripe}
-                  style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }}
-                  aria-hidden
-                />
-              ))}
+              {/* body */}
+              <div
+                className={styles.tlBody}
+                style={{ width, height: rowsH }}
+                onClick={onCanvasBackgroundClick}
+              >
+                {/* weekend shading */}
+                {weekends.map((b) => (
+                  <div key={b.key} className={styles.tlWeekend} style={{ left: b.x, width: b.width, height: rowsH }} aria-hidden />
+                ))}
+                {/* row lines / hover stripes */}
+                {dto.rows.map((_, i) => (
+                  <div key={i} className={styles.tlRowLine} style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }} aria-hidden />
+                ))}
 
-              {/* dependency connectors (behind bars) */}
-              <svg width={canvasWidth} height={canvasHeight} className={styles.ganttSvg} aria-hidden>
-                <defs>
-                  <marker id="fe4-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
-                    <path d="M0,0 L6,3 L0,6 Z" className={styles.depArrow} />
-                  </marker>
-                </defs>
-                {segs.map((s) => {
-                  const midX = Math.max(s.x1 + 8, s.x2 - 8);
-                  const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
+                {/* dependency connectors (subtle) */}
+                {segs.length > 0 && (
+                  <svg width={width} height={rowsH} className={styles.tlSvg} aria-hidden>
+                    <defs>
+                      <marker id="fe4-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                        <path d="M0,0 L5,3 L0,6 Z" className={styles.tlDepArrow} />
+                      </marker>
+                    </defs>
+                    {segs.map((s) => {
+                      const midX = Math.max(s.x1 + 10, s.x2 - 10);
+                      const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
+                      return (
+                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`} />
+                      );
+                    })}
+                  </svg>
+                )}
+
+                {/* today line */}
+                <div className={styles.tlToday} style={{ left: tX, height: rowsH }} data-testid="fe4-gantt-today" aria-hidden />
+
+                {/* bars */}
+                {bars.map((b) => {
+                  if (!b.hasBar) return null;
+                  const g = previewGeom(b);
+                  const showInside = g.width > 66;
                   return (
-                    <path
-                      key={s.id}
-                      d={d}
-                      fill="none"
-                      className={s.isViolated ? styles.depViolated : styles.depNormal}
-                      strokeWidth={s.isViolated ? 2 : 1.5}
-                      markerEnd="url(#fe4-arrow)"
-                      data-testid={`fe4-gantt-dep-${s.id}`}
-                    />
+                    <div
+                      key={b.taskId}
+                      className={barClassOf(b.taskId)}
+                      style={{ left: g.left, top: b.y + (ROW_HEIGHT - BAR_HEIGHT) / 2, width: g.width, height: BAR_HEIGHT }}
+                      title={titleById.get(b.taskId) ?? ""}
+                      data-testid={`fe4-gantt-bar-${b.taskId}`}
+                      onPointerDown={(e) => beginDrag(e, b, "move")}
+                    >
+                      <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
+                      {canWrite && onSchedule && (
+                        <span
+                          className={styles.barHandle + " " + styles.barHandleL}
+                          data-testid={`fe4-gantt-bar-${b.taskId}-rz-l`}
+                          onPointerDown={(e) => beginDrag(e, b, "resize-start")}
+                          aria-hidden
+                        />
+                      )}
+                      {showInside && <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>}
+                      {canWrite && onSchedule && (
+                        <span
+                          className={styles.barHandle + " " + styles.barHandleR}
+                          data-testid={`fe4-gantt-bar-${b.taskId}-rz-r`}
+                          onPointerDown={(e) => beginDrag(e, b, "resize-end")}
+                          aria-hidden
+                        />
+                      )}
+                      {!showInside && <span className={styles.barLabelOut} style={{ left: g.width + 8 }}>{titleById.get(b.taskId)}</span>}
+                    </div>
                   );
                 })}
-              </svg>
-
-              {/* today line */}
-              {todayX !== null && (
-                <div className={styles.ganttToday} style={{ left: todayX, height: canvasHeight }} data-testid="fe4-gantt-today" />
-              )}
-
-              {/* bars */}
-              {boxes.map((b) =>
-                b.hasBar ? (
-                  <div
-                    key={b.taskId}
-                    className={barClass(b)}
-                    style={{ left: barLeft(b), top: b.y + (ROW_HEIGHT - BAR_H) / 2, width: b.width, height: BAR_H }}
-                    title={`${titleById.get(b.taskId) ?? ""} — ${b.progressPercent}%`}
-                    data-testid={`fe4-gantt-bar-${b.taskId}`}
-                    onPointerDown={(e) => onBarPointerDown(e, b.taskId)}
-                  >
-                    <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} />
-                    <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>
-                  </div>
-                ) : null,
-              )}
+              </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

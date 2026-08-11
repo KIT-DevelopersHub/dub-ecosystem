@@ -175,130 +175,128 @@
   cursor: grab;
 }
 
-/* ---- gantt shell ---- */
+/* ================= Notion-style timeline ================= */
 .ganttView { display: flex; flex-direction: column; gap: var(--dub-space-3); }
-.ganttControls {
+
+/* ---- toolbar (view name + today + granularity) ---- */
+.tlToolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--dub-space-3);
   flex-wrap: wrap;
 }
-.zoomControl { display: inline-flex; align-items: center; gap: var(--dub-space-2); }
-.zoomLabel {
+.tlToolbarLeft { display: inline-flex; align-items: baseline; gap: var(--dub-space-2); }
+.tlToolbarRight { display: inline-flex; align-items: center; gap: var(--dub-space-2); }
+.tlViewName { font-size: var(--dub-font-size-md, 0.95rem); font-weight: var(--dub-font-weight-bold, 700); color: var(--dub-color-text-primary); }
+.tlCount { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+
+.tlTodayBtn {
+  padding: 5px var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 7px);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-secondary);
   font-size: var(--dub-font-size-sm, 0.82rem);
   font-weight: var(--dub-font-weight-medium, 600);
-  color: var(--dub-color-text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
-.zoomSwitcher {
+.tlTodayBtn:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); border-color: var(--dub-color-border-strong); }
+
+.tlSeg {
   display: inline-flex;
-  padding: 3px;
+  padding: 2px;
   gap: 2px;
   background: var(--dub-color-surface-sunken);
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-md, 8px);
 }
-.zoomBtn {
-  min-width: 40px;
-  padding: 6px var(--dub-space-3);
+.tlSegBtn {
+  min-width: 34px;
+  padding: 4px 10px;
   border: none;
   border-radius: var(--dub-radius-sm, 6px);
   background: transparent;
   color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm, 0.85rem);
+  font-size: var(--dub-font-size-sm, 0.82rem);
   font-weight: var(--dub-font-weight-medium, 600);
   cursor: pointer;
-  transition: background var(--dub-motion-fast, 0.12s) ease, color var(--dub-motion-fast, 0.12s) ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
-.zoomBtn:hover { color: var(--dub-color-text-primary); }
-.zoomBtnActive {
+.tlSegBtn:hover { color: var(--dub-color-text-primary); }
+.tlSegBtnOn {
   background: var(--dub-color-surface-base);
-  color: var(--dub-color-brand-700);
-  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.1));
+  color: var(--dub-color-text-primary);
+  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
 }
 
-.ganttLegend {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--dub-space-3);
-  font-size: var(--dub-font-size-xs, 0.72rem);
-  color: var(--dub-color-text-secondary);
-}
-.legendItem { display: inline-flex; align-items: center; gap: 5px; }
-.legendSwatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
-.legendCritical { background: var(--dub-color-danger-400, #f2a3a3); }
-.legendToday { width: 4px; height: 13px; border-radius: 999px; background: var(--dub-color-brand-600, var(--dub-color-brand-500)); }
-
-.gantt {
-  overflow-x: auto;
+/* ---- frame + single scroll surface (two-pane via sticky) ---- */
+.tlFrame {
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg, 12px);
   background: var(--dub-color-surface-base);
-  box-shadow: var(--dub-shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.06));
+  overflow: hidden;
+  box-shadow: var(--dub-shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.05));
 }
-.ganttGrid { display: grid; }
+.tlScroll {
+  overflow: auto;
+  max-height: min(72vh, 720px);
+  overscroll-behavior-x: contain;
+}
+.tlInner { display: flex; align-items: stretch; }
 
-/* row 1: sticky header (timeline + corner) */
-.ganttCorner {
+/* ---- left pane (sticky column) ---- */
+.tlLeft {
   position: sticky;
   left: 0;
   z-index: 3;
-  background: var(--dub-color-surface-sunken);
-  border-bottom: 1px solid var(--dub-color-border-default);
-  border-right: 1px solid var(--dub-color-border-default);
-  padding: 0 var(--dub-space-3);
-  font-size: var(--dub-font-size-xs, 0.72rem);
-  font-weight: var(--dub-font-weight-bold, 700);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--dub-color-text-secondary);
-  display: flex;
-  align-items: center;
-}
-.ganttHeader {
-  position: relative;
-  height: 34px;
-  background: var(--dub-color-surface-sunken);
-  border-bottom: 1px solid var(--dub-color-border-default);
-}
-.ganttTick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  padding-left: 5px;
-  font-size: var(--dub-font-size-xs, 0.7rem);
-  color: var(--dub-color-text-secondary);
-  border-left: 1px solid var(--dub-color-border-default);
-  white-space: nowrap;
-}
-.ganttTodayLabel {
-  position: absolute;
-  top: 4px;
-  transform: translateX(-50%);
-  padding: 1px 6px;
-  border-radius: var(--dub-radius-full, 999px);
-  font-size: 0.62rem;
-  font-weight: 700;
-  color: var(--dub-color-text-inverse);
-  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
-  z-index: 1;
-}
-
-/* row 2: labels + canvas */
-.ganttLabels {
-  position: sticky;
-  left: 0;
-  z-index: 2;
+  flex: 0 0 auto;
   background: var(--dub-color-surface-base);
   border-right: 1px solid var(--dub-color-border-default);
 }
-.ganttRowLabel {
-  box-sizing: border-box; /* keep each row exactly ROW_HEIGHT so labels align to bars */
+.tlLeftHead {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  padding: 0 var(--dub-space-3) 6px;
+  background: var(--dub-color-surface-sunken);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.tlLeftHeadTitle {
+  font-size: var(--dub-font-size-xs, 0.7rem);
+  font-weight: var(--dub-font-weight-bold, 700);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dub-color-text-secondary);
+}
+.tlCollapseBtn, .tlExpandBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 6px);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.tlCollapseBtn:hover, .tlExpandBtn:hover { color: var(--dub-color-text-primary); background: var(--dub-color-surface-sunken); }
+.tlExpandBtn { position: absolute; top: calc(50% - 10px); left: 6px; z-index: 6; }
+
+.tlRow {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   width: 100%;
   padding: 0 var(--dub-space-3);
   border: none;
@@ -308,105 +306,198 @@
   text-align: left;
   font-size: var(--dub-font-size-sm, 0.85rem);
   cursor: pointer;
-  transition: background var(--dub-motion-fast, 0.12s) ease;
+  transition: background 0.1s ease;
 }
-.ganttRowLabel:hover { background: var(--dub-color-surface-sunken); }
-.ganttRowLabelText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.criticalDot {
+.tlRow:hover { background: var(--dub-color-surface-sunken); }
+.tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
+.tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tlRowMeta {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--dub-color-danger-500);
+  max-width: 40%;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.tlAddRow {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0 var(--dub-space-3);
+  border: none;
+  border-bottom: 1px solid var(--dub-color-border-default);
+  background: transparent;
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+  text-align: left;
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  cursor: pointer;
+}
+.tlAddRow:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); }
+.tlResizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+.tlResizer:hover { background: var(--dub-color-brand-200); }
 
-.ganttCanvas { position: relative; }
-.ganttRowStripe {
+/* ---- right pane (timeline) ---- */
+.tlRight { flex: 0 0 auto; }
+.tlHeader {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--dub-color-surface-sunken);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.tlHeaderTop { position: relative; width: 100%; border-bottom: 1px solid var(--dub-color-border-default); }
+.tlHeaderBottom { position: absolute; left: 0; width: 100%; }
+.tlMonth {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  border-left: 1px solid var(--dub-color-border-default);
+  overflow: hidden;
+}
+.tlMonthLabel {
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: var(--dub-font-weight-bold, 700);
+  color: var(--dub-color-text-secondary);
+  white-space: nowrap;
+  position: sticky;
+  left: 8px;
+}
+.tlTick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--dub-color-border-default);
+  font-size: 0.68rem;
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tlTickToday { color: var(--dub-color-brand-600); font-weight: 700; }
+
+.tlBody { position: relative; }
+.tlWeekend { position: absolute; top: 0; background: var(--dub-color-gray-50); z-index: 0; }
+.tlRowLine {
   box-sizing: border-box;
   position: absolute;
   left: 0;
   right: 0;
   border-bottom: 1px solid var(--dub-color-border-default);
+  z-index: 0;
 }
-.ganttRowStripe:nth-child(even) { background: var(--dub-color-surface-sunken); }
-.ganttSvg { position: absolute; inset: 0; pointer-events: none; }
+.tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.tlDep { stroke: var(--dub-color-gray-300); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.tlDepArrow { fill: var(--dub-color-gray-300); }
 
-/* ---- bars ---- */
+.tlToday {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--dub-color-brand-500);
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ---- bars (soft, rounded, Notion-style) ---- */
 .bar {
   position: absolute;
-  border-radius: var(--dub-radius-sm, 6px);
+  z-index: 3;
+  border-radius: 6px;
   background: var(--dub-color-brand-400);
-  box-shadow: inset 0 0 0 1px var(--dub-color-brand-500);
-  overflow: hidden;
-  cursor: pointer;
+  overflow: visible;
+  cursor: grab;
   display: flex;
   align-items: center;
   touch-action: none;
-  transition: box-shadow var(--dub-motion-fast, 0.12s) ease, transform var(--dub-motion-fast, 0.12s) ease;
+  transition: box-shadow 0.12s ease, filter 0.12s ease;
 }
-.bar:hover { box-shadow: inset 0 0 0 1px var(--dub-color-brand-700), var(--dub-shadow-md, 0 2px 6px rgba(0, 0, 0, 0.18)); transform: translateY(-1px); }
+.bar:hover { box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18); filter: brightness(0.98); }
+.bar:hover .barHandle { opacity: 1; }
 
-/* status-legible fills */
-.barTodo { background: var(--dub-color-gray-300, #cbd2da); box-shadow: inset 0 0 0 1px var(--dub-color-gray-400, #aab3bd); }
-.barInProgress { background: var(--dub-color-brand-400); box-shadow: inset 0 0 0 1px var(--dub-color-brand-500); }
-.barBlocked { background: var(--dub-color-warning-400, #e8b45a); box-shadow: inset 0 0 0 1px var(--dub-color-warning-500); }
-.barDone { background: var(--dub-color-success-400, #6fce9a); box-shadow: inset 0 0 0 1px var(--dub-color-success-500); }
-.barCancelled { background: var(--dub-color-gray-200, #e2e6ea); box-shadow: inset 0 0 0 1px var(--dub-color-gray-300); opacity: 0.7; }
-.barCancelled .barLabel { text-decoration: line-through; color: var(--dub-color-text-secondary); }
+/* status-legible pastel fills (dark text) */
+.barTodo { background: var(--dub-color-gray-200); }
+.barTodo .barLabel, .barTodo .barLabelOut { color: var(--dub-color-text-secondary); }
+.barInProgress { background: var(--dub-color-brand-300, var(--dub-color-brand-400)); }
+.barBlocked { background: var(--dub-color-warning-300, var(--dub-color-warning-400)); }
+.barBlocked .barLabel { color: var(--dub-color-warning-900, #7a4a00); }
+.barDone { background: var(--dub-color-success-300, var(--dub-color-success-400)); }
+.barDone .barLabel { color: var(--dub-color-success-900, #0a5b34); }
+.barCancelled { background: var(--dub-color-gray-100); opacity: 0.75; }
+.barCancelled .barLabel, .barCancelled .barLabelOut { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
-/* critical path wins the outline */
-.barCritical { background: var(--dub-color-danger-400, #f2a3a3); box-shadow: inset 0 0 0 1px var(--dub-color-danger-500); }
-.barCritical:hover { box-shadow: inset 0 0 0 1px var(--dub-color-danger-500), var(--dub-shadow-md, 0 2px 6px rgba(0, 0, 0, 0.18)); }
-.barDragging { cursor: grabbing; opacity: 0.9; z-index: 5; box-shadow: inset 0 0 0 1px var(--dub-color-brand-700), var(--dub-shadow-lg, 0 6px 16px rgba(0, 0, 0, 0.24)); }
+.barDragging { cursor: grabbing; z-index: 6; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
 
 .barProgress {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  border-radius: var(--dub-radius-sm, 6px) 0 0 var(--dub-radius-sm, 6px);
-  background: rgba(0, 0, 0, 0.22);
+  border-radius: 6px 0 0 6px;
+  background: rgba(15, 23, 42, 0.14);
+  pointer-events: none;
 }
 .barLabel {
   position: relative;
   z-index: 1;
-  padding: 0 7px;
-  font-size: var(--dub-font-size-xs, 0.72rem);
+  padding: 0 8px;
+  font-size: var(--dub-font-size-xs, 0.74rem);
   font-weight: var(--dub-font-weight-medium, 600);
-  color: var(--dub-color-text-inverse);
+  color: var(--dub-color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
 }
-
-.ganttToday {
+.barLabelOut {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--dub-font-size-xs, 0.74rem);
+  font-weight: var(--dub-font-weight-medium, 600);
+  color: var(--dub-color-text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.barHandle {
   position: absolute;
   top: 0;
-  width: 2px;
-  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
-  pointer-events: none;
-  z-index: 4;
+  bottom: 0;
+  width: 8px;
+  z-index: 2;
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity 0.12s ease;
 }
-
-.depViolated { stroke: var(--dub-color-danger-500); }
-.depNormal { stroke: var(--dub-color-border-strong); }
-.depArrow { fill: var(--dub-color-border-strong); }
-
-.ganttEmpty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--dub-space-2);
-  padding: var(--dub-space-10, 3rem) var(--dub-space-6);
-  color: var(--dub-color-text-secondary);
-  border: 1px dashed var(--dub-color-border-default);
-  border-radius: var(--dub-radius-lg, 12px);
-  background: var(--dub-color-surface-raised);
-  text-align: center;
+.barHandle::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(15, 23, 42, 0.32);
 }
-.ganttEmptyTitle { margin: 0; font-weight: var(--dub-font-weight-bold, 700); color: var(--dub-color-text-primary); }
-.ganttEmptyBody { margin: 0; max-width: 32rem; font-size: var(--dub-font-size-sm, 0.85rem); line-height: 1.6; }
+.barHandleL { left: 0; border-radius: 6px 0 0 6px; }
+.barHandleL::after { left: 2px; }
+.barHandleR { right: 0; border-radius: 0 6px 6px 0; }
+.barHandleR::after { right: 2px; }
 
 /* ---- banners ---- */
 .banner {

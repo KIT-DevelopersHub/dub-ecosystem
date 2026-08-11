@@ -3,7 +3,7 @@ import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
 import { Button } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { replaceDependencies, resolveUsers } from "../api/endpoints";
+import { patchGanttRow, replaceDependencies, resolveUsers } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
 import { useTaskStore } from "../store/useTaskStore";
 import { emptyFilter, toListTasksQuery, type TaskFilterState } from "../domain/task-query";
@@ -34,6 +34,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const [filter, setFilter] = useState<TaskFilterState>(() => emptyFilter(eventId));
   const [selected, setSelected] = useState<common.TaskId | null>(null);
   const [creating, setCreating] = useState(false);
+  const [createPresetDue, setCreatePresetDue] = useState<string | null>(null);
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
@@ -56,6 +57,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const userList = useMemo(() => [...users.values()], [users]);
   const statusById = useMemo(() => new Map(tasks.map((t) => [t.id, t.status] as const)), [tasks]);
+  const assigneeNameById = useMemo(() => {
+    const m = new Map<common.TaskId, string>();
+    for (const t of tasks) {
+      const name = t.assigneeId ? users.get(t.assigneeId)?.displayName : undefined;
+      if (name) m.set(t.id, name);
+    }
+    return m;
+  }, [tasks, users]);
 
   // The status filter narrows the gantt: keep only rows whose task is in the
   // (server-filtered) store set, and dependencies between two visible tasks.
@@ -77,17 +86,21 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       ? fieldErrorMap((store.lastError as unknown as { details?: unknown }).details)
       : undefined;
 
-  const MS_PER_DAY = 86_400_000;
-  const onReschedule = (id: common.TaskId, deltaDays: number) => {
-    const t = store.list().find((x) => x.id === id);
-    const row = gantt.data?.rows.find((r) => r.taskId === id);
-    if (!t || !row?.endsAt) return;
-    const nextDue = new Date(Date.parse(row.endsAt) + deltaDays * MS_PER_DAY).toISOString();
-    void store
-      .patchOptimistic(client, id, { dueAt: nextDue }, t.version, { version: t.version, dueAt: nextDue })
-      .then((ok) => {
-        if (ok) void gantt.refetchFresh();
+  // Bar move/resize on the timeline: optimistically update the cache (bar jumps
+  // the same tick as the drop), then persist the new schedule to the backend.
+  const onSchedule = (id: common.TaskId, startsAt: common.ISODateTime, endsAt: common.ISODateTime) => {
+    gantt.setRowScheduleOptimistic(id, startsAt, endsAt);
+    void patchGanttRow(client, id, { startsAt, endsAt })
+      .then(() => gantt.refetchFresh())
+      .then(() => store.load(client, query))
+      .catch(() => {
+        void gantt.refetchFresh();
       });
+  };
+
+  const onCreateOnDate = (dueAt: common.ISODateTime | null) => {
+    setCreatePresetDue(dueAt ? dueAt.slice(0, 10) : null);
+    setCreating(true);
   };
 
   const onCreate = async (draft: TaskDraft) => {
@@ -176,15 +189,22 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           dto={filteredDto}
           zoom="week"
           truncated={filteredDto.rows.length >= 2000}
-          onReschedule={caps.canWrite ? onReschedule : undefined}
+          onSchedule={caps.canWrite ? onSchedule : undefined}
           onSelect={setSelected}
+          onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
+          assigneeNameById={assigneeNameById}
+          canWrite={caps.canWrite}
         />
       )}
 
       <TaskCreateModal
         open={creating}
-        onClose={() => setCreating(false)}
+        initialDue={createPresetDue}
+        onClose={() => {
+          setCreating(false);
+          setCreatePresetDue(null);
+        }}
         users={userList}
         dependencyOptions={tasks.map((t) => ({ id: t.id, title: t.title }))}
         onCreate={onCreate}

@@ -74,6 +74,19 @@ export function getGanttFresh(client: ApiClient, eventId: common.EventId): Promi
   });
 }
 
+/** Persist a bar's schedule after a timeline drag/resize (Notion-style edit). */
+export function patchGanttRow(
+  client: ApiClient,
+  taskId: common.TaskId,
+  body: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+): Promise<gantt.GanttRow> {
+  return client.request<gantt.GanttRow>({
+    method: "PATCH",
+    path: `${P}/gantt/rows/${taskId}` as ApiPath,
+    body,
+  });
+}
+
 export function getGanttDependencies(
   client: ApiClient,
   eventId: common.EventId,

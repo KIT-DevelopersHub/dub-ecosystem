@@ -89,6 +89,9 @@ export class MockApiClient implements ApiClient {
       if (req.method === "DELETE") return this.deleteTask(id) as T;
     }
     // --- gantt ---
+    const ganttRow = path.match(/^\/api\/v1\/gantt\/rows\/([^/]+)$/);
+    if (ganttRow && req.method === "PATCH")
+      return this.patchRowSchedule(ganttRow[1]!, req.body as { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }) as T;
     if (path === "/api/v1/gantt" && req.method === "GET") return this.ganttDto(String(req.query?.event)) as T;
     if (path === "/api/v1/gantt/dependencies" && req.method === "GET") return this.ganttDeps(String(req.query?.event)) as T;
     if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.event)) as T;
@@ -260,6 +263,28 @@ export class MockApiClient implements ApiClient {
       }
     }
     return lines;
+  }
+
+  /** Persist a bar's schedule from a timeline drag/resize (Notion-style). The
+   *  task model has only dueAt, so gantt startsAt/endsAt live in rowDates; this
+   *  is the write path the timeline uses to move/resize bars. Also mirrors endsAt
+   *  onto the task's dueAt so the list/detail views stay consistent. */
+  private patchRowSchedule(
+    taskId: string,
+    body: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+  ): gantt.GanttRow {
+    const t = this.taskById.get(taskId);
+    if (!t) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
+    this.rowDates[taskId] = { startsAt: body.startsAt, endsAt: body.endsAt };
+    if (body.endsAt) this.taskById.set(taskId, { ...t, dueAt: body.endsAt, updatedAt: new Date().toISOString() });
+    return {
+      taskId,
+      title: t.title,
+      startsAt: body.startsAt,
+      endsAt: body.endsAt,
+      progressPercent: progressForStatus(t.status),
+      assigneeId: t.assigneeId,
+    };
   }
 
   private ganttDto(eventId: string): gantt.GanttChartDTO {

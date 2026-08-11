@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { common, identity, task } from "@dub/types";
 import { Modal, Button, TextField, Select, DatePicker } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
@@ -20,13 +20,15 @@ export interface TaskCreateModalProps {
   /** existing tasks in the event, offered as predecessors (dependencies). */
   dependencyOptions: readonly { id: common.TaskId; title: string }[];
   onCreate: (draft: TaskDraft) => Promise<void>;
+  /** date-input value (YYYY-MM-DD) preset when opened from a timeline cell. */
+  initialDue?: string | null;
 }
 
 // A newly-created task starts in "todo"; only todo-reachable states are offered.
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCreate }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCreate, initialDue }: TaskCreateModalProps) {
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<task.TaskStatus>("todo");
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
@@ -34,6 +36,11 @@ export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCre
   const [due, setDue] = useState<string | null>(null);
   const [deps, setDeps] = useState<common.TaskId[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // seed the due date from the timeline cell that was clicked (when reopened).
+  useEffect(() => {
+    if (open) setDue(initialDue ?? null);
+  }, [open, initialDue]);
 
   const reset = () => {
     setTitle("");
