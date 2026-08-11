@@ -1,0 +1,46 @@
+# Free-tier deploy of gantt-service as `dub-gantt-service` (internal; reached via the
+# api-gateway SVC_GANTT service binding — workers.dev disabled). NO paid Cloudflare
+# Queues: gantt is a read model that PUBLISHES NOTHING, so it has no outbox — it only
+# CONSUMED the dub-q-evt-gantt lane (cache purge + view-state reap). On the FREE plan that
+# Queue consumer is replaced by the HTTP landing route POST /internal/events-async
+# (guarded by x-dub-internal), which task-service / event-service forward their due
+# task.*/action.*/event.* envelopes to from their own @dub/freeq outbox drains. Handlers
+# are idempotent (purge/DELETE), so at-least-once redelivery is safe; a non-2xx keeps the
+# caller's row pending (event never lost). gantt never calls those services back, so no
+# event↔task cycle is reintroduced. No cron here: gantt has no outbox of its own to drain.
+#
+# Deploy (only on 高岡's go — 本番反映は直列):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config services/gantt-service/wrangler.free.toml
+name = "dub-gantt-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: gantt owns the gantt_* namespace (per-user view state) only.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# DTO short-lived cache (gantt:dto:<eventId>, TTL 60s).
+[[kv_namespaces]]
+binding = "GANTT_KV"
+id = "00000000000000000000000000000000" # placeholder; infra sets the real free-tier KV id
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"      # read-only: listTasks / listDependencies
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"     # read-only: eventExists
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (event:read)
