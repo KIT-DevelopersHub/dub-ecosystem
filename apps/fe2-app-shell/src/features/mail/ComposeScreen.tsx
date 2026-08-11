@@ -3,10 +3,12 @@
 // no token field at all. Route-level RequirePermission("mail:send") gates entry;
 // this screen focuses on the form. Built entirely from @dub/ui primitives.
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { Button, Card, Form, FormField, PageHeader, Stack, TextField, Textarea, useToast } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
 import { parseRecipients } from "./mailApi.tsx";
 
@@ -30,6 +32,8 @@ function validate(fields: Fields): { req?: mail.SendMailRequest; errors: Partial
 export function ComposeScreen(): JSX.Element {
   const mailApi = useMailApi();
   const toast = useToast();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [fields, setFields] = useState<Fields>({ to: "", subject: "", body: "" });
   const [submitted, setSubmitted] = useState(false);
 
@@ -39,6 +43,10 @@ export function ComposeScreen(): JSX.Element {
       toast.show({ kind: "success", title: "メールを送信しました。" });
       setFields({ to: "", subject: "", body: "" });
       setSubmitted(false);
+      // Invalidate the Sent list so the just-sent mail shows on arrival (defeats the
+      // 30s staleTime after a prior empty visit), then land in the Sent folder.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.feature("mail", "sent-list") });
+      void navigate({ to: "/mail/sent" });
     },
     onError: (e: unknown) => {
       const message = ApiError.isApiError(e) ? toDisplayableError(e).message : "メールを送信できませんでした。";

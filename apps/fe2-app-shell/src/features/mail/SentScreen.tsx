@@ -5,6 +5,7 @@
 // switches between the two folders. Empty / error / loading use @dub/ui.
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { Badge, Button, Card, Divider, EmptyState, ErrorState, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
@@ -112,8 +113,14 @@ function SentDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
 
 export function SentScreen(): JSX.Element {
   const mailApi = useMailApi();
+  const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const sentKey = queryKeys.feature("mail", "sent-list");
+  const composeAction = (
+    <Button testId="fe2-mail-sent-compose" onClick={() => void navigate({ to: "/mail/compose" })}>
+      メール作成
+    </Button>
+  );
 
   const query = useQuery({
     queryKey: sentKey,
@@ -153,7 +160,7 @@ export function SentScreen(): JSX.Element {
 
   return (
     <main data-testid="fe2-mail-sent">
-      <PageHeader title="送信済み" />
+      <PageHeader title="送信済み" actions={composeAction} />
       <MailFolderTabs active="sent" />
       {body}
     </main>
