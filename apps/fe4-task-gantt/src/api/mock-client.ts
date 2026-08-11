@@ -2,7 +2,7 @@
 // real `@dub/api-client` (gateway HTTP) lands. Enforces the same contract the
 // server does: version conflicts, status-transition rules, dependency cycles —
 // so optimistic-UI rollback paths (tests 2/3/5/9/11) exercise real branches.
-import type { gantt, identity, event, common, gateway } from "@dub/types";
+import type { gantt, identity, event, common, gateway, team } from "@dub/types";
 import { task } from "@dub/types";
 import type { ErrorResponse } from "@dub/errors";
 import { CommonErrorCodes } from "@dub/errors";
@@ -32,6 +32,7 @@ export interface MockSeed {
   tasks?: task.Task[];
   dependencies?: gantt.GanttDependencyLine[];
   users?: identity.UserSummary[];
+  teams?: team.Team[];
   actions?: event.ActionSummary[];
   view?: gantt.GanttViewState;
   /** row date overrides (task has only dueAt; gantt startsAt/endsAt live here). */
@@ -44,6 +45,7 @@ export class MockApiClient implements ApiClient {
   private taskById = new Map<common.TaskId, task.Task>();
   private deps = new Map<common.TaskId, common.TaskId[]>(); // taskId -> dependsOnIds
   private users = new Map<common.UserId, identity.UserSummary>();
+  private teams: team.Team[] = [];
   private actions: event.ActionSummary[] = [];
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
@@ -62,6 +64,7 @@ export class MockApiClient implements ApiClient {
       this.deps.set(d.toTaskId, list);
     }
     for (const u of seed.users ?? []) this.users.set(u.id, u);
+    this.teams = seed.teams ?? [];
     this.actions = seed.actions ?? [];
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
@@ -97,6 +100,8 @@ export class MockApiClient implements ApiClient {
     if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.event)) as T;
     if (path === "/api/v1/gantt/views" && req.method === "PUT")
       return this.putView(String(req.query?.event), req.body as gantt.PutGanttViewRequest) as T;
+    // --- teams (canonical team.Team; future: member-service) ---
+    if (path === "/api/v1/teams" && req.method === "GET") return ({ items: this.teams } as team.ListTeamsResponse) as T;
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(String(req.query?.ids ?? "")) as T;
     // --- events ---
@@ -150,6 +155,7 @@ export class MockApiClient implements ApiClient {
     let items = [...this.taskById.values()];
     if (q.eventId) items = items.filter((t) => t.eventId === q.eventId);
     if (q.assigneeId) items = items.filter((t) => t.assigneeId === q.assigneeId);
+    if (q.teamId) items = items.filter((t) => t.teamId === q.teamId);
     if (q.status) {
       const statuses = String(q.status).split(",");
       items = items.filter((t) => statuses.includes(t.status));
@@ -180,6 +186,7 @@ export class MockApiClient implements ApiClient {
       status: "todo",
       priority: body.priority ?? "medium",
       assigneeId: body.assigneeId ?? null,
+      teamId: body.teamId ?? null,
       dueAt: body.dueAt ?? null,
       origin: body.origin ?? "internal",
       archivedAt: null,
@@ -208,6 +215,7 @@ export class MockApiClient implements ApiClient {
       ...(body.status !== undefined ? { status: body.status } : {}),
       ...(body.priority !== undefined ? { priority: body.priority } : {}),
       ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
+      ...(body.teamId !== undefined ? { teamId: body.teamId } : {}),
       ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),
       version: cur.version + 1,
       updatedAt: new Date().toISOString(),
@@ -249,6 +257,7 @@ export class MockApiClient implements ApiClient {
           endsAt: schedule.endsAt,
           progressPercent: progressForStatus(t.status),
           assigneeId: t.assigneeId,
+          teamId: t.teamId ?? null,
         };
       });
   }
@@ -284,6 +293,7 @@ export class MockApiClient implements ApiClient {
       endsAt: body.endsAt,
       progressPercent: progressForStatus(t.status),
       assigneeId: t.assigneeId,
+      teamId: t.teamId ?? null,
     };
   }
 

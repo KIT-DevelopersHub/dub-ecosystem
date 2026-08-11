@@ -5,12 +5,14 @@ import { Button } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
 import { patchGanttRow, replaceDependencies, resolveUsers } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
+import { useTeams } from "../api/useTeams";
 import { useTaskStore } from "../store/useTaskStore";
 import { emptyFilter, toListTasksQuery, type TaskFilterState } from "../domain/task-query";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap } from "../domain/error-mapping";
 import { TaskFilterBar } from "./TaskFilterBar";
+import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
@@ -39,6 +41,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
+  const teams = useTeams().data ?? [];
 
   const query = useMemo(() => toListTasksQuery(filter), [filter]);
 
@@ -126,6 +129,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       title: draft.title,
       ...(draft.priority ? { priority: draft.priority } : {}),
       ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
+      ...(draft.teamId ? { teamId: draft.teamId } : {}),
       ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
     });
     if (!created) return;
@@ -187,6 +191,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       </header>
 
       <div className={styles.toolbar}>
+        {teams.length > 0 && (
+          <TeamViewSwitcher
+            teams={teams}
+            value={filter.teamId}
+            onChange={(teamId) => setFilter((f) => ({ ...f, ...(teamId ? { teamId } : { teamId: undefined }) }))}
+            disabled={!caps.canRead}
+          />
+        )}
         <TaskFilterBar
           value={filter}
           onChange={setFilter}
@@ -225,6 +237,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           setCreatePresetDeps([]);
         }}
         users={userList}
+        teams={teams}
         dependencyOptions={tasks.map((t) => ({ id: t.id, title: t.title }))}
         onCreate={onCreate}
       />
@@ -233,6 +246,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         <TaskDetailPanel
           task={selectedTask}
           users={userList}
+          teams={teams}
           canWrite={caps.canWrite}
           canDelete={caps.canDelete}
           {...(fieldErrors ? { fieldErrors } : {})}

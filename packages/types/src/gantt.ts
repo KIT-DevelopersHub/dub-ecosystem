@@ -1,5 +1,5 @@
 // gantt — gantt-service namespace (view states; read model over task/event).
-import type { EventId, TaskId, UserId, ISODateTime } from "./common";
+import type { EventId, TaskId, UserId, TeamId, ISODateTime } from "./common";
 
 export type GanttZoom = "day" | "week" | "month";
 
@@ -10,6 +10,8 @@ export interface GanttRow {
   endsAt: ISODateTime | null;
   progressPercent: number; // 0-100 (done=100/else=0 in P0)
   assigneeId: UserId | null;
+  /** Owning team (canonical team.Team), for team-scoped views. Additive. */
+  teamId?: TeamId | null;
 }
 
 export interface GanttDependencyLine {

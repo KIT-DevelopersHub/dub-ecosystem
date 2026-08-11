@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { common, identity, task } from "@dub/types";
+import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
 import { DateField } from "./DateField";
@@ -11,6 +11,7 @@ export interface TaskDraft {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  teamId: common.TeamId | null;
   dueAt: common.ISODateTime | null;
   dependsOnIds: common.TaskId[];
 }
@@ -19,6 +20,7 @@ export interface TaskCreateModalProps {
   open: boolean;
   onClose: () => void;
   users: readonly identity.UserSummary[];
+  teams: readonly team.Team[];
   /** existing tasks in the event, offered as predecessors (dependencies). */
   dependencyOptions: readonly { id: common.TaskId; title: string }[];
   onCreate: (draft: TaskDraft) => Promise<void>;
@@ -32,11 +34,12 @@ export interface TaskCreateModalProps {
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCreate, initialDue, initialDependsOn }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, teams, dependencyOptions, onCreate, initialDue, initialDependsOn }: TaskCreateModalProps) {
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<task.TaskStatus>("todo");
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
+  const [teamId, setTeamId] = useState<common.TeamId | null>(null);
   const [due, setDue] = useState<string | null>(null);
   const [deps, setDeps] = useState<common.TaskId[]>([]);
   const [saving, setSaving] = useState(false);
@@ -54,6 +57,7 @@ export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCre
     setStatus("todo");
     setPriority("medium");
     setAssigneeId(null);
+    setTeamId(null);
     setDue(null);
     setDeps([]);
   };
@@ -73,6 +77,7 @@ export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCre
         status,
         priority,
         assigneeId,
+        teamId,
         dueAt: isoFromDateInput(due),
         dependsOnIds: deps,
       });
@@ -160,6 +165,21 @@ export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCre
           </label>
           <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
         </div>
+
+        {teams.length > 0 && (
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-create-team">
+              チーム
+            </label>
+            <Select
+              id="fe4-create-team"
+              value={teamId ?? ""}
+              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
+              options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
+              testId="fe4-create-team"
+            />
+          </div>
+        )}
 
         <div className={styles.formFieldFull}>
           <span className={styles.formLabel}>先行タスク（依存）</span>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { common, identity, task } from "@dub/types";
+import type { common, identity, task, team } from "@dub/types";
 import { Button, IconButton, TextField, Select } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
@@ -12,6 +12,7 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 export interface TaskDetailPanelProps {
   task: task.Task;
   users: readonly identity.UserSummary[];
+  teams?: readonly team.Team[];
   onSave: (patch: task.UpdateTaskRequest) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -26,6 +27,7 @@ export interface TaskDetailPanelProps {
 export function TaskDetailPanel({
   task: t,
   users,
+  teams = [],
   onSave,
   onDelete,
   onClose,
@@ -38,17 +40,20 @@ export function TaskDetailPanel({
   const [status, setStatus] = useState<task.TaskStatus>(t.status);
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
+  const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
   const [due, setDue] = useState<string | null>(dateInputFromIso(t.dueAt));
   const [confirming, setConfirming] = useState(false);
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
   const nextDueIso = isoFromDateInput(due);
+  const curTeam = t.teamId ?? null;
   const dirty =
     title !== t.title ||
     status !== t.status ||
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
+    teamId !== curTeam ||
     nextDueIso !== t.dueAt;
 
   const save = () => {
@@ -57,6 +62,7 @@ export function TaskDetailPanel({
     if (status !== t.status) patch.status = status;
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
+    if (teamId !== curTeam) patch.teamId = teamId;
     if (nextDueIso !== t.dueAt) patch.dueAt = nextDueIso;
     onSave(patch);
   };
@@ -135,6 +141,22 @@ export function TaskDetailPanel({
             <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
           </div>
         </div>
+
+        {teams.length > 0 && (
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-detail-team">
+              チーム
+            </label>
+            <Select
+              id="fe4-detail-team"
+              value={teamId ?? ""}
+              disabled={!canWrite}
+              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
+              options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
+              testId="fe4-detail-team"
+            />
+          </div>
+        )}
 
         {canWrite && onCreateChild && (
           <button type="button" className={styles.childCreateBtn} onClick={() => onCreateChild(t.id)} data-testid="fe4-detail-create-child">

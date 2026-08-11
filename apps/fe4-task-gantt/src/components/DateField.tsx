@@ -55,13 +55,22 @@ export function DateField({ id, value, onChange, disabled, testId }: DateFieldPr
     if (sel) setView({ y: sel.y, m: sel.m });
   }, [value]);
 
-  // position the portal popover under the trigger, flipping up if no room
+  // position the portal popover, clamped inside the viewport on both axes so it
+  // never gets clipped at the screen edge (e.g. inside the right-docked detail
+  // panel — bug A: "next month" was unreachable because the calendar overflowed).
   useLayoutEffect(() => {
     if (!open || !wrapRef.current) return;
     const r = wrapRef.current.getBoundingClientRect();
+    const POP_W = 268;
     const POP_H = 320;
+    const M = 8;
+    // horizontal: prefer left-aligned to the trigger, but clamp so the whole
+    // popover stays on-screen (right-docked panels push it left / inside).
+    const left = Math.max(M, Math.min(r.left, window.innerWidth - POP_W - M));
+    // vertical: below if it fits, else flip above, else clamp.
     const below = window.innerHeight - r.bottom > POP_H + 12;
-    setPos({ left: r.left, top: below ? r.bottom + 6 : Math.max(8, r.top - POP_H - 6) });
+    const top = below ? r.bottom + 6 : Math.max(M, Math.min(r.top - POP_H - 6, window.innerHeight - POP_H - M));
+    setPos({ left, top });
   }, [open]);
 
   useEffect(() => {
