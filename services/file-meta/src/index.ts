@@ -1,7 +1,7 @@
 // dub-file-meta Worker entry. Builds real deps (D1 repo + R2 blobs + event/audit
 // Queues + identity authz + drive-proxy completion) from env, for both the HTTP
 // fetch handler and the Queue consumer (EVT_FILE_META: drive.* + *.archived).
-import type { D1Database, Queue, Fetcher, R2Bucket, MessageBatch, ScheduledController, ExecutionContext } from "@cloudflare/workers-types";
+import type { D1Database, Queue, Fetcher, R2Bucket, MessageBatch } from "@cloudflare/workers-types";
 import { createDbClient } from "@dub/db";
 import {
   createEvent,
@@ -12,13 +12,11 @@ import {
 } from "@dub/events";
 import { createServiceClient, extractContext, newRequestId } from "@dub/http";
 import { createAuthClient } from "@dub/auth-client";
-import { consoleSink } from "@dub/observability";
 import { common, type drive } from "@dub/types";
 import { createApp } from "./app";
 import { createConsumer, createEnvelopeConsumer } from "./consumer";
 import { createD1FileRepo, createD1IdempotencyStore } from "./repo";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
-import { runOutboxDrain } from "./drain";
 import type { AuthGate, BlobStore, DriveClient, EmitEvent } from "./deps";
 
 export interface Env {
@@ -126,20 +124,7 @@ export default {
     await consumer(batch, env);
   },
 
-  // Free-tier Cron: drain the @dub/freeq audit outbox to audit-log (replaces the paid
-  // AUDIT_QUEUE producer path). Only wired on wrangler.free.toml [triggers]; on the paid
-  // deploy (real AUDIT_QUEUE) there is no cron and this never fires. Best-effort.
-  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    try {
-      const result = await runOutboxDrain(env);
-      consoleSink({ level: "info", message: "file-meta outbox drained", service: "file-meta", fields: { ...result } });
-    } catch (err) {
-      consoleSink({
-        level: "error",
-        message: "file-meta outbox drain failed",
-        service: "file-meta",
-        fields: { error: err instanceof Error ? err.message : String(err) },
-      });
-    }
-  },
+  // NOTE: no scheduled() drain here. The freeq outbox is drained centrally by the
+  // standalone freeq-drain worker (single aggregated cron). src/drain.ts is retained as
+  // the topic->destination contract source (audit.record) for freeq-drain's routing.
 };

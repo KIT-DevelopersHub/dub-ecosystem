@@ -4,7 +4,7 @@
 // tier @dub/freeq outbox (replacement for the paid EVT_NOTIFICATION / AUDIT_QUEUE
 // producers). The ChatRoom DO (RT hub) is preserved — SQLite-backed DOs run on the
 // free plan. This file stays import-clean for `wrangler dev`.
-import type { Fetcher, Queue, ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
+import type { Fetcher, Queue, ExecutionContext } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
 import { createServiceClient, type RequestContext } from "@dub/http";
@@ -15,7 +15,6 @@ import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1ChatRepo } from "./d1-repo";
 import { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
-import { runOutboxDrain } from "./drain";
 import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
 import type { Env } from "./env";
 import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, RealtimePublisher } from "./types";
@@ -144,23 +143,9 @@ export default {
     return app.fetch(request as unknown as Request) as unknown as Response;
   },
 
-  // Free-tier Cron drain: forward audit rows to audit-log, defer domain events
-  // (kept durable/pending). On a paid deploy with real Queues this is a harmless
-  // no-op tick (the outbox stays empty). Best-effort: a drain hiccup is logged, not
-  // thrown, so it never trips the scheduled invocation into a retry storm.
-  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    try {
-      const result = await runOutboxDrain(env);
-      consoleSink({ level: "info", message: "chat-service outbox drained", service: "chat-service", fields: { ...result } });
-    } catch (err) {
-      consoleSink({
-        level: "error",
-        message: "chat-service outbox drain failed",
-        service: "chat-service",
-        fields: { error: err instanceof Error ? err.message : String(err) },
-      });
-    }
-  },
+  // NOTE: no scheduled() drain here. The freeq outbox is drained centrally by the
+  // standalone freeq-drain worker (single aggregated cron). src/drain.ts is retained as
+  // the topic->destination contract source for freeq-drain's routing map.
 };
 
 export { ChatRoom } from "./chat-room-do";

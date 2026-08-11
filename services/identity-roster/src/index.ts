@@ -3,11 +3,9 @@
 // (wrangler.toml is a documented skeleton).
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { common } from "@dub/types";
-import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { D1IdentityRepo } from "./repo/d1-repo";
 import { createAuditSink, createSessionRevoker } from "./sinks";
-import { runAuditDrain } from "./drain";
 import type { Env } from "./env";
 
 // Typed against the ambient Request/Response (shared by Hono + the Workers
@@ -34,20 +32,9 @@ const handler = {
     return app.fetch(request, env as unknown as Record<string, unknown>, ctx as Parameters<typeof app.fetch>[2]);
   },
 
-  // Cron Trigger (free-tier only; see wrangler.free.toml [triggers]). Drains the
-  // @dub/freeq audit outbox, forwarding durably-persisted best-effort audit records to
-  // audit-log. On the paid deploy OUTBOX_DB/SVC_AUDIT are absent and this is a no-op
-  // (the real Queue + Queue consumer carry the audit fan-out instead). controller/ctx
-  // are typed opaquely so this file keeps typechecking under both tsconfigs.
-  async scheduled(_controller: unknown, env: Env, _ctx: unknown): Promise<void> {
-    const result = await runAuditDrain(env);
-    consoleSink({
-      level: "info",
-      message: "identity-roster audit outbox drained",
-      service: "identity-roster",
-      fields: { ...result },
-    });
-  },
+  // NOTE: no scheduled() drain here. The freeq audit outbox is drained centrally by the
+  // standalone freeq-drain worker (single aggregated cron). src/drain.ts is retained as
+  // the topic->destination contract source (audit.record) for freeq-drain's routing.
 };
 
 export default handler;

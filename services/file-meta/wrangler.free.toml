@@ -56,8 +56,6 @@ service = "dub-drive-proxy"       # GET /files/:id — drive.* name/mime complet
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
-# Audit outbox drain Cron (every minute — matches auth-service's audit drain cadence so
-# async audit records reach audit-log promptly). Free plan caps the account at 5 cron
-# triggers; this reuses none of the daily retention schedules.
-[triggers]
-crons = ["* * * * *"]
+# NOTE: the per-service drain Cron Trigger (was `crons = ["* * * * *"]`) was REMOVED.
+# The freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron),
+# freeing a slot on the Workers FREE plan's 5-cron account cap.

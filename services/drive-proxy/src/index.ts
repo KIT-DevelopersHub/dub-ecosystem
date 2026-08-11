@@ -13,16 +13,14 @@
 // in the `drive_watch_channels` registry (this D1 is watch state ONLY — file metadata
 // stays with file-meta-service). When no D1 is bound the watch routes 500 and the rest
 // of the surface is unaffected.
-import type { ExecutionContext, Fetcher, ScheduledController } from "@cloudflare/workers-types";
+import type { ExecutionContext, Fetcher } from "@cloudflare/workers-types";
 import { createServiceClient, newRequestId } from "@dub/http";
-import { consoleSink } from "@dub/observability";
 import type { identity } from "@dub/types";
 import { createApp } from "./app";
 import { createKvCache } from "./cache";
 import { createKvRateLimiter } from "./ratelimit";
 import { createEventPublisher } from "./events";
 import { buildPublisherEnv } from "./outbox";
-import { runOutboxDrain } from "./drain";
 import { createGoogleClient } from "./google/client";
 import { createTokenProvider } from "./google/token";
 import { createDriveService } from "./service";
@@ -99,29 +97,12 @@ function buildWatch(
   });
 }
 
-const SERVICE_NAME = "drive-proxy";
-
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
     return buildApp(env).fetch(request, env, ctx);
   },
 
-  // Free-tier Cron: drain the @dub/freeq outbox (forwards audit rows to audit-log over
-  // SVC_AUDIT; defers file-meta domain events, which stay durable/pending). No-op on the
-  // paid plan (OUTBOX_DB unbound -> runOutboxDrain returns zeroed; real Queues carry the
-  // traffic and this handler is never scheduled there). Best-effort: a drain hiccup logs
-  // and returns; it must never throw out of scheduled().
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    try {
-      const result = await runOutboxDrain(env);
-      consoleSink({ level: "info", message: "drive-proxy outbox drained", service: SERVICE_NAME, fields: { ...result } });
-    } catch (err) {
-      consoleSink({
-        level: "error",
-        message: "drive-proxy outbox drain failed",
-        service: SERVICE_NAME,
-        fields: { error: err instanceof Error ? err.message : String(err) },
-      });
-    }
-  },
+  // NOTE: no scheduled() drain here. The freeq outbox is drained centrally by the
+  // standalone freeq-drain worker (single aggregated cron). src/drain.ts is retained as
+  // the topic->destination contract source (audit.record) for freeq-drain's routing.
 };

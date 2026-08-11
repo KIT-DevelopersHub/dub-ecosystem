@@ -2,12 +2,9 @@
 // scheduled Cron (daily retention purge). Deploy is out of scope for this unit.
 import type { ExecutionContext, MessageBatch, ScheduledController } from "@cloudflare/workers-types";
 import type { DubEventEnvelope } from "@dub/events";
-import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { consumeEventQueue } from "./queue";
 import { runRetentionPurge } from "./scheduled";
-import { runAuditDrain } from "./drain";
-import { SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 
 const app = createApp();
@@ -23,14 +20,11 @@ const handler = {
     return consumeEventQueue(batch, env);
   },
 
-  // Daily Cron: retention purge + free-tier audit outbox drain. On the paid deploy
-  // OUTBOX_DB/SVC_AUDIT are absent so the drain is a no-op (the real Queue + Queue
-  // consumer carry the audit fan-out instead); on the free deploy it forwards
-  // durably-persisted delivery-failed audit records to audit-log.
+  // Daily Cron: retention purge only. The free-tier audit outbox drain was REMOVED from
+  // here — the freeq outbox is now drained centrally by the standalone freeq-drain worker
+  // (single aggregated cron). This service keeps its own business cron (retention purge).
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     await runRetentionPurge(env);
-    const drained = await runAuditDrain(env);
-    consoleSink({ level: "info", message: "notification audit outbox drained", service: SERVICE_NAME, fields: { ...drained } });
   },
 };
 

@@ -5,14 +5,12 @@ import type {
   ScheduledController,
 } from "@cloudflare/workers-types";
 import type { DubEventEnvelope, WebhookEventEnvelopeV1 } from "@dub/events";
-import { consoleSink } from "@dub/observability";
 import { emptyStats, type SyncRunRecord } from "./domain/types";
 import type { Env } from "./env";
 import { WH_GITHUB_QUEUE, EVT_GITHUB_SYNC_QUEUE } from "./env";
 import { buildRuntime } from "./deps";
 import { createApp } from "./app";
 import { handleWebhookBatch, buildDomainEventHandler } from "./queue";
-import { runOutboxDrain } from "./drain";
 
 const PROCESSED_TTL_DAYS = 14;
 
@@ -55,20 +53,10 @@ export default {
 };
 
 async function runScheduled(env: Env): Promise<void> {
-  // Free-tier outbox drain runs on every tick (forwards audit rows to audit-log; defers
-  // domain events). Best-effort: a drain hiccup must not abort the reconcile. On a paid
-  // deploy (real Queues) the outbox is empty, so the drain is a cheap no-op.
-  try {
-    const result = await runOutboxDrain(env);
-    consoleSink({ level: "info", message: "github-sync outbox drained", service: "github-sync", fields: { ...result } });
-  } catch (err) {
-    consoleSink({
-      level: "error",
-      message: "github-sync outbox drain failed",
-      service: "github-sync",
-      fields: { error: err instanceof Error ? err.message : String(err) },
-    });
-  }
+  // Business cron only: the reconcile pass (+ idempotency purge). The free-tier outbox
+  // drain was REMOVED from here — the freeq outbox is now drained centrally by the
+  // standalone freeq-drain worker (single aggregated cron). This service keeps its own
+  // business cron (reconcile).
   await runReconcileCron(env);
 }
 

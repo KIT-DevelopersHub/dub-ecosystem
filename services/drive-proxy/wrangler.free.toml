@@ -47,10 +47,9 @@ service = "dub-identity-roster"   # POST /authz/check (drive:read / drive:write)
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
-# --- Cron: drains the freeq outbox on each tick (03:15 UTC daily; the Workers FREE plan
-# caps cron triggers, so a single daily schedule carries the drain). ---
-[triggers]
-crons = ["15 3 * * *"]
+# NOTE: the per-service drain Cron Trigger (was `crons = ["15 3 * * *"]`) was REMOVED.
+# The freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron),
+# freeing a slot on the Workers FREE plan's 5-cron account cap.
 
 # --- Tunable numbers (frozen semantics; mirror wrangler.toml) ---
 [vars]

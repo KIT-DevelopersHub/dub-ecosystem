@@ -2,7 +2,7 @@
 // AppDeps and serves the Hono app. A Cron Trigger drains the free-tier @dub/freeq
 // outbox (replacement for the paid EVT_* / AUDIT_QUEUE producers). This file must
 // stay import-clean for `wrangler dev`.
-import type { ExecutionContext, Queue, ScheduledController } from "@cloudflare/workers-types";
+import type { ExecutionContext, Queue } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
 import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
@@ -11,7 +11,6 @@ import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1EventRepo } from "./d1-repo";
 import { buildTaskClient } from "./task-client";
-import { runOutboxDrain } from "./drain";
 import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
 import type { Env } from "./env";
 import type { AppDeps, EventPublisher, AuditSink } from "./types";
@@ -72,23 +71,9 @@ export default {
     return app.fetch(request as unknown as Request) as unknown as Response;
   },
 
-  // Free-tier Cron drain: forward audit rows to audit-log, defer domain events
-  // (kept durable/pending). On a paid deploy with real Queues this is a harmless
-  // no-op tick (the outbox stays empty). Best-effort: a drain hiccup is logged, not
-  // thrown, so it never trips the scheduled invocation into a retry storm.
-  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    try {
-      const result = await runOutboxDrain(env);
-      consoleSink({ level: "info", message: "event-service outbox drained", service: "event-service", fields: { ...result } });
-    } catch (err) {
-      consoleSink({
-        level: "error",
-        message: "event-service outbox drain failed",
-        service: "event-service",
-        fields: { error: err instanceof Error ? err.message : String(err) },
-      });
-    }
-  },
+  // NOTE: no scheduled() drain here. The freeq outbox is drained centrally by the
+  // standalone freeq-drain worker (single aggregated cron). src/drain.ts is retained as
+  // the topic->destination contract source (audit.record + evt.* defer) for freeq-drain.
 };
 
 export { createApp } from "./app";
