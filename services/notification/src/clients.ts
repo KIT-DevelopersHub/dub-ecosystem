@@ -10,7 +10,9 @@ import { SERVICE_NAME } from "./config";
 
 // ---- identity ----
 export interface IdentityPort {
-  /** GET /users?roleKey= — expand a role key into member user ids. */
+  /** GET /internal/users?roleKey= — expand a role id into member user ids. Internal
+   *  S2S route (x-dub-internal gated), so role fan-out works for any caller regardless
+   *  of the acting user's identity:read permission. */
   listUserIdsByRole(roleKey: string, ctx: RequestContext): Promise<string[]>;
   /** GET /users/:id — resolve a user's email (null when absent/unknown). */
   getEmail(userId: string, ctx: RequestContext): Promise<string | null>;
@@ -54,7 +56,10 @@ export function makeIdentityPort(binding: Fetcher): IdentityPort {
   const client = createServiceClient(binding, { service: "identity-roster", caller: SERVICE_NAME });
   return {
     async listUserIdsByRole(roleKey, ctx) {
-      const res = await client.get<{ items: { id: string }[] }>(ctx, "/users", { query: { roleKey } });
+      // Internal S2S route: NOT the permission-gated external GET /identity/users. The
+      // bare GET /users has no list handler (404s), which previously made role fan-out
+      // (feedback → admin inbox) silently fail; /internal/users is x-dub-internal gated.
+      const res = await client.get<{ items: { id: string }[] }>(ctx, "/internal/users", { query: { roleKey } });
       return res.items.map((u) => u.id);
     },
     async getEmail(userId, ctx) {
