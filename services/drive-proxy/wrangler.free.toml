@@ -1,0 +1,68 @@
+# Free-tier deploy of drive-proxy as `dub-drive-proxy` (internal; reached via the
+# api-gateway SVC_DRIVE_PROXY service binding — workers.dev disabled). NO paid Cloudflare
+# Queues: the event + audit fan-out that used Queue producers (EVT_FILE_META /
+# AUDIT_QUEUE) is now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB,
+# binding OUTBOX_DB). buildPublisherEnv() falls back to the outbox shim when the Queue
+# bindings are absent, so no event/audit record is dropped; a Cron drain forwards audit
+# rows to audit-log (SVC_AUDIT) and defers file-meta domain events (durable/pending) until
+# their consumer route lands. The paid wrangler.toml is left untouched (queue-wiring
+# conformance stays green).
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core (idempotent)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/drive-proxy/db/0001_freeq_outbox.sql
+#   npx wrangler deploy --config services/drive-proxy/wrangler.free.toml
+# Secrets (GOOGLE_OAUTH_*) are set out-of-band via `wrangler secret put` and persist
+# across deploys; never commit them (機密はローカルのみ).
+name = "dub-drive-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# --- KV: Google token cache + short-TTL response cache + rate counter (§3) ---
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_AT_APPLY"          # `wrangler kv namespace create drive-proxy-cache`
+
+# Free-tier event/audit outbox (@dub/freeq): replaces the paid EVT_FILE_META /
+# AUDIT_QUEUE producers. Shared dub-core D1 — the un-namespaced freeq_outbox table only
+# (drive-proxy's watch registry stays on its own dub-drive-proxy-watch D1, unbound here).
+[[d1_databases]]
+binding = "OUTBOX_DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service Bindings (live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (drive:read / drive:write)
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# --- Cron: drains the freeq outbox on each tick (03:15 UTC daily; the Workers FREE plan
+# caps cron triggers, so a single daily schedule carries the drain). ---
+[triggers]
+crons = ["15 3 * * *"]
+
+# --- Tunable numbers (frozen semantics; mirror wrangler.toml) ---
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+DRIVE_RATE_WINDOW_SECONDS = "100"
+DRIVE_RATE_SOFT_LIMIT = "500"
+DRIVE_CACHE_TTL_LIST_SECONDS = "60"
+DRIVE_CACHE_TTL_FILE_SECONDS = "60"
+DRIVE_CACHE_TTL_SHEET_SECONDS = "30"
+DRIVE_WATCH_TTL_SECONDS = "86400"
+
+# --- Secrets (set via `wrangler secret put`, never in this file) ---
+# GOOGLE_OAUTH_CLIENT_ID
+# GOOGLE_OAUTH_CLIENT_SECRET
+# GOOGLE_OAUTH_REFRESH_TOKEN

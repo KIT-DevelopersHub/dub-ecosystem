@@ -40,6 +40,22 @@ Design source of truth: `設計_P0a/services_連携/drive-proxy.md` + P0b frozen
   (contract only; enabled with the P1 Drive-watch consumer). The **producer** side —
   issuing the channel token — is implemented (see below).
 
+### Free-tier (no paid Queues) — `@dub/freeq` outbox
+
+Cloudflare Queues are a Workers **paid** feature. For a free-plan deploy the two
+producer bindings (`EVT_FILE_META` / `AUDIT_QUEUE`) are absent and
+`buildPublisherEnv()` (`src/outbox.ts`) transparently falls back to a
+[`@dub/freeq`](../../packages/freeq) **D1 outbox** (`freeq_outbox` on the shared
+`dub-core` D1, binding `OUTBOX_DB`) — nothing above the `createEventPublisher` seam
+changes, and no event/audit record is dropped (the producer `INSERT` is the durability
+guarantee). A daily Cron (`scheduled` handler → `runOutboxDrain`, `src/drain.ts`)
+forwards `audit.record` rows to audit-log `POST /internal/audit-async` (over `SVC_AUDIT`,
+the exact `AuditRecordEnvelopeV1` verbatim) and **defers** `evt.file-meta` domain events
+(they stay durable/`pending` until file-meta's free-tier consumer route lands — never
+lost, never mislabeled done). Deploy with `wrangler.free.toml` (apply
+`db/0001_freeq_outbox.sql` to `dub-core` once). The paid `wrangler.toml` is unchanged, so
+the queue-wiring conformance guard keeps passing.
+
 ## Drive-watch (channel-token issuance)
 
 drive-proxy is the **issuing side** of the Google Drive push-channel token that
