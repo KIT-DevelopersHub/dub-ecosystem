@@ -201,3 +201,16 @@ export const DEMO_CREDENTIALS: readonly { email: string; password: string }[] = 
 export async function seedDemoCredentials(store: PasswordStore, now: () => string = () => new Date().toISOString()): Promise<void> {
   for (const c of DEMO_CREDENTIALS) await seedPasswordCredential(store, c.email, c.password, now);
 }
+
+// Login credentials for the oversight accounts (info@ / admin@) — the auth-service half
+// of identity-roster's OVERSIGHT_USERS (emails MUST match). admin@ already has a demo
+// credential above; info@ is added here so the shared address is a real loginable
+// individual account. Both hold the admin role (=> mail:read_all).
+export const OVERSIGHT_CREDENTIALS: readonly { email: string; password: string }[] = [
+  { email: "info@developershub.jp", password: "demo-info-pw" },
+] as const;
+
+/** Idempotent: seed the oversight accounts' credentials (info@) into the store. */
+export async function seedOversightCredentials(store: PasswordStore, now: () => string = () => new Date().toISOString()): Promise<void> {
+  for (const c of OVERSIGHT_CREDENTIALS) await seedPasswordCredential(store, c.email, c.password, now);
+}

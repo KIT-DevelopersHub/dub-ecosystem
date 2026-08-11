@@ -486,6 +486,127 @@ describe("account isolation (per-user scope)", () => {
   });
 });
 
+describe("oversight — mail:read_all bypasses account scope", () => {
+  const asUser = (userId: string, over: Record<string, string> = {}) =>
+    ({ "content-type": "application/json", "x-dub-request-id": "req_ovr", "x-dub-user-id": userId, ...over });
+  // An identity where the caller holds BOTH mail:read (guard) and mail:read_all (oversight).
+  const oversightEnv = () => makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, {}, ["mail:read", "mail:read_all", "mail:send"]) });
+
+  const seedOwned = (raw: ReturnType<typeof makeEnv>["raw"], row: { id: string; ownerUserId: string | null; threadId?: string }) => {
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
+         VALUES (?, ?, ?, 'info', ?, ?, 'Hi', 'snip', NULL, NULL, ?, ?, 'body', NULL, NULL, ?)`,
+      )
+      .run(
+        row.id,
+        `<${row.id}@x>`,
+        row.threadId ?? `thr_${row.id}`,
+        JSON.stringify({ email: "sender@x.com" }),
+        JSON.stringify([{ email: "info@developershub.jp" }]),
+        "2026-08-10T00:00:00.000Z",
+        "2026-08-10T00:00:00.000Z",
+        row.ownerUserId,
+      );
+  };
+
+  it("Inbox: a mail:read_all holder lists EVERY account's messages (incl. NULL-owner)", async () => {
+    const { env, raw } = oversightEnv();
+    seedOwned(raw, { id: "in_alice", ownerUserId: "usr_alice" });
+    seedOwned(raw, { id: "in_bob", ownerUserId: "usr_bob" });
+    seedOwned(raw, { id: "in_orphan", ownerUserId: null }); // archive/legacy row, owner unresolved
+
+    const box = (await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser("usr_super") }), env)).json()) as { items: mail.MailMessageListItem[] };
+    expect(box.items.map((m) => m.id).sort()).toEqual(["in_alice", "in_bob", "in_orphan"]);
+  });
+
+  it("Detail + thread: a mail:read_all holder can open any account's message and thread", async () => {
+    const { env, raw } = oversightEnv();
+    seedOwned(raw, { id: "in_a", ownerUserId: "usr_alice", threadId: "thr_a" });
+    expect((await app.fetch(new Request("https://svc/mail/messages/in_a", { headers: asUser("usr_super") }), env)).status).toBe(200);
+    const thread = await app.fetch(new Request("https://svc/mail/threads/thr_a", { headers: asUser("usr_super") }), env);
+    expect(thread.status).toBe(200);
+  });
+
+  it("Sent: a mail:read_all holder sees another user's sent mail", async () => {
+    const { env } = oversightEnv();
+    await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "ovr-1" }),
+        body: JSON.stringify({ to: [{ email: "x@x.com" }], subject: "Alice-sent", textBody: "body" }),
+      }),
+      env,
+    );
+    const list = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_super") }), env)).json()) as { items: mail.MailSentListItem[] };
+    expect(list.items.map((i) => i.subject)).toContain("Alice-sent");
+  });
+
+  it("without mail:read_all a caller stays scoped to their own mail (fail-closed)", async () => {
+    // grant mail:read only (NOT mail:read_all) — the default isolation applies.
+    const { env, raw } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, {}, ["mail:read"]) });
+    seedOwned(raw, { id: "in_alice", ownerUserId: "usr_alice" });
+    const box = (await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser("usr_bob") }), env)).json()) as { items: mail.MailMessageListItem[] };
+    expect(box.items).toHaveLength(0); // bob (no read_all) sees none of alice's mail
+  });
+});
+
+describe("archive auto-CC on send", () => {
+  const asUser = (userId: string, over: Record<string, string> = {}) =>
+    ({ "content-type": "application/json", "x-dub-request-id": "req_cc", "x-dub-user-id": userId, ...over });
+
+  it("adds the archive address to Cc on every outbox send (default archive@developershub.jp)", async () => {
+    const { env } = makeEnv(); // MAIL_ARCHIVE_CC unset -> DEFAULT_ARCHIVE_CC_ADDRESS
+    const out = await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "cc-1" }),
+        body: JSON.stringify({ to: [{ email: "b@x.com" }], subject: "Report", textBody: "body" }),
+      }),
+      env,
+    );
+    expect(out.status).toBe(202);
+    // The persisted Sent row records the archive in its Cc.
+    const detailList = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
+    const id = detailList.items[0]!.id;
+    const detail = (await (await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(id)}`, { headers: asUser("usr_alice") }), env)).json()) as mail.MailSentDetail;
+    expect((detail.cc ?? []).map((a) => a.email)).toContain("archive@developershub.jp");
+  });
+
+  it("does not duplicate the archive address when the caller already CC'd it", async () => {
+    const { env } = makeEnv({ MAIL_ARCHIVE_CC: "archive@developershub.jp" });
+    await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "cc-2" }),
+        body: JSON.stringify({ to: [{ email: "b@x.com" }], cc: [{ email: "archive@developershub.jp" }], subject: "R", textBody: "b" }),
+      }),
+      env,
+    );
+    const list = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
+    const detail = (await (await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(list.items[0]!.id)}`, { headers: asUser("usr_alice") }), env)).json()) as mail.MailSentDetail;
+    const archives = (detail.cc ?? []).filter((a) => a.email === "archive@developershub.jp");
+    expect(archives).toHaveLength(1);
+  });
+
+  it("MAIL_ARCHIVE_CC='' disables the auto-CC (opt-out)", async () => {
+    const { env } = makeEnv({ MAIL_ARCHIVE_CC: "" });
+    await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "cc-3" }),
+        body: JSON.stringify({ to: [{ email: "b@x.com" }], subject: "R", textBody: "b" }),
+      }),
+      env,
+    );
+    const list = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
+    const detail = (await (await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(list.items[0]!.id)}`, { headers: asUser("usr_alice") }), env)).json()) as mail.MailSentDetail;
+    expect((detail.cc ?? []).map((a) => a.email)).not.toContain("archive@developershub.jp");
+  });
+});
+
 describe("health", () => {
   it("reports ok", async () => {
     const { env } = makeEnv();

@@ -66,6 +66,10 @@ binding = "AUDIT_QUEUE"
 MAIL_OUTBOUND_PROVIDER = "resend"
 SES_REGION = "ap-northeast-1"
 MAIL_FROM_ADDRESS = "info@developershub.jp"
+# Compliance archive: every outbound send is auto-CC'd here. Pair with a CF Email Routing
+# rule (matcher=archive@developershub.jp, action=worker:dub-mail-gateway) so the archived
+# copy is ingested back and visible to mail:read_all (oversight) holders. See README.
+MAIL_ARCHIVE_CC = "archive@developershub.jp"
 # Send resilience tuning (optional; defaults shown). Retries transient provider failures
 # (network / timeout / 429 / 5xx) with backoff+jitter; deterministic 4xx fail fast.
 MAIL_SEND_MAX_ATTEMPTS = "3"      # total attempts (1 try + 2 retries); range 1..6

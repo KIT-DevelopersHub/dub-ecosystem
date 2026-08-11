@@ -189,16 +189,34 @@ function sendRowToDetail(r: SendLogRow): mail.MailSentDetail {
   return detail;
 }
 
+/** Read scope for the account-isolated mail queries. A plain userId string scopes a
+ *  query to that owner's own mail (the #169 per-account isolation, fail-closed). The
+ *  `{ readAll: true }` variant is the `mail:read_all` OVERSIGHT bypass: an authorized
+ *  supervisor / info@ / admin@ account sees EVERY row (owner filter dropped, including
+ *  NULL-owner archive/system rows). Callers resolve which variant to pass from the
+ *  caller's permissions — the repo never decides policy, only applies the given scope. */
+export type MailScope = string | { readAll: true };
+
+/** True when the scope is the mail:read_all oversight bypass (no owner filter). */
+function isReadAll(scope: MailScope): scope is { readAll: true } {
+  return typeof scope === "object";
+}
+
 /** List sent mail (status='sent'), newest first. id-based opaque cursor (like
  *  listInbound); ULID ids sort in creation order so the id cursor tracks created_at. */
 export async function listSent(
   db: DbClient,
-  q: { ownerUserId: string; cursor?: string; limit: number },
+  q: { ownerUserId: MailScope; cursor?: string; limit: number },
 ): Promise<common.Paginated<mail.MailSentListItem>> {
   // Fail-closed account scope: only the signed-in user's own delivered sends. A NULL
   // owner_user_id (system send / legacy row) never matches `= ?`, so it is invisible.
-  const where: string[] = ["status = 'sent'", "owner_user_id = ?"];
-  const binds: unknown[] = [q.ownerUserId];
+  // Oversight (mail:read_all) drops the owner filter entirely and returns every send.
+  const where: string[] = ["status = 'sent'"];
+  const binds: unknown[] = [];
+  if (!isReadAll(q.ownerUserId)) {
+    where.push("owner_user_id = ?");
+    binds.push(q.ownerUserId);
+  }
   if (q.cursor !== undefined) {
     where.push("id < ?");
     binds.push(decodeCursor(q.cursor));
@@ -219,14 +237,17 @@ export async function listSent(
 
 /** Full sent detail (body included) — backs GET /sent/:id. Only a delivered
  *  (status='sent') row is returned; a pending/failed row reads as not-found. */
-export async function getSentDetail(db: DbClient, id: string, ownerUserId: string): Promise<mail.MailSentDetail | null> {
+export async function getSentDetail(db: DbClient, id: string, scope: MailScope): Promise<mail.MailSentDetail | null> {
   // Account scope: a user can only open their OWN sent mail — another user's id reads as
-  // not-found (fail-closed 404), never a 403 that would confirm the row exists.
-  const row = await db.first<SendLogRow>(
-    `SELECT * FROM mail_send_log WHERE id = ? AND status = 'sent' AND owner_user_id = ?`,
-    id,
-    ownerUserId,
-  );
+  // not-found (fail-closed 404), never a 403 that would confirm the row exists. Oversight
+  // (mail:read_all) drops the owner filter so a supervisor can open any delivered send.
+  const binds: unknown[] = [id];
+  let sql = `SELECT * FROM mail_send_log WHERE id = ? AND status = 'sent'`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  const row = await db.first<SendLogRow>(sql, ...binds);
   return row ? sendRowToDetail(row) : null;
 }
 
@@ -309,41 +330,66 @@ export async function getInboundById(db: DbClient, id: string): Promise<mail.Mai
 
 /** Full detail (body + read state) — backs GET /messages/:id. Account-scoped: another
  *  user's message reads as not-found (fail-closed 404), never exposing its body. */
-export async function getInboundDetail(db: DbClient, id: string, ownerUserId: string): Promise<mail.MailMessageDetail | null> {
-  const row = await db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE id = ? AND owner_user_id = ?`, id, ownerUserId);
+export async function getInboundDetail(db: DbClient, id: string, scope: MailScope): Promise<mail.MailMessageDetail | null> {
+  // Oversight (mail:read_all) drops the owner filter so a supervisor sees any message body.
+  const binds: unknown[] = [id];
+  let sql = `SELECT * FROM mail_inbound WHERE id = ?`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  const row = await db.first<InboundRow>(sql, ...binds);
   return row ? rowToDetail(row) : null;
 }
 
 /** Every message in a thread, oldest→newest, as full details — backs GET /threads/:id.
  *  Account-scoped: only the caller's own messages in the thread are returned (a thread
  *  the caller owns no message in reads as empty → 404 at the route). */
-export async function listThread(db: DbClient, threadId: string, ownerUserId: string): Promise<mail.MailMessageDetail[]> {
-  const rows = await db.all<InboundRow>(
-    `SELECT * FROM mail_inbound WHERE thread_id = ? AND owner_user_id = ? ORDER BY received_at ASC, id ASC`,
-    threadId,
-    ownerUserId,
-  );
+export async function listThread(db: DbClient, threadId: string, scope: MailScope): Promise<mail.MailMessageDetail[]> {
+  // Oversight (mail:read_all) drops the owner filter so a supervisor sees the whole thread.
+  const binds: unknown[] = [threadId];
+  let sql = `SELECT * FROM mail_inbound WHERE thread_id = ?`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  sql += ` ORDER BY received_at ASC, id ASC`;
+  const rows = await db.all<InboundRow>(sql, ...binds);
   return rows.map(rowToDetail);
 }
 
 /** Mark a message read (idempotent): stamps read_at only on the first open. Returns
  *  whether the message exists FOR THIS OWNER so the route can 404 an unknown/foreign id
  *  (a user can never flip another account's read state). */
-export async function markInboundRead(db: DbClient, id: string, ownerUserId: string): Promise<{ found: boolean }> {
-  const row = await db.first<{ id: string }>(`SELECT id FROM mail_inbound WHERE id = ? AND owner_user_id = ?`, id, ownerUserId);
+export async function markInboundRead(db: DbClient, id: string, scope: MailScope): Promise<{ found: boolean }> {
+  // Oversight (mail:read_all) may open (and thus mark read) any message.
+  const readAll = isReadAll(scope);
+  const selSql = readAll ? `SELECT id FROM mail_inbound WHERE id = ?` : `SELECT id FROM mail_inbound WHERE id = ? AND owner_user_id = ?`;
+  const row = readAll
+    ? await db.first<{ id: string }>(selSql, id)
+    : await db.first<{ id: string }>(selSql, id, scope);
   if (!row) return { found: false };
-  await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND owner_user_id = ? AND read_at IS NULL`, nowIso(), id, ownerUserId);
+  if (readAll) {
+    await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND read_at IS NULL`, nowIso(), id);
+  } else {
+    await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND owner_user_id = ? AND read_at IS NULL`, nowIso(), id, scope);
+  }
   return { found: true };
 }
 
 export async function listInbound(
   db: DbClient,
-  q: { ownerUserId: string; threadId?: string; cursor?: string; limit: number },
+  q: { ownerUserId: MailScope; threadId?: string; cursor?: string; limit: number },
 ): Promise<common.Paginated<mail.MailMessageListItem>> {
   // Fail-closed account scope: only messages delivered to the signed-in user. A NULL
   // owner_user_id (unassigned / legacy row) never matches `= ?`, so it stays invisible.
-  const where: string[] = ["owner_user_id = ?"];
-  const binds: unknown[] = [q.ownerUserId];
+  // Oversight (mail:read_all) drops the owner filter and lists every account's inbox.
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (!isReadAll(q.ownerUserId)) {
+    where.push("owner_user_id = ?");
+    binds.push(q.ownerUserId);
+  }
   if (q.threadId !== undefined) {
     where.push("thread_id = ?");
     binds.push(q.threadId);

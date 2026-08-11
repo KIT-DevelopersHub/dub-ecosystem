@@ -16,7 +16,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
 
-    // inline editor + full 32-key matrix appear WITHOUT any navigation
+    // inline editor + full 33-key matrix appear WITHOUT any navigation
     await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_organizer")).toBeInTheDocument());
     expect(screen.getByTestId("fe7-role-role_organizer-permission-matrix")).toBeInTheDocument();
     expect(screen.getByTestId("fe7-role-role_organizer-matrix-key-event:read")).toBeInTheDocument();

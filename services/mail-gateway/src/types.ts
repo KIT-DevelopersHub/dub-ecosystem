@@ -34,6 +34,10 @@ export interface SendDeps {
    *  pure system/automation send with no human on the call. Persisted on the send-log so
    *  GET /mail/sent can return only the signed-in user's own mail. */
   ownerUserId?: string | null;
+  /** Fixed archive address auto-CC'd on this send (compliance archive). null/empty =
+   *  disabled. Deduplicated against the existing To/Cc so a caller who already addressed
+   *  it is never CC'd twice. */
+  archiveCc?: string | null;
   /** Retry budget for the provider call (transient failures only). Optional — the send
    *  core falls back to the built-in defaults when absent (tests omit it). */
   retry?: Pick<RetryOptions, "maxAttempts" | "baseDelayMs">;
