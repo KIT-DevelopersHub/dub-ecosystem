@@ -12,7 +12,9 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@dub/errors": "workspace:*",
@@ -32,6 +34,7 @@
     "@testing-library/user-event": "^14.5.2",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
+    "@playwright/test": "^1.49.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
     "vite": "^6.0.3"

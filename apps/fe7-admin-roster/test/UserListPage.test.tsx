@@ -50,6 +50,55 @@ describe("UserListPage", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("shows a ロール column with each user's org-wide roles as chips", async () => {
+    renderWithProviders(<UserListPage />);
+    // Alice = admin, Bob = member (seeded roleIds), Carol = none.
+    await waitFor(() => expect(screen.getByTestId("fe7-role-chip-user_alice-role_admin")).toBeInTheDocument());
+    expect(screen.getByTestId("fe7-role-chip-user_alice-role_admin")).toHaveTextContent("admin");
+    expect(screen.getByTestId("fe7-role-chip-user_bob-role_member")).toHaveTextContent("member");
+    expect(screen.getByTestId("fe7-roles-empty-user_carol")).toBeInTheDocument();
+  });
+
+  it("admin grants a role inline from the list (optimistic) without leaving the page", async () => {
+    const user = userEvent.setup();
+    const { navigate } = renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-empty-user_carol")).toBeInTheDocument());
+
+    // Open Carol's inline role editor and toggle "member" on.
+    const cell = screen.getByTestId("fe7-user-roles-user_carol");
+    await user.click(within(cell).getByRole("button", { name: "編集" }));
+    await user.click(await screen.findByTestId("fe7-inline-role-toggle-user_carol-role_member"));
+
+    // Chip appears immediately (optimistic) and no navigation happened.
+    await waitFor(() => expect(screen.getByTestId("fe7-role-chip-user_carol-role_member")).toBeInTheDocument());
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("fe7-users-table")).toBeInTheDocument();
+  });
+
+  it("admin revokes a role inline from the list", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-role-chip-user_bob-role_member")).toBeInTheDocument());
+
+    const cell = screen.getByTestId("fe7-user-roles-user_bob");
+    await user.click(within(cell).getByRole("button", { name: "編集" }));
+    // Wait until the lazily-loaded assignment enables the checkbox, then uncheck.
+    const toggle = await screen.findByTestId("fe7-inline-role-toggle-user_bob-role_member");
+    await waitFor(() => expect(toggle).not.toBeDisabled());
+    await user.click(toggle);
+
+    await waitFor(() => expect(screen.queryByTestId("fe7-role-chip-user_bob-role_member")).not.toBeInTheDocument());
+  });
+
+  it("hides inline role editing for read-only users (chips stay visible)", async () => {
+    renderWithProviders(<UserListPage />, { me: makeMe(["identity:read"]) });
+    // Chips still render for everyone...
+    await waitFor(() => expect(screen.getByTestId("fe7-role-chip-user_alice-role_admin")).toBeInTheDocument());
+    // ...but no "編集" affordance for a read-only viewer.
+    const cell = screen.getByTestId("fe7-user-roles-user_alice");
+    expect(within(cell).queryByRole("button", { name: "編集" })).not.toBeInTheDocument();
+  });
+
   it("offers 在籍に戻す for a non-active user, and the pane closes on ×", async () => {
     const user = userEvent.setup();
     // user_carol is seeded with status "invited" -> the status toggle offers reactivation.
