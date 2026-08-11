@@ -10,6 +10,7 @@ import { HEADERS } from "@dub/observability";
 import { getUserId, type AuthClient } from "@dub/auth-client";
 import { common, type auditLog } from "@dub/types";
 import type { DubEventEnvelope, WebhookEventEnvelopeV1 } from "@dub/events";
+import type { Env } from "./env";
 import type { GithubSyncService } from "./service";
 import type { Publisher } from "./events/publisher";
 import { GITHUB_PERMISSIONS, asPermissionKey } from "./auth";
@@ -83,6 +84,21 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars & { authn: unkn
     }
     await dispatchWebhook(deps.queue, body as WebhookEventEnvelopeV1);
     return c.json({ ok: true }, 202);
+  });
+
+  // ---- POST /internal/reconcile/kick (free-plan reconcile-alarm bootstrap) ----
+  // Arms the GithubReconcileDO alarm loop once after a free-tier deploy (wrangler.free.toml),
+  // which drives the reconcile pass every 6h WITHOUT consuming a Workers-Free cron slot.
+  // Idempotent (ensureAlarm only sets an alarm when none is pending), so it is safe to call
+  // after every deploy. On the paid deploy the DO is not bound (Cron Trigger drives reconcile)
+  // and this returns 503 — harmless, since the paid path never calls it.
+  app.post("/internal/reconcile/kick", async (c) => {
+    const ns = (c.env as Env).RECONCILE_DO;
+    if (!ns) return c.json({ error: "RECONCILE_DO not bound" }, 503);
+    const stub = ns.get(ns.idFromName("singleton"));
+    const res = await stub.fetch("https://github-reconcile-do/internal/ensure-alarm", { method: "POST" });
+    const body = (await res.json().catch(() => ({}))) as unknown;
+    return c.json({ ok: true, kicked: true, do: body });
   });
 
   app.use("*", dubContext());

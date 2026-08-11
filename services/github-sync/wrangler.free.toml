@@ -58,12 +58,24 @@ service = "dub-event-service"     # GET /events/:id (event existence)
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
-# --- Cron: every 6h (matches the paid reconcile cadence). The scheduled handler drains the
-# freeq outbox on every tick (forwards audit rows to audit-log; defers domain events) and
-# then runs the reconciliation + processed-event purge. A single trigger keeps github-sync
-# within the Workers FREE plan's 5-cron account cap (same discipline as mail-gateway). ---
-[triggers]
-crons = ["0 */6 * * *"]
+# --- Reconcile via a Durable Object ALARM, NOT a Cron Trigger. github-sync's reconcile is a
+# business cron (the free-tier outbox drain was already moved to the central freeq-drain
+# worker), but the Workers FREE plan's 5-cron ACCOUNT cap is already full — a 6th cron would
+# be rejected. A DO alarm does not count against that cap, so the reconcile runs every 6h
+# (GithubReconcileDO, src/reconcile-do.ts) without displacing any of the five business crons.
+# The paid wrangler.toml keeps its Cron Trigger unchanged (it has cron budget on that plan).
+#
+# Bootstrap once after deploy (idempotent) to arm the alarm loop:
+#   npx wrangler deploy --config services/github-sync/wrangler.free.toml
+#   curl -X POST https://dub-github-sync.<subdomain>.workers.dev/internal/reconcile/kick \
+#     -H "x-dub-internal: 1"   # or via a Service Binding from an internal worker
+[[durable_objects.bindings]]
+name = "RECONCILE_DO"
+class_name = "GithubReconcileDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GithubReconcileDO"]   # SQLite-backed DO is available on the Workers Free plan
 
 [vars]
 GITHUB_ORIGIN_DEFAULT = "github"

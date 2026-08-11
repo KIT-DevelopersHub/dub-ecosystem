@@ -1,18 +1,23 @@
 // github-sync Worker entrypoint: HTTP (Hono) + two Queue consumers + reconcile cron.
+// The reconcile pass is driven by the Cron Trigger (paid wrangler.toml) via the scheduled
+// handler below, OR by the GithubReconcileDO alarm (free plan, wrangler.free.toml — no cron
+// slot consumed). The reconcile body itself lives in ./reconcile so both paths share it.
 import type {
   ExecutionContext,
   MessageBatch,
   ScheduledController,
 } from "@cloudflare/workers-types";
 import type { DubEventEnvelope, WebhookEventEnvelopeV1 } from "@dub/events";
-import { emptyStats, type SyncRunRecord } from "./domain/types";
 import type { Env } from "./env";
 import { WH_GITHUB_QUEUE, EVT_GITHUB_SYNC_QUEUE } from "./env";
 import { buildRuntime } from "./deps";
 import { createApp } from "./app";
 import { handleWebhookBatch, buildDomainEventHandler } from "./queue";
+import { runScheduled } from "./reconcile";
 
-const PROCESSED_TTL_DAYS = 14;
+// SQLite-backed DO that drives the free-plan reconcile via an alarm (no cron slot). Bound
+// only in wrangler.free.toml; harmlessly unused when deploying the paid wrangler.toml.
+export { GithubReconcileDO } from "./reconcile-do";
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -51,59 +56,3 @@ export default {
     ctx.waitUntil(runScheduled(env));
   },
 };
-
-async function runScheduled(env: Env): Promise<void> {
-  // Business cron only: the reconcile pass (+ idempotency purge). The free-tier outbox
-  // drain was REMOVED from here — the freeq outbox is now drained centrally by the
-  // standalone freeq-drain worker (single aggregated cron). This service keeps its own
-  // business cron (reconcile).
-  await runReconcileCron(env);
-}
-
-async function runReconcileCron(env: Env): Promise<void> {
-  const rt = buildRuntime(env);
-  const requestId = rt.now() + "-cron";
-  const run: SyncRunRecord = {
-    id: `ghs_cron_${Date.now()}`,
-    scope: "cron",
-    repoId: null,
-    status: "running",
-    stats: emptyStats(),
-    triggeredBy: null,
-    startedAt: rt.now(),
-    finishedAt: null,
-    error: null,
-    createdAt: rt.now(),
-  };
-  await rt.stores.runs.create(run);
-  const stats = emptyStats();
-  let failed = false;
-  let cursor: string | null = null;
-  do {
-    const page = await rt.stores.repos.list({ enabled: true }, cursor, 200);
-    for (const repo of page.items) {
-      try {
-        const s = await rt.engine.reconcileRepo(requestId, repo);
-        stats.created += s.created;
-        stats.updated += s.updated;
-        stats.skipped += s.skipped;
-        stats.conflicts += s.conflicts;
-        stats.failed += s.failed;
-      } catch {
-        failed = true;
-        stats.failed++;
-      }
-    }
-    cursor = page.nextCursor;
-  } while (cursor);
-
-  await rt.stores.runs.update(run.id, {
-    status: failed || stats.failed > 0 ? "partial_failed" : "succeeded",
-    stats,
-    finishedAt: rt.now(),
-  });
-
-  // Purge processed-event idempotency rows older than the TTL.
-  const cutoff = new Date(Date.now() - PROCESSED_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  await rt.stores.processed.purgeOlderThan(cutoff);
-}
