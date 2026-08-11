@@ -1,10 +1,11 @@
-// Client-side mail model for the Gmail-style UI (demo). This is a UI-only,
-// in-memory model: folders, stars, labels, read-state and multi-message
-// conversations that power the 3-pane experience without any backend. The real
-// gateway (MailApi) persists a subset (received messages, thread bodies, read,
-// send); star / archive / trash / label / reply persistence lands in a later
-// slice and can hydrate this model. Nothing here is a Google asset — it is our
-// own generic data shape, seeded with DevHub-flavoured sample threads.
+// Client-side mail model for the Gmail-style UI. A UI-only, in-memory shape —
+// folders, stars, labels, read-state and multi-message conversations — that powers
+// the 3-pane experience. It carries NO seed data: the store starts empty and is
+// hydrated from the real gateway (MailApi: GET /mail/messages received, GET /mail/sent
+// sent). Star / archive / trash / label persistence is optimistic (a later slice
+// persists it server-side). Nothing here is a Google asset — it is our own generic
+// data shape. Demo fixtures used to live here; they now belong to tests only
+// (mailModel.fixtures.ts).
 
 export type FolderId = "inbox" | "starred" | "sent" | "drafts" | "trash" | "archive";
 
@@ -22,12 +23,6 @@ export interface Label {
   name: string;
   color: string; // token var or hex accent for the label chip/dot
 }
-
-export const DEMO_LABELS: Label[] = [
-  { id: "work", name: "仕事", color: "var(--dub-color-brand-500)" },
-  { id: "conf", name: "カンファレンス", color: "var(--dub-color-success-500)" },
-  { id: "important", name: "重要", color: "var(--dub-color-danger-500)" },
-];
 
 export interface MailPerson {
   email: string;
@@ -124,204 +119,7 @@ export function matchesQuery(t: MailThreadModel, q: string): boolean {
   );
 }
 
-// ---- demo seed (DevHub / 北陸ITカンファレンス flavour) ----
-
-const ME: MailPerson = { email: "you@developershub.jp", name: "あなた" };
-
-function iso(daysAgo: number, h: number, m: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  d.setHours(h, m, 0, 0);
-  return d.toISOString();
-}
-
-export const DEMO_THREADS: MailThreadModel[] = [
-  {
-    id: "t-conf-kickoff",
-    subject: "北陸ITカンファレンス 2026 キックオフのお知らせ",
-    folder: "inbox",
-    starred: true,
-    labels: ["conf", "important"],
-    messages: [
-      {
-        id: "m1",
-        from: { email: "office@developershub.jp", name: "運営事務局" },
-        to: [ME],
-        date: iso(0, 9, 12),
-        read: false,
-        body: "運営メンバーのみなさん\n\n北陸ITカンファレンス 2026 のキックオフミーティングを今週金曜に開催します。会場・配信・スポンサー各班のリードは事前に担当タスクの棚卸しをお願いします。\n\nアジェンダと当日の役割分担は追ってこのスレッドに共有します。\n\n運営事務局",
-      },
-      {
-        id: "m2",
-        from: { email: "sato@developershub.jp", name: "佐藤 リード" },
-        to: [ME, { email: "office@developershub.jp", name: "運営事務局" }],
-        date: iso(0, 10, 3),
-        read: false,
-        body: "会場班の佐藤です。承知しました。金曜までに会場レイアウト案と必要備品リストを共有します。配信班と回線要件をすり合わせたいので、担当の方いれば教えてください。",
-      },
-    ],
-  },
-  {
-    id: "t-sponsor",
-    subject: "スポンサー協賛のご相談（株式会社ノースクラウド）",
-    folder: "inbox",
-    starred: false,
-    labels: ["work"],
-    messages: [
-      {
-        id: "m1",
-        from: { email: "eigyo@northcloud.example.co.jp", name: "ノースクラウド 営業部" },
-        to: [ME],
-        date: iso(1, 14, 40),
-        read: false,
-        body: "DevelopersHub ご担当者様\n\nいつもお世話になっております。北陸ITカンファレンス 2026 のゴールドスポンサー枠について、協賛内容とロゴ掲出のレギュレーションをご相談させてください。来週前半でオンライン打ち合わせは可能でしょうか。\n\n株式会社ノースクラウド 営業部",
-      },
-    ],
-  },
-  {
-    id: "t-cfp",
-    subject: "【登壇者募集】セッション CFP のレビュー依頼",
-    folder: "inbox",
-    starred: false,
-    labels: ["conf"],
-    messages: [
-      {
-        id: "m1",
-        from: { email: "program@developershub.jp", name: "プログラム委員会" },
-        to: [ME],
-        date: iso(2, 11, 5),
-        read: true,
-        body: "CFP に 42 件の応募が集まりました。一次レビューの担当割り当てを共有します。各自 7〜8 件、今週末までに評価コメントをスプレッドシートへ記入してください。採否は来週の委員会で最終決定します。",
-      },
-    ],
-  },
-  {
-    id: "t-venue",
-    subject: "会場下見の日程調整",
-    folder: "inbox",
-    starred: true,
-    labels: [],
-    messages: [
-      {
-        id: "m1",
-        from: { email: "sato@developershub.jp", name: "佐藤 リード" },
-        to: [ME],
-        date: iso(3, 16, 20),
-        read: true,
-        body: "会場の下見、候補日を3つ挙げます。8/18(火)午後 / 8/20(木)午前 / 8/22(土)午前。参加できる日に○を付けて返信ください。当日は動線と電源位置を重点的に確認します。",
-      },
-      {
-        id: "m2",
-        from: ME,
-        to: [{ email: "sato@developershub.jp", name: "佐藤 リード" }],
-        date: iso(3, 17, 2),
-        read: true,
-        body: "8/20(木)午前で参加できます。配信班にも声をかけておきます。",
-      },
-    ],
-  },
-  {
-    id: "t-newsletter",
-    subject: "週刊デブハブ — 今週の運営ダイジェスト",
-    folder: "inbox",
-    starred: false,
-    labels: [],
-    messages: [
-      {
-        id: "m1",
-        from: { email: "news@developershub.jp", name: "週刊デブハブ" },
-        to: [ME],
-        date: iso(4, 8, 0),
-        read: true,
-        body: "今週のハイライト: 参加登録が 300 名を突破しました / スポンサー枠の残りわずか / ボランティアスタッフ説明会は 8/25 開催。詳細は各チャンネルをご確認ください。",
-      },
-    ],
-  },
-  {
-    id: "t-invoice",
-    subject: "請求書送付のご案内（印刷物）",
-    folder: "inbox",
-    starred: false,
-    labels: ["work"],
-    messages: [
-      {
-        id: "m1",
-        from: { email: "billing@print-hokuriku.example.jp", name: "北陸プリント 経理" },
-        to: [ME],
-        date: iso(6, 13, 45),
-        read: true,
-        body: "パンフレット・ポスター印刷分の請求書をお送りします。お支払い期限は月末です。ご不明点があればお問い合わせください。",
-      },
-    ],
-  },
-  {
-    id: "t-sent-reply",
-    subject: "Re: ボランティアスタッフ募集フォームの件",
-    folder: "sent",
-    starred: false,
-    labels: [],
-    messages: [
-      {
-        id: "m1",
-        from: ME,
-        to: [{ email: "volunteer@developershub.jp", name: "ボランティア窓口" }],
-        date: iso(1, 18, 30),
-        read: true,
-        body: "フォームの項目案を確認しました。Tシャツサイズと担当希望の欄を追加してよいと思います。締切は 8/25 で問題ありません。よろしくお願いします。",
-      },
-    ],
-  },
-  {
-    id: "t-sent-thanks",
-    subject: "登壇のお礼と当日の流れ",
-    folder: "sent",
-    starred: false,
-    labels: ["conf"],
-    messages: [
-      {
-        id: "m1",
-        from: ME,
-        to: [{ email: "speaker@example.com", name: "登壇者A" }],
-        date: iso(5, 12, 10),
-        read: true,
-        body: "この度はご登壇をお引き受けいただきありがとうございます。当日のタイムテーブルと控室のご案内を添付します。リハーサルは開演1時間前を予定しています。",
-      },
-    ],
-  },
-  {
-    id: "t-draft",
-    subject: "（下書き）スポンサー各社への御礼メール",
-    folder: "drafts",
-    starred: false,
-    labels: [],
-    messages: [
-      {
-        id: "m1",
-        from: ME,
-        to: [{ email: "eigyo@northcloud.example.co.jp", name: "ノースクラウド 営業部" }],
-        date: iso(0, 20, 15),
-        read: true,
-        body: "この度は北陸ITカンファレンス 2026 へのご協賛を賜り、誠にありがとうございます。当日のロゴ掲出位置と",
-      },
-    ],
-  },
-  {
-    id: "t-trash",
-    subject: "【自動送信】システムメンテナンスのお知らせ",
-    folder: "trash",
-    starred: false,
-    labels: [],
-    messages: [
-      {
-        id: "m1",
-        from: { email: "no-reply@status.example.com", name: "ステータス通知" },
-        to: [ME],
-        date: iso(8, 3, 0),
-        read: true,
-        body: "定期メンテナンスを実施します。作業中は一部サービスがご利用いただけません。ご了承ください。",
-      },
-    ],
-  },
-];
-
-export const DEMO_ME = ME;
+/** Neutral "self" identity for optimistic compose/send rows before hydration replaces
+ *  them with the server's real From. The client never learns its own @developershub.jp
+ *  address (/me omits email); the gateway resolves the real From server-side. */
+export const SELF: MailPerson = { email: "", name: "自分" };
