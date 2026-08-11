@@ -20,7 +20,7 @@ export interface GatewayRoute {
 export const API_PREFIX = common.API_PREFIX; // "/api/v1"
 
 // Paths the gateway handles itself (never proxied). Registered before the catch-all.
-export const GATEWAY_OWNED_SEGMENTS = new Set(["me", "bff", "public"]);
+export const GATEWAY_OWNED_SEGMENTS = new Set(["me", "bff", "public", "admin"]);
 
 export const ROUTES: readonly GatewayRoute[] = [
   { segment: "auth", binding: "SVC_AUTH", auth: "public" },
