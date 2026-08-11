@@ -10,6 +10,7 @@ import type {
   RoleRow,
   UserPage,
   UserRow,
+  UserSource,
 } from "./types";
 
 interface UserDb {
@@ -20,6 +21,7 @@ interface UserDb {
   github_login: string | null;
   avatar_url: string | null;
   status: string;
+  source: string;
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +53,7 @@ function toUser(r: UserDb): UserRow {
     githubLogin: r.github_login,
     avatarUrl: r.avatar_url,
     status: r.status as identity.UserStatus,
+    source: r.source as UserSource,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -159,8 +162,8 @@ export class D1IdentityRepo implements IdentityRepo {
   }
   async createUser(row: UserRow): Promise<void> {
     await this.db.run(
-      `INSERT INTO identity_users (id, org_id, email, display_name, github_login, avatar_url, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO identity_users (id, org_id, email, display_name, github_login, avatar_url, status, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.id,
       row.orgId,
       row.email,
@@ -168,13 +171,14 @@ export class D1IdentityRepo implements IdentityRepo {
       row.githubLogin,
       row.avatarUrl,
       row.status,
+      row.source,
       row.createdAt,
       row.updatedAt,
     );
   }
   async updateUser(
     userId: string,
-    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status">>,
+    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source">>,
     updatedAt: string,
   ): Promise<void> {
     const sets: string[] = [];
@@ -191,10 +195,22 @@ export class D1IdentityRepo implements IdentityRepo {
       sets.push("status = ?");
       binds.push(patch.status);
     }
+    if (patch.source !== undefined) {
+      sets.push("source = ?");
+      binds.push(patch.source);
+    }
     sets.push("updated_at = ?");
     binds.push(updatedAt);
     binds.push(userId);
     await this.db.run(`UPDATE identity_users SET ${sets.join(", ")} WHERE id = ?`, ...binds);
+  }
+  async listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]> {
+    const rows = await this.db.all<UserDb>(
+      "SELECT * FROM identity_users WHERE org_id = ? AND source = ? ORDER BY id",
+      orgId,
+      source,
+    );
+    return rows.map(toUser);
   }
 
   async getRole(roleId: string): Promise<RoleRow | null> {

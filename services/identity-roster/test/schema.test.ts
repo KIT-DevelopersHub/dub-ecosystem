@@ -14,6 +14,6 @@ describe("identity migrations conform to @dub/db SQL lint", () => {
 
   it("stays within the identity namespace", () => {
     expect(IDENTITY_MIGRATIONS.every((m) => m.namespace === "identity")).toBe(true);
-    expect(IDENTITY_MIGRATIONS.map((m) => m.id)).toEqual(["0001_init", "0002_system_roles"]);
+    expect(IDENTITY_MIGRATIONS.map((m) => m.id)).toEqual(["0001_init", "0002_system_roles", "0003_user_source"]);
   });
 });

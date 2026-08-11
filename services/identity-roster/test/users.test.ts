@@ -52,7 +52,7 @@ describe("users listing & detail", () => {
   it("allows a user to read their own detail without identity:read", async () => {
     const h = await makeHarness();
     // strip member's permissions by making them a bare user with no roles
-    await h.repo.createUser({ id: "user_bare", orgId: ORG_ID, email: "bare@devhub.jp", displayName: "Bare", githubLogin: null, avatarUrl: null, status: "active", createdAt: "t", updatedAt: "t" });
+    await h.repo.createUser({ id: "user_bare", orgId: ORG_ID, email: "bare@devhub.jp", displayName: "Bare", githubLogin: null, avatarUrl: null, status: "active", source: "manual", createdAt: "t", updatedAt: "t" });
     const self = await h.app.request("/identity/users/user_bare", asUser("user_bare"));
     expect(self.status).toBe(200);
     // but cannot read someone else without identity:read

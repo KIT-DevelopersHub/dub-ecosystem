@@ -104,9 +104,20 @@ ${rolePerms("role_sys_organizer", ORGANIZER_KEYS)}
 ${rolePerms("role_sys_member", MEMBER_KEYS)}
 `;
 
+// Provenance marker (theme "roster from Email Routing"): rows synced from Cloudflare
+// Email Routing carry source='email-routing' so the sync can tell which rows it owns
+// (and logically deactivate the ones that disappeared, never hard-deleting — data保全).
+// Manually invited/provisioned users stay source='manual'. Forward-only ADD COLUMN with
+// a literal DEFAULT is allowed here (the theme-3 D2 ban is on datetime DEFAULTs only).
+const SOURCE_UP = `
+ALTER TABLE identity_users ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'
+  CHECK (source IN ('manual','email-routing'));
+`;
+
 export const IDENTITY_MIGRATIONS: Migration[] = [
   { id: "0001_init", namespace: "identity", up: SCHEMA_UP },
   { id: "0002_system_roles", namespace: "identity", up: SEED_UP },
+  { id: "0003_user_source", namespace: "identity", up: SOURCE_UP },
 ];
 
 export const IDENTITY_SCHEMA_SQL = SCHEMA_UP;

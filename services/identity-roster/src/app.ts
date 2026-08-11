@@ -110,6 +110,14 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.invite(orgId, body, ctxOf(c)), 201);
   });
 
+  // Reconcile the roster with the Cloudflare Email Routing @developershub.jp addresses.
+  // The caller (roster console, holds mail:admin) relays the addresses it read from the
+  // mail-gateway proxy; identity upserts them by email (source=email-routing) synchronously.
+  ext.post("/users/sync-email-routing", requirePermission("identity:admin"), async (c) => {
+    const body = await readJson<{ addresses?: unknown }>(c);
+    return c.json(await svc.syncEmailRouting(orgId, body as never, ctxOf(c)));
+  });
+
   ext.patch("/users/:id", requirePermission("identity:admin"), async (c) => {
     const body = await readJson<Record<string, unknown>>(c);
     return c.json(await svc.updateUser(c.req.param("id"), orgId, body, ctxOf(c)));

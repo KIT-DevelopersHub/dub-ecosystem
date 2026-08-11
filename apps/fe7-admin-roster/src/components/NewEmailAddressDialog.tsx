@@ -12,7 +12,16 @@ const formErrorStyle: React.CSSProperties = { color: "var(--dub-color-danger-600
 
 // Issue a new @developershub.jp address (creates a Cloudflare Email Routing rule
 // forwarding `localPart@developershub.jp` -> `destination`).
-export function NewEmailAddressDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function NewEmailAddressDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Fired after a successful issue (e.g. to re-sync the roster with the new address). */
+  onCreated?: () => void;
+}) {
   const [localPart, setLocalPart] = useState("");
   const [destination, setDestination] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -37,6 +46,7 @@ export function NewEmailAddressDialog({ open, onClose }: { open: boolean; onClos
           toast({ kind: "success", title: "アドレスを発行しました", description: addr.address });
           reset();
           onClose();
+          onCreated?.();
         },
         onError: (err) => {
           const p = presentError(err);

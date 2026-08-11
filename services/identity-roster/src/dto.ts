@@ -2,6 +2,31 @@
 // identity namespace (management endpoints + provision response). Public read
 // models (IdentityUser, Role, AuthzCheckResponse, ...) always come from @dub/types.
 import type { common, identity } from "@dub/types";
+import type { UserSource } from "./repo/types";
+
+// The frozen identity.IdentityUser stays frozen (P0 contract); provenance is exposed
+// as a superset field the roster console reads (same pattern as RoleWithMemberCount).
+// A view carrying source is assignable wherever identity.IdentityUser is expected.
+export type IdentityUserView = identity.IdentityUser & { source: UserSource };
+export type IdentityUserDetailView = identity.IdentityUserDetail & { source: UserSource };
+
+// ---- Email Routing sync (roster from Cloudflare Email Routing) ----
+// The FE relays the @developershub.jp addresses read from the mail-gateway proxy
+// (it holds mail:admin) to this synchronous endpoint, which upserts them by email.
+export interface EmailRoutingAddressInput {
+  address: string; // full @developershub.jp address == the user email
+  destination?: string | null; // forward target (informational; not stored yet)
+  enabled?: boolean; // disabled rules are still listed but land as status='disabled'
+}
+export interface SyncEmailRoutingRequest {
+  addresses: EmailRoutingAddressInput[];
+}
+export interface SyncEmailRoutingResult {
+  added: number; // new roster rows created
+  updated: number; // existing rows marked source=email-routing (or reactivated)
+  deactivated: number; // previously-synced rows no longer present -> status=disabled
+  total: number; // addresses accepted from the request
+}
 
 export interface UpdateUserRequest {
   displayName?: string;

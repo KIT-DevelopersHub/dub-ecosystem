@@ -11,10 +11,14 @@ import type {
   AssignRoleRequest,
   CreateRoleRequest,
   EffectivePermissionsResponse,
+  IdentityUserDetailView,
+  IdentityUserView,
   InviteUserResponse,
   ProvisionUserResponse,
   RoleAssignmentView,
   RoleWithMemberCount,
+  SyncEmailRoutingRequest,
+  SyncEmailRoutingResult,
   UpdateRoleRequest,
   UpdateUserRequest,
 } from "./dto";
@@ -36,7 +40,7 @@ export class IdentityService {
     return [...set];
   }
 
-  private toIdentityUser(u: UserRow, assignments: AssignmentRow[]): identity.IdentityUser {
+  private toIdentityUser(u: UserRow, assignments: AssignmentRow[]): IdentityUserView {
     return {
       id: u.id,
       orgId: u.orgId,
@@ -45,6 +49,7 @@ export class IdentityService {
       githubLogin: u.githubLogin,
       avatarUrl: u.avatarUrl,
       status: u.status,
+      source: u.source,
       roleIds: this.orgWideRoleIds(assignments),
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
@@ -113,7 +118,7 @@ export class IdentityService {
     return { items, nextCursor: page.nextCursor };
   }
 
-  async getUserDetail(userId: string, orgId: string): Promise<identity.IdentityUserDetail> {
+  async getUserDetail(userId: string, orgId: string): Promise<IdentityUserDetailView> {
     const user = await this.d.repo.getUser(userId);
     if (!user) throw errors.notFound("user", userId);
     const ctx = await this.loadEvalContext(userId, orgId);
@@ -153,6 +158,7 @@ export class IdentityService {
       githubLogin: null,
       avatarUrl: null,
       status: "invited",
+      source: "manual",
       createdAt: now,
       updatedAt: now,
     };
@@ -231,6 +237,82 @@ export class IdentityService {
     const updated = (await this.d.repo.getUser(userId))!;
     const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
     return this.toIdentityUser(updated, assignments);
+  }
+
+  // ---------- Email Routing sync ----------
+  /**
+   * Reconcile the roster against the Cloudflare Email Routing @developershub.jp
+   * addresses (relayed by the caller, who holds mail:admin). Upsert-by-email:
+   *  - a new address becomes an active roster row (source='email-routing');
+   *  - an existing email is marked source='email-routing' (and a row WE previously
+   *    deactivated is reactivated when the address re-appears enabled);
+   *  - a source='email-routing' row whose address vanished is logically DISABLED,
+   *    never hard-deleted (data保全) — its roles/history survive a re-sync.
+   * All addresses are validated before any write, so a bad address aborts cleanly
+   * with no partial mutation. Synchronous D1 upsert; independent of the freeq drain.
+   */
+  async syncEmailRouting(orgId: string, req: SyncEmailRoutingRequest, ctx: RequestCtx): Promise<SyncEmailRoutingResult> {
+    const org = await this.d.repo.getOrg(orgId);
+    if (!org) throw errors.notFound("org", orgId);
+    if (!req || !Array.isArray(req.addresses)) {
+      throw errors.validationFailed([{ field: "addresses", reason: "required" }]);
+    }
+
+    // Validate + normalize up front (throws before any write on a bad address).
+    const seen = new Set<string>();
+    const normalized: { email: string; enabled: boolean }[] = [];
+    for (const a of req.addresses) {
+      const email = requireEmail(a?.address ?? "");
+      if (seen.has(email)) continue; // de-dupe within the batch
+      seen.add(email);
+      normalized.push({ email, enabled: a?.enabled !== false });
+    }
+
+    const now = this.d.now();
+    let added = 0;
+    let updated = 0;
+    for (const { email, enabled } of normalized) {
+      const existing = await this.d.repo.getUserByEmail(orgId, email);
+      if (!existing) {
+        await this.d.repo.createUser({
+          id: this.d.newId("user"),
+          orgId,
+          email,
+          displayName: email.split("@")[0]!,
+          githubLogin: null,
+          avatarUrl: null,
+          status: enabled ? "active" : "disabled",
+          source: "email-routing",
+          createdAt: now,
+          updatedAt: now,
+        });
+        added++;
+      } else {
+        const patch: Partial<Pick<UserRow, "status" | "source">> = { source: "email-routing" };
+        // re-appearing address: reactivate a row this sync had itself disabled.
+        if (enabled && existing.status === "disabled" && existing.source === "email-routing") {
+          patch.status = "active";
+        }
+        await this.d.repo.updateUser(existing.id, patch, now);
+        updated++;
+      }
+    }
+
+    // Logical deactivation of rows we own that are no longer in Email Routing.
+    // Never auto-disable an org-wide identity:admin holder: a mailbox sync must not
+    // be able to lock the org out of its own RBAC console (mirrors updateUser's guard).
+    let deactivated = 0;
+    const admins = new Set(await this.d.repo.usersWithOrgWidePermission(orgId, ADMIN));
+    const owned = await this.d.repo.listUsersBySource(orgId, "email-routing");
+    for (const u of owned) {
+      if (seen.has(u.email.toLowerCase()) || u.status === "disabled" || admins.has(u.id)) continue;
+      await this.d.repo.updateUser(u.id, { status: "disabled" }, now);
+      deactivated++;
+    }
+
+    const result: SyncEmailRoutingResult = { added, updated, deactivated, total: normalized.length };
+    await this.d.audit.publish(this.record("identity.roster.synced", "success", ctx, orgId, "org", orgId, { ...result }));
+    return result;
   }
 
   // ---------- roles ----------

@@ -1,24 +1,28 @@
 import { useState } from "react";
-import type { identity } from "@dub/types";
 import {
   PageHeader,
   DataTable,
   TextField,
   Select,
   Button,
+  Badge,
+  Card,
   EmptyState,
   ErrorState,
   LoadMore,
   FormField,
+  Spinner,
   type ColumnDef,
   type SelectOption,
 } from "@dub/ui";
 import { UserStatusBadge } from "./UserStatusBadge";
 import { InviteUserDialog } from "./InviteUserDialog";
-import { useUsers } from "../hooks/useRosterApi";
+import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
+import { useUsers, useSyncEmailRouting, isEmailRoutingUnconfigured } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
 import { displayError } from "../lib/errorDisplay";
+import type { RosterUser } from "../contracts/pending";
 
 const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
   { value: "all", label: "すべて" },
@@ -28,18 +32,36 @@ const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
   { value: "rejected", label: "却下" },
 ];
 
+const toolbarStyle: React.CSSProperties = { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" };
+const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center" };
+const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
+const noticeTitleStyle: React.CSSProperties = { fontWeight: 600 };
+const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
+
+/** Provenance chip: Email Routing rows vs. manually invited members. */
+function SourceBadge({ source, testId }: { source: RosterUser["source"]; testId?: string }) {
+  return source === "email-routing" ? (
+    <Badge tone="info" testId={testId}>Email Routing</Badge>
+  ) : (
+    <Badge tone="neutral" testId={testId}>手動</Badge>
+  );
+}
+
 export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void }) {
   const [filters, setFilters] = useState<UserListFilters>(DEFAULT_USER_FILTERS);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [issueOpen, setIssueOpen] = useState(false);
   const { can } = usePermissions();
   const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
+  const sync = useSyncEmailRouting();
 
   const canInvite = can("identity:admin");
+  const canManageRouting = can("mail:admin"); // read the proxy / issue addresses
+  const canSync = canInvite && canManageRouting; // relay proxy -> roster upsert
+  const notConnected = isEmailRoutingUnconfigured(sync.error);
 
-  // @dub/ui DataTable has no per-row testId; the row identity testid (frozen e2e
-  // convention 1-7) is surfaced on the first cell instead.
-  const columns: ColumnDef<identity.IdentityUser>[] = [
+  const columns: ColumnDef<RosterUser>[] = [
     {
       key: "name",
       header: "名前",
@@ -56,6 +78,7 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
       ),
     },
     { key: "email", header: "メール", cell: (u) => u.email },
+    { key: "source", header: "種別", cell: (u) => <SourceBadge source={u.source} testId={`fe7-users-source-${u.id}`} /> },
     { key: "status", header: "状態", cell: (u) => <UserStatusBadge status={u.status} /> },
   ];
 
@@ -65,15 +88,47 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
         title="ユーザー名簿"
         testId="fe7-users-header"
         actions={
-          canInvite ? (
-            <Button variant="primary" onClick={() => setInviteOpen(true)} testId="fe7-users-invite">
-              ユーザーを招待
-            </Button>
-          ) : null
+          <div style={actionsStyle}>
+            {canSync ? (
+              <Button
+                variant="primary"
+                onClick={() => sync.mutate()}
+                disabled={sync.isPending}
+                testId="fe7-users-sync"
+              >
+                {sync.isPending ? <Spinner /> : "Email Routing から同期"}
+              </Button>
+            ) : null}
+            {canManageRouting ? (
+              <Button variant="secondary" onClick={() => setIssueOpen(true)} testId="fe7-users-issue">
+                アドレスを発行
+              </Button>
+            ) : null}
+            {canInvite ? (
+              <Button variant="secondary" onClick={() => setInviteOpen(true)} testId="fe7-users-invite">
+                ユーザーを招待
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+      <p style={noticeTextStyle}>
+        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。「同期」で最新のアドレスを取り込み、各メンバーにロールと表示名を設定できます。
+      </p>
+
+      {notConnected ? (
+        <Card testId="fe7-routing-unconfigured">
+          <div style={noticeBodyStyle}>
+            <span style={noticeTitleStyle}>Email Routing に未接続です</span>
+            <p style={noticeTextStyle}>
+              Cloudflare Email Routing のトークンが未設定のため同期できません。接続後にもう一度お試しください。
+            </p>
+          </div>
+        </Card>
+      ) : null}
+
+      <div style={toolbarStyle}>
         <FormField label="検索" htmlFor="fe7-users-search">
           <TextField
             id="fe7-users-search"
@@ -120,6 +175,11 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
       )}
 
       <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <NewEmailAddressDialog
+        open={issueOpen}
+        onClose={() => setIssueOpen(false)}
+        onCreated={() => sync.mutate()}
+      />
     </div>
   );
 }

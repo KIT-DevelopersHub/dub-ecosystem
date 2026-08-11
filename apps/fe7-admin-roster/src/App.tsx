@@ -36,7 +36,9 @@ function matchRoute(path: string): { route: FeatureRoute; params: Record<string,
 const MOCK_ME: gateway.MeResponse = {
   user: { id: "user_alice", displayName: "Alice Admin", avatarUrl: null },
   orgId: "org_devhub",
-  permissions: ["identity:read", "identity:admin", "audit:read", "event:read"],
+  // mail:admin lets the harness exercise the Email Routing surfaces (roster sync,
+  // address issue) — the mock admin role grants it in production too.
+  permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"],
   sessionExpiresAt: Date.now() + 3600_000,
 };
 
