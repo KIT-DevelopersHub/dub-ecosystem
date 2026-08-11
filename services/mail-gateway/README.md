@@ -128,13 +128,18 @@ wrangler secret put RESEND_API_KEY        # paste re_… when prompted
    `200` with `"ready": true`. A `503` lists exactly what is missing (no secrets leaked).
 6. **Smoke send**: `pnpm send-test --send` (see §5).
 
-### 3.3a Demo reset — wipe all inbox + sent rows (DESTRUCTIVE)
+### 3.3a Demo reset — wipe all inbox + sent rows (DESTRUCTIVE, secondary cleanup)
 
-The "weird demo mails" a viewer sees are **live rows in D1** (leftover smoke-test sends +
-test receives), not seed code. To return the inbox + Sent folders to a clean, empty state
-for a demo/screenshot, run `db/reset-demo.sql`. It only clears message rows
-(`mail_inbound`, `mail_send_log`); the mailbox registry and Email Routing address config
-are untouched.
+> Where the sample mail actually came from: the "weird demo mails" a viewer saw were the
+> **fe2 client-side seed** (`apps/fe2-app-shell/.../gmail/mailModel.ts` `DEMO_THREADS`),
+> rendered by the `/mail` GmailApp with no backend at all. That seed has been **removed
+> from the live app** — the GmailApp now hydrates from the gateway (`GET /mail/messages` +
+> `GET /mail/sent`), so a fresh load is clean by construction. This SQL is the **secondary
+> cleanup** for any stray rows that a real smoke-test send / test receive left in D1.
+
+To return the inbox + Sent folders to a clean, empty state at the **data** layer, run
+`db/reset-demo.sql`. It only clears message rows (`mail_inbound`, `mail_send_log`); the
+mailbox registry and Email Routing address config are untouched.
 
 > WARNING: destructive and irreversible. For the **deploy owner** to run against a
 > demo/staging DB only. Never run it against a database holding real received/sent mail.
