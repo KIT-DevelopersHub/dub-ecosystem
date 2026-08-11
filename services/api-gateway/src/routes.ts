@@ -67,6 +67,11 @@ export const ROUTES: readonly GatewayRoute[] = [
   // own x-dub-internal guard. (The drain itself uses the SVC_AUDIT binding, not the gateway.)
   { segment: "audit", binding: "SVC_AUDIT_LOG", auth: "required", internalOnlyPaths: ["/audit/internal/"] },
   { segment: "webhooks", binding: "SVC_WEBHOOK_INGEST", auth: "required" },
+  // Free-tier usage / billing-guard dashboard read. Only GET /usage/summary is served by
+  // usage-meter; the collector's /internal/* routes are not routable here (first segment
+  // "internal" has no route -> 404). auth=required forwards x-dub-user-id; usage-meter
+  // re-checks infra:read on the caller.
+  { segment: "usage", binding: "SVC_USAGE_METER", auth: "required" },
 ] as const;
 
 const ROUTE_BY_SEGMENT = new Map<string, GatewayRoute>(ROUTES.map((r) => [r.segment, r]));

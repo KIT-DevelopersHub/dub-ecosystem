@@ -1,5 +1,5 @@
 // Namespace registry — an EXTENSION of @dub/db's NAMESPACES (the single source of
-// truth, 16 entries, theme-3 D11). We import the `Namespace` type and never re-declare
+// truth, 17 entries, theme-3 D11). We import the `Namespace` type and never re-declare
 // the list; this table only annotates each namespace with its owner unit + frozen
 // tables. A compile-time exhaustiveness check keeps this in lockstep with NAMESPACES.
 import { NAMESPACES, type Namespace } from "@dub/db";
@@ -46,6 +46,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   { ns: "audit", ownerUnit: "audit-log#10", tables: ["audit_logs"] },
   { ns: "mobile", ownerUnit: "mobile-bff MO3#31", tables: ["mobile_devices"] },
   { ns: "seed", ownerUnit: "infra-d1-seed#28", tables: ["seed_runs"] },
+  { ns: "usage", ownerUnit: "usage-meter", tables: ["usage_snapshot"] },
 ];
 
 // Compile-time guard: every NAMESPACES entry appears exactly once in the registry.

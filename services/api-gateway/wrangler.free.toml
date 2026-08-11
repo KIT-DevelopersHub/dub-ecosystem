@@ -91,3 +91,8 @@ environment = "production"
 binding = "SVC_WEBHOOK_INGEST"
 service = "dub-webhook-ingest"
 environment = "production"
+
+[[services]]
+binding = "SVC_USAGE_METER"
+service = "dub-usage-meter"
+environment = "production"

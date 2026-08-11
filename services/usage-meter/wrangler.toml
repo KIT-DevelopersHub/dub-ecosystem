@@ -1,0 +1,66 @@
+# usage-meter — free-tier usage collector + billing-guard. Daily collection is driven by a
+# Durable Object ALARM (class MeterDO), NOT a Cron Trigger: the Workers Free plan's 5-cron
+# ACCOUNT cap is already full of business crons, and a DO alarm does not count against it —
+# so the daily collect runs without displacing any of them. This base toml documents the
+# frozen binding topology; the free-tier deploy uses wrangler.free.toml.
+name = "usage-meter"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# --- The daily-alarm Durable Object (SQLite-backed = FREE plan). Bootstrapped once after
+#     deploy via POST /internal/meter/kick, then self-reschedules every 24h. ---
+[[durable_objects.bindings]]
+name = "METER_DO"
+class_name = "MeterDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MeterDO"]   # SQLite-backed DO is available on the Workers Free plan
+
+# --- Shared core D1 (binding DB). usage-meter WRITES only its usage_ namespace
+#     (usage_snapshot) and READS mail_send_log for the Resend send count. ---
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service bindings: identity (authz/check for GET /usage/summary), notification
+#     (in-app admin alert), mail-gateway (email admin alert). ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"
+
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "notification"
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "mail-gateway"
+
+# --- NO cron trigger. The daily collect is driven by the MeterDO alarm (above), which does
+#     not consume a slot on the Workers FREE plan's 5-cron account cap. ---
+
+[vars]
+ENVIRONMENT = "production"
+# CF_ACCOUNT_ID is the account tag the GraphQL Analytics query filters by. Non-secret, but
+# left to the free deploy / secret since it is environment-specific.
+# USAGE_ALERT_EMAIL defaults to admin@developershub.jp in code when unset.
+
+# --- secrets (set via `wrangler secret put`, never committed) ---
+# USAGE_CF_ANALYTICS_TOKEN  -> Cloudflare GraphQL Analytics (account read). If unset the code
+#                              falls back to CLOUDFLARE_API_TOKEN (the shared deploy token).
+# CLOUDFLARE_API_TOKEN      -> fallback analytics token
+# CF_ACCOUNT_ID             -> account tag (may be a var instead of a secret)
+# USAGE_ALERT_ADMIN_USER_IDS-> csv of admin user ids for the in-app EVT_NOTIFICATION alert
+
+[env.preview.vars]
+ENVIRONMENT = "preview"
+
+[env.local.vars]
+ENVIRONMENT = "local"

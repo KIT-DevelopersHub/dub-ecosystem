@@ -19,6 +19,7 @@ export interface GatewayEnv {
   SVC_GITHUB_SYNC: Fetcher;
   SVC_AUDIT_LOG: Fetcher;
   SVC_WEBHOOK_INGEST: Fetcher;
+  SVC_USAGE_METER: Fetcher;
 
   // ---- Queue producer (the one publish exception) ----
   EVT_NOTIFICATION?: Queue<DubEventEnvelope>;
