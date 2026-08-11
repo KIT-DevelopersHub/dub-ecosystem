@@ -87,6 +87,36 @@ describe("identity master (GET /users/:id, internal)", () => {
   });
 });
 
+// Internal S2S role → members expansion (notification-service feedback fan-out).
+describe("role members (GET /internal/users, internal)", () => {
+  it("expands a role into its members with x-dub-internal only (no identity:read)", async () => {
+    const h = await makeHarness();
+    // Exactly how notification-service calls it: internal marker + roleKey spelling,
+    // acting as a submitter that has NO identity:read permission.
+    const res = await h.app.request(
+      `/internal/users?roleKey=${h.adminRoleId}`,
+      { headers: { "x-dub-internal": "1", "x-dub-user-id": h.memberId, "x-dub-request-id": "req_test" } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as common.Paginated<identity.IdentityUser>;
+    expect(body.items.map((u) => u.id)).toEqual([h.adminId]); // only the admin holds the admin role
+  });
+
+  it("also accepts the ?role= spelling", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/internal/users?role=${h.memberRoleId}`, internal());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as common.Paginated<identity.IdentityUser>;
+    expect(body.items.map((u) => u.id)).toEqual([h.memberId]);
+  });
+
+  it("requires x-dub-internal (403 without it)", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/internal/users?role=${h.adminRoleId}`, { headers: { "x-dub-request-id": "r" } });
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("update user (PATCH /identity/users/:id)", () => {
   it("updates display name and github login", async () => {
     const h = await makeHarness();

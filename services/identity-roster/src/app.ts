@@ -168,6 +168,24 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.getUser(c.req.param("id"), orgId));
   });
 
+  // Role → members expansion — internal S2S read for notification-service fan-out
+  // (e.g. feedback → admin/maintainer inboxes). Mirrors the external GET /identity/users
+  // role filter but is gated by x-dub-internal ONLY, not identity:read: the caller acts
+  // on behalf of the system, so a feedback submitter without identity:read must still be
+  // able to trigger admin notifications. `role` and `roleKey` are accepted spellings of
+  // the same roleId filter. Returns the same { items, nextCursor } page shape.
+  app.get("/internal/users", requireInternal, async (c) => {
+    const roleId = c.req.query("role") ?? c.req.query("roleKey");
+    const status = c.req.query("status") as identity.UserStatus | undefined;
+    const out = await svc.listUsers(orgId, {
+      ...(roleId ? { roleId } : {}),
+      ...(status ? { status } : {}),
+      ...(c.req.query("limit") ? { limit: numParam(c.req.query("limit")) } : {}),
+      ...(c.req.query("cursor") ? { cursor: c.req.query("cursor")! } : {}),
+    });
+    return c.json(out);
+  });
+
   // Login allowlist lookup — internal S2S read for auth-service password login.
   // Returns { user } (any status) or { user: null } when the email is not on the
   // roster; auth-service enforces the active-only allowlist. Read-only (no provision
