@@ -1,0 +1,116 @@
+name: Deploy (production)
+
+# Auto-deploy the free-tier Worker set to production on every merge to main.
+#
+# WHY: deploys used to be a human/agent running `wrangler deploy` by hand after
+# watching CI. When that watcher was idle, a merged + green change silently never
+# reached prod (surfaced once as a 404 on a gateway route). This workflow removes
+# that single point of failure: merge to main == deploy, no watcher required.
+#
+# Green gate: this job re-runs typecheck + test + build itself, so a red commit can
+# never deploy — the deploy steps only run after verify passes in the SAME job.
+# (Chosen over `workflow_run` on ci.yml: self-contained, no cross-workflow SHA/branch
+# resolution quirks, and the green result is guaranteed for the exact deployed tree.)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_healthcheck:
+        description: "Skip post-deploy health/smoke checks"
+        type: boolean
+        default: false
+
+# Serialize production deploys. Never cancel a mid-flight deploy — queue the next one
+# (concurrent deploys to the same account are a known outage source).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+
+jobs:
+  deploy:
+    name: verify · deploy · smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # First run auto-creates this environment (no protection). Add required reviewers
+    # under Settings → Environments → production to gate deploys behind approval.
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # fe2 is a static SPA — the API base is baked in at BUILD time. Override via a
+      # repo variable if the prod gateway origin differs from the workers.dev default.
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://dub-api-gateway.developershub-site.workers.dev' }}
+      # Public origins used by the post-deploy smoke checks.
+      GATEWAY_HEALTH_URL: ${{ vars.GATEWAY_HEALTH_URL || 'https://dub-api-gateway.developershub-site.workers.dev' }}
+      MOBILE_BFF_HEALTH_URL: ${{ vars.MOBILE_BFF_HEALTH_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Preflight — required secret present
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not set. Add it under Settings → Secrets and variables → Actions. See docs/DEPLOY.md."
+            exit 1
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
+      # --- Green gate: identical checks to ci.yml, in-job, before any deploy ---
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm run test
+
+      # Builds all packages; fe2's Vite bundle bakes in VITE_API_BASE_URL (prod gateway).
+      - name: Build
+        run: pnpm run build
+
+      # --- Migrations (guarded) ---
+      # D1 dub-core migrations are forward-only + idempotent (ledger + CREATE ... IF NOT
+      # EXISTS). Remote apply is NOT wired into this repo yet (the custom migrate.ts is
+      # local-only; the namespaced layout is applied via the infra pipeline out-of-band).
+      # This step is the ordered insertion point: enable it by setting the repo variable
+      # DEPLOY_APPLY_MIGRATIONS=true once a remote apply command exists. Until then it is
+      # a no-op so the workflow can never half-apply schema. See docs/DEPLOY.md §Migrations.
+      - name: Apply D1 migrations (guarded)
+        run: |
+          if [ "${{ vars.DEPLOY_APPLY_MIGRATIONS }}" = "true" ]; then
+            echo "::error::DEPLOY_APPLY_MIGRATIONS=true but no remote apply command is wired. Wire it here (see docs/DEPLOY.md) before enabling."
+            exit 1
+          fi
+          echo "D1 migrations: skipped (applied out-of-band). dub-core schema is forward-only + idempotent."
+
+      # --- Deploy in dependency order with fail-fast health gating ---
+      - name: Deploy to production
+        run: bash infra/deploy/deploy-prod.sh
+        env:
+          SKIP_HEALTHCHECK: ${{ inputs.skip_healthcheck && '1' || '0' }}
