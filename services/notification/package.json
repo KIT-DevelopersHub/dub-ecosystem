@@ -12,6 +12,7 @@
     "@dub/types": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/events": "workspace:*",
+    "@dub/freeq": "workspace:*",
     "@dub/db": "workspace:*",
     "@dub/auth-client": "workspace:*",
     "@dub/observability": "workspace:*",

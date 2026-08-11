@@ -1,0 +1,81 @@
+# Free-tier deploy of mo3-mobile-bff as `dub-mo3-mobile-bff` (the dedicated mobile face,
+# theme14 D5: m-api.developershub.jp; api-gateway holds no mobile face). NO paid Cloudflare
+# Queues (free tier):
+#
+#   * Producer: the AUDIT_QUEUE publishAudit channel (push delivery-failure, theme13/D3) is
+#     now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB). deps.ts falls back
+#     to the outbox shim when AUDIT_QUEUE is absent, so no audit record is dropped; the Cron
+#     drain forwards audit rows to audit-log (POST /internal/audit-async).
+#   * Consumer: the dub-q-evt-mobile-bff domain-event consumer (change_log fan-out) is dropped;
+#     the publishing services' freeq drains POST each envelope to POST /internal/events-async
+#     (x-dub-internal, Service Binding) which runs the SAME append handler. Non-2xx keeps the
+#     upstream row pending = no loss. This route only appends the change_log (no re-publish),
+#     so no event cycle is reintroduced.
+#
+# The paid wrangler.toml is intentionally UNCHANGED (queue-wiring/contract conformance).
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core (idempotent; shared with mail-gateway/auth)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file apps/mo3-mobile-bff/db/0001_freeq_outbox.sql
+#   npx wrangler deploy --config apps/mo3-mobile-bff/wrangler.free.toml
+name = "dub-mo3-mobile-bff"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Public route (theme14 D5: dedicated Worker). Enable once the DNS/zone is wired.
+# routes = [{ pattern = "m-api.developershub.jp/*", zone_name = "developershub.jp" }]
+
+# Shared dub-core D1: mobile_ namespace tables + the un-namespaced freeq_outbox table.
+# REAL dub-core id (verified via `wrangler d1 list`): d663f9c6-… (60a9b8ab-… is the
+# separate auth-outbox DB).
+[[d1_databases]]
+binding = "DB_MOBILE"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_AUTH"
+service = "dub-auth-service"          # /mobile/exchange, /auth/refresh, /auth/logout, /verify
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"       # /users/:id, /authz/check (auth-client)
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"         # events/actions transparent + BFF
+
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"          # tasks transparent + BFF
+
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"  # inbox/preferences transparent + unread-count
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"             # free-tier outbox drain -> POST /internal/audit-async
+
+# --- Cron: daily (03:40 UTC). The scheduled handler drains the audit outbox each tick.
+# The Workers FREE plan caps the account at 5 cron triggers, so this reuses a single daily
+# schedule rather than an every-minute drain trigger. ---
+[triggers]
+crons = ["40 3 * * *"]
+
+# --- vars (non-secret) ---
+[vars]
+ENVIRONMENT = "production"
+DEFAULT_ORG_ID = "org_devhub"
+
+# Secrets (set via `wrangler secret put`, never committed):
+#   APNS_KEY_P8 / APNS_KEY_ID / APNS_TEAM_ID / APNS_BUNDLE_ID   (iOS, p8 JWT)
+#   FCM_SERVICE_ACCOUNT_JSON / FCM_PROJECT_ID                    (Android, HTTP v1)

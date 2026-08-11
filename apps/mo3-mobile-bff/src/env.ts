@@ -6,8 +6,13 @@ import type { AuditRecordEnvelopeV1 } from "@dub/events";
 
 export interface Env {
   // --- data ---
-  DB_MOBILE: D1Database; // shared dub-core DB, mobile_* namespace only (theme12)
-  AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13)
+  DB_MOBILE: D1Database; // shared dub-core DB, mobile_* namespace + freeq_outbox on free tier (theme12)
+
+  // --- queue producer (PAID plan only) ---
+  // Optional: on the Workers FREE plan this binding is absent and deps.ts falls back to
+  // a @dub/freeq D1 outbox shim (see outbox.ts / drain.ts). When present (paid deploy,
+  // wrangler.toml) the real Queue is used unchanged.
+  AUDIT_QUEUE?: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13)
 
   // --- service bindings (stubbed until 9-x結線) ---
   SVC_AUTH: Fetcher; // auth-service (/mobile/exchange, /auth/refresh, /auth/logout, /verify)
@@ -15,6 +20,7 @@ export interface Env {
   SVC_EVENT: Fetcher; // event-service (events/actions transparent + BFF)
   SVC_TASK: Fetcher; // task-service (tasks transparent + BFF)
   SVC_NOTIFICATION: Fetcher; // notification-service (inbox/preferences transparent + unread-count)
+  SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain -> POST /internal/audit-async); absent => drain defers
 
   // --- vars ---
   ENVIRONMENT?: string; // "local" | "preview" | "production" (default production)

@@ -1,7 +1,7 @@
 // dub-file-meta Worker entry. Builds real deps (D1 repo + R2 blobs + event/audit
 // Queues + identity authz + drive-proxy completion) from env, for both the HTTP
 // fetch handler and the Queue consumer (EVT_FILE_META: drive.* + *.archived).
-import type { D1Database, Queue, Fetcher, R2Bucket, MessageBatch } from "@cloudflare/workers-types";
+import type { D1Database, Queue, Fetcher, R2Bucket, MessageBatch, ScheduledController, ExecutionContext } from "@cloudflare/workers-types";
 import { createDbClient } from "@dub/db";
 import {
   createEvent,
@@ -12,18 +12,27 @@ import {
 } from "@dub/events";
 import { createServiceClient, extractContext, newRequestId } from "@dub/http";
 import { createAuthClient } from "@dub/auth-client";
+import { consoleSink } from "@dub/observability";
 import { common, type drive } from "@dub/types";
 import { createApp } from "./app";
-import { createConsumer } from "./consumer";
+import { createConsumer, createEnvelopeConsumer } from "./consumer";
 import { createD1FileRepo, createD1IdempotencyStore } from "./repo";
+import { AUDIT_TOPIC, outboxQueue } from "./outbox";
+import { runOutboxDrain } from "./drain";
 import type { AuthGate, BlobStore, DriveClient, EmitEvent } from "./deps";
 
 export interface Env {
   DB: D1Database;
   R2_FILES: R2Bucket;
-  AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1>;
+  // PAID plan only: the publishAudit channel. On the Workers FREE plan this binding is
+  // absent and buildAuditEnv() falls back to a @dub/freeq D1 outbox shim (outbox.ts +
+  // drain.ts) so no audit record is dropped; a Cron drain forwards rows to audit-log.
+  AUDIT_QUEUE?: Queue<AuditRecordEnvelopeV1>;
   SVC_IDENTITY: Fetcher;
   SVC_DRIVE_PROXY?: Fetcher;
+  // audit-log (free-tier outbox drain delivery target). Absent => drain defers audit
+  // rows (kept pending/durable) until it lands.
+  SVC_AUDIT?: Fetcher;
 }
 
 function r2Blobs(bucket: R2Bucket): BlobStore {
@@ -66,6 +75,12 @@ function emitter(env: Env): EmitEvent {
     publishEvent(env as unknown as Record<string, Queue<DubEventEnvelope>>, createEvent(name, payload, ctx));
 }
 
+// publishAudit target: the real (paid) AUDIT_QUEUE when bound, else the free-tier
+// @dub/freeq D1 outbox shim (durably persisted, drained to audit-log by cron).
+function buildAuditEnv(env: Env): { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> } {
+  return { AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue<AuditRecordEnvelopeV1>(env.DB, AUDIT_TOPIC) };
+}
+
 function authGate(env: Env): AuthGate {
   const ac = createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "file-meta" });
   return {
@@ -79,13 +94,22 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const ctx = extractContext(request.headers, { allowGenerate: true });
     const db = createDbClient(env.DB, { namespace: "file_meta", requestId: ctx.requestId });
+    const repo = createD1FileRepo(db);
     const app = createApp({
-      repo: createD1FileRepo(db),
+      repo,
       blobs: r2Blobs(env.R2_FILES),
       emit: emitter(env),
-      audit: (input) => publishAudit(env, input),
+      audit: (input) => publishAudit(buildAuditEnv(env), input),
       auth: authGate(env),
       ...(env.SVC_DRIVE_PROXY ? { drive: driveClient(env.SVC_DRIVE_PROXY, ctx.requestId)! } : {}),
+      // Free-tier consumer landing (POST /internal/events-async): the SAME handler map
+      // as the Queue consumer, with D1 idempotency on the shared dub-core DB.
+      consume: createEnvelopeConsumer({
+        repo,
+        emit: emitter(env),
+        idempotency: createD1IdempotencyStore(db),
+        ...(env.SVC_DRIVE_PROXY ? { drive: driveClient(env.SVC_DRIVE_PROXY, ctx.requestId)! } : {}),
+      }),
     });
     return app.fetch(request, env);
   },
@@ -100,5 +124,22 @@ export default {
       ...(env.SVC_DRIVE_PROXY ? { drive: driveClient(env.SVC_DRIVE_PROXY, requestId)! } : {}),
     });
     await consumer(batch, env);
+  },
+
+  // Free-tier Cron: drain the @dub/freeq audit outbox to audit-log (replaces the paid
+  // AUDIT_QUEUE producer path). Only wired on wrangler.free.toml [triggers]; on the paid
+  // deploy (real AUDIT_QUEUE) there is no cron and this never fires. Best-effort.
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      const result = await runOutboxDrain(env);
+      consoleSink({ level: "info", message: "file-meta outbox drained", service: "file-meta", fields: { ...result } });
+    } catch (err) {
+      consoleSink({
+        level: "error",
+        message: "file-meta outbox drain failed",
+        service: "file-meta",
+        fields: { error: err instanceof Error ? err.message : String(err) },
+      });
+    }
   },
 };

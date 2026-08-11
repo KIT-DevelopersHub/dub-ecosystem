@@ -152,7 +152,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
 describe("admin email routing (@developershub.jp address management)", () => {
   interface Addr { id: string; localPart: string; address: string; destination: string; enabled: boolean }
   interface Page<T> { items: T[] }
-  const BASE = "/api/v1/admin/email-routing/addresses";
+  const BASE = "/api/v1/mail/admin/email-routing/addresses";
   const list = (a: ReturnType<typeof api>) => a.request<Page<Addr>>({ method: "GET", path: BASE });
 
   it("the demo admin holds mail:admin (so the tab is reachable) and lists @developershub.jp addresses", async () => {

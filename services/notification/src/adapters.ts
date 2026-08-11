@@ -85,7 +85,9 @@ export type AdapterRegistry = Record<NotificationChannel, ChannelAdapter>;
 export interface DeliveryRunnerDeps {
   db: DbClient;
   adapters: AdapterRegistry;
-  auditQueue: { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> };
+  // null when neither a paid Queue nor the free-tier @dub/freeq outbox is bound; publish
+  // is then skipped (a safe no-op, never a throw). See deps.ts / outbox.ts.
+  auditQueue: { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> } | null;
   orgId: string;
   maxAttempts?: number;
 }
@@ -131,16 +133,21 @@ export async function runDelivery(deps: DeliveryRunnerDeps, job: DeliveryJob): P
     requestId: job.requestId,
     occurredAt: nowIso(),
   };
-  try {
-    await publishAudit(deps.auditQueue, audit);
-  } catch (auditErr) {
-    consoleSink({
-      level: "error",
-      message: "failed to publish delivery-failed audit",
-      service: SERVICE_NAME,
-      requestId: job.requestId,
-      fields: { error: auditErr instanceof Error ? auditErr.message : String(auditErr) },
-    });
+  // On the paid deploy deps.auditQueue is the real Queue; on the free tier it is the
+  // @dub/freeq D1 outbox shim (durable, drained to audit-log). null only when neither is
+  // bound — then there is no audit sink to publish to (safe no-op).
+  if (deps.auditQueue) {
+    try {
+      await publishAudit(deps.auditQueue, audit);
+    } catch (auditErr) {
+      consoleSink({
+        level: "error",
+        message: "failed to publish delivery-failed audit",
+        service: SERVICE_NAME,
+        requestId: job.requestId,
+        fields: { error: auditErr instanceof Error ? auditErr.message : String(auditErr) },
+      });
+    }
   }
   return { status: "failed", detail: lastError ?? undefined };
 }

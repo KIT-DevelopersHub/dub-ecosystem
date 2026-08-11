@@ -19,7 +19,9 @@ import type { MailStatusResponse } from "../lib/mailStatus";
 
 const BASE = "/api/v1";
 const IDENTITY = `${BASE}/identity`;
-const EMAIL_ROUTING = `${BASE}/admin/email-routing`;
+// mail-gateway registers the Email Routing admin surface under its `/mail` gateway
+// segment, so the external path is /api/v1/mail/admin/email-routing/* (not /admin/*).
+const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
 
 export interface RosterApi {
   listUsers(filters: UserListFilters): Promise<common.Paginated<identity.IdentityUser>>;
