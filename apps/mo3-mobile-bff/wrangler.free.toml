@@ -1,4 +1,4 @@
-# Free-tier deploy of mo3-mobile-bff as `dub-mo3-mobile-bff` (the dedicated mobile face,
+# Free-tier deploy of mo3-mobile-bff as `mo3-mobile-bff` (the dedicated mobile face,
 # theme14 D5: m-api.developershub.jp; api-gateway holds no mobile face). NO paid Cloudflare
 # Queues (free tier):
 #
@@ -20,7 +20,10 @@
 #   npx wrangler d1 execute dub-core --remote \
 #     --file apps/mo3-mobile-bff/db/0001_freeq_outbox.sql
 #   npx wrangler deploy --config apps/mo3-mobile-bff/wrangler.free.toml
-name = "dub-mo3-mobile-bff"
+# NOTE: the live worker name has NO `dub-` prefix (unlike the other free-tier services).
+# freeq-drain (SVC_MOBILE_BFF) and notification both bind to `mo3-mobile-bff`, so this name
+# must match exactly or their Service Bindings fail to resolve.
+name = "mo3-mobile-bff"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]

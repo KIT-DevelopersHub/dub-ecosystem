@@ -28,7 +28,7 @@ enabled = true
 # --- KV: Google token cache + short-TTL response cache + rate counter (§3) ---
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_AT_APPLY"          # `wrangler kv namespace create drive-proxy-cache`
+id = "b969e6ef6c034ed4ab3b9800f1a0e9ce"   # `drive-proxy-cache` (verified via `wrangler kv namespace list`)
 
 # Free-tier event/audit outbox (@dub/freeq): replaces the paid EVT_FILE_META /
 # AUDIT_QUEUE producers. Shared dub-core D1 — the un-namespaced freeq_outbox table only
