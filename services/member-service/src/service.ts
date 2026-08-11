@@ -1,20 +1,10 @@
 // Business logic for 運営メンバー管理. Pure of HTTP: takes parsed inputs + a request
-// context, throws DubError, returns wire DTOs. The Hono app is a thin adapter.
+// context, throws DubError, returns canonical @dub/types wire DTOs. The Hono app is a
+// thin adapter. member_teams is the source of truth for the shared Team entity.
 import { DubError, errors } from "@dub/errors";
-import type { common } from "@dub/types";
-import type {
-  AppDeps,
-  CreateMemberRequest,
-  CreateTeamRequest,
-  MembersOverview,
-  MemberTeam,
-  OrgMember,
-  PersonRow,
-  TeamRow,
-  UpdateMemberRequest,
-  UpdateTeamRequest,
-} from "./types";
-import { isMemberStatus, MAX_NAME_LEN, SORT_ORDER_GAP, toMemberTeam, toOrgMember } from "./domain";
+import type { common, member } from "@dub/types";
+import type { AppDeps, PersonRow, TeamRow } from "./types";
+import { isMemberStatus, MAX_NAME_LEN, SORT_ORDER_GAP, slugify, toMember, toTeam } from "./domain";
 
 export interface ReqCtx {
   requestId: string;
@@ -47,7 +37,7 @@ export class MemberService {
   constructor(private readonly deps: AppDeps) {}
 
   // ---- overview (powers all three views) ----
-  async getOverview(_ctx: ReqCtx): Promise<MembersOverview> {
+  async getOverview(_ctx: ReqCtx): Promise<member.MembersOverview> {
     const orgId = this.deps.orgId;
     const [teams, people, links] = await Promise.all([
       this.deps.repo.listTeams(orgId),
@@ -61,42 +51,67 @@ export class MemberService {
       byPerson.set(l.personId, arr);
     }
     return {
-      teams: teams.map(toMemberTeam),
-      members: people.map((p) => toOrgMember(p, byPerson.get(p.id) ?? [])),
+      teams: teams.map(toTeam),
+      members: people.map((p) => toMember(p, byPerson.get(p.id) ?? [])),
     };
   }
 
-  // ---- teams ----
-  async createTeam(_ctx: ReqCtx, body: CreateTeamRequest): Promise<MemberTeam> {
+  // ---- teams (member_teams is the canonical source read by other apps) ----
+  async listTeams(_ctx: ReqCtx): Promise<member.ListTeamsResponse> {
+    const teams = await this.deps.repo.listTeams(this.deps.orgId);
+    return { teams: teams.map(toTeam) };
+  }
+
+  /** Resolve a unique, URL-safe key within the org (auto-suffix on collision). */
+  private async resolveKey(orgId: common.OrgId, desired: string, fallback: string, excludeId?: string): Promise<string> {
+    let base = slugify(desired);
+    if (base.length === 0) base = slugify(fallback) || `team-${Math.random().toString(36).slice(2, 8)}`;
+    let candidate = base;
+    for (let i = 2; ; i++) {
+      const existing = await this.deps.repo.getTeamByKey(orgId, candidate);
+      if (!existing || existing.id === excludeId) return candidate;
+      candidate = `${base}-${i}`;
+    }
+  }
+
+  async createTeam(_ctx: ReqCtx, body: member.CreateTeamRequest): Promise<member.Team> {
     const orgId = this.deps.orgId;
     const now = this.deps.now();
-    const nextSort = (await this.deps.repo.maxTeamSortOrder(orgId)) + SORT_ORDER_GAP;
+    const teamName = name(body.name);
+    const id = this.deps.newTeamId();
+    const key = await this.resolveKey(orgId, body.key ?? teamName, id);
     const row: TeamRow = {
-      id: this.deps.newTeamId(),
+      id,
       orgId,
-      name: name(body.name),
+      key,
+      name: teamName,
+      color: optText(body.color, "color"),
       description: optText(body.description, "description"),
-      sortOrder: nextSort,
+      sortOrder: (await this.deps.repo.maxTeamSortOrder(orgId)) + SORT_ORDER_GAP,
       createdAt: now,
       updatedAt: now,
     };
     await this.deps.repo.createTeam(row);
-    return toMemberTeam(row);
+    return toTeam(row);
   }
 
-  async updateTeam(_ctx: ReqCtx, id: string, body: UpdateTeamRequest): Promise<MemberTeam> {
+  async updateTeam(_ctx: ReqCtx, id: string, body: member.UpdateTeamRequest): Promise<member.Team> {
     const cur = await this.deps.repo.getTeam(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errTeamNotFound(id);
+    const nextName = body.name !== undefined ? name(body.name) : cur.name;
+    const key = body.key !== undefined ? await this.resolveKey(cur.orgId, body.key, nextName, cur.id) : cur.key;
     const next: TeamRow = {
       ...cur,
-      name: body.name !== undefined ? name(body.name) : cur.name,
+      key,
+      name: nextName,
+      color: body.color !== undefined ? optText(body.color, "color") : cur.color,
       description: body.description !== undefined ? optText(body.description, "description") : cur.description,
       sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : cur.sortOrder,
       updatedAt: this.deps.now(),
     };
     const ok = await this.deps.repo.updateTeam(next);
     if (!ok) throw errTeamNotFound(id);
-    return toMemberTeam(next);
+    return toTeam(next);
   }
 
   async deleteTeam(_ctx: ReqCtx, id: string): Promise<void> {
@@ -119,7 +134,7 @@ export class MemberService {
     return unique;
   }
 
-  async createMember(ctx: ReqCtx, body: CreateMemberRequest): Promise<OrgMember> {
+  async createMember(ctx: ReqCtx, body: member.CreateMemberRequest): Promise<member.Member> {
     if (!isMemberStatus(body.status)) throw errors.validationFailed([{ field: "status", reason: "invalid" }]);
     const teamIds = await this.validateTeamIds(body.teamIds);
     const orgId = this.deps.orgId;
@@ -140,10 +155,10 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.createPerson(row, teamIds);
-    return toOrgMember(row, teamIds);
+    return toMember(row, teamIds);
   }
 
-  async updateMember(_ctx: ReqCtx, id: string, body: UpdateMemberRequest): Promise<OrgMember> {
+  async updateMember(_ctx: ReqCtx, id: string, body: member.UpdateMemberRequest): Promise<member.Member> {
     if (typeof body.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
     const cur = await this.deps.repo.getPerson(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
@@ -165,7 +180,7 @@ export class MemberService {
     const ok = await this.deps.repo.updatePerson(next, body.version, teamIds);
     if (!ok) throw errVersionConflict(id);
     const finalTeamIds = teamIds ?? (await this.currentTeamIds(id));
-    return toOrgMember(next, finalTeamIds);
+    return toMember(next, finalTeamIds);
   }
 
   async deleteMember(_ctx: ReqCtx, id: string): Promise<void> {

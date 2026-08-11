@@ -1,76 +1,20 @@
-// Service-local types for member-service (運営メンバー管理). This is a self-contained
-// domain (invite status + team membership), so its wire contracts live here rather
-// than in the frozen @dub/types. Distinct from identity_* (RBAC login accounts).
-import type { common, identity } from "@dub/types";
+// Service-local types for member-service (運営メンバー管理). Wire contracts come from
+// the CANONICAL @dub/types `member` namespace (Team is the single shared team
+// definition across all apps); this file adds only the internal persistence rows and
+// injected-dependency interfaces. Distinct from identity_* (RBAC login accounts).
+import type { common, identity, member } from "@dub/types";
 import type { MiddlewareHandler, Context } from "hono";
 
-// ---- wire enums / entities (mirrored by the FE2 feature contract) ----
-export type MemberStatus = "added" | "invited" | "considering" | "declined";
-export const MEMBER_STATUSES: readonly MemberStatus[] = ["added", "invited", "considering", "declined"];
+export type MemberStatus = member.MemberStatus;
+export const MEMBER_STATUSES = ["added", "invited", "considering", "declined"] as const;
 
-export interface MemberTeam {
-  id: string;
-  orgId: common.OrgId;
-  name: string;
-  description: string | null;
-  sortOrder: number;
-  createdAt: common.ISODateTime;
-  updatedAt: common.ISODateTime;
-}
-
-export interface OrgMember {
-  id: string;
-  orgId: common.OrgId;
-  name: string;
-  roleTitle: string | null;
-  status: MemberStatus;
-  teamIds: string[];
-  contact: string | null;
-  note: string | null;
-  sortOrder: number;
-  version: number;
-  createdAt: common.ISODateTime;
-  updatedAt: common.ISODateTime;
-}
-
-export interface MembersOverview {
-  teams: MemberTeam[];
-  members: OrgMember[];
-}
-
-// ---- request contracts ----
-export interface CreateTeamRequest {
-  name: string;
-  description?: string | null;
-}
-export interface UpdateTeamRequest {
-  name?: string;
-  description?: string | null;
-  sortOrder?: number;
-}
-export interface CreateMemberRequest {
-  name: string;
-  roleTitle?: string | null;
-  status: MemberStatus;
-  teamIds: string[];
-  contact?: string | null;
-  note?: string | null;
-}
-export interface UpdateMemberRequest extends common.Versioned {
-  name?: string;
-  roleTitle?: string | null;
-  status?: MemberStatus;
-  teamIds?: string[];
-  contact?: string | null;
-  note?: string | null;
-  sortOrder?: number;
-}
-
-// ---- internal persistence rows (superset of wire types; created_by is internal) ----
+// ---- internal persistence rows (superset of the wire types) ----
 export interface TeamRow {
   id: string;
   orgId: common.OrgId;
+  key: string;
   name: string;
+  color: string | null;
   description: string | null;
   sortOrder: number;
   createdAt: common.ISODateTime;
@@ -106,6 +50,7 @@ export interface MemberRepo {
   // teams
   createTeam(row: TeamRow): Promise<void>;
   getTeam(id: string): Promise<TeamRow | null>;
+  getTeamByKey(orgId: common.OrgId, key: string): Promise<TeamRow | null>;
   listTeams(orgId: common.OrgId): Promise<TeamRow[]>;
   updateTeam(row: TeamRow): Promise<boolean>;
   deleteTeam(id: string): Promise<void>;
@@ -115,13 +60,11 @@ export interface MemberRepo {
   createPerson(row: PersonRow, teamIds: string[]): Promise<void>;
   getPerson(id: string): Promise<PersonRow | null>;
   listPeople(orgId: common.OrgId): Promise<PersonRow[]>;
-  // Optimistic write: UPDATE ... WHERE id=? AND version=expected. Returns false on
-  // version mismatch / not found. When teamIds is provided the join set is replaced.
   updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean>;
   archivePerson(id: string): Promise<void>;
   maxPersonSortOrder(orgId: common.OrgId): Promise<number>;
 
-  // team membership (person_id -> team_ids), for the whole org in one read.
+  // team membership (person_id -> team_ids) for the whole org in one read.
   teamLinksForOrg(orgId: common.OrgId): Promise<Array<{ personId: string; teamId: string }>>;
 }
 

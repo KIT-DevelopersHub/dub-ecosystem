@@ -6,7 +6,8 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { dubContext, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
-import type { AppDeps, CreateMemberRequest, CreateTeamRequest, UpdateMemberRequest, UpdateTeamRequest } from "./types";
+import type { member } from "@dub/types";
+import type { AppDeps } from "./types";
 import { MemberService, type ReqCtx } from "./service";
 
 function reqCtx(c: Context): ReqCtx {
@@ -46,12 +47,17 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // ---- teams ----
+  // GET /members/teams is the CANONICAL team list other apps (e.g. gantt) read to
+  // source their own team switchers ({ teams: Team[] }).
+  app.get("/members/teams", authz.requirePermission(READ), async (c) => {
+    return c.json(await svc.listTeams(reqCtx(c)));
+  });
   app.post("/members/teams", authz.requirePermission(WRITE), async (c) => {
-    const body = await readJson<CreateTeamRequest>(c);
+    const body = await readJson<member.CreateTeamRequest>(c);
     return c.json(await svc.createTeam(reqCtx(c), body), 201);
   });
   app.patch("/members/teams/:id", authz.requirePermission(WRITE), async (c) => {
-    const body = await readJson<UpdateTeamRequest>(c);
+    const body = await readJson<member.UpdateTeamRequest>(c);
     return c.json(await svc.updateTeam(reqCtx(c), c.req.param("id"), body));
   });
   app.delete("/members/teams/:id", authz.requirePermission(WRITE), async (c) => {
@@ -61,11 +67,11 @@ export function createApp(deps: AppDeps): Hono {
 
   // ---- people ----
   app.post("/members/people", authz.requirePermission(WRITE), async (c) => {
-    const body = await readJson<CreateMemberRequest>(c);
+    const body = await readJson<member.CreateMemberRequest>(c);
     return c.json(await svc.createMember(reqCtx(c), body), 201);
   });
   app.patch("/members/people/:id", authz.requirePermission(WRITE), async (c) => {
-    const body = await readJson<UpdateMemberRequest>(c);
+    const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));
   });
   app.delete("/members/people/:id", authz.requirePermission(WRITE), async (c) => {

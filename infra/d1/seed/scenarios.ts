@@ -301,15 +301,15 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
     // 8. 運営メンバー管理 (member-service): teams + people across all statuses, so the
     //    運営メンバー screen (一覧 / チーム別 / 組織図) renders with representative data.
     const memberTeams = [
-      { id: `member_team_venue${sfx}`, name: "会場", description: "会場設営・運営" },
-      { id: `member_team_pr${sfx}`, name: "広報", description: "SNS・告知" },
-      { id: `member_team_sponsor${sfx}`, name: "スポンサー", description: "協賛対応" },
+      { id: `member_team_venue${sfx}`, key: `venue${sfx}`, name: "会場", color: "#4f46e5", description: "会場設営・運営" },
+      { id: `member_team_pr${sfx}`, key: `pr${sfx}`, name: "広報", color: "#0ea5e9", description: "SNS・告知" },
+      { id: `member_team_sponsor${sfx}`, key: `sponsor${sfx}`, name: "スポンサー", color: "#f59e0b", description: "協賛対応" },
     ];
     for (let i = 0; i < memberTeams.length; i++) {
       const t = memberTeams[i]!;
       await w.upsert(
         "member_teams",
-        { id: t.id, org_id: SEED.orgs.primary.id, name: t.name, description: t.description, sort_order: (i + 1) * 1024, created_at: SEED_TS, updated_at: SEED_TS },
+        { id: t.id, org_id: SEED.orgs.primary.id, key: t.key, name: t.name, color: t.color, description: t.description, sort_order: (i + 1) * 1024, created_at: SEED_TS, updated_at: SEED_TS },
         "replace",
         ["id"],
       );

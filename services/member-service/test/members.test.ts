@@ -28,6 +28,20 @@ describe("member-service HTTP surface", () => {
     expect(res.status).toBe(403);
   });
 
+  it("GET /members/teams returns the canonical team list with a derived unique key", async () => {
+    const app = createApp(makeDeps());
+    await call(app, "POST", "/members/teams", { body: { name: "Venue Ops", color: "#4f46e5" } });
+    // same-name team -> key auto-deduped
+    await call(app, "POST", "/members/teams", { body: { name: "Venue Ops" } });
+    const res = await call(app, "GET", "/members/teams");
+    expect(res.status).toBe(200);
+    expect(res.json.teams).toHaveLength(2);
+    const keys = res.json.teams.map((t: any) => t.key);
+    expect(keys).toContain("venue-ops");
+    expect(new Set(keys).size).toBe(2); // unique
+    expect(res.json.teams[0]).toHaveProperty("color");
+  });
+
   it("full flow: create teams + member, group in overview, edit, delete", async () => {
     const app = createApp(makeDeps());
 

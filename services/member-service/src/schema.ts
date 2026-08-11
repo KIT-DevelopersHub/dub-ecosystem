@@ -10,12 +10,15 @@ export const MEMBER_SCHEMA_MIGRATION: Migration = {
 CREATE TABLE member_teams (
   id          TEXT PRIMARY KEY,
   org_id      TEXT NOT NULL,
+  key         TEXT NOT NULL,
   name        TEXT NOT NULL,
+  color       TEXT,
   description TEXT,
   sort_order  INTEGER NOT NULL,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
+CREATE UNIQUE INDEX idx_member_teams_org_key ON member_teams(org_id, key);
 CREATE INDEX idx_member_teams_org ON member_teams(org_id, sort_order);
 CREATE TABLE member_people (
   id          TEXT PRIMARY KEY,

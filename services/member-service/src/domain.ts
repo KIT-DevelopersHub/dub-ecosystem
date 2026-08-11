@@ -1,5 +1,6 @@
-// Pure domain helpers: DTO mappers (row -> wire) + validation constants.
-import type { MemberStatus, MemberTeam, OrgMember, PersonRow, TeamRow } from "./types";
+// Pure domain helpers: DTO mappers (row -> canonical @dub/types wire) + slug/validation.
+import type { member } from "@dub/types";
+import type { MemberStatus, PersonRow, TeamRow } from "./types";
 import { MEMBER_STATUSES } from "./types";
 
 export const SORT_ORDER_GAP = 1024;
@@ -9,19 +10,21 @@ export function isMemberStatus(v: unknown): v is MemberStatus {
   return typeof v === "string" && (MEMBER_STATUSES as readonly string[]).includes(v);
 }
 
-export function toMemberTeam(r: TeamRow): MemberTeam {
-  return {
-    id: r.id,
-    orgId: r.orgId,
-    name: r.name,
-    description: r.description,
-    sortOrder: r.sortOrder,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  };
+/** URL-safe slug from a team name. ASCII names slugify; non-ASCII (e.g. Japanese)
+ *  yields "" and the caller falls back to a generated key. */
+export function slugify(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
-export function toOrgMember(r: PersonRow, teamIds: string[]): OrgMember {
+export function toTeam(r: TeamRow): member.Team {
+  return { id: r.id, key: r.key, name: r.name, color: r.color, description: r.description };
+}
+
+export function toMember(r: PersonRow, teamIds: string[]): member.Member {
   return {
     id: r.id,
     orgId: r.orgId,

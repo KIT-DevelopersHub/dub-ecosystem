@@ -6,7 +6,9 @@ import type { MemberRepo, PersonRow, TeamRow, MemberStatus } from "./types";
 interface TeamDbRow {
   id: string;
   org_id: string;
+  key: string;
   name: string;
+  color: string | null;
   description: string | null;
   sort_order: number;
   created_at: string;
@@ -32,7 +34,9 @@ function toTeamRow(r: TeamDbRow): TeamRow {
   return {
     id: r.id,
     orgId: r.org_id,
+    key: r.key,
     name: r.name,
+    color: r.color,
     description: r.description,
     sortOrder: r.sort_order,
     createdAt: r.created_at,
@@ -72,13 +76,17 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     // ---- teams ----
     async createTeam(row: TeamRow): Promise<void> {
       await db.run(
-        `INSERT INTO member_teams (id, org_id, name, description, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        row.id, row.orgId, row.name, row.description, row.sortOrder, row.createdAt, row.updatedAt,
+        `INSERT INTO member_teams (id, org_id, key, name, color, description, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        row.id, row.orgId, row.key, row.name, row.color, row.description, row.sortOrder, row.createdAt, row.updatedAt,
       );
     },
     async getTeam(id: string): Promise<TeamRow | null> {
       const r = await db.first<TeamDbRow>(`SELECT * FROM member_teams WHERE id = ?`, id);
+      return r ? toTeamRow(r) : null;
+    },
+    async getTeamByKey(orgId, key: string): Promise<TeamRow | null> {
+      const r = await db.first<TeamDbRow>(`SELECT * FROM member_teams WHERE org_id = ? AND key = ?`, orgId, key);
       return r ? toTeamRow(r) : null;
     },
     async listTeams(orgId): Promise<TeamRow[]> {
@@ -90,8 +98,8 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     },
     async updateTeam(row: TeamRow): Promise<boolean> {
       const res = await db.run(
-        `UPDATE member_teams SET name = ?, description = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
-        row.name, row.description, row.sortOrder, row.updatedAt, row.id,
+        `UPDATE member_teams SET key = ?, name = ?, color = ?, description = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
+        row.key, row.name, row.color, row.description, row.sortOrder, row.updatedAt, row.id,
       );
       return res.meta.changes > 0;
     },
