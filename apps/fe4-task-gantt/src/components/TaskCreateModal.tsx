@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import type { common, identity, task } from "@dub/types";
-import { Modal, Button, TextField, Select, DatePicker } from "@dub/ui";
+import { Modal, Button, TextField, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
+import { DateField } from "./DateField";
+import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
 
 export interface TaskDraft {
@@ -22,13 +24,15 @@ export interface TaskCreateModalProps {
   onCreate: (draft: TaskDraft) => Promise<void>;
   /** date-input value (YYYY-MM-DD) preset when opened from a timeline cell. */
   initialDue?: string | null;
+  /** predecessor ids preset when opened via "create child task" (feature #4). */
+  initialDependsOn?: readonly common.TaskId[];
 }
 
 // A newly-created task starts in "todo"; only todo-reachable states are offered.
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCreate, initialDue }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCreate, initialDue, initialDependsOn }: TaskCreateModalProps) {
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<task.TaskStatus>("todo");
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
@@ -37,10 +41,13 @@ export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCre
   const [deps, setDeps] = useState<common.TaskId[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // seed the due date from the timeline cell that was clicked (when reopened).
+  // seed the due date + predecessors when (re)opened from a timeline cell / child-create.
   useEffect(() => {
-    if (open) setDue(initialDue ?? null);
-  }, [open, initialDue]);
+    if (open) {
+      setDue(initialDue ?? null);
+      setDeps(initialDependsOn ? [...initialDependsOn] : []);
+    }
+  }, [open, initialDue, initialDependsOn]);
 
   const reset = () => {
     setTitle("");
@@ -69,15 +76,13 @@ export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCre
         dueAt: isoFromDateInput(due),
         dependsOnIds: deps,
       });
+      rememberPredecessors(deps);
       reset();
       onClose();
     } finally {
       setSaving(false);
     }
   };
-
-  const toggleDep = (id: common.TaskId) =>
-    setDeps((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
   return (
     <Modal
@@ -153,27 +158,13 @@ export function TaskCreateModal({ open, onClose, users, dependencyOptions, onCre
           <label className={styles.formLabel} htmlFor="fe4-create-due">
             期日
           </label>
-          <DatePicker id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
+          <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
         </div>
 
-        {dependencyOptions.length > 0 && (
-          <div className={styles.formFieldFull}>
-            <span className={styles.formLabel}>先行タスク（依存）</span>
-            <div className={styles.depPicker} data-testid="fe4-create-deps">
-              {dependencyOptions.map((t) => (
-                <label key={t.id} className={`${styles.depOption} ${deps.includes(t.id) ? styles.depOptionOn : ""}`}>
-                  <input
-                    type="checkbox"
-                    checked={deps.includes(t.id)}
-                    onChange={() => toggleDep(t.id)}
-                    data-testid={`fe4-create-dep-${t.id}`}
-                  />
-                  {t.title}
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
+        <div className={styles.formFieldFull}>
+          <span className={styles.formLabel}>先行タスク（依存）</span>
+          <PredecessorPicker options={dependencyOptions} value={deps} onChange={setDeps} testId="fe4-create-deps" />
+        </div>
       </div>
     </Modal>
   );

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { common, identity, task } from "@dub/types";
-import { Button, IconButton, TextField, Select, DatePicker } from "@dub/ui";
+import { Button, IconButton, TextField, Select } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
+import { DateField } from "./DateField";
 import { TaskStatusBadge } from "./TaskStatusBadge";
 import styles from "../styles/app.module.css";
 
@@ -14,6 +15,8 @@ export interface TaskDetailPanelProps {
   onSave: (patch: task.UpdateTaskRequest) => void;
   onDelete: () => void;
   onClose: () => void;
+  /** Open the create modal with this task preset as the predecessor (feature #4). */
+  onCreateChild?: (parentId: common.TaskId) => void;
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
@@ -26,6 +29,7 @@ export function TaskDetailPanel({
   onSave,
   onDelete,
   onClose,
+  onCreateChild,
   fieldErrors,
   canWrite,
   canDelete,
@@ -128,9 +132,16 @@ export function TaskDetailPanel({
             <label className={styles.formLabel} htmlFor="fe4-detail-due">
               期日
             </label>
-            <DatePicker id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
+            <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
           </div>
         </div>
+
+        {canWrite && onCreateChild && (
+          <button type="button" className={styles.childCreateBtn} onClick={() => onCreateChild(t.id)} data-testid="fe4-detail-create-child">
+            ＋ ここから子タスクを作成
+            <span className={styles.childCreateHint}>このタスクを先行（親）にして新規作成</span>
+          </button>
+        )}
 
         <div className={styles.panelActions}>
           <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">

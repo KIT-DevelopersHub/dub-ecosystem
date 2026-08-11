@@ -555,10 +555,14 @@
 .confirmText { margin: 0 0 var(--dub-space-2); font-size: var(--dub-font-size-sm, 0.85rem); color: var(--dub-color-danger-700, var(--dub-color-danger-900)); }
 
 /* ---- form (create modal + detail panel) ---- */
-.formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--dub-space-3); }
-.formRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--dub-space-3); }
+/* minmax(0,1fr) so a wide child (native date/select) never blows the column out
+   and forces the dialog to scroll horizontally (bug fix #2). */
+.formGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--dub-space-3); max-width: 100%; }
+.formRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--dub-space-3); max-width: 100%; }
 .formField { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.formFieldFull { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; }
+.formField input, .formField select, .formField textarea { max-width: 100%; box-sizing: border-box; }
+.formFieldFull { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.formFieldFull input, .formFieldFull select, .formFieldFull textarea { max-width: 100%; box-sizing: border-box; }
 .formLabel {
   font-size: var(--dub-font-size-sm, 0.8rem);
   font-weight: var(--dub-font-weight-medium, 600);
@@ -608,3 +612,181 @@
 
 @keyframes fe4-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fe4-slide { from { transform: translateX(16px); opacity: 0.4; } to { transform: translateX(0); opacity: 1; } }
+
+/* ================= styled date field (Notion-tone calendar) ================= */
+.df { position: relative; display: block; width: 100%; min-width: 0; }
+.dfNative {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%);
+  overflow: hidden; white-space: nowrap;
+}
+.dfTrigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 8px);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-md, 0.95rem);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.dfTrigger:hover:not(:disabled) { border-color: var(--dub-color-border-strong); }
+.dfTrigger:focus-visible { outline: 2px solid var(--dub-color-border-focus); outline-offset: 1px; border-color: var(--dub-color-border-focus); }
+.dfTrigger:disabled { background: var(--dub-color-surface-sunken); opacity: 0.7; cursor: not-allowed; }
+.dfIcon { flex: 0 0 auto; color: var(--dub-color-text-secondary); }
+.dfValue { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dfPlaceholder { flex: 1 1 auto; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+.dfClear {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 999px;
+  color: var(--dub-color-text-secondary);
+  font-size: 0.9rem; line-height: 1;
+}
+.dfClear:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); }
+
+.dfPop {
+  position: fixed;
+  z-index: var(--dub-zIndex-modal, 1300);
+  width: 268px;
+  padding: var(--dub-space-3);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg, 12px);
+  box-shadow: var(--dub-shadow-overlay, 0 12px 32px rgba(15, 23, 42, 0.18));
+}
+.dfPopHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--dub-space-2); }
+.dfMonth { font-size: var(--dub-font-size-sm, 0.85rem); font-weight: var(--dub-font-weight-bold, 700); color: var(--dub-color-text-primary); }
+.dfNav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 6px);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-secondary);
+  cursor: pointer; font-size: 0.95rem; line-height: 1;
+}
+.dfNav:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); }
+.dfGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dfWd { display: flex; align-items: center; justify-content: center; height: 24px; font-size: 0.68rem; font-weight: 700; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+.dfWdWeekend { color: var(--dub-color-text-secondary); }
+.dfCellEmpty { height: 32px; }
+.dfCell {
+  display: flex; align-items: center; justify-content: center;
+  height: 32px;
+  border: none;
+  border-radius: var(--dub-radius-sm, 6px);
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.dfCell:hover { background: var(--dub-color-surface-sunken); }
+.dfCellWeekend { color: var(--dub-color-text-secondary); }
+.dfCellToday { box-shadow: inset 0 0 0 1px var(--dub-color-border-strong); font-weight: 700; }
+.dfCellSel { background: var(--dub-color-brand-500); color: var(--dub-color-text-inverse); font-weight: 700; }
+.dfCellSel:hover { background: var(--dub-color-brand-600); }
+.dfPopFoot { display: flex; justify-content: flex-end; margin-top: var(--dub-space-2); }
+.dfTodayBtn {
+  padding: 4px 10px;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 6px);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-brand-600);
+  font-size: var(--dub-font-size-sm, 0.8rem);
+  font-weight: 600;
+  cursor: pointer;
+}
+.dfTodayBtn:hover { background: var(--dub-color-surface-sunken); }
+
+/* ================= predecessor combobox ================= */
+.pp { display: flex; flex-direction: column; gap: var(--dub-space-2); min-width: 0; max-width: 100%; }
+.ppSelected { display: flex; flex-wrap: wrap; gap: var(--dub-space-1); }
+.ppChip {
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 100%;
+  padding: 3px 4px 3px var(--dub-space-2);
+  border-radius: var(--dub-radius-full, 999px);
+  border: 1px solid var(--dub-color-brand-200, var(--dub-color-brand-100));
+  background: var(--dub-color-brand-50, var(--dub-color-brand-100));
+  color: var(--dub-color-brand-700);
+  font-size: var(--dub-font-size-sm, 0.8rem);
+}
+.ppChipText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ppChipX {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px;
+  border: none; border-radius: 999px;
+  background: transparent; color: var(--dub-color-brand-600);
+  cursor: pointer; font-size: 0.85rem; line-height: 1;
+}
+.ppChipX:hover { background: var(--dub-color-brand-100); }
+.ppInputWrap { position: relative; min-width: 0; }
+.ppInput {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-md, 0.95rem);
+  font-family: inherit;
+}
+.ppInput:focus-visible { outline: 2px solid var(--dub-color-border-focus); outline-offset: 1px; border-color: var(--dub-color-border-focus); }
+.ppInput:disabled { background: var(--dub-color-surface-sunken); opacity: 0.7; }
+.ppMenu {
+  position: absolute;
+  left: 0; right: 0; top: calc(100% + 4px);
+  z-index: 20;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 10px);
+  box-shadow: var(--dub-shadow-overlay, 0 10px 24px rgba(15, 23, 42, 0.16));
+}
+.ppMenuHint { padding: 6px var(--dub-space-2) 4px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+.ppOption {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--dub-space-2);
+  width: 100%;
+  padding: var(--dub-space-2);
+  border: none; border-radius: var(--dub-radius-sm, 6px);
+  background: transparent; color: var(--dub-color-text-primary);
+  text-align: left; font-size: var(--dub-font-size-sm, 0.85rem);
+  cursor: pointer;
+}
+.ppOption:hover { background: var(--dub-color-surface-sunken); }
+.ppOptText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ppOptAdd { flex: 0 0 auto; color: var(--dub-color-brand-600); font-weight: 700; }
+.ppEmpty { padding: var(--dub-space-2); font-size: var(--dub-font-size-sm, 0.82rem); color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+
+/* ================= detail: create child task ================= */
+.childCreateBtn {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px dashed var(--dub-color-brand-300, var(--dub-color-brand-200));
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-brand-50, var(--dub-color-surface-sunken));
+  color: var(--dub-color-brand-700);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.childCreateBtn:hover { background: var(--dub-color-brand-100); border-color: var(--dub-color-brand-400); }
+.childCreateHint { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); font-weight: 400; }

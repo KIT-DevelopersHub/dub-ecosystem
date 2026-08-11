@@ -35,6 +35,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const [selected, setSelected] = useState<common.TaskId | null>(null);
   const [creating, setCreating] = useState(false);
   const [createPresetDue, setCreatePresetDue] = useState<string | null>(null);
+  const [createPresetDeps, setCreatePresetDeps] = useState<common.TaskId[]>([]);
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
@@ -100,6 +101,22 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const onCreateOnDate = (dueAt: common.ISODateTime | null) => {
     setCreatePresetDue(dueAt ? dueAt.slice(0, 10) : null);
+    setCreatePresetDeps([]);
+    setCreating(true);
+  };
+
+  // "＋ ここから子タスクを作成": open the create modal with this task preset as the
+  // predecessor (parent). We also preset the child's due a few days after the
+  // parent finishes, so it gets a bar and the parent->child dependency line is
+  // actually drawn on the gantt (a bar-less row would hide the connector).
+  const onCreateChild = (parentId: common.TaskId) => {
+    const MS_PER_DAY = 86_400_000;
+    const row = gantt.data?.rows.find((r) => r.taskId === parentId);
+    const anchor = row?.endsAt ?? tasks.find((t) => t.id === parentId)?.dueAt ?? null;
+    const childDue = anchor ? new Date(Date.parse(anchor) + 3 * MS_PER_DAY).toISOString().slice(0, 10) : null;
+    setSelected(null);
+    setCreatePresetDue(childDue);
+    setCreatePresetDeps([parentId]);
     setCreating(true);
   };
 
@@ -201,9 +218,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       <TaskCreateModal
         open={creating}
         initialDue={createPresetDue}
+        initialDependsOn={createPresetDeps}
         onClose={() => {
           setCreating(false);
           setCreatePresetDue(null);
+          setCreatePresetDeps([]);
         }}
         users={userList}
         dependencyOptions={tasks.map((t) => ({ id: t.id, title: t.title }))}
@@ -219,6 +238,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}
+          onCreateChild={onCreateChild}
           onClose={() => setSelected(null)}
         />
       )}
