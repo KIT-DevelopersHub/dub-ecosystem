@@ -5,6 +5,7 @@ import {
   TextField,
   Select,
   Button,
+  IconButton,
   Badge,
   Card,
   EmptyState,
@@ -16,10 +17,12 @@ import {
   type SelectOption,
 } from "@dub/ui";
 import { UserStatusBadge } from "./UserStatusBadge";
+import { UserInlineEditor } from "./UserInlineEditor";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
 import { useUsers, useSyncEmailRouting, isEmailRoutingUnconfigured } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
+import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
 import { displayError } from "../lib/errorDisplay";
 import type { RosterUser } from "../contracts/pending";
@@ -38,6 +41,28 @@ const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "
 const noticeTitleStyle: React.CSSProperties = { fontWeight: 600 };
 const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
 
+// Master (table) + detail (right pane) — the roster and the selected user's management
+// surface sit side by side on ONE screen. Wraps under the table on narrow viewports.
+const splitStyle: React.CSSProperties = { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap", marginTop: 16 };
+const tableColStyle: React.CSSProperties = { flex: "1 1 460px", minWidth: 0 };
+const paneColStyle: React.CSSProperties = { flex: "1 1 340px", minWidth: 300, position: "sticky", top: 16 };
+const paneHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 };
+const paneTitleStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 16, minWidth: 0 };
+
+function nameButtonStyle(selected: boolean): React.CSSProperties {
+  return {
+    background: "none",
+    border: "none",
+    padding: 0,
+    font: "inherit",
+    cursor: "pointer",
+    textAlign: "left",
+    color: "var(--dub-color-accent-fg, #0969da)",
+    fontWeight: selected ? 700 : 500,
+    textDecoration: selected ? "underline" : "none",
+  };
+}
+
 /** Provenance chip: Email Routing rows vs. manually invited members. */
 function SourceBadge({ source, testId }: { source: RosterUser["source"]; testId?: string }) {
   return source === "email-routing" ? (
@@ -47,19 +72,27 @@ function SourceBadge({ source, testId }: { source: RosterUser["source"]; testId?
   );
 }
 
-export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void }) {
+export function UserListPage() {
   const [filters, setFilters] = useState<UserListFilters>(DEFAULT_USER_FILTERS);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const { can } = usePermissions();
+  const { me } = useRosterContext();
   const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
   const sync = useSyncEmailRouting();
 
+  const currentUserId = me?.user.id ?? "";
   const canInvite = can("identity:admin");
   const canManageRouting = can("mail:admin"); // read the proxy / issue addresses
   const canSync = canInvite && canManageRouting; // relay proxy -> roster upsert
   const notConnected = isEmailRoutingUnconfigured(sync.error);
+
+  const items = query.data?.items ?? [];
+  // Resolve the selection against the freshest list so the pane reflects saved edits
+  // and closes itself if the selected user drops out of the current filter.
+  const selectedUser = items.find((u) => u.id === selectedId) ?? null;
 
   const columns: ColumnDef<RosterUser>[] = [
     {
@@ -67,13 +100,15 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
       header: "名前",
       cell: (u) => (
         <span data-testid={`fe7-users-row-${u.id}`}>
-          {onOpenUser ? (
-            <button onClick={() => onOpenUser(u.id)} data-testid={`fe7-users-open-${u.id}`}>
-              {u.displayName}
-            </button>
-          ) : (
-            u.displayName
-          )}
+          <button
+            type="button"
+            onClick={() => setSelectedId(u.id)}
+            aria-current={selectedId === u.id ? "true" : undefined}
+            data-testid={`fe7-users-open-${u.id}`}
+            style={nameButtonStyle(selectedId === u.id)}
+          >
+            {u.displayName}
+          </button>
         </span>
       ),
     },
@@ -114,7 +149,7 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
       />
 
       <p style={noticeTextStyle}>
-        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。「同期」で最新のアドレスを取り込み、各メンバーにロールと表示名を設定できます。
+        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。名前をクリックすると右側で表示名・ロール・在籍状態をその場で編集できます。
       </p>
 
       {notConnected ? (
@@ -156,22 +191,58 @@ export function UserListPage({ onOpenUser }: { onOpenUser?: (id: string) => void
 
       {query.isError ? (
         <ErrorState error={displayError(query.error)} onRetry={() => query.refetch()} testId="fe7-users-error" />
-      ) : query.data && query.data.items.length === 0 ? (
+      ) : query.data && items.length === 0 ? (
         <EmptyState title="該当するユーザーがいません" testId="fe7-users-empty" />
       ) : (
-        <>
-          <DataTable
-            columns={columns}
-            rows={query.data?.items ?? []}
-            rowKey={(u) => u.id}
-            testId="fe7-users-table"
-          />
-          <LoadMore
-            hasMore={!!query.data?.nextCursor}
-            onLoadMore={() => setCursor(query.data?.nextCursor ?? undefined)}
-            testId="fe7-users-loadmore"
-          />
-        </>
+        <div style={splitStyle}>
+          <div style={tableColStyle}>
+            <DataTable
+              columns={columns}
+              rows={items}
+              rowKey={(u) => u.id}
+              onRowClick={(u) => setSelectedId(u.id)}
+              testId="fe7-users-table"
+            />
+            <LoadMore
+              hasMore={!!query.data?.nextCursor}
+              onLoadMore={() => setCursor(query.data?.nextCursor ?? undefined)}
+              testId="fe7-users-loadmore"
+            />
+          </div>
+
+          {selectedUser ? (
+            <div style={paneColStyle}>
+              <Card testId="fe7-user-pane">
+                <div style={paneHeaderStyle}>
+                  <span style={paneTitleStyle}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {selectedUser.displayName}
+                    </span>
+                    <UserStatusBadge status={selectedUser.status} testId="fe7-user-status" />
+                  </span>
+                  <IconButton
+                    name="x"
+                    aria-label="閉じる"
+                    onClick={() => setSelectedId(null)}
+                    testId="fe7-user-pane-close"
+                  />
+                </div>
+                <UserInlineEditor
+                  key={selectedUser.id}
+                  user={selectedUser}
+                  currentUserId={currentUserId}
+                  events={[]}
+                />
+              </Card>
+            </div>
+          ) : (
+            <div style={paneColStyle}>
+              <Card testId="fe7-user-pane-empty">
+                <EmptyState title="ユーザーを選択してください" description="一覧から名前をクリックすると、ここで編集できます。" />
+              </Card>
+            </div>
+          )}
+        </div>
       )}
 
       <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />

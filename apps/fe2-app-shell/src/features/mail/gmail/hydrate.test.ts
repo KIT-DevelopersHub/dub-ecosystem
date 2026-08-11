@@ -1,0 +1,54 @@
+// Unit tests for the gateway-DTO -> client-model mappers.
+import { describe, expect, it } from "vitest";
+import type { mail } from "@dub/types";
+import { inboxItemsToThreads, sentDetailToMessage, sentItemsToThreads, threadDetailToMessages } from "./hydrate.ts";
+import { SELF } from "./mailModel.ts";
+
+const inbox: mail.MailMessageListItem[] = [
+  { id: "a1", messageId: "<a1>", threadId: "T", from: { email: "a@x.jp" }, to: [{ email: "me@developershub.jp" }], subject: "Hello", snippet: "older", receivedAt: "2026-08-01T00:00:00.000Z", read: true },
+  { id: "a2", messageId: "<a2>", threadId: "T", from: { email: "b@x.jp" }, to: [{ email: "me@developershub.jp" }], subject: "Hello", snippet: "newer", receivedAt: "2026-08-02T00:00:00.000Z", read: false },
+  { id: "b1", messageId: "<b1>", threadId: "U", from: { email: "c@x.jp" }, to: [{ email: "me@developershub.jp" }], subject: "Other", snippet: "solo", receivedAt: "2026-08-03T00:00:00.000Z", read: false },
+];
+
+describe("inboxItemsToThreads", () => {
+  it("groups by threadId, oldest→newest, preserving first-seen order", () => {
+    const threads = inboxItemsToThreads(inbox);
+    expect(threads.map((t) => t.id)).toEqual(["T", "U"]);
+    expect(threads[0]!.messages.map((m) => m.id)).toEqual(["a1", "a2"]);
+    expect(threads[0]!.folder).toBe("inbox");
+    // body seeds from the snippet (list endpoints carry no body).
+    expect(threads[0]!.messages[0]!.body).toBe("older");
+    expect(threads[1]!.messages).toHaveLength(1);
+  });
+});
+
+describe("sentItemsToThreads", () => {
+  it("maps each sent item to a one-message sent thread with its recorded From", () => {
+    const items: mail.MailSentListItem[] = [
+      { id: "s1", from: { email: "alice@developershub.jp" }, to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent" },
+    ];
+    const threads = sentItemsToThreads(items, SELF);
+    expect(threads[0]!.folder).toBe("sent");
+    expect(threads[0]!.messages[0]!.from.email).toBe("alice@developershub.jp");
+    expect(threads[0]!.messages[0]!.read).toBe(true);
+  });
+
+  it("falls back to `me` when a sent item has no recorded From", () => {
+    const items: mail.MailSentListItem[] = [
+      { id: "s2", to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent" },
+    ];
+    expect(sentItemsToThreads(items, SELF)[0]!.messages[0]!.from).toEqual(SELF);
+  });
+});
+
+describe("full-body mappers", () => {
+  it("threadDetailToMessages uses textBody", () => {
+    const thread: mail.MailThread = { id: "T", messages: [{ ...inbox[0]!, textBody: "the full body" }] };
+    expect(threadDetailToMessages(thread)[0]!.body).toBe("the full body");
+  });
+
+  it("sentDetailToMessage uses textBody", () => {
+    const detail: mail.MailSentDetail = { id: "s1", from: { email: "a@b.jp" }, to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent", textBody: "full sent body" };
+    expect(sentDetailToMessage(detail, SELF).body).toBe("full sent body");
+  });
+});

@@ -85,7 +85,13 @@ export function inboundDeps(h: Harness, over: Partial<InboundDeps> = {}): Inboun
 }
 
 // ---- fake identity Fetcher (POST /authz/check) for app-level auth tests ----
-export function fakeIdentityFetcher(allow: boolean): Fetcher {
+// `users` (optional) also answers the internal GET /users/:id used by the outbox From
+// resolution: a userId present here resolves to that roster user (email drives the
+// From); a userId absent from the map 404s (→ safe info@ fallback).
+export function fakeIdentityFetcher(
+  allow: boolean,
+  users: Record<string, { email: string; displayName?: string }> = {},
+): Fetcher {
   return {
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
@@ -95,6 +101,25 @@ export function fakeIdentityFetcher(allow: boolean): Fetcher {
           decisions: body.checks.map(() => ({ allowed: allow, evaluatedAt: new Date().toISOString(), ttlSeconds: 60 })),
         };
         return new Response(JSON.stringify(res), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const userMatch = /^\/users\/([^/]+)$/.exec(url.pathname);
+      if (userMatch && req.method === "GET") {
+        const id = decodeURIComponent(userMatch[1]!);
+        const seed = users[id];
+        if (!seed) return new Response("not found", { status: 404 });
+        const user: identity.IdentityUser = {
+          id,
+          orgId: "org_devhub",
+          displayName: seed.displayName ?? seed.email,
+          email: seed.email,
+          githubLogin: null,
+          avatarUrl: null,
+          status: "active",
+          roleIds: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        };
+        return new Response(JSON.stringify(user), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("not found", { status: 404 });
     },

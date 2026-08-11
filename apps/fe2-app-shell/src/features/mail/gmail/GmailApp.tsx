@@ -1,8 +1,8 @@
 // Top-level Gmail-style mail experience. Composes the full-width search bar, the
 // left folder/label nav, the center list ↔ reading-pane swap, floating compose
 // windows and an undo toast. Owns keyboard shortcuts (c compose / e archive /
-// # delete / r reply / j·k move / x select / / focus search). All state lives in
-// the client MailStore (demo); real API wiring merges later.
+// # delete / r reply / j·k move / x select / / focus search). State lives in the client
+// MailStore, hydrated from the real gateway by useMailSync (inbox + Sent are live data).
 import { useEffect, useRef } from "react";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
@@ -11,6 +11,7 @@ import { ComposeWindow } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
 import { inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
 import { MailStoreProvider, useMailStore } from "./useMailStore.tsx";
+import { useMailSync } from "./useMailSync.tsx";
 
 function SearchBar(): JSX.Element {
   const { state, dispatch } = useMailStore();
@@ -126,6 +127,7 @@ function Shortcuts(): null {
 
 function GmailBody(): JSX.Element {
   const { state } = useMailStore();
+  useMailSync(); // hydrate inbox + Sent from the gateway; lazy-load bodies on open
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId) : undefined;
   const unreadInbox = state.threads.filter((t) => inFolder(t, "inbox") && threadUnread(t)).length;
 

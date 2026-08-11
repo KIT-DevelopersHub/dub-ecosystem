@@ -85,18 +85,20 @@ export function MailSidebar(): JSX.Element {
         );
       })}
 
-      <div
-        style={{
-          margin: "12px 20px 4px",
-          fontSize: "var(--dub-font-size-xs)",
-          color: "var(--dub-color-text-muted)",
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        ラベル
-      </div>
+      {state.labels.length > 0 ? (
+        <div
+          style={{
+            margin: "12px 20px 4px",
+            fontSize: "var(--dub-font-size-xs)",
+            color: "var(--dub-color-text-muted)",
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+          }}
+        >
+          ラベル
+        </div>
+      ) : null}
       {state.labels.map((l) => {
         const active = state.labelFilter === l.id;
         return (

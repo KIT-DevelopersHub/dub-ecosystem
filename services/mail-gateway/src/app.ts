@@ -19,6 +19,7 @@ import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
 import { buildDb, buildSendDeps } from "./deps";
+import { resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
@@ -94,8 +95,12 @@ export function createApp() {
     const ctx = ctxOf(c);
     const idempotencyKey = c.req.header(HEADERS.idempotencyKey) ?? crypto.randomUUID();
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
-    const requester = c.req.header(HEADERS.userId) ?? "unknown";
-    const deps = buildSendDeps(c.env, ctx);
+    const userId = c.req.header(HEADERS.userId) ?? null;
+    const requester = userId ?? "unknown";
+    // From = the logged-in user's own @developershub.jp address (roster lookup), with a
+    // safe info@ fallback for non-roster / non-company callers. See from.ts.
+    const fromAddress = await resolveUserFromAddress(c.env, ctx, userId);
+    const deps = buildSendDeps(c.env, ctx, undefined, fromAddress);
     const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
