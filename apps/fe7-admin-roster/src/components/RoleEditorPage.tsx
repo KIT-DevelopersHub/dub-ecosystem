@@ -5,7 +5,7 @@ import { PermissionMatrix } from "./PermissionMatrix";
 import { useRoles, usePermissionCatalog, useCreateRole, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
-import { buildRoleUpdate } from "../lib/permissionMatrix";
+import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
 import { errorMessage } from "../lib/errorDisplay";
 
 // roleId omitted -> create mode.
@@ -30,10 +30,18 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
     setHydrated(true);
   }
 
-  const readOnly = existing?.isSystem || !can("identity:admin");
+  // System roles are editable by admins now; only the identity:admin gate blocks it.
+  const readOnly = !can("identity:admin");
+  // Renaming a system role is still disallowed (its name identifies it, e.g. "admin").
+  const nameDisabled = readOnly || !!existing?.isSystem;
+  const lockedKeys = existing ? lockedKeysForRole(existing) : [];
 
   function save() {
     setConfirmSave(false);
+    if (lockedKeys.some((k) => !perms.includes(k))) {
+      toast({ kind: "error", title: "この権限は外せません", description: "admin ロールから identity:admin は削除できません。" });
+      return;
+    }
     if (roleId && existing) {
       const patch = buildRoleUpdate({ name: existing.name, permissions: existing.permissions }, { name, permissions: perms });
       if (!patch) { toast({ kind: "info", title: "変更はありません" }); return; }
@@ -54,17 +62,17 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
       <PageHeader title={roleId ? "ロールを編集" : "ロールを作成"} testId="fe7-role-editor-header" />
       <Card testId="fe7-role-editor">
         <FormField label="ロール名" htmlFor="fe7-role-name">
-          <TextField id="fe7-role-name" value={name} onChange={(v) => setName(v)} disabled={readOnly} testId="fe7-role-name" />
+          <TextField id="fe7-role-name" value={name} onChange={(v) => setName(v)} disabled={nameDisabled} testId="fe7-role-name" />
         </FormField>
         {catalog.data ? (
-          <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} />
+          <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} lockedKeys={lockedKeys} />
         ) : (
           <p>権限カタログを読み込み中…</p>
         )}
         {!readOnly ? (
           <Button variant="primary" onClick={() => setConfirmSave(true)} disabled={!name.trim()} testId="fe7-role-save">保存</Button>
         ) : (
-          <p>システムロールは編集できません。</p>
+          <p>編集権限がありません。</p>
         )}
       </Card>
       <ConfirmDialog

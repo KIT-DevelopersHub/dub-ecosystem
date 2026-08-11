@@ -62,16 +62,25 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect(screen.getByTestId("fe7-role-role_organizer-permission-matrix")).toBeInTheDocument();
   });
 
-  it("system role is read-only inline (disabled matrix, no save)", async () => {
+  it("admin can edit a system role inline; admin role pins identity:admin", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_admin")).toBeInTheDocument());
 
+    // admin role: identity:admin is locked (self-lockout guard) but the role is still
+    // editable — the Save button is present and other keys are toggleable.
     await user.click(screen.getByTestId("fe7-roles-open-role_admin"));
     await waitFor(() =>
       expect((screen.getByTestId("fe7-role-role_admin-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true),
     );
-    expect(screen.queryByTestId("fe7-role-role_admin-save")).not.toBeInTheDocument();
+    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-mail:admin") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByTestId("fe7-role-role_admin-save")).toBeInTheDocument();
+
+    // a non-admin system role (member) is fully editable, identity:admin included.
+    await user.click(screen.getByTestId("fe7-roles-open-role_member"));
+    await waitFor(() => expect(screen.getByTestId("fe7-role-role_member-permission-matrix")).toBeInTheDocument());
+    expect((screen.getByTestId("fe7-role-role_member-matrix-key-event:read") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByTestId("fe7-role-role_member-save")).toBeInTheDocument();
   });
 
   it("read-only user can view permissions inline but cannot edit or create", async () => {
