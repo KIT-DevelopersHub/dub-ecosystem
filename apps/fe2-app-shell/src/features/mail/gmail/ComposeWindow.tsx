@@ -99,10 +99,15 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
     if (to.length === 0) return;
+    // Optimistic: show it in Sent immediately. The real send follows; once the gateway
+    // confirms, REQUEST_SYNC re-fetches GET /mail/sent so the entry is server-backed and
+    // survives a reload (the From is the gateway-resolved <user>@developershub.jp).
     dispatch({ type: "SEND", to, cc, subject: compose.subject, body: compose.body });
     const req: mail.SendMailRequest = { to, subject: compose.subject || "(件名なし)", textBody: compose.body };
-    // best-effort real send; harmless no-op under the demo mock (404 swallowed).
-    void mailApi.send(cc.length > 0 ? { ...req, cc } : req).catch(() => undefined);
+    void mailApi
+      .send(cc.length > 0 ? { ...req, cc } : req)
+      .then(() => dispatch({ type: "REQUEST_SYNC" }))
+      .catch(() => undefined);
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
   };
 

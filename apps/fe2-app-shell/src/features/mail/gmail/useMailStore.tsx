@@ -1,18 +1,13 @@
-// Client-side store for the Gmail-style mail UI (demo). A useReducer + context
-// pair (matching the codebase's provider style) that owns folder/label view,
-// open thread, bulk selection, search, floating compose windows and an undo
-// snapshot. All mutations are optimistic and in-memory; wiring these to the real
-// gateway (star/archive/trash/label/reply persistence) is a later slice.
+// Client-side store for the Gmail-style mail UI. A useReducer + context pair
+// (matching the codebase's provider style) that owns folder/label view, open thread,
+// bulk selection, search, floating compose windows and an undo snapshot. The store
+// starts EMPTY and is filled from the real gateway (see useMailSync): HYDRATE replaces
+// threads from GET /mail/messages + GET /mail/sent, SET_THREAD_MESSAGES fills a thread's
+// full bodies on open, and REQUEST_SYNC (bumped after a send) triggers a re-fetch so the
+// Sent folder is server-backed and survives a reload. Star/archive/trash/label/reply
+// mutations stay optimistic and in-memory (server persistence is a later slice).
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from "react";
-import {
-  DEMO_LABELS,
-  DEMO_ME,
-  DEMO_THREADS,
-  type FolderId,
-  type Label,
-  type MailPerson,
-  type MailThreadModel,
-} from "./mailModel.ts";
+import { SELF, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 export interface ComposeState {
   id: string;
@@ -44,6 +39,8 @@ export interface MailState {
   search: string;
   composes: ComposeState[];
   undo: UndoState | null;
+  /** Bumped to ask the hydration hook to re-fetch inbox+sent (e.g. after a send). */
+  syncNonce: number;
 }
 
 export type MailAction =
@@ -66,7 +63,11 @@ export type MailAction =
   | { type: "UPDATE_COMPOSE"; id: string; patch: Partial<ComposeState> }
   | { type: "CLOSE_COMPOSE"; id: string }
   | { type: "UNDO" }
-  | { type: "DISMISS_UNDO" };
+  | { type: "DISMISS_UNDO" }
+  // ---- server sync ----
+  | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
+  | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
+  | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
 
 let seq = 0;
 const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
@@ -224,15 +225,36 @@ export function reducer(state: MailState, action: MailAction): MailState {
       return state.undo ? { ...state, threads: state.undo.prevThreads, undo: null } : state;
     case "DISMISS_UNDO":
       return { ...state, undo: null };
+    case "HYDRATE":
+      // Replace threads with the server view. Drop selections/undo that referenced the
+      // now-stale set; keep the open thread if it still exists (so an open reading pane
+      // survives a post-send re-hydrate) and its body-load is preserved.
+      return {
+        ...state,
+        threads: action.threads,
+        ...(action.me ? { me: action.me } : {}),
+        checked: new Set(),
+        undo: null,
+        openThreadId: action.threads.some((t) => t.id === state.openThreadId) ? state.openThreadId : null,
+      };
+    case "SET_THREAD_MESSAGES":
+      return {
+        ...state,
+        threads: state.threads.map((t) => (t.id === action.threadId ? { ...t, messages: action.messages } : t)),
+      };
+    case "REQUEST_SYNC":
+      return { ...state, syncNonce: state.syncNonce + 1 };
     default:
       return state;
   }
 }
 
+// Starts EMPTY — the real inbox/sent are loaded by useMailSync on mount. No demo data
+// ships in the bundle (that lived in mailModel.ts; it now belongs to tests only).
 export const initialMailState: MailState = {
-  me: DEMO_ME,
-  threads: DEMO_THREADS,
-  labels: DEMO_LABELS,
+  me: SELF,
+  threads: [],
+  labels: [],
   folder: "inbox",
   labelFilter: null,
   openThreadId: null,
@@ -240,6 +262,7 @@ export const initialMailState: MailState = {
   search: "",
   composes: [],
   undo: null,
+  syncNonce: 0,
 };
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);
