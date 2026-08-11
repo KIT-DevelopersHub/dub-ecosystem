@@ -88,3 +88,26 @@ export function buildMockUsageSummary(now: Date = new Date()): UsageSummary {
 
 /** Convenience constant (current-time based) for non-deterministic callers. */
 export const MOCK_USAGE_SUMMARY: UsageSummary = buildMockUsageSummary();
+
+/** NEUTRAL summary for the "could not read" state (live GET failed / forbidden /
+ *  malformed). It reuses ONLY the metric catalog (labels/providers/units/overflow
+ *  behaviour) from the mock, but blanks every usage value: status `unknown`, no
+ *  percentage, amounts unreadable, worst-status `unknown`. This lets the dashboard
+ *  render the familiar card grid as "取得不可 / —" WITHOUT ever showing the mock's
+ *  illustrative warn/critical numbers — so a degraded/unauthorized session never
+ *  sees a fake "上限間近" alarm. */
+export function buildNeutralUsageSummary(now: Date = new Date()): UsageSummary {
+  const base = buildMockUsageSummary(now);
+  return {
+    generatedAt: now.toISOString(),
+    worstStatus: "unknown",
+    services: base.services.map((s) => ({
+      ...s,
+      used: -1,
+      limit: -1,
+      pct: Number.NaN,
+      resetsAt: null,
+      status: "unknown",
+    })),
+  };
+}
