@@ -32,6 +32,9 @@ interface MockState {
   emailAddresses: EmailRoutingAddress[];
   me: gateway.MeResponse;
   mailRateLimit: MailRateLimitStatus;
+  // userId -> current plaintext password (admin set/view surface, #5a/#5c). The real
+  // backend stores an AES copy; the mock keeps the plaintext so the view flow works.
+  passwords: Map<string, string>;
 }
 
 const ORG = "org_devhub";
@@ -65,7 +68,10 @@ function seedState(seed?: MockSeed): MockState {
     permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"],
     sessionExpiresAt: Date.now() + 3600_000,
   };
-  return { users, roles, assignments, audits, emailAddresses, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT };
+  // user_alice starts with a viewable credential (demo/E2E); others are unset until an
+  // admin issues one (view then rejects with PASSWORD_NOT_VIEWABLE, like the backend).
+  const passwords = new Map<string, string>([["user_alice", "Alice-Init-0001"]]);
+  return { users, roles, assignments, audits, emailAddresses, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords };
 }
 
 function paginate<T>(items: T[]): common.Paginated<T> {
@@ -115,6 +121,14 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       const action = (query?.action as string | undefined) ?? "identity.";
       const filtered = s.audits.filter((a) => a.action.startsWith(action));
       return paginate(filtered) as unknown as T;
+    }
+    const viewPwMatch = path.match(/\/admin\/users\/([^/]+)\/password$/);
+    if (viewPwMatch) {
+      const u = s.users.get(viewPwMatch[1]!);
+      if (!u) throw err("NOT_FOUND", "user not found");
+      const pw = s.passwords.get(u.id);
+      if (!pw) throw err("PASSWORD_NOT_VIEWABLE", "no viewable password for this user");
+      return { userId: u.id, email: u.email, password: pw } as unknown as T;
     }
     if (path.endsWith("/me")) return s.me as unknown as T;
     if (path.endsWith("/mail/status")) {
@@ -232,6 +246,20 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       };
       s.emailAddresses.push(addr);
       return addr as unknown as T;
+    }
+    const setPwMatch = path.match(/\/admin\/users\/([^/]+)\/password$/);
+    if (setPwMatch) {
+      const u = s.users.get(setPwMatch[1]!);
+      if (!u) throw err("NOT_FOUND", "user not found");
+      const req = (body ?? {}) as { password?: string; generate?: boolean };
+      const supplied = typeof req.password === "string" && req.password.length > 0 ? req.password : "";
+      const generated = supplied === "" || req.generate === true;
+      if (!generated && supplied.length < 8) {
+        throw err("VALIDATION_FAILED", "password too short", [{ field: "password", reason: "too_short", message: "min 8 chars" }]);
+      }
+      const password = generated ? `Pw-${Math.random().toString(36).slice(2, 10)}` : supplied;
+      s.passwords.set(u.id, password);
+      return (generated ? { ok: true, password } : { ok: true }) as unknown as T;
     }
     throw err("NOT_FOUND", `unhandled POST ${path}`);
   }

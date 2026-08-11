@@ -3,7 +3,7 @@
 // roll back on error; revoke / permission-bundle save / status change wait for the
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import type { identity, common, auditLog } from "@dub/types";
+import type { identity, common, auditLog, auth } from "@dub/types";
 import { isErrorResponse } from "@dub/errors";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
@@ -108,6 +108,25 @@ export function usePatchUser(userId: common.UserId) {
       qc.invalidateQueries({ queryKey: queryKeys.user(userId) });
       qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users", "list"] });
     },
+  });
+}
+
+/** NON-optimistic: admin sets or re-issues a user's initial password (#5a). Imperative
+ *  (triggered by a button); the generated password comes back in `mutation.data.password`
+ *  and must be surfaced ONCE by the caller — it is never re-fetchable. */
+export function useSetUserPassword(userId: common.UserId) {
+  const { api } = useRosterContext();
+  return useMutation<auth.AdminSetPasswordResponse, unknown, auth.AdminSetPasswordRequest>({
+    mutationFn: (req) => api.setUserPassword(userId, req),
+  });
+}
+
+/** NON-optimistic: admin views a user's current password (#5c). Imperative + never
+ *  cached: the plaintext lives only in `mutation.data` until the caller clears it. */
+export function useViewUserPassword(userId: common.UserId) {
+  const { api } = useRosterContext();
+  return useMutation<auth.AdminViewPasswordResponse, unknown, void>({
+    mutationFn: () => api.viewUserPassword(userId),
   });
 }
 

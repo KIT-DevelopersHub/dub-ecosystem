@@ -25,6 +25,9 @@ export function allSchemas(): string[] {
     ...TASK_MIGRATIONS.map((m) => m.up),
     sqlFile("../../../services/notification/db/0001_notif.sql"),
     sqlFile("../../../services/mail-gateway/db/0001_mail.sql"),
+    sqlFile("../../../services/mail-gateway/db/0002_inbound_body_read.sql"),
+    sqlFile("../../../services/mail-gateway/db/0003_freeq_outbox.sql"),
+    sqlFile("../../../services/mail-gateway/db/0004_send_body.sql"),
   ];
 }
 

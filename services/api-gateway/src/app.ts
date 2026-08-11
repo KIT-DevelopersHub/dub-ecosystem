@@ -9,6 +9,7 @@ import { healthzHandler } from "./handlers/healthz";
 import { meHandler } from "./handlers/me";
 import { bffHomeHandler } from "./handlers/bff-home";
 import { createPublicInquiryHandler } from "./handlers/public-inquiry";
+import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
 import { gatewayRouteHandler } from "./gateway-route";
 import { API_PREFIX } from "./routes";
 import type { TurnstileVerifier } from "./turnstile";
@@ -44,6 +45,13 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.get(`${API_PREFIX}/me`, meHandler);
   app.get(`${API_PREFIX}/bff/home`, bffHomeHandler);
   app.post(`${API_PREFIX}/public/inquiries`, createPublicInquiryHandler(options.turnstile));
+
+  // Password management (themes #5a/#5b/#5c). Gateway-owned because auth-service's admin
+  // routes are internal-only and the `auth` proxy segment strips tokens: these compose
+  // entry verify + authorization + a genuine internal forward (see handlers/passwords.ts).
+  app.post(`${API_PREFIX}/me/password`, selfPasswordHandler);
+  app.post(`${API_PREFIX}/admin/users/:userId/password`, adminSetPasswordHandler);
+  app.get(`${API_PREFIX}/admin/users/:userId/password`, adminViewPasswordHandler);
 
   // transparent routing for everything else under the API prefix
   app.all(`${API_PREFIX}/*`, gatewayRouteHandler);

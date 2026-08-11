@@ -2,7 +2,7 @@
 // `/api/v1/*` boundary (design §2-4). This unit implements against the contract
 // types only; the concrete transport (auth cookie, base URL, error reconstruction)
 // is FE2's ResourceClient.
-import type { identity, common, auditLog } from "@dub/types";
+import type { identity, common, auditLog, auth } from "@dub/types";
 import type { ResourceClient } from "../shell/contract";
 import type {
   CreateRoleRequest,
@@ -22,6 +22,9 @@ import type { MailStatusResponse } from "../lib/mailStatus";
 
 const BASE = "/api/v1";
 const IDENTITY = `${BASE}/identity`;
+// Admin password management (#5a/#5c) is a gateway-owned surface (not under /identity):
+// the gateway composes entry-verify + identity:admin + an internal forward to auth-service.
+const ADMIN = `${BASE}/admin`;
 // mail-gateway registers the Email Routing admin surface under its `/mail` gateway
 // segment, so the external path is /api/v1/mail/admin/email-routing/* (not /admin/*).
 const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
@@ -47,6 +50,12 @@ export interface RosterApi {
   listUserRoles(userId: common.UserId): Promise<RoleAssignment[]>;
   assignRole(userId: common.UserId, req: AssignRoleRequest): Promise<RoleAssignment>;
   revokeRole(userId: common.UserId, assignmentId: string): Promise<void>;
+  /** Admin: set or auto-generate a user's initial password (#5a). A generated password
+   *  is returned ONCE (response.password); a specified one returns { ok } only. */
+  setUserPassword(userId: common.UserId, req: auth.AdminSetPasswordRequest): Promise<auth.AdminSetPasswordResponse>;
+  /** Admin: view a user's current password (#5c). Sensitive — decrypted on demand and
+   *  audited server-side; never cache the result. */
+  viewUserPassword(userId: common.UserId): Promise<auth.AdminViewPasswordResponse>;
   permissionCatalog(): Promise<identity.PermissionCatalogEntry[]>;
   auditLogs(filters: AuditFilters): Promise<auditLog.AuditLogPage>;
   /** Mail-gateway rate-limit status, via the gateway boundary (proxied to /internal/status). */
@@ -85,6 +94,10 @@ export function createRosterApi(client: ResourceClient): RosterApi {
       client.post<RoleAssignment>(`${IDENTITY}/users/${userId}/roles`, req),
     revokeRole: (userId, assignmentId) =>
       client.delete(`${IDENTITY}/users/${userId}/roles/${assignmentId}`),
+    setUserPassword: (userId, req) =>
+      client.post<auth.AdminSetPasswordResponse>(`${ADMIN}/users/${userId}/password`, req),
+    viewUserPassword: (userId) =>
+      client.get<auth.AdminViewPasswordResponse>(`${ADMIN}/users/${userId}/password`),
     permissionCatalog: () =>
       client.get<identity.PermissionCatalogEntry[]>(`${IDENTITY}/permissions/catalog`),
     auditLogs: (filters) =>

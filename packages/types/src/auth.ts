@@ -20,6 +20,35 @@ export interface AuthPasswordLoginRequest {
   email: string;
   password: string;
 }
+// self password change (#5b): the logged-in user changes their OWN password. Reaches
+// the gateway at POST /api/v1/me/password (session required); the current password is
+// re-verified server-side before the new hash is stored.
+export interface SelfPasswordChangeRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+// admin sets/re-issues a user's initial password (#5a) via the gateway at
+// POST /api/v1/admin/users/:userId/password (identity:admin). Omit `password` (or pass
+// generate=true) to auto-generate a strong one. `mustChange` defaults true.
+export interface AdminSetPasswordRequest {
+  password?: string;
+  generate?: boolean;
+  mustChange?: boolean;
+}
+// Response of the admin set/re-issue call. `password` is present ONLY when the server
+// generated it — it is returned exactly ONCE and never stored in plaintext.
+export interface AdminSetPasswordResponse {
+  ok: true;
+  password?: string;
+}
+// admin views a user's current password (#5c) via the gateway at
+// GET /api/v1/admin/users/:userId/password (identity:admin). The plaintext is decrypted
+// on demand from the AES-GCM copy and every view is audited (auth.password.viewed).
+export interface AdminViewPasswordResponse {
+  userId: UserId;
+  email: string;
+  password: string;
+}
 export interface AuthVerifyRequest {
   token: string;
 }
