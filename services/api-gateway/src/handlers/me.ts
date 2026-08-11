@@ -27,7 +27,7 @@ export async function meHandler(c: Context<{ Bindings: GatewayEnv; Variables: Ga
   ]);
 
   const body: gateway.MeResponse = {
-    user: { id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl },
+    user: { id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl, email: user.email },
     orgId: user.orgId,
     permissions: perms.permissions,
     sessionExpiresAt: auth.session ? auth.session.sessionExpiresAt : 0,
