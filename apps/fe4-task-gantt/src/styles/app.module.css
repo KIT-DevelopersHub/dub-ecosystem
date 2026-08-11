@@ -96,24 +96,159 @@
 }
 
 .gantt { overflow-x: auto; border: 1px solid var(--dub-color-border-default); border-radius: 8px; }
-.ganttGrid { display: grid; grid-template-columns: 220px 1fr; }
+.ganttGrid { display: grid; }
+
+/* row 1: sticky header (timeline + corner) */
+.ganttCorner {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--dub-color-surface-sunken);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  border-right: 1px solid var(--dub-color-border-default);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--dub-color-text-secondary);
+  display: flex;
+  align-items: center;
+}
+.ganttHeader {
+  position: relative;
+  height: 26px;
+  background: var(--dub-color-surface-sunken);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.ganttTick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  font-size: 0.7rem;
+  color: var(--dub-color-text-secondary);
+  border-left: 1px solid var(--dub-color-border-default);
+  white-space: nowrap;
+}
+.ganttTodayLabel {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--dub-color-text-inverse);
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
+}
+
+/* row 2: labels + canvas */
+.ganttLabels {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--dub-color-surface-base);
+  border-right: 1px solid var(--dub-color-border-default);
+}
 .ganttRowLabel {
+  box-sizing: border-box; /* keep each row exactly ROW_HEIGHT so labels align to bars */
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: var(--dub-space-1) var(--dub-space-2);
   border-bottom: 1px solid var(--dub-color-border-default);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.85rem;
 }
+.criticalDot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--dub-color-danger-500);
+}
+
 .ganttCanvas { position: relative; }
+.ganttRowStripe {
+  box-sizing: border-box;
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.ganttRowStripe:nth-child(even) { background: var(--dub-color-surface-sunken); }
+.ganttSvg { position: absolute; inset: 0; pointer-events: none; }
+
 .bar {
   position: absolute;
-  height: 18px;
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--dub-color-brand-400);
+  box-shadow: inset 0 0 0 1px var(--dub-color-brand-500);
+  overflow: hidden;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  touch-action: none;
+  transition: box-shadow 0.1s ease;
 }
-.barProgress { position: absolute; height: 18px; border-radius: 4px 0 0 4px; background: var(--dub-color-brand-700); }
+.bar:hover { box-shadow: inset 0 0 0 1px var(--dub-color-brand-700), 0 1px 4px rgba(0, 0, 0, 0.18); }
+.barCritical { background: var(--dub-color-danger-400, #f2a3a3); box-shadow: inset 0 0 0 1px var(--dub-color-danger-500); }
+.barCritical:hover { box-shadow: inset 0 0 0 1px var(--dub-color-danger-500), 0 1px 4px rgba(0, 0, 0, 0.18); }
+.barDragging { cursor: grabbing; opacity: 0.85; z-index: 5; }
+.barProgress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 5px 0 0 5px;
+  background: var(--dub-color-brand-700);
+  opacity: 0.55;
+}
+.barLabel {
+  position: relative;
+  z-index: 1;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  color: var(--dub-color-text-inverse);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.ganttToday {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
+  pointer-events: none;
+  z-index: 4;
+}
+
 .depViolated { stroke: var(--dub-color-danger-500); }
 .depNormal { stroke: var(--dub-color-border-strong); }
+.depArrow { fill: var(--dub-color-border-strong); }
+
+.ganttEmpty {
+  padding: var(--dub-space-4);
+  color: var(--dub-color-text-secondary);
+  border: 1px dashed var(--dub-color-border-default);
+  border-radius: 8px;
+  text-align: center;
+}
+.ganttLegend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--dub-color-text-secondary);
+}
+.legendSwatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-left: var(--dub-space-2); }
+.legendCritical { background: var(--dub-color-danger-400, #f2a3a3); }
+.legendToday { background: var(--dub-color-brand-600, var(--dub-color-brand-500)); border-radius: 999px; width: 4px; }
 
 .banner {
   padding: var(--dub-space-2) var(--dub-space-3);

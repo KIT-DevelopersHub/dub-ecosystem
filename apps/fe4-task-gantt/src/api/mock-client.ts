@@ -36,6 +36,8 @@ export interface MockSeed {
   view?: gantt.GanttViewState;
   /** row date overrides (task has only dueAt; gantt startsAt/endsAt live here). */
   rowDates?: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }>;
+  /** critical-path task ids the gantt DTO reports (bar colouring). */
+  criticalTaskIds?: common.TaskId[];
 }
 
 export class MockApiClient implements ApiClient {
@@ -45,6 +47,7 @@ export class MockApiClient implements ApiClient {
   private actions: event.ActionSummary[] = [];
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
+  private criticalTaskIds: common.TaskId[] = [];
 
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
@@ -62,6 +65,7 @@ export class MockApiClient implements ApiClient {
     this.actions = seed.actions ?? [];
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
+    this.criticalTaskIds = seed.criticalTaskIds ?? [];
   }
 
   async request<T, TBody = unknown>(req: RequestInput<TBody>): Promise<T> {
@@ -259,7 +263,13 @@ export class MockApiClient implements ApiClient {
   }
 
   private ganttDto(eventId: string): gantt.GanttChartDTO {
-    return { eventId, rows: this.ganttRows(eventId), dependencies: this.ganttDeps(eventId) };
+    const rowIds = new Set(this.ganttRows(eventId).map((r) => r.taskId));
+    return {
+      eventId,
+      rows: this.ganttRows(eventId),
+      dependencies: this.ganttDeps(eventId),
+      criticalTaskIds: this.criticalTaskIds.filter((id) => rowIds.has(id)),
+    };
   }
 
   private getView(eventId: string): gantt.GanttViewState {

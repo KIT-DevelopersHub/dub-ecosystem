@@ -57,6 +57,20 @@ export function TaskWorkspacePage({ eventId, permissions, initialView = "list" }
     void store.patchOptimistic(client, id, { status: to }, t.version, { version: t.version, status: to });
   };
 
+  // Gantt bar drag: shift the task's dueAt by whole days, then refetch the chart.
+  const MS_PER_DAY = 86_400_000;
+  const onReschedule = (id: common.TaskId, deltaDays: number) => {
+    const t = store.list().find((x) => x.id === id);
+    const row = gantt.data?.rows.find((r) => r.taskId === id);
+    if (!t || !row?.endsAt) return;
+    const nextDue = new Date(Date.parse(row.endsAt) + deltaDays * MS_PER_DAY).toISOString();
+    void store
+      .patchOptimistic(client, id, { dueAt: nextDue }, t.version, { version: t.version, dueAt: nextDue })
+      .then((ok) => {
+        if (ok) void gantt.refetchFresh();
+      });
+  };
+
   const selectedTask = selected ? store.list().find((t) => t.id === selected) ?? null : null;
   const fieldErrors =
     store.lastError?.action === "field_errors" ? fieldErrorMap((store.lastError as unknown as { details?: unknown }).details) : undefined;
@@ -90,7 +104,12 @@ export function TaskWorkspacePage({ eventId, permissions, initialView = "list" }
         />
       )}
       {view === "gantt" && gantt.data && (
-        <GanttView dto={gantt.data} zoom="week" truncated={gantt.data.rows.length >= 2000} />
+        <GanttView
+          dto={gantt.data}
+          zoom="week"
+          truncated={gantt.data.rows.length >= 2000}
+          onReschedule={caps.canWrite ? onReschedule : undefined}
+        />
       )}
 
       {selectedTask && (
