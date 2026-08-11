@@ -60,6 +60,57 @@ export interface CfRoutingRule {
   matchers: CfRuleMatcher[];
   actions: CfRuleAction[];
 }
+/** One roster entry derived from a routing rule: the RECEIVING @zone address the rule
+ *  matches on (its `to` literal matcher), the rule's first forward target as a
+ *  destination hint, and the rule's enabled flag. This — NOT the account-scoped
+ *  destination addresses — is what the user roster syncs from. */
+export interface RosterEmailAddress {
+  address: string; // receiving address, e.g. "account@developershub.jp"
+  destination: string | null; // first forward target, or null (worker/drop/none)
+  enabled: boolean;
+}
+
+/**
+ * Extract the roster's receiving addresses from Cloudflare Email Routing RULES.
+ *
+ * The roster = the @zone addresses people RECEIVE at (issued as routing rules,
+ * zone-scoped) — NOT the account-scoped destination (forward-target) addresses, of
+ * which a domain typically has only one or two. Each rule contributes one entry per
+ * `{type:'literal', field:'to', value:'x@zone'}` matcher whose address belongs to
+ * `zoneName`. Catch-all (`type:'all'`) rules and non-@zone matchers are ignored.
+ * De-duped by lowercased address (first occurrence wins; a later ENABLED occurrence
+ * upgrades a previously-seen disabled one, so a paused duplicate never masks a live one).
+ */
+export function rosterAddressesFromRules(rules: CfRoutingRule[], zoneName: string): RosterEmailAddress[] {
+  const suffix = `@${zoneName.trim().toLowerCase()}`;
+  const byAddress = new Map<string, RosterEmailAddress>();
+  for (const rule of rules ?? []) {
+    const destination = firstForwardTarget(rule);
+    for (const m of rule.matchers ?? []) {
+      if (m.type !== "literal" || m.field !== "to" || typeof m.value !== "string") continue;
+      const address = m.value.trim().toLowerCase();
+      if (address.length <= suffix.length || !address.endsWith(suffix)) continue;
+      const existing = byAddress.get(address);
+      if (!existing) {
+        byAddress.set(address, { address, destination, enabled: !!rule.enabled });
+      } else if (rule.enabled && !existing.enabled) {
+        byAddress.set(address, { address, destination: existing.destination ?? destination, enabled: true });
+      }
+    }
+  }
+  return [...byAddress.values()];
+}
+
+/** The first `forward` action's first target, or null (worker/drop actions have none). */
+function firstForwardTarget(rule: CfRoutingRule): string | null {
+  for (const a of rule.actions ?? []) {
+    if (a.type === "forward" && Array.isArray(a.value) && a.value.length > 0) {
+      return a.value[0] ?? null;
+    }
+  }
+  return null;
+}
+
 interface CfEnvelope<T> {
   success: boolean;
   errors: Array<{ code?: number; message?: string }>;

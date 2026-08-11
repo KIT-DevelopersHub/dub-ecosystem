@@ -208,9 +208,11 @@ export function useSyncEmailRouting() {
   const { toast } = useToast();
   return useMutation<SyncEmailRoutingResult>({
     mutationFn: async () => {
-      const page = await api.listEmailAddresses();
-      const addresses = page.items.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled }));
-      return api.syncEmailRouting(addresses);
+      // Sync from the @developershub.jp RECEIVING addresses (routing rules) — every
+      // issued address — NOT the account-scoped destination (forward-target) addresses,
+      // of which the domain has ~1 (the old source, which only ever added that one).
+      const { items } = await api.listRosterEmailAddresses();
+      return api.syncEmailRouting(items);
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users"] });
