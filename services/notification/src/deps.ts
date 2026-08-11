@@ -41,10 +41,16 @@ export function buildAdapters(env: Env, db: DbClient, identity: IdentityPort, ct
   };
 }
 
-/** Full ingest dependency bundle for one request/message. */
-export function buildIngestDeps(env: Env, ctx: RequestContext): IngestDeps {
+/** Full ingest dependency bundle for one request/message. `overrides.identity` lets
+ *  callers/tests inject a fake IdentityPort (role → user expansion) without a real
+ *  identity binding. */
+export function buildIngestDeps(
+  env: Env,
+  ctx: RequestContext,
+  overrides: { identity?: IdentityPort } = {},
+): IngestDeps {
   const db = buildDb(env, ctx.requestId);
-  const identity = makeIdentityPort(env.SVC_IDENTITY);
+  const identity = overrides.identity ?? makeIdentityPort(env.SVC_IDENTITY);
   const event = makeEventPort(env.SVC_EVENT);
   const resolver = makeRecipientResolver({ identity, event });
   const adapters = buildAdapters(env, db, identity, ctx);

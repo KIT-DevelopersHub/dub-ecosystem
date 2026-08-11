@@ -42,3 +42,14 @@ export const FEEDBACK_ADMIN_PERMISSION = "notif:admin" as const;
 export const FEEDBACK_ADMIN_EMAIL = "admin@developershub.jp";
 // Excerpt length for the notification subject "フィードバック: <抜粋>".
 export const FEEDBACK_EXCERPT_LEN = 60;
+
+// ---- in-app admin notification on feedback submit ----
+// On every feedback submit we also create an in-app notification (notifications inbox)
+// for each admin / maintainer user, so it shows up in their inbox + unread badge. This
+// is a SYNCHRONOUS D1 write via the shared ingest path (in_app channel only), so it
+// lands even when the async freeq drain is paused. Slack / chat / email are intentionally
+// NOT targeted here — the pre-existing best-effort admin email is untouched.
+export const FEEDBACK_NOTIFY_TYPE = "feedback";
+// Role IDs mirror the identity-roster system-role seed (identity-roster/src/schema.ts:
+// role_sys_admin / role_sys_maintainer). identity `GET /users?roleKey=` filters by roleId.
+export const FEEDBACK_NOTIFY_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"] as const;
