@@ -36,6 +36,24 @@ WRANGLER="pnpm dlx wrangler@4.35.0"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# Strip stray whitespace/newlines from the CF credentials before wrangler sees them.
+# WHY (real prod-deploy outage, not a wrangler-version bug): wrangler embeds
+# CLOUDFLARE_ACCOUNT_ID verbatim into the API URL path. A single trailing space in the
+# secret turns  GET /accounts/<id>/workers/services/<name>  into ".../<id> /workers/..."
+# which the Cloudflare API router rejects with:
+#   Could not route to /accounts/<id> /workers/... object identifier is invalid? [code: 7003]
+#   No route for that URI [code: 7000]
+# (Confirmed by repro: a clean-but-WRONG id fails as auth [10000]; a trailing NEWLINE is
+# auto-trimmed by wrangler; only a trailing SPACE yields 7003 — exactly the CI failure.)
+# Account ids and API tokens are single whitespace-free tokens, so removing ALL whitespace
+# is safe and also absorbs leading/CR/newline damage from copy-paste into GitHub secrets.
+if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+  export CLOUDFLARE_ACCOUNT_ID="$(printf '%s' "${CLOUDFLARE_ACCOUNT_ID}" | tr -d '[:space:]')"
+fi
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+  export CLOUDFLARE_API_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN}" | tr -d '[:space:]')"
+fi
+
 if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
   echo "::error::CLOUDFLARE_API_TOKEN is not set — cannot deploy. See docs/DEPLOY.md." >&2
   exit 1
