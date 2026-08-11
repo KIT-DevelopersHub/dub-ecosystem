@@ -11,12 +11,12 @@ import { useNavigation } from "./providers/NavigationContext";
 import { useRosterContext } from "./providers/RosterProvider";
 import { MailRateLimitBanner } from "./components/MailRateLimitBanner";
 
+// The roster manages each user INLINE (right pane) — selecting a name no longer
+// navigates to a per-user screen (design "1画面で完結"). The `/admin/users/:userId`
+// route below is kept only as a deep-link fallback (補助).
 function usersRoute(): Promise<{ Component: ComponentType }> {
   return import("./components/UserListPage").then(({ UserListPage }) => ({
-    Component: function UsersRoute() {
-      const { navigate } = useNavigation();
-      return <UserListPage onOpenUser={(id) => navigate(`/admin/users/${id}`)} />;
-    },
+    Component: UserListPage,
   }));
 }
 

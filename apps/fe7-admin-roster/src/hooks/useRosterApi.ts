@@ -102,7 +102,12 @@ export function usePatchUser(userId: common.UserId) {
       const p = presentError(err);
       toast({ kind: "error", title: "更新に失敗しました", description: "message" in p ? p.message : undefined });
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.user(userId) }),
+    // Refresh both the detail cache and the roster list so the inline pane's row
+    // (status badge / display name) reflects the saved edit.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.user(userId) });
+      qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users", "list"] });
+    },
   });
 }
 
