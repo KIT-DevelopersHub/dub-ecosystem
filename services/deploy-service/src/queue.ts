@@ -31,7 +31,12 @@ export async function handleDeployJobs(
   }
 }
 
-async function processJob(deps: Deps, job: DeployJobMessage): Promise<void> {
+// Exported so the free-tier outbox drain (drain.ts) can run a deploy job in process
+// using the SAME handler as the paid Queue consumer above. Idempotent: it re-reads the
+// row and returns early on a missing/terminal deployment, so at-least-once redelivery is
+// safe. Unexpected/transient infra errors bubble (paid: message.retry(); free: freeq
+// reschedules with backoff); CF business failures are finalized in place, never thrown.
+export async function processJob(deps: Deps, job: DeployJobMessage): Promise<void> {
   const current = await deps.repo.getDeployment(job.deploymentId);
   if (!current) return; // nothing to do (row gone)
   if (isTerminal(current.status)) return; // idempotent: already finalized
