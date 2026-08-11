@@ -40,7 +40,9 @@ function identity(allowed: boolean): Fetcher {
 
 function stubBucket() {
   const put = vi.fn(async () => ({}));
-  return { bucket: { put } as unknown as Env["AUDIT_ARCHIVE"], put };
+  // NonNullable: AUDIT_ARCHIVE is optional on Env (absent on the free plan), but the archive
+  // job is only ever called with a real bucket, so the stub is the non-undefined R2Bucket.
+  return { bucket: { put } as unknown as NonNullable<Env["AUDIT_ARCHIVE"]>, put };
 }
 
 function makeEnv(d1: Env["DB"], opts: { allow?: boolean; bucket?: Env["AUDIT_ARCHIVE"] } = {}): Env {
