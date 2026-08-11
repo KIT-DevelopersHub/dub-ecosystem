@@ -211,21 +211,33 @@ function adaptUsage(api: ApiClient): FeatureModule {
   return { id: "usage", routes, nav };
 }
 
+// 一旦非表示にする admin ナビの path 集合（機能・ルートは残し、ランチャー/ナビからだけ隠す）。
+// 社長判断: ロール管理・ユーザー名簿はまだ使わないので当面出さない。
+// ★戻すには: この集合から該当 path を消す（空配列にすれば全て再表示）。
+const HIDDEN_ADMIN_NAV_PATHS: ReadonlySet<string> = new Set([
+  "/admin/users", // ユーザー名簿
+  "/admin/roles", // ロール管理
+]);
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
   const src = adminModule.routes as readonly SourceRoute[];
+  // ルートは全て登録したまま（deep-link は生きる）。ナビ登録だけ絞る。
   const routes = src.map((r) => wrapRoute(r, wrap));
   // Map each admin route path -> its own requiredPermissions so the launcher can
   // hide the admin tools (ユーザー名簿 / ロール管理 / 変更履歴) from non-admins, matching
   // the route guard (defense in depth; a non-admin can neither see nor open them).
   const permByPath = new Map(src.map((r) => [r.path, r.requiredPermissions]));
-  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => {
-    const perms = permByPath.get(n.path);
-    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
-    if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
-    return e;
-  });
+  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[])
+    // 一旦非表示ぶんをランチャー/ナビから除外（HIDDEN_ADMIN_NAV_PATHS）。
+    .filter((n) => !HIDDEN_ADMIN_NAV_PATHS.has(n.path))
+    .map((n, i) => {
+      const perms = permByPath.get(n.path);
+      const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
+      if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
+      return e;
+    });
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 

@@ -12,7 +12,7 @@ export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThre
   const byThread = new Map<string, MailThreadModel>();
   const order: string[] = [];
   for (const it of items) {
-    const msg: MailMsg = { id: it.id, from: it.from, to: it.to, date: it.receivedAt, body: it.snippet, read: it.read };
+    const msg: MailMsg = { id: it.id, messageId: it.messageId, from: it.from, to: it.to, date: it.receivedAt, body: it.snippet, read: it.read };
     const existing = byThread.get(it.threadId);
     if (existing) {
       existing.messages.push(msg);
@@ -28,6 +28,41 @@ export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThre
     t.messages.sort((a, b) => a.date.localeCompare(b.date));
   }
   return order.map((id) => byThread.get(id)!);
+}
+
+/** Combine received + sent into the thread list the store renders. A sent REPLY (its
+ *  threadId matches a received thread) is folded INTO that conversation so it stays
+ *  visible in the thread instead of showing as a detached Sent row; every other sent
+ *  message becomes its own Sent thread as before. Mirrors the server-side union in
+ *  GET /threads/:id, so the list view and the opened conversation agree. */
+export function combineThreads(
+  inboxItems: mail.MailMessageListItem[],
+  sentItems: mail.MailSentListItem[],
+  me: MailPerson,
+): MailThreadModel[] {
+  const inboxThreads = inboxItemsToThreads(inboxItems);
+  const byId = new Map(inboxThreads.map((t) => [t.id, t]));
+  const standalone: mail.MailSentListItem[] = [];
+  for (const s of sentItems) {
+    const parent = s.threadId ? byId.get(s.threadId) : undefined;
+    if (parent) {
+      parent.messages.push({
+        id: s.id,
+        messageId: s.id,
+        from: s.from ?? me,
+        to: s.to,
+        ...(s.cc && s.cc.length > 0 ? { cc: s.cc } : {}),
+        date: s.sentAt,
+        body: s.snippet,
+        read: true,
+        outbound: true,
+      });
+      parent.messages.sort((a, b) => a.date.localeCompare(b.date));
+    } else {
+      standalone.push(s);
+    }
+  }
+  return [...inboxThreads, ...sentItemsToThreads(standalone, me)];
 }
 
 /** Sent messages -> sent threads (one message each; the send-log has no thread grouping). */
@@ -47,6 +82,7 @@ export function sentItemsToThreads(items: mail.MailSentListItem[], me: MailPerso
         date: it.sentAt,
         body: it.snippet,
         read: true,
+        outbound: true,
       },
     ],
   }));
@@ -56,6 +92,7 @@ export function sentItemsToThreads(items: mail.MailSentListItem[], me: MailPerso
 export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
   return thread.messages.map((m) => ({
     id: m.id,
+    messageId: m.messageId,
     from: m.from,
     to: m.to,
     date: m.receivedAt,
@@ -74,5 +111,6 @@ export function sentDetailToMessage(detail: mail.MailSentDetail, me: MailPerson)
     date: detail.sentAt,
     body: detail.textBody,
     read: true,
+    outbound: true,
   };
 }

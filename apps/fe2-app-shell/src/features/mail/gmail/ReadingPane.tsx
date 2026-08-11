@@ -4,6 +4,7 @@
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
 import { useState, type CSSProperties } from "react";
+import type { mail } from "@dub/types";
 import {
   avatarColor,
   displayName,
@@ -18,6 +19,7 @@ import {
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore } from "./useMailStore.tsx";
+import { useMailApi } from "../MailProvider.tsx";
 
 function fmtList(people: MailPerson[]): string {
   return people.map(displayName).join(", ");
@@ -137,17 +139,25 @@ function HeaderButton({ label, icon, onClick, testId }: { label: string; icon: P
 
 export function ReadingPane({ thread, labels }: { thread: MailThreadModel; labels: Label[] }): JSX.Element {
   const { dispatch, state } = useMailStore();
+  const mailApi = useMailApi();
   const [reply, setReply] = useState("");
   const lastIdx = thread.messages.length - 1;
   const last = thread.messages[lastIdx]!;
   const chips = thread.labels.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
 
-  const replyRecipients = last.from.email === state.me.email ? last.to : [last.from];
-  const allRecipients = [
-    ...(last.from.email === state.me.email ? last.to : [last.from]),
-    ...last.to.filter((t) => t.email !== state.me.email),
-    ...(last.cc ?? []),
-  ];
+  // Reply targets the last message that ISN'T ours — the external correspondent — never
+  // our own reply (which is now folded into the conversation). `ourAddresses` are the From
+  // addresses we sent as (info@ / the user's address), so reply-all can drop them too.
+  const ourAddresses = new Set(thread.messages.filter((m) => m.outbound).map((m) => m.from.email).filter(Boolean));
+  const notUs = (p: MailPerson): boolean => p.email.length > 0 && !ourAddresses.has(p.email);
+  const replyTo = [...thread.messages].reverse().find((m) => !m.outbound) ?? last;
+  const dedupPeople = (ps: MailPerson[]): MailPerson[] => {
+    const m = new Map<string, MailPerson>();
+    for (const p of ps) if (p.email && !m.has(p.email)) m.set(p.email, p);
+    return [...m.values()];
+  };
+  const replyRecipients = replyTo.outbound ? replyTo.to.filter(notUs) : [replyTo.from];
+  const allRecipients = dedupPeople([replyTo.from, ...replyTo.to, ...(replyTo.cc ?? [])].filter(notUs));
 
   const openCompose = (mode: "reply" | "replyAll" | "forward"): void => {
     const to = mode === "forward" ? [] : mode === "replyAll" ? allRecipients : replyRecipients;
@@ -157,17 +167,33 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         mode,
         to: to.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", "),
         subject: `${mode === "forward" ? "Fwd" : "Re"}: ${thread.subject.replace(/^(Re|Fwd):\s*/i, "")}`,
-        body: quote(last),
+        body: quote(replyTo),
         showCc: mode === "replyAll",
+        // Reply/replyAll thread against the correspondent's Message-Id; a forward is new.
+        ...(mode !== "forward" && replyTo.messageId ? { inReplyTo: replyTo.messageId } : {}),
       },
     });
   };
 
   const sendInline = (): void => {
     const body = reply.trim();
-    if (body.length === 0) return;
+    if (body.length === 0 || replyRecipients.length === 0) return;
+    // Optimistic: append to the open thread immediately. Previously this was ALL that
+    // happened — the reply never reached the gateway, so nothing was delivered. Now we
+    // also POST it (with In-Reply-To via the parent Message-Id) and re-sync so the sent
+    // reply is server-backed and survives a reload.
     dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, subject: thread.subject });
     setReply("");
+    const req: mail.SendMailRequest = {
+      to: replyRecipients,
+      subject: /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`,
+      textBody: body,
+    };
+    if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
+    void mailApi
+      .send(req)
+      .then(() => dispatch({ type: "REQUEST_SYNC" }))
+      .catch(() => undefined);
   };
 
   return (

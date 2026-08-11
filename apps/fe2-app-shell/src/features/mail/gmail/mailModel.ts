@@ -31,12 +31,21 @@ export interface MailPerson {
 
 export interface MailMsg {
   id: string;
+  /** RFC Message-Id of this message (received mail). Drives reply threading:
+   *  a reply sets In-Reply-To/References to it so the recipient's client threads
+   *  the conversation and a further reply carries the chain back to us. Absent for
+   *  optimistic/local rows the client mints before the server round-trip. */
+  messageId?: string;
   from: MailPerson;
   to: MailPerson[];
   cc?: MailPerson[];
   date: string; // ISO
   body: string; // plain text (pre-wrap)
   read: boolean;
+  /** True when WE sent this message (compose/reply/folded Sent row). Used to (a) keep our
+   *  replies visible in a conversation across a getThread refresh and (b) target a reply
+   *  at the last message that ISN'T ours (the external correspondent), never at ourselves. */
+  outbound?: boolean;
 }
 
 export interface MailThreadModel {
