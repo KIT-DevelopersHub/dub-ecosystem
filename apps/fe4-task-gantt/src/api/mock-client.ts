@@ -238,13 +238,13 @@ export class MockApiClient implements ApiClient {
     return [...this.taskById.values()]
       .filter((t) => t.eventId === eventId && t.archivedAt === null)
       .map((t): gantt.GanttRow => {
-        const d = this.rowDates[t.id];
+        const schedule = deriveSchedule(t, this.rowDates[t.id]);
         return {
           taskId: t.id,
           title: t.title,
-          startsAt: d?.startsAt ?? null,
-          endsAt: d?.endsAt ?? t.dueAt,
-          progressPercent: t.status === "done" ? 100 : 0,
+          startsAt: schedule.startsAt,
+          endsAt: schedule.endsAt,
+          progressPercent: progressForStatus(t.status),
           assigneeId: t.assigneeId,
         };
       });
@@ -287,6 +287,47 @@ export class MockApiClient implements ApiClient {
     const items = ids.map((id) => this.users.get(id)).filter((u): u is identity.UserSummary => u !== undefined);
     return { items, nextCursor: null };
   }
+}
+
+const MS_PER_DAY = 86_400_000;
+
+/** Bar progress the mock reports per status (in_progress/blocked read as partial). */
+function progressForStatus(status: task.TaskStatus): number {
+  switch (status) {
+    case "done":
+      return 100;
+    case "in_progress":
+      return 50;
+    case "blocked":
+      return 25;
+    default:
+      return 0; // todo / cancelled
+  }
+}
+
+/** Default bar length (days) by priority — mirrors the seed's documented model. */
+const DURATION_DAYS_BY_PRIORITY: Record<task.TaskPriority, number> = {
+  urgent: 1,
+  high: 2,
+  medium: 3,
+  low: 5,
+};
+
+/**
+ * Resolve a row's [startsAt, endsAt] the way gantt-service would: explicit
+ * rowDates win; otherwise a task with a dueAt gets a synthesized bar of
+ * `bar = [dueAt - durationByPriority, dueAt]` so freshly-created tasks still
+ * render a bar in the standalone demo (no CPM backend here).
+ */
+function deriveSchedule(
+  t: task.Task,
+  override?: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+): { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null } {
+  if (override) return override;
+  if (!t.dueAt) return { startsAt: null, endsAt: null };
+  const end = Date.parse(t.dueAt);
+  const start = end - DURATION_DAYS_BY_PRIORITY[t.priority] * MS_PER_DAY;
+  return { startsAt: new Date(start).toISOString(), endsAt: t.dueAt };
 }
 
 /** DFS cycle detection over adjacency (node -> dependsOn). */

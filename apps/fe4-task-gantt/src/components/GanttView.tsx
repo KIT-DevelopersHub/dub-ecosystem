@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { common, gantt } from "@dub/types";
+import type { common, gantt, task } from "@dub/types";
 import {
   computeDateBounds,
   ganttGeometry,
@@ -11,9 +11,10 @@ import {
 } from "../domain/gantt-layout";
 import styles from "../styles/app.module.css";
 
-const ROW_HEIGHT = 34;
-const BAR_H = 20;
-const LABEL_COL = 220;
+const ROW_HEIGHT = 38;
+const BAR_H = 22;
+const LABEL_COL = 236;
+const CLICK_THRESHOLD_PX = 4;
 
 export interface GanttViewProps {
   dto: gantt.GanttChartDTO;
@@ -24,9 +25,25 @@ export interface GanttViewProps {
   truncated?: boolean;
   /** Drag a bar N whole days: container patches the task's dueAt (optimistic). */
   onReschedule?: (taskId: common.TaskId, deltaDays: number) => void;
+  /** Click a bar or row label to open the detail panel. */
+  onSelect?: (taskId: common.TaskId) => void;
+  /** taskId -> status, for status-legible bar colouring. */
+  statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
 }
 
-const ZOOMS: gantt.GanttZoom[] = ["day", "week", "month"];
+const ZOOMS: { key: gantt.GanttZoom; label: string }[] = [
+  { key: "day", label: "日" },
+  { key: "week", label: "週" },
+  { key: "month", label: "月" },
+];
+
+const STATUS_BAR_CLASS: Record<task.TaskStatus, string | undefined> = {
+  todo: styles.barTodo,
+  in_progress: styles.barInProgress,
+  blocked: styles.barBlocked,
+  done: styles.barDone,
+  cancelled: styles.barCancelled,
+};
 
 /** Tick label granularity: day shows M/D, week/month show the ISO date. */
 function tickLabel(iso: string, zoom: gantt.GanttZoom): string {
@@ -35,13 +52,14 @@ function tickLabel(iso: string, zoom: gantt.GanttZoom): string {
   return iso;
 }
 
-export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onReschedule }: GanttViewProps) {
+export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onReschedule, onSelect, statusById }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
   useEffect(() => setZoom(zoomProp), [zoomProp]);
 
-  // live drag preview: {taskId, dxPx} while a bar is being dragged.
+  // pointer session on a bar: tracks drag distance to disambiguate click vs drag.
   const [drag, setDrag] = useState<{ taskId: common.TaskId; dxPx: number } | null>(null);
   const dragStartX = useRef(0);
+  const movedRef = useRef(false);
 
   const criticalIds = useMemo(() => new Set(dto.criticalTaskIds ?? []), [dto.criticalTaskIds]);
   const bounds = useMemo(() => computeDateBounds(dto.rows), [dto.rows]);
@@ -65,47 +83,69 @@ export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onResc
     onZoomChange?.(z);
   };
 
-  // ---- bar drag (pointer events; only fires reschedule past a 1-day threshold) ----
+  // ---- bar pointer: drag to reschedule, tap (no move) to open detail ----
   const onBarPointerDown = (e: React.PointerEvent, taskId: common.TaskId) => {
-    if (!onReschedule) return;
     e.preventDefault();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     dragStartX.current = e.clientX;
+    movedRef.current = false;
     setDrag({ taskId, dxPx: 0 });
   };
   const onBarPointerMove = (e: React.PointerEvent) => {
     if (!drag) return;
-    setDrag({ ...drag, dxPx: e.clientX - dragStartX.current });
+    const dx = e.clientX - dragStartX.current;
+    if (Math.abs(dx) > CLICK_THRESHOLD_PX) movedRef.current = true;
+    setDrag({ ...drag, dxPx: onReschedule ? dx : 0 });
   };
   const onBarPointerUp = () => {
     if (!drag) return;
-    const deltaDays = pxToDayDelta(drag.dxPx, zoom);
-    if (deltaDays !== 0) onReschedule?.(drag.taskId, deltaDays);
+    const { taskId, dxPx } = drag;
+    if (!movedRef.current) {
+      onSelect?.(taskId);
+    } else if (onReschedule) {
+      const deltaDays = pxToDayDelta(dxPx, zoom);
+      if (deltaDays !== 0) onReschedule(taskId, deltaDays);
+    }
     setDrag(null);
+    movedRef.current = false;
   };
 
   const barLeft = (b: BarBox) => b.x + (drag?.taskId === b.taskId ? drag.dxPx : 0);
+  const barClass = (b: BarBox) => {
+    const status = statusById?.get(b.taskId);
+    const statusClass = (status ? STATUS_BAR_CLASS[status] : "") ?? "";
+    return `${styles.bar} ${statusClass} ${b.isCritical ? styles.barCritical : ""} ${
+      drag?.taskId === b.taskId && movedRef.current ? styles.barDragging : ""
+    }`;
+  };
 
   return (
-    <div data-testid="fe4-gantt-view">
-      <div className={styles.toolbar}>
-        <div className={styles.switcher} role="tablist" aria-label="ズーム">
-          {ZOOMS.map((z) => (
-            <button
-              key={z}
-              role="tab"
-              aria-selected={z === zoom}
-              className={`${styles.switcherBtn} ${z === zoom ? styles.switcherBtnActive : ""}`}
-              onClick={() => changeZoom(z)}
-              data-testid={`fe4-gantt-zoom-${z}`}
-            >
-              {z === "day" ? "日" : z === "week" ? "週" : "月"}
-            </button>
-          ))}
+    <div data-testid="fe4-gantt-view" className={styles.ganttView}>
+      <div className={styles.ganttControls}>
+        <div className={styles.zoomControl}>
+          <span className={styles.zoomLabel}>表示粒度</span>
+          <div className={styles.zoomSwitcher} role="tablist" aria-label="表示粒度">
+            {ZOOMS.map((z) => (
+              <button
+                key={z.key}
+                role="tab"
+                aria-selected={z.key === zoom}
+                className={`${styles.zoomBtn} ${z.key === zoom ? styles.zoomBtnActive : ""}`}
+                onClick={() => changeZoom(z.key)}
+                data-testid={`fe4-gantt-zoom-${z.key}`}
+              >
+                {z.label}
+              </button>
+            ))}
+          </div>
         </div>
         <span className={styles.ganttLegend}>
-          <span className={`${styles.legendSwatch} ${styles.legendCritical}`} /> クリティカルパス
-          <span className={`${styles.legendSwatch} ${styles.legendToday}`} /> 今日
+          <span className={styles.legendItem}>
+            <span className={`${styles.legendSwatch} ${styles.legendCritical}`} />クリティカルパス
+          </span>
+          <span className={styles.legendItem}>
+            <span className={`${styles.legendSwatch} ${styles.legendToday}`} />今日
+          </span>
         </span>
       </div>
 
@@ -117,7 +157,10 @@ export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onResc
 
       {!bounds ? (
         <div className={styles.ganttEmpty} data-testid="fe4-gantt-empty">
-          期日が設定されたタスクがありません。タスクに期日を設定すると棒が表示されます。
+          <p className={styles.ganttEmptyTitle}>表示できるバーがありません</p>
+          <p className={styles.ganttEmptyBody}>
+            期日が設定されたタスクがまだありません。「＋ タスク作成」から期日つきのタスクを追加すると、ここにバーが表示されます。
+          </p>
         </div>
       ) : (
         <div className={styles.gantt}>
@@ -140,16 +183,18 @@ export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onResc
             {/* row 2: labels + canvas */}
             <div className={styles.ganttLabels}>
               {dto.rows.map((r) => (
-                <div
+                <button
                   key={r.taskId}
+                  type="button"
                   className={styles.ganttRowLabel}
                   style={{ height: ROW_HEIGHT }}
                   title={r.title}
+                  onClick={() => onSelect?.(r.taskId)}
                   data-testid={`fe4-gantt-row-${r.taskId}`}
                 >
                   {criticalIds.has(r.taskId) && <span className={styles.criticalDot} aria-hidden />}
-                  {r.title}
-                </div>
+                  <span className={styles.ganttRowLabelText}>{r.title}</span>
+                </button>
               ))}
             </div>
 
@@ -203,11 +248,11 @@ export function GanttView({ dto, zoom: zoomProp, onZoomChange, truncated, onResc
                 b.hasBar ? (
                   <div
                     key={b.taskId}
-                    className={`${styles.bar} ${b.isCritical ? styles.barCritical : ""} ${drag?.taskId === b.taskId ? styles.barDragging : ""}`}
+                    className={barClass(b)}
                     style={{ left: barLeft(b), top: b.y + (ROW_HEIGHT - BAR_H) / 2, width: b.width, height: BAR_H }}
                     title={`${titleById.get(b.taskId) ?? ""} — ${b.progressPercent}%`}
                     data-testid={`fe4-gantt-bar-${b.taskId}`}
-                    onPointerDown={onReschedule ? (e) => onBarPointerDown(e, b.taskId) : undefined}
+                    onPointerDown={(e) => onBarPointerDown(e, b.taskId)}
                   >
                     <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} />
                     <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>
