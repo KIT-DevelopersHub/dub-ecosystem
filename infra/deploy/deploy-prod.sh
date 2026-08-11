@@ -28,7 +28,11 @@
 #
 set -euo pipefail
 
-WRANGLER="npx --yes wrangler@4.35.0"
+# pnpm dlx (NOT npx): this repo is a pnpm workspace, and `npx` run inside a pnpm
+# workspace refuses to fetch a package that isn't a local dependency — it falls
+# through to PATH and dies with `sh: wrangler: not found` (exit 127). `pnpm dlx`
+# downloads + runs the pinned wrangler regardless of workspace context.
+WRANGLER="pnpm dlx wrangler@4.35.0"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
