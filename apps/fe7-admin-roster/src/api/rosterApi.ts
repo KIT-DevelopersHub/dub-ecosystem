@@ -12,6 +12,9 @@ import type {
   EmailRoutingAddress,
   CreateEmailAddressRequest,
   UpdateEmailAddressRequest,
+  RosterUser,
+  SyncEmailRoutingAddress,
+  SyncEmailRoutingResult,
 } from "../contracts/pending";
 import { buildListUsersParams, type UserListFilters } from "../lib/listUsersQuery";
 import { buildAuditQuery, type AuditFilters } from "../lib/auditQuery";
@@ -24,14 +27,16 @@ const IDENTITY = `${BASE}/identity`;
 const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
 
 export interface RosterApi {
-  listUsers(filters: UserListFilters): Promise<common.Paginated<identity.IdentityUser>>;
-  getUserSummaries(ids: readonly common.UserId[]): Promise<common.Paginated<identity.IdentityUser>>;
+  listUsers(filters: UserListFilters): Promise<common.Paginated<RosterUser>>;
+  getUserSummaries(ids: readonly common.UserId[]): Promise<common.Paginated<RosterUser>>;
   getUser(id: common.UserId): Promise<identity.IdentityUserDetail>;
   patchUser(
     id: common.UserId,
     patch: { displayName?: string; status?: identity.UserStatus; githubLogin?: string | null },
   ): Promise<identity.IdentityUser>;
   inviteUser(req: identity.InviteUserRequest): Promise<identity.IdentityUser>;
+  /** Reconcile the roster with the @developershub.jp Email Routing addresses. */
+  syncEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<SyncEmailRoutingResult>;
   listRoles(): Promise<common.Paginated<identity.Role>>;
   createRole(req: CreateRoleRequest): Promise<identity.Role>;
   updateRole(id: common.RoleId, req: UpdateRoleRequest): Promise<identity.Role>;
@@ -53,17 +58,19 @@ export interface RosterApi {
 export function createRosterApi(client: ResourceClient): RosterApi {
   return {
     listUsers: (filters) =>
-      client.get<common.Paginated<identity.IdentityUser>>(
+      client.get<common.Paginated<RosterUser>>(
         `${IDENTITY}/users`,
         buildListUsersParams(filters),
       ),
     getUserSummaries: (ids) =>
-      client.get<common.Paginated<identity.IdentityUser>>(`${IDENTITY}/users`, {
+      client.get<common.Paginated<RosterUser>>(`${IDENTITY}/users`, {
         ids: [...ids].join(","),
       }),
     getUser: (id) => client.get<identity.IdentityUserDetail>(`${IDENTITY}/users/${id}`),
     patchUser: (id, patch) => client.patch<identity.IdentityUser>(`${IDENTITY}/users/${id}`, patch),
     inviteUser: (req) => client.post<identity.IdentityUser>(`${IDENTITY}/users/invite`, req),
+    syncEmailRouting: (addresses) =>
+      client.post<SyncEmailRoutingResult>(`${IDENTITY}/users/sync-email-routing`, { addresses }),
     listRoles: () => client.get<common.Paginated<identity.Role>>(`${IDENTITY}/roles`),
     createRole: (req) => client.post<identity.Role>(`${IDENTITY}/roles`, req),
     updateRole: (id, req) => client.patch<identity.Role>(`${IDENTITY}/roles/${id}`, req),

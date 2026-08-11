@@ -65,6 +65,30 @@ export interface CreateEmailAddressRequest {
   destination: string;
 }
 
+// ---- Roster provenance + Email Routing sync (identity-roster) ----
+// identity-roster tags each roster row with its provenance and exposes a sync
+// endpoint that upserts the @developershub.jp Email Routing addresses by email.
+// Modeled locally until identity-roster publishes it into @dub/types.
+export type UserSource = "manual" | "email-routing";
+
+// The frozen identity.IdentityUser plus the provenance field the roster surfaces.
+// `source` is optional so this stays mutually assignable with identity.IdentityUser.
+export type RosterUser = identity.IdentityUser & { source?: UserSource };
+
+// One @developershub.jp address relayed to the sync endpoint (read from the proxy).
+export interface SyncEmailRoutingAddress {
+  address: string;
+  destination?: string | null;
+  enabled?: boolean;
+}
+
+export interface SyncEmailRoutingResult {
+  added: number;
+  updated: number;
+  deactivated: number;
+  total: number;
+}
+
 // PATCH sends only the changed fields (enable/disable toggle, or new destination).
 export interface UpdateEmailAddressRequest {
   enabled?: boolean;

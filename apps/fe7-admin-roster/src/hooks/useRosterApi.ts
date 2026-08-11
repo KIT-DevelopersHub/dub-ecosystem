@@ -4,6 +4,7 @@
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { identity, common, auditLog } from "@dub/types";
+import { isErrorResponse } from "@dub/errors";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
 import { queryKeys } from "../lib/queryKeys";
@@ -17,13 +18,22 @@ import type {
   UpdateRoleRequest,
   AssignRoleRequest,
   RoleAssignment,
+  RosterUser,
+  SyncEmailRoutingResult,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
   UpdateEmailAddressRequest,
 } from "../contracts/pending";
 
+/** The mail-gateway proxy answers 503 with this code when the CF token is unset.
+ *  The sync surface reads it to show a "未接続" notice instead of a generic error. */
+export const EMAIL_ROUTING_UNCONFIGURED = "MAIL_EMAIL_ROUTING_UNCONFIGURED";
+export function isEmailRoutingUnconfigured(err: unknown): boolean {
+  return isErrorResponse(err) && err.error.code === EMAIL_ROUTING_UNCONFIGURED;
+}
+
 // ---- queries ----
-export function useUsers(filters: UserListFilters): UseQueryResult<common.Paginated<identity.IdentityUser>> {
+export function useUsers(filters: UserListFilters): UseQueryResult<common.Paginated<RosterUser>> {
   const { api } = useRosterContext();
   return useQuery({ queryKey: queryKeys.users(filters), queryFn: () => api.listUsers(filters) });
 }
@@ -182,6 +192,39 @@ export function useInviteUser() {
   return useMutation({
     mutationFn: (req: identity.InviteUserRequest) => api.inviteUser(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users"] }),
+  });
+}
+
+/**
+ * Reconcile the roster with Cloudflare Email Routing. Reads the @developershub.jp
+ * addresses through the proxy (needs mail:admin), then relays them to identity's
+ * synchronous upsert endpoint (needs identity:admin). When the proxy is unconfigured
+ * it rejects with EMAIL_ROUTING_UNCONFIGURED — the caller reads `mutation.error`
+ * (isEmailRoutingUnconfigured) to render the "未接続" notice instead of a toast.
+ */
+export function useSyncEmailRouting() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation<SyncEmailRoutingResult>({
+    mutationFn: async () => {
+      const page = await api.listEmailAddresses();
+      const addresses = page.items.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled }));
+      return api.syncEmailRouting(addresses);
+    },
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users"] });
+      toast({
+        kind: "success",
+        title: "Email Routing と同期しました",
+        description: `追加 ${res.added}・更新 ${res.updated}・停止 ${res.deactivated}`,
+      });
+    },
+    onError: (err) => {
+      if (isEmailRoutingUnconfigured(err)) return; // rendered as an inline notice, not a toast
+      const p = presentError(err);
+      toast({ kind: "error", title: "同期に失敗しました", description: "message" in p ? p.message : undefined });
+    },
   });
 }
 

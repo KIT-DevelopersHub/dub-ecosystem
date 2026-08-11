@@ -5,8 +5,11 @@
 import { identity } from "@dub/types"; // value import: identity.PERMISSION_CATALOG (runtime) + types
 import type { common, auditLog, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment, EmailRoutingAddress } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult } from "../contracts/pending";
 import { EMAIL_ROUTING_DOMAIN } from "../contracts/pending";
+
+// Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
+type MockUser = identity.IdentityUserDetail & { source: UserSource };
 import { CLEAR_MAIL_RATE_LIMIT, type MailRateLimitStatus, type MailStatusResponse } from "../lib/mailStatus";
 
 function err(code: string, message: string, details?: unknown): ErrorResponse {
@@ -22,7 +25,7 @@ export interface MockSeed {
 }
 
 interface MockState {
-  users: Map<string, identity.IdentityUserDetail>;
+  users: Map<string, MockUser>;
   roles: Map<string, identity.Role>;
   assignments: Map<string, RoleAssignment[]>; // userId -> assignments
   audits: auditLog.AuditRecord[];
@@ -39,10 +42,10 @@ function seedState(seed?: MockSeed): MockState {
     ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read"], isSystem: true }],
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
   ]);
-  const users = new Map<string, identity.IdentityUserDetail>([
-    ["user_alice", { id: "user_alice", orgId: ORG, displayName: "Alice Admin", email: "alice@developershub.jp", githubLogin: "alice", avatarUrl: null, status: "active", roleIds: ["role_admin"], permissions: ["identity:read", "identity:admin", "audit:read", "event:read"], createdAt: now(), updatedAt: now() }],
-    ["user_bob", { id: "user_bob", orgId: ORG, displayName: "Bob Member", email: "bob@developershub.jp", githubLogin: "bob", avatarUrl: null, status: "active", roleIds: ["role_member"], permissions: ["identity:read", "event:read"], createdAt: now(), updatedAt: now() }],
-    ["user_carol", { id: "user_carol", orgId: ORG, displayName: "Carol Invited", email: "carol@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", roleIds: [], permissions: [], createdAt: now(), updatedAt: now() }],
+  const users = new Map<string, MockUser>([
+    ["user_alice", { id: "user_alice", orgId: ORG, displayName: "Alice Admin", email: "alice@developershub.jp", githubLogin: "alice", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], permissions: ["identity:read", "identity:admin", "audit:read", "event:read"], createdAt: now(), updatedAt: now() }],
+    ["user_bob", { id: "user_bob", orgId: ORG, displayName: "Bob Member", email: "bob@developershub.jp", githubLogin: "bob", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_member"], permissions: ["identity:read", "event:read"], createdAt: now(), updatedAt: now() }],
+    ["user_carol", { id: "user_carol", orgId: ORG, displayName: "Carol Invited", email: "carol@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "manual", roleIds: [], permissions: [], createdAt: now(), updatedAt: now() }],
   ]);
   const assignments = new Map<string, RoleAssignment[]>([
     ["user_alice", [{ id: "asg_1", userId: "user_alice", roleId: "role_admin", roleName: "admin", resourceType: null, resourceId: null, grantedBy: "user_alice", grantedAt: now() }]],
@@ -125,9 +128,9 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
         throw err("CONFLICT", "email already exists");
       }
       const id = `user_${Math.random().toString(36).slice(2, 8)}`;
-      const user: identity.IdentityUserDetail = {
+      const user: MockUser = {
         id, orgId: ORG, displayName: req.displayName ?? req.email, email: req.email,
-        githubLogin: null, avatarUrl: null, status: "invited", roleIds: req.roleIds ?? [],
+        githubLogin: null, avatarUrl: null, status: "invited", source: "manual", roleIds: req.roleIds ?? [],
         permissions: [], createdAt: now(), updatedAt: now(),
       };
       s.users.set(id, user);
@@ -159,6 +162,49 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       };
       s.assignments.set(userId, [...list, asg]);
       return asg as unknown as T;
+    }
+    if (path.endsWith("/users/sync-email-routing")) {
+      const req = body as { addresses?: Array<{ address: string; enabled?: boolean }> };
+      const list = Array.isArray(req?.addresses) ? req.addresses : [];
+      // validate + normalize up front (bad address aborts with nothing written)
+      const seen = new Set<string>();
+      const normalized: { email: string; enabled: boolean }[] = [];
+      for (const a of list) {
+        const email = (a?.address ?? "").trim().toLowerCase();
+        if (!EMAIL_RE.test(email)) {
+          throw err("VALIDATION_FAILED", "invalid address", [{ field: "address", reason: "format", message: email }]);
+        }
+        if (seen.has(email)) continue;
+        seen.add(email);
+        normalized.push({ email, enabled: a?.enabled !== false });
+      }
+      let added = 0;
+      let updated = 0;
+      for (const { email, enabled } of normalized) {
+        const existing = [...s.users.values()].find((u) => u.email.toLowerCase() === email);
+        if (!existing) {
+          const id = `user_${Math.random().toString(36).slice(2, 8)}`;
+          s.users.set(id, {
+            id, orgId: ORG, displayName: email.split("@")[0]!, email,
+            githubLogin: null, avatarUrl: null, status: enabled ? "active" : "disabled",
+            source: "email-routing", roleIds: [], permissions: [], createdAt: now(), updatedAt: now(),
+          });
+          added++;
+        } else {
+          const reactivate = enabled && existing.status === "disabled" && existing.source === "email-routing";
+          s.users.set(existing.id, { ...existing, source: "email-routing", ...(reactivate ? { status: "active" } : {}), updatedAt: now() });
+          updated++;
+        }
+      }
+      let deactivated = 0;
+      for (const u of [...s.users.values()]) {
+        if (u.source !== "email-routing" || u.status === "disabled") continue;
+        if (seen.has(u.email.toLowerCase())) continue;
+        s.users.set(u.id, { ...u, status: "disabled", updatedAt: now() });
+        deactivated++;
+      }
+      const result: SyncEmailRoutingResult = { added, updated, deactivated, total: normalized.length };
+      return result as unknown as T;
     }
     if (path.endsWith("/admin/email-routing/addresses")) {
       const req = body as { localPart: string; destination: string };
@@ -200,7 +246,7 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       const u = s.users.get(userMatch[1]!);
       if (!u) throw err("NOT_FOUND", "user not found");
       const req = body as Partial<identity.IdentityUser>;
-      const updated: identity.IdentityUserDetail = { ...u, ...req, updatedAt: now() };
+      const updated: MockUser = { ...u, ...req, updatedAt: now() };
       s.users.set(u.id, updated);
       return stripDetail(updated) as unknown as T;
     }
