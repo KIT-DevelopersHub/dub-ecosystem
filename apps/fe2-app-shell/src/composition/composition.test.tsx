@@ -77,6 +77,20 @@ describe("assembleFeatureModules", () => {
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
+  it("hides ロール管理 / ユーザー名簿 from nav while keeping other admin tools", () => {
+    // 一旦非表示（社長判断）: ロール管理(/admin/roles)・ユーザー名簿(/admin/users) は
+    // ランチャー/ナビに出さない。他の admin ツール（メールアドレス管理・変更履歴）は残す。
+    const { api } = fakeApi();
+    const registry = buildRegistry(assembleFeatureModules(api));
+    const navPaths = registry.nav.map((n) => n.path);
+    expect(navPaths).not.toContain("/admin/users");
+    expect(navPaths).not.toContain("/admin/roles");
+    expect(navPaths).toEqual(expect.arrayContaining(["/admin/email-routing", "/admin/history"]));
+    // ルート自体は残す（deep-link 生存 / 後で戻せる）
+    const routePaths = registry.routes.map((r) => r.path);
+    expect(routePaths).toEqual(expect.arrayContaining(["/admin/users", "/admin/roles"]));
+  });
+
   it("carries badge sources through for notifications and chat", () => {
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
