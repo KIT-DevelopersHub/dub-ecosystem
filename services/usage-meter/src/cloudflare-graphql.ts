@@ -75,6 +75,7 @@ export function buildUsageQuery(accountTag: string, now: Date): { query: string;
           }
           r2StorageAdaptiveGroups(limit: 1, filter: { date_geq: $today, date_leq: $today }, orderBy: [date_DESC]) {
             max { payloadSize }
+            dimensions { date }
           }
           durableObjectsInvocationsAdaptiveGroups(limit: 10000, filter: { date_geq: $today, date_leq: $today }) {
             sum { requests }
