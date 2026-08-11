@@ -1,6 +1,11 @@
-# event-service Worker — SKELETON ONLY. Deploy is out of scope for this unit
-# (P0b: no deploy until the integration wave). Bindings mirror the design's
-# dependencies; account_id / database_id / queue ids are filled by infra at Apply.
+# event-service Worker — PAID topology (canonical Queue fan-out). Bindings mirror the
+# design's dependencies; account_id / database_id / queue ids are filled by infra at
+# Apply. The EVT_* / AUDIT_QUEUE producers below are the frozen catalog wiring the
+# queue-wiring conformance test validates — keep them.
+#
+# FREE-TIER deploy uses wrangler.free.toml instead: no paid Queues; index.ts falls back
+# to a @dub/freeq D1 outbox (freeq_outbox on dub-core) drained by a Cron Trigger. When
+# these real Queue bindings ARE present they are used unchanged (no code change needed).
 name = "event-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"

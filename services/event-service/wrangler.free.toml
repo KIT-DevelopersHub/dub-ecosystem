@@ -1,0 +1,50 @@
+# Free-tier deploy of event-service as `dub-event-service` (internal; reached via the
+# api-gateway SVC_EVENT service binding — workers.dev disabled). NO paid Cloudflare
+# Queues: the event.*/action.* fan-out + audit that used Queue producers (EVT_* /
+# AUDIT_QUEUE) is now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB).
+# index.ts falls back to the outbox shim when the Queue bindings are absent, so no
+# event/audit record is dropped; a Cron drain forwards audit rows to audit-log and
+# defers domain events (durable/pending) until their consumer routes land.
+#
+# Deploy (only on 高岡's go — 本番反映は直列):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core (idempotent, shared by all services)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/event-service/db/0001_freeq_outbox.sql
+#   npx wrangler deploy --config services/event-service/wrangler.free.toml
+name = "dub-event-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: event_* namespace tables + the un-namespaced freeq_outbox table.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (event:read / event:write / event:admin)
+
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"      # read-only participant synthesis (assignee userIds)
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# --- Cron: every 5 minutes. The scheduled handler drains the freeq outbox (forwards
+# audit rows to audit-log; defers domain events). The Workers FREE plan caps the
+# account at 5 cron triggers total; this is one modest schedule. ---
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
