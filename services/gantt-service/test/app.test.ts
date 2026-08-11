@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { gantt } from "@dub/types";
+import { createEvent } from "@dub/events";
 import { createApp } from "../src/app";
 import type { Env } from "../src/env";
 import type { AppDeps, DtoCache, UpstreamPort } from "../src/ports";
@@ -124,6 +125,52 @@ describe("gantt-service HTTP", () => {
       { method: "PUT", headers: { ...AUTHED, "content-type": "application/json" }, body: JSON.stringify({ zoom: "year", collapsedTaskIds: [] }) },
       ENV,
     );
+    expect(res.status).toBe(400);
+  });
+});
+
+// Free-tier consumer landing route (replaces the dub-q-evt-gantt Queue consumer). No auth:
+// gated only by x-dub-internal, which the gateway strips off external requests.
+describe("gantt-service POST /internal/events-async (free-tier consumer)", () => {
+  const ctx = { requestId: "req_test", actorId: "user_a" as string | null };
+  const INTERNAL = { "content-type": "application/json", "x-dub-internal": "1" };
+  const post = (app: ReturnType<typeof createApp>, headers: Record<string, string>, body: unknown) =>
+    app.request("/internal/events-async", { method: "POST", headers, body: JSON.stringify(body) }, ENV);
+
+  it("without x-dub-internal -> 404 (route never exposed externally)", async () => {
+    const evt = createEvent("task.status_changed", { taskId: "task_a", eventId: "event_1", previousStatus: "todo", status: "done" }, ctx);
+    const res = await post(createApp(deps({})), { "content-type": "application/json" }, evt);
+    expect(res.status).toBe(404);
+  });
+
+  it("task.status_changed -> 202 and purges the DTO cache (same handler as the Queue path)", async () => {
+    const cache = fakeCache();
+    const evt = createEvent("task.status_changed", { taskId: "task_a", eventId: "event_1", previousStatus: "todo", status: "done" }, ctx);
+    const res = await post(createApp(deps({ cache })), INTERNAL, evt);
+    expect(res.status).toBe(202);
+    expect(cache.purges).toEqual(["event_1"]);
+  });
+
+  it("event.archived -> purges cache AND reaps view-state rows", async () => {
+    const cache = fakeCache();
+    const views = fakeViewRepo();
+    await views.put("user_a", "event_1", { zoom: "day", collapsedTaskIds: [] });
+    const evt = createEvent("event.archived", { eventId: "event_1" }, ctx);
+    const res = await post(createApp(deps({ cache, views: () => views })), INTERNAL, evt);
+    expect(res.status).toBe(202);
+    expect(cache.purges).toEqual(["event_1"]);
+    expect((await views.get("user_a", "event_1")).zoom).toBe("week"); // reaped -> default
+  });
+
+  it("unknown event name -> 202 no-op (onUnknownEvent: ack parity)", async () => {
+    const cache = fakeCache();
+    const res = await post(createApp(deps({ cache })), INTERNAL, { id: "evt_x", name: "mail.sent", requestId: "req_test", payload: {} });
+    expect(res.status).toBe(202);
+    expect(cache.purges).toEqual([]);
+  });
+
+  it("malformed envelope (no name/id) -> 400", async () => {
+    const res = await post(createApp(deps({})), INTERNAL, { foo: "bar" });
     expect(res.status).toBe(400);
   });
 });

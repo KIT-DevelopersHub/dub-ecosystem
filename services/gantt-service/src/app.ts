@@ -1,15 +1,18 @@
 // Hono app. Routes mount under /api/v1/gantt at the gateway; paths here are the
 // internal (stripPrefix) paths. Deps are injected (ports.ts) for testability.
 import { Hono, type MiddlewareHandler } from "hono";
-import { dubErrorHandler, DubError, CommonErrorCodes } from "@dub/errors";
+import { dubErrorHandler, DubError, CommonErrorCodes, errors } from "@dub/errors";
 import { dubContext, type RequestContext } from "@dub/http";
+import { HEADERS } from "@dub/observability";
 import type { AuthnContext, AuthClient } from "@dub/auth-client";
+import type { DubEventEnvelope } from "@dub/events";
 import type { gantt, common } from "@dub/types";
 import type { Env } from "./env";
 import { SERVICE_NAME } from "./env";
 import type { AppDeps } from "./ports";
 import { buildGanttChartDTO } from "./dto";
 import { validatePutBody } from "./views";
+import { dispatchEvent } from "./queue";
 import { defaultDeps } from "./deps";
 
 type Vars = { dubCtx: RequestContext; authn: AuthnContext };
@@ -47,6 +50,30 @@ export function createApp(deps: AppDeps = defaultDeps): App {
   app.onError(dubErrorHandler({ service: SERVICE_NAME }));
 
   app.get("/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
+
+  // ---- internal-only guard: /internal/* requires the x-dub-internal marker. The gateway
+  // strips all x-dub-* headers off external requests (proxy spoof-defense), so only genuine
+  // service-to-service calls carry it; external callers get a 404 (route never exposed). ----
+  app.use("/internal/*", async (c, next) => {
+    if (!c.req.header(HEADERS.internal)) throw errors.notFound("route", c.req.path);
+    await next();
+  });
+
+  // ---- POST /internal/events-async (free-tier consumer landing route) ----
+  // Free-plan replacement for the dub-q-evt-gantt Queue consumer: task-service /
+  // event-service forward each due task.*/action.*/event.* envelope from their @dub/freeq
+  // outbox drains here. Runs the SAME cache-purge / view-reap handlers as the Queue path
+  // (dispatchEvent). Handlers are idempotent, so a redelivery is safe; a non-2xx response
+  // tells the caller's drain to keep the row pending and retry, so an event is never lost.
+  // gantt is a read model and never calls those services back — no event↔task cycle.
+  app.post("/internal/events-async", async (c) => {
+    const body = await c.req.json<Partial<DubEventEnvelope>>().catch(() => null);
+    if (!body || typeof body.name !== "string" || typeof body.id !== "string") {
+      throw errors.validationFailed([{ field: "body", reason: "invalid_envelope" }]);
+    }
+    await dispatchEvent(c.env, body as DubEventEnvelope, deps);
+    return c.json({ ok: true }, 202);
+  });
 
   // all business routes: context parse -> authn -> authz(event:read)
   app.use("/gantt", dubContext());
