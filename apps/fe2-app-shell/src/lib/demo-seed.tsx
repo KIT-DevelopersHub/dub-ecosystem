@@ -653,6 +653,123 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
   return null;
 }
 
+// ── members (運営メンバー管理) ─────────────────────────────────────────────────
+// In-memory 運営メンバー store for the demo transport: seeded with a few teams +
+// members across all statuses, and full CRUD so add/edit/delete/status/team all
+// persist for the session (a reload resets). Mirrors services/member-service's wire
+// shapes (/api/v1/members/*).
+interface DemoTeam {
+  id: string;
+  orgId: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+interface DemoMember {
+  id: string;
+  orgId: string;
+  name: string;
+  roleTitle: string | null;
+  status: "added" | "invited" | "considering" | "declined";
+  teamIds: string[];
+  contact: string | null;
+  note: string | null;
+  sortOrder: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function createMembersStore() {
+  let seq = 100;
+  const nid = (p: string): string => `${p}_demo_${++seq}`;
+  const teams: DemoTeam[] = [
+    { id: "team_venue", orgId: ORG, name: "会場", description: "会場設営・運営", sortOrder: 1024, createdAt: isoNow(), updatedAt: isoNow() },
+    { id: "team_pr", orgId: ORG, name: "広報", description: "SNS・告知", sortOrder: 2048, createdAt: isoNow(), updatedAt: isoNow() },
+    { id: "team_sponsor", orgId: ORG, name: "スポンサー", description: "協賛対応", sortOrder: 3072, createdAt: isoNow(), updatedAt: isoNow() },
+  ];
+  const members: DemoMember[] = [
+    { id: "member_1", orgId: ORG, name: "高岡 己太朗", roleTitle: "実行委員長", status: "added", teamIds: ["team_venue", "team_pr"], contact: "kota@developershub.jp", note: "全体統括", sortOrder: 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
+    { id: "member_2", orgId: ORG, name: "佐藤 花子", roleTitle: "会場リーダー", status: "added", teamIds: ["team_venue"], contact: null, note: null, sortOrder: 2048, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
+    { id: "member_3", orgId: ORG, name: "鈴木 一郎", roleTitle: "広報担当", status: "invited", teamIds: ["team_pr"], contact: "ichiro@example.com", note: "Xアカウント運用", sortOrder: 3072, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
+    { id: "member_4", orgId: ORG, name: "田中 次郎", roleTitle: null, status: "considering", teamIds: ["team_sponsor"], contact: null, note: "参加検討中", sortOrder: 4096, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
+    { id: "member_5", orgId: ORG, name: "山田 三郎", roleTitle: "デザイン", status: "declined", teamIds: [], contact: null, note: "今回は不参加", sortOrder: 5120, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
+  ];
+
+  const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
+
+  function handle(method: string, pathname: string, _url: URL, body: any): Response | null {
+    if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+
+    // teams
+    if (method === "POST" && pathname === "/api/v1/members/teams") {
+      const t: DemoTeam = { id: nid("team"), orgId: ORG, name: String(body?.name ?? ""), description: body?.description ?? null, sortOrder: (teams.length + 1) * 1024, createdAt: isoNow(), updatedAt: isoNow() };
+      teams.push(t);
+      return json(t, 201);
+    }
+    let m = /^\/api\/v1\/members\/teams\/([^/]+)$/.exec(pathname);
+    if (m) {
+      const t = teams.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!t) return notFound(`${method} ${pathname}`);
+      if (method === "PATCH") {
+        if (body?.name !== undefined) t.name = String(body.name);
+        if (body?.description !== undefined) t.description = body.description ?? null;
+        if (typeof body?.sortOrder === "number") t.sortOrder = body.sortOrder;
+        t.updatedAt = isoNow();
+        return json(t);
+      }
+      if (method === "DELETE") {
+        teams.splice(teams.indexOf(t), 1);
+        for (const mem of members) mem.teamIds = mem.teamIds.filter((id) => id !== t.id);
+        return json({ ok: true });
+      }
+    }
+
+    // people
+    if (method === "POST" && pathname === "/api/v1/members/people") {
+      const mem: DemoMember = {
+        id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
+        status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
+        createdAt: isoNow(), updatedAt: isoNow(),
+      };
+      members.push(mem);
+      return json(mem, 201);
+    }
+    m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
+    if (m) {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (method === "PATCH") {
+        if (typeof body?.version === "number" && body.version !== mem.version) {
+          const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+          return json(err, 409);
+        }
+        if (body?.name !== undefined) mem.name = String(body.name);
+        if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+        if (body?.status !== undefined) mem.status = body.status;
+        if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+        if (body?.contact !== undefined) mem.contact = body.contact ?? null;
+        if (body?.note !== undefined) mem.note = body.note ?? null;
+        if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;
+        mem.version += 1;
+        mem.updatedAt = isoNow();
+        return json({ ...mem, teamIds: [...mem.teamIds] });
+      }
+      if (method === "DELETE") {
+        members.splice(members.indexOf(mem), 1);
+        return json({ ok: true });
+      }
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -668,6 +785,8 @@ export function createDemoFetch(): typeof fetch {
   const roster = createRosterStore();
   // Mutable Inbox + Sent folders (read-state persists; a demo send lands in Sent).
   const mailStore = createMailStore();
+  // Mutable 運営メンバー store (teams + members CRUD persists for the session).
+  const membersStore = createMembersStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -685,6 +804,7 @@ export function createDemoFetch(): typeof fetch {
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
+      membersStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
     // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.

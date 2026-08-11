@@ -47,6 +47,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   { ns: "mobile", ownerUnit: "mobile-bff MO3#31", tables: ["mobile_devices"] },
   { ns: "seed", ownerUnit: "infra-d1-seed#28", tables: ["seed_runs"] },
   { ns: "usage", ownerUnit: "usage-meter", tables: ["usage_snapshot"] },
+  { ns: "member", ownerUnit: "member-service", tables: ["member_teams", "member_people", "member_team_links"] },
 ];
 
 // Compile-time guard: every NAMESPACES entry appears exactly once in the registry.

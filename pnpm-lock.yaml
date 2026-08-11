@@ -1238,6 +1238,33 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
 
+  services/member-service:
+    dependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4
+        version: 4.20260702.1
+      '@dub/auth-client':
+        specifier: workspace:*
+        version: link:../../packages/auth-client
+      '@dub/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+      '@dub/http':
+        specifier: workspace:*
+        version: link:../../packages/http
+      '@dub/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      hono:
+        specifier: ^4.6.14
+        version: 4.13.1
+
   services/notification:
     dependencies:
       '@dub/auth-client':

@@ -72,6 +72,10 @@ export const ROUTES: readonly GatewayRoute[] = [
   // "internal" has no route -> 404). auth=required forwards x-dub-user-id; usage-meter
   // re-checks infra:read on the caller.
   { segment: "usage", binding: "SVC_USAGE_METER", auth: "required" },
+  // 運営メンバー管理 (member-service): teams + people CRUD + /members/overview. auth=required
+  // forwards x-dub-user-id; member-service re-checks identity:read (read) / identity:admin
+  // (write). Plain proxied segment (no internal-only paths).
+  { segment: "members", binding: "SVC_MEMBER", auth: "required" },
 ] as const;
 
 const ROUTE_BY_SEGMENT = new Map<string, GatewayRoute>(ROUTES.map((r) => [r.segment, r]));

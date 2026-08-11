@@ -297,6 +297,47 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
         ["id"],
       );
     }
+
+    // 8. 運営メンバー管理 (member-service): teams + people across all statuses, so the
+    //    運営メンバー screen (一覧 / チーム別 / 組織図) renders with representative data.
+    const memberTeams = [
+      { id: `member_team_venue${sfx}`, name: "会場", description: "会場設営・運営" },
+      { id: `member_team_pr${sfx}`, name: "広報", description: "SNS・告知" },
+      { id: `member_team_sponsor${sfx}`, name: "スポンサー", description: "協賛対応" },
+    ];
+    for (let i = 0; i < memberTeams.length; i++) {
+      const t = memberTeams[i]!;
+      await w.upsert(
+        "member_teams",
+        { id: t.id, org_id: SEED.orgs.primary.id, name: t.name, description: t.description, sort_order: (i + 1) * 1024, created_at: SEED_TS, updated_at: SEED_TS },
+        "replace",
+        ["id"],
+      );
+    }
+    const memberPeople = [
+      { id: `member_p1${sfx}`, name: "高岡 己太朗", role: "実行委員長", status: "added", teams: [0, 1], contact: "kota@developershub.jp" },
+      { id: `member_p2${sfx}`, name: "佐藤 花子", role: "会場リーダー", status: "added", teams: [0], contact: null },
+      { id: `member_p3${sfx}`, name: "鈴木 一郎", role: "広報担当", status: "invited", teams: [1], contact: "ichiro@example.com" },
+      { id: `member_p4${sfx}`, name: "田中 次郎", role: null, status: "considering", teams: [2], contact: null },
+      { id: `member_p5${sfx}`, name: "山田 三郎", role: "デザイン", status: "declined", teams: [] as number[], contact: null },
+    ];
+    for (let i = 0; i < memberPeople.length; i++) {
+      const p = memberPeople[i]!;
+      await w.upsert(
+        "member_people",
+        { id: p.id, org_id: SEED.orgs.primary.id, name: p.name, role_title: p.role, status: p.status, contact: p.contact, note: null, sort_order: (i + 1) * 1024, version: 1, archived_at: null, created_by: adminId, created_at: SEED_TS, updated_at: SEED_TS },
+        "replace",
+        ["id"],
+      );
+      for (const teamIdx of p.teams) {
+        await w.upsert(
+          "member_team_links",
+          { person_id: p.id, team_id: memberTeams[teamIdx]!.id, created_at: SEED_TS, updated_at: SEED_TS },
+          "replace",
+          ["person_id", "team_id"],
+        );
+      }
+    }
   }
 
   // seed_runs ledger (idempotent: UNIQUE(dataset, run_id, fixture_hash)).

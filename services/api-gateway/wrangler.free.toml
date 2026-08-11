@@ -96,3 +96,8 @@ environment = "production"
 binding = "SVC_USAGE_METER"
 service = "dub-usage-meter"
 environment = "production"
+
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"
+environment = "production"

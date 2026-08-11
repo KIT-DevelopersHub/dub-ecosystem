@@ -1,7 +1,7 @@
 // @dub/types — single source of truth for all inter-service HTTP contract types.
 // Type-only package (no runtime beyond the declared-list constants). index.ts does
 // namespace re-export only (flat export forbidden; avoids name collisions).
-// 18 namespaces + common (D14).
+// 19 namespaces + common (D14).
 
 export * as common from "./common";
 export * as gateway from "./gateway"; // #1  api-gateway
@@ -22,5 +22,6 @@ export * as mail from "./mail"; // #15 mail-gateway (2-stage stub)
 export * as mailAutomation from "./mail-automation"; // #16 mail-automation
 export * as chat from "./chat"; // #17 chat-service (RT frozen, rest STUB)
 export * as mobile from "./mobile"; // MO3 mobile-bff (D14)
+export * as member from "./member"; // member-service (運営メンバー管理; canonical shared Team)
 
 export const CONTRACT_VERSION = "1.0.0";
