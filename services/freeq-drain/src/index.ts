@@ -1,13 +1,15 @@
-// freeq-drain Worker entry. ONE cron (see wrangler.toml [triggers] crons = ["*/5 * * * *"])
-// drives a single aggregated drain of every bound @dub/freeq outbox D1. This is the ONLY
-// drainer of the freeq outboxes: the per-service drains were neutralized so no two workers
-// claim the shared dub-core table (which caused the mis-ack data-loss bug). fetch() is a
-// trivial health probe (a Worker needs a default export with a fetch handler).
-import type { ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
-import { consoleSink } from "@dub/observability";
+// freeq-drain Worker entry. The single aggregated drain of every bound @dub/freeq outbox
+// D1 is driven by a Durable Object ALARM (see src/drain-do.ts), NOT a Cron Trigger — the
+// Workers Free plan's 5-cron account cap is full of business crons, and a DO alarm does not
+// count against it. This is the ONLY drainer of the freeq outboxes: the per-service drains
+// were neutralized so no two workers claim the shared dub-core table (the mis-ack data-loss
+// bug). fetch() serves the health probe AND the POST /internal/drain/kick bootstrap that
+// arms the DO alarm once after deploy (see app.ts).
+import type { ExecutionContext } from "@cloudflare/workers-types";
 import { createApp } from "./app";
-import { drainAll } from "./drain-all";
 import type { Env } from "./env";
+
+export { FreeqDrainDO } from "./drain-do";
 
 const app = createApp();
 
@@ -16,11 +18,6 @@ const app = createApp();
 const handler = {
   fetch(req: Request, env: Env, ctx: ExecutionContext) {
     return app.fetch(req, env, ctx as unknown as never);
-  },
-
-  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    const results = await drainAll(env);
-    consoleSink({ level: "info", message: "freeq aggregated drain", service: "freeq-drain", fields: { ...results } });
   },
 };
 
