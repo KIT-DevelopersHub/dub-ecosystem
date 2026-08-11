@@ -18,6 +18,7 @@ import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { HomeScreen } from "./screens/HomeScreen.tsx";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
+import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
 
 /** Convert design `:param` segments to TanStack Router `$param`. */
 export function toTanstackPath(path: string): string {
@@ -28,8 +29,11 @@ function guard(route: ResolvedRoute, Body: ComponentType): () => JSX.Element {
   return function Guarded(): JSX.Element {
     let node: JSX.Element = <Body />;
     for (const perm of route.requiredPermissions) {
+      // Missing permission on an authenticated user is a 403 (not a 404): the page
+      // exists, the user just isn't authorized. Show the permission-denied screen so
+      // they know to ask an admin, instead of the misleading "page not found".
       node = (
-        <RequirePermission permission={perm} fallback={<NotFoundScreen />}>
+        <RequirePermission permission={perm} fallback={<PermissionDeniedScreen />}>
           {node}
         </RequirePermission>
       );
