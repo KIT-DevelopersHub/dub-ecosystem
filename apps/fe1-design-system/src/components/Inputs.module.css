@@ -46,12 +46,56 @@
   color: var(--dub-color-text-primary);
   cursor: pointer;
 }
+/* Switch: the native checkbox is visually hidden but stays focusable/clickable
+   (the wrapping <label> forwards clicks); .switchTrack is the visible toggle with
+   a sliding thumb and an ON tint so the state reads at a glance. */
+.switch {
+  align-items: center;
+}
+.switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+}
 .switchTrack {
+  position: relative;
   display: inline-block;
+  flex: none;
   width: 36px;
   height: 20px;
   border-radius: var(--dub-radius-full);
   background: var(--dub-color-gray-300);
+  transition: background 0.15s ease;
+}
+.switchTrack::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-base, #ffffff);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.2);
+  transition: transform 0.15s ease;
+}
+.switch input:checked ~ .switchTrack {
+  background: var(--dub-color-success-600, #12b76a);
+}
+.switch input:checked ~ .switchTrack::after {
+  transform: translateX(16px);
+}
+.switch input:focus-visible ~ .switchTrack {
+  outline: 2px solid var(--dub-color-border-focus, #2970ff);
+  outline-offset: 2px;
+}
+.switch input:disabled ~ .switchTrack {
+  opacity: 0.5;
+}
+.switch input:disabled ~ .switchTrack::after {
+  box-shadow: none;
 }
 .dateWrap {
   position: relative;

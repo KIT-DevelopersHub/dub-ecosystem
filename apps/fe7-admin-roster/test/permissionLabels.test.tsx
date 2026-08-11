@@ -53,10 +53,41 @@ describe("PermissionMatrix — Japanese, grouped, on/off legible", () => {
     expect(screen.getByTestId("fe7-matrix-count-mail")).toHaveTextContent("1 / 3 有効");
   });
 
-  it("keeps checkbox testids + semantics intact (behavior-preserving)", () => {
+  it("keeps matrix-key testids + on/off + disabled semantics intact (behavior-preserving)", () => {
     render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} disabled onChange={() => {}} />);
     const box = screen.getByTestId("fe7-matrix-key-mail:read") as HTMLInputElement;
     expect(box.checked).toBe(true);
     expect(box.disabled).toBe(true);
+  });
+
+  it("renders each permission grant as an accessible on/off switch (role=switch)", () => {
+    render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} onChange={() => {}} />);
+    expect(screen.getByTestId("fe7-matrix-key-mail:read")).toHaveAttribute("role", "switch");
+    expect(screen.getByTestId("fe7-matrix-key-mail:send")).toHaveAttribute("role", "switch");
+  });
+
+  it("shows an always-visible plain-Japanese description under every permission", () => {
+    render(<PermissionMatrix catalog={catalog} selected={[]} onChange={() => {}} />);
+    // description is rendered inline (not only a hover tooltip), one per key
+    const desc = screen.getByTestId("fe7-matrix-desc-mail:send");
+    expect(desc).toBeInTheDocument();
+    expect(desc.textContent).toMatch(/メールを送信できる/);
+    // every catalog key has its own inline description node
+    for (const e of catalog) {
+      expect(screen.getByTestId(`fe7-matrix-desc-${e.key}`).textContent?.length ?? 0).toBeGreaterThan(0);
+    }
+  });
+
+  it("locks a protected key: switch disabled + a fixed reason in the description", () => {
+    render(
+      <PermissionMatrix
+        catalog={catalog}
+        selected={["identity:admin"]}
+        lockedKeys={["identity:admin"]}
+        onChange={() => {}}
+      />,
+    );
+    expect((screen.getByTestId("fe7-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByTestId("fe7-matrix-desc-identity:admin").textContent).toMatch(/外せません/);
   });
 });
