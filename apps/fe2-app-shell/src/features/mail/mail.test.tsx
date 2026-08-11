@@ -14,11 +14,10 @@ import { createMailApi, isValidEmail, parseRecipients, type MailApi } from "./ma
 import { MailApiProvider } from "./MailProvider.tsx";
 import { ComposeScreen } from "./ComposeScreen.tsx";
 import { InboxScreen } from "./InboxScreen.tsx";
-import { SentScreen } from "./SentScreen.tsx";
 import { ThreadDetail } from "./MessageDetail.tsx";
 
-// MailFolderTabs (rendered by Inbox/Sent screens) uses the shell router's useNavigate;
-// screens are unit-tested in isolation (no RouterProvider), so stub it to a no-op.
+// ComposeScreen navigates to /mail on send via the shell router's useNavigate; screens
+// are unit-tested in isolation (no RouterProvider), so stub it to a no-op.
 const navigateSpy = vi.fn();
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateSpy }));
 
@@ -177,21 +176,6 @@ function fullApi(over: Partial<MailApi> = {}): MailApi {
   };
 }
 
-function sentListItem(over: Partial<mail.MailSentListItem> = {}): mail.MailSentListItem {
-  return {
-    id: "s1",
-    to: [{ email: "bob@x.com", name: "Bob" }],
-    subject: "Report",
-    snippet: "Here is the report.",
-    sentAt: "2026-08-11T00:00:00.000Z",
-    provider: "resend",
-    status: "sent",
-    ...over,
-  };
-}
-function sentDetail(over: Partial<mail.MailSentDetail> = {}): mail.MailSentDetail {
-  return { ...sentListItem(), textBody: "Here is the report body.", ...over };
-}
 
 describe("InboxScreen", () => {
   it("renders the empty state when there are no messages", async () => {
@@ -243,47 +227,6 @@ describe("InboxScreen", () => {
     render(wrap(<InboxScreen />, api));
     await userEvent.click(await screen.findByTestId("fe2-mail-inbox-item"));
     expect(markRead).not.toHaveBeenCalled();
-  });
-});
-
-describe("SentScreen", () => {
-  it("renders the empty state when nothing has been sent", async () => {
-    const api = fullApi();
-    render(wrap(<SentScreen />, api));
-    expect(await screen.findByTestId("fe2-mail-sent-empty")).toBeInTheDocument();
-  });
-
-  it("renders sent messages with recipients and a folder switch", async () => {
-    const page: common.Paginated<mail.MailSentListItem> = { items: [sentListItem()], nextCursor: null };
-    const api = fullApi({ listSent: vi.fn().mockResolvedValue(page) });
-    render(wrap(<SentScreen />, api));
-    expect(await screen.findByText("Report")).toBeInTheDocument();
-    expect(screen.getByText("宛先: Bob <bob@x.com>")).toBeInTheDocument();
-    // Inbox / Sent folder tabs are present, Sent active.
-    expect(screen.getByTestId("fe2-mail-folders")).toBeInTheDocument();
-    expect(screen.getByTestId("fe2-mail-folders-tab-sent")).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("opens the sent detail with the full body on click", async () => {
-    const page: common.Paginated<mail.MailSentListItem> = { items: [sentListItem()], nextCursor: null };
-    const getSent = vi.fn().mockResolvedValue(sentDetail({ textBody: "Full sent body." }));
-    const api = fullApi({ listSent: vi.fn().mockResolvedValue(page), getSent });
-    render(wrap(<SentScreen />, api));
-
-    await userEvent.click(await screen.findByTestId("fe2-mail-sent-item"));
-    expect(getSent).toHaveBeenCalledWith("s1");
-    expect(await screen.findByTestId("fe2-mail-sent-detail")).toBeInTheDocument();
-    expect(screen.getByText("Full sent body.")).toBeInTheDocument();
-  });
-});
-
-describe("MailFolderTabs (via InboxScreen)", () => {
-  it("navigates to /mail/sent when the Sent tab is clicked", async () => {
-    navigateSpy.mockClear();
-    render(wrap(<InboxScreen />, fullApi()));
-    await screen.findByTestId("fe2-mail-inbox-empty");
-    await userEvent.click(screen.getByTestId("fe2-mail-folders-tab-sent"));
-    expect(navigateSpy).toHaveBeenCalledWith({ to: "/mail/sent" });
   });
 });
 

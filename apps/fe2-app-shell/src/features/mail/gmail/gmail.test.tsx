@@ -1,37 +1,70 @@
 // Tests for the Gmail-style mail experience: the client store reducer (stars,
-// archive+undo, trash, send, read-on-open, compose lifecycle) and a render smoke
-// test of the assembled 3-pane UI (folders, dense rows, compose window, list↔
-// reading-pane swap). All in-memory — no network.
+// archive+undo, trash, send, read-on-open, compose lifecycle) over the seeded demo
+// fixture, and a render test of the assembled 3-pane UI wired to the gateway — the
+// live app starts EMPTY and hydrates Inbox/Sent from the MailApi (no hardcoded seed).
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { common, mail } from "@dub/types";
 import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
-import { reducer, initialMailState, type MailState } from "./useMailStore.tsx";
+import { reducer, demoMailState, initialMailState, type MailState } from "./useMailStore.tsx";
 import { threadUnread } from "./mailModel.ts";
 
+const INBOX: mail.MailMessageListItem[] = [
+  { id: "m1", messageId: "<m1>", threadId: "t1", from: { email: "a@x.com", name: "送信者A" }, to: [{ email: "me@developershub.jp" }], subject: "Hello", snippet: "hi there", receivedAt: "2026-08-10T00:00:00.000Z", read: false },
+  { id: "m2", messageId: "<m2>", threadId: "t2", from: { email: "b@x.com", name: "送信者B" }, to: [{ email: "me@developershub.jp" }], subject: "Second", snippet: "yo", receivedAt: "2026-08-09T00:00:00.000Z", read: true },
+];
+const SENT: mail.MailSentListItem[] = [
+  { id: "s1", to: [{ email: "c@x.com", name: "宛先C" }], subject: "送信済みの件", snippet: "sent body", sentAt: "2026-08-11T00:00:00.000Z", provider: "resend", status: "sent" },
+];
+
 function fakeApi(over: Partial<MailApi> = {}): MailApi {
+  const page = <T,>(items: T[]): common.Paginated<T> => ({ items, nextCursor: null });
   return {
-    send: vi.fn().mockResolvedValue({ messageId: "m", provider: "ses", acceptedAt: "t" }),
-    listInbox: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    send: vi.fn().mockResolvedValue({ messageId: "m", provider: "resend", acceptedAt: "t" }),
+    listInbox: vi.fn().mockResolvedValue(page(INBOX)),
     getMessage: vi.fn(),
-    getThread: vi.fn(),
+    getThread: vi.fn().mockResolvedValue({
+      id: "t1",
+      messages: [{ id: "m1", messageId: "<m1>", threadId: "t1", from: INBOX[0]!.from, to: INBOX[0]!.to, subject: "Hello", snippet: "hi there", receivedAt: INBOX[0]!.receivedAt, read: true, textBody: "Full inbox body." }],
+    } satisfies mail.MailThread),
     markRead: vi.fn().mockResolvedValue({ read: true }),
-    listSent: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
-    getSent: vi.fn(),
+    listSent: vi.fn().mockResolvedValue(page(SENT)),
+    getSent: vi.fn().mockResolvedValue({ ...SENT[0]!, textBody: "Full sent body." } satisfies mail.MailSentDetail),
     ...over,
   };
 }
 
-function wrap(ui: ReactNode): JSX.Element {
-  return <MailApiProvider value={fakeApi()}>{ui}</MailApiProvider>;
+function wrap(ui: ReactNode, api: MailApi = fakeApi()): JSX.Element {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={client}>
+      <MailApiProvider value={api}>{ui}</MailApiProvider>
+    </QueryClientProvider>
+  );
 }
 
-const base = (): MailState => ({ ...initialMailState, checked: new Set(), composes: [], undo: null });
+const base = (): MailState => ({ ...demoMailState, checked: new Set(), composes: [], undo: null });
 
 describe("mail store reducer", () => {
+  it("live initial state is EMPTY (no hardcoded demo pile)", () => {
+    expect(initialMailState.threads).toHaveLength(0);
+    expect(initialMailState.labels).toHaveLength(0);
+  });
+
+  it("SET_THREADS replaces the list (gateway hydration) and HYDRATE_THREAD fills bodies", () => {
+    const s0 = { ...initialMailState, checked: new Set<string>(), composes: [], undo: null };
+    const s1 = reducer(s0, { type: "SET_THREADS", threads: [{ id: "x", subject: "S", folder: "inbox", starred: false, labels: [], messages: [{ id: "x", from: { email: "a@x.com" }, to: [], date: "t", body: "snip", read: false }] }] });
+    expect(s1.threads).toHaveLength(1);
+    const s2 = reducer(s1, { type: "HYDRATE_THREAD", id: "x", messages: [{ id: "x", from: { email: "a@x.com" }, to: [], date: "t", body: "full body", read: true }] });
+    expect(s2.threads[0]!.hydrated).toBe(true);
+    expect(s2.threads[0]!.messages[0]!.body).toBe("full body");
+  });
+
   it("toggles a thread star", () => {
     const s = base();
     const id = s.threads[0]!.id;
@@ -92,12 +125,14 @@ describe("mail store reducer", () => {
   });
 });
 
-describe("GmailApp", () => {
-  it("renders the folder nav and dense demo rows", () => {
+describe("GmailApp (gateway-wired)", () => {
+  it("hydrates the Inbox from GET /mail/messages and shows the folder nav", async () => {
     render(wrap(<GmailApp />));
     expect(screen.getByTestId("fe2-mail-folder-inbox")).toBeInTheDocument();
     expect(screen.getByTestId("fe2-mail-folder-sent")).toBeInTheDocument();
-    expect(screen.getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0);
+    const rows = await screen.findAllByTestId("fe2-mail-inbox-item");
+    expect(rows.length).toBe(INBOX.length);
+    expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 
   it("opens a floating compose window from the compose button", async () => {
@@ -107,26 +142,28 @@ describe("GmailApp", () => {
     expect(screen.getByTestId("fe2-mail-compose-to")).toBeInTheDocument();
   });
 
-  it("opens the reading pane when a row is clicked", async () => {
+  it("opens the reading pane (and loads the body) when a row is clicked", async () => {
     render(wrap(<GmailApp />));
-    const firstRow = screen.getAllByTestId("fe2-mail-inbox-item")[0]!;
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
     await userEvent.click(firstRow);
     expect(screen.getByTestId("fe2-mail-thread")).toBeInTheDocument();
     expect(screen.getByTestId("fe2-mail-reply")).toBeInTheDocument();
+    expect(await screen.findByText("Full inbox body.")).toBeInTheDocument();
   });
 
-  it("switches folders from the sidebar", async () => {
+  it("switches to the Sent folder and lists sent mail from GET /mail/sent", async () => {
     render(wrap(<GmailApp />));
+    await screen.findAllByTestId("fe2-mail-inbox-item");
     await userEvent.click(screen.getByTestId("fe2-mail-folder-sent"));
     const list = screen.getByTestId("fe2-mail-inbox");
-    // Sent demo threads exist, so the list still has rows under the Sent view.
-    expect(within(list).getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0);
+    const rows = await within(list).findAllByTestId("fe2-mail-inbox-item");
+    expect(rows.length).toBe(SENT.length);
+    expect(screen.getByText("送信済みの件")).toBeInTheDocument();
   });
 
   it("toggles a star from a list row", async () => {
     render(wrap(<GmailApp />));
-    const firstStar = screen.getAllByTestId("fe2-mail-star")[0]!;
-    // Should not throw and should keep the row present after toggling.
+    const firstStar = (await screen.findAllByTestId("fe2-mail-star"))[0]!;
     await userEvent.click(firstStar);
     expect(screen.getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0);
   });
