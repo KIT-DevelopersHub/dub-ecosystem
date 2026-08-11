@@ -71,6 +71,25 @@ function firstLine(text: string, max = 140): string {
   return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
 }
 
+// Sent is persisted in sessionStorage so it survives a page reload (POST /outbox is
+// durable; a reload re-reads GET /mail/sent and the mail is still there).
+const MOCK_SENT_KEY = "dub-mock-mail-sent";
+function loadMockSent(): mail.MailSentDetail[] {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(MOCK_SENT_KEY);
+    return raw ? (JSON.parse(raw) as mail.MailSentDetail[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveMockSent(sent: mail.MailSentDetail[]): void {
+  try {
+    globalThis.sessionStorage?.setItem(MOCK_SENT_KEY, JSON.stringify(sent));
+  } catch {
+    /* storage unavailable — in-memory only */
+  }
+}
+
 function createMailMock() {
   const received: mail.MailMessageDetail[] = [
     {
@@ -86,7 +105,7 @@ function createMailMock() {
       textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。",
     },
   ];
-  const sent: mail.MailSentDetail[] = [];
+  const sent: mail.MailSentDetail[] = loadMockSent();
   let seq = 0;
 
   function handle(method: string, pathname: string, body: unknown): Response | null {
@@ -133,6 +152,7 @@ function createMailMock() {
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
       };
       sent.unshift(detail);
+      saveMockSent(sent);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
       return json(res);
     }

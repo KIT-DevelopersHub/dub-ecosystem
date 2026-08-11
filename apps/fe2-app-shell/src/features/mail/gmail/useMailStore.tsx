@@ -10,6 +10,7 @@ import {
   DEMO_THREADS,
   type FolderId,
   type Label,
+  type MailMsg,
   type MailPerson,
   type MailThreadModel,
 } from "./mailModel.ts";
@@ -60,6 +61,8 @@ export type MailAction =
   | { type: "TOGGLE_CHECK"; id: string }
   | { type: "CHECK_ALL"; ids: string[] }
   | { type: "CLEAR_CHECKS" }
+  | { type: "SET_THREADS"; threads: MailThreadModel[] }
+  | { type: "HYDRATE_THREAD"; id: string; messages: MailMsg[] }
   | { type: "ADD_MESSAGE"; threadId: string; body: string; to: MailPerson[]; subject: string }
   | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; subject: string; body: string }
   | { type: "OPEN_COMPOSE"; compose: Partial<ComposeState> }
@@ -79,6 +82,16 @@ function setRead(threads: MailThreadModel[], ids: Set<string>, read: boolean): M
 
 export function reducer(state: MailState, action: MailAction): MailState {
   switch (action.type) {
+    case "SET_THREADS":
+      // Replace the list from the gateway (source of truth for inbox + sent). Preserves
+      // the open thread / selection / search so a background refetch is non-disruptive.
+      return { ...state, threads: action.threads };
+    case "HYDRATE_THREAD":
+      // Fill in a thread's full message bodies fetched lazily when it is opened.
+      return {
+        ...state,
+        threads: state.threads.map((t) => (t.id === action.id ? { ...t, messages: action.messages, hydrated: true } : t)),
+      };
     case "SET_FOLDER":
       return { ...state, folder: action.folder, labelFilter: null, openThreadId: null, search: "", checked: new Set() };
     case "SET_LABEL":
@@ -229,10 +242,14 @@ export function reducer(state: MailState, action: MailAction): MailState {
   }
 }
 
+// Live default: EMPTY. The real app hydrates threads from the gateway (GET
+// /mail/messages + /mail/sent) — never from a hardcoded seed — so a fresh load shows a
+// clean, gateway-backed mailbox with no leftover sample pile. `me` stays as the signed-in
+// stand-in; labels are gateway-agnostic UI chips and start empty until a labels API lands.
 export const initialMailState: MailState = {
   me: DEMO_ME,
-  threads: DEMO_THREADS,
-  labels: DEMO_LABELS,
+  threads: [],
+  labels: [],
   folder: "inbox",
   labelFilter: null,
   openThreadId: null,
@@ -240,6 +257,14 @@ export const initialMailState: MailState = {
   search: "",
   composes: [],
   undo: null,
+};
+
+/** Seeded state for unit tests / offline demos ONLY (never the live default). Carries the
+ *  sample DevHub threads + labels so the reducer and render tests have fixtures. */
+export const demoMailState: MailState = {
+  ...initialMailState,
+  threads: DEMO_THREADS,
+  labels: DEMO_LABELS,
 };
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);

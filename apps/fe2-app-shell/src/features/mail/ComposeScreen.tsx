@@ -43,10 +43,10 @@ export function ComposeScreen(): JSX.Element {
       toast.show({ kind: "success", title: "メールを送信しました。" });
       setFields({ to: "", subject: "", body: "" });
       setSubmitted(false);
-      // Invalidate the Sent list so the just-sent mail shows on arrival (defeats the
-      // 30s staleTime after a prior empty visit), then land in the Sent folder.
+      // Invalidate the Sent list so the just-sent mail is fresh, then return to the
+      // unified mail app (its Sent folder reads GET /mail/sent).
       void queryClient.invalidateQueries({ queryKey: queryKeys.feature("mail", "sent-list") });
-      void navigate({ to: "/mail/sent" });
+      void navigate({ to: "/mail" });
     },
     onError: (e: unknown) => {
       const message = ApiError.isApiError(e) ? toDisplayableError(e).message : "メールを送信できませんでした。";

@@ -4,7 +4,9 @@
 // On send it appends to the Sent folder via the store and best-effort posts through
 // the real MailApi (ignored under the demo mock).
 import { useState, type CSSProperties } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { mail } from "@dub/types";
+import { queryKeys } from "../../../lib/queryKeys.tsx";
 import { parseRecipients } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { MailIcon } from "./icons.tsx";
@@ -93,17 +95,24 @@ function RecipientField({
 export function ComposeWindow({ compose, offset }: { compose: ComposeState; offset: number }): JSX.Element {
   const { dispatch } = useMailStore();
   const mailApi = useMailApi();
+  const queryClient = useQueryClient();
   const patch = (p: Partial<ComposeState>): void => dispatch({ type: "UPDATE_COMPOSE", id: compose.id, patch: p });
 
   const send = (): void => {
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
     if (to.length === 0) return;
-    dispatch({ type: "SEND", to, cc, subject: compose.subject, body: compose.body });
     const req: mail.SendMailRequest = { to, subject: compose.subject || "(件名なし)", textBody: compose.body };
-    // best-effort real send; harmless no-op under the demo mock (404 swallowed).
-    void mailApi.send(cc.length > 0 ? { ...req, cc } : req).catch(() => undefined);
+    const payload = cc.length > 0 ? { ...req, cc } : req;
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+    // Land in the Sent folder; POST /outbox is the SOURCE OF TRUTH — on success we
+    // refetch the Sent list from the gateway so the sent mail persists across reloads
+    // (no reliance on ephemeral client state).
+    dispatch({ type: "SET_FOLDER", folder: "sent" });
+    void mailApi
+      .send(payload)
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.feature("mail", "sent-list") }))
+      .catch(() => undefined);
   };
 
   const maximized = compose.maximized;

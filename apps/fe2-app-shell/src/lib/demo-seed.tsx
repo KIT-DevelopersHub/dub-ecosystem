@@ -199,11 +199,31 @@ function firstLine(text: string, max = 140): string {
   return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
 }
 
+// The Sent folder is persisted in sessionStorage so it survives a page reload — the demo
+// transport thus behaves like a real gateway (POST /outbox is durable; a reload re-reads
+// GET /mail/sent and the sent mail is still there), which is exactly what the UI relies on.
+const DEMO_SENT_KEY = "dub-demo-mail-sent";
+function loadSent(): mail.MailSentDetail[] {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(DEMO_SENT_KEY);
+    return raw ? (JSON.parse(raw) as mail.MailSentDetail[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveSent(sent: mail.MailSentDetail[]): void {
+  try {
+    globalThis.sessionStorage?.setItem(DEMO_SENT_KEY, JSON.stringify(sent));
+  } catch {
+    /* storage unavailable (e.g. SSR/tests) — in-memory only */
+  }
+}
+
 function createMailStore() {
   // Received seed = the same clean sample set the demo already shows (msg_1..3), cloned
   // so the read flag can be flipped in-session without mutating the module constants.
   const received: mail.MailMessageDetail[] = Object.values(MAIL_DETAIL).map((m) => ({ ...m }));
-  const sent: mail.MailSentDetail[] = [];
+  const sent: mail.MailSentDetail[] = loadSent();
   let seq = 0;
 
   function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
@@ -252,6 +272,7 @@ function createMailStore() {
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
       };
       sent.unshift(detail);
+      saveSent(sent);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
       return json(res);
     }

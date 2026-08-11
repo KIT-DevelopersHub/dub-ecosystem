@@ -51,6 +51,8 @@ export interface MailThreadModel {
   folder: FolderId;
   starred: boolean;
   labels: string[]; // Label ids
+  apiThreadId?: string; // gateway thread id (inbox) — used to fetch full bodies on open
+  hydrated?: boolean; // true once the full body has been loaded from the gateway
 }
 
 // ---- pure helpers ----

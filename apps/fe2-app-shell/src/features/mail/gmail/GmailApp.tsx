@@ -4,13 +4,124 @@
 // # delete / r reply / j·k move / x select / / focus search). All state lives in
 // the client MailStore (demo); real API wiring merges later.
 import { useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type { mail } from "@dub/types";
+import { queryKeys } from "../../../lib/queryKeys.tsx";
+import { useMailApi } from "../MailProvider.tsx";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
 import { ComposeWindow } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
-import { inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
+import { inFolder, matchesQuery, threadUnread, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 import { MailStoreProvider, useMailStore } from "./useMailStore.tsx";
+
+// ---- gateway ↔ store mapping (the live app's data flow) ----
+function toPerson(a: mail.MailAddress): MailPerson {
+  return a.name ? { email: a.email, name: a.name } : { email: a.email };
+}
+function inboxToThread(item: mail.MailMessageListItem): MailThreadModel {
+  return {
+    id: item.id,
+    apiThreadId: item.threadId,
+    subject: item.subject,
+    folder: "inbox",
+    starred: false,
+    labels: [],
+    hydrated: false,
+    messages: [{ id: item.id, from: toPerson(item.from), to: item.to.map(toPerson), date: item.receivedAt, body: item.snippet, read: item.read }],
+  };
+}
+function sentToThread(item: mail.MailSentListItem, me: MailPerson): MailThreadModel {
+  const cc = item.cc?.map(toPerson);
+  return {
+    id: item.id,
+    subject: item.subject,
+    folder: "sent",
+    starred: false,
+    labels: [],
+    hydrated: false,
+    messages: [
+      {
+        id: item.id,
+        from: item.from ? toPerson(item.from) : me,
+        to: item.to.map(toPerson),
+        ...(cc && cc.length > 0 ? { cc } : {}),
+        date: item.sentAt,
+        body: item.snippet,
+        read: true,
+      },
+    ],
+  };
+}
+function inboxDetailToMsg(d: mail.MailMessageDetail): MailMsg {
+  return { id: d.id, from: toPerson(d.from), to: d.to.map(toPerson), date: d.receivedAt, body: d.textBody || d.snippet, read: true };
+}
+function sentDetailToMsgs(d: mail.MailSentDetail, me: MailPerson): MailMsg[] {
+  const cc = d.cc?.map(toPerson);
+  return [
+    {
+      id: d.id,
+      from: d.from ? toPerson(d.from) : me,
+      to: d.to.map(toPerson),
+      ...(cc && cc.length > 0 ? { cc } : {}),
+      date: d.sentAt,
+      body: d.textBody || d.snippet,
+      read: true,
+    },
+  ];
+}
+
+/** Hydrates the client store from the gateway: Inbox ← GET /mail/messages, Sent ← GET
+ *  /mail/sent (source of truth). Bodies are fetched lazily on open (getThread/getSent),
+ *  and opening an unread inbox message marks it read via the API. Compose persists via
+ *  POST /outbox and invalidates the Sent query, so a sent mail survives a reload. */
+function useGatewaySync(): void {
+  const mailApi = useMailApi();
+  const { state, dispatch } = useMailStore();
+  const me = state.me;
+
+  const inboxQ = useQuery({ queryKey: queryKeys.feature("mail", "inbox"), queryFn: () => mailApi.listInbox({ limit: 50 }) });
+  const sentQ = useQuery({ queryKey: queryKeys.feature("mail", "sent-list"), queryFn: () => mailApi.listSent({ limit: 50 }) });
+
+  const inboxData = inboxQ.data;
+  const sentData = sentQ.data;
+  useEffect(() => {
+    if (!inboxData && !sentData) return;
+    const threads = [
+      ...(inboxData?.items ?? []).map(inboxToThread),
+      ...(sentData?.items ?? []).map((s) => sentToThread(s, me)),
+    ];
+    dispatch({ type: "SET_THREADS", threads });
+  }, [inboxData, sentData, me, dispatch]);
+
+  // Lazy body load + mark-read on open.
+  const openId = state.openThreadId;
+  useEffect(() => {
+    if (!openId) return;
+    const t = state.threads.find((x) => x.id === openId);
+    if (!t || t.hydrated) return;
+    let cancelled = false;
+    if (t.folder === "sent") {
+      void mailApi
+        .getSent(t.id)
+        .then((d) => !cancelled && dispatch({ type: "HYDRATE_THREAD", id: t.id, messages: sentDetailToMsgs(d, me) }))
+        .catch(() => undefined);
+    } else {
+      const tid = t.apiThreadId ?? t.id;
+      void mailApi
+        .getThread(tid)
+        .then((thr) => !cancelled && dispatch({ type: "HYDRATE_THREAD", id: t.id, messages: thr.messages.map(inboxDetailToMsg) }))
+        .catch(() => undefined);
+      if (t.messages.some((m) => !m.read)) void mailApi.markRead(t.messages[0]!.id).catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+    // Fire once per opened thread; store reads use the current closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
+}
 
 function SearchBar(): JSX.Element {
   const { state, dispatch } = useMailStore();
@@ -126,6 +237,7 @@ function Shortcuts(): null {
 
 function GmailBody(): JSX.Element {
   const { state } = useMailStore();
+  useGatewaySync();
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId) : undefined;
   const unreadInbox = state.threads.filter((t) => inFolder(t, "inbox") && threadUnread(t)).length;
 

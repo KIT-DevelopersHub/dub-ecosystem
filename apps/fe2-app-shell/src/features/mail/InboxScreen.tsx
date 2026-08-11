@@ -4,13 +4,11 @@
 // invalidates the list so the badge clears. Empty / error / loading use @dub/ui.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
-import { MailFolderTabs } from "./MailFolderTabs.tsx";
 import { ThreadDetail } from "./MessageDetail.tsx";
 
 function formatReceived(iso: string): string {
@@ -45,13 +43,9 @@ function MessageRow({ message, onOpen }: { message: mail.MailMessageListItem; on
 
 export function InboxScreen({ onCompose }: { onCompose?: () => void }): JSX.Element {
   const mailApi = useMailApi();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<{ id: string; threadId: string } | null>(null);
   const inboxKey = queryKeys.feature("mail", "inbox");
-  // When mounted as a route (no onCompose prop), the compose button navigates to the
-  // standalone compose route (mail:send). An embedding parent can still override it.
-  const compose = onCompose ?? (() => void navigate({ to: "/mail/compose" }));
 
   const query = useQuery({
     queryKey: inboxKey,
@@ -73,11 +67,11 @@ export function InboxScreen({ onCompose }: { onCompose?: () => void }): JSX.Elem
     return <ThreadDetail threadId={selected.threadId} onBack={() => setSelected(null)} />;
   }
 
-  const composeAction = (
-    <Button testId="fe2-mail-inbox-compose" onClick={compose}>
+  const composeAction = onCompose ? (
+    <Button testId="fe2-mail-inbox-compose" onClick={onCompose}>
       メール作成
     </Button>
-  );
+  ) : undefined;
 
   let body: JSX.Element;
   if (query.isPending) {
@@ -110,7 +104,6 @@ export function InboxScreen({ onCompose }: { onCompose?: () => void }): JSX.Elem
   return (
     <main data-testid="fe2-mail-inbox">
       <PageHeader title="受信トレイ" {...(composeAction ? { actions: composeAction } : {})} />
-      <MailFolderTabs active="inbox" />
       {body}
     </main>
   );
