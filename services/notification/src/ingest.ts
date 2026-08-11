@@ -25,7 +25,8 @@ export interface IngestDeps {
   db: DbClient;
   resolver: RecipientResolver;
   adapters: AdapterRegistry;
-  auditEnv: { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> };
+  // null when neither a paid Queue nor the free-tier outbox is bound (publish skipped).
+  auditEnv: { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> } | null;
   orgId: string;
   ctx: RequestContext;
   maxAttempts?: number;

@@ -62,6 +62,7 @@ export function createShellRouter(
       <AppShellLayout
         navEntries={registry.nav}
         headerWidgets={registry.headerWidgets}
+        api={api}
         {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
         {...(opts?.onLogout ? { onLogout: opts.onLogout } : {})}
       >

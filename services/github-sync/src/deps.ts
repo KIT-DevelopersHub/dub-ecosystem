@@ -10,7 +10,7 @@ import { StubGithubApi, RealGithubApi, type GithubApiClient } from "./clients/gi
 import { HttpTaskClient, type TaskServiceClient } from "./clients/task";
 import { HttpIdentityClient, type IdentityUserClient } from "./clients/identity";
 import { HttpEventClient, type EventExistenceClient } from "./clients/event";
-import { QueuePublisher, type Publisher } from "./events/publisher";
+import { QueuePublisher, buildPublisherEnv, buildAuditQueue, type Publisher } from "./events/publisher";
 import { SyncEngine } from "./engine/sync";
 import { GithubSyncService } from "./service";
 
@@ -52,7 +52,8 @@ export function buildRuntime(env: Env): Runtime {
       ? new RealGithubApi({ auth: { appId, privateKeyPem } })
       : new StubGithubApi();
 
-  const publisher = new QueuePublisher({ EVT_NOTIFICATION: env.EVT_NOTIFICATION }, env.AUDIT_QUEUE);
+  // Prefer real (paid) Queue bindings; fall back to the @dub/freeq D1 outbox on free tier.
+  const publisher = new QueuePublisher(buildPublisherEnv(env), buildAuditQueue(env));
 
   const originDefault = (env.GITHUB_ORIGIN_DEFAULT === "internal" ? "internal" : "github") as "internal" | "github";
   const selfLogins = (env.GITHUB_SELF_LOGINS ?? "")

@@ -1,0 +1,69 @@
+# Free-tier deploy of github-sync as `dub-github-sync` (internal; reached via the
+# api-gateway SVC bindings — workers.dev disabled). NO paid Cloudflare Queues.
+#
+# PRODUCER side: the github.* domain-event fan-out (EVT_NOTIFICATION) + audit fan-out
+# (AUDIT_QUEUE) is now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB).
+# events/publisher.ts falls back to the outbox shim when the Queue bindings are absent, so
+# no audit/event record is dropped; the Cron drain forwards audit rows to audit-log and
+# defers domain events (durable/pending) until the notification consumer route lands.
+#
+# CONSUMER side: the retired dub-q-wh-github + dub-q-evt-github-sync Queue consumers are
+# replaced by the HTTP landing routes POST /internal/webhooks-async and
+# POST /internal/events-async (guarded by x-dub-internal, see app.ts). webhook-ingest /
+# task-service / event-service forward each due envelope from their own @dub/freeq outbox
+# drains, running the SAME sync engine + envelope.id idempotency the Queue consumers did.
+#
+# Deploy (only on 高岡's go — 本番反映は直列):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/github-sync/db/0001_freeq_outbox.sql
+#   npx wrangler deploy --config services/github-sync/wrangler.free.toml
+# Secrets (GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY / GITHUB_APP_CLIENT_SECRET) are set via
+# `wrangler secret put` and persist across deploys.
+name = "dub-github-sync"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: github_ namespace tables + the un-namespaced freeq_outbox table.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# R2 read fallback for >96KB webhook payloads (the landing route resolves offloaded bodies).
+[[r2_buckets]]
+binding = "WEBHOOK_RAW"
+bucket_name = "dub-r2-webhook-raw"
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"      # task upsert/mapping during sync
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (github:*), GitHub-login mapping
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"     # GET /events/:id (event existence)
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# --- Cron: every 6h (matches the paid reconcile cadence). The scheduled handler drains the
+# freeq outbox on every tick (forwards audit rows to audit-log; defers domain events) and
+# then runs the reconciliation + processed-event purge. A single trigger keeps github-sync
+# within the Workers FREE plan's 5-cron account cap (same discipline as mail-gateway). ---
+[triggers]
+crons = ["0 */6 * * *"]
+
+[vars]
+GITHUB_ORIGIN_DEFAULT = "github"

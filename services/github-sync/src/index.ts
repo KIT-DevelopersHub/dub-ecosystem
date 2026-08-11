@@ -5,19 +5,27 @@ import type {
   ScheduledController,
 } from "@cloudflare/workers-types";
 import type { DubEventEnvelope, WebhookEventEnvelopeV1 } from "@dub/events";
+import { consoleSink } from "@dub/observability";
 import { emptyStats, type SyncRunRecord } from "./domain/types";
 import type { Env } from "./env";
 import { WH_GITHUB_QUEUE, EVT_GITHUB_SYNC_QUEUE } from "./env";
 import { buildRuntime } from "./deps";
 import { createApp } from "./app";
 import { handleWebhookBatch, buildDomainEventHandler } from "./queue";
+import { runOutboxDrain } from "./drain";
 
 const PROCESSED_TTL_DAYS = 14;
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const rt = buildRuntime(env);
-    const app = createApp({ auth: rt.auth, service: rt.service, publisher: rt.publisher, now: rt.now });
+    const app = createApp({
+      auth: rt.auth,
+      service: rt.service,
+      publisher: rt.publisher,
+      now: rt.now,
+      queue: { engine: rt.engine, processed: rt.stores.processed, webhookRaw: env.WEBHOOK_RAW },
+    });
     return app.fetch(request, env as unknown as Record<string, unknown>);
   },
 
@@ -42,9 +50,27 @@ export default {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runReconcileCron(env));
+    ctx.waitUntil(runScheduled(env));
   },
 };
+
+async function runScheduled(env: Env): Promise<void> {
+  // Free-tier outbox drain runs on every tick (forwards audit rows to audit-log; defers
+  // domain events). Best-effort: a drain hiccup must not abort the reconcile. On a paid
+  // deploy (real Queues) the outbox is empty, so the drain is a cheap no-op.
+  try {
+    const result = await runOutboxDrain(env);
+    consoleSink({ level: "info", message: "github-sync outbox drained", service: "github-sync", fields: { ...result } });
+  } catch (err) {
+    consoleSink({
+      level: "error",
+      message: "github-sync outbox drain failed",
+      service: "github-sync",
+      fields: { error: err instanceof Error ? err.message : String(err) },
+    });
+  }
+  await runReconcileCron(env);
+}
 
 async function runReconcileCron(env: Env): Promise<void> {
   const rt = buildRuntime(env);

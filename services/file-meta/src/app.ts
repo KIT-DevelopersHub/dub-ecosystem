@@ -4,8 +4,11 @@
 import { Hono, type Context } from "hono";
 import { DubError, CommonErrorCodes, dubErrorHandler } from "@dub/errors";
 import { dubContext, DUB_HEADERS } from "@dub/http";
+import { HEADERS } from "@dub/observability";
 import { CONTRACT_VERSION, common, type fileMeta } from "@dub/types";
 import { newId, nowIso } from "@dub/db";
+import type { DubEventEnvelope } from "@dub/events";
+import type { EnvelopeOutcome } from "./consumer";
 import {
   type AuditFn,
   type AuthGate,
@@ -29,6 +32,10 @@ export interface AppDeps {
   auth: AuthGate;
   drive?: DriveClient;
   config?: Partial<FileMetaConfig>;
+  // Free-tier consumer entry: processes one inbound event envelope through the same
+  // handler map the Queue consumer uses. Wired in on the free deploy so the
+  // POST /internal/events-async landing route can drain producers' deferred rows.
+  consume?: (env: DubEventEnvelope) => Promise<EnvelopeOutcome>;
 }
 
 interface DubCtx {
@@ -46,7 +53,7 @@ function userIdOf(c: Context): string {
 
 export function createApp(deps: AppDeps) {
   const cfg: FileMetaConfig = { ...DEFAULT_CONFIG, ...deps.config };
-  const { repo, blobs, emit, audit, auth, drive } = deps;
+  const { repo, blobs, emit, audit, auth, drive, consume } = deps;
   const app = new Hono();
   app.onError(dubErrorHandler({ service: "file-meta" }));
   app.use("*", dubContext({ allowGenerate: true }));
@@ -82,6 +89,28 @@ export function createApp(deps: AppDeps) {
   app.get("/internal/health", (c) => {
     c.header("x-dub-contract-version", CONTRACT_VERSION);
     return c.json({ status: "ok", service: "file-meta", contractVersion: CONTRACT_VERSION });
+  });
+
+  // ---- async event ingest (free-tier consumer landing; outbox drain target) ----
+  // Free-tier replacement for the retired EVT_FILE_META Queue consumer. Producers of
+  // drive.* / *.archived (drive-proxy / event / task) that deferred `evt.file-meta`
+  // rows in their own @dub/freeq outbox forward each envelope here over their SVC_*
+  // binding — the SAME DubEventEnvelope the retired Queue consumer understood, run
+  // through the SAME handler map (see createEnvelopeConsumer). The envelope id is the
+  // idempotency key (file_meta_processed_events + unique drive_file_id), so at-least-once
+  // re-delivery is safe. A non-2xx makes the caller's drain keep its row pending and
+  // retry, so an event is never lost. Internal-only: requires x-dub-internal (service
+  // binding); the api-gateway 404s this path for external clients.
+  app.post("/internal/events-async", async (c) => {
+    if (!c.req.header(HEADERS.internal)) throw new DubError(CommonErrorCodes.NOT_FOUND, "route not found", { status: 404 });
+    if (!consume) throw new DubError(CommonErrorCodes.INTERNAL, "event consumer not configured", { status: 500 });
+    const env = (await c.req.json<DubEventEnvelope>().catch(() => null)) as DubEventEnvelope | null;
+    const outcome = await consume(env as DubEventEnvelope);
+    if (outcome === "retry") {
+      // Non-2xx: the caller's outbox row stays pending and is redelivered (never lost).
+      throw new DubError("FILE_EVENT_INGEST_FAILED", "event processing failed; retry", { status: 500 });
+    }
+    return c.body(null, 202);
   });
 
   app.use("/files/*", auth.requireAuth());

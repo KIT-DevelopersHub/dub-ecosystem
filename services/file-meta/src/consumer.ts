@@ -79,3 +79,41 @@ export function createConsumer(deps: ConsumerDeps) {
     },
   );
 }
+
+// Outcome of processing a single envelope through the shared handler map.
+// "ack" = handled (or idempotently skipped / unknown-acked); "retry" = failed, the
+// caller MUST keep the source durable (its outbox row stays pending) so nothing is lost.
+export type EnvelopeOutcome = "ack" | "retry";
+
+/**
+ * Transport-agnostic single-envelope entry point over the EXACT SAME handler map the
+ * Queue consumer uses (idempotency, drive.* / *.archived dispatch, unknown-event ack,
+ * error -> retry). It drives `createConsumer` with a synthetic one-message batch so the
+ * behaviour cannot drift from the Queue path. This backs the free-tier HTTP landing
+ * route POST /internal/events-async: producers (drive-proxy / event / task) that
+ * deferred `evt.file-meta` rows in their own freeq outbox drain them here, closing the
+ * loop without a paid Queue. No cycle is re-introduced: the handlers emit file.* events
+ * which have no subscribers, so processing an inbound event never re-enqueues to
+ * file-meta.
+ */
+export function createEnvelopeConsumer(deps: ConsumerDeps): (env: DubEventEnvelope) => Promise<EnvelopeOutcome> {
+  const batchHandler = createConsumer(deps);
+  return async (env) => {
+    let outcome: EnvelopeOutcome = "ack";
+    const message = {
+      id: (env && typeof env.id === "string" ? env.id : "0"),
+      timestamp: new Date(),
+      attempts: 1,
+      body: env,
+      ack() {
+        outcome = "ack";
+      },
+      retry() {
+        outcome = "retry";
+      },
+    };
+    const batch = { messages: [message], queue: "internal-events-async", ackAll() {}, retryAll() {} };
+    await batchHandler(batch as unknown as never, {});
+    return outcome;
+  };
+}

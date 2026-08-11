@@ -83,6 +83,10 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
         return json({}, 200);
       case "POST /api/v1/auth/logout":
         return json(null, 204);
+      // Feedback widget (shell chrome): acknowledge so the offline/demo build shows
+      // the success state. No real feedback leaves the browser under the mock.
+      case "POST /api/v1/feedback":
+        return json({ id: `fb_demo_${Date.now()}` }, 201);
       default:
         // Unhandled by the boot mock: a normal NOT_FOUND envelope so feature
         // screens surface their own in-frame fallback (design 2-1).
