@@ -30,6 +30,31 @@ paths:
         '200':
           description: OK
       security: []
+  /internal/events-async:
+    post:
+      operationId: ingestFileEventAsync
+      summary: Asynchronous event ingest (free-tier consumer landing)
+      tags:
+        - files
+      description: |-
+        Free-tier replacement for the retired EVT_FILE_META Cloudflare Queue consumer. Producers of drive.* / *.archived (drive-proxy / event / task) that deferred `evt.file-meta` rows in their own @dub/freeq outbox forward each envelope here over their SVC_* service binding — the same DubEventEnvelope the retired Queue consumer understood, run through the same handler map (drive.file.created/moved/trashed auto-registration/reflection; event/action/task.archived link suppression). The envelope id is the idempotency key (file_meta_processed_events + unique drive_file_id ⇒ at-least-once re-delivery is safe); a non-2xx makes the caller's drain keep the row pending and retry, so an event is never lost.
+
+        Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A @dub/events DubEventEnvelope (id, name, requestId, payload).
+      responses:
+        '202':
+          description: Accepted (handled or idempotently skipped)
+        '404':
+          description: Missing x-dub-internal marker
+        '500':
+          description: Handler failed; caller keeps the outbox row pending and retries
+      security: []
   /files/meta:
     post:
       operationId: registerMeta
