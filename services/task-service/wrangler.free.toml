@@ -1,0 +1,56 @@
+# Free-tier deploy of task-service as `dub-task-service` (internal; reached via the
+# api-gateway SVC_TASK service binding). NO paid Cloudflare Queues: the task.* fan-out +
+# audit fan-out that used Queue producers (EVT_NOTIFICATION / EVT_GITHUB_SYNC / EVT_GANTT /
+# EVT_MOBILE_BFF / EVT_FILE_META / AUDIT_QUEUE) is now a @dub/freeq D1 outbox (freeq_outbox
+# on the shared dub-core DB). events.ts falls back to the outbox shim when the Queue bindings
+# are absent, so no audit/event record is dropped; a Cron drain forwards audit rows to
+# audit-log and defers domain events (durable/pending) until their consumer routes land.
+#
+# The retired dub-q-evt-task CONSUMER is replaced by the HTTP landing route
+# POST /internal/events-async (see app.ts) — event-service's own free-tier drain POSTs each
+# due event.archived envelope there, running the same compensation + idempotency the Queue
+# consumer did. task-service never calls event-service back, so no event↔task cycle.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/task-service/db/0002_freeq_outbox.sql
+#   npx wrangler deploy --config services/task-service/wrangler.free.toml
+name = "dub-task-service"
+main = "src/index.ts"
+compatibility_date = "2024-11-27"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: task_ namespace tables + the un-namespaced freeq_outbox table.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (task:read / task:write / task:delete)
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"     # GET /events/:id (create-time event validation)
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# --- Cron: every 15 min. The scheduled handler drains the freeq outbox on every tick and
+# runs the due-soon scan (task.due_soon, 24h window). ---
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+ENVIRONMENT = "production"
+DUE_SOON_WINDOW_HOURS = "24"
+SERVICE_CALLERS = "github-sync"

@@ -15,6 +15,7 @@ servers:
 tags:
   - name: tasks
   - name: health
+  - name: internal
 security:
   - sessionCookie: []
   - gatewayIdentity: []
@@ -29,6 +30,43 @@ paths:
         '200':
           description: OK
       security: []
+  /internal/events-async:
+    post:
+      operationId: taskEventsAsync
+      summary: Free-tier consumer landing route (event.archived compensation)
+      tags:
+        - internal
+      description: |-
+        Internal-only: requires x-dub-internal (service binding). The api-gateway 404s this path for external clients.
+
+        Free-plan replacement for the retired dub-q-evt-task Cloudflare Queue consumer. On the Workers FREE plan there are no paid Queues, so event-service's own @dub/freeq outbox drain forwards each due event.archived envelope here over its service binding. Runs the same bulk soft-archive compensation and envelope.id idempotency the Queue consumer did (no per-task task.archived fan-out — storm prevention). A non-2xx tells the caller's drain to keep the row pending and retry, so an event is never lost. task-service does NOT call event-service back, so no event↔task cycle is reintroduced.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - id
+              properties:
+                name:
+                  type: string
+                  description: Event catalog name (e.g. event.archived).
+                id:
+                  type: string
+                  description: Envelope ULID — the producer idempotency key.
+                payload:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '202':
+          description: Accepted (compensation applied / idempotent no-op)
+        '400':
+          description: Malformed event envelope
+        '404':
+          description: Path hit without the x-dub-internal marker (external caller)
   /tasks/dependencies:
     get:
       operationId: listDependencies

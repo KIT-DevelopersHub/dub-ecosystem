@@ -1,24 +1,29 @@
 // Worker bindings + derived runtime config for task-service.
-// Shared dub-core D1 (task_* namespace) + Queue producers/consumer + SB deps.
+// Shared dub-core D1 (task_* namespace + un-namespaced freeq_outbox) + Queue producers/
+// consumer (PAID plan) or the @dub/freeq D1 outbox (FREE plan) + SB deps.
 import type { D1Database, Queue, Fetcher } from "@cloudflare/workers-types";
 import type { DubEventEnvelope, AuditRecordEnvelopeV1 } from "@dub/events";
 import { common } from "@dub/types";
 
 export interface Env {
   // --- data ---
-  DB: D1Database; // shared dub-core; DbClient enforces task_* namespace
+  DB: D1Database; // shared dub-core; DbClient enforces task_* namespace (+ freeq_outbox)
 
   // --- Queue producers (task.* fan-out; keyed by @dub/events CONSUMER_QUEUE_BINDINGS) ---
+  // Optional: on the Workers FREE plan these bindings are absent and deps.ts falls back to
+  // a @dub/freeq D1 outbox shim (see outbox.ts / drain.ts). When present (paid deploy,
+  // wrangler.toml) the real Queues are used unchanged.
   EVT_NOTIFICATION?: Queue<DubEventEnvelope>;
   EVT_GITHUB_SYNC?: Queue<DubEventEnvelope>;
   EVT_GANTT?: Queue<DubEventEnvelope>;
   EVT_MOBILE_BFF?: Queue<DubEventEnvelope>;
   EVT_FILE_META?: Queue<DubEventEnvelope>;
-  AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13)
+  AUDIT_QUEUE?: Queue<AuditRecordEnvelopeV1>; // publishAudit channel (theme13); free tier => outbox
 
   // --- service bindings ---
   SVC_IDENTITY: Fetcher; // identity-roster (POST /authz/check, GET /users/:id)
   SVC_EVENT: Fetcher; // event-service (GET /events/:id)
+  SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain defers audit
 
   // --- vars ---
   ENVIRONMENT?: string; // "local" | "preview" | "production"

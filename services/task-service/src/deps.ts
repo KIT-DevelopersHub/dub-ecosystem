@@ -2,7 +2,7 @@
 // tests can inject in-memory fakes (repo, publisher, auditor, authorizer, upstream
 // clients, idempotency store) without any Cloudflare runtime.
 import { createDbClient } from "@dub/db";
-import type { IdempotencyStore, DubEventPublisherEnv } from "@dub/events";
+import type { IdempotencyStore } from "@dub/events";
 import { configFromEnv, type AppConfig, type Env } from "./env";
 import { createD1TaskRepo, type TaskRepo } from "./repo";
 import {
@@ -16,6 +16,8 @@ import {
 import {
   createQueueEventPublisher,
   createQueueAuditor,
+  buildPublisherEnv,
+  buildAuditEnv,
   type EventPublisher,
   type Auditor,
 } from "./events";
@@ -39,8 +41,8 @@ export function buildDeps(env: Env): Deps {
   return {
     config,
     repo: createD1TaskRepo(db),
-    events: createQueueEventPublisher(env as unknown as DubEventPublisherEnv),
-    audit: createQueueAuditor(env),
+    events: createQueueEventPublisher(buildPublisherEnv(env)),
+    audit: createQueueAuditor(buildAuditEnv(env)),
     authz: createIdentityAuthorizer(env.SVC_IDENTITY, config.orgId),
     eventClient: createServiceBindingEventClient(env.SVC_EVENT),
     identity: createServiceBindingIdentityClient(env.SVC_IDENTITY),
