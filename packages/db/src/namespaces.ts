@@ -1,4 +1,4 @@
-// Schema namespace registry — the frozen source of truth (D11, 16 entries).
+// Schema namespace registry — the source of truth (D11, 17 entries).
 // infra #28's NAMESPACE_REGISTRY imports the `Namespace` type from here (no dup list).
 
 export const NAMESPACES = [
@@ -18,6 +18,7 @@ export const NAMESPACES = [
   "audit", // audit-log
   "mobile", // mobile-bff (MO3)
   "seed", // infra-d1-seed (#28)
+  "usage", // usage-meter (free-tier usage snapshots + billing guard)
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

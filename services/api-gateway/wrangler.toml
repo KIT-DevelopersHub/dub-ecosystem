@@ -78,6 +78,10 @@ service = "audit-log"
 binding = "SVC_WEBHOOK_INGEST"
 service = "dub-webhook-ingest"
 
+[[services]]
+binding = "SVC_USAGE_METER"
+service = "usage-meter"
+
 # ---- Queue producer (the single publish exception: public.inquiry.received) ----
 [[queues.producers]]
 binding = "EVT_NOTIFICATION"

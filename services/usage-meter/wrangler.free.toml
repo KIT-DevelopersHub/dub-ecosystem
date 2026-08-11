@@ -1,0 +1,57 @@
+# Free-tier deploy of usage-meter as `dub-usage-meter` (internal; workers.dev disabled).
+# Daily collection runs on a Durable Object ALARM (MeterDO) — NO cron, so it does not touch
+# the Workers Free plan's full 5-cron account cap. Mirrors the base wrangler.toml topology.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the usage_snapshot table on dub-core (aggregated infra runner or:)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file infra/d1/migrations/usage/0001_init.sql
+#   npx wrangler deploy --config services/usage-meter/wrangler.free.toml
+#   # then arm the daily alarm loop once:
+#   #   POST /internal/meter/kick  (over a Service Binding with x-dub-internal: 1)
+#   # secrets:
+#   npx wrangler secret put USAGE_CF_ANALYTICS_TOKEN --config services/usage-meter/wrangler.free.toml
+#   npx wrangler secret put CF_ACCOUNT_ID           --config services/usage-meter/wrangler.free.toml
+#   # (optional) USAGE_ALERT_ADMIN_USER_IDS, USAGE_ALERT_EMAIL
+name = "dub-usage-meter"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# --- daily-alarm Durable Object (SQLite-backed = free plan) ---
+[[durable_objects.bindings]]
+name = "METER_DO"
+class_name = "MeterDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MeterDO"]
+
+# --- shared core D1 (usage_ writes + mail_ read) ---
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- service bindings (live free-tier worker names) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "dub-mail-gateway"
+
+# --- NO cron trigger (MeterDO alarm drives the daily collect) ---
+
+[vars]
+ENVIRONMENT = "production"
