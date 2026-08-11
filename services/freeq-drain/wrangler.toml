@@ -1,8 +1,10 @@
-# freeq-drain — single cron-driven aggregated @dub/freeq drain (P0: DO NOT DEPLOY from here).
-# ONE cron slot replaces every per-service drain cron. It drains all four freeq_outbox D1s
-# and routes each row by topic (see src/routing.ts) to its live consumer, DEFERRING (never
-# acking) any topic without a live route — the mis-ack data-loss fix. database_id and the
-# service-binding target names are filled at infra Apply.
+# freeq-drain — single aggregated @dub/freeq drain (P0: DO NOT DEPLOY from here without care).
+# The drain is driven by a Durable Object ALARM (class FreeqDrainDO), NOT a Cron Trigger:
+# the Workers FREE plan's 5-cron ACCOUNT cap is already full of five business crons, and a
+# DO alarm does not count against that cap — so the every-5-minutes drain runs without
+# displacing any of them. It drains all bound freeq_outbox D1s and routes each row by topic
+# (see src/routing.ts) to its live consumer, DEFERRING (never acking) any topic without a
+# live route — the mis-ack data-loss fix.
 name = "freeq-drain"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
@@ -12,32 +14,42 @@ workers_dev = false
 [observability]
 enabled = true
 
-# --- freeq outbox D1s (one drain pass each; database_id filled at infra Apply) ---
-# NOTE: in the current live FREE deploy drive-proxy and mo3-mobile-bff bind their outbox to
-# the shared dub-core DB, so DB_DRIVE / DB_MOBILE may resolve to the same physical id as
-# DB_CORE at Apply (a repeat drain of the same table is harmless / idempotent). They are
-# kept as distinct bindings to match the design's four logical outbox tables.
+# --- The alarm-loop Durable Object (SQLite-backed = FREE plan) that drives the drain.
+#     Bootstrapped once after deploy via POST /internal/drain/kick, then self-reschedules. ---
+[[durable_objects.bindings]]
+name = "DRAIN_DO"
+class_name = "FreeqDrainDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FreeqDrainDO"]   # SQLite-backed DO is available on the Workers Free plan
+
+# --- freeq outbox D1s (one drain pass each). Only TWO physical D1s exist in the account:
+#     dub-core (shared) and auth-outbox. drive-proxy and mo3-mobile-bff write their outbox
+#     rows to the SHARED dub-core DB (there is no dub-drive-proxy-watch / mobile outbox DB),
+#     so DB_DRIVE and DB_MOBILE both resolve to dub-core. Re-draining the same table in one
+#     tick is harmless/idempotent (drain claims rows atomically). ---
 [[d1_databases]]
 binding = "DB_CORE"
 database_name = "dub-core"
-database_id = "REPLACE_AT_APPLY"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 [[d1_databases]]
 binding = "DB_AUTH"
 database_name = "auth-outbox"
-database_id = "REPLACE_AT_APPLY"
+database_id = "60a9b8ab-5904-4c1e-8821-e43e0192ce43"
 
 [[d1_databases]]
 binding = "DB_DRIVE"
-database_name = "dub-drive-proxy-watch"
-database_id = "REPLACE_AT_APPLY"
+database_name = "dub-core"                                # drive-proxy writes its outbox to dub-core
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 [[d1_databases]]
 binding = "DB_MOBILE"
-database_name = "mobile"
-database_id = "REPLACE_AT_APPLY"
+database_name = "dub-core"                                # mo3-mobile-bff writes its outbox to dub-core
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
-# --- Service bindings: LIVE consumers the routing map DELIVERS to (free-tier worker names).
+# --- Service bindings: LIVE consumers the routing map DELIVERS to (deployed worker names).
 #     Any other/unknown topic DEFERS, so no binding is needed for deferred topics. ---
 [[services]]
 binding = "SVC_AUDIT_LOG"
@@ -61,11 +73,10 @@ service = "dub-github-sync"        # POST /internal/events-async (evt.github-syn
 
 [[services]]
 binding = "SVC_MOBILE_BFF"
-service = "dub-mo3-mobile-bff"     # POST /internal/events-async (evt.mobile-bff)
+service = "mo3-mobile-bff"         # POST /internal/events-async (evt.mobile-bff) — live worker has NO dub- prefix
 
-# --- The ONE freeq cron. Every 5 minutes; replaces all per-service drain crons. ---
-[triggers]
-crons = ["*/5 * * * *"]
+# --- NO cron trigger. The drain is driven by the FreeqDrainDO alarm (above), which does not
+#     consume a slot on the Workers FREE plan's 5-cron account cap. ---
 
 [vars]
 ENVIRONMENT = "production"

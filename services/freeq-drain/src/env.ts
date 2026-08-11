@@ -2,9 +2,12 @@
 // from each) and the live consumer service bindings the routing map forwards to. Every
 // binding is optional: a missing D1 is skipped and a missing service binding makes its
 // topic DEFER (row stays durable/pending) rather than crash the drain.
-import type { D1Database, Fetcher } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
 
 export interface Env {
+  // --- the alarm-loop Durable Object that drives the drain (replaces the cron trigger) ---
+  DRAIN_DO?: DurableObjectNamespace; // POST /internal/drain/kick bootstraps its self-rescheduling alarm
+
   // --- freeq outbox D1s (one drain pass each) ---
   DB_CORE?: D1Database; // shared dub-core outbox (audit-log, chat, deploy, event, file-meta, github-sync, identity-roster, mail-gateway, notification, task)
   DB_AUTH?: D1Database; // auth-service's separate auth-outbox
