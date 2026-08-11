@@ -8,9 +8,11 @@
 // to the system default so a send never fails just because the From could not resolve.
 import { createServiceClient } from "@dub/http";
 import type { RequestContext } from "@dub/http";
-import type { identity } from "@dub/types";
+import type { DbClient } from "@dub/db";
+import type { identity, mail } from "@dub/types";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS, SERVICE_NAME } from "./config";
+import { findInboundByMessageId } from "./repo";
 
 /** Verified sending domain (Resend). Only addresses on this domain may be a From. */
 export const COMPANY_MAIL_DOMAIN = "developershub.jp";
@@ -44,4 +46,39 @@ export async function resolveUserFromAddress(env: Env, ctx: RequestContext, user
   } catch {
     return fallback;
   }
+}
+
+/** Angle-bracket-strip a Message-Id ("<x@y>" -> "x@y") so it matches the stored value. */
+function bareMessageId(id: string): string {
+  return id.trim().replace(/^<|>$/g, "").trim();
+}
+
+/**
+ * Resolve the From for a REPLY. A reply to a received message goes out AS the shared
+ * mailbox the original was addressed to (e.g. info@developershub.jp) rather than the
+ * individual reader's personal address. Two reasons: (1) the external correspondent
+ * emailed info@ and should see a reply from info@, and (2) their reply then returns to
+ * info@ — the address wired to this Worker via Email Routing — so the loop closes (a
+ * reply sent from an unrouted personal/admin address would bounce back to that address,
+ * never reaching Dub). Falls back to the per-user resolution when the parent isn't a
+ * known inbound message (e.g. replying to our own sent mail) so nothing regresses.
+ */
+export async function resolveReplyFromAddress(
+  env: Env,
+  ctx: RequestContext,
+  db: DbClient,
+  inReplyTo: string,
+  userId: string | null,
+): Promise<string> {
+  try {
+    const parent = await findInboundByMessageId(db, bareMessageId(inReplyTo));
+    if (parent) {
+      const recipients = JSON.parse(parent.to_json) as mail.MailAddress[];
+      const mailbox = recipients.map((r) => r.email).find(isCompanyAddress);
+      if (mailbox) return mailbox.trim();
+    }
+  } catch {
+    /* fall through to the per-user resolution */
+  }
+  return resolveUserFromAddress(env, ctx, userId);
 }

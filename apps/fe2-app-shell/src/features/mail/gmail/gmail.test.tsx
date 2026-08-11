@@ -225,6 +225,40 @@ describe("GmailApp (hydrates from the gateway)", () => {
     await waitFor(() => expect((api.listSent as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1));
   });
 
+  it("keeps a sent reply visible in its conversation and replies to the external correspondent (not ourselves)", async () => {
+    // Sent folder carries our reply, threaded (threadId) into the received conversation.
+    const api = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({ items: [DEMO_INBOX_ITEMS[0]!], nextCursor: null }),
+      listSent: vi.fn().mockResolvedValue({
+        items: [
+          {
+            id: "sent_r",
+            from: { email: "info@developershub.jp" },
+            to: [{ email: "hanako@example.com", name: "山田 花子" }],
+            subject: "Re: 登壇のご相談",
+            snippet: "了解しました。",
+            sentAt: "2026-08-10T02:00:00.000Z",
+            provider: "resend",
+            status: "sent",
+            threadId: "thr_in_1",
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    // getThread returns received-only; the folded reply must survive the refresh.
+    await waitFor(() => expect(screen.getByText("了解しました。")).toBeInTheDocument());
+    // Replying targets the external correspondent (hanako), never our own info@ reply.
+    await userEvent.click(screen.getByTestId("fe2-mail-reply"));
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sent.to).toEqual([{ email: "hanako@example.com", name: "山田 花子" }]);
+    expect(sent.inReplyTo).toBe("<in1@developershub.jp>");
+  });
+
   it("reply button opens a compose that sends In-Reply-To", async () => {
     const api = fakeApi();
     render(wrap(<GmailApp />, api));

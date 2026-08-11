@@ -42,6 +42,10 @@ export interface MailMsg {
   date: string; // ISO
   body: string; // plain text (pre-wrap)
   read: boolean;
+  /** True when WE sent this message (compose/reply/folded Sent row). Used to (a) keep our
+   *  replies visible in a conversation across a getThread refresh and (b) target a reply
+   *  at the last message that ISN'T ours (the external correspondent), never at ourselves. */
+  outbound?: boolean;
 }
 
 export interface MailThreadModel {
