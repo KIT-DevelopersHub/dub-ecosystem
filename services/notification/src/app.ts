@@ -32,8 +32,8 @@ import {
   parseCreateFeedback,
   parseListFeedbackQuery,
 } from "./validation";
-import { makeMailPort, type MailPort } from "./clients";
-import { notifyAdminOfFeedback } from "./feedback";
+import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
+import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
 import { FEEDBACK_ADMIN_PERMISSION } from "./config";
 import type { IngestInput } from "./types";
 
@@ -50,6 +50,9 @@ export interface CreateAppOptions {
   /** Override the mail port (tests). Defaults to a per-request SVC_MAIL_GATEWAY-backed
    *  port at runtime, or null when the binding is absent (feedback notify -> skipped). */
   mail?: MailPort;
+  /** Override the identity port (tests) used to expand roles → user ids for the in-app
+   *  feedback admin notification. Defaults to the SVC_IDENTITY-backed port. */
+  identity?: IdentityPort;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -62,6 +65,8 @@ export function createApp(options: CreateAppOptions = {}) {
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, ctxOf(c).requestId);
   const mailOf = (c: Context<AppBindings>): MailPort | null =>
     options.mail ?? (c.env.SVC_MAIL_GATEWAY ? makeMailPort(c.env.SVC_MAIL_GATEWAY) : null);
+  const ingestDepsOf = (c: Context<AppBindings>, ctx: RequestContext) =>
+    buildIngestDeps(c.env, ctx, options.identity ? { identity: options.identity } : {});
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
@@ -177,6 +182,9 @@ export function createApp(options: CreateAppOptions = {}) {
     });
     // Best-effort admin alert — never blocks the save / 201.
     await notifyAdminOfFeedback(mailOf(c), ctx, item);
+    // In-app notification into every admin / maintainer inbox (synchronous D1 write via
+    // the shared ingest path; also best-effort so the save / 201 is never affected).
+    await notifyAdminsOfFeedbackInApp(ingestDepsOf(c, ctx), ctx, item);
     const res: notification.CreateFeedbackResponse = { id: item.id, accepted: true };
     return c.json(res, 201);
   });

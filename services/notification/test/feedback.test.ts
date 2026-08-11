@@ -4,8 +4,10 @@ import { describe, it, expect } from "vitest";
 import type { Fetcher } from "@cloudflare/workers-types";
 import type { notification } from "@dub/types";
 import { createApp } from "../src/app";
-import { buildFeedbackEmail } from "../src/feedback";
-import { makeTestEnv, type TestEnvHandle, type RecordingMail } from "./helpers";
+import { buildFeedbackEmail, buildFeedbackNotifyInput, notifyAdminsOfFeedbackInApp } from "../src/feedback";
+import { buildIngestDeps } from "../src/deps";
+import { unreadCount, listInbox } from "../src/repo";
+import { makeTestEnv, fakeIdentity, ctx, type TestEnvHandle, type RecordingMail } from "./helpers";
 
 // A fake identity binding that answers POST /authz/check with a fixed allow/deny —
 // lets the real @dub/auth-client drive requirePermission("notif:admin") end to end.
@@ -176,5 +178,109 @@ describe("in-app feedback", () => {
     expect(email.to[0]!.email).toBe("admin@developershub.jp");
     expect(email.subject).toContain("フィードバック:");
     expect(email.textBody).toContain("検索を速くしてほしい");
+  });
+});
+
+// Role IDs mirror the identity-roster system-role seed (config.FEEDBACK_NOTIFY_ROLE_IDS).
+const ADMIN_ROLE = "role_sys_admin";
+const MAINTAINER_ROLE = "role_sys_maintainer";
+const MEMBER_ROLE = "role_sys_member";
+
+describe("feedback -> in-app admin notifications", () => {
+  it("POST /feedback: creates one inbox notification per admin + maintainer (member excluded)", async () => {
+    const identity = fakeIdentity({
+      byRole: {
+        [ADMIN_ROLE]: ["usr_admin1", "usr_admin2"],
+        [MAINTAINER_ROLE]: ["usr_maint1"],
+        [MEMBER_ROLE]: ["usr_member1"],
+      },
+    });
+    const h = makeTestEnv();
+    const app = createApp({ mail: recordingMail(), identity });
+    const req = reqOf(app, h);
+
+    const res = await req(
+      "/feedback",
+      jsonPost({ message: "検索が遅い", category: "idea", page: { url: "https://app/s", name: "検索" } }, "usr_alice"),
+    );
+    expect(res.status).toBe(201);
+    const out = (await res.json()) as notification.CreateFeedbackResponse;
+
+    // one unread inbox item for each admin + maintainer user
+    expect(await unreadCount(h.db, "usr_admin1")).toBe(1);
+    expect(await unreadCount(h.db, "usr_admin2")).toBe(1);
+    expect(await unreadCount(h.db, "usr_maint1")).toBe(1);
+    // member role is never queried -> no notification; the submitter gets none either
+    expect(await unreadCount(h.db, "usr_member1")).toBe(0);
+    expect(await unreadCount(h.db, "usr_alice")).toBe(0);
+
+    // only the admin + maintainer roles were expanded
+    expect(identity.roleCalls.sort()).toEqual([ADMIN_ROLE, MAINTAINER_ROLE].sort());
+
+    // the inbox item is typed + deep-links back to the feedback record
+    const inbox = await listInbox(h.db, "usr_admin1", { limit: 10 });
+    expect(inbox.items).toHaveLength(1);
+    expect(inbox.items[0]).toMatchObject({ type: "feedback", resourceType: "feedback", resourceId: out.id });
+    expect(inbox.items[0]!.title).toContain("検索が遅い");
+  });
+
+  it("identity failure is swallowed — feedback still saves (201), no inbox rows", async () => {
+    // No identity override -> the SVC_IDENTITY inert fetcher throws on role expansion.
+    const h = makeTestEnv();
+    const app = createApp({ mail: recordingMail() });
+    const req = reqOf(app, h);
+    const res = await req("/feedback", jsonPost({ message: "落ちた" }, "usr_bob"));
+    expect(res.status).toBe(201);
+    const out = (await res.json()) as notification.CreateFeedbackResponse;
+    const row = await h.db.first<{ id: string }>(`SELECT id FROM notif_feedback WHERE id = ?`, out.id);
+    expect(row?.id).toBe(out.id);
+  });
+
+  it("notifyAdminsOfFeedbackInApp is idempotent — re-running does not duplicate inbox rows", async () => {
+    const identity = fakeIdentity({ byRole: { [ADMIN_ROLE]: ["usr_admin1"], [MAINTAINER_ROLE]: ["usr_maint1"] } });
+    const h = makeTestEnv();
+    const deps = buildIngestDeps(h.env, ctx("req_idem"), { identity });
+    const item: notification.FeedbackItem = {
+      id: "nfb_dupe",
+      userId: "usr_alice",
+      category: "bug",
+      message: "二重にならないこと",
+      pageUrl: null,
+      pageName: "設定",
+      readAt: null,
+      createdAt: "2026-08-11T00:00:00.000Z",
+    };
+
+    const first = await notifyAdminsOfFeedbackInApp(deps, ctx("req_idem"), item);
+    const second = await notifyAdminsOfFeedbackInApp(deps, ctx("req_idem"), item);
+    expect(first).toBe(true);
+    expect(second).toBe(true);
+
+    // dedupKey (feedback:<id>) makes the second ingest a no-op -> still one row each
+    expect(await unreadCount(h.db, "usr_admin1")).toBe(1);
+    expect(await unreadCount(h.db, "usr_maint1")).toBe(1);
+  });
+
+  it("buildFeedbackNotifyInput: in_app only, role-targeted, feedback-scoped dedupKey", () => {
+    const input = buildFeedbackNotifyInput(
+      {
+        id: "nfb_9",
+        userId: "usr_a",
+        category: "question",
+        message: "使い方が分からない",
+        pageUrl: "https://app/x",
+        pageName: "ホーム",
+        readAt: null,
+        createdAt: "2026-08-11T00:00:00.000Z",
+      },
+      "req_1",
+    );
+    expect(input.channels).toEqual(["in_app"]);
+    expect(input.recipients.roles).toEqual([ADMIN_ROLE, MAINTAINER_ROLE]);
+    expect(input.recipients.userIds).toBeUndefined();
+    expect(input.dedupKey).toBe("feedback:nfb_9");
+    expect(input.resourceType).toBe("feedback");
+    expect(input.resourceId).toBe("nfb_9");
+    expect(input.actorId).toBe("usr_a");
   });
 });
