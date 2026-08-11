@@ -61,6 +61,7 @@ export function TeamsView({
             testId={`members-teamcard-${team.id}`}
             header={
               <div className={styles.teamHeader}>
+                {team.color ? <span className={styles.colorDot} style={{ background: team.color }} aria-hidden /> : null}
                 <span className={styles.teamName}>{team.name}</span>
                 <Badge tone="neutral">{inTeam.length}</Badge>
                 <div className={styles.teamActions}>

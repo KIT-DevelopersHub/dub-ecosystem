@@ -660,12 +660,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
 // shapes (/api/v1/members/*).
 interface DemoTeam {
   id: string;
-  orgId: string;
+  key: string;
   name: string;
+  color: string | null;
   description: string | null;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
 }
 interface DemoMember {
   id: string;
@@ -686,9 +684,9 @@ function createMembersStore() {
   let seq = 100;
   const nid = (p: string): string => `${p}_demo_${++seq}`;
   const teams: DemoTeam[] = [
-    { id: "team_venue", orgId: ORG, name: "会場", description: "会場設営・運営", sortOrder: 1024, createdAt: isoNow(), updatedAt: isoNow() },
-    { id: "team_pr", orgId: ORG, name: "広報", description: "SNS・告知", sortOrder: 2048, createdAt: isoNow(), updatedAt: isoNow() },
-    { id: "team_sponsor", orgId: ORG, name: "スポンサー", description: "協賛対応", sortOrder: 3072, createdAt: isoNow(), updatedAt: isoNow() },
+    { id: "team_venue", key: "venue", name: "会場", color: "#4f46e5", description: "会場設営・運営" },
+    { id: "team_pr", key: "pr", name: "広報", color: "#0ea5e9", description: "SNS・告知" },
+    { id: "team_sponsor", key: "sponsor", name: "スポンサー", color: "#f59e0b", description: "協賛対応" },
   ];
   const members: DemoMember[] = [
     { id: "member_1", orgId: ORG, name: "高岡 己太朗", roleTitle: "実行委員長", status: "added", teamIds: ["team_venue", "team_pr"], contact: "kota@developershub.jp", note: "全体統括", sortOrder: 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
@@ -700,12 +698,17 @@ function createMembersStore() {
 
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
 
+  const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
   function handle(method: string, pathname: string, _url: URL, body: any): Response | null {
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+    // canonical team list other apps read
+    if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
 
     // teams
     if (method === "POST" && pathname === "/api/v1/members/teams") {
-      const t: DemoTeam = { id: nid("team"), orgId: ORG, name: String(body?.name ?? ""), description: body?.description ?? null, sortOrder: (teams.length + 1) * 1024, createdAt: isoNow(), updatedAt: isoNow() };
+      const name = String(body?.name ?? "");
+      const t: DemoTeam = { id: nid("team"), key: slug(body?.key ?? name) || `team-${teams.length + 1}`, name, color: body?.color ?? null, description: body?.description ?? null };
       teams.push(t);
       return json(t, 201);
     }
@@ -715,9 +718,9 @@ function createMembersStore() {
       if (!t) return notFound(`${method} ${pathname}`);
       if (method === "PATCH") {
         if (body?.name !== undefined) t.name = String(body.name);
+        if (body?.key !== undefined) t.key = slug(body.key) || t.key;
+        if (body?.color !== undefined) t.color = body.color ?? null;
         if (body?.description !== undefined) t.description = body.description ?? null;
-        if (typeof body?.sortOrder === "number") t.sortOrder = body.sortOrder;
-        t.updatedAt = isoNow();
         return json(t);
       }
       if (method === "DELETE") {

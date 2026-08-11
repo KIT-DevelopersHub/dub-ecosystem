@@ -25,8 +25,8 @@ function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: Re
 
 const OVERVIEW: MembersOverview = {
   teams: [
-    { id: "t1", orgId: "o", name: "会場", description: null, sortOrder: 1, createdAt: "t", updatedAt: "t" },
-    { id: "t2", orgId: "o", name: "広報", description: null, sortOrder: 2, createdAt: "t", updatedAt: "t" },
+    { id: "t1", key: "venue", name: "会場", color: "#4f46e5", description: null },
+    { id: "t2", key: "pr", name: "広報", color: null, description: null },
   ],
   members: [
     { id: "m1", orgId: "o", name: "山田太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
@@ -37,6 +37,7 @@ const OVERVIEW: MembersOverview = {
 function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
   return {
     getOverview: () => Promise.resolve(OVERVIEW),
+    listTeams: () => Promise.resolve({ teams: OVERVIEW.teams }),
     createTeam: vi.fn(),
     updateTeam: vi.fn(),
     deleteTeam: vi.fn(),

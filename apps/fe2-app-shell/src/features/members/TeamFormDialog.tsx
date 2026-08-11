@@ -18,6 +18,7 @@ export function TeamFormDialog({
   const update = useUpdateTeam();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [color, setColor] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export function TeamFormDialog({
     setError(null);
     setName(editing?.name ?? "");
     setDescription(editing?.description ?? "");
+    setColor(editing?.color ?? "");
   }, [open, editing]);
 
   const pending = create.isPending || update.isPending;
@@ -34,7 +36,7 @@ export function TeamFormDialog({
       setError("チーム名を入力してください");
       return;
     }
-    const payload = { name: name.trim(), description: description.trim() || null };
+    const payload = { name: name.trim(), description: description.trim() || null, color: color.trim() || null };
     const done = () => onClose();
     if (editing) {
       update.mutate({ id: editing.id, patch: payload }, { onSuccess: done });
@@ -65,6 +67,9 @@ export function TeamFormDialog({
         <div className={styles.formStack}>
           <FormField label="チーム名" htmlFor="team-name" required {...(error ? { error } : {})}>
             <TextField id="team-name" value={name} onChange={setName} testId="members-team-name" />
+          </FormField>
+          <FormField label="カラー" htmlFor="team-color" help="任意 (例: #4f46e5) — 他アプリのチーム表示でも使われます">
+            <TextField id="team-color" value={color} onChange={setColor} placeholder="#4f46e5" />
           </FormField>
           <FormField label="説明" htmlFor="team-desc">
             <Textarea id="team-desc" value={description} onChange={setDescription} rows={2} />

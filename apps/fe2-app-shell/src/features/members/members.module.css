@@ -69,6 +69,13 @@
   font-size: var(--dub-font-size-xs);
   color: var(--dub-color-text-secondary);
 }
+.colorDot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--dub-radius-full);
+  flex: 0 0 auto;
+  border: 1px solid var(--dub-color-border-default);
+}
 .emptyTeamNote {
   color: var(--dub-color-text-muted);
   font-size: var(--dub-font-size-sm);

@@ -29,6 +29,7 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
         return (
           <div key={team.id} className={styles.orgTeam}>
             <div className={styles.orgTeamTitle}>
+              {team.color ? <span className={styles.colorDot} style={{ background: team.color }} aria-hidden /> : null}
               <span>{team.name}</span>
               <Badge tone="neutral">{inTeam.length}</Badge>
             </div>
