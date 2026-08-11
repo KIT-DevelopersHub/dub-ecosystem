@@ -145,12 +145,19 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const last = thread.messages[lastIdx]!;
   const chips = thread.labels.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
 
-  const replyRecipients = last.from.email === state.me.email ? last.to : [last.from];
-  const allRecipients = [
-    ...(last.from.email === state.me.email ? last.to : [last.from]),
-    ...last.to.filter((t) => t.email !== state.me.email),
-    ...(last.cc ?? []),
-  ];
+  // Reply targets the last message that ISN'T ours — the external correspondent — never
+  // our own reply (which is now folded into the conversation). `ourAddresses` are the From
+  // addresses we sent as (info@ / the user's address), so reply-all can drop them too.
+  const ourAddresses = new Set(thread.messages.filter((m) => m.outbound).map((m) => m.from.email).filter(Boolean));
+  const notUs = (p: MailPerson): boolean => p.email.length > 0 && !ourAddresses.has(p.email);
+  const replyTo = [...thread.messages].reverse().find((m) => !m.outbound) ?? last;
+  const dedupPeople = (ps: MailPerson[]): MailPerson[] => {
+    const m = new Map<string, MailPerson>();
+    for (const p of ps) if (p.email && !m.has(p.email)) m.set(p.email, p);
+    return [...m.values()];
+  };
+  const replyRecipients = replyTo.outbound ? replyTo.to.filter(notUs) : [replyTo.from];
+  const allRecipients = dedupPeople([replyTo.from, ...replyTo.to, ...(replyTo.cc ?? [])].filter(notUs));
 
   const openCompose = (mode: "reply" | "replyAll" | "forward"): void => {
     const to = mode === "forward" ? [] : mode === "replyAll" ? allRecipients : replyRecipients;
@@ -160,10 +167,10 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         mode,
         to: to.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", "),
         subject: `${mode === "forward" ? "Fwd" : "Re"}: ${thread.subject.replace(/^(Re|Fwd):\s*/i, "")}`,
-        body: quote(last),
+        body: quote(replyTo),
         showCc: mode === "replyAll",
-        // Reply/replyAll thread against the parent's Message-Id; a forward is a new message.
-        ...(mode !== "forward" && last.messageId ? { inReplyTo: last.messageId } : {}),
+        // Reply/replyAll thread against the correspondent's Message-Id; a forward is new.
+        ...(mode !== "forward" && replyTo.messageId ? { inReplyTo: replyTo.messageId } : {}),
       },
     });
   };
@@ -182,7 +189,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
       subject: /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`,
       textBody: body,
     };
-    if (last.messageId) req.inReplyTo = last.messageId;
+    if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
     void mailApi
       .send(req)
       .then(() => dispatch({ type: "REQUEST_SYNC" }))

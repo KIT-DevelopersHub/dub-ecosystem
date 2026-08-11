@@ -7,13 +7,19 @@
 // unit tests that provide only a fake MailApi.
 import { useEffect, useRef } from "react";
 import { useMailApi } from "../MailProvider.tsx";
-import { inboxItemsToThreads, sentDetailToMessage, sentItemsToThreads, threadDetailToMessages } from "./hydrate.ts";
+import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
 import { useMailStore } from "./useMailStore.tsx";
 
 export function useMailSync(): void {
   const api = useMailApi();
   const { state, dispatch } = useMailStore();
   const { syncNonce, me, openThreadId, threads } = state;
+
+  // Tracks which threads have had their full bodies fetched (list APIs carry only a
+  // snippet). Cleared on every sync so a post-send re-sync re-fetches the OPEN thread —
+  // otherwise a just-sent reply (now in GET /threads/:id) would never load and the reply
+  // would appear to vanish from the conversation.
+  const loaded = useRef<Set<string>>(new Set());
 
   // Load inbox + sent on mount and on every requested sync (post-send). A failure leaves
   // the current threads in place (empty on first load) rather than blowing up the pane.
@@ -23,7 +29,8 @@ export function useMailSync(): void {
       try {
         const [inbox, sent] = await Promise.all([api.listInbox({ limit: 50 }), api.listSent({ limit: 50 })]);
         if (!alive) return;
-        dispatch({ type: "HYDRATE", threads: [...inboxItemsToThreads(inbox.items), ...sentItemsToThreads(sent.items, me)] });
+        dispatch({ type: "HYDRATE", threads: combineThreads(inbox.items, sent.items, me) });
+        loaded.current.clear(); // force the open thread to re-fetch its full body (+ any new reply)
       } catch {
         /* keep existing state; the list simply stays as-is */
       }
@@ -34,7 +41,6 @@ export function useMailSync(): void {
   }, [api, dispatch, syncNonce, me]);
 
   // Lazily fill the full body when a thread is opened (list APIs carry only a snippet).
-  const loaded = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!openThreadId || loaded.current.has(openThreadId)) return;
     const thread = threads.find((t) => t.id === openThreadId);
@@ -50,13 +56,18 @@ export function useMailSync(): void {
         } else {
           // Persist read-state on the server so it survives a reload (mirrors InboxScreen).
           // Opening reads the whole thread; OPEN_THREAD already flipped the local flags, so
-          // we mark every message read server-side (markRead is idempotent). Best-effort —
-          // a failure never blocks opening the thread.
-          for (const m of thread.messages) void api.markRead(m.id).catch(() => undefined);
+          // we mark every received message read server-side (markRead is idempotent, and a
+          // maillog id would 404). Best-effort — a failure never blocks opening the thread.
+          const known = thread.messages;
+          for (const m of known) if (!m.outbound) void api.markRead(m.id).catch(() => undefined);
           const full = await api.getThread(thread.id);
-          // The thread is now open → read; force it so a racing getThread (server not yet
-          // reflecting the markRead above) can't revert the opened thread to unread.
-          const messages = threadDetailToMessages(full).map((m) => ({ ...m, read: true }));
+          // getThread returns RECEIVED messages only. Preserve our own replies (folded Sent
+          // rows, outbound=true) that it omits, so a sent reply stays visible in the thread
+          // instead of vanishing on refresh. Dedup by id, order by date. Force read=true so a
+          // racing getThread (server not yet reflecting markRead) can't revert to unread.
+          const inbound = threadDetailToMessages(full).map((m) => ({ ...m, read: true }));
+          const ours = known.filter((m) => m.outbound && !inbound.some((i) => i.id === m.id));
+          const messages = [...inbound, ...ours].sort((a, b) => a.date.localeCompare(b.date));
           if (alive) dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages });
         }
       } catch {

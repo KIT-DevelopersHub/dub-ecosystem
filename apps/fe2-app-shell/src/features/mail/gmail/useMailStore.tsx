@@ -165,6 +165,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
                     date: new Date().toISOString(),
                     body: action.body,
                     read: true,
+                    outbound: true,
                   },
                 ],
               }
@@ -188,6 +189,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
             date: new Date().toISOString(),
             body: action.body,
             read: true,
+            outbound: true,
           },
         ],
       };
