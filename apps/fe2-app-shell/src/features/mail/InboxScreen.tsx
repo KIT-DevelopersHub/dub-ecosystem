@@ -9,6 +9,7 @@ import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
+import { MailFolderTabs } from "./MailFolderTabs.tsx";
 import { ThreadDetail } from "./MessageDetail.tsx";
 
 function formatReceived(iso: string): string {
@@ -104,6 +105,7 @@ export function InboxScreen({ onCompose }: { onCompose?: () => void }): JSX.Elem
   return (
     <main data-testid="fe2-mail-inbox">
       <PageHeader title="受信トレイ" {...(composeAction ? { actions: composeAction } : {})} />
+      <MailFolderTabs active="inbox" />
       {body}
     </main>
   );

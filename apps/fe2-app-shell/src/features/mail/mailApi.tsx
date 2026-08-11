@@ -12,12 +12,19 @@ type MailMessageListItem = mail.MailMessageListItem;
 type MailMessageDetail = mail.MailMessageDetail;
 type MailMessageState = mail.MailMessageState;
 type MailThread = mail.MailThread;
+type MailSentListItem = mail.MailSentListItem;
+type MailSentDetail = mail.MailSentDetail;
 type Paginated<T> = common.Paginated<T>;
 
 export interface InboxQuery {
   limit?: number;
   cursor?: string;
   threadId?: string;
+}
+
+export interface SentQuery {
+  limit?: number;
+  cursor?: string;
 }
 
 export interface MailApi {
@@ -31,6 +38,10 @@ export interface MailApi {
   getThread(threadId: string): Promise<MailThread>;
   /** Mark a message read (idempotent). Returns the resulting read state (mail:read). */
   markRead(id: string): Promise<MailMessageState>;
+  /** List sent messages, newest first (mail:read). */
+  listSent(query?: SentQuery): Promise<Paginated<MailSentListItem>>;
+  /** Fetch one sent message's full detail — body + recipients (mail:read). */
+  getSent(id: string): Promise<MailSentDetail>;
 }
 
 const MAIL = "/api/v1/mail";
@@ -50,6 +61,14 @@ export function createMailApi(api: ApiClient): MailApi {
     getMessage: (id) => api.request<MailMessageDetail>({ method: "GET", path: `${MAIL}/messages/${encodeURIComponent(id)}` }),
     getThread: (threadId) => api.request<MailThread>({ method: "GET", path: `${MAIL}/threads/${encodeURIComponent(threadId)}` }),
     markRead: (id) => api.request<MailMessageState>({ method: "POST", path: `${MAIL}/messages/${encodeURIComponent(id)}/read` }),
+    listSent: (query) => {
+      const q: Record<string, string | number | boolean | undefined> = {};
+      if (query?.limit !== undefined) q.limit = query.limit;
+      if (query?.cursor !== undefined) q.cursor = query.cursor;
+      const hasQuery = Object.keys(q).length > 0;
+      return api.request<Paginated<MailSentListItem>>({ method: "GET", path: `${MAIL}/sent`, ...(hasQuery ? { query: q } : {}) });
+    },
+    getSent: (id) => api.request<MailSentDetail>({ method: "GET", path: `${MAIL}/sent/${encodeURIComponent(id)}` }),
   };
 }
 

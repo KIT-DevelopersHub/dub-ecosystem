@@ -188,6 +188,65 @@ const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
 };
 
+// ── mail: Sent folder (stateful) ──────────────────────────────────────────────
+// A tiny in-session store so a demo "send" is actually observable in the Sent
+// folder end-to-end: POST /mail/outbox appends a sent row that GET /mail/sent then
+// lists and GET /mail/sent/:id opens. Fresh per createDemoFetch() → a reload resets.
+// No real mail leaves the browser (the demo banner says so).
+function firstLine(text: string, max = 140): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
+}
+
+function createMailSentStore() {
+  const sent: mail.MailSentDetail[] = [];
+  let seq = 0;
+
+  function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
+    if (method === "POST" && pathname === "/api/v1/mail/outbox") {
+      const req = (body ?? {}) as Partial<mail.SendMailRequest>;
+      const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
+      const sentAt = new Date().toISOString();
+      const providerMessageId = `<demo-${Date.now()}@developershub.jp>`;
+      const detail: mail.MailSentDetail = {
+        id,
+        from: { email: "demo@developershub.jp", name: "デモ 管理者" },
+        to: req.to ?? [],
+        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        subject: req.subject ?? "(件名なし)",
+        snippet: firstLine(req.textBody ?? ""),
+        sentAt,
+        provider: "resend",
+        providerMessageId,
+        status: "sent",
+        textBody: req.textBody ?? "",
+        ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+      };
+      sent.unshift(detail);
+      const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
+      return json(res);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/sent") {
+      const items: mail.MailSentListItem[] = sent.map(({ textBody, htmlBody, ...listItem }) => {
+        void textBody;
+        void htmlBody;
+        return listItem;
+      });
+      return json(page(items));
+    }
+    if (method === "GET") {
+      const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const found = sent.find((s) => s.id === decodeURIComponent(m[1]!));
+        return found ? json(found) : notFound(`GET ${pathname}`);
+      }
+    }
+    return null;
+  }
+
+  return { handle };
+}
+
 // ── identity / roster (admin RBAC console) ────────────────────────────────────
 // The admin console (FE7 @dub/admin-roster) is fully INTERACTIVE in the demo:
 // permission-matrix edit, role add and user role assignment all persist in an
@@ -556,11 +615,9 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
   }
 
   if (method === "POST") {
-    // mail: mark read + "send" both acknowledged (no real mail leaves the browser).
+    // mail: mark read acknowledged (no real mail leaves the browser). The Sent folder
+    // (POST /mail/outbox → GET /mail/sent) is served by the stateful mail store below.
     if (/^\/api\/v1\/mail\/messages\/[^/]+\/read$/.test(pathname)) return json({ read: true });
-    if (pathname === "/api/v1/mail/outbox") {
-      return json({ messageId: `<demo-${Date.now()}@developershub.jp>`, provider: "resend", acceptedAt: new Date().toISOString() });
-    }
     if (pathname === "/api/v1/notifications/inbox/read-all") return json(null, 204);
   }
 
@@ -585,6 +642,8 @@ export function createDemoFetch(): typeof fetch {
   });
   // Mutable roster state for the interactive admin console (create/edit/assign).
   const roster = createRosterStore();
+  // Mutable Sent folder so a demo send is observable end-to-end (outbox → /sent).
+  const mailSent = createMailSentStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -599,7 +658,10 @@ export function createDemoFetch(): typeof fetch {
         parsedBody = undefined;
       }
     }
-    const hit = roster.handle(method, url.pathname, url, parsedBody) ?? matchDemoRoute(method, url.pathname, url);
+    const hit =
+      roster.handle(method, url.pathname, url, parsedBody) ??
+      mailSent.handle(method, url.pathname, url, parsedBody) ??
+      matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
     // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.
     return boot(input, init);
