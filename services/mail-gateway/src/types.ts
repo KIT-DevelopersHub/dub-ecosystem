@@ -3,7 +3,7 @@
 // ALWAYS uses @dub/types / @dub/events; nothing here is a wire type.
 import type { mail } from "@dub/types";
 import type { AuditRecordEnvelopeV1, DubEventEnvelope } from "@dub/events";
-import type { Queue } from "@cloudflare/workers-types";
+import type { Fetcher, Queue } from "@cloudflare/workers-types";
 import type { DbClient } from "@dub/db";
 import type { RequestContext } from "@dub/http";
 import type { MailProvider } from "./provider";
@@ -30,6 +30,10 @@ export interface SendDeps {
   orgId: string;
   fromAddress: string;
   ctx: RequestContext;
+  /** Owner (Sent-folder account scope): the user who composed the send, or null for a
+   *  pure system/automation send with no human on the call. Persisted on the send-log so
+   *  GET /mail/sent can return only the signed-in user's own mail. */
+  ownerUserId?: string | null;
   /** Retry budget for the provider call (transient failures only). Optional — the send
    *  core falls back to the built-in defaults when absent (tests omit it). */
   retry?: Pick<RetryOptions, "maxAttempts" | "baseDelayMs">;
@@ -41,6 +45,10 @@ export interface InboundDeps {
   audit: AuditEnv;
   orgId: string;
   ctx: RequestContext;
+  /** identity-roster binding (internal S2S). Used to resolve the recipient address of an
+   *  inbound message to a roster userId (Inbox account scope). Optional so unit tests that
+   *  don't exercise owner resolution can omit it (owner then resolves to null). */
+  identity?: Fetcher;
 }
 
 // Normalized inbound message parsed from a raw RFC822 message (Email Routing).

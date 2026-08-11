@@ -253,15 +253,15 @@ describe("external routes require the /mail mount", () => {
 describe("inbox detail (body + read state)", () => {
   const seedInbound = (
     raw: ReturnType<typeof makeEnv>["raw"],
-    over: { id?: string; messageId?: string; threadId?: string; bodyText?: string; htmlBody?: string | null; readAt?: string | null; receivedAt?: string } = {},
+    over: { id?: string; messageId?: string; threadId?: string; bodyText?: string; htmlBody?: string | null; readAt?: string | null; receivedAt?: string; ownerUserId?: string | null } = {},
   ) => {
     const id = over.id ?? "mailin_1";
     raw
       .prepare(
         `INSERT INTO mail_inbound
            (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
-            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at)
-         VALUES (?, ?, ?, 'info', ?, ?, 'Hello', 'snip', NULL, NULL, ?, ?, ?, ?, ?)`,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
+         VALUES (?, ?, ?, 'info', ?, ?, 'Hello', 'snip', NULL, NULL, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -274,6 +274,7 @@ describe("inbox detail (body + read state)", () => {
         over.bodyText ?? "Full body text here.",
         over.htmlBody === undefined ? null : over.htmlBody,
         over.readAt === undefined ? null : over.readAt,
+        over.ownerUserId === undefined ? "usr_alice" : over.ownerUserId,
       );
     return id;
   };
@@ -398,6 +399,123 @@ describe("Sent folder (/mail/sent)", () => {
     const { env } = makeEnv();
     const res = await app.fetch(new Request("https://svc/mail/sent/nope", { headers: h() }), env);
     expect(res.status).toBe(404);
+  });
+});
+
+// ===================== per-account scope (Gmail-style isolation) =====================
+// The security property: an account sees ONLY its own sent / received / thread mail, and
+// can never open or mutate another account's message. Exercised through the REAL Hono app
+// (real auth middleware + real in-memory D1) via app.fetch — the same pipeline production
+// serves. usr_alice and usr_bob are two distinct signed-in accounts.
+describe("account isolation (per-user scope)", () => {
+  const asUser = (userId: string, over: Record<string, string> = {}) =>
+    ({ "content-type": "application/json", "x-dub-request-id": "req_iso", "x-dub-user-id": userId, ...over });
+
+  // Insert an inbound message owned by a specific user (bypasses ingest; owner set直接).
+  const seedOwned = (
+    raw: ReturnType<typeof makeEnv>["raw"],
+    row: { id: string; ownerUserId: string; threadId?: string; messageId?: string },
+  ) => {
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
+         VALUES (?, ?, ?, 'info', ?, ?, 'Hi', 'snip', NULL, NULL, ?, ?, 'body', NULL, NULL, ?)`,
+      )
+      .run(
+        row.id,
+        row.messageId ?? `<${row.id}@x>`,
+        row.threadId ?? `thr_${row.id}`,
+        JSON.stringify({ email: "sender@x.com" }),
+        JSON.stringify([{ email: "info@developershub.jp" }]),
+        "2026-08-10T00:00:00.000Z",
+        "2026-08-10T00:00:00.000Z",
+        row.ownerUserId,
+      );
+  };
+
+  it("Sent: a mail A sends is invisible in B's Sent folder (and visible in A's)", async () => {
+    const { env } = makeEnv();
+    const send = await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "iso-1" }),
+        body: JSON.stringify({ to: [{ email: "x@x.com" }], subject: "Alice-only", textBody: "secret" }),
+      }),
+      env,
+    );
+    expect(send.status).toBe(202);
+
+    const aList = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
+    expect(aList.items.map((i) => i.subject)).toContain("Alice-only");
+
+    const bList = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_bob") }), env)).json()) as { items: mail.MailSentListItem[] };
+    expect(bList.items).toHaveLength(0); // B sees none of A's sent mail
+  });
+
+  it("Sent detail: B cannot open A's sent message (404, not 403 — no existence leak)", async () => {
+    const { env } = makeEnv();
+    await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "iso-2" }),
+        body: JSON.stringify({ to: [{ email: "x@x.com" }], subject: "S", textBody: "b" }),
+      }),
+      env,
+    );
+    const aList = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
+    const id = aList.items[0]!.id;
+
+    const bDetail = await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(id)}`, { headers: asUser("usr_bob") }), env);
+    expect(bDetail.status).toBe(404);
+    const aDetail = await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(id)}`, { headers: asUser("usr_alice") }), env);
+    expect(aDetail.status).toBe(200);
+  });
+
+  it("Inbox: each account lists only messages delivered to it", async () => {
+    const { env, raw } = makeEnv();
+    seedOwned(raw, { id: "in_alice", ownerUserId: "usr_alice" });
+    seedOwned(raw, { id: "in_bob", ownerUserId: "usr_bob" });
+
+    const aBox = (await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailMessageListItem[] };
+    expect(aBox.items.map((m) => m.id)).toEqual(["in_alice"]);
+
+    const bBox = (await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser("usr_bob") }), env)).json()) as { items: mail.MailMessageListItem[] };
+    expect(bBox.items.map((m) => m.id)).toEqual(["in_bob"]);
+  });
+
+  it("Message detail + thread: B cannot read A's message or thread (404)", async () => {
+    const { env, raw } = makeEnv();
+    seedOwned(raw, { id: "in_a", ownerUserId: "usr_alice", threadId: "thr_a" });
+
+    const bMsg = await app.fetch(new Request("https://svc/mail/messages/in_a", { headers: asUser("usr_bob") }), env);
+    expect(bMsg.status).toBe(404);
+    const bThread = await app.fetch(new Request("https://svc/mail/threads/thr_a", { headers: asUser("usr_bob") }), env);
+    expect(bThread.status).toBe(404);
+
+    // A can (owns it)
+    expect((await app.fetch(new Request("https://svc/mail/messages/in_a", { headers: asUser("usr_alice") }), env)).status).toBe(200);
+  });
+
+  it("Mark-read: B cannot flip A's message read state (404, and it stays unread for A)", async () => {
+    const { env, raw } = makeEnv();
+    seedOwned(raw, { id: "in_a2", ownerUserId: "usr_alice" });
+
+    const bMark = await app.fetch(new Request("https://svc/mail/messages/in_a2/read", { method: "POST", headers: asUser("usr_bob") }), env);
+    expect(bMark.status).toBe(404);
+
+    const aDetail = (await (await app.fetch(new Request("https://svc/mail/messages/in_a2", { headers: asUser("usr_alice") }), env)).json()) as mail.MailMessageDetail;
+    expect(aDetail.read).toBe(false); // B's attempt did not touch A's message
+  });
+
+  it("legacy rows with no owner are invisible to everyone (fail-closed)", async () => {
+    const { env, raw } = makeEnv();
+    seedOwned(raw, { id: "in_orphan", ownerUserId: null as unknown as string });
+    for (const u of ["usr_alice", "usr_bob"]) {
+      const box = (await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser(u) }), env)).json()) as { items: unknown[] };
+      expect(box.items).toHaveLength(0);
+    }
   });
 });
 

@@ -17,6 +17,7 @@ import {
   parseAddressList,
 } from "./mime";
 import { insertInbound, newInboundId, seenInbound } from "./repo";
+import { resolveInboundOwner } from "./owner";
 import type { InboundDeps, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
 
@@ -83,12 +84,17 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     return { processed: false, message };
   }
 
+  // Per-account Inbox scope: resolve the owning roster user from the recipient
+  // address(es). null when no roster user matches (fail-closed: invisible to all).
+  const ownerUserId = await resolveInboundOwner(deps.identity, deps.ctx, message.to);
+
   const changes = await insertInbound(deps.db, message, {
     mailbox,
     autoSubmitted: loop["auto-submitted"] ?? null,
     loopMarker: loop["x-dub-mail-loop"] ?? null,
     bodyText,
     htmlBody,
+    ownerUserId,
   });
   if (changes === 0) {
     // lost the race with a concurrent redelivery — already persisted, do not re-publish.
