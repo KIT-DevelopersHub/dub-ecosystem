@@ -15,16 +15,20 @@ export function PermissionMatrix({
   selected,
   disabled,
   onChange,
+  idPrefix = "fe7",
 }: {
   catalog: readonly CatalogEntry[];
   selected: readonly identity.PermissionKey[];
   disabled?: boolean;
   onChange: (next: identity.PermissionKey[]) => void;
+  // testid namespace. Default "fe7" (single matrix per screen). Inline editors on the
+  // role list pass a per-role prefix so multiple matrices never collide on the page.
+  idPrefix?: string;
 }) {
   const groups = groupByDomain(catalog);
 
   return (
-    <div data-testid="fe7-permission-matrix">
+    <div data-testid={`${idPrefix}-permission-matrix`}>
       {groups.map((g) => {
         const state = domainSelectionState(selected, g.entries);
         return (
@@ -37,7 +41,7 @@ export function PermissionMatrix({
                   ref={(el) => { if (el) el.indeterminate = state.some && !state.all; }}
                   disabled={disabled}
                   onChange={(e) => onChange(toggleDomain(selected, g.entries, e.target.checked))}
-                  data-testid={`fe7-matrix-domain-${g.domain}`}
+                  data-testid={`${idPrefix}-matrix-domain-${g.domain}`}
                 />
                 <strong>{g.domain}</strong>
               </label>
@@ -52,7 +56,7 @@ export function PermissionMatrix({
                     checked={checked}
                     disabled={disabled}
                     onChange={() => onChange(togglePermission(selected, key))}
-                    data-testid={`fe7-matrix-key-${e.key}`}
+                    data-testid={`${idPrefix}-matrix-key-${e.key}`}
                   />
                   <span style={e.dangerous ? dangerousStyle : undefined} title={e.description}>
                     {e.name}

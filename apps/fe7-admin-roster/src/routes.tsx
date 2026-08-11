@@ -30,11 +30,14 @@ function userDetailRoute(): Promise<{ Component: ComponentType }> {
   }));
 }
 
+// Existing-role permissions are now viewed/edited inline in RoleListPage (single
+// screen), so the list no longer navigates to a per-role editor. `/admin/roles/new`
+// (create) stays a dedicated screen.
 function rolesRoute(): Promise<{ Component: ComponentType }> {
   return import("./components/RoleListPage").then(({ RoleListPage }) => ({
     Component: function RolesRoute() {
       const { navigate } = useNavigation();
-      return <RoleListPage onNew={() => navigate("/admin/roles/new")} onEdit={(id) => navigate(`/admin/roles/${id}`)} />;
+      return <RoleListPage onNew={() => navigate("/admin/roles/new")} />;
     },
   }));
 }
@@ -44,15 +47,6 @@ function roleNewRoute(): Promise<{ Component: ComponentType }> {
     Component: function RoleNewRoute() {
       const { navigate } = useNavigation();
       return <RoleEditorPage onDone={() => navigate("/admin/roles")} />;
-    },
-  }));
-}
-
-function roleEditRoute(): Promise<{ Component: ComponentType }> {
-  return import("./components/RoleEditorPage").then(({ RoleEditorPage }) => ({
-    Component: function RoleEditRoute() {
-      const { params, navigate } = useNavigation();
-      return <RoleEditorPage roleId={params.roleId} onDone={() => navigate("/admin/roles")} />;
     },
   }));
 }
@@ -74,7 +68,6 @@ export const routes: FeatureRoute[] = [
   { path: "/admin/users/:userId", lazy: userDetailRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles", lazy: rolesRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles/new", lazy: roleNewRoute, auth: "required", requiredPermissions: ["identity:admin"] },
-  { path: "/admin/roles/:roleId", lazy: roleEditRoute, auth: "required", requiredPermissions: ["identity:admin"] },
   { path: "/admin/email-routing", lazy: emailRoutingRoute, auth: "required", requiredPermissions: ["mail:admin"] },
   { path: "/admin/history", lazy: historyRoute, auth: "required", requiredPermissions: ["audit:read"] },
 ];

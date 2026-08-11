@@ -1,0 +1,80 @@
+// Inline permission editor for a SINGLE existing role, rendered in place inside the
+// role list accordion (design: "1画面で権限を確認・編集"). This removes the need to
+// navigate to a separate role-editor screen just to see or change a role's permissions.
+//
+// Create-mode and the standalone /admin/roles/new screen still live in RoleEditorPage;
+// this component only edits an already-loaded role.
+import { useState } from "react";
+import type { identity } from "@dub/types";
+import { TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
+import { PermissionMatrix } from "./PermissionMatrix";
+import { usePermissionCatalog, useUpdateRole } from "../hooks/useRosterApi";
+import { usePermissions } from "../hooks/usePermissions";
+import { useToast } from "../hooks/useToast";
+import { buildRoleUpdate } from "../lib/permissionMatrix";
+import { errorMessage } from "../lib/errorDisplay";
+
+const noteStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, marginTop: 8 };
+const actionsStyle: React.CSSProperties = { marginTop: 12 };
+
+export function RolePermissionsEditor({ role }: { role: identity.Role }) {
+  const catalog = usePermissionCatalog();
+  const update = useUpdateRole(role.id);
+  const { can } = usePermissions();
+  const { toast } = useToast();
+
+  // Each editor instance seeds from its own role; it is mounted only while expanded,
+  // so opening a different role always starts from that role's saved state.
+  const [name, setName] = useState(role.name);
+  const [perms, setPerms] = useState<identity.PermissionKey[]>([...role.permissions]);
+  const [confirmSave, setConfirmSave] = useState(false);
+
+  const readOnly = role.isSystem || !can("identity:admin");
+  // testid namespace so multiple accordions never collide (matrix keys are shared).
+  const ns = `fe7-role-${role.id}`;
+
+  function save() {
+    setConfirmSave(false);
+    const patch = buildRoleUpdate({ name: role.name, permissions: role.permissions }, { name, permissions: perms });
+    if (!patch) {
+      toast({ kind: "info", title: "変更はありません" });
+      return;
+    }
+    update.mutate(patch, {
+      onSuccess: () => toast({ kind: "success", title: "ロールを保存しました" }),
+      onError: (err) => toast({ kind: "error", title: "保存に失敗しました", description: errorMessage(err) }),
+    });
+  }
+
+  return (
+    <div data-testid={`fe7-role-inline-${role.id}`}>
+      {!role.isSystem ? (
+        <FormField label="ロール名" htmlFor={`${ns}-name`}>
+          <TextField id={`${ns}-name`} value={name} onChange={(v) => setName(v)} disabled={readOnly} testId={`${ns}-name`} />
+        </FormField>
+      ) : null}
+      {catalog.data ? (
+        <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} />
+      ) : (
+        <p>権限カタログを読み込み中…</p>
+      )}
+      {readOnly ? (
+        <p style={noteStyle}>{role.isSystem ? "システムロールは編集できません。" : "編集権限がありません。"}</p>
+      ) : (
+        <div style={actionsStyle}>
+          <Button variant="primary" onClick={() => setConfirmSave(true)} disabled={!name.trim() || update.isPending} testId={`${ns}-save`}>
+            保存
+          </Button>
+        </div>
+      )}
+      <ConfirmDialog
+        title="権限束を保存"
+        message="ロールの権限を保存します。付与済みユーザーの実効権限に影響します。"
+        open={confirmSave}
+        onConfirm={save}
+        onCancel={() => setConfirmSave(false)}
+        testId={`${ns}-save-confirm`}
+      />
+    </div>
+  );
+}
