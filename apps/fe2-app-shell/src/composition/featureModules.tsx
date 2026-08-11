@@ -26,6 +26,8 @@ import type { ApiClient } from "../lib/api-client.tsx";
 import type { FeatureModule, FeatureRoute, NavEntry } from "../modules/types.tsx";
 import { mailRoutes, mailNav } from "../features/mail/index.tsx";
 import { MailProvider } from "../features/mail/MailProvider.tsx";
+import { usageRoutes, usageNav } from "../features/usage/index.tsx";
+import { UsageProvider } from "../features/usage/UsageProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -196,6 +198,19 @@ function adaptMail(api: ApiClient): FeatureModule {
   return { id: "mail", routes, nav };
 }
 
+// ── usage (FE2-local feature module) ──────────────────────────────────────────
+// Like mail, the free-tier usage & billing-guard dashboard lives in the shell
+// (apps/fe2-app-shell/src/features/usage) rather than a separate FE package. It
+// ships a canonical FeatureModule so it registers, routes, and (would) authz-gate
+// exactly like the others. Its route is wrapped in UsageProvider (UsageApi built
+// from the one shell api-client); nav sits after mail (order 46), before admin.
+function adaptUsage(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(UsageProvider, api);
+  const routes = (usageRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = usageNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 46 }));
+  return { id: "usage", routes, nav };
+}
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
@@ -216,12 +231,20 @@ function adaptAdmin(api: ApiClient): FeatureModule {
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, mail, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, usage, admin]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
 export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
-  return [adaptEvents(api), adaptTasks(api), adaptNotifications(api), adaptChat(api), adaptMail(api), adaptAdmin(api)];
+  return [
+    adaptEvents(api),
+    adaptTasks(api),
+    adaptNotifications(api),
+    adaptChat(api),
+    adaptMail(api),
+    adaptUsage(api),
+    adaptAdmin(api),
+  ];
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptAdmin, toIcon };
