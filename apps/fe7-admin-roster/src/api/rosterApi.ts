@@ -35,6 +35,9 @@ export interface RosterApi {
     patch: { displayName?: string; status?: identity.UserStatus; githubLogin?: string | null },
   ): Promise<identity.IdentityUser>;
   inviteUser(req: identity.InviteUserRequest): Promise<identity.IdentityUser>;
+  /** Roster sync SOURCE: the @developershub.jp RECEIVING addresses (routing rules,
+   *  zone-scoped), i.e. every issued address — not the ~1 account-scoped destination. */
+  listRosterEmailAddresses(): Promise<{ items: SyncEmailRoutingAddress[] }>;
   /** Reconcile the roster with the @developershub.jp Email Routing addresses. */
   syncEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<SyncEmailRoutingResult>;
   listRoles(): Promise<common.Paginated<identity.Role>>;
@@ -69,6 +72,8 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     getUser: (id) => client.get<identity.IdentityUserDetail>(`${IDENTITY}/users/${id}`),
     patchUser: (id, patch) => client.patch<identity.IdentityUser>(`${IDENTITY}/users/${id}`, patch),
     inviteUser: (req) => client.post<identity.IdentityUser>(`${IDENTITY}/users/invite`, req),
+    listRosterEmailAddresses: () =>
+      client.get<{ items: SyncEmailRoutingAddress[] }>(`${EMAIL_ROUTING}/roster-addresses`),
     syncEmailRouting: (addresses) =>
       client.post<SyncEmailRoutingResult>(`${IDENTITY}/users/sync-email-routing`, { addresses }),
     listRoles: () => client.get<common.Paginated<identity.Role>>(`${IDENTITY}/roles`),

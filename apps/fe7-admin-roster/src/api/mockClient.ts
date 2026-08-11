@@ -102,6 +102,12 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
       if (!u) throw err("NOT_FOUND", "user not found");
       return u as unknown as T;
     }
+    if (path.endsWith("/admin/email-routing/roster-addresses")) {
+      // roster sync source: the RECEIVING addresses (one per issued rule), not destinations.
+      return {
+        items: s.emailAddresses.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })),
+      } as unknown as T;
+    }
     if (path.endsWith("/admin/email-routing/addresses")) {
       return paginate([...s.emailAddresses]) as unknown as T;
     }

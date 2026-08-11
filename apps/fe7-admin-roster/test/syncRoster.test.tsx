@@ -44,12 +44,12 @@ describe("UserListPage — Email Routing sync", () => {
   });
 
   it("renders a 未接続 notice when the proxy is unconfigured (no partial write)", async () => {
-    // Wrap the mock so the addresses read fails as the gateway 503 does.
+    // Wrap the mock so the roster-source read fails as the gateway 503 does.
     const base = createMockClient({ me: ADMIN });
     const client: ResourceClient = {
       ...base,
       get: (path: string, query?: Record<string, unknown>) => {
-        if (path.endsWith("/admin/email-routing/addresses")) {
+        if (path.endsWith("/admin/email-routing/roster-addresses")) {
           return Promise.reject({ error: { code: "MAIL_EMAIL_ROUTING_UNCONFIGURED", message: "unconfigured", retryable: false } });
         }
         return base.get(path, query);

@@ -21,7 +21,7 @@ import { common } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import { buildAuditEnv } from "./deps";
 import type { AppBindings } from "./env";
-import { CfEmailRoutingClient, requireEmailRoutingConfig } from "./email-routing";
+import { CfEmailRoutingClient, requireEmailRoutingConfig, rosterAddressesFromRules } from "./email-routing";
 import { parseCreateAddressRequest, parseCreateRuleRequest, parseUpdateRuleRequest } from "./email-routing-validation";
 
 type WithAuth = (permission: identity.PermissionKey) => MiddlewareHandler<AppBindings>;
@@ -52,6 +52,18 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>, withAuth: With
       clientOf(c).deleteAddress(id),
     );
     return c.json(result, 200);
+  });
+
+  // ---- roster sync source (derived from rules, zone-scoped) ----
+  // The user roster syncs from the @developershub.jp RECEIVING addresses — the routing
+  // rules people receive mail at — NOT the account-scoped destination (forward-target)
+  // addresses (of which the domain has ~1). Returns one entry per issued receiving
+  // address so identity-roster upserts a roster row for each. Fixes the sync that
+  // previously read destination addresses and only ever added the single verified one.
+  ext.get("/admin/email-routing/roster-addresses", async (c) => {
+    const cfg = requireEmailRoutingConfig(c.env);
+    const rules = await new CfEmailRoutingClient(cfg).listRules();
+    return c.json({ items: rosterAddressesFromRules(rules, cfg.zoneName) });
   });
 
   // ---- routing rules ----
