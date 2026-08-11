@@ -28,6 +28,7 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0002_inbound_body_read.sql"),
     sqlFile("../../../services/mail-gateway/db/0003_freeq_outbox.sql"),
     sqlFile("../../../services/mail-gateway/db/0004_send_body.sql"),
+    sqlFile("../../../services/mail-gateway/db/0006_owner_scope.sql"),
   ];
 }
 
