@@ -10,8 +10,8 @@ import { buildDeps } from "./deps";
 import type { Env } from "./env";
 
 export type { Env } from "./env";
-export { hashPassword, verifyPassword, seedPasswordCredential, seedDemoCredentials, DEMO_CREDENTIALS, KvPasswordStore } from "./passwords";
-export type { PasswordStore, StoredCredential } from "./passwords";
+export { hashPassword, verifyPassword, seedPasswordCredential, seedDemoCredentials, DEMO_CREDENTIALS, KvPasswordStore, setCredential, generatePassword, encryptSecret, decryptSecret } from "./passwords";
+export type { PasswordStore, StoredCredential, SetCredentialParams } from "./passwords";
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {

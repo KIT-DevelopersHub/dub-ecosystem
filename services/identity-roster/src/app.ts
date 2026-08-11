@@ -168,6 +168,18 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.getUser(c.req.param("id"), orgId));
   });
 
+  // Login allowlist lookup — internal S2S read for auth-service password login.
+  // Returns { user } (any status) or { user: null } when the email is not on the
+  // roster; auth-service enforces the active-only allowlist. Read-only (no provision
+  // side effects), so probing this never mutates roster state.
+  app.post("/internal/users/lookup", requireInternal, async (c) => {
+    const body = await readJson<{ email?: string }>(c);
+    if (!body || typeof body.email !== "string" || body.email.length === 0) {
+      throw errors.validationFailed([{ field: "email", reason: "required" }]);
+    }
+    return c.json(await svc.lookupByEmail(orgId, body.email));
+  });
+
   app.post("/authz/check", requireInternal, async (c) => {
     const body = await readJson<identity.AuthzCheckRequest>(c);
     if (!body || typeof body.subjectUserId !== "string" || typeof body.orgId !== "string") {

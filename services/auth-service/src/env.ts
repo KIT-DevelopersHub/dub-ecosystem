@@ -18,12 +18,16 @@ export interface Env {
   ENVIRONMENT?: string; // "local" | "preview" | "production" (default production)
   DUB_TEST_LOGIN?: string; // "1" enables /auth/test-login (local/preview only)
   COOKIE_DOMAIN?: string; // unset/empty -> host-only cookie (no Domain attr; required on *.workers.dev)
-  ALLOWED_LOGIN_DOMAIN?: string; // only emails on this domain may log in (default developershub.jp)
+  ALLOWED_LOGIN_DOMAIN?: string; // OPTIONAL extra filter; empty (default) => no domain restriction, roster allowlist is authoritative
   SESSION_ACCESS_TTL_SEC?: string; // access lifetime (default 3600 = 1h)
   SESSION_ABS_WEB_TTL_SEC?: string; // web absolute (default 2592000 = 30d)
   SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute (default 15552000 = 180d)
   PWLOGIN_MAX_FAILURES?: string; // password-login failures per window before 429 (default 5)
   PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
+  PASSWORD_MIN_LENGTH?: string; // min length for user/admin-set passwords (default 8)
+
+  // --- password reversible-encryption key (admin view #5c) ---
+  PASSWORD_ENC_KEY?: string; // Worker secret: base64 of 32 bytes (AES-256-GCM). Empty => admin view unavailable.
 
   // --- Google OAuth secrets (MOBILE ONLY — web OAuth removed) ---
   GOOGLE_MOBILE_IOS_CLIENT_ID?: string;
@@ -34,7 +38,12 @@ const DEFAULTS = {
   // Empty => host-only cookie (Domain attribute omitted). Cross-subdomain sharing
   // (e.g. app./api.developershub.jp) is opt-in via an explicit COOKIE_DOMAIN var.
   cookieDomain: "",
-  allowedLoginDomain: "developershub.jp",
+  // Empty => domain gate OFF. Login is gated by the identity-roster active allowlist
+  // (theme #4). An explicit ALLOWED_LOGIN_DOMAIN re-enables the domain filter as an
+  // ADDITIONAL layer, but it must not be relied on as the sole gate (roster members
+  // may hold non-company-domain emails, e.g. github-synced accounts).
+  allowedLoginDomain: "",
+  passwordMinLength: 8,
   accessTtlSec: 3600,
   absWebTtlSec: 30 * 24 * 60 * 60,
   absMobileTtlSec: 180 * 24 * 60 * 60,
@@ -46,7 +55,9 @@ export interface AppConfig {
   testLoginEnabled: boolean;
   cookieName: string;
   cookieDomain: string;
-  allowedLoginDomain: string;
+  allowedLoginDomain: string; // "" => domain gate disabled (roster allowlist authoritative)
+  passwordMinLength: number;
+  passwordEncKey: string; // base64 AES-256 key; "" => admin password view unavailable
   accessTtlSec: number;
   absWebTtlSec: number;
   absMobileTtlSec: number;
@@ -77,6 +88,8 @@ export function configFromEnv(env: Env): AppConfig {
     cookieName: "dub_session",
     cookieDomain: env.COOKIE_DOMAIN ?? DEFAULTS.cookieDomain,
     allowedLoginDomain: (env.ALLOWED_LOGIN_DOMAIN ?? DEFAULTS.allowedLoginDomain).trim().toLowerCase(),
+    passwordMinLength: intVar(env.PASSWORD_MIN_LENGTH, DEFAULTS.passwordMinLength),
+    passwordEncKey: (env.PASSWORD_ENC_KEY ?? "").trim(),
     accessTtlSec: intVar(env.SESSION_ACCESS_TTL_SEC, DEFAULTS.accessTtlSec),
     absWebTtlSec: intVar(env.SESSION_ABS_WEB_TTL_SEC, DEFAULTS.absWebTtlSec),
     absMobileTtlSec: intVar(env.SESSION_ABS_MOBILE_TTL_SEC, DEFAULTS.absMobileTtlSec),

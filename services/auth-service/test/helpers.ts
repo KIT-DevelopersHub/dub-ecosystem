@@ -6,7 +6,7 @@ import { configFromEnv, type AppConfig, type Env } from "../src/env";
 import { SessionService } from "../src/sessions";
 import type { Deps } from "../src/deps";
 import type { OAuthProvider, GoogleProfile } from "../src/oauth";
-import type { IdentityClient, ProvisionResult } from "../src/identity-client";
+import type { IdentityClient, ProvisionResult, LookupResult } from "../src/identity-client";
 import type { Auditor, AuditInput } from "../src/audit";
 import { KvPasswordStore } from "../src/passwords";
 import { KvRateLimiter } from "../src/ratelimit";
@@ -38,7 +38,11 @@ export class FakeOAuth implements OAuthProvider {
   }
 }
 
-function fakeUser(email: string, displayName: string): identity.IdentityUser {
+export function fakeUser(
+  email: string,
+  displayName: string,
+  overrides: Partial<identity.IdentityUser> = {},
+): identity.IdentityUser {
   return {
     id: "usr_01ABCDEF",
     orgId: "org_devhub",
@@ -50,15 +54,35 @@ function fakeUser(email: string, displayName: string): identity.IdentityUser {
     roleIds: [],
     createdAt: "2026-08-09T00:00:00Z",
     updatedAt: "2026-08-09T00:00:00Z",
+    ...overrides,
   };
 }
 
 export class FakeIdentity implements IdentityClient {
+  // provision (mobile-exchange path)
   result: ProvisionResult = { status: "existing", user: fakeUser("alice@example.com", "Alice") };
   calls: identity.ProvisionUserRequest[] = [];
+  // allowlist lookup (password login). Default: any email resolves to an active user.
+  lookupUser: identity.IdentityUser | null = fakeUser("alice@example.com", "Alice");
+  lookupCalls: string[] = [];
+  // userId -> canonical user (self password change + admin password mgmt)
+  users = new Map<string, identity.IdentityUser>();
+  // userIds that hold identity:admin
+  admins = new Set<string>();
+
   async provision(_ctx: RequestContext, input: identity.ProvisionUserRequest): Promise<ProvisionResult> {
     this.calls.push(input);
     return this.result;
+  }
+  async lookupByEmail(_ctx: RequestContext, email: string): Promise<LookupResult> {
+    this.lookupCalls.push(email);
+    return { user: this.lookupUser ? { ...this.lookupUser, email: email.toLowerCase() } : null };
+  }
+  async getUser(_ctx: RequestContext, userId: string): Promise<identity.IdentityUser | null> {
+    return this.users.get(userId) ?? null;
+  }
+  async hasPermission(_ctx: RequestContext, userId: string, permission: identity.PermissionKey): Promise<boolean> {
+    return permission === "identity:admin" ? this.admins.has(userId) : true;
   }
 }
 
@@ -79,12 +103,18 @@ export interface TestHarness {
   setNow: (ms: number) => void;
 }
 
+// Valid base64 of 32 bytes (AES-256) for the password-encryption tests.
+export const TEST_ENC_KEY = btoa(String.fromCharCode(...Array.from({ length: 32 }, (_, i) => (i * 7 + 3) & 0xff)));
+
 export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
   const env = {
     ENVIRONMENT: "preview",
     DUB_TEST_LOGIN: "1",
     COOKIE_DOMAIN: ".test.dev",
+    // domain filter kept ON in unit tests (default is now OFF); allowlist tests
+    // exercise the roster gate independently.
     ALLOWED_LOGIN_DOMAIN: "developershub.jp",
+    PASSWORD_ENC_KEY: TEST_ENC_KEY,
     SESSION_ACCESS_TTL_SEC: "3600",
     SESSION_ABS_WEB_TTL_SEC: "2592000",
     SESSION_ABS_MOBILE_TTL_SEC: "15552000",
@@ -121,14 +151,28 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
   return { deps, kv, oauth, identity, audit, config, setNow: (ms) => (now = ms) };
 }
 
-/** Convenience: JSON POST init with optional internal marker + bearer. */
-export function jsonInit(
-  body: unknown,
-  opts: { internal?: boolean; bearer?: string; cookie?: string } = {},
-): RequestInit {
+export interface ReqOpts {
+  internal?: boolean;
+  bearer?: string;
+  cookie?: string;
+  actor?: string; // x-dub-user-id (trusted actor set by the gateway)
+}
+
+function buildHeaders(opts: ReqOpts): Record<string, string> {
   const headers: Record<string, string> = { "content-type": "application/json", "x-dub-request-id": "req_test" };
   if (opts.internal) headers["x-dub-internal"] = "1";
   if (opts.bearer) headers["authorization"] = `Bearer ${opts.bearer}`;
   if (opts.cookie) headers["cookie"] = opts.cookie;
-  return { method: "POST", headers, body: JSON.stringify(body) };
+  if (opts.actor) headers["x-dub-user-id"] = opts.actor;
+  return headers;
+}
+
+/** Convenience: JSON POST init with optional internal marker + bearer + actor. */
+export function jsonInit(body: unknown, opts: ReqOpts = {}): RequestInit {
+  return { method: "POST", headers: buildHeaders(opts), body: JSON.stringify(body) };
+}
+
+/** GET init (no body) with the same optional markers. */
+export function getInit(opts: ReqOpts = {}): RequestInit {
+  return { method: "GET", headers: buildHeaders(opts) };
 }
