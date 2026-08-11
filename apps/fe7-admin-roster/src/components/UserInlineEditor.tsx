@@ -11,6 +11,7 @@ import type { identity } from "@dub/types";
 import { Button, TextField, ConfirmDialog, FormField, Divider } from "@dub/ui";
 import { RoleAssignmentList } from "./RoleAssignmentList";
 import { RoleAssignDialog } from "./RoleAssignDialog";
+import { UserPasswordSection } from "./UserPasswordSection";
 import { usePatchUser } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
@@ -117,6 +118,8 @@ export function UserInlineEditor({
         ) : null}
       </div>
       <RoleAssignmentList userId={user.id} />
+
+      {canAdmin ? <UserPasswordSection user={user} /> : null}
 
       <RoleAssignDialog
         open={assignOpen}
