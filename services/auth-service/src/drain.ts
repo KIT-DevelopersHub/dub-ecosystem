@@ -6,39 +6,27 @@
 import type { Fetcher } from "@cloudflare/workers-types";
 import { drain, type Deliver, type DrainResult } from "@dub/freeq";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
-import type { auditLog } from "@dub/types";
-import type { Env } from "./env";
 import { AUDIT_TOPIC } from "./audit";
+import type { Env } from "./env";
 
-// audit-log's async ingest for non-sync actions (auth.session.*). Paired next-工程
-// route: once audit-log drops its Queue consumer it exposes this to receive the
-// envelope the drain delivers. A 4xx/5xx (incl. 404 before it lands) throws -> the
-// row is retried with backoff and never lost.
+// audit-log's async ingest for non-sync actions (auth.session.*). A 4xx/5xx (incl. 404
+// before it lands) throws -> the row is retried with backoff and never lost.
 const AUDIT_ASYNC_PATH = "/internal/audit-async";
 
-interface AuditEnvelope {
-  type: "audit.record";
-  version: 1;
-  id: string;
-  payload: auditLog.AuditRecordInput;
-}
-
+// NOTE: the standalone freeq-drain worker is what runs this drain in production; this
+// local drain is retained as the topic->destination contract source. Since theme#... the
+// OUTBOX payload IS already the AuditRecordEnvelopeV1 (the producer wraps it in audit.ts),
+// so delivery just forwards the payload VERBATIM — re-wrapping here would double-wrap.
 export function makeAuditDeliver(svc: Fetcher): Deliver {
-  return async ({ id, topic, payload }) => {
+  return async ({ topic, payload }) => {
     if (topic !== AUDIT_TOPIC) return; // unknown topic: ack (nothing to deliver)
-    const envelope: AuditEnvelope = {
-      type: "audit.record",
-      version: 1,
-      id,
-      payload: payload as auditLog.AuditRecordInput,
-    };
     const res = await svc.fetch("https://audit-log" + AUDIT_ASYNC_PATH, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         [HDR_INTERNAL]: INTERNAL_HEADER_VALUE,
       },
-      body: JSON.stringify(envelope),
+      body: JSON.stringify(payload), // payload IS the envelope the producer enqueued
     });
     if (!res.ok) throw new Error(`audit-log async ingest returned ${res.status}`);
   };

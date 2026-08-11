@@ -50,7 +50,14 @@ describe("OutboxAuditor (producer INSERT)", () => {
     expect(stored).toHaveLength(1);
     expect(stored[0]!.topic).toBe("audit.record");
     expect(stored[0]!.status).toBe("pending");
-    const payload = JSON.parse(stored[0]!.payload);
+    // The stored payload is the canonical AuditRecordEnvelopeV1 wrapper (not the bare
+    // record): the shared freeq-drain forwards it verbatim to audit-log, which validates
+    // exactly this shape. envelope.id === the outbox row id (shared idempotency key).
+    const envelope = JSON.parse(stored[0]!.payload);
+    expect(envelope.type).toBe("audit.record");
+    expect(envelope.version).toBe(1);
+    expect(envelope.id).toBe(stored[0]!.id);
+    const payload = envelope.payload;
     expect(payload.action).toBe("auth.session.login");
     expect(payload.actorId).toBe("usr_1");
     expect(payload.orgId).toBe("org_devhub"); // DUB_DEFAULT_ORG_ID
@@ -92,6 +99,8 @@ describe("audit outbox drain (delivery to audit-log)", () => {
     expect(env0.version).toBe(1);
     expect(typeof env0.id).toBe("string");
     expect(env0.payload.action).toBe("auth.session.login");
+    // no double-wrap: payload is the record itself, not a nested envelope
+    expect((env0.payload as { payload?: unknown }).payload).toBeUndefined();
     // the delivered id equals the outbox row id (idempotency key)
     expect(env0.id).toBe(rows(raw)[0]!.id);
   });

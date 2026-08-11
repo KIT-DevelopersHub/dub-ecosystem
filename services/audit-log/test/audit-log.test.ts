@@ -234,6 +234,74 @@ describe("POST /internal/audit-async (async ingest, open catalog)", () => {
   });
 });
 
+// ---- async ingest: LEGACY FLAT backward-compat (the pre-fix auth-outbox backlog) --------
+// Before the producer wrapped its records, the auth-outbox enqueued a bare AuditRecordInput,
+// so the shared freeq-drain forwarded a FLAT body here — which the strict envelope validator
+// rejected with 400 (the ~42 stuck rows). /internal/audit-async now ALSO accepts the flat
+// shape, normalizing it and deriving a deterministic idempotency id so the backlog drains
+// without loss or duplication. New producers keep emitting the wrapped envelope.
+
+describe("POST /internal/audit-async (legacy FLAT record backward-compat)", () => {
+  const postFlat = (env: Env, flat: unknown, internal = true) =>
+    createApp().fetch(
+      new Request("https://svc/internal/audit-async", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(internal ? { [HEADERS.internal]: "1" } : {}) },
+        body: JSON.stringify(flat),
+      }),
+      env,
+    );
+
+  it("accepts a bare AuditRecordInput (no envelope) and persists it (202 + derived id)", async () => {
+    const { d1 } = makeD1();
+    const flat = input({ action: "auth.session.login", actorId: "user_9", requestId: "req_legacy_1" });
+    const res = await postFlat(makeEnv(d1), flat);
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as auditLog.AuditLogWriteResponse;
+    expect(body.id).toMatch(/^aud_legacy_[0-9a-f]{64}$/); // deterministic content hash
+    const rec = await getById(auditDb(d1), body.id);
+    expect(rec?.action).toBe("auth.session.login");
+    expect(rec?.actorId).toBe("user_9");
+    expect(rec?.requestId).toBe("req_legacy_1");
+  });
+
+  it("derives a STABLE id => at-least-once redelivery of the same flat row dedupes (one row)", async () => {
+    const { d1 } = makeD1();
+    const flat = input({ action: "auth.session.logout", actorId: "user_9", requestId: "req_legacy_2" });
+    const r1 = await postFlat(makeEnv(d1), flat);
+    const r2 = await postFlat(makeEnv(d1), flat);
+    const id1 = ((await r1.json()) as auditLog.AuditLogWriteResponse).id;
+    const id2 = ((await r2.json()) as auditLog.AuditLogWriteResponse).id;
+    expect(id1).toBe(id2); // deterministic => same key
+    expect((await queryLogs(auditDb(d1), {})).items.length).toBe(1); // INSERT OR IGNORE => no dup
+  });
+
+  it("distinct flat events get distinct ids (no false-merge)", async () => {
+    const { d1 } = makeD1();
+    const a = await postFlat(makeEnv(d1), input({ requestId: "req_a" }));
+    const b = await postFlat(makeEnv(d1), input({ requestId: "req_b" }));
+    const idA = ((await a.json()) as auditLog.AuditLogWriteResponse).id;
+    const idB = ((await b.json()) as auditLog.AuditLogWriteResponse).id;
+    expect(idA).not.toBe(idB);
+    expect((await queryLogs(auditDb(d1), {})).items.length).toBe(2);
+  });
+
+  it("still rejects a flat body that fails record validation (400, no insert)", async () => {
+    const { d1 } = makeD1();
+    const res = await postFlat(makeEnv(d1), input({ action: "NOT valid action" }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+    expect((await queryLogs(auditDb(d1), {})).items.length).toBe(0);
+  });
+
+  it("the wrapped envelope path is unaffected (still keyed by envelope id)", async () => {
+    const { d1 } = makeD1();
+    const res = await postFlat(makeEnv(d1), envelope("WRAPPED_1", { action: "auth.session.login" }));
+    expect(res.status).toBe(202);
+    expect(((await res.json()) as auditLog.AuditLogWriteResponse).id).toBe("WRAPPED_1");
+  });
+});
+
 // ---- 7,8,13  Read query route --------------------------------------------
 
 describe("GET /audit/logs (read, audit:read gated)", () => {
