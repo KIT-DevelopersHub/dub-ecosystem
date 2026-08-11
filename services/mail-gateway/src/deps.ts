@@ -35,6 +35,9 @@ export function buildSendDeps(
   // @developershub.jp address and passes it here; internal/system sends omit it and
   // keep the configured default (info@…).
   fromOverride?: string,
+  // Owner (Sent-folder account scope): the signed-in user's id for a user-facing send,
+  // or null for a pure system/automation send.
+  ownerUserId: string | null = null,
 ): SendDeps {
   return {
     db: buildDb(env, ctx.requestId),
@@ -44,6 +47,7 @@ export function buildSendDeps(
     orgId: common.DUB_DEFAULT_ORG_ID,
     fromAddress: fromOverride ?? env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ctx,
+    ownerUserId,
     retry: sendRetryOptions(env),
   };
 }
@@ -55,5 +59,7 @@ export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
     audit: buildAuditEnv(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     ctx,
+    // identity binding: resolves an inbound recipient address → roster userId (Inbox scope).
+    identity: env.SVC_IDENTITY,
   };
 }

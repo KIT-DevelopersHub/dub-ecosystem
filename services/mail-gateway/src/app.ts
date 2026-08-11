@@ -33,6 +33,14 @@ export function createApp() {
 
   const ctxOf = (c: Context<AppBindings>): RequestContext => c.get("dubCtx");
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, ctxOf(c).requestId);
+  // The signed-in user for a request past withAuth (trusted x-dub-user-id). requireAuth
+  // already 401s when it is absent, so on the guarded read/outbox routes it is present;
+  // this throws (fail-closed) rather than silently scoping to "" if the guard ever changes.
+  const ownerOf = (c: Context<AppBindings>): string => {
+    const userId = c.req.header(HEADERS.userId);
+    if (!userId) throw errors.forbidden("account scope requires an authenticated user");
+    return userId;
+  };
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
@@ -74,7 +82,8 @@ export function createApp() {
 
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
     const requester = c.req.header(HEADERS.caller) ?? userId ?? "unknown";
-    const deps = buildSendDeps(c.env, ctx);
+    // Owner = the user on the call (Sent-folder scope); null for a pure system send.
+    const deps = buildSendDeps(c.env, ctx, undefined, undefined, userId ?? null);
     const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
@@ -100,7 +109,8 @@ export function createApp() {
     // From = the logged-in user's own @developershub.jp address (roster lookup), with a
     // safe info@ fallback for non-roster / non-company callers. See from.ts.
     const fromAddress = await resolveUserFromAddress(c.env, ctx, userId);
-    const deps = buildSendDeps(c.env, ctx, undefined, fromAddress);
+    // Owner = the signed-in user so this send shows only in THEIR Sent folder.
+    const deps = buildSendDeps(c.env, ctx, undefined, fromAddress, userId);
     const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
@@ -114,12 +124,12 @@ export function createApp() {
 
   ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listInbound(dbOf(c), q);
+    const page = await listInbound(dbOf(c), { ...q, ownerUserId: ownerOf(c) });
     return c.json(page satisfies common.Paginated<mail.MailMessageListItem>);
   });
 
   ext.get("/messages/:id", async (c) => {
-    const msg = await getInboundDetail(dbOf(c), c.req.param("id"));
+    const msg = await getInboundDetail(dbOf(c), c.req.param("id"), ownerOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json(msg satisfies mail.MailMessageDetail);
   });
@@ -129,7 +139,7 @@ export function createApp() {
   // External (user-facing via gateway) so it lives on `ext` under /mail and inherits the
   // ext.use("/messages/*", withAuth("mail:read")) guard above.
   ext.post("/messages/:id/read", async (c) => {
-    const { found } = await markInboundRead(dbOf(c), c.req.param("id"));
+    const { found } = await markInboundRead(dbOf(c), c.req.param("id"), ownerOf(c));
     if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json({ read: true } satisfies mail.MailMessageState);
   });
@@ -138,19 +148,19 @@ export function createApp() {
   // detail. Only delivered (status='sent') rows are listed; pending/failed never show.
   ext.get("/sent", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listSent(dbOf(c), { limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    const page = await listSent(dbOf(c), { ownerUserId: ownerOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
     return c.json(page satisfies common.Paginated<mail.MailSentListItem>);
   });
 
   ext.get("/sent/:id", async (c) => {
-    const msg = await getSentDetail(dbOf(c), c.req.param("id"));
+    const msg = await getSentDetail(dbOf(c), c.req.param("id"), ownerOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `sent message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json(msg satisfies mail.MailSentDetail);
   });
 
   ext.get("/threads/:id", async (c) => {
     const threadId = c.req.param("id");
-    const messages = await listThread(dbOf(c), threadId);
+    const messages = await listThread(dbOf(c), threadId, ownerOf(c));
     if (messages.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
     return c.json({ id: threadId, messages } satisfies mail.MailThread);
   });

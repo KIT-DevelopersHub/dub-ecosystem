@@ -107,6 +107,8 @@ export async function sendMail(
       htmlBody: req.htmlBody ?? null,
       ccJson: JSON.stringify(req.cc ?? []),
       fromAddress,
+      // Owner = the human sender (Sent-folder account scope); null for system sends.
+      ownerUserId: deps.ownerUserId ?? null,
     });
     if (claimed === 0) {
       // lost the race — another request claimed the key; re-read and dedup.

@@ -15,6 +15,13 @@ const req = (over: Partial<mail.SendMailRequest> = {}): mail.SendMailRequest => 
   ...over,
 });
 
+// Advance the wall clock >=1ms so two consecutive sends get strictly increasing
+// created_at values. listSent orders by (created_at DESC, id DESC) and the ULID id
+// encodes that same time, so spacing the sends makes ordering + id-cursor pagination
+// deterministic (without it, two same-millisecond sends tie on created_at and the
+// random ULID suffix decides order — a flaky assumption unrelated to this change).
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 2));
+
 describe("snippetOf", () => {
   it("collapses whitespace to a single line and truncates to the max", () => {
     expect(snippetOf("a\n\n  b   c")).toBe("a b c");
@@ -43,9 +50,10 @@ describe("listSent / getSentDetail", () => {
     const h = makeHarness();
     const deps = sendDeps(h);
     await sendMail(deps, req({ subject: "First" }), "a", "usr_alice");
+    await tick();
     await sendMail(deps, req({ subject: "Second", cc: [{ email: "c@x.com" }] }), "b", "usr_alice");
 
-    const page = await listSent(h.db, { limit: 50 });
+    const page = await listSent(h.db, { ownerUserId: "usr_alice", limit: 50 });
     expect(page.items).toHaveLength(2);
     // newest first
     expect(page.items[0]!.subject).toBe("Second");
@@ -61,12 +69,15 @@ describe("listSent / getSentDetail", () => {
   it("paginates with an opaque cursor", async () => {
     const h = makeHarness();
     const deps = sendDeps(h);
-    for (let i = 0; i < 3; i++) await sendMail(deps, req({ subject: `M${i}` }), `k${i}`, "usr_alice");
+    for (let i = 0; i < 3; i++) {
+      await sendMail(deps, req({ subject: `M${i}` }), `k${i}`, "usr_alice");
+      await tick();
+    }
 
-    const first = await listSent(h.db, { limit: 2 });
+    const first = await listSent(h.db, { ownerUserId: "usr_alice", limit: 2 });
     expect(first.items).toHaveLength(2);
     expect(first.nextCursor).not.toBeNull();
-    const second = await listSent(h.db, { limit: 2, cursor: first.nextCursor! });
+    const second = await listSent(h.db, { ownerUserId: "usr_alice", limit: 2, cursor: first.nextCursor! });
     expect(second.items).toHaveLength(1);
     expect(second.nextCursor).toBeNull();
     // no overlap
@@ -80,18 +91,18 @@ describe("listSent / getSentDetail", () => {
     await sendMail(deps, req({ htmlBody: "<b>x</b>" }), "d1", "usr_alice");
     const row = await findSendByKey(h.db, "d1");
 
-    const detail = await getSentDetail(h.db, row!.id);
+    const detail = await getSentDetail(h.db, row!.id, "usr_alice");
     expect(detail?.textBody).toBe("Line one.\nLine two.");
     expect(detail?.htmlBody).toBe("<b>x</b>");
 
-    expect(await getSentDetail(h.db, "does-not-exist")).toBeNull();
+    expect(await getSentDetail(h.db, "does-not-exist", "usr_alice")).toBeNull();
   });
 
   it("does NOT list a failed send (only status='sent')", async () => {
     const h = makeHarness({ fail: true });
     const deps = sendDeps(h);
     await expect(sendMail(deps, req(), "f1", "usr_alice")).rejects.toBeTruthy();
-    const page = await listSent(h.db, { limit: 50 });
+    const page = await listSent(h.db, { ownerUserId: "usr_alice", limit: 50 });
     expect(page.items).toHaveLength(0);
   });
 });
