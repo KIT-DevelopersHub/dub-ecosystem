@@ -64,9 +64,10 @@ describe("UserListPage", () => {
     const { navigate } = renderWithProviders(<UserListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-empty-user_carol")).toBeInTheDocument());
 
-    // Open Carol's inline role editor and toggle "member" on.
+    // Click Carol's roles cell (the chips ARE the trigger — no separate 編集 button)
+    // and toggle "member" on.
     const cell = screen.getByTestId("fe7-user-roles-user_carol");
-    await user.click(within(cell).getByRole("button", { name: "編集" }));
+    await user.click(within(cell).getByRole("button", { name: "ロールを編集" }));
     await user.click(await screen.findByTestId("fe7-inline-role-toggle-user_carol-role_member"));
 
     // Chip appears immediately (optimistic) and no navigation happened.
@@ -81,7 +82,7 @@ describe("UserListPage", () => {
     await waitFor(() => expect(screen.getByTestId("fe7-role-chip-user_bob-role_member")).toBeInTheDocument());
 
     const cell = screen.getByTestId("fe7-user-roles-user_bob");
-    await user.click(within(cell).getByRole("button", { name: "編集" }));
+    await user.click(within(cell).getByRole("button", { name: "ロールを編集" }));
     // Wait until the lazily-loaded assignment enables the checkbox, then uncheck.
     const toggle = await screen.findByTestId("fe7-inline-role-toggle-user_bob-role_member");
     await waitFor(() => expect(toggle).not.toBeDisabled());
@@ -94,9 +95,10 @@ describe("UserListPage", () => {
     renderWithProviders(<UserListPage />, { me: makeMe(["identity:read"]) });
     // Chips still render for everyone...
     await waitFor(() => expect(screen.getByTestId("fe7-role-chip-user_alice-role_admin")).toBeInTheDocument());
-    // ...but no "編集" affordance for a read-only viewer.
+    // ...but the cell is not an edit trigger for a read-only viewer.
     const cell = screen.getByTestId("fe7-user-roles-user_alice");
-    expect(within(cell).queryByRole("button", { name: "編集" })).not.toBeInTheDocument();
+    expect(within(cell).queryByRole("button", { name: "ロールを編集" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-inline-role-edit-user_alice")).not.toBeInTheDocument();
   });
 
   it("offers 在籍に戻す for a non-active user, and the pane closes on ×", async () => {

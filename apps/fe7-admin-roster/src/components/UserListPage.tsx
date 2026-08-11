@@ -158,7 +158,7 @@ export function UserListPage() {
       />
 
       <p style={noticeTextStyle}>
-        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。ロール列の「編集」で各メンバーのロールをその場で追加・削除できます。表示名や在籍状態の変更は、名前をクリックすると右側でその場で編集できます。
+        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。ロール列をクリックすると、各メンバーのロールをその場で追加・削除できます。表示名や在籍状態の変更は、名前をクリックすると右側でその場で編集できます。
       </p>
 
       {notConnected ? (

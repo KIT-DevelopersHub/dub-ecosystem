@@ -1,8 +1,9 @@
 // Inline ロール editor for a SINGLE roster row. Renders the user's org-wide roles as
-// chips DIRECTLY in the list's ロール column (design: "一覧で詳細が見えている") and, for
-// admins, lets them add/remove roles IN PLACE via a popover checklist — no navigation to
-// a per-user screen. Edits are optimistic (useAssignRoleInline / useRevokeRoleInline):
-// the chip updates instantly and rolls back on error.
+// chips DIRECTLY in the list's ロール column (design: "一覧で詳細が見えている"). For admins
+// the chips cell IS the edit trigger: clicking it opens a popover checklist to add/remove
+// roles IN PLACE — no separate "編集" button, no navigation to a per-user screen. Edits
+// are optimistic (useAssignRoleInline / useRevokeRoleInline): the chip updates instantly
+// and rolls back on error.
 //
 // The chips read from `user.roleIds` (already on the list row — no per-row fetch). The
 // popover lazily fetches the user's assignments only while open, to resolve the
@@ -15,7 +16,6 @@ import type { RosterUser } from "../contracts/pending";
 const cellStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" };
 const chipsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 };
 const emptyStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13 };
-const triggerStyle: React.CSSProperties = { color: "var(--dub-color-accent-fg, #0969da)", fontSize: 12, fontWeight: 600 };
 const panelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 8, minWidth: 200 };
 const panelTitleStyle: React.CSSProperties = { fontWeight: 600, fontSize: 13, marginBottom: 2 };
 const panelHintStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 12, margin: 0 };
@@ -43,28 +43,43 @@ export function InlineRoleEditor({
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   const assigned = user.roleIds;
 
-  return (
-    // Stop row clicks from bubbling to the DataTable's onRowClick (which opens the
-    // right-hand management pane) — role edits stay self-contained in this cell.
-    <div style={cellStyle} data-testid={`fe7-user-roles-${user.id}`} onClick={(e) => e.stopPropagation()}>
-      <div style={chipsStyle}>
-        {assigned.length === 0 ? (
-          <span style={emptyStyle} data-testid={`fe7-roles-empty-${user.id}`}>
-            ロールなし
-          </span>
-        ) : (
-          assigned.map((roleId) => (
-            <Badge key={roleId} tone={roleTone(roleName(roleId))} testId={`fe7-role-chip-${user.id}-${roleId}`}>
-              {roleName(roleId)}
-            </Badge>
-          ))
-        )}
+  const chips = (
+    <span style={chipsStyle}>
+      {assigned.length === 0 ? (
+        <span style={emptyStyle} data-testid={`fe7-roles-empty-${user.id}`}>
+          ロールなし
+        </span>
+      ) : (
+        assigned.map((roleId) => (
+          <Badge key={roleId} tone={roleTone(roleName(roleId))} testId={`fe7-role-chip-${user.id}-${roleId}`}>
+            {roleName(roleId)}
+          </Badge>
+        ))
+      )}
+    </span>
+  );
+
+  // Read-only viewers just see the chips.
+  if (!canAdmin) {
+    return (
+      <div style={cellStyle} data-testid={`fe7-user-roles-${user.id}`}>
+        {chips}
       </div>
-      {canAdmin ? (
-        <Popover placement="bottom" testId={`fe7-inline-role-edit-${user.id}`} trigger={<span style={triggerStyle}>編集</span>}>
-          <RolePopoverPanel user={user} roles={roles} currentUserId={currentUserId} />
-        </Popover>
-      ) : null}
+    );
+  }
+
+  // Admins: the chips cell itself is the edit trigger (no separate "編集" button).
+  // Clicking anywhere in the cell opens the inline role checklist. stopPropagation
+  // keeps the click from bubbling to the row's onRowClick (right-hand pane).
+  return (
+    <div style={cellStyle} data-testid={`fe7-user-roles-${user.id}`} onClick={(e) => e.stopPropagation()}>
+      <Popover
+        placement="bottom"
+        testId={`fe7-inline-role-edit-${user.id}`}
+        trigger={<span aria-label="ロールを編集">{chips}</span>}
+      >
+        <RolePopoverPanel user={user} roles={roles} currentUserId={currentUserId} />
+      </Popover>
     </div>
   );
 }
