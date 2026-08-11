@@ -65,11 +65,12 @@ export const TEST_USERS: Record<TestUserKey, TestUser> = {
   outsider: { key: "outsider", userId: "usr_outsider00000000000000000", orgId: OTHER_ORG, email: "outsider@other.test", displayName: "Outsider" },
 };
 
-// Demo self-owned accounts (seeded in both identity-roster and auth-service KV).
-// Local demo passwords only — deliberately simple; never a real secret.
+// Demo self-owned accounts. Emails MUST match identity-roster's seedDemoUsers
+// (the login allowlist resolves them to ACTIVE roster users) — otherwise the
+// roster allowlist would 403 them. Local demo passwords only; never a real secret.
 export const DEMO_LOGINS: Record<string, string> = {
-  "admin@dub.local": "demo-admin-pw",
-  "member@dub.local": "demo-member-pw",
+  "admin@developershub.jp": "demo-admin-pw",
+  "member@developershub.jp": "demo-member-pw",
 };
 
 // ---- shared in-memory stores (cross-service side effects observed here) ----

@@ -135,6 +135,19 @@ export class IdentityService {
     return this.toIdentityUser(user, assignments);
   }
 
+  /** Read-only lookup by email for the auth-service login allowlist. Returns the
+   *  canonical roster user (ANY status) or null when the email is not on the
+   *  roster. Unlike provision() this has NO side effects (it never activates an
+   *  invited user) — auth-service enforces the active-only allowlist on the result. */
+  async lookupByEmail(orgId: string, email: string): Promise<{ user: identity.IdentityUser | null }> {
+    const normalized = (email ?? "").trim().toLowerCase();
+    if (!normalized) return { user: null };
+    const user = await this.d.repo.getUserByEmail(orgId, normalized);
+    if (!user) return { user: null };
+    const assignments = await this.d.repo.listAssignmentsByUser(user.id, orgId);
+    return { user: this.toIdentityUser(user, assignments) };
+  }
+
   // ---------- invite / provision ----------
   async invite(orgId: string, req: { email: string; displayName?: string; roleIds?: string[] }, ctx: RequestCtx): Promise<InviteUserResponse> {
     const email = requireEmail(req.email);

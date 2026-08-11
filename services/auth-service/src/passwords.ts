@@ -66,10 +66,61 @@ export async function verifyPassword(password: string, encoded: string): Promise
   }
 }
 
+// ---- reversible encryption for admin password viewing (#5c) ----------------
+// The user has accepted (decision B) that an identity:admin may read a user's
+// password. To avoid ever storing plaintext, the password is ALSO kept as an
+// AES-256-GCM ciphertext under a server-held key (Worker secret PASSWORD_ENC_KEY,
+// base64 of 32 bytes). LOGIN never decrypts — it verifies the PBKDF2 hash; only the
+// admin view endpoint decrypts. Ciphertext is self-describing so the scheme can
+// evolve: enc$v1$<ivB64url>$<cipherB64url>.
+const ENC_VERSION = "v1";
+const IV_BYTES = 12;
+
+async function importEncKey(keyB64: string): Promise<CryptoKey> {
+  // Accept standard- or url-base64 for the secret; decode to raw 32 bytes.
+  const raw = fromBase64Url(keyB64.trim().replace(/\+/g, "-").replace(/\//g, "_"));
+  if (raw.length !== 32) throw new Error("PASSWORD_ENC_KEY must decode to 32 bytes (AES-256)");
+  return crypto.subtle.importKey("raw", raw as unknown as BufferSource, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+/** Encrypt a plaintext secret with AES-256-GCM under the server key (self-describing). */
+export async function encryptSecret(plaintext: string, keyB64: string): Promise<string> {
+  const key = await importEncKey(keyB64);
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as unknown as BufferSource }, key, new TextEncoder().encode(plaintext)),
+  );
+  return `enc$${ENC_VERSION}$${toBase64Url(iv)}$${toBase64Url(ct)}`;
+}
+
+/** Decrypt a ciphertext produced by encryptSecret. Throws on a bad key / tamper. */
+export async function decryptSecret(encoded: string, keyB64: string): Promise<string> {
+  const parts = encoded.split("$");
+  if (parts.length !== 4 || parts[0] !== "enc" || parts[1] !== ENC_VERSION) throw new Error("malformed ciphertext");
+  const key = await importEncKey(keyB64);
+  const iv = fromBase64Url(parts[2]!);
+  const ct = fromBase64Url(parts[3]!);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as unknown as BufferSource }, key, ct as unknown as BufferSource);
+  return new TextDecoder().decode(pt);
+}
+
+const PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"; // no look-alikes
+/** Cryptographically-random password for admin-issued initial/reset credentials. */
+export function generatePassword(length = 20): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  let out = "";
+  for (const b of bytes) out += PW_ALPHABET[b % PW_ALPHABET.length];
+  return out;
+}
+
 export interface StoredCredential {
   email: string; // normalized (lowercased) email
-  hash: string; // encoded PBKDF2 form — never plaintext
+  hash: string; // encoded PBKDF2 form — never plaintext (login verification)
+  enc?: string; // AES-GCM ciphertext of the plaintext (admin view #5c); absent = not viewable
   createdAt: string; // ISO-8601
+  updatedAt?: string; // ISO-8601 of the last set/reset
+  setBy?: string; // actor userId who set it (admin) or "self"; unset for seeded/demo creds
+  mustChange?: boolean; // true when an admin issued an initial/reset password
 }
 
 export function normalizeEmail(email: string): string {
@@ -103,6 +154,36 @@ export async function seedPasswordCredential(store: PasswordStore, email: string
   const normalized = normalizeEmail(email);
   const hash = await hashPassword(password);
   await store.put({ email: normalized, hash, createdAt: now() });
+}
+
+export interface SetCredentialParams {
+  email: string;
+  password: string;
+  encKey?: string; // when set, the plaintext is also stored AES-GCM-encrypted (admin view)
+  setBy?: string; // actor userId (admin) or "self"
+  mustChange?: boolean; // mark an admin-issued initial/reset password
+  now?: () => string;
+}
+
+/** Set (or reset) a credential: a PBKDF2 hash for login PLUS, when an encryption key
+ *  is provided, an AES-GCM copy of the plaintext for the admin view endpoint (#5c).
+ *  createdAt is preserved across resets; updatedAt tracks the last change. */
+export async function setCredential(store: PasswordStore, params: SetCredentialParams): Promise<void> {
+  const now = params.now ?? (() => new Date().toISOString());
+  const email = normalizeEmail(params.email);
+  const existing = await store.get(email);
+  const hash = await hashPassword(params.password);
+  const enc = params.encKey ? await encryptSecret(params.password, params.encKey) : undefined;
+  const cred: StoredCredential = {
+    email,
+    hash,
+    ...(enc ? { enc } : {}),
+    createdAt: existing?.createdAt ?? now(),
+    updatedAt: now(),
+    ...(params.setBy ? { setBy: params.setBy } : {}),
+    ...(params.mustChange !== undefined ? { mustChange: params.mustChange } : {}),
+  };
+  await store.put(cred);
 }
 
 // Demo login credentials for the 3 company-domain accounts (admin / maintainer /
