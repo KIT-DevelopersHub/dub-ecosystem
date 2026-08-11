@@ -1,11 +1,13 @@
 import type { identity } from "@dub/types";
-import { Badge } from "@dub/ui";
+import { Badge, Switch } from "@dub/ui";
 import { groupByDomain, toggleDomain, togglePermission, domainSelectionState, type CatalogEntry } from "../lib/permissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../lib/permissionLabels";
 
 // Design-system tokens (@dub/tokens) with literal fallbacks so the matrix still
-// reads correctly if a token is ever absent. Enabled rows get a success tint so
-// on/off is legible at a glance, not only from the checkbox.
+// reads correctly if a token is ever absent. Each permission is an on/off toggle
+// (@dub/ui Switch) with an always-visible plain-Japanese description underneath, so
+// even non-obvious keys explain what turning them on grants. Enabled rows get a
+// success tint so on/off is legible at a glance, not only from the toggle.
 const cardStyle: React.CSSProperties = {
   border: "1px solid var(--dub-color-border-default, #dde1e9)",
   borderRadius: 8,
@@ -18,15 +20,25 @@ const groupTitleStyle: React.CSSProperties = { fontWeight: 700, fontSize: 15 };
 const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 13 };
 const rowBaseStyle: React.CSSProperties = {
   display: "flex",
-  gap: 8,
-  alignItems: "center",
-  padding: "6px 8px",
+  gap: 10,
+  alignItems: "flex-start",
+  padding: "8px 8px",
   borderRadius: 6,
 };
 const rowOnStyle: React.CSSProperties = { background: "var(--dub-color-success-50, #ecfdf3)" };
-const labelTextStyle: React.CSSProperties = { flex: 1 };
-const dangerousStyle: React.CSSProperties = { color: "var(--dub-color-danger-600, #d92d20)" };
-const keyHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12, marginLeft: 6 };
+const switchWrapStyle: React.CSSProperties = { flex: 1, minWidth: 0 };
+const labelBlockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2, minWidth: 0 };
+const labelLineStyle: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" };
+const nameStyle: React.CSSProperties = { fontWeight: 600, fontSize: 14 };
+const dangerousNameStyle: React.CSSProperties = { ...nameStyle, color: "var(--dub-color-danger-600, #d92d20)" };
+const descStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12.5, lineHeight: 1.45 };
+const keyHintStyle: React.CSSProperties = {
+  color: "var(--dub-color-text-muted, #6f7a90)",
+  fontSize: 11,
+  fontFamily: "var(--dub-font-family-mono, monospace)",
+};
+const lockHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 11, fontWeight: 600 };
+const badgeWrapStyle: React.CSSProperties = { flex: "none", paddingTop: 1 };
 
 export function PermissionMatrix({
   catalog,
@@ -43,8 +55,8 @@ export function PermissionMatrix({
   // testid namespace. Default "fe7" (single matrix per screen). Inline editors on the
   // role list pass a per-role prefix so multiple matrices never collide on the page.
   idPrefix?: string;
-  // Keys that stay checked and cannot be toggled off even when the rest of the matrix
-  // is editable — e.g. identity:admin on the admin role (self-lockout guard).
+  // Keys that stay on and cannot be toggled off even when the rest of the matrix is
+  // editable — e.g. identity:admin on the admin role (self-lockout guard).
   lockedKeys?: readonly identity.PermissionKey[];
 }) {
   const groups = groupByDomain(catalog);
@@ -77,26 +89,41 @@ export function PermissionMatrix({
             {g.entries.map((e) => {
               const key = e.key as identity.PermissionKey;
               const checked = selected.includes(key);
+              const isLocked = locked.has(key);
+              const description = permissionDescription(e.key, e.description);
               return (
-                <label key={e.key} style={{ ...rowBaseStyle, ...(checked ? rowOnStyle : null) }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={disabled || locked.has(key)}
-                    onChange={() => onChange(togglePermission(selected, key))}
-                    data-testid={`${idPrefix}-matrix-key-${e.key}`}
-                  />
-                  <span style={labelTextStyle}>
-                    <span style={e.dangerous ? dangerousStyle : undefined} title={permissionDescription(e.key, e.description)}>
-                      {permissionLabel(e.key, e.name)}
-                      {e.dangerous ? " ⚠" : ""}
-                    </span>
-                    <span style={keyHintStyle}>{e.key}</span>
+                <div key={e.key} style={{ ...rowBaseStyle, ...(checked ? rowOnStyle : null) }}>
+                  <div style={switchWrapStyle}>
+                    <Switch
+                      id={`${idPrefix}-sw-${e.key}`}
+                      checked={checked}
+                      disabled={disabled || isLocked}
+                      onChange={() => onChange(togglePermission(selected, key))}
+                      testId={`${idPrefix}-matrix-key-${e.key}`}
+                      label={
+                        <span style={labelBlockStyle}>
+                          <span style={labelLineStyle}>
+                            <span style={e.dangerous ? dangerousNameStyle : nameStyle}>
+                              {permissionLabel(e.key, e.name)}
+                              {e.dangerous ? " ⚠" : ""}
+                            </span>
+                            <span style={keyHintStyle}>{e.key}</span>
+                            {isLocked ? <span style={lockHintStyle}>🔒 固定</span> : null}
+                          </span>
+                          <span style={descStyle} data-testid={`${idPrefix}-matrix-desc-${e.key}`}>
+                            {description}
+                            {isLocked ? "（締め出し防止のため外せません）" : ""}
+                          </span>
+                        </span>
+                      }
+                    />
+                  </div>
+                  <span style={badgeWrapStyle}>
+                    <Badge tone={checked ? "success" : "neutral"} testId={`${idPrefix}-matrix-state-${e.key}`}>
+                      {checked ? "オン" : "オフ"}
+                    </Badge>
                   </span>
-                  <Badge tone={checked ? "success" : "neutral"} testId={`${idPrefix}-matrix-state-${e.key}`}>
-                    {checked ? "オン" : "オフ"}
-                  </Badge>
-                </label>
+                </div>
               );
             })}
           </fieldset>
