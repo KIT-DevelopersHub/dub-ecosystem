@@ -29,7 +29,8 @@
       "@dub/freeq": ["packages/freeq/src/index.ts"],
       "@dub/auth-client": ["packages/auth-client/src/index.ts"],
       "@dub/tokens": ["packages/tokens/src/index.ts"],
-      "@dub/tokens/css": ["packages/tokens/src/css.ts"]
+      "@dub/tokens/css": ["packages/tokens/src/css.ts"],
+      "@dub/app-ui": ["packages/app-ui/src/index.ts"]
     }
   }
 }
