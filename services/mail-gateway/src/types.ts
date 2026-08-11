@@ -7,6 +7,7 @@ import type { Queue } from "@cloudflare/workers-types";
 import type { DbClient } from "@dub/db";
 import type { RequestContext } from "@dub/http";
 import type { MailProvider } from "./provider";
+import type { MailBlobStore } from "./attachments";
 import type { RetryOptions } from "./retry";
 
 // The publish targets publishEvent(env, ...) needs: keyed by the frozen queue binding
@@ -33,6 +34,9 @@ export interface SendDeps {
   /** Retry budget for the provider call (transient failures only). Optional — the send
    *  core falls back to the built-in defaults when absent (tests omit it). */
   retry?: Pick<RetryOptions, "maxAttempts" | "baseDelayMs">;
+  /** Attachment body store (R2). Absent => attachments are rejected at validation and
+   *  never stored (feature degrades loudly, never silently drops a file). */
+  blobs?: MailBlobStore;
 }
 
 export interface InboundDeps {
@@ -41,6 +45,9 @@ export interface InboundDeps {
   audit: AuditEnv;
   orgId: string;
   ctx: RequestContext;
+  /** Attachment body store (R2). Absent => inbound attachment extraction is skipped
+   *  (headers/snippet/body ingest is unchanged). */
+  blobs?: MailBlobStore;
 }
 
 // Normalized inbound message parsed from a raw RFC822 message (Email Routing).

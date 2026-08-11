@@ -4,12 +4,13 @@
 // allowlist sanitizer (sanitize.tsx) before it ever touches the DOM. Read/unread is
 // shown per message via a Badge; the list marks messages read on open (InboxScreen).
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Button, Card, Divider, ErrorState, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
+import { Badge, Button, Card, Divider, ErrorState, PageHeader, SkeletonLoader, Stack, useToast } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
 import { sanitizeHtml } from "./sanitize.tsx";
+import { formatBytes, saveBlob } from "./mailApi.tsx";
 
 function formatReceived(iso: string): string {
   const d = new Date(iso);
@@ -37,6 +38,33 @@ function MessageBody({ message }: { message: mail.MailMessageDetail }): JSX.Elem
   return <em data-testid="fe2-mail-body-empty">(本文なし)</em>;
 }
 
+/** Attachment list: each row fetches the R2 body via the session-authorized MailApi and
+ *  triggers a browser download (works behind the cookie session + 401 refresh). */
+function Attachments({ message }: { message: mail.MailMessageDetail }): JSX.Element | null {
+  const mailApi = useMailApi();
+  const toast = useToast();
+  const attachments = message.attachments ?? [];
+  if (attachments.length === 0) return null;
+  const download = async (att: mail.MailAttachment): Promise<void> => {
+    try {
+      const blob = await mailApi.downloadAttachment("messages", message.id, att.id);
+      saveBlob(blob, att.filename);
+    } catch {
+      toast.show({ kind: "error", title: "添付ファイルをダウンロードできませんでした。" });
+    }
+  };
+  return (
+    <Stack gap={1} testId="fe2-mail-attachments">
+      <small>添付ファイル ({attachments.length})</small>
+      {attachments.map((a) => (
+        <Button key={a.id} variant="secondary" testId="fe2-mail-attachment" onClick={() => void download(a)}>
+          {a.filename} ({formatBytes(a.sizeBytes)})
+        </Button>
+      ))}
+    </Stack>
+  );
+}
+
 function MessageCard({ message }: { message: mail.MailMessageDetail }): JSX.Element {
   return (
     <Card testId="fe2-mail-thread-message">
@@ -49,6 +77,7 @@ function MessageCard({ message }: { message: mail.MailMessageDetail }): JSX.Elem
         <small>{formatReceived(message.receivedAt)}</small>
         <Divider />
         <MessageBody message={message} />
+        <Attachments message={message} />
       </Stack>
     </Card>
   );

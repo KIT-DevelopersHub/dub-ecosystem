@@ -95,6 +95,13 @@ export function formatAddress(a: mail.MailAddress): string {
 }
 
 // ---- outbound MIME assembly ----
+/** A ready-to-attach outbound file: metadata + already-base64 bytes. */
+export interface OutboundAttachment {
+  filename: string;
+  contentType: string;
+  contentBase64: string; // standard-alphabet base64 of the raw bytes
+}
+
 export interface AssembleInput {
   from: string;
   to: mail.MailAddress[];
@@ -106,6 +113,7 @@ export interface AssembleInput {
   inReplyTo: string | null; // without angle brackets
   date?: string; // RFC822 date; defaults to now
   loopHeaders?: mail.MailLoopHeaders;
+  attachments?: OutboundAttachment[]; // wrapped in multipart/mixed when present
 }
 
 function part(mime: string, body: string): string {
@@ -115,7 +123,35 @@ function chunk76(b64: string): string {
   return (b64.match(/.{1,76}/g) ?? [b64]).join("\r\n");
 }
 
-/** Assemble an RFC822 message. multipart/alternative when htmlBody is present. */
+/** One attachment part (base64, Content-Disposition: attachment). */
+function attachmentPart(a: OutboundAttachment): string {
+  const name = encodeHeaderWord(a.filename).replace(/"/g, "");
+  const ct = a.contentType || "application/octet-stream";
+  return (
+    `Content-Type: ${ct}; name="${name}"\r\n` +
+    `Content-Transfer-Encoding: base64\r\n` +
+    `Content-Disposition: attachment; filename="${name}"\r\n\r\n` +
+    `${chunk76(a.contentBase64.replace(/\s+/g, ""))}`
+  );
+}
+
+/** The body section (self-contained MIME part incl. its own Content-Type). Nested inside
+ *  multipart/mixed when attachments are present; otherwise inlined by assembleMime. */
+function bodySection(input: AssembleInput): string {
+  if (input.htmlBody) {
+    const alt = `--_dubalt_${input.messageId}`;
+    return (
+      `Content-Type: multipart/alternative; boundary="${alt}"\r\n\r\n` +
+      `--${alt}\r\n${part("text/plain", input.textBody)}\r\n` +
+      `--${alt}\r\n${part("text/html", input.htmlBody)}\r\n` +
+      `--${alt}--\r\n`
+    );
+  }
+  return part("text/plain", input.textBody);
+}
+
+/** Assemble an RFC822 message. multipart/alternative when htmlBody is present, wrapped in
+ *  multipart/mixed when attachments are present (body part first, then each file). */
 export function assembleMime(input: AssembleInput): string {
   const h: string[] = [];
   h.push(`From: ${input.from}`);
@@ -134,6 +170,16 @@ export function assembleMime(input: AssembleInput): string {
   const autoSub = input.loopHeaders?.["auto-submitted"];
   if (autoSub) h.push(`Auto-Submitted: ${autoSub}`);
 
+  const atts = input.attachments ?? [];
+  if (atts.length > 0) {
+    const mixed = `--_dubmix_${input.messageId}`;
+    h.push(`Content-Type: multipart/mixed; boundary="${mixed}"`);
+    let body = `--${mixed}\r\n${bodySection(input)}\r\n`;
+    for (const a of atts) body += `--${mixed}\r\n${attachmentPart(a)}\r\n`;
+    body += `--${mixed}--\r\n`;
+    return `${h.join("\r\n")}\r\n\r\n${body}`;
+  }
+
   if (input.htmlBody) {
     const boundary = `--_dub_${input.messageId}`;
     h.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
@@ -151,8 +197,9 @@ export interface RawInbound {
   from: string; // envelope/header From
   to: string; // envelope To (the destination address)
   headers: Record<string, string>; // lowercased header names -> value
-  rawText: string; // raw RFC822 (headers + body); used only for the snippet
+  rawText: string; // raw RFC822 prefix (headers + body); used only for snippet/body
   rawSize: number;
+  rawFull?: string; // full (capped) RFC822 buffer for attachment extraction (R2-bound only)
 }
 
 function stripAngle(id: string): string {
@@ -341,4 +388,99 @@ export function headersToMap(headers: { forEach: (cb: (v: string, k: string) => 
     map[k.toLowerCase()] = v;
   });
   return map;
+}
+
+// ---- inbound attachment extraction (MIME multipart) ----
+// Reuses the block/header/multipart helpers above (splitHeadersBody, splitMultipart) and
+// adds a BYTES decoder (attachments are binary, so decodeCte's string path is unusable).
+export interface ExtractedAttachment {
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
+}
+export interface ExtractLimits {
+  maxCount: number;
+  maxBytesPerFile: number;
+  maxTotalBytes: number;
+}
+
+/** Extract a parameter value from a structured header (boundary / filename / name).
+ *  Handles quoted and bare forms; decodes RFC2047 words in the value. */
+function headerParam(value: string | undefined, name: string): string | null {
+  if (!value) return null;
+  const re = new RegExp(`;\\s*${name}\\s*=\\s*(?:"([^"]*)"|([^;\\s]+))`, "i");
+  const m = re.exec(value);
+  const raw = m ? (m[1] ?? m[2] ?? null) : null;
+  return raw !== null ? decodeHeaderWord(raw) : null;
+}
+
+/** Content-Type mediatype (lowercased, params stripped). */
+function mediaType(value: string | undefined): string {
+  return (value ?? "text/plain").split(";")[0]!.trim().toLowerCase();
+}
+
+/** Decode a leaf part body to raw BYTES by its Content-Transfer-Encoding. */
+function decodePartBytes(body: string, cte: string): Uint8Array {
+  const enc = (cte || "7bit").trim().toLowerCase();
+  if (enc === "base64") return b64decodeToBytes(body);
+  if (enc === "quoted-printable") {
+    const s = body.replace(/=\r?\n/g, ""); // soft line breaks
+    const bytes: number[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i] as string;
+      if (ch === "=" && /^[0-9A-Fa-f]{2}$/.test(s.slice(i + 1, i + 3))) {
+        bytes.push(parseInt(s.slice(i + 1, i + 3), 16));
+        i += 2;
+        continue;
+      }
+      bytes.push(ch.charCodeAt(0) & 0xff);
+    }
+    return new Uint8Array(bytes);
+  }
+  // 7bit / 8bit / binary / none: raw octets from the char codes.
+  const out = new Uint8Array(body.length);
+  for (let i = 0; i < body.length; i++) out[i] = body.charCodeAt(i) & 0xff;
+  return out;
+}
+
+/** Recursively walk a MIME entity, collecting attachment leaves (Content-Disposition:
+ *  attachment, or any non-text leaf carrying a filename). Bounded by ExtractLimits. */
+function walkForAttachments(block: string, out: ExtractedAttachment[], limits: ExtractLimits, state: { total: number }, depth: number): void {
+  if (depth > 12 || out.length >= limits.maxCount) return;
+  const { headers, body } = splitHeadersBody(block);
+  const ctype = headers["content-type"];
+  const media = mediaType(ctype);
+
+  if (media.startsWith("multipart/")) {
+    const boundary = headerParam(ctype, "boundary");
+    if (!boundary) return;
+    for (const p of splitMultipart(body, boundary)) {
+      if (out.length >= limits.maxCount) break;
+      walkForAttachments(p, out, limits, state, depth + 1);
+    }
+    return;
+  }
+
+  const disposition = (headers["content-disposition"] ?? "").toLowerCase();
+  const filename = headerParam(headers["content-disposition"], "filename") ?? headerParam(ctype, "name");
+  const isAttachment = disposition.startsWith("attachment") || (filename !== null && !media.startsWith("text/"));
+  if (!isAttachment || !filename) return;
+
+  const bytes = decodePartBytes(body.trim(), headers["content-transfer-encoding"] ?? "7bit");
+  if (bytes.byteLength === 0 || bytes.byteLength > limits.maxBytesPerFile) return;
+  if (state.total + bytes.byteLength > limits.maxTotalBytes) return;
+  state.total += bytes.byteLength;
+  out.push({ filename, contentType: media || "application/octet-stream", bytes });
+}
+
+/** Extract attachment parts from a full RFC822 message. Returns [] for a non-multipart or
+ *  attachment-free message. Pure/synchronous (unit-testable without the Worker runtime). */
+export function extractAttachments(rawFull: string, limits: ExtractLimits): ExtractedAttachment[] {
+  const out: ExtractedAttachment[] = [];
+  try {
+    walkForAttachments(rawFull, out, limits, { total: 0 }, 0);
+  } catch {
+    return out; // best-effort: a malformed MIME never breaks ingest
+  }
+  return out;
 }

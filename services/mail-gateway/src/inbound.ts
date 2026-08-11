@@ -11,12 +11,15 @@ import type { mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import {
   decodeHeaderWord,
+  extractAttachments,
   extractBody,
   extractSnippet,
   parseAddress,
   parseAddressList,
 } from "./mime";
 import { insertInbound, newInboundId, seenInbound } from "./repo";
+import { persistAttachments } from "./attachments";
+import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import type { InboundDeps, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
 
@@ -93,6 +96,25 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   if (changes === 0) {
     // lost the race with a concurrent redelivery — already persisted, do not re-publish.
     return { processed: false, message };
+  }
+
+  // Attachments: extract from the full raw MIME (buffered by the email() handler when R2
+  // is bound) and persist bytes->R2 + metadata->D1, keyed to this inbound message row.
+  // Best-effort (persistAttachments logs per-file failures); ingest already succeeded.
+  if (deps.blobs && raw.rawFull) {
+    const extracted = extractAttachments(raw.rawFull, {
+      maxCount: MAX_ATTACHMENTS_PER_MESSAGE,
+      maxBytesPerFile: MAX_ATTACHMENT_BYTES,
+      maxTotalBytes: MAX_ATTACHMENTS_TOTAL_BYTES,
+    });
+    if (extracted.length > 0) {
+      await persistAttachments(
+        { db: deps.db, blobs: deps.blobs, orgId: deps.orgId, ctx: deps.ctx },
+        "inbound",
+        message.id,
+        extracted,
+      );
+    }
   }
 
   const event = createEvent(

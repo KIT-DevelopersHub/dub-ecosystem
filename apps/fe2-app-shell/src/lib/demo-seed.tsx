@@ -158,6 +158,14 @@ const NOTIFICATIONS: notification.InboxItem[] = [
 ];
 
 // ── mail ────────────────────────────────────────────────────────────────────
+// Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
+const DEMO_MAIL_BLOBS = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
+function seedMailBlob(id: string, filename: string, contentType: string, text: string): mail.MailAttachment {
+  const bytes = new TextEncoder().encode(text);
+  DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
+  return { id, filename, contentType, sizeBytes: bytes.byteLength };
+}
+
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_1", messageId: "<m1@demo>", threadId: "thr_1", from: { email: "hanako@example.com", name: "山田 花子" },
@@ -178,7 +186,11 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
   msg_1: { ...MAIL_LIST[0]!, textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。\n\nよろしくお願いいたします。" },
-  msg_2: { ...MAIL_LIST[1]!, textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。" },
+  msg_2: {
+    ...MAIL_LIST[1]!,
+    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。",
+    attachments: [seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…")],
+  },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
 };
 
@@ -205,8 +217,27 @@ function createMailStore() {
   const received: mail.MailMessageDetail[] = Object.values(MAIL_DETAIL).map((m) => ({ ...m }));
   const sent: mail.MailSentDetail[] = [];
   let seq = 0;
+  let attSeq = 0;
+  const b64ToBytes = (b64: string): Uint8Array => {
+    const bin = atob(b64.replace(/\s+/g, ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
 
   function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
+    // attachment download (messages|sent): stream the stored blob as a file.
+    {
+      const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const blob = DEMO_MAIL_BLOBS.get(decodeURIComponent(m[1]!));
+        if (!blob) return notFound(`GET ${pathname}`);
+        return new Response(blob.bytes as BodyInit, {
+          status: 200,
+          headers: { "content-type": blob.contentType, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(blob.filename)}` },
+        });
+      }
+    }
     // received: list / detail / mark-read (read state persists in-session)
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
       const items: mail.MailMessageListItem[] = received.map(({ textBody, htmlBody, ...li }) => {
@@ -237,6 +268,12 @@ function createMailStore() {
       const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
       const sentAt = new Date().toISOString();
       const providerMessageId = `<demo-${Date.now()}@developershub.jp>`;
+      const attachments: mail.MailAttachment[] = (req.attachments ?? []).map((a) => {
+        const attId = `mailatt_demo_${Date.now().toString(36)}_${attSeq++}`;
+        const bytes = b64ToBytes(a.contentBase64);
+        DEMO_MAIL_BLOBS.set(attId, { filename: a.filename, contentType: a.contentType, bytes });
+        return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
+      });
       const detail: mail.MailSentDetail = {
         id,
         from: { email: "demo@developershub.jp", name: "デモ 管理者" },
@@ -250,6 +287,7 @@ function createMailStore() {
         status: "sent",
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       };
       sent.unshift(detail);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };

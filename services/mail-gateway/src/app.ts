@@ -18,11 +18,12 @@ import { DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
 import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
-import { buildDb, buildSendDeps } from "./deps";
+import { buildBlobs, buildDb, buildSendDeps } from "./deps";
+import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
+import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -73,6 +74,7 @@ export function createApp() {
     if (!idempotencyKey) throw new DubError("MAIL_INVALID_REQUEST", "Idempotency-Key header required", { status: 400 });
 
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
+    assertAttachmentsSupported(c, req);
     const requester = c.req.header(HEADERS.caller) ?? userId ?? "unknown";
     const deps = buildSendDeps(c.env, ctx);
     const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
@@ -95,6 +97,7 @@ export function createApp() {
     const ctx = ctxOf(c);
     const idempotencyKey = c.req.header(HEADERS.idempotencyKey) ?? crypto.randomUUID();
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
+    assertAttachmentsSupported(c, req);
     const userId = c.req.header(HEADERS.userId) ?? null;
     const requester = userId ?? "unknown";
     // From resolution:
@@ -125,8 +128,11 @@ export function createApp() {
   });
 
   ext.get("/messages/:id", async (c) => {
-    const msg = await getInboundDetail(dbOf(c), c.req.param("id"));
+    const db = dbOf(c);
+    const msg = await getInboundDetail(db, c.req.param("id"));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
+    const attachments = await attachmentsFor(db, "inbound", msg.id);
+    if (attachments.length > 0) msg.attachments = attachments;
     return c.json(msg satisfies mail.MailMessageDetail);
   });
 
@@ -149,17 +155,49 @@ export function createApp() {
   });
 
   ext.get("/sent/:id", async (c) => {
-    const msg = await getSentDetail(dbOf(c), c.req.param("id"));
+    const db = dbOf(c);
+    const msg = await getSentDetail(db, c.req.param("id"));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `sent message not found: ${c.req.param("id")}`, { status: 404 });
+    const attachments = await attachmentsFor(db, "sent", msg.id);
+    if (attachments.length > 0) msg.attachments = attachments;
     return c.json(msg satisfies mail.MailSentDetail);
   });
 
   ext.get("/threads/:id", async (c) => {
+    const db = dbOf(c);
     const threadId = c.req.param("id");
-    const messages = await listThread(dbOf(c), threadId);
+    const messages = await listThread(db, threadId);
     if (messages.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
+    for (const m of messages) {
+      const attachments = await attachmentsFor(db, "inbound", m.id);
+      if (attachments.length > 0) m.attachments = attachments;
+    }
     return c.json({ id: threadId, messages } satisfies mail.MailThread);
   });
+
+  // ---- attachment download (mail:read). Streams the R2 body with a download disposition.
+  // Scoped by (message kind, message id, attachment id) so a mismatched id 404s. 503 when
+  // the R2 bucket is not bound (feature off — fails loud, never silently serves nothing).
+  const downloadAttachment = (kind: "inbound" | "sent") => async (c: Context<AppBindings>) => {
+    const blobs = buildBlobs(c.env);
+    if (!blobs) throw new DubError("MAIL_ATTACHMENTS_UNCONFIGURED", "attachment storage not configured", { status: 503 });
+    const messageId = c.req.param("id") ?? "";
+    const attId = c.req.param("attId") ?? "";
+    const row = await getAttachment(dbOf(c), kind, messageId, attId);
+    if (!row) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `attachment not found: ${attId}`, { status: 404 });
+    const obj = await blobs.get(row.r2_key);
+    if (!obj) throw new DubError("MAIL_MESSAGE_NOT_FOUND", "attachment body missing", { status: 404 });
+    return new Response(obj.body, {
+      status: 200,
+      headers: {
+        "content-type": row.mime_type || obj.contentType,
+        "content-length": String(obj.size),
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(row.filename)}`,
+      },
+    });
+  };
+  ext.get("/messages/:id/attachments/:attId", downloadAttachment("inbound"));
+  ext.get("/sent/:id/attachments/:attId", downloadAttachment("sent"));
 
   // ---- mailbox admin: mail:admin.
   ext.use("/mailboxes", withAuth("mail:admin"));
@@ -209,6 +247,14 @@ export function createApp() {
   });
 
   return app;
+}
+
+/** Reject a send carrying attachments when the R2 bucket is not bound (feature off) —
+ *  fail loud with a 503 rather than silently dropping the files after "sent". */
+function assertAttachmentsSupported(c: Context<AppBindings>, req: mail.SendMailRequest): void {
+  if (req.attachments && req.attachments.length > 0 && !c.env.R2_MAIL) {
+    throw new DubError("MAIL_ATTACHMENTS_UNCONFIGURED", "attachment storage not configured", { status: 503 });
+  }
 }
 
 /** requireAuth (trusted header) + requirePermission chained on one per-request client. */
