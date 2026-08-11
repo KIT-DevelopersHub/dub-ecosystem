@@ -27,7 +27,14 @@ function fakeAuth(): AuthClient {
 }
 
 function app(h: Harness) {
-  return createApp({ auth: fakeAuth(), service: h.service, publisher: h.publisher, now: fixedNow });
+  const webhookRaw = { get: async () => null } as unknown as import("@cloudflare/workers-types").R2Bucket;
+  return createApp({
+    auth: fakeAuth(),
+    service: h.service,
+    publisher: h.publisher,
+    now: fixedNow,
+    queue: { engine: h.engine, processed: h.stores.processed, webhookRaw },
+  });
 }
 
 function headers(extra?: Record<string, string>): Record<string, string> {
