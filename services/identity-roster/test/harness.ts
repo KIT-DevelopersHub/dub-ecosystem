@@ -67,6 +67,7 @@ export async function makeHarness(): Promise<Harness> {
     githubLogin: null,
     avatarUrl: null,
     status: "active",
+    source: "manual",
     createdAt: now(),
     updatedAt: now(),
   });

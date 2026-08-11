@@ -105,6 +105,7 @@ export async function seedDemoUsers(d: SeedDeps, orgId: string): Promise<SeededD
         githubLogin: null,
         avatarUrl: null,
         status: "active",
+        source: "manual",
         createdAt: now,
         updatedAt: now,
       };

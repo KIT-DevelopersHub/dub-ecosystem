@@ -10,6 +10,7 @@ import type {
   RoleRow,
   UserPage,
   UserRow,
+  UserSource,
 } from "./types";
 
 function pageSlice<T extends { id: string }>(rows: T[], limit: number, cursor?: string): { items: T[]; nextCursor: string | null } {
@@ -71,12 +72,15 @@ export class MemIdentityRepo implements IdentityRepo {
   }
   async updateUser(
     userId: string,
-    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status">>,
+    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source">>,
     updatedAt: string,
   ): Promise<void> {
     const u = this.users.get(userId);
     if (!u) return;
     this.users.set(userId, { ...u, ...patch, updatedAt });
+  }
+  async listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]> {
+    return [...this.users.values()].filter((u) => u.orgId === orgId && u.source === source).map((u) => ({ ...u }));
   }
 
   async getRole(roleId: string): Promise<RoleRow | null> {

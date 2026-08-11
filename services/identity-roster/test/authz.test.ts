@@ -19,7 +19,7 @@ async function seedRole(repo: MemIdentityRepo, id: string, perms: identity.Permi
   await repo.createRole({ id, orgId: ORG, name: id, isSystem: false, permissions: perms, createdAt: TS, updatedAt: TS });
 }
 async function seedUser(repo: MemIdentityRepo, id: string, status: identity.UserStatus = "active", orgId = ORG) {
-  await repo.createUser({ id, orgId, email: `${id}@x.jp`, displayName: id, githubLogin: null, avatarUrl: null, status, createdAt: TS, updatedAt: TS });
+  await repo.createUser({ id, orgId, email: `${id}@x.jp`, displayName: id, githubLogin: null, avatarUrl: null, status, source: "manual", createdAt: TS, updatedAt: TS });
 }
 async function assign(repo: MemIdentityRepo, id: string, userId: string, roleId: string, rt: string | null = null, ri: string | null = null) {
   await repo.createAssignment({ id, userId, roleId, orgId: ORG, resourceType: rt, resourceId: ri, grantedBy: "sys", grantedAt: TS });

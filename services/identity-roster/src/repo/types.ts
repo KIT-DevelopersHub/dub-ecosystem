@@ -4,6 +4,10 @@
 // and are identical regardless of the backing store.
 import type { identity } from "@dub/types";
 
+// Provenance of a roster row. 'email-routing' rows are owned by the Email Routing
+// sync (upsert-by-email); 'manual' rows are invited/provisioned the ordinary way.
+export type UserSource = "manual" | "email-routing";
+
 export interface OrgRow {
   id: string;
   name: string;
@@ -18,6 +22,7 @@ export interface UserRow {
   githubLogin: string | null;
   avatarUrl: string | null;
   status: identity.UserStatus;
+  source: UserSource;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,7 +75,10 @@ export interface IdentityRepo {
   getUserByEmail(orgId: string, email: string): Promise<UserRow | null>;
   listUsers(filter: ListUsersFilter): Promise<UserPage>;
   createUser(row: UserRow): Promise<void>;
-  updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status">>, updatedAt: string): Promise<void>;
+  updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source">>, updatedAt: string): Promise<void>;
+  /** All users in the org with a given provenance (used by the Email Routing sync to
+   *  find rows it owns and logically deactivate the ones no longer present). */
+  listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]>;
 
   // roles
   getRole(roleId: string): Promise<RoleRow | null>;
