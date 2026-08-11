@@ -180,6 +180,10 @@ function sendRowToListItem(r: SendLogRow): mail.MailSentListItem {
   if (cc.length > 0) item.cc = cc;
   if (r.from_address) item.from = { email: r.from_address };
   if (r.provider_message_id) item.providerMessageId = r.provider_message_id;
+  // thread_id is set for replies (= the parent message's id). Surfacing it lets the
+  // client fold a sent reply back into its conversation instead of showing it as a
+  // detached Sent thread (so the reply stays visible in the open thread).
+  if (r.thread_id) item.threadId = r.thread_id;
   return item;
 }
 
@@ -234,6 +238,14 @@ export async function getSentDetail(db: DbClient, id: string, ownerUserId: strin
 export async function seenInbound(db: DbClient, messageId: string): Promise<boolean> {
   const row = await db.first<{ message_id: string }>(`SELECT message_id FROM mail_inbound WHERE message_id = ?`, messageId);
   return row !== null;
+}
+
+/** The received message with this RFC Message-Id, if any. Backs reply-From resolution:
+ *  a reply's inReplyTo points at the parent inbound message, whose recipient mailbox
+ *  (the address the conversation was addressed to, e.g. info@) is the identity the reply
+ *  should go out as. Returns the raw row so callers can read to_json / mailbox. */
+export async function findInboundByMessageId(db: DbClient, messageId: string): Promise<InboundRow | null> {
+  return db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE message_id = ?`, messageId);
 }
 
 /** Persist a normalized inbound message. INSERT OR IGNORE on message_id makes an

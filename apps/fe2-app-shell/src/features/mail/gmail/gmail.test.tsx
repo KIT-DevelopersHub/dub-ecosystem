@@ -205,6 +205,75 @@ describe("GmailApp (hydrates from the gateway)", () => {
     await waitFor(() => expect((api.listSent as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1));
   });
 
+  it("inline reply POSTs to the gateway with In-Reply-To (was a silent no-op before)", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!; // mailin_1 / thr_in_1
+    await userEvent.click(firstRow);
+    // Wait for getThread to fill the body (so `last.messageId` is the real Message-Id).
+    await waitFor(() => expect(screen.getByText(/相談させてください/)).toBeInTheDocument());
+    await userEvent.type(screen.getByTestId("fe2-mail-inline-reply"), "承知しました、対応します。");
+    await userEvent.click(screen.getByTestId("fe2-mail-inline-send"));
+    // The reply is actually SENT (previously ADD_MESSAGE only → nothing left the client).
+    expect(api.send).toHaveBeenCalledTimes(1);
+    const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sent.inReplyTo).toBe("<in1@developershub.jp>"); // threads against the parent
+    expect(sent.subject).toBe("Re: 登壇のご相談");
+    expect(sent.to).toEqual([{ email: "hanako@example.com", name: "山田 花子" }]);
+    expect(sent.textBody).toContain("承知しました");
+    // Re-syncs so the sent reply is server-backed after the round-trip.
+    await waitFor(() => expect((api.listSent as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("keeps a sent reply visible in its conversation and replies to the external correspondent (not ourselves)", async () => {
+    // Sent folder carries our reply, threaded (threadId) into the received conversation.
+    const api = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({ items: [DEMO_INBOX_ITEMS[0]!], nextCursor: null }),
+      listSent: vi.fn().mockResolvedValue({
+        items: [
+          {
+            id: "sent_r",
+            from: { email: "info@developershub.jp" },
+            to: [{ email: "hanako@example.com", name: "山田 花子" }],
+            subject: "Re: 登壇のご相談",
+            snippet: "了解しました。",
+            sentAt: "2026-08-10T02:00:00.000Z",
+            provider: "resend",
+            status: "sent",
+            threadId: "thr_in_1",
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    // getThread returns received-only; the folded reply must survive the refresh.
+    await waitFor(() => expect(screen.getByText("了解しました。")).toBeInTheDocument());
+    // Replying targets the external correspondent (hanako), never our own info@ reply.
+    await userEvent.click(screen.getByTestId("fe2-mail-reply"));
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sent.to).toEqual([{ email: "hanako@example.com", name: "山田 花子" }]);
+    expect(sent.inReplyTo).toBe("<in1@developershub.jp>");
+  });
+
+  it("reply button opens a compose that sends In-Reply-To", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    await waitFor(() => expect(screen.getByText(/相談させてください/)).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("fe2-mail-reply"));
+    expect(screen.getByTestId("fe2-mail-compose-window")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    expect(api.send).toHaveBeenCalledTimes(1);
+    const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sent.inReplyTo).toBe("<in1@developershub.jp>");
+    expect(sent.subject).toBe("Re: 登壇のご相談");
+  });
+
   it("toggles a star from a list row", async () => {
     render(wrap(<GmailApp />));
     const firstStar = (await screen.findAllByTestId("fe2-mail-star"))[0]!;

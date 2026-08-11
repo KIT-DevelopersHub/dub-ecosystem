@@ -92,6 +92,7 @@ export interface MailSentListItem {
   provider: SendMailResponse["provider"];
   providerMessageId?: string;
   status: "sent";
+  threadId?: string; // set for a reply (= parent message id); lets a client thread the reply into its conversation
 }
 /** Sent-folder detail: the list row plus the full body. htmlBody optional (present
  *  only when the send carried an HTML part) and MUST be sanitized before rendering. */

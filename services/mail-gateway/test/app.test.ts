@@ -162,6 +162,39 @@ describe("POST /mail/outbox (user-facing compose)", () => {
     const page = (await listRes.json()) as { items: mail.MailSentListItem[] };
     expect(page.items[0]!.from?.email).toBe("info@developershub.jp");
   });
+
+  it("a REPLY goes out AS the mailbox the parent was addressed to (info@), not the reader's own address, and links the thread", async () => {
+    const { env, raw } = makeEnv({
+      SVC_IDENTITY: fakeIdentityFetcher(true, { usr_admin: { email: "admin@developershub.jp", displayName: "Admin" } }),
+    });
+    // The received message the reply threads against — addressed to the shared info@ box.
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at)
+         VALUES ('mailin_r', 'ext-1@gmail.com', 'ext-1@gmail.com', 'info', ?, ?, 'Hi', 'snip', NULL, NULL, '2026-08-10T00:00:00.000Z', '2026-08-10T00:00:00.000Z', 'hello', NULL, NULL)`,
+      )
+      .run(JSON.stringify({ email: "outsider@gmail.com" }), JSON.stringify([{ email: "info@developershub.jp" }]));
+
+    const replyBody: mail.SendMailRequest = {
+      to: [{ email: "outsider@gmail.com" }],
+      subject: "Re: Hi",
+      textBody: "thanks",
+      inReplyTo: "ext-1@gmail.com",
+    };
+    const send = await app.fetch(
+      new Request("https://svc/mail/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_admin" }), body: JSON.stringify(replyBody) }),
+      env,
+    );
+    expect(send.status).toBe(202);
+    const listRes = await app.fetch(new Request("https://svc/mail/sent", { headers: headers({ "x-dub-user-id": "usr_admin" }) }), env);
+    const page = (await listRes.json()) as { items: mail.MailSentListItem[] };
+    // From = info@ (shared mailbox the mail came in on) so the external reply returns to a
+    // Worker-routed address — NOT admin@ (the reader). threadId links the reply to the thread.
+    expect(page.items[0]!.from?.email).toBe("info@developershub.jp");
+    expect(page.items[0]!.threadId).toBe("ext-1@gmail.com");
+  });
 });
 
 describe("read routes (/mail/messages)", () => {

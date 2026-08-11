@@ -19,7 +19,7 @@ import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
 import { buildDb, buildSendDeps } from "./deps";
-import { resolveUserFromAddress } from "./from";
+import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
@@ -106,10 +106,16 @@ export function createApp() {
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
     const userId = c.req.header(HEADERS.userId) ?? null;
     const requester = userId ?? "unknown";
-    // From = the logged-in user's own @developershub.jp address (roster lookup), with a
-    // safe info@ fallback for non-roster / non-company callers. See from.ts.
-    const fromAddress = await resolveUserFromAddress(c.env, ctx, userId);
-    // Owner = the signed-in user so this send shows only in THEIR Sent folder.
+    // From resolution:
+    //  - a REPLY (inReplyTo present) goes out as the shared mailbox the parent was
+    //    addressed to (e.g. info@), so the external correspondent sees a consistent
+    //    identity AND their reply returns to that Worker-routed address (loop closes).
+    //  - a fresh compose uses the logged-in user's own @developershub.jp address, with a
+    //    safe info@ fallback for non-roster / non-company callers. See from.ts.
+    const fromAddress = req.inReplyTo
+      ? await resolveReplyFromAddress(c.env, ctx, dbOf(c), req.inReplyTo, userId)
+      : await resolveUserFromAddress(c.env, ctx, userId);
+    // Owner = the signed-in user so this send shows only in THEIR Sent folder (#169).
     const deps = buildSendDeps(c.env, ctx, undefined, fromAddress, userId);
     const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
