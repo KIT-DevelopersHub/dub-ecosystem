@@ -133,6 +133,35 @@ describe("POST /mail/outbox (user-facing compose)", () => {
     expect(second.status).toBe(200);
     expect(sends.notif).toHaveLength(1);
   });
+
+  it("sets From to the logged-in user's @developershub.jp address (roster lookup)", async () => {
+    const { env } = makeEnv({
+      SVC_IDENTITY: fakeIdentityFetcher(true, { usr_alice: { email: "alice@developershub.jp", displayName: "Alice" } }),
+    });
+    const send = await app.fetch(
+      new Request("https://svc/mail/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify(sendBody) }),
+      env,
+    );
+    expect(send.status).toBe(202);
+    // The Sent folder projects the send-log's stored From — assert it is the user's address.
+    const listRes = await app.fetch(new Request("https://svc/mail/sent", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    const page = (await listRes.json()) as { items: mail.MailSentListItem[] };
+    expect(page.items[0]!.from?.email).toBe("alice@developershub.jp");
+  });
+
+  it("falls back to info@ when the caller is not a @developershub.jp roster member", async () => {
+    const { env } = makeEnv({
+      SVC_IDENTITY: fakeIdentityFetcher(true, { usr_ext: { email: "outsider@gmail.com" } }),
+    });
+    const send = await app.fetch(
+      new Request("https://svc/mail/outbox", { method: "POST", headers: headers({ "x-dub-user-id": "usr_ext" }), body: JSON.stringify(sendBody) }),
+      env,
+    );
+    expect(send.status).toBe(202);
+    const listRes = await app.fetch(new Request("https://svc/mail/sent", { headers: headers({ "x-dub-user-id": "usr_ext" }) }), env);
+    const page = (await listRes.json()) as { items: mail.MailSentListItem[] };
+    expect(page.items[0]!.from?.email).toBe("info@developershub.jp");
+  });
 });
 
 describe("read routes (/mail/messages)", () => {

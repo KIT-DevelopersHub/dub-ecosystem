@@ -27,14 +27,22 @@ export function buildAuditEnv(env: Env): AuditEnv {
   return { AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue(env.DB, AUDIT_TOPIC) };
 }
 
-export function buildSendDeps(env: Env, ctx: RequestContext, provider: MailProvider = buildProvider(env)): SendDeps {
+export function buildSendDeps(
+  env: Env,
+  ctx: RequestContext,
+  provider: MailProvider = buildProvider(env),
+  // Optional From override. The user-facing /outbox lane resolves the caller's own
+  // @developershub.jp address and passes it here; internal/system sends omit it and
+  // keep the configured default (info@…).
+  fromOverride?: string,
+): SendDeps {
   return {
     db: buildDb(env, ctx.requestId),
     provider,
     events: eventEnv(env),
     audit: buildAuditEnv(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
-    fromAddress: env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
+    fromAddress: fromOverride ?? env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ctx,
     retry: sendRetryOptions(env),
   };
