@@ -16,16 +16,26 @@
     "db:lint": "pnpm --filter @dub/infra-d1 d1:lint",
     "db:migrate": "pnpm --filter @dub/infra-d1 d1:migrate",
     "db:seed": "pnpm --filter @dub/infra-d1 d1:seed",
-    "db:reset": "pnpm --filter @dub/infra-d1 d1:reset"
+    "db:reset": "pnpm --filter @dub/infra-d1 d1:reset",
+    "dev:seed": "node --import tsx scripts/local/seed-local.ts",
+    "dev:core": "node scripts/local/dev.mjs core",
+    "dev:auth": "node scripts/local/dev.mjs auth",
+    "dev:identity": "node scripts/local/dev.mjs identity",
+    "dev:mail": "node scripts/local/dev.mjs mail",
+    "dev:gateway": "node scripts/local/dev.mjs gateway",
+    "dev:fe2": "pnpm --filter @dub/fe2-app-shell dev",
+    "dev:list": "node scripts/local/dev.mjs --list"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
     "@types/node": "^22.10.2",
     "hono": "^4.6.14",
     "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "wrangler": "^4.42.0"
   }
 }

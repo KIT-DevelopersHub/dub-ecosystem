@@ -6,5 +6,8 @@ coverage/
 .DS_Store
 .env
 .env.*
+!.env*.example
 .dev.vars
 .wrangler/
+# shared miniflare local D1/KV state for `pnpm dev:*` (see LOCAL_DEV.md)
+.wrangler-local/

@@ -38,10 +38,10 @@ const handler = {
 };
 
 export default handler;
-export { createApp } from "./app";
-export { IdentityService } from "./service";
-export { MemIdentityRepo } from "./repo/mem-repo";
-export { D1IdentityRepo } from "./repo/d1-repo";
-export { seedReferenceData, seedDemoUsers, DEMO_USERS } from "./seed";
-export { IDENTITY_MIGRATIONS, IDENTITY_SCHEMA_SQL } from "./schema";
 export type { Env } from "./env";
+// NOTE: the Worker entry module must export ONLY the default handler (plus type-only
+// re-exports, which are erased at build). workerd treats every *value* named export of
+// the entry as a named entrypoint and rejects non-handler values (strings/arrays/objects)
+// at `wrangler dev` boot ("not of type function or ExportedHandler"). Tests import the
+// helpers from their own modules (./schema, ./seed, ./service, ./repo/*) directly, so no
+// runtime re-export is needed here.

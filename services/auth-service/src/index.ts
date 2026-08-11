@@ -10,8 +10,11 @@ import { buildDeps } from "./deps";
 import type { Env } from "./env";
 
 export type { Env } from "./env";
-export { hashPassword, verifyPassword, seedPasswordCredential, seedDemoCredentials, DEMO_CREDENTIALS, KvPasswordStore } from "./passwords";
 export type { PasswordStore, StoredCredential } from "./passwords";
+// NOTE: the Worker entry module must export ONLY the default handler (plus type-only
+// re-exports). workerd treats every *value* named export of the entry as a named
+// entrypoint and rejects non-handler values (e.g. DEMO_CREDENTIALS) at `wrangler dev`
+// boot. Password helpers live in ./passwords; import them from there directly.
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
