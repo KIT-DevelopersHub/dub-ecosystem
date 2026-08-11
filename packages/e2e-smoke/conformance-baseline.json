@@ -24,6 +24,19 @@
     ],
     "missingInCode": []
   },
+  "gantt-service": {
+    "missingInSpec": [
+      "POST /internal/events-async"
+    ],
+    "missingInCode": []
+  },
+  "github-sync": {
+    "missingInSpec": [
+      "POST /internal/events-async",
+      "POST /internal/webhooks-async"
+    ],
+    "missingInCode": []
+  },
   "mail-gateway": {
     "missingInSpec": [
       "GET /mail/mailboxes",
