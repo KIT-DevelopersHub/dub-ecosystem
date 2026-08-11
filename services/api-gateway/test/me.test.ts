@@ -39,7 +39,7 @@ describe("GET /api/v1/me", () => {
     const res = await app().fetch(new Request("https://x/api/v1/me", { headers: { authorization: "Bearer t" } }), env, execCtx);
     expect(res.status).toBe(200);
     const body = (await res.json()) as gateway.MeResponse;
-    expect(body.user).toEqual({ id: "usr_1", displayName: "Alice", avatarUrl: null });
+    expect(body.user).toEqual({ id: "usr_1", displayName: "Alice", avatarUrl: null, email: "alice@example.com" });
     expect(body.orgId).toBe("org_devhub");
     expect(body.permissions).toEqual(["event:read", "task:write"]);
     expect(body.sessionExpiresAt).toBe(1_800_000_000_000);

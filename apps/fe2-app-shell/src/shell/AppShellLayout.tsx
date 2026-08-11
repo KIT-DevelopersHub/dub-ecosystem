@@ -18,6 +18,26 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
+// Shorten a long email so the shell title never overflows the header, keeping the
+// domain (the part users scan for) and eliding the local part: `abcdef…@dub.jp`.
+// A pure string transform — the header stays composition-only (visuals are FE1's).
+export function truncateEmail(email: string, maxLen = 30): string {
+  if (email.length <= maxLen) return email;
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return `${email.slice(0, Math.max(1, maxLen - 1))}…`;
+  const domain = email.slice(at); // includes "@"
+  const keep = maxLen - domain.length - 1; // room for the ellipsis
+  if (keep >= 1) return `${email.slice(0, keep)}…${domain}`;
+  return `${email.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
+// Header brand label: the signed-in user's email once /me resolves, else the
+// fallback brand (shown while loading or unauthenticated — never a blank title).
+function headerLabel(auth: ReturnType<typeof useAuth>, fallback: string): string {
+  if (auth.status === "authenticated" && auth.me.user.email) return truncateEmail(auth.me.user.email);
+  return fallback;
+}
+
 export interface AppShellLayoutProps {
   navEntries: NavEntry[];
   headerWidgets?: ComponentType[];
@@ -71,7 +91,7 @@ export function AppShellLayout({
   const header = (
     <PageHeader
       testId="fe2-shell-header"
-      title={title}
+      title={headerLabel(auth, title)}
       actions={
         <>
           <AppLauncher

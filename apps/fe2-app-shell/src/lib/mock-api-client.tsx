@@ -22,7 +22,7 @@ export interface MockSeed {
 
 const DEFAULT_SEED: MockSeed = {
   me: {
-    user: { id: "usr_demo", displayName: "デモ ユーザー", avatarUrl: null },
+    user: { id: "usr_demo", displayName: "デモ ユーザー", avatarUrl: null, email: "demo@developershub.jp" },
     orgId: "org_demo",
     // Broad-but-not-admin permission set so the primary nav + self-service
     // routes render under the mock. Matches PERMISSION_CATALOG keys.

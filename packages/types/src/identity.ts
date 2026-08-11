@@ -77,6 +77,10 @@ export interface UserSummary {
   id: UserId;
   displayName: string;
   avatarUrl: string | null;
+  // Optional (additive): self email for identity display (e.g. shell header).
+  // api-gateway /me populates it from the identity master; other summary
+  // producers (roster search etc.) may omit it.
+  email?: string;
 }
 
 export interface Org {
