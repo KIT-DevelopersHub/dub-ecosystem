@@ -16,8 +16,18 @@
 #
 # The paid wrangler.toml is unchanged (queue-wiring conformance stays green).
 #
+# R2 decision (free tier): the R2_FILES binding is KEPT, not dropped. File bodies are
+# stored in R2 (src/index.ts: `blobs: r2Blobs(env.R2_FILES)`) — dropping the binding would
+# break attachment storage, a core feature. R2 has a genuine free tier (10 GB storage,
+# 1M Class-A + 10M Class-B ops/month), which covers DevHub's scale, so the fix is to
+# ENABLE R2 on the account once and create the bucket — a one-time provisioning step, not a
+# config downgrade. The deploy that was failing ("R2 not enabled") succeeds after the
+# `wrangler r2 bucket create` step below.
+#
 # Deploy:
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: enable R2 on the account (dashboard, free tier) then create the bucket
+#   npx wrangler r2 bucket create dub-file-attachments
 #   # one-time on dub-core (idempotent): business schema + audit outbox table
 #   npx wrangler d1 execute dub-core --remote --file services/file-meta/schema.sql
 #   npx wrangler d1 execute dub-core --remote --file services/file-meta/db/0001_freeq_outbox.sql

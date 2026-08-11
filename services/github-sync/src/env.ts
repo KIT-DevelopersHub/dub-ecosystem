@@ -1,5 +1,5 @@
 // Worker environment bindings (mirror of wrangler.toml).
-import type { D1Database, Queue, R2Bucket, Fetcher } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, Queue, R2Bucket, Fetcher } from "@cloudflare/workers-types";
 import type { DubEventEnvelope, AuditRecordEnvelopeV1, WebhookEventEnvelopeV1 } from "@dub/events";
 
 export interface Env {
@@ -12,6 +12,9 @@ export interface Env {
   // drain.ts). When present (paid deploy, wrangler.toml) the real Queues are used unchanged.
   EVT_NOTIFICATION?: Queue<DubEventEnvelope>;
   AUDIT_QUEUE?: Queue<AuditRecordEnvelopeV1>;
+  // Free-plan reconcile alarm DO (bound only in wrangler.free.toml; absent on paid, where
+  // the Cron Trigger drives reconcile instead). Used by POST /internal/reconcile/kick.
+  RECONCILE_DO?: DurableObjectNamespace;
   // Service bindings
   SVC_TASK: Fetcher;
   SVC_IDENTITY: Fetcher;
