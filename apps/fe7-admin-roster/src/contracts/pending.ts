@@ -45,7 +45,7 @@ export interface RoleAssignment {
 // ---- Email Routing (Cloudflare Email Routing @developershub.jp) ----
 // PENDING contract, OWNED by the Email Routing proxy service (separate agent /
 // unmerged branch). Modeled locally here until it publishes into @dub/types.
-// Gateway boundary: `/api/v1/admin/email-routing/addresses` (each managed address
+// Gateway boundary: `/api/v1/mail/admin/email-routing/addresses` (each managed address
 // maps 1:1 to a Cloudflare Email Routing rule that forwards to `destination`).
 // The org domain is fixed (@developershub.jp); only the local part is editable.
 

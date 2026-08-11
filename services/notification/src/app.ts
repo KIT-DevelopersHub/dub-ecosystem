@@ -19,6 +19,9 @@ import {
   listPreferenceOverrides,
   upsertPreference,
   deletePreference,
+  insertFeedback,
+  listFeedback,
+  markFeedbackRead,
 } from "./repo";
 import { mergedView, defaultEnabled } from "./preferences";
 import {
@@ -26,7 +29,12 @@ import {
   parseListInboxQuery,
   parseReadAll,
   parsePreferencesUpdate,
+  parseCreateFeedback,
+  parseListFeedbackQuery,
 } from "./validation";
+import { makeMailPort, type MailPort } from "./clients";
+import { notifyAdminOfFeedback } from "./feedback";
+import { FEEDBACK_ADMIN_PERMISSION } from "./config";
 import type { IngestInput } from "./types";
 
 interface GetPreferencesResponse {
@@ -38,7 +46,13 @@ interface NotifyResponse {
   deduplicated: boolean;
 }
 
-export function createApp() {
+export interface CreateAppOptions {
+  /** Override the mail port (tests). Defaults to a per-request SVC_MAIL_GATEWAY-backed
+   *  port at runtime, or null when the binding is absent (feedback notify -> skipped). */
+  mail?: MailPort;
+}
+
+export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<AppBindings>();
 
   app.onError(dubErrorHandler({ service: SERVICE_NAME }));
@@ -46,6 +60,8 @@ export function createApp() {
 
   const ctxOf = (c: Context<AppBindings>): RequestContext => c.get("dubCtx");
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, ctxOf(c).requestId);
+  const mailOf = (c: Context<AppBindings>): MailPort | null =>
+    options.mail ?? (c.env.SVC_MAIL_GATEWAY ? makeMailPort(c.env.SVC_MAIL_GATEWAY) : null);
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
@@ -140,6 +156,45 @@ export function createApp() {
     return c.json(res);
   });
 
+  // ---- in-app feedback (widget). POST is any authenticated user; GET/PATCH are the
+  // admin read surface (notif:admin). The gateway routes /api/v1/feedback -> here via
+  // the "feedback" segment bound to SVC_NOTIFICATION.
+  app.use("/feedback", authOnly); // requireAuth for POST + GET (permission on GET below)
+  app.use("/feedback/*", authOnly);
+
+  app.post("/feedback", async (c) => {
+    const userId = getUserId(c);
+    const parsed = parseCreateFeedback(await c.req.json().catch(() => null));
+    const ctx = ctxOf(c);
+    const item = await insertFeedback(dbOf(c), {
+      userId,
+      category: parsed.category ?? "other",
+      message: parsed.message,
+      pageUrl: parsed.page?.url ?? null,
+      pageName: parsed.page?.name ?? null,
+      userAgent: c.req.header("user-agent") ?? null,
+      requestId: ctx.requestId,
+    });
+    // Best-effort admin alert — never blocks the save / 201.
+    await notifyAdminOfFeedback(mailOf(c), ctx, item);
+    const res: notification.CreateFeedbackResponse = { id: item.id, accepted: true };
+    return c.json(res, 201);
+  });
+
+  app.get("/feedback", requireFeedbackAdmin, async (c) => {
+    const q = parseListFeedbackQuery(c.req.query());
+    const page = await listFeedback(dbOf(c), q);
+    return c.json(page satisfies notification.ListFeedbackResponse);
+  });
+
+  app.patch("/feedback/:id/read", requireFeedbackAdmin, async (c) => {
+    const ok = await markFeedbackRead(dbOf(c), c.req.param("id"));
+    if (!ok) {
+      throw new DubError("NOTIF_FEEDBACK_NOT_FOUND", `feedback not found: ${c.req.param("id")}`, { status: 404 });
+    }
+    return c.json({ ok: true });
+  });
+
   return app;
 }
 
@@ -148,4 +203,11 @@ const authOnly: MiddlewareHandler<AppBindings> = async (c, next) => {
   const client = createAuthClient({ identityBinding: c.env.SVC_IDENTITY, serviceName: SERVICE_NAME });
   c.set("authClient", client);
   return client.requireAuth()(c, next);
+};
+
+// Admin gate for the feedback read surface. Runs AFTER authOnly (which sets authClient
+// + authn), so it reuses that per-request client to check notif:admin (identity /authz/check).
+const requireFeedbackAdmin: MiddlewareHandler<AppBindings> = async (c, next) => {
+  const client = c.get("authClient");
+  return client.requirePermission(FEEDBACK_ADMIN_PERMISSION)(c, next);
 };

@@ -27,6 +27,28 @@ describe("users listing & detail", () => {
     expect(res.status).toBe(400);
   });
 
+  it("filters users by role (?role=)", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/identity/users?role=${h.adminRoleId}`, asUser(h.adminId));
+    const body = (await res.json()) as common.Paginated<identity.IdentityUser>;
+    expect(body.items.map((u) => u.id)).toEqual([h.adminId]); // only the admin holds admin role
+  });
+
+  it("also accepts the FE7 roleKey spelling as the role filter", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/identity/users?roleKey=${h.memberRoleId}`, asUser(h.adminId));
+    const body = (await res.json()) as common.Paginated<identity.IdentityUser>;
+    expect(body.items.map((u) => u.id)).toEqual([h.memberId]);
+  });
+
+  it("filters users by free-text q over displayName/email", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/identity/users?q=member@`, asUser(h.adminId));
+    const body = (await res.json()) as common.Paginated<identity.IdentityUser>;
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.id).toBe(h.memberId);
+  });
+
   it("allows a user to read their own detail without identity:read", async () => {
     const h = await makeHarness();
     // strip member's permissions by making them a bare user with no roles

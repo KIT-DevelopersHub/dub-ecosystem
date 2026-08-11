@@ -184,6 +184,86 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /feedback:
+    post:
+      operationId: submitFeedback
+      summary: Submit in-app feedback (widget)
+      tags:
+        - notifications
+      description: |-
+        Any authenticated user. Persists an append-only feedback record and best-effort
+        notifies the admin by email (a mail failure never fails the save). External path:
+        POST /api/v1/feedback.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFeedbackRequest'
+      responses:
+        '201':
+          description: Accepted (stored)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateFeedbackResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    get:
+      operationId: listFeedback
+      summary: List feedback (admin)
+      tags:
+        - notifications
+      description: 'Admin only (notif:admin). Newest-first, cursor-paged. External path: GET /api/v1/feedback.'
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Page of feedback items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFeedback'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /feedback/{id}/read:
+    patch:
+      operationId: markFeedbackRead
+      summary: Mark a feedback item read (admin)
+      tags:
+        - notifications
+      description: 'Admin only (notif:admin). Idempotent. External path: PATCH /api/v1/feedback/{id}/read.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Marked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   schemas:
     Error:
@@ -373,6 +453,93 @@ components:
       properties:
         type:
           type: string
+    FeedbackCategory:
+      type: string
+      enum:
+        - bug
+        - idea
+        - question
+        - other
+    CreateFeedbackRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: 1..4000 chars.
+        category:
+          $ref: '#/components/schemas/FeedbackCategory'
+        page:
+          type: object
+          description: Where the feedback was raised (aids triage).
+          properties:
+            url:
+              type: string
+            name:
+              type: string
+    CreateFeedbackResponse:
+      type: object
+      required:
+        - id
+        - accepted
+      properties:
+        id:
+          type: string
+        accepted:
+          type: boolean
+    FeedbackItem:
+      type: object
+      required:
+        - id
+        - userId
+        - category
+        - message
+        - pageUrl
+        - pageName
+        - readAt
+        - createdAt
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        category:
+          $ref: '#/components/schemas/FeedbackCategory'
+        message:
+          type: string
+        pageUrl:
+          type:
+            - string
+            - 'null'
+        pageName:
+          type:
+            - string
+            - 'null'
+        readAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO8601 UTC
+    PaginatedFeedback:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedbackItem'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
   responses:
     BadRequest:
       description: VALIDATION_FAILED — request body/query invalid; error.details is FieldError[].

@@ -1,0 +1,53 @@
+# Free-tier deploy of identity-roster as `dub-identity-roster` (internal; reached via
+# the api-gateway SVC_IDENTITY binding and by auth-service SVC_IDENTITY — workers.dev
+# disabled). Mirrors the live worker's topology minus paid Cloudflare Queues: the
+# best-effort audit producer (AUDIT_QUEUE) is replaced by a @dub/freeq D1 outbox
+# (freeq_outbox on the shared dub-core DB, bound as OUTBOX_DB). sinks.ts falls back to
+# the outbox shim when AUDIT_QUEUE is absent, so audit records are durably persisted —
+# no longer silently dropped — and a Cron drain (scheduled handler) forwards them to
+# audit-log over SVC_AUDIT (/internal/audit-async). Nothing throws and no identity
+# mutation fails on a missing audit channel.
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the outbox table on dub-core
+#   npx wrangler d1 execute dub-core --remote \
+#     --file services/identity-roster/db/0001_freeq_outbox.sql
+#   npx wrangler deploy --config services/identity-roster/wrangler.free.toml
+name = "dub-identity-roster"
+main = "src/index.ts"
+compatibility_date = "2025-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared core D1 (binding DB). identity-roster owns only the identity_* namespace.
+# database_id is the REAL dub-core D1 (verified via `wrangler d1 list`): dub-core is
+# d663f9c6-… . (60a9b8ab-… is the separate `auth-outbox` DB — NOT dub-core.)
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# @dub/freeq audit outbox. Same physical dub-core D1 as `DB`, bound separately as infra
+# plumbing for the un-namespaced freeq_outbox table (create it once with db/0001…sql).
+[[d1_databases]]
+binding = "OUTBOX_DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# audit-log service binding: the drain forwards outbox rows to POST /internal/audit-async.
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"
+
+# Cron: daily (03:40 UTC). The scheduled handler drains the audit outbox on every tick.
+# The Workers FREE plan caps the account at 5 cron triggers, so this is a single low-rate
+# schedule (audit volume from RBAC mutations is small; rows stay durable between ticks).
+[triggers]
+crons = ["40 3 * * *"]
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"

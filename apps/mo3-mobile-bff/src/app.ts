@@ -13,7 +13,9 @@ import { type RequestContext, type ServiceClient } from "@dub/http";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import { newId } from "@dub/db";
 import type { auth, mobile } from "@dub/types";
+import type { DubEventEnvelope } from "@dub/events";
 import type { Deps } from "./deps";
+import { ingestChangeLogEvent } from "./change-log";
 import { mobileErrors } from "./errors";
 import { toDeviceDto } from "./devices";
 import { buildHome, buildEventOverview } from "./bff";
@@ -275,6 +277,29 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
       { userId, type, payload },
     );
     return c.json(result, 202);
+  });
+
+  // ================= internal: differential-sync change-log landing route =================
+  // Free-tier consumer lane. On the paid plan the dub-q-evt-mobile-bff Queue consumer
+  // (index.ts queue(), same append path) delivers task.*/event.*/action.* events. On the
+  // free plan the publishing services' freeq drains POST each envelope here instead, over
+  // a Service Binding (x-dub-internal marker). Same handler (ingestChangeLogEvent), same
+  // idempotency (ON CONFLICT DO NOTHING on event_id). A non-2xx keeps the upstream outbox
+  // row pending (redelivered later) = no loss. This route only APPENDS the change_log; it
+  // never re-publishes, so no event cycle is reintroduced.
+  app.post("/internal/events-async", async (c) => {
+    requireInternal(c);
+    const body = await readJson<Partial<DubEventEnvelope>>(c);
+    if (typeof body.id !== "string" || body.id.length === 0) {
+      throw errors.validationFailed([{ field: "id", reason: "required" }]);
+    }
+    if (typeof body.name !== "string" || body.name.length === 0) {
+      throw errors.validationFailed([{ field: "name", reason: "required" }]);
+    }
+    // A store failure throws here -> dubErrorHandler returns 5xx -> the upstream freeq row
+    // stays pending and is redelivered (at-least-once), so the event is never dropped.
+    const applied = await ingestChangeLogEvent(deps.changeLogStore, body as DubEventEnvelope);
+    return c.json({ accepted: true, applied }, 202);
   });
 
   return app;

@@ -28,3 +28,17 @@ export const MAX_QUERY_LIMIT = 200;
 
 // The 4 frozen channels (theme4). slack is intentionally excluded.
 export const CHANNELS = ["in_app", "email", "chat", "push"] as const;
+
+// ---- in-app feedback (widget -> admin) ----
+// Closed category vocabulary (mirrors notification.FeedbackCategory).
+export const FEEDBACK_CATEGORIES = ["bug", "idea", "question", "other"] as const;
+export const FEEDBACK_MESSAGE_MAX = 4000;
+export const FEEDBACK_PAGE_URL_MAX = 2048;
+export const FEEDBACK_PAGE_NAME_MAX = 200;
+// Permission gate for the admin read surface (GET /feedback, PATCH …/read).
+export const FEEDBACK_ADMIN_PERMISSION = "notif:admin" as const;
+// Best-effort admin notification recipient. Deliverability depends on domain
+// verification; a send failure never blocks the feedback save.
+export const FEEDBACK_ADMIN_EMAIL = "admin@developershub.jp";
+// Excerpt length for the notification subject "フィードバック: <抜粋>".
+export const FEEDBACK_EXCERPT_LEN = 60;

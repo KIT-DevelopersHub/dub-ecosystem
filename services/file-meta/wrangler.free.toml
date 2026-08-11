@@ -1,0 +1,63 @@
+# Free-tier deploy of file-meta as `dub-file-meta` (internal; reached via the
+# api-gateway SVC_FILE_META service binding — workers.dev disabled). This is the name
+# the gateway routes /api/v1/files/* to.
+#
+# NO paid Cloudflare Queues (free tier):
+#   - Producer: the publishAudit channel (AUDIT_QUEUE) is dropped; index.ts falls back
+#     to a @dub/freeq D1 outbox shim (src/outbox.ts) so audit records are durably
+#     persisted, never dropped. A Cron drain (src/drain.ts) forwards rows to audit-log
+#     (POST /internal/audit-async). file.* domain events have no subscribers, so there
+#     is no domain-event producer to convert.
+#   - Consumer: the EVT_FILE_META queue consumer (drive.* + *.archived) is dropped. Its
+#     handler map is exposed as POST /internal/events-async (x-dub-internal guard); the
+#     producers of those events (drive-proxy / event / task) drain their own deferred
+#     `evt.file-meta` outbox rows to that route over their SVC_* binding, closing the
+#     loop without a Queue. The envelope id is the idempotency key (at-least-once safe).
+#
+# The paid wrangler.toml is unchanged (queue-wiring conformance stays green).
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time on dub-core (idempotent): business schema + audit outbox table
+#   npx wrangler d1 execute dub-core --remote --file services/file-meta/schema.sql
+#   npx wrangler d1 execute dub-core --remote --file services/file-meta/db/0001_freeq_outbox.sql
+#   npx wrangler deploy --config services/file-meta/wrangler.free.toml
+name = "dub-file-meta"
+main = "src/index.ts"
+compatibility_date = "2024-11-27"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1 (file_meta_ namespace + the un-namespaced freeq_outbox on free
+# tier). REAL dub-core id (verified via `wrangler d1 list`): d663f9c6-… .
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# R2 attachment body store (metadata stays in D1; body lives in R2).
+[[r2_buckets]]
+binding = "R2_FILES"
+bucket_name = "dub-file-attachments"
+
+# --- Service bindings (all targets are live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # requireAuth / requirePermission (file:* authz)
+
+[[services]]
+binding = "SVC_DRIVE_PROXY"
+service = "dub-drive-proxy"       # GET /files/:id — drive.* name/mime completion
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# Audit outbox drain Cron (every minute — matches auth-service's audit drain cadence so
+# async audit records reach audit-log promptly). Free plan caps the account at 5 cron
+# triggers; this reuses none of the daily retention schedules.
+[triggers]
+crons = ["* * * * *"]

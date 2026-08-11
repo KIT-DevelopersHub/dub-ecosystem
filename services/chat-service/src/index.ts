@@ -1,54 +1,50 @@
 // Worker entrypoint. Wires the runtime env (D1, Service Bindings, Queues, and the
 // CHAT_ROOM Durable Object) into AppDeps and serves the Hono app; also routes the
-// /ws upgrade straight to the channel's ChatRoom DO. Deploy is out of scope for
-// this unit (only Apply-time IDs in wrangler.toml remain placeholders); this file
-// stays import-clean for `wrangler dev`.
-import type { D1Database, Fetcher, Queue, ExecutionContext, DurableObjectNamespace } from "@cloudflare/workers-types";
+// /ws upgrade straight to the channel's ChatRoom DO. A Cron Trigger drains the free-
+// tier @dub/freeq outbox (replacement for the paid EVT_NOTIFICATION / AUDIT_QUEUE
+// producers). The ChatRoom DO (RT hub) is preserved — SQLite-backed DOs run on the
+// free plan. This file stays import-clean for `wrangler dev`.
+import type { Fetcher, Queue, ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
 import { createServiceClient, type RequestContext } from "@dub/http";
 import { isDubError } from "@dub/errors";
-import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventPublisherEnv } from "@dub/events";
+import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
 import { common, type auditLog } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1ChatRepo } from "./d1-repo";
 import { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
-import { ChatRoom } from "./chat-room-do";
+import { runOutboxDrain } from "./drain";
+import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
+import type { Env } from "./env";
 import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, RealtimePublisher } from "./types";
 
-export interface Env {
-  DB: D1Database;
-  SVC_IDENTITY: Fetcher;
-  SVC_EVENT?: Fetcher;
-  SVC_FILE_META?: Fetcher;
-  EVT_NOTIFICATION?: Queue;
-  AUDIT_QUEUE?: Queue;
-  // ChatRoom DO namespace (RT fanout). Absent in local/preview -> Noop publisher.
-  CHAT_ROOM?: DurableObjectNamespace<ChatRoom>;
-  DUB_DEFAULT_ORG_ID?: string;
-  CHAT_RT_DO_URL_BASE?: string;
-  WS_TICKET_SECRET?: string;
-}
+export type { Env } from "./env";
 
 const DEFAULT_DO_URL_BASE = "wss://chat-rt.developershub.jp/ws/:id";
 // Dev-only fallback secret; production sets WS_TICKET_SECRET via wrangler secret.
 const DEV_WS_SECRET = "dev-insecure-ws-ticket-secret";
 
 function buildPublisher(env: Env): EventPublisher {
+  // Prefer real (paid) Queue bindings when present; otherwise fan out into the
+  // free-tier @dub/freeq D1 outbox so no subscriber's event is dropped.
+  const pubEnv = buildPublisherEnv(env.DB, env as unknown as Partial<Record<string, Queue<DubEventEnvelope>>>);
   return {
     async publish(name, payload, ctx) {
       const envelope = createEvent(name, payload, ctx);
-      await publishEvent(env as unknown as DubEventPublisherEnv, envelope);
+      await publishEvent(pubEnv, envelope);
     },
   };
 }
 
 function buildAudit(env: Env): AuditSink {
+  // Real AUDIT_QUEUE when present, else the freeq outbox — audit is now always
+  // durably persisted (never silently dropped when the queue binding is absent).
+  const auditQueue = (env.AUDIT_QUEUE ?? outboxQueue<AuditRecordEnvelopeV1>(env.DB, AUDIT_TOPIC)) as Queue<AuditRecordEnvelopeV1>;
   return {
     async record(input: auditLog.AuditRecordInput) {
-      if (!env.AUDIT_QUEUE) return; // audit queue optional in local/preview
-      await publishAudit({ AUDIT_QUEUE: env.AUDIT_QUEUE as Queue<AuditRecordEnvelopeV1> }, input);
+      await publishAudit({ AUDIT_QUEUE: auditQueue }, input);
     },
   };
 }
@@ -146,6 +142,24 @@ export default {
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
     const app = createApp(buildDeps(env, requestId));
     return app.fetch(request as unknown as Request) as unknown as Response;
+  },
+
+  // Free-tier Cron drain: forward audit rows to audit-log, defer domain events
+  // (kept durable/pending). On a paid deploy with real Queues this is a harmless
+  // no-op tick (the outbox stays empty). Best-effort: a drain hiccup is logged, not
+  // thrown, so it never trips the scheduled invocation into a retry storm.
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      const result = await runOutboxDrain(env);
+      consoleSink({ level: "info", message: "chat-service outbox drained", service: "chat-service", fields: { ...result } });
+    } catch (err) {
+      consoleSink({
+        level: "error",
+        message: "chat-service outbox drain failed",
+        service: "chat-service",
+        fields: { error: err instanceof Error ? err.message : String(err) },
+      });
+    }
   },
 };
 

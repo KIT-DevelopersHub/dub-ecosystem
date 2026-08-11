@@ -23,7 +23,7 @@ function eventEnv(env: Env): EventPublishEnv {
     EVT_NOTIFICATION: env.EVT_NOTIFICATION ?? outboxQueue(env.DB, TOPIC_NOTIFICATION),
   };
 }
-function auditEnv(env: Env): AuditEnv {
+export function buildAuditEnv(env: Env): AuditEnv {
   return { AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue(env.DB, AUDIT_TOPIC) };
 }
 
@@ -32,7 +32,7 @@ export function buildSendDeps(env: Env, ctx: RequestContext, provider: MailProvi
     db: buildDb(env, ctx.requestId),
     provider,
     events: eventEnv(env),
-    audit: auditEnv(env),
+    audit: buildAuditEnv(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     fromAddress: env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ctx,
@@ -44,7 +44,7 @@ export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
   return {
     db: buildDb(env, ctx.requestId),
     events: eventEnv(env),
-    audit: auditEnv(env),
+    audit: buildAuditEnv(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     ctx,
   };

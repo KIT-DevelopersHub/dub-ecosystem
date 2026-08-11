@@ -9,11 +9,12 @@ import { evaluate, effectiveOrgWidePermissions, type EvalContext } from "./authz
 import { isPermissionKey } from "./permissions";
 import type {
   AssignRoleRequest,
-  AssignRoleResult,
   CreateRoleRequest,
   EffectivePermissionsResponse,
   InviteUserResponse,
   ProvisionUserResponse,
+  RoleAssignmentView,
+  RoleWithMemberCount,
   UpdateRoleRequest,
   UpdateUserRequest,
 } from "./dto";
@@ -54,6 +55,19 @@ export class IdentityService {
     return { id: r.id, orgId: r.orgId, name: r.name, permissions: r.permissions, isSystem: r.isSystem };
   }
 
+  private toAssignmentView(a: AssignmentRow, roleName: string): RoleAssignmentView {
+    return {
+      id: a.id,
+      userId: a.userId,
+      roleId: a.roleId,
+      roleName,
+      resourceType: a.resourceType,
+      resourceId: a.resourceId,
+      grantedBy: a.grantedBy,
+      grantedAt: a.grantedAt,
+    };
+  }
+
   private async loadEvalContext(userId: string, orgId: string): Promise<EvalContext> {
     const user = await this.d.repo.getUser(userId);
     const assignments = user ? await this.d.repo.listAssignmentsByUser(userId, orgId) : [];
@@ -74,18 +88,20 @@ export class IdentityService {
 
   async listUsers(
     orgId: string,
-    opts: { ids?: string[]; status?: identity.UserStatus; limit?: number; cursor?: string },
+    opts: { ids?: string[]; status?: identity.UserStatus; roleId?: string; q?: string; limit?: number; cursor?: string },
   ): Promise<common.Paginated<identity.IdentityUser>> {
     if (opts.ids && opts.ids.length > MAX_IDS) {
       throw errors.validationFailed([{ field: "ids", reason: "too_long", message: `max ${MAX_IDS}` }]);
     }
-    if (opts.ids && opts.ids.length > 0 && (opts.status || opts.cursor)) {
+    if (opts.ids && opts.ids.length > 0 && (opts.status || opts.cursor || opts.roleId || opts.q)) {
       throw errors.validationFailed([{ field: "ids", reason: "exclusive", message: "ids cannot combine with other filters" }]);
     }
     const page = await this.d.repo.listUsers({
       orgId,
       ...(opts.ids ? { ids: opts.ids } : {}),
       ...(opts.status ? { status: opts.status } : {}),
+      ...(opts.roleId ? { roleId: opts.roleId } : {}),
+      ...(opts.q ? { q: opts.q } : {}),
       limit: clampLimit(opts.limit),
       ...(opts.cursor ? { cursor: opts.cursor } : {}),
     });
@@ -218,9 +234,13 @@ export class IdentityService {
   }
 
   // ---------- roles ----------
-  async listRoles(orgId: string, limit?: number, cursor?: string): Promise<common.Paginated<identity.Role>> {
+  async listRoles(orgId: string, limit?: number, cursor?: string): Promise<common.Paginated<RoleWithMemberCount>> {
     const page = await this.d.repo.listRoles(orgId, clampLimit(limit), cursor);
-    return { items: page.items.map((r) => this.toRole(r)), nextCursor: page.nextCursor };
+    const counts = await this.d.repo.roleMemberCounts(orgId);
+    return {
+      items: page.items.map((r) => ({ ...this.toRole(r), memberCount: counts.get(r.id) ?? 0 })),
+      nextCursor: page.nextCursor,
+    };
   }
 
   async createRole(orgId: string, req: CreateRoleRequest, ctx: RequestCtx): Promise<identity.Role> {
@@ -264,7 +284,26 @@ export class IdentityService {
   }
 
   // ---------- assignments ----------
-  async assignRole(userId: string, orgId: string, req: AssignRoleRequest, ctx: RequestCtx): Promise<AssignRoleResult> {
+  /** A user's role assignments (org + resource-scoped), with the role name joined in. */
+  async listUserRoles(userId: string, orgId: string): Promise<RoleAssignmentView[]> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+    const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    const nameCache = new Map<string, string>();
+    const out: RoleAssignmentView[] = [];
+    for (const a of assignments) {
+      let roleName = nameCache.get(a.roleId);
+      if (roleName === undefined) {
+        const role = await this.d.repo.getRole(a.roleId);
+        roleName = role?.name ?? a.roleId; // orphan-safe: fall back to the id
+        nameCache.set(a.roleId, roleName);
+      }
+      out.push(this.toAssignmentView(a, roleName));
+    }
+    return out;
+  }
+
+  async assignRole(userId: string, orgId: string, req: AssignRoleRequest, ctx: RequestCtx): Promise<RoleAssignmentView> {
     const user = await this.d.repo.getUser(userId);
     if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
     const role = await this.d.repo.getRole(req.roleId);
@@ -293,7 +332,7 @@ export class IdentityService {
     // write-ahead sync audit (SYNC_AUDIT_ACTIONS: identity.role.assigned).
     await this.d.audit.logSync(this.record("identity.role.assigned", "success", ctx, orgId, "user", userId, { roleId: req.roleId, resourceType, resourceId }));
     await this.d.repo.createAssignment(assignment);
-    return { assignmentId: assignment.id };
+    return this.toAssignmentView(assignment, role.name);
   }
 
   async revokeRole(userId: string, assignmentId: string, orgId: string, ctx: RequestCtx): Promise<void> {

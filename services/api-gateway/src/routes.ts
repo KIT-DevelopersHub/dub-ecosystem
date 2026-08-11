@@ -40,6 +40,11 @@ export const ROUTES: readonly GatewayRoute[] = [
     auth: "required",
     internalOnlyPaths: ["/notifications/notify", "/notifications/internal/"],
   },
+  // In-app feedback/contact widget -> notification-service (same binding as the inbox).
+  // POST /feedback (any authed user submits) + GET /feedback & PATCH /feedback/:id/read
+  // (admin-only, enforced in-service via notif:admin). Kept on its own top-level segment
+  // so the frontend path stays simple (/api/v1/feedback).
+  { segment: "feedback", binding: "SVC_NOTIFICATION", auth: "required" },
   { segment: "files", binding: "SVC_FILE_META", auth: "required" }, // body cap resolved from env at runtime
   { segment: "drive", binding: "SVC_DRIVE_PROXY", auth: "required" },
   { segment: "chat", binding: "SVC_CHAT", auth: "required" }, // HTTP only; WS upgrade is rejected

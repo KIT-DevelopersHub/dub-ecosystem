@@ -80,9 +80,15 @@ export function createApp(opts: AppOptions): App {
     const idsRaw = c.req.query("ids");
     const ids = idsRaw ? idsRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
     const status = c.req.query("status") as identity.UserStatus | undefined;
+    // `role` is the task's filter param; `roleKey` is the FE7 client's spelling
+    // (lib/listUsersQuery). Accept both, same semantics (a roleId to filter by).
+    const roleId = c.req.query("role") ?? c.req.query("roleKey");
+    const q = c.req.query("q");
     const out = await svc.listUsers(orgId, {
       ...(ids ? { ids } : {}),
       ...(status ? { status } : {}),
+      ...(roleId ? { roleId } : {}),
+      ...(q ? { q } : {}),
       ...(c.req.query("limit") ? { limit: numParam(c.req.query("limit")) } : {}),
       ...(c.req.query("cursor") ? { cursor: c.req.query("cursor")! } : {}),
     });
@@ -125,6 +131,9 @@ export function createApp(opts: AppOptions): App {
     return c.body(null, 204);
   });
 
+  ext.get("/users/:id/roles", requirePermission("identity:read"), async (c) => {
+    return c.json(await svc.listUserRoles(c.req.param("id"), orgId));
+  });
   ext.post("/users/:id/roles", requirePermission("identity:admin"), async (c) => {
     const body = await readJson<{ roleId: string; resourceType?: string; resourceId?: string }>(c);
     return c.json(await svc.assignRole(c.req.param("id"), orgId, body, ctxOf(c)), 201);
