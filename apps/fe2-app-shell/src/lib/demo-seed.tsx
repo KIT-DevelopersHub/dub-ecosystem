@@ -188,6 +188,94 @@ const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
 };
 
+// ── mail: stateful Inbox + Sent folders ───────────────────────────────────────
+// A tiny in-session store so the mail folders behave end-to-end: received messages
+// persist their read flag (opening one clears the unread badge on refetch), and a
+// demo "send" is observable in the Sent folder (POST /mail/outbox → GET /mail/sent →
+// GET /mail/sent/:id). Fresh per createDemoFetch() → a reload resets. No real mail
+// leaves the browser (the demo banner says so).
+function firstLine(text: string, max = 140): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
+}
+
+function createMailStore() {
+  // Received seed = the same clean sample set the demo already shows (msg_1..3), cloned
+  // so the read flag can be flipped in-session without mutating the module constants.
+  const received: mail.MailMessageDetail[] = Object.values(MAIL_DETAIL).map((m) => ({ ...m }));
+  const sent: mail.MailSentDetail[] = [];
+  let seq = 0;
+
+  function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
+    // received: list / detail / mark-read (read state persists in-session)
+    if (method === "GET" && pathname === "/api/v1/mail/messages") {
+      const items: mail.MailMessageListItem[] = received.map(({ textBody, htmlBody, ...li }) => {
+        void textBody;
+        void htmlBody;
+        return li;
+      });
+      return json(page(items));
+    }
+    {
+      const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const found = received.find((r) => r.id === decodeURIComponent(m[1]!));
+        return found ? json(found) : notFound(`GET ${pathname}`);
+      }
+    }
+    if (method === "POST") {
+      const m = /^\/api\/v1\/mail\/messages\/([^/]+)\/read$/.exec(pathname);
+      if (m) {
+        const found = received.find((r) => r.id === decodeURIComponent(m[1]!));
+        if (found) found.read = true;
+        return json({ read: true });
+      }
+    }
+    // sent: outbox append + list + detail
+    if (method === "POST" && pathname === "/api/v1/mail/outbox") {
+      const req = (body ?? {}) as Partial<mail.SendMailRequest>;
+      const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
+      const sentAt = new Date().toISOString();
+      const providerMessageId = `<demo-${Date.now()}@developershub.jp>`;
+      const detail: mail.MailSentDetail = {
+        id,
+        from: { email: "demo@developershub.jp", name: "デモ 管理者" },
+        to: req.to ?? [],
+        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        subject: req.subject ?? "(件名なし)",
+        snippet: firstLine(req.textBody ?? ""),
+        sentAt,
+        provider: "resend",
+        providerMessageId,
+        status: "sent",
+        textBody: req.textBody ?? "",
+        ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+      };
+      sent.unshift(detail);
+      const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
+      return json(res);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/sent") {
+      const items: mail.MailSentListItem[] = sent.map(({ textBody, htmlBody, ...listItem }) => {
+        void textBody;
+        void htmlBody;
+        return listItem;
+      });
+      return json(page(items));
+    }
+    if (method === "GET") {
+      const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const found = sent.find((s) => s.id === decodeURIComponent(m[1]!));
+        return found ? json(found) : notFound(`GET ${pathname}`);
+      }
+    }
+    return null;
+  }
+
+  return { handle };
+}
+
 // ── identity / roster (admin RBAC console) ────────────────────────────────────
 // The admin console (FE7 @dub/admin-roster) is fully INTERACTIVE in the demo:
 // permission-matrix edit, role add and user role assignment all persist in an
@@ -537,12 +625,9 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
     if (pathname === "/api/v1/notifications/inbox/unread-count") {
       return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
     }
-    // mail
-    if (pathname === "/api/v1/mail/messages") return json(page(MAIL_LIST));
-    {
-      const id = seg(/^\/api\/v1\/mail\/messages\/([^/]+)$/);
-      if (id) return MAIL_DETAIL[id] ? json(MAIL_DETAIL[id]) : notFound(`GET ${pathname}`);
-    }
+    // mail: received list / detail + the Sent folder are served by the stateful mail
+    // store (createMailStore) so read-state and sends persist in-session; only the
+    // static thread view stays here.
     {
       const id = seg(/^\/api\/v1\/mail\/threads\/([^/]+)$/);
       if (id) return MAIL_THREAD[id] ? json(MAIL_THREAD[id]) : notFound(`GET ${pathname}`);
@@ -556,11 +641,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
   }
 
   if (method === "POST") {
-    // mail: mark read + "send" both acknowledged (no real mail leaves the browser).
-    if (/^\/api\/v1\/mail\/messages\/[^/]+\/read$/.test(pathname)) return json({ read: true });
-    if (pathname === "/api/v1/mail/outbox") {
-      return json({ messageId: `<demo-${Date.now()}@developershub.jp>`, provider: "resend", acceptedAt: new Date().toISOString() });
-    }
+    // mail read + send are served by the stateful mail store (createMailStore).
     if (pathname === "/api/v1/notifications/inbox/read-all") return json(null, 204);
   }
 
@@ -585,6 +666,8 @@ export function createDemoFetch(): typeof fetch {
   });
   // Mutable roster state for the interactive admin console (create/edit/assign).
   const roster = createRosterStore();
+  // Mutable Inbox + Sent folders (read-state persists; a demo send lands in Sent).
+  const mailStore = createMailStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -599,7 +682,10 @@ export function createDemoFetch(): typeof fetch {
         parsedBody = undefined;
       }
     }
-    const hit = roster.handle(method, url.pathname, url, parsedBody) ?? matchDemoRoute(method, url.pathname, url);
+    const hit =
+      roster.handle(method, url.pathname, url, parsedBody) ??
+      mailStore.handle(method, url.pathname, url, parsedBody) ??
+      matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
     // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.
     return boot(input, init);

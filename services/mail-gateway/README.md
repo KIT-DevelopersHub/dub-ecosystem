@@ -115,7 +115,10 @@ wrangler secret put RESEND_API_KEY        # paste re_… when prompted
 
 1. **D1**: use the existing `dub-core` DB (or `wrangler d1 create dub-core`) and put its
    `database_id` into `wrangler.toml` (replace `PLACEHOLDER_DUB_CORE_D1_ID`). Apply the
-   schema in `db/0001_mail.sql`.
+   schema in `db/0001_mail.sql`, then every forward-only migration in id order
+   (`db/0002_inbound_body_read.sql`, `db/0003_freeq_outbox.sql`, `db/0004_send_body.sql`).
+   `0004` adds the body/recipient columns that back the **Sent** folder (additive
+   `ALTER TABLE ... ADD COLUMN`, all nullable — safe on a populated DB, no data loss).
 2. **Provider**: set `MAIL_OUTBOUND_PROVIDER` in `[vars]` and put the matching secret(s).
 3. **Inbound** (optional but recommended): Cloudflare → developershub.jp → **Email →
    Email Routing** → enable, add address `info@developershub.jp` → action **Send to a
@@ -124,6 +127,28 @@ wrangler secret put RESEND_API_KEY        # paste re_… when prompted
 5. **Verify**: `curl -H 'x-dub-internal: 1' https://<worker>/internal/health/ready` →
    `200` with `"ready": true`. A `503` lists exactly what is missing (no secrets leaked).
 6. **Smoke send**: `pnpm send-test --send` (see §5).
+
+### 3.3a Demo reset — wipe all inbox + sent rows (DESTRUCTIVE)
+
+The "weird demo mails" a viewer sees are **live rows in D1** (leftover smoke-test sends +
+test receives), not seed code. To return the inbox + Sent folders to a clean, empty state
+for a demo/screenshot, run `db/reset-demo.sql`. It only clears message rows
+(`mail_inbound`, `mail_send_log`); the mailbox registry and Email Routing address config
+are untouched.
+
+> WARNING: destructive and irreversible. For the **deploy owner** to run against a
+> demo/staging DB only. Never run it against a database holding real received/sent mail.
+
+```
+# 1) Dry run against a LOCAL copy first (no remote writes):
+wrangler d1 execute dub-core --local --file=db/reset-demo.sql
+
+# 2) Apply to the remote demo DB (deploy owner only):
+wrangler d1 execute dub-core --remote --file=db/reset-demo.sql
+```
+
+(`dub-core` is the DB name in `wrangler.toml`.) There is intentionally **no** HTTP purge
+endpoint — a remotely reachable "delete all mail" route is too dangerous for prod.
 
 ---
 

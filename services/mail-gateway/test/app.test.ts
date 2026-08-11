@@ -288,6 +288,57 @@ describe("inbox detail (body + read state)", () => {
   });
 });
 
+describe("Sent folder (/mail/sent)", () => {
+  const h = (over: Record<string, string> = {}) => ({ "content-type": "application/json", "x-dub-request-id": "req_s", "x-dub-user-id": "usr_alice", ...over });
+
+  it("401/403s the list without a session identity", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/mail/sent", { headers: headers() }), env);
+    expect(res.status).toBeGreaterThanOrEqual(401);
+    expect(res.status).toBeLessThan(404);
+  });
+
+  it("403s the list when mail:read is denied", async () => {
+    const { env } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(false) });
+    const res = await app.fetch(new Request("https://svc/mail/sent", { headers: h() }), env);
+    expect(res.status).toBe(403);
+  });
+
+  it("lists a mail sent through /mail/outbox and opens its detail", async () => {
+    const { env } = makeEnv();
+    const out = await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: h({ "x-dub-idempotency-key": "sent-ob-1" }),
+        body: JSON.stringify({ to: [{ email: "b@x.com", name: "Bob" }], subject: "Report", textBody: "Body of the report." }),
+      }),
+      env,
+    );
+    expect(out.status).toBe(202);
+
+    const list = await app.fetch(new Request("https://svc/mail/sent", { headers: h() }), env);
+    expect(list.status).toBe(200);
+    const page = (await list.json()) as { items: mail.MailSentListItem[] };
+    expect(page.items).toHaveLength(1);
+    const item = page.items[0]!;
+    expect(item.subject).toBe("Report");
+    expect(item.to).toEqual([{ email: "b@x.com", name: "Bob" }]);
+    expect(item.status).toBe("sent");
+    expect(item.snippet).toBe("Body of the report.");
+
+    const detailRes = await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(item.id)}`, { headers: h() }), env);
+    expect(detailRes.status).toBe(200);
+    const detail = (await detailRes.json()) as mail.MailSentDetail;
+    expect(detail.textBody).toBe("Body of the report.");
+  });
+
+  it("404s an unknown sent id", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/mail/sent/nope", { headers: h() }), env);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("health", () => {
   it("reports ok", async () => {
     const { env } = makeEnv();

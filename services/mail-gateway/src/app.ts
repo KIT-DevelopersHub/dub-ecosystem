@@ -21,7 +21,7 @@ import { registerEmailRoutingAdmin } from "./email-routing-routes";
 import { buildDb, buildSendDeps } from "./deps";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getInboundDetail, latestFailedSend, listInbound, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
+import { getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -104,6 +104,8 @@ export function createApp() {
   ext.use("/messages", withAuth("mail:read"));
   ext.use("/messages/*", withAuth("mail:read"));
   ext.use("/threads/*", withAuth("mail:read"));
+  ext.use("/sent", withAuth("mail:read"));
+  ext.use("/sent/*", withAuth("mail:read"));
 
   ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
@@ -125,6 +127,20 @@ export function createApp() {
     const { found } = await markInboundRead(dbOf(c), c.req.param("id"));
     if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json({ read: true } satisfies mail.MailMessageState);
+  });
+
+  // ---- Sent folder (mail:read): the send-log projected as a Gmail-style Sent list +
+  // detail. Only delivered (status='sent') rows are listed; pending/failed never show.
+  ext.get("/sent", async (c) => {
+    const q = parseListMessagesQuery(c.req.query());
+    const page = await listSent(dbOf(c), { limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    return c.json(page satisfies common.Paginated<mail.MailSentListItem>);
+  });
+
+  ext.get("/sent/:id", async (c) => {
+    const msg = await getSentDetail(dbOf(c), c.req.param("id"));
+    if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `sent message not found: ${c.req.param("id")}`, { status: 404 });
+    return c.json(msg satisfies mail.MailSentDetail);
   });
 
   ext.get("/threads/:id", async (c) => {

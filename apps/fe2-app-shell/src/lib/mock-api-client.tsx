@@ -13,7 +13,7 @@
 // 404 error envelope so feature screens render their own in-frame fallbacks
 // (never a white screen). Extend `routes`/seed via options to cover more.
 import type { ErrorResponse } from "@dub/errors";
-import type { gateway } from "@dub/types";
+import type { gateway, mail } from "@dub/types";
 
 export interface MockSeed {
   me: gateway.MeResponse;
@@ -62,17 +62,127 @@ function errorEnvelope(code: string, message: string, status: number): Response 
   return json(body, status);
 }
 
+// A SMALL, clean mail surface (NOT the "weird demo pile"): one seeded received message
+// plus a live Sent folder. POST /mail/outbox appends a sent row that GET /mail/sent
+// lists and GET /mail/sent/:id opens, so a compose→send→Sent flow works with no backend.
+// Fresh per createMockFetch() (reload resets). No real mail leaves the browser.
+function firstLine(text: string, max = 140): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
+}
+
+function createMailMock() {
+  const received: mail.MailMessageDetail[] = [
+    {
+      id: "msg_seed_1",
+      messageId: "<seed-1@developershub.jp>",
+      threadId: "thr_seed_1",
+      from: { email: "hanako@example.com", name: "山田 花子" },
+      to: [{ email: "demo@developershub.jp" }],
+      subject: "登壇のご相談",
+      snippet: "カンファレンスでの登壇について相談させてください。",
+      receivedAt: "2026-08-02T01:30:00.000Z",
+      read: false,
+      textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。",
+    },
+  ];
+  const sent: mail.MailSentDetail[] = [];
+  let seq = 0;
+
+  function handle(method: string, pathname: string, body: unknown): Response | null {
+    // received list / detail / read
+    if (method === "GET" && pathname === "/api/v1/mail/messages") {
+      const items: mail.MailMessageListItem[] = received.map(({ textBody, htmlBody, ...li }) => {
+        void textBody;
+        void htmlBody;
+        return li;
+      });
+      return json({ items, nextCursor: null });
+    }
+    {
+      const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const found = received.find((r) => r.id === decodeURIComponent(m[1]!));
+        return found ? json(found) : errorEnvelope("NOT_FOUND", "message not found", 404);
+      }
+    }
+    if (method === "POST" && /^\/api\/v1\/mail\/messages\/([^/]+)\/read$/.test(pathname)) {
+      const id = /messages\/([^/]+)\/read$/.exec(pathname)![1]!;
+      const found = received.find((r) => r.id === decodeURIComponent(id));
+      if (found) found.read = true;
+      return json({ read: true });
+    }
+    // sent: outbox append + list + detail
+    if (method === "POST" && pathname === "/api/v1/mail/outbox") {
+      const req = (body ?? {}) as Partial<mail.SendMailRequest>;
+      const id = `sent_mock_${Date.now().toString(36)}_${seq++}`;
+      const sentAt = new Date().toISOString();
+      const providerMessageId = `<mock-${Date.now()}@developershub.jp>`;
+      const detail: mail.MailSentDetail = {
+        id,
+        from: { email: "demo@developershub.jp", name: "デモ ユーザー" },
+        to: req.to ?? [],
+        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        subject: req.subject ?? "(件名なし)",
+        snippet: firstLine(req.textBody ?? ""),
+        sentAt,
+        provider: "resend",
+        providerMessageId,
+        status: "sent",
+        textBody: req.textBody ?? "",
+        ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+      };
+      sent.unshift(detail);
+      const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
+      return json(res);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/sent") {
+      const items: mail.MailSentListItem[] = sent.map(({ textBody, htmlBody, ...li }) => {
+        void textBody;
+        void htmlBody;
+        return li;
+      });
+      return json({ items, nextCursor: null });
+    }
+    {
+      const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const found = sent.find((s) => s.id === decodeURIComponent(m[1]!));
+        return found ? json(found) : errorEnvelope("NOT_FOUND", "sent message not found", 404);
+      }
+    }
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` implementation that serves the shell's boot surface from seed data.
  *  Feed it to createApiClient({ fetchImpl }). Only the transport is mocked; the
  *  api-client's retry/refresh/error handling runs unchanged. */
 export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
   const data: MockSeed = { me: seed.me ?? DEFAULT_SEED.me, home: seed.home ?? DEFAULT_SEED.home };
+  const mailMock = createMailMock();
 
   const mockFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const method = (init?.method ?? "GET").toUpperCase();
     const { pathname } = new URL(url);
     const route = `${method} ${pathname}`;
+
+    // Mail (received + Sent folder) served from an in-memory clean seed + sent store.
+    if (pathname.startsWith("/api/v1/mail/")) {
+      let parsed: unknown;
+      if (typeof init?.body === "string" && init.body.length > 0) {
+        try {
+          parsed = JSON.parse(init.body);
+        } catch {
+          parsed = undefined;
+        }
+      }
+      const hit = mailMock.handle(method, pathname, parsed);
+      if (hit) return hit;
+    }
 
     switch (route) {
       case "GET /api/v1/me":

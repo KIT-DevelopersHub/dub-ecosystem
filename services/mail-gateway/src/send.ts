@@ -101,6 +101,12 @@ export async function sendMail(
       toJson: JSON.stringify(req.to),
       subject: req.subject,
       threadId,
+      // Body/recipients persisted at claim time so a later status='sent' row backs the
+      // Sent folder (GET /sent). Does not affect idempotency (same OR IGNORE on the key).
+      textBody: req.textBody,
+      htmlBody: req.htmlBody ?? null,
+      ccJson: JSON.stringify(req.cc ?? []),
+      fromAddress,
     });
     if (claimed === 0) {
       // lost the race — another request claimed the key; re-read and dedup.

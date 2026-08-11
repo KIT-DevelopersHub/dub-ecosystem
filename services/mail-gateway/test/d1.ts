@@ -19,6 +19,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0001_mail.sql"),
   join(HERE, "../db/0002_inbound_body_read.sql"),
   join(HERE, "../db/0003_freeq_outbox.sql"),
+  join(HERE, "../db/0004_send_body.sql"),
 ];
 
 function norm(v: unknown): unknown {

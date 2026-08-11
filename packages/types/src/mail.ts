@@ -74,6 +74,32 @@ export interface MailThread {
   messages: MailMessageDetail[];
 }
 
+// ---- ④ Sent folder (統合波 next slice; ADDITIVE — frozen ① untouched) ----
+// The idempotent send-log (二重送信ゼロ) is the source of truth for outbound mail.
+// These read DTOs project a status='sent' send-log row into a Gmail-style "Sent"
+// list/detail so the UI can show what was sent. Populated from mail_send_log's added
+// columns (text_body / html_body / cc_json / snippet / from_address; migration 0004).
+
+/** Sent-folder list row: one delivered outbound message (send-log status='sent'). */
+export interface MailSentListItem {
+  id: string;
+  from?: MailAddress; // envelope From used for the send (when recorded)
+  to: MailAddress[];
+  cc?: MailAddress[];
+  subject: string;
+  snippet: string;
+  sentAt: ISODateTime;
+  provider: SendMailResponse["provider"];
+  providerMessageId?: string;
+  status: "sent";
+}
+/** Sent-folder detail: the list row plus the full body. htmlBody optional (present
+ *  only when the send carried an HTML part) and MUST be sanitized before rendering. */
+export interface MailSentDetail extends MailSentListItem {
+  textBody: string;
+  htmlBody?: string;
+}
+
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----
 export interface Mailbox {
   address: string; // STUB
