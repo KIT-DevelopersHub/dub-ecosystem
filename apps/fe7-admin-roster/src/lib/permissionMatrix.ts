@@ -37,17 +37,23 @@ export function togglePermission(
   return [...set].sort();
 }
 
-/** Select/deselect every key in a domain at once. */
+/**
+ * Select/deselect every key in a domain at once. Keys in `lockedKeys` are never
+ * removed by a deselect (they stay in the set) — used to protect the admin role's
+ * identity:admin grant from a domain-level "off" toggle (self-lockout guard).
+ */
 export function toggleDomain(
   selected: readonly identity.PermissionKey[],
   entries: readonly CatalogEntry[],
   select: boolean,
+  lockedKeys: readonly identity.PermissionKey[] = [],
 ): identity.PermissionKey[] {
   const set = new Set(selected);
+  const locked = new Set(lockedKeys);
   for (const e of entries) {
     const key = e.key as identity.PermissionKey;
     if (select) set.add(key);
-    else set.delete(key);
+    else if (!locked.has(key)) set.delete(key);
   }
   return [...set].sort();
 }
@@ -66,6 +72,15 @@ export function domainSelectionState(
   let count = 0;
   for (const e of entries) if (set.has(e.key as identity.PermissionKey)) count++;
   return { all: count === entries.length && entries.length > 0, some: count > 0 };
+}
+
+/**
+ * Keys that must stay granted on a role and cannot be toggled off (self-lockout
+ * guard). Today only the built-in admin role is protected: stripping identity:admin
+ * from it would leave nobody able to manage roles/permissions, locking everyone out.
+ */
+export function lockedKeysForRole(role: { name: string; isSystem: boolean }): identity.PermissionKey[] {
+  return role.isSystem && role.name === "admin" ? ["identity:admin"] : [];
 }
 
 /** True if selecting `key` requires an extra confirmation (dangerous flag). */

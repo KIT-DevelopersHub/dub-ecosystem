@@ -34,6 +34,34 @@ describe("roles CRUD", () => {
     expect(body.permissions.sort()).toEqual(["task:read", "task:write"]);
   });
 
+  it("lets an admin edit a system role's permission bundle", async () => {
+    const h = await makeHarness();
+    // member is a system role; add mail:read to it via PATCH.
+    const res = await h.app.request(`/identity/roles/${h.memberRoleId}`, jsonBody(asUser(h.adminId), "PATCH", { permissions: ["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create", "mail:read"] }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as identity.Role;
+    expect(body.permissions).toContain("mail:read");
+    expect(body.isSystem).toBe(true);
+  });
+
+  it("refuses to strip identity:admin from the admin role (self-lockout guard)", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/identity/roles/${h.adminRoleId}`, jsonBody(asUser(h.adminId), "PATCH", { permissions: ["identity:read", "event:read"] }));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string; details?: { code?: string } } };
+    expect(body.error.code).toBe("CONFLICT");
+    expect(body.error.details?.code).toBe("LAST_ADMIN");
+  });
+
+  it("lets the admin role edit other permissions while keeping identity:admin", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/identity/roles/${h.adminRoleId}`, jsonBody(asUser(h.adminId), "PATCH", { permissions: ["identity:read", "identity:admin", "event:read"] }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as identity.Role;
+    expect(body.permissions).toContain("identity:admin");
+    expect(body.permissions).not.toContain("event:write");
+  });
+
   it("refuses to delete a system role with CONFLICT", async () => {
     const h = await makeHarness();
     const res = await h.app.request(`/identity/roles/${h.adminRoleId}`, { ...asUser(h.adminId), method: "DELETE" });

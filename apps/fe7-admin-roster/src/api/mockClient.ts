@@ -269,8 +269,11 @@ export function createMockClient(seed?: MockSeed): ResourceClient {
     if (roleMatch) {
       const role = s.roles.get(roleMatch[1]!);
       if (!role) throw err("NOT_FOUND", "role not found");
-      if (role.isSystem) throw err("CONFLICT", "system role is read-only");
       const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+      // Self-lockout guard (mirrors identity-roster): the admin role must keep identity:admin.
+      if (role.isSystem && role.name === "admin" && req.permissions !== undefined && !req.permissions.includes("identity:admin")) {
+        throw err("CONFLICT", "cannot remove identity:admin from the admin role");
+      }
       const updated: identity.Role = { ...role, ...(req.name !== undefined ? { name: req.name } : {}), ...(req.permissions !== undefined ? { permissions: req.permissions } : {}) };
       s.roles.set(role.id, updated);
       return updated as unknown as T;

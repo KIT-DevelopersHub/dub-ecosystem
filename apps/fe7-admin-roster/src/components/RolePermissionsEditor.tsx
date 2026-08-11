@@ -11,7 +11,7 @@ import { PermissionMatrix } from "./PermissionMatrix";
 import { usePermissionCatalog, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
-import { buildRoleUpdate } from "../lib/permissionMatrix";
+import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
 import { errorMessage } from "../lib/errorDisplay";
 
 const noteStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, marginTop: 8 };
@@ -29,12 +29,21 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   const [perms, setPerms] = useState<identity.PermissionKey[]>([...role.permissions]);
   const [confirmSave, setConfirmSave] = useState(false);
 
-  const readOnly = role.isSystem || !can("identity:admin");
+  // System roles are now editable by admins; only the identity:admin authz gate
+  // blocks editing. Deletion of system roles stays blocked (RoleListPage).
+  const readOnly = !can("identity:admin");
+  // Keys that cannot be toggled off (admin role must keep identity:admin).
+  const lockedKeys = lockedKeysForRole(role);
   // testid namespace so multiple accordions never collide (matrix keys are shared).
   const ns = `fe7-role-${role.id}`;
 
   function save() {
     setConfirmSave(false);
+    // Defense-in-depth: never let the admin role lose identity:admin (self-lockout).
+    if (lockedKeys.some((k) => !perms.includes(k))) {
+      toast({ kind: "error", title: "この権限は外せません", description: "admin ロールから identity:admin は削除できません。" });
+      return;
+    }
     const patch = buildRoleUpdate({ name: role.name, permissions: role.permissions }, { name, permissions: perms });
     if (!patch) {
       toast({ kind: "info", title: "変更はありません" });
@@ -54,14 +63,17 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
         </FormField>
       ) : null}
       {catalog.data ? (
-        <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} />
+        <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
       ) : (
         <p>権限カタログを読み込み中…</p>
       )}
       {readOnly ? (
-        <p style={noteStyle}>{role.isSystem ? "システムロールは編集できません。" : "編集権限がありません。"}</p>
+        <p style={noteStyle}>編集権限がありません。</p>
       ) : (
         <div style={actionsStyle}>
+          {lockedKeys.length > 0 ? (
+            <p style={noteStyle}>admin ロールの identity:admin は締め出し防止のため外せません。</p>
+          ) : null}
           <Button variant="primary" onClick={() => setConfirmSave(true)} disabled={!name.trim() || update.isPending} testId={`${ns}-save`}>
             保存
           </Button>

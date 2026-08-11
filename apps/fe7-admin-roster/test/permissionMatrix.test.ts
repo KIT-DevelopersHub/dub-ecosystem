@@ -7,6 +7,7 @@ import {
   domainSelectionState,
   isDangerous,
   buildRoleUpdate,
+  lockedKeysForRole,
 } from "../src/lib/permissionMatrix";
 
 const catalog = [...identity.PERMISSION_CATALOG];
@@ -46,9 +47,24 @@ describe("permissionMatrix — selection", () => {
     expect(domainSelectionState(all, eventEntries)).toEqual({ all: true, some: true });
   });
 
+  it("keeps locked keys when deselecting a whole domain (self-lockout guard)", () => {
+    const idEntries = catalog.filter((e) => e.domain === "identity");
+    const all = idEntries.map((e) => e.key as identity.PermissionKey); // identity:read + identity:admin
+    // Without a lock, deselecting clears the domain.
+    expect(toggleDomain(all, idEntries, false)).toEqual([]);
+    // With identity:admin locked, it survives a domain-off toggle.
+    expect(toggleDomain(all, idEntries, false, ["identity:admin"])).toEqual(["identity:admin"]);
+  });
+
   it("flags dangerous permissions from the catalog", () => {
     expect(isDangerous(catalog, "identity:admin")).toBe(true);
     expect(isDangerous(catalog, "identity:read")).toBe(false);
+  });
+
+  it("locks identity:admin only on the built-in admin role", () => {
+    expect(lockedKeysForRole({ name: "admin", isSystem: true })).toEqual(["identity:admin"]);
+    expect(lockedKeysForRole({ name: "member", isSystem: true })).toEqual([]);
+    expect(lockedKeysForRole({ name: "admin", isSystem: false })).toEqual([]);
   });
 });
 

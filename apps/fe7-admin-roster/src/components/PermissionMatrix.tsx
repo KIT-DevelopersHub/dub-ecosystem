@@ -16,6 +16,7 @@ export function PermissionMatrix({
   disabled,
   onChange,
   idPrefix = "fe7",
+  lockedKeys = [],
 }: {
   catalog: readonly CatalogEntry[];
   selected: readonly identity.PermissionKey[];
@@ -24,8 +25,12 @@ export function PermissionMatrix({
   // testid namespace. Default "fe7" (single matrix per screen). Inline editors on the
   // role list pass a per-role prefix so multiple matrices never collide on the page.
   idPrefix?: string;
+  // Keys that stay checked and cannot be toggled off even when the rest of the matrix
+  // is editable — e.g. identity:admin on the admin role (self-lockout guard).
+  lockedKeys?: readonly identity.PermissionKey[];
 }) {
   const groups = groupByDomain(catalog);
+  const locked = new Set(lockedKeys);
 
   return (
     <div data-testid={`${idPrefix}-permission-matrix`}>
@@ -40,7 +45,7 @@ export function PermissionMatrix({
                   checked={state.all}
                   ref={(el) => { if (el) el.indeterminate = state.some && !state.all; }}
                   disabled={disabled}
-                  onChange={(e) => onChange(toggleDomain(selected, g.entries, e.target.checked))}
+                  onChange={(e) => onChange(toggleDomain(selected, g.entries, e.target.checked, lockedKeys))}
                   data-testid={`${idPrefix}-matrix-domain-${g.domain}`}
                 />
                 <strong>{g.domain}</strong>
@@ -54,7 +59,7 @@ export function PermissionMatrix({
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={disabled}
+                    disabled={disabled || locked.has(key)}
                     onChange={() => onChange(togglePermission(selected, key))}
                     data-testid={`${idPrefix}-matrix-key-${e.key}`}
                   />

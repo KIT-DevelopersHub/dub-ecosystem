@@ -356,6 +356,17 @@ export class IdentityService {
     const role = await this.d.repo.getRole(roleId);
     if (!role || role.orgId !== orgId) throw errors.notFound("role", roleId);
     if (req.permissions !== undefined) assertPermissionKeys(req.permissions);
+    // Self-lockout guard: the built-in admin role must always retain identity:admin,
+    // otherwise an admin could strip role-management from every account and lock the
+    // whole org out. All other permissions on any role (system or custom) stay editable.
+    if (
+      req.permissions !== undefined &&
+      role.isSystem &&
+      role.name === "admin" &&
+      !req.permissions.includes(ADMIN)
+    ) {
+      throw errors.conflict("cannot remove identity:admin from the admin role", { code: "LAST_ADMIN" });
+    }
     if (req.name !== undefined && req.name !== role.name) {
       const clash = await this.d.repo.getRoleByName(orgId, req.name);
       if (clash) throw errors.conflict(`role name exists: ${req.name}`, { code: "ROLE_NAME_EXISTS" });
