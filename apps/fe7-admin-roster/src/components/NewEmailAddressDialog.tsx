@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { Modal, TextField, Button, FormField } from "@dub/ui";
+import { DialogActions, FormError } from "@dub/app-ui";
 import { useCreateEmailAddress } from "../hooks/useRosterApi";
 import { useToast } from "../hooks/useToast";
 import { EMAIL_ROUTING_DOMAIN } from "../contracts/pending";
 import { presentError, fieldErrorMap } from "../lib/errorDisplay";
 
-const actionsRow: React.CSSProperties = { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 };
 const suffixRow: React.CSSProperties = { display: "flex", gap: 6, alignItems: "center" };
-const suffixStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", whiteSpace: "nowrap" };
-const formErrorStyle: React.CSSProperties = { color: "var(--dub-color-danger-600)", fontSize: 13, margin: "8px 0 0" };
+const suffixStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", whiteSpace: "nowrap" };
 
 // Issue a new @developershub.jp address (creates a Cloudflare Email Routing rule
 // forwarding `localPart@developershub.jp` -> `destination`).
@@ -83,12 +82,8 @@ export function NewEmailAddressDialog({
           testId="fe7-email-destination"
         />
       </FormField>
-      {formError ? (
-        <p style={formErrorStyle} role="alert">
-          {formError}
-        </p>
-      ) : null}
-      <div style={actionsRow}>
+      <FormError>{formError}</FormError>
+      <DialogActions>
         <Button variant="secondary" onClick={onClose} testId="fe7-email-cancel">
           キャンセル
         </Button>
@@ -100,7 +95,7 @@ export function NewEmailAddressDialog({
         >
           発行する
         </Button>
-      </div>
+      </DialogActions>
     </Modal>
   );
 }

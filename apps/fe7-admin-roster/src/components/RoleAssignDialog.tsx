@@ -1,13 +1,11 @@
 import { useState } from "react";
-import { Modal, Select, Button, FormField, type SelectOption } from "@dub/ui";
+import { Modal, Button } from "@dub/ui";
+import { RolePicker, DialogActions, FormError } from "@dub/app-ui";
 import { ScopePicker } from "./ScopePicker";
 import { useRoles, useAssignRole } from "../hooks/useRosterApi";
 import { useToast } from "../hooks/useToast";
 import { DEFAULT_SCOPE, buildAssignRequest, type ScopeSelection } from "../lib/scope";
 import { errorMessage } from "../lib/errorDisplay";
-
-const actionsRow: React.CSSProperties = { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 };
-const formErrorStyle: React.CSSProperties = { color: "var(--dub-color-danger-600)", fontSize: 13, margin: "8px 0 0" };
 
 export function RoleAssignDialog({
   open,
@@ -42,26 +40,22 @@ export function RoleAssignDialog({
     );
   }
 
-  const roleOptions: SelectOption[] = roles.data?.items.map((r) => ({ value: r.id, label: r.name })) ?? [];
-
   return (
     <Modal title="ロールを付与" open={open} onClose={onClose} testId="fe7-assign-dialog">
-      <FormField label="ロール" htmlFor="fe7-assign-role">
-        <Select
-          id="fe7-assign-role"
-          value={roleId}
-          options={roleOptions}
-          placeholder="選択してください"
-          onChange={(v) => setRoleId(v)}
-          testId="fe7-assign-role"
-        />
-      </FormField>
+      <RolePicker
+        id="fe7-assign-role"
+        value={roleId}
+        roles={roles.data?.items}
+        placeholder="選択してください"
+        onChange={setRoleId}
+        testId="fe7-assign-role"
+      />
       <ScopePicker value={scope} events={events} onChange={setScope} />
-      {error ? <p style={formErrorStyle} role="alert">{error}</p> : null}
-      <div style={actionsRow}>
+      <FormError>{error}</FormError>
+      <DialogActions>
         <Button variant="secondary" onClick={onClose} testId="fe7-assign-cancel">キャンセル</Button>
         <Button variant="primary" onClick={submit} disabled={assign.isPending} testId="fe7-assign-submit">付与する</Button>
-      </div>
+      </DialogActions>
     </Modal>
   );
 }

@@ -1,98 +1,37 @@
 // Floating compose window (bottom-right), Gmail-style: minimize / maximize / close,
 // To rendered as removable chips with a Cc/Bcc toggle, subject and body, and a
-// send button. Recipients are parsed with the feature's shared parseRecipients.
-// On send it appends to the Sent folder via the store and best-effort posts through
-// the real MailApi (ignored under the demo mock).
-import { useState, type CSSProperties } from "react";
+// send button. Recipient entry uses the shared @dub/app-ui EmailAddressSelect
+// (chips + autocomplete), fed the feature's parseRecipients and correspondent
+// candidates from the store. On send it appends to the Sent folder via the store
+// and best-effort posts through the real MailApi (ignored under the demo mock).
+import { useMemo, type CSSProperties } from "react";
 import type { mail } from "@dub/types";
+import { EmailAddressSelect, type EmailToken } from "@dub/app-ui";
 import { parseRecipients } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore, type ComposeState } from "./useMailStore.tsx";
 
-function Chips({ raw, onRemove }: { raw: string; onRemove: (email: string) => void }): JSX.Element | null {
-  const { recipients } = parseRecipients(raw);
-  if (recipients.length === 0) return null;
-  return (
-    <>
-      {recipients.map((r) => (
-        <span
-          key={r.email}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "2px 4px 2px 8px",
-            borderRadius: "var(--dub-radius-full)",
-            background: "var(--dub-color-surface-sunken)",
-            border: "1px solid var(--dub-color-border-default)",
-            fontSize: "var(--dub-font-size-xs)",
-            color: "var(--dub-color-text-primary)",
-          }}
-        >
-          {r.name ?? r.email}
-          <button
-            type="button"
-            aria-label={`${r.email} を削除`}
-            onClick={() => onRemove(r.email)}
-            style={{ all: "unset", cursor: "pointer", display: "inline-flex", color: "var(--dub-color-text-muted)" }}
-          >
-            <MailIcon name="x" size={12} />
-          </button>
-        </span>
-      ))}
-    </>
-  );
-}
-
-function RecipientField({
-  label,
-  value,
-  onChange,
-  testId,
-  extra,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  testId: string;
-  extra?: JSX.Element;
-}): JSX.Element {
-  const [draft, setDraft] = useState("");
-  const commit = (): void => {
-    const t = draft.trim().replace(/[,;]$/, "");
-    if (t.length > 0) onChange(value ? `${value}, ${t}` : t);
-    setDraft("");
-  };
-  const removeChip = (email: string): void => {
-    const { recipients } = parseRecipients(value);
-    onChange(recipients.filter((r) => r.email !== email).map((r) => (r.name ? `${r.name} <${r.email}>` : r.email)).join(", "));
-  };
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 36, padding: "4px 12px", borderBottom: "1px solid var(--dub-color-border-default)", flexWrap: "wrap" }}>
-      <span style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)", width: 28 }}>{label}</span>
-      <Chips raw={value} onRemove={removeChip} />
-      <input
-        data-testid={testId}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === "," || e.key === ";") {
-            e.preventDefault();
-            commit();
-          }
-        }}
-        style={{ flex: 1, minWidth: 80, border: "none", outline: "none", background: "transparent", color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-sm)", fontFamily: "inherit" }}
-      />
-      {extra}
-    </div>
-  );
-}
-
 export function ComposeWindow({ compose, offset }: { compose: ComposeState; offset: number }): JSX.Element {
-  const { dispatch } = useMailStore();
+  const { state, dispatch } = useMailStore();
   const mailApi = useMailApi();
+
+  // Address-book candidates: everyone the user has corresponded with (excluding self).
+  const candidates: EmailToken[] = useMemo(() => {
+    const byEmail = new Map<string, EmailToken>();
+    for (const t of state.threads) {
+      for (const m of t.messages) {
+        for (const p of [m.from, ...m.to, ...(m.cc ?? [])]) {
+          if (p.email && p.email !== state.me.email && !byEmail.has(p.email)) {
+            byEmail.set(p.email, p.name ? { email: p.email, name: p.name } : { email: p.email });
+          }
+        }
+      }
+    }
+    return [...byEmail.values()];
+  }, [state.threads, state.me.email]);
+
+  const removeIcon = <MailIcon name="x" size={12} />;
   const patch = (p: Partial<ComposeState>): void => dispatch({ type: "UPDATE_COMPOSE", id: compose.id, patch: p });
 
   const send = (): void => {
@@ -162,10 +101,14 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
 
       {minimized ? null : (
         <>
-          <RecipientField
+          <EmailAddressSelect
+            variant="flush"
             label="To"
             value={compose.to}
             onChange={(v) => patch({ to: v })}
+            parse={parseRecipients}
+            candidates={candidates}
+            removeIcon={removeIcon}
             testId="fe2-mail-compose-to"
             extra={
               <span style={{ display: "flex", gap: 8 }}>
@@ -178,8 +121,12 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
               </span>
             }
           />
-          {compose.showCc ? <RecipientField label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} testId="fe2-mail-compose-cc" /> : null}
-          {compose.showBcc ? <RecipientField label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} testId="fe2-mail-compose-bcc" /> : null}
+          {compose.showCc ? (
+            <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-cc" />
+          ) : null}
+          {compose.showBcc ? (
+            <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-bcc" />
+          ) : null}
           <input
             data-testid="fe2-mail-compose-subject"
             value={compose.subject}

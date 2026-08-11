@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@dub/admin-roster": "workspace:*",
+    "@dub/app-ui": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/fe3-event-action": "workspace:*",
     "@dub/fe4-task-gantt": "workspace:*",

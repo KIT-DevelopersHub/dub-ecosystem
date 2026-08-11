@@ -1,0 +1,6 @@
+.error {
+  margin: var(--dub-space-2) 0 0;
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-line-height-normal);
+}
