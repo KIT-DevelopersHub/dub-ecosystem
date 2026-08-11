@@ -29,6 +29,16 @@ const sampleNoticeStyle: CSSProperties = {
   borderRadius: toCssVarName("radius.md"),
   background: toCssVarName("color.warning.100"),
 };
+// Neutral (not warning-tinted) notice for the "could not read" state. It must not
+// borrow an alarm color — the whole point is that we DON'T know the usage, so the
+// surface stays calm/gray rather than yellow/red.
+const neutralNoticeStyle: CSSProperties = {
+  fontSize: toCssVarName("font.size.sm"),
+  color: toCssVarName("color.text.secondary"),
+  padding: `${toCssVarName("space.2")} ${toCssVarName("space.3")}`,
+  borderRadius: toCssVarName("radius.md"),
+  background: toCssVarName("color.gray.100"),
+};
 
 /** Responsive auto-fit grid (min 260px columns). Kept inline (token-spaced) since
  *  @dub/ui Grid is fixed-column; auto-fit is the right fit for variable card counts. */
@@ -78,17 +88,27 @@ export function UsageDashboard(): JSX.Element {
   if (query.isPending || !query.data) {
     body = <SkeletonLoader lines={6} />;
   } else {
-    const { summary, source } = query.data;
+    const { summary, source, reason } = query.data;
+    // The worst-status banner (incl. the red "上限に迫っている" strip) is driven ONLY by
+    // real data. On `unavailable` the summary is neutral (worstStatus "unknown"), so
+    // the banner is a calm gray "取得できませんでした" — never a false alarm.
+    const notice =
+      source === "unavailable" ? (
+        <div role="note" data-testid="fe2-usage-unavailable-notice" data-reason={reason} style={neutralNoticeStyle}>
+          {reason === "forbidden"
+            ? "使用状況を表示する権限がありません（管理者にお問い合わせください）。表示中の各項目はサンプルではなく「取得不可」です。"
+            : "使用状況を取得できませんでした（取得中、または一時的に利用できません）。表示中の各項目はサンプルではなく「取得不可」です。"}
+        </div>
+      ) : source === "demo" ? (
+        <div role="note" data-testid="fe2-usage-sample-notice" data-source={source} style={sampleNoticeStyle}>
+          デモモード — 表示中の使用状況はサンプル値です。
+        </div>
+      ) : null;
+
     body = (
       <Stack gap={4}>
         <UsageSummaryBanner worstStatus={summary.worstStatus} />
-        {source !== "live" ? (
-          <div role="note" data-testid="fe2-usage-sample-notice" data-source={source} style={sampleNoticeStyle}>
-            {source === "demo"
-              ? "デモモード — 表示中の使用状況はサンプル値です。"
-              : "バックエンド未接続のため、サンプル値を表示しています。"}
-          </div>
-        ) : null}
+        {notice}
         {reassurance}
         <div style={gridStyle} data-testid="fe2-usage-grid">
           {summary.services.map((s) => (
