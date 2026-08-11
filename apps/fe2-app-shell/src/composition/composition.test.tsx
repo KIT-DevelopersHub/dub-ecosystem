@@ -24,10 +24,10 @@ function fakeApi(): { api: ApiClient; calls: RequestInput[] } {
 }
 
 describe("assembleFeatureModules", () => {
-  it("assembles the six features in canonical order", () => {
+  it("assembles the seven features in canonical order", () => {
     const { api } = fakeApi();
     const modules = assembleFeatureModules(api);
-    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "mail", "admin"]);
+    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "mail", "usage", "admin"]);
   });
 
   it("merges into the shell registry with no duplicate route ownership", () => {
@@ -35,7 +35,7 @@ describe("assembleFeatureModules", () => {
     const registry = buildRegistry(assembleFeatureModules(api));
     const paths = registry.routes.map((r) => r.path);
     // core segments each feature owns
-    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/notifications", "/chat", "/mail", "/admin/users"]));
+    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/notifications", "/chat", "/mail", "/usage", "/admin/users"]));
     // no duplicates survived the flatten + ownership check
     expect(new Set(paths).size).toBe(paths.length);
   });
