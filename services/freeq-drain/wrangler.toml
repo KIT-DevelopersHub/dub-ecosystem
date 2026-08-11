@@ -1,0 +1,77 @@
+# freeq-drain — single cron-driven aggregated @dub/freeq drain (P0: DO NOT DEPLOY from here).
+# ONE cron slot replaces every per-service drain cron. It drains all four freeq_outbox D1s
+# and routes each row by topic (see src/routing.ts) to its live consumer, DEFERRING (never
+# acking) any topic without a live route — the mis-ack data-loss fix. database_id and the
+# service-binding target names are filled at infra Apply.
+name = "freeq-drain"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# --- freeq outbox D1s (one drain pass each; database_id filled at infra Apply) ---
+# NOTE: in the current live FREE deploy drive-proxy and mo3-mobile-bff bind their outbox to
+# the shared dub-core DB, so DB_DRIVE / DB_MOBILE may resolve to the same physical id as
+# DB_CORE at Apply (a repeat drain of the same table is harmless / idempotent). They are
+# kept as distinct bindings to match the design's four logical outbox tables.
+[[d1_databases]]
+binding = "DB_CORE"
+database_name = "dub-core"
+database_id = "REPLACE_AT_APPLY"
+
+[[d1_databases]]
+binding = "DB_AUTH"
+database_name = "auth-outbox"
+database_id = "REPLACE_AT_APPLY"
+
+[[d1_databases]]
+binding = "DB_DRIVE"
+database_name = "dub-drive-proxy-watch"
+database_id = "REPLACE_AT_APPLY"
+
+[[d1_databases]]
+binding = "DB_MOBILE"
+database_name = "mobile"
+database_id = "REPLACE_AT_APPLY"
+
+# --- Service bindings: LIVE consumers the routing map DELIVERS to (free-tier worker names).
+#     Any other/unknown topic DEFERS, so no binding is needed for deferred topics. ---
+[[services]]
+binding = "SVC_AUDIT_LOG"
+service = "dub-audit-log"          # POST /internal/audit-async (audit.record)
+
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"       # POST /internal/events-async (evt.task)
+
+[[services]]
+binding = "SVC_GANTT"
+service = "dub-gantt-service"      # POST /internal/events-async (evt.gantt)
+
+[[services]]
+binding = "SVC_FILE_META"
+service = "dub-file-meta"          # POST /internal/events-async (evt.file-meta)
+
+[[services]]
+binding = "SVC_GITHUB_SYNC"
+service = "dub-github-sync"        # POST /internal/events-async (evt.github-sync)
+
+[[services]]
+binding = "SVC_MOBILE_BFF"
+service = "dub-mo3-mobile-bff"     # POST /internal/events-async (evt.mobile-bff)
+
+# --- The ONE freeq cron. Every 5 minutes; replaces all per-service drain crons. ---
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+ENVIRONMENT = "production"
+
+[env.preview.vars]
+ENVIRONMENT = "preview"
+
+[env.local.vars]
+ENVIRONMENT = "local"

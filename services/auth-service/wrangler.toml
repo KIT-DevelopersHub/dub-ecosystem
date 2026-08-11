@@ -32,14 +32,15 @@ binding = "SVC_IDENTITY"
 service = "identity-roster"
 
 # --- Service binding: audit-log (audit outbox drain delivery target) ---
+# Retained for reference/back-compat; the audit outbox is now drained by the standalone
+# freeq-drain worker (single aggregated cron), so this service no longer runs a drain cron.
 [[services]]
 binding = "SVC_AUDIT"
 service = "audit-log"
 
-# --- Cron Trigger: drain the audit outbox every minute (free tier; replaces the
-#     paid Queue's push delivery). ---
-[triggers]
-crons = ["* * * * *"]
+# NOTE: the per-service drain Cron Trigger (was `crons = ["* * * * *"]`) was REMOVED. The
+# freeq_outbox is drained centrally by the freeq-drain worker (services/freeq-drain), which
+# holds the ONE freeq cron. Removing it here frees a cron slot on the free-plan account cap.
 
 # --- vars (non-secret) ---
 # Login is email+password only (web Google OAuth removed) and restricted to

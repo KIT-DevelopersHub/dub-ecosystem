@@ -1,11 +1,8 @@
 // Worker entrypoint. HTTP via Hono; the private deploy-jobs queue via handleDeployJobs
 // (paid plan); the free-tier @dub/freeq outbox drain via the Cron scheduled handler.
-import type { ExecutionContext, MessageBatch, ScheduledController } from "@cloudflare/workers-types";
-import { consoleSink } from "@dub/observability";
+import type { ExecutionContext, MessageBatch } from "@cloudflare/workers-types";
 import { createApp } from "./app";
 import { handleDeployJobs } from "./queue";
-import { runOutboxDrain } from "./drain";
-import { SERVICE_NAME } from "./deps";
 import type { Env } from "./env";
 import type { DeployJobMessage } from "./jobs";
 
@@ -19,21 +16,12 @@ export default {
   async queue(batch: MessageBatch<DeployJobMessage>, env: Env): Promise<void> {
     await handleDeployJobs(batch, env);
   },
-  // FREE plan: Cron drains the freeq outbox (forwards audit rows to audit-log, runs deploy
-  // jobs in process, defers domain events). Best-effort — a drain hiccup only logs.
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    try {
-      const result = await runOutboxDrain(env);
-      consoleSink({ level: "info", message: "deploy-service outbox drained", service: SERVICE_NAME, fields: { ...result } });
-    } catch (err) {
-      consoleSink({
-        level: "error",
-        message: "deploy-service outbox drain failed",
-        service: SERVICE_NAME,
-        fields: { error: err instanceof Error ? err.message : String(err) },
-      });
-    }
-  },
+  // NOTE: no scheduled() drain here. The freeq outbox is drained centrally by the
+  // standalone freeq-drain worker (single aggregated cron). The `deploy.job` topic has no
+  // HTTP landing route (it is processed in-process by deploy-service's own drain/Queue
+  // consumer), so freeq-drain DEFERS deploy.job rows — they stay durable/pending. Wiring an
+  // internal /internal/deploy-job route is a documented follow-up. src/drain.ts is retained
+  // (and re-exported below) as the deliver-contract source for tests and freeq-drain.
 };
 
 export { createApp } from "./app";

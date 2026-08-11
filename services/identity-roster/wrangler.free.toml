@@ -43,11 +43,9 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 binding = "SVC_AUDIT"
 service = "dub-audit-log"
 
-# Cron: daily (03:40 UTC). The scheduled handler drains the audit outbox on every tick.
-# The Workers FREE plan caps the account at 5 cron triggers, so this is a single low-rate
-# schedule (audit volume from RBAC mutations is small; rows stay durable between ticks).
-[triggers]
-crons = ["40 3 * * *"]
+# NOTE: the per-service drain Cron Trigger (was `crons = ["40 3 * * *"]`) was REMOVED.
+# The freeq audit outbox is now drained centrally by the freeq-drain worker (the ONE freeq
+# cron), freeing a slot on the Workers FREE plan's 5-cron account cap.
 
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"

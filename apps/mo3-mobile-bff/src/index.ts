@@ -2,16 +2,15 @@
 // rebuilt per request from bindings (buildDeps is cheap, keeps the isolate free of
 // shared mutable state).
 // - queue():     PAID plan only — drains dub-q-evt-mobile-bff into the change_log.
-// - scheduled(): FREE plan Cron — drains the @dub/freeq audit outbox to audit-log.
-// The two lanes never both run in one deploy: paid wrangler.toml wires the Queue
-// (no [triggers]); free wrangler.free.toml wires the Cron (no Queue). The change_log
-// free-tier lane arrives over HTTP (POST /internal/events-async), not the queue.
-import type { ExecutionContext, MessageBatch, ScheduledController } from "@cloudflare/workers-types";
+// The change_log free-tier lane arrives over HTTP (POST /internal/events-async), not the
+// queue. The @dub/freeq audit outbox is drained by the standalone freeq-drain worker
+// (single aggregated cron), so this Worker no longer runs its own scheduled() drain.
+// src/drain.ts is retained as the topic->destination contract source (audit.record).
+import type { ExecutionContext, MessageBatch } from "@cloudflare/workers-types";
 import type { DubEventEnvelope } from "@dub/events";
 import { buildApp } from "./app";
 import { buildDeps } from "./deps";
 import { mobileQueueHandler } from "./queue";
-import { runOutboxDrain } from "./drain";
 import type { Env } from "./env";
 
 export type { Env } from "./env";
@@ -23,8 +22,5 @@ export default {
   },
   async queue(batch: MessageBatch<DubEventEnvelope>, env: Env): Promise<void> {
     await mobileQueueHandler(batch, env);
-  },
-  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    await runOutboxDrain(env);
   },
 };

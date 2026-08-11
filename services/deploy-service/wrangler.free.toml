@@ -42,12 +42,12 @@ service = "dub-identity-roster"   # POST /authz/check (infra:read / infra:deploy
 binding = "SVC_AUDIT_LOG"
 service = "dub-audit-log"         # sync intent (/internal/log) + free-tier outbox drain (/internal/audit-async)
 
-# --- Cron: drains the freeq outbox on every tick (forwards audit rows to audit-log, runs
-# deploy jobs in process, defers domain events). The Workers FREE plan caps the account at
-# 5 cron triggers; deploy-service owns this single schedule. A 1-minute cadence keeps the
-# async deploy exec + poll loop responsive without a paid Queue. ---
-[triggers]
-crons = ["* * * * *"]
+# NOTE: the per-service drain Cron Trigger (was `crons = ["* * * * *"]`) was REMOVED. The
+# freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron).
+# CAVEAT: the `deploy.job` topic is processed IN-PROCESS by deploy-service (no HTTP landing
+# route), so freeq-drain DEFERS deploy.job rows — they stay durable/pending. Async deploy
+# job execution without a paid Queue is a documented follow-up (add an internal HTTP route
+# so freeq-drain can deliver deploy.job, or restore a dedicated deploy-only trigger).
 
 # --- Vars (non-secret). CF_ACCOUNT_ID is a secret (set per-environment). ---
 [vars]

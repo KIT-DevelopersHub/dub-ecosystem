@@ -61,11 +61,9 @@ service = "dub-file-meta"         # best-effort message<->file link registration
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
-# --- Cron: every 5 minutes. The scheduled handler drains the freeq outbox (forwards
-# audit rows to audit-log; defers domain events). The Workers FREE plan caps the
-# account at 5 cron triggers total; this is one modest schedule. ---
-[triggers]
-crons = ["*/5 * * * *"]
+# NOTE: the per-service drain Cron Trigger (was `crons = ["*/5 * * * *"]`) was REMOVED.
+# The freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron),
+# freeing a slot on the Workers FREE plan's 5-cron account cap.
 
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"

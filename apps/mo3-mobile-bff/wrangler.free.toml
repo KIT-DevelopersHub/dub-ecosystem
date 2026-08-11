@@ -65,11 +65,9 @@ service = "dub-notification-service"  # inbox/preferences transparent + unread-c
 binding = "SVC_AUDIT"
 service = "dub-audit-log"             # free-tier outbox drain -> POST /internal/audit-async
 
-# --- Cron: daily (03:40 UTC). The scheduled handler drains the audit outbox each tick.
-# The Workers FREE plan caps the account at 5 cron triggers, so this reuses a single daily
-# schedule rather than an every-minute drain trigger. ---
-[triggers]
-crons = ["40 3 * * *"]
+# NOTE: the per-service drain Cron Trigger (was `crons = ["40 3 * * *"]`) was REMOVED.
+# The @dub/freeq audit outbox is now drained centrally by the freeq-drain worker (the ONE
+# freeq cron), freeing a slot on the Workers FREE plan's 5-cron account cap.
 
 # --- vars (non-secret) ---
 [vars]
