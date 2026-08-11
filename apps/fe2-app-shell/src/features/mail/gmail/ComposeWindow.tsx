@@ -43,8 +43,12 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     // survives a reload (the From is the gateway-resolved <user>@developershub.jp).
     dispatch({ type: "SEND", to, cc, subject: compose.subject, body: compose.body });
     const req: mail.SendMailRequest = { to, subject: compose.subject || "(件名なし)", textBody: compose.body };
+    if (cc.length > 0) req.cc = cc;
+    // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/
+    // References (recipient threads the conversation; a further reply chains back to us).
+    if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     void mailApi
-      .send(cc.length > 0 ? { ...req, cc } : req)
+      .send(req)
       .then(() => dispatch({ type: "REQUEST_SYNC" }))
       .catch(() => undefined);
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });

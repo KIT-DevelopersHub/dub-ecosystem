@@ -21,6 +21,10 @@ export interface ComposeState {
   showBcc: boolean;
   minimized: boolean;
   maximized: boolean;
+  /** RFC Message-Id this compose is replying to (reply/replyAll). Sent to the gateway as
+   *  SendMailRequest.inReplyTo so In-Reply-To/References are stamped and the thread links.
+   *  Undefined for a brand-new compose or a forward. */
+  inReplyTo?: string;
 }
 
 export interface UndoState {

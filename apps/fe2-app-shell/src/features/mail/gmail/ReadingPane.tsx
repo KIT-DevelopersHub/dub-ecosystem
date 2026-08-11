@@ -4,6 +4,7 @@
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
 import { useState, type CSSProperties } from "react";
+import type { mail } from "@dub/types";
 import {
   avatarColor,
   displayName,
@@ -18,6 +19,7 @@ import {
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore } from "./useMailStore.tsx";
+import { useMailApi } from "../MailProvider.tsx";
 
 function fmtList(people: MailPerson[]): string {
   return people.map(displayName).join(", ");
@@ -137,6 +139,7 @@ function HeaderButton({ label, icon, onClick, testId }: { label: string; icon: P
 
 export function ReadingPane({ thread, labels }: { thread: MailThreadModel; labels: Label[] }): JSX.Element {
   const { dispatch, state } = useMailStore();
+  const mailApi = useMailApi();
   const [reply, setReply] = useState("");
   const lastIdx = thread.messages.length - 1;
   const last = thread.messages[lastIdx]!;
@@ -159,15 +162,31 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         subject: `${mode === "forward" ? "Fwd" : "Re"}: ${thread.subject.replace(/^(Re|Fwd):\s*/i, "")}`,
         body: quote(last),
         showCc: mode === "replyAll",
+        // Reply/replyAll thread against the parent's Message-Id; a forward is a new message.
+        ...(mode !== "forward" && last.messageId ? { inReplyTo: last.messageId } : {}),
       },
     });
   };
 
   const sendInline = (): void => {
     const body = reply.trim();
-    if (body.length === 0) return;
+    if (body.length === 0 || replyRecipients.length === 0) return;
+    // Optimistic: append to the open thread immediately. Previously this was ALL that
+    // happened — the reply never reached the gateway, so nothing was delivered. Now we
+    // also POST it (with In-Reply-To via the parent Message-Id) and re-sync so the sent
+    // reply is server-backed and survives a reload.
     dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, subject: thread.subject });
     setReply("");
+    const req: mail.SendMailRequest = {
+      to: replyRecipients,
+      subject: /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`,
+      textBody: body,
+    };
+    if (last.messageId) req.inReplyTo = last.messageId;
+    void mailApi
+      .send(req)
+      .then(() => dispatch({ type: "REQUEST_SYNC" }))
+      .catch(() => undefined);
   };
 
   return (
