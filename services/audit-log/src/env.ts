@@ -6,7 +6,9 @@ import type { AuthnContext } from "@dub/auth-client";
 // Worker bindings (wrangler.toml). Deploy is out of scope for this unit.
 export interface Env {
   DB: D1Database; // shared dub-core D1 (audit_ namespace only)
-  AUDIT_ARCHIVE: R2Bucket; // R2 bucket for monthly NDJSON archive
+  // R2 bucket for the monthly NDJSON archive. Optional: absent on the Workers FREE plan
+  // (wrangler.free.toml binds no R2), in which case the scheduled handler skips archiving.
+  AUDIT_ARCHIVE?: R2Bucket;
   SVC_IDENTITY: Fetcher; // identity-roster Service Binding (authz/check)
 }
 

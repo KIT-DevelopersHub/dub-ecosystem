@@ -1,0 +1,47 @@
+# Free-tier deploy of audit-log as `dub-audit-log` (internal; reached via Service Bindings
+# — workers.dev disabled). This is the deployable free-plan config; the paid wrangler.toml
+# (with the R2 monthly-archive bucket and the dub-q-audit-record Queue consumer) is left
+# UNCHANGED so the queue-wiring conformance guard stays green.
+#
+# Differences from the paid wrangler.toml (all forced by the Workers FREE plan):
+#   * name          = dub-audit-log  (the live worker name every SVC_AUDIT binding routes to;
+#                     the paid file's `audit-log` is the scaffold name and is NOT deployed).
+#   * D1 database_id = the REAL shared dub-core id (verified via `wrangler d1 list`).
+#   * NO R2 bucket   — the monthly NDJSON archive (AUDIT_ARCHIVE) needs a paid-ish R2 setup;
+#                     the scheduled handler no-ops the archive when the binding is absent
+#                     (src/index.ts guard), so ingestion is unaffected. Re-add the [[r2_buckets]]
+#                     block here to turn archiving back on once R2 is provisioned.
+#   * NO Queue consumer — there is no paid dub-q-audit-record Queue on the free plan. Audit
+#                     records arrive over HTTP at POST /internal/audit-async instead: the
+#                     central freeq-drain worker forwards every `audit.record` outbox row to
+#                     this route (SVC_AUDIT_LOG binding). This is the route that drains the
+#                     pending audit backlog once this config is deployed.
+#
+# Deploy (本番反映は直列・高岡のGoで):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config services/audit-log/wrangler.free.toml
+name = "dub-audit-log"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1 (audit_ namespace only). REAL dub-core id (verified via `wrangler d1 list`).
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# identity-roster Service Binding (authz/check for audit:read) — free-tier worker name.
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+# Monthly archive Cron (00:00 UTC on the 1st). On the free tier (no R2 binding) the
+# scheduled handler logs a skip and returns; the trigger is kept so archiving resumes
+# automatically the moment an AUDIT_ARCHIVE R2 binding is added back above.
+[triggers]
+crons = ["0 0 1 * *"]

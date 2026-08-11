@@ -24,6 +24,11 @@ const handler = {
   },
 
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    // Free-tier (wrangler.free.toml) binds no R2: skip the archive, leave ingestion intact.
+    if (!env.AUDIT_ARCHIVE) {
+      consoleSink({ level: "info", message: "audit archive skipped (no R2 binding)", service: SERVICE_NAME, fields: {} });
+      return;
+    }
     const db = createDbClient(env.DB, { namespace: "audit" });
     const summary = await archiveOldRecords(db, env.AUDIT_ARCHIVE);
     consoleSink({ level: "info", message: "audit archive job finished", service: SERVICE_NAME, fields: { ...summary } });
