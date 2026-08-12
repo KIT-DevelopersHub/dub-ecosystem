@@ -13,7 +13,7 @@ export interface Env {
   METER_DO?: DurableObjectNamespace;
 
   // ---- service bindings ----
-  SVC_IDENTITY?: Fetcher; // authz/check (infra:read) for GET /usage/summary
+  SVC_IDENTITY?: Fetcher; // requireAuth backing for GET /usage/summary (auth only, no permission)
   SVC_NOTIFICATION?: Fetcher; // admin in-app alert via POST /notify (EVT_NOTIFICATION path)
   SVC_MAIL_GATEWAY?: Fetcher; // admin email alert via POST /send
 
