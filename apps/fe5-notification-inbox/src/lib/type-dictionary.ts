@@ -7,7 +7,7 @@ import type { IconName } from "@dub/ui";
 import type { NotificationType } from "../contracts/notification-api";
 import { matchSpecificity } from "./preference-merge";
 
-export type NotificationGroup = "task" | "event" | "system";
+export type NotificationGroup = "task" | "event" | "system" | "release";
 
 export interface NotificationTypeDisplay {
   pattern: string; // "task.assigned" | "task.*" | "*"
@@ -29,6 +29,10 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   { pattern: "event.reminder", label: "Event reminder", icon: "calendar", group: "event" },
   { pattern: "system.*", label: "System", icon: "info", group: "system" },
   { pattern: "system.announcement", label: "Announcement", icon: "megaphone", group: "system" },
+  // Release notes (new-feature announcements). Its own group so it gets a dedicated
+  // "新機能" filter chip and a distinct 🎉 badge in the inbox.
+  { pattern: "release", label: "🎉 新機能", icon: "megaphone", group: "release" },
+  { pattern: "release.*", label: "🎉 新機能", icon: "megaphone", group: "release" },
 ];
 
 const GENERIC_ICON: IconName = "bell";
@@ -65,6 +69,7 @@ export function resolveTypeDisplay(type: NotificationType): ResolvedTypeDisplay 
 
 // The prefix-group filter options for the inbox filter bar (test 3).
 export const NOTIFICATION_GROUP_PREFIXES: { group: NotificationGroup; prefix: string; label: string }[] = [
+  { group: "release", prefix: "release", label: "新機能" },
   { group: "task", prefix: "task.", label: "Tasks" },
   { group: "event", prefix: "event.", label: "Events" },
   { group: "system", prefix: "system.", label: "System" },
