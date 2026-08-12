@@ -88,7 +88,7 @@ function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] 
           </>
         ) : null}
         <div className={styles.colCount}>
-          計{confirmed}名{tent > 0 ? `（＋打診中${tent}）` : ""}
+          計{members.length}名{tent > 0 ? `（うち打診中${tent}）` : ""}
         </div>
       </div>
     </div>
