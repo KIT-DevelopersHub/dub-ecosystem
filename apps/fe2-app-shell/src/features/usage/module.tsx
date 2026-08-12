@@ -4,20 +4,18 @@
 //   /usage → free-tier usage & billing-guard dashboard
 // auth:"required" so an unauthenticated visitor is bounced to /login by the shell.
 //
-// requiredPermissions: ["infra:read"] — the backend (services/usage-meter) gates
-// GET /usage/summary on infra:read, so the shell mirrors that: the nav entry is
-// hidden and the route shows PermissionDeniedScreen for anyone without it. This
-// aligns the FE with the real access policy (previously the nav showed for every
-// signed-in user, who then got a forbidden read + a misleading sample board).
+// No requiredPermissions — the free-tier usage numbers are safe to show to every signed-in
+// user (there is nothing to hide), matching usage-meter's server gate, which now requires
+// authentication but no special permission. So the nav tile shows for anyone logged in and
+// the route renders for anyone logged in; the read is a safe D1 snapshot. The #177 neutral
+// fallback (never invent a fake danger % when a read is unavailable) is unchanged, and the
+// illustrative mock stays VITE_DEMO-only.
 import type { ComponentType } from "react";
 import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { UsageDashboard } from "./UsageDashboard.tsx";
 
 type PermissionKey = identity.PermissionKey;
-
-/** Permission required to view usage — matches usage-meter's server-side gate. */
-export const USAGE_VIEW_PERMISSION: PermissionKey = "infra:read";
 
 export interface UsageSourceRoute {
   path: string;
@@ -37,10 +35,9 @@ export const usageRoutes: UsageSourceRoute[] = [
     path: "/usage",
     lazy: () => Promise.resolve({ Component: UsageDashboard }),
     auth: "required",
-    requiredPermissions: [USAGE_VIEW_PERMISSION],
   },
 ];
 
 export const usageNav: UsageNavEntry[] = [
-  { label: "無料枠 / 課金ガード", path: "/usage", icon: "shield", requiredPermissions: [USAGE_VIEW_PERMISSION] },
+  { label: "無料枠 / 課金ガード", path: "/usage", icon: "shield" },
 ];

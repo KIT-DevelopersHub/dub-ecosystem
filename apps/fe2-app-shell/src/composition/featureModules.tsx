@@ -204,9 +204,10 @@ function adaptMail(api: ApiClient): FeatureModule {
 // ships a canonical FeatureModule so it registers, routes, and authz-gates exactly
 // like the others. Its route is wrapped in UsageProvider (UsageApi built from the
 // one shell api-client); nav sits after mail (order 46), before admin. The route +
-// nav carry requiredPermissions (infra:read), matching usage-meter's server gate:
-// wrapRoute copies the route perms (→ PermissionDeniedScreen), and the nav entry's
-// perms hide the launcher tile for anyone without infra:read.
+// nav carry auth:"required" but no requiredPermissions, matching usage-meter's server
+// gate: any signed-in user may view the (safe) free-tier numbers, so the launcher tile
+// shows and the route renders for everyone logged in. (The adapter still copies through
+// any requiredPermissions if a future policy adds one.)
 function adaptUsage(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(UsageProvider, api);
   const routes = (usageRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));

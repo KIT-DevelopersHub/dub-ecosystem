@@ -65,8 +65,8 @@ export interface UsageSummary {
 export type UsageSource = "live" | "demo" | "unavailable";
 
 /** Why a summary is `unavailable` — drives the neutral notice copy.
- *  forbidden = the caller lacks infra:read (or the session lapsed); error = a
- *  transient/offline/contract failure. */
+ *  forbidden = the caller is not authenticated / the session lapsed (viewing needs
+ *  sign-in but no special permission); error = a transient/offline/contract failure. */
 export type UsageUnavailableReason = "forbidden" | "error";
 
 export interface UsageSummaryResult {

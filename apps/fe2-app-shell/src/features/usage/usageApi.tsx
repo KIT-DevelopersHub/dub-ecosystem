@@ -55,8 +55,9 @@ export function createUsageApi(
       }
       return { summary, source: "live" };
     } catch (e) {
-      // 401/403 mean "you may not view usage" (needs infra:read); anything else is a
-      // transient/offline/contract failure. Both render neutrally, only the copy differs.
+      // 401/403 mean the session lapsed / the caller is not authenticated (viewing needs
+      // no special permission anymore, only sign-in); anything else is a transient/offline/
+      // contract failure. Both render neutrally, only the copy differs.
       const forbidden = ApiError.isApiError(e) && (e.status === 401 || e.status === 403);
       return unavailable(forbidden ? "forbidden" : "error");
     }

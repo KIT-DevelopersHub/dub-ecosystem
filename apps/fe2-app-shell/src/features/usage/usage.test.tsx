@@ -196,7 +196,7 @@ describe("createUsageApi", () => {
     expect(res.summary.services.every((s) => s.status === "unknown")).toBe(true);
     expect(res.summary.services.some((s) => s.status === "warn" || s.status === "critical")).toBe(false);
   });
-  it("reports reason:forbidden on a 401/403 (missing infra:read)", async () => {
+  it("reports reason:forbidden on a 401/403 (session lapsed / not authenticated)", async () => {
     const forbidden = new ApiError(403, { error: { code: "FORBIDDEN", message: "no", retryable: false } });
     const request = vi.fn(() => Promise.reject(forbidden));
     const api = { request } as unknown as ApiClient;
