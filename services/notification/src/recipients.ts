@@ -19,6 +19,11 @@ export function makeRecipientResolver(deps: { identity: IdentityPort; event: Eve
       for (const id of recipients.userIds ?? []) set.add(id);
 
       try {
+        // Broadcast: every active user (release notes / org-wide announcements).
+        if (recipients.all) {
+          const ids = await deps.identity.listAllUserIds(ctx);
+          for (const id of ids) set.add(id);
+        }
         for (const roleKey of recipients.roles ?? []) {
           const ids = await deps.identity.listUserIdsByRole(roleKey, ctx);
           for (const id of ids) set.add(id);

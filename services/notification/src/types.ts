@@ -21,6 +21,7 @@ export interface NotifyRecipients {
   userIds?: string[];
   roles?: string[]; // identity GET /users?roleKey=
   eventId?: string; // event GET /events/:id/participants
+  all?: boolean; // broadcast — every active user (identity GET /users, paged). Release notes.
 }
 
 // Normalized ingest input shared by all three lanes.

@@ -15,7 +15,11 @@ import {
   FEEDBACK_MESSAGE_MAX,
   FEEDBACK_PAGE_URL_MAX,
   FEEDBACK_PAGE_NAME_MAX,
+  RELEASE_TITLE_MAX,
+  RELEASE_BODY_MAX,
+  RELEASE_APP_MAX,
 } from "./config";
+import type { ReleaseInput } from "./release";
 import { isValidTypePattern } from "./preferences";
 import type { NotificationChannel } from "./types";
 
@@ -86,6 +90,57 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
   if (dedupKey !== undefined) out.dedupKey = dedupKey as string;
   if (resourceType !== undefined) out.resourceType = resourceType as string;
   if (resourceId !== undefined) out.resourceId = resourceId as string;
+  return out;
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T.*)?$/;
+
+/** Validate POST /release body (admin release-note publish). */
+export function parseReleaseRequest(body: unknown): ReleaseInput {
+  if (!isPlainObject(body)) throw notifValidationFailed([{ field: "(root)", reason: "invalid_type" }]);
+  const fe: FieldError[] = [];
+  const b = body;
+
+  const title = typeof b.title === "string" ? b.title.trim() : "";
+  if (!title || title.length > RELEASE_TITLE_MAX) {
+    fe.push({ field: "title", reason: "invalid_length", message: `1..${RELEASE_TITLE_MAX}` });
+  }
+
+  const bodyText = typeof b.body === "string" ? b.body.trim() : "";
+  if (!bodyText || bodyText.length > RELEASE_BODY_MAX) {
+    fe.push({ field: "body", reason: "invalid_length", message: `1..${RELEASE_BODY_MAX}` });
+  }
+
+  let app: string | undefined;
+  if (b.app !== undefined && b.app !== null && b.app !== "") {
+    if (typeof b.app !== "string" || b.app.length > RELEASE_APP_MAX) {
+      fe.push({ field: "app", reason: "invalid_length", message: `<= ${RELEASE_APP_MAX}` });
+    } else {
+      app = b.app.trim();
+    }
+  }
+
+  let publishedAt: string | undefined;
+  if (b.publishedAt !== undefined && b.publishedAt !== null && b.publishedAt !== "") {
+    if (typeof b.publishedAt !== "string" || !ISO_DATE_RE.test(b.publishedAt)) {
+      fe.push({ field: "publishedAt", reason: "invalid_format", message: "ISO8601 date/datetime" });
+    } else {
+      publishedAt = b.publishedAt;
+    }
+  }
+
+  let dedupKey: string | undefined;
+  if (b.dedupKey !== undefined && b.dedupKey !== null && b.dedupKey !== "") {
+    if (typeof b.dedupKey !== "string") fe.push({ field: "dedupKey", reason: "invalid_type" });
+    else dedupKey = b.dedupKey;
+  }
+
+  if (fe.length > 0) throw notifValidationFailed(fe);
+
+  const out: ReleaseInput = { title, body: bodyText };
+  if (app !== undefined) out.app = app;
+  if (publishedAt !== undefined) out.publishedAt = publishedAt;
+  if (dedupKey !== undefined) out.dedupKey = dedupKey;
   return out;
 }
 

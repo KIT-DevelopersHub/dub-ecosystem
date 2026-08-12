@@ -69,15 +69,24 @@ export function ctx(requestId = "req_test", userId?: string): RequestContext {
 export function fakeIdentity(opts: {
   byRole?: Record<string, string[]>;
   emails?: Record<string, string>;
-}): IdentityPort & { roleCalls: string[]; emailCalls: string[] } {
+  allUsers?: string[];
+}): IdentityPort & { roleCalls: string[]; emailCalls: string[]; allCalls: number } {
   const roleCalls: string[] = [];
   const emailCalls: string[] = [];
+  const state = { allCalls: 0 };
   return {
     roleCalls,
     emailCalls,
+    get allCalls() {
+      return state.allCalls;
+    },
     async listUserIdsByRole(roleKey) {
       roleCalls.push(roleKey);
       return opts.byRole?.[roleKey] ?? [];
+    },
+    async listAllUserIds() {
+      state.allCalls++;
+      return opts.allUsers ?? [];
     },
     async getEmail(userId) {
       emailCalls.push(userId);
