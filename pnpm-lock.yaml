@@ -976,6 +976,27 @@ importers:
         specifier: ^4
         version: 4.13.1
 
+  services/drive-share-service:
+    dependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4
+        version: 4.20260702.1
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+      '@dub/http':
+        specifier: workspace:*
+        version: link:../../packages/http
+      '@dub/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      hono:
+        specifier: ^4
+        version: 4.13.1
+
   services/event-service:
     dependencies:
       '@cloudflare/workers-types':

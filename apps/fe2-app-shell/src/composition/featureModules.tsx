@@ -28,6 +28,8 @@ import { mailRoutes, mailNav } from "../features/mail/index.tsx";
 import { MailProvider } from "../features/mail/MailProvider.tsx";
 import { usageRoutes, usageNav } from "../features/usage/index.tsx";
 import { UsageProvider } from "../features/usage/UsageProvider.tsx";
+import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
+import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
 import {
@@ -233,6 +235,19 @@ function adaptMembers(api: ApiClient): FeatureModule {
   return { id: "members", routes, nav };
 }
 
+// ── driveshare (FE2-local feature module) ─────────────────────────────────────
+// Like mail/usage, the Hackit Drive sharing manager lives in the shell
+// (apps/fe2-app-shell/src/features/driveshare) rather than a separate FE package. Its
+// route is wrapped in DriveShareProvider (DriveShareApi built from the one shell
+// api-client); nav sits after members (order 48), before admin. The backend
+// (drive-share-service) is the authoritative drive:read/drive:write gate.
+function adaptDriveShare(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(DriveShareProvider, api);
+  const routes = (driveShareRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = driveShareNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 48 }));
+  return { id: "driveshare", routes, nav };
+}
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
@@ -255,7 +270,7 @@ function adaptAdmin(api: ApiClient): FeatureModule {
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, mail, usage, members, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, usage, members, driveshare, admin]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
@@ -268,8 +283,9 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptMail(api),
     adaptUsage(api),
     adaptMembers(api),
+    adaptDriveShare(api),
     adaptAdmin(api),
   ];
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptDriveShare, adaptAdmin, toIcon };
