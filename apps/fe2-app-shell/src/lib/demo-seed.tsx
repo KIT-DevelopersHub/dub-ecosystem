@@ -819,6 +819,151 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
   return null;
 }
 
+// ── members (運営メンバー管理) ─────────────────────────────────────────────────
+// In-memory 運営メンバー store for the demo transport: seeded with a few teams +
+// members across all statuses, and full CRUD so add/edit/delete/status/team all
+// persist for the session (a reload resets). Mirrors services/member-service's wire
+// shapes (/api/v1/members/*).
+interface DemoTeam {
+  id: string;
+  key: string;
+  name: string;
+  color: string | null;
+  description: string | null;
+}
+interface DemoMember {
+  id: string;
+  orgId: string;
+  name: string;
+  roleTitle: string | null;
+  status: "added" | "invited" | "considering" | "declined";
+  teamIds: string[];
+  contact: string | null;
+  note: string | null;
+  sortOrder: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function createMembersStore() {
+  let seq = 100;
+  const nid = (p: string): string => `${p}_demo_${++seq}`;
+  // PDF「全体組織体制図」に寄せた構成: 統括チーム＋色付き5チーム、役割段は roleTitle で表現。
+  const teams: DemoTeam[] = [
+    { id: "team_hq", key: "soukatsu", name: "統括チーム", color: "#1e3a5f", description: "全体意思決定・進行統制・チーム間調整" },
+    { id: "team_dev", key: "dev", name: "開発チーム", color: "#0d9488", description: "運営ツール内製・名簿・当日連絡基盤" },
+    { id: "team_ops", key: "ops", name: "当日進行チーム", color: "#2563eb", description: "進行管理・タイムテーブル・人員配置" },
+    { id: "team_sponsor", key: "sponsor", name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
+    { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
+    { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
+  ];
+  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null): DemoMember => ({
+    id, orgId: ORG, name, roleTitle, status, teamIds, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+  });
+  const members: DemoMember[] = [
+    // 統括
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp"),
+    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1),
+    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2),
+    // 開発
+    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3),
+    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4),
+    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5),
+    // 当日進行
+    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6),
+    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7),
+    // スポンサー
+    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8),
+    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9),
+    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10),
+    // 会場
+    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11),
+    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12),
+    // 集客広報
+    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13),
+    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com"),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+  ];
+
+  const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
+
+  const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+  function handle(method: string, pathname: string, _url: URL, body: any): Response | null {
+    if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+    // canonical team list other apps read
+    if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
+
+    // teams
+    if (method === "POST" && pathname === "/api/v1/members/teams") {
+      const name = String(body?.name ?? "");
+      const t: DemoTeam = { id: nid("team"), key: slug(body?.key ?? name) || `team-${teams.length + 1}`, name, color: body?.color ?? null, description: body?.description ?? null };
+      teams.push(t);
+      return json(t, 201);
+    }
+    let m = /^\/api\/v1\/members\/teams\/([^/]+)$/.exec(pathname);
+    if (m) {
+      const t = teams.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!t) return notFound(`${method} ${pathname}`);
+      if (method === "PATCH") {
+        if (body?.name !== undefined) t.name = String(body.name);
+        if (body?.key !== undefined) t.key = slug(body.key) || t.key;
+        if (body?.color !== undefined) t.color = body.color ?? null;
+        if (body?.description !== undefined) t.description = body.description ?? null;
+        return json(t);
+      }
+      if (method === "DELETE") {
+        teams.splice(teams.indexOf(t), 1);
+        for (const mem of members) mem.teamIds = mem.teamIds.filter((id) => id !== t.id);
+        return json({ ok: true });
+      }
+    }
+
+    // people
+    if (method === "POST" && pathname === "/api/v1/members/people") {
+      const mem: DemoMember = {
+        id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
+        status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
+        createdAt: isoNow(), updatedAt: isoNow(),
+      };
+      members.push(mem);
+      return json(mem, 201);
+    }
+    m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
+    if (m) {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (method === "PATCH") {
+        if (typeof body?.version === "number" && body.version !== mem.version) {
+          const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+          return json(err, 409);
+        }
+        if (body?.name !== undefined) mem.name = String(body.name);
+        if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+        if (body?.status !== undefined) mem.status = body.status;
+        if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+        if (body?.contact !== undefined) mem.contact = body.contact ?? null;
+        if (body?.note !== undefined) mem.note = body.note ?? null;
+        if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;
+        mem.version += 1;
+        mem.updatedAt = isoNow();
+        return json({ ...mem, teamIds: [...mem.teamIds] });
+      }
+      if (method === "DELETE") {
+        members.splice(members.indexOf(mem), 1);
+        return json({ ok: true });
+      }
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -834,6 +979,8 @@ export function createDemoFetch(): typeof fetch {
   const roster = createRosterStore();
   // Mutable Inbox + Sent folders (read-state persists; a demo send lands in Sent).
   const mailStore = createMailStore();
+  // Mutable 運営メンバー store (teams + members CRUD persists for the session).
+  const membersStore = createMembersStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -855,6 +1002,7 @@ export function createDemoFetch(): typeof fetch {
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
+      membersStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.

@@ -1,0 +1,33 @@
+# Free-tier deploy of member-service as `dub-member-service` (internal; reached via the
+# api-gateway SVC_MEMBER service binding — workers.dev disabled). No paid Queues: this
+# service is self-contained (no events / audit fan-out), so it needs only the shared
+# dub-core D1 (member_* namespace) + identity-roster for authz.
+#
+# Deploy (only on 高岡's go — 本番反映は直列):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: apply the member namespace migration on dub-core
+#   npx wrangler d1 execute dub-core --remote \
+#     --file infra/d1/migrations/member/0001_init.sql
+#   npx wrangler deploy --config services/member-service/wrangler.free.toml
+name = "dub-member-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: member_* namespace tables.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- Service bindings (live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (identity:read / identity:admin)
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"

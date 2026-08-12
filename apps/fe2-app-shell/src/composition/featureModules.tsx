@@ -28,6 +28,8 @@ import { mailRoutes, mailNav } from "../features/mail/index.tsx";
 import { MailProvider } from "../features/mail/MailProvider.tsx";
 import { usageRoutes, usageNav } from "../features/usage/index.tsx";
 import { UsageProvider } from "../features/usage/UsageProvider.tsx";
+import { membersRoutes, membersNav } from "../features/members/index.tsx";
+import { MembersProvider } from "../features/members/MembersProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -219,6 +221,18 @@ function adaptUsage(api: ApiClient): FeatureModule {
   return { id: "usage", routes, nav };
 }
 
+// ── members (FE2-local feature module) ────────────────────────────────────────
+// 運営メンバー管理 (invite status + team membership; the GUI replacement for the
+// hand-maintained 組織図 PDF). Like mail/usage it lives in the shell (features/members)
+// rather than a separate FE package. Nav sits after usage (order 47), before admin.
+// Route gate = identity:read; write actions are re-authorized server-side (identity:admin).
+function adaptMembers(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(MembersProvider, api);
+  const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = membersNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 47 }));
+  return { id: "members", routes, nav };
+}
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
@@ -241,7 +255,7 @@ function adaptAdmin(api: ApiClient): FeatureModule {
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, mail, usage, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, usage, members, admin]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
@@ -253,8 +267,9 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptChat(api),
     adaptMail(api),
     adaptUsage(api),
+    adaptMembers(api),
     adaptAdmin(api),
   ];
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptAdmin, toIcon };

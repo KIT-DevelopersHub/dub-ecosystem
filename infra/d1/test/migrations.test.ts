@@ -7,7 +7,7 @@ import { NAMESPACE_REGISTRY } from "../src/registry";
 import { emptyD1, migratedD1 } from "./d1";
 
 describe("aggregation + registry", () => {
-  it("registry is in lockstep with the frozen NAMESPACES (17 entries)", () => {
+  it("registry is in lockstep with the frozen NAMESPACES (18 entries)", () => {
     expect(NAMESPACE_REGISTRY.length).toBe(NAMESPACES.length);
     expect(NAMESPACE_REGISTRY.map((e) => e.ns)).toEqual([...NAMESPACES]);
   });
