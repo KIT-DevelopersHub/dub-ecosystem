@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { event } from "@dub/types";
-import { Button, Icon, LoadMore } from "@dub/ui";
+import { Button, Icon, LoadMore, SkeletonCard } from "@dub/ui";
 import { useCan } from "../contracts/fe2";
 import { useNavigation } from "../contracts/navigation";
 import { useEventsQuery } from "../hooks/useEventQueries";
@@ -65,7 +65,13 @@ export function EventListPage() {
       </div>
 
       {isLoading ? (
-        <div className={styles.emptyState}>読み込み中…</div>
+        // Loading MUST show a skeleton, never a bare blank, so the user can tell
+        // "loading" from "empty" (FRONTEND_GUIDE §5).
+        <div className={styles.grid} data-testid="fe3-eventlist-skeleton">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonCard key={i} media lines={2} />
+          ))}
+        </div>
       ) : items.length === 0 ? (
         <div className={styles.emptyState}>イベントがありません</div>
       ) : (

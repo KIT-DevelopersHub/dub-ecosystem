@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { common, event } from "@dub/types";
-import { Icon, Button } from "@dub/ui";
+import { Icon, Button, SkeletonList } from "@dub/ui";
 import { ActionCard } from "./ActionCard";
 import { ActionCreateModal } from "./ActionCreateModal";
 import { useActionsQuery } from "../hooks/useEventQueries";
@@ -122,7 +122,11 @@ export function ActionBoard({
       </div>
 
       {query.isLoading ? (
-        <div className={styles.emptyState}>読み込み中…</div>
+        // Loading MUST show a skeleton, never a bare blank, so the user can tell
+        // "loading" from "empty" (FRONTEND_GUIDE §5).
+        <div className={styles.board} data-testid="fe3-actionboard-skeleton">
+          <SkeletonList rows={5} />
+        </div>
       ) : items.length === 0 ? (
         <div className={styles.emptyState}>アクションがありません</div>
       ) : (
