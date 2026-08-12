@@ -10,6 +10,7 @@ import { consoleSink } from "@dub/observability";
 import type { auditLog, mail } from "@dub/types";
 import { DEFAULT_SEND_BASE_DELAY_MS, DEFAULT_SEND_MAX_ATTEMPTS, SERVICE_NAME } from "./config";
 import { assembleMime } from "./mime";
+import { decodeInputAttachment, persistAttachments } from "./attachments";
 import { withRetry } from "./retry";
 import {
   findSendByKey,
@@ -32,6 +33,9 @@ export function hashRequest(req: mail.SendMailRequest): string {
     htmlBody: req.htmlBody ?? null,
     inReplyTo: req.inReplyTo ?? null,
     loopHeaders: req.loopHeaders ?? null,
+    // Attachment fingerprint: filename + type + base64 length (cheap, avoids hashing MBs
+    // of bytes while still tripping the 409 when the same key carries different files).
+    attachments: (req.attachments ?? []).map((a) => `${a.filename}:${a.contentType}:${a.contentBase64.length}`),
   });
   let h = 0x811c9dc5;
   for (let i = 0; i < canonical.length; i++) {
@@ -43,6 +47,20 @@ export function hashRequest(req: mail.SendMailRequest): string {
 
 function domainOf(fromAddress: string): string {
   return fromAddress.split("@")[1] ?? "developershub.jp";
+}
+
+/** Auto-CC the fixed archive address on every send (compliance archive). Returns a new
+ *  request with the archive appended to Cc, UNLESS it is already present in To or Cc
+ *  (case-insensitive) — a caller who addressed it is never double-CC'd. A null/empty
+ *  archive address is a no-op (feature disabled). Applied before hashRequest so the
+ *  idempotency hash, persisted ccJson, MIME and provider recipients all agree. */
+export function withArchiveCc(req: mail.SendMailRequest, archiveCc: string | null | undefined): mail.SendMailRequest {
+  const addr = archiveCc?.trim();
+  if (!addr) return req;
+  const target = addr.toLowerCase();
+  const already = [...req.to, ...(req.cc ?? [])].some((a) => a.email.trim().toLowerCase() === target);
+  if (already) return req;
+  return { ...req, cc: [...(req.cc ?? []), { email: addr }] };
 }
 
 /** Stable RFC Message-Id reconstructed from the send-log id, so a replay reproduces
@@ -70,11 +88,14 @@ export interface SendResult {
  */
 export async function sendMail(
   deps: SendDeps,
-  req: mail.SendMailRequest,
+  rawReq: mail.SendMailRequest,
   idempotencyKey: string,
   requester: string,
 ): Promise<SendResult> {
   const { db, provider, fromAddress } = deps;
+  // Auto-CC the archive address (compliance) on every send, deduped against To/Cc. Done
+  // first so every downstream use (hash, claim, MIME, provider) sees the same recipients.
+  const req = withArchiveCc(rawReq, deps.archiveCc);
   const reqHash = hashRequest(req);
   const threadId = req.inReplyTo ?? null;
 
@@ -107,6 +128,8 @@ export async function sendMail(
       htmlBody: req.htmlBody ?? null,
       ccJson: JSON.stringify(req.cc ?? []),
       fromAddress,
+      // Owner = the human sender (Sent-folder account scope); null for system sends.
+      ownerUserId: deps.ownerUserId ?? null,
     });
     if (claimed === 0) {
       // lost the race — another request claimed the key; re-read and dedup.
@@ -119,6 +142,11 @@ export async function sendMail(
 
   // 2) assemble + hand to the provider.
   const messageId = rfcMessageId(ownedId, fromAddress);
+  const outAttachments = (req.attachments ?? []).map((a) => ({
+    filename: a.filename,
+    contentType: a.contentType,
+    contentBase64: a.contentBase64,
+  }));
   const outbound: OutboundMail = {
     from: fromAddress,
     to: req.to,
@@ -138,7 +166,9 @@ export async function sendMail(
       messageId,
       inReplyTo: req.inReplyTo ?? null,
       ...(req.loopHeaders ? { loopHeaders: req.loopHeaders } : {}),
+      ...(outAttachments.length > 0 ? { attachments: outAttachments } : {}),
     }),
+    ...(outAttachments.length > 0 ? { attachments: outAttachments } : {}),
   };
 
   try {
@@ -149,6 +179,17 @@ export async function sendMail(
     const retry = deps.retry ?? { maxAttempts: DEFAULT_SEND_MAX_ATTEMPTS, baseDelayMs: DEFAULT_SEND_BASE_DELAY_MS };
     const { providerMessageId } = await withRetry(() => provider.send(outbound), retry);
     await markSendSent(db, ownedId, provider.name, providerMessageId);
+    // Store attachment bytes to R2 + metadata (keyed to this send-log row) so the Sent
+    // folder can list/download them. Best-effort: the email is already delivered, so a
+    // storage hiccup is logged inside persistAttachments, never a 5xx on a sent mail.
+    if (deps.blobs && req.attachments && req.attachments.length > 0) {
+      await persistAttachments(
+        { db, blobs: deps.blobs, orgId: deps.orgId, ctx: deps.ctx },
+        "sent",
+        ownedId,
+        req.attachments.map(decodeInputAttachment),
+      );
+    }
     await publishSent(deps, messageId, requester);
     await audit(deps, "success", messageId, requester, null);
     const response: mail.SendMailResponse = { messageId, provider: provider.name, acceptedAt: nowIso() };

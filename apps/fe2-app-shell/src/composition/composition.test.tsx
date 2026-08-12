@@ -27,7 +27,7 @@ describe("assembleFeatureModules", () => {
   it("assembles the seven features in canonical order", () => {
     const { api } = fakeApi();
     const modules = assembleFeatureModules(api);
-    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "mail", "usage", "driveshare", "admin"]);
+    expect(modules.map((m) => m.id)).toEqual(["events", "tasks", "notifications", "chat", "mail", "usage", "members", "driveshare", "admin"]);
   });
 
   it("merges into the shell registry with no duplicate route ownership", () => {
@@ -35,7 +35,7 @@ describe("assembleFeatureModules", () => {
     const registry = buildRegistry(assembleFeatureModules(api));
     const paths = registry.routes.map((r) => r.path);
     // core segments each feature owns
-    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/notifications", "/chat", "/mail", "/usage", "/admin/users"]));
+    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/notifications", "/chat", "/mail", "/usage", "/members", "/admin/users"]));
     // no duplicates survived the flatten + ownership check
     expect(new Set(paths).size).toBe(paths.length);
   });
@@ -77,16 +77,16 @@ describe("assembleFeatureModules", () => {
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("hides ロール管理 / ユーザー名簿 from nav while keeping other admin tools", () => {
-    // 一旦非表示（社長判断）: ロール管理(/admin/roles)・ユーザー名簿(/admin/users) は
-    // ランチャー/ナビに出さない。他の admin ツール（メールアドレス管理・変更履歴）は残す。
+  it("shows every admin tool (ロール管理 / ユーザー名簿 / メールアドレス管理 / 変更履歴) in nav", () => {
+    // 社長要望（#171 撤回）: 「アプリは絶対に減らすな」。ロール管理(/admin/roles)・
+    // ユーザー名簿(/admin/users) を含む全 admin ツールをランチャー/ナビに表示する。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
-    expect(navPaths).not.toContain("/admin/users");
-    expect(navPaths).not.toContain("/admin/roles");
-    expect(navPaths).toEqual(expect.arrayContaining(["/admin/email-routing", "/admin/history"]));
-    // ルート自体は残す（deep-link 生存 / 後で戻せる）
+    expect(navPaths).toEqual(
+      expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/email-routing", "/admin/history"]),
+    );
+    // ルートも当然残る（deep-link 生存）
     const routePaths = registry.routes.map((r) => r.path);
     expect(routePaths).toEqual(expect.arrayContaining(["/admin/users", "/admin/roles"]));
   });

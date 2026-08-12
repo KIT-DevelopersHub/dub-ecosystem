@@ -24,6 +24,7 @@ export interface SendLogRow {
   cc_json: string | null; // 0004: JSON MailAddress[] of Cc recipients
   snippet: string | null; // 0004: first ~140 chars of text_body (Sent list preview)
   from_address: string | null; // 0004: envelope From used for the send
+  owner_user_id: string | null; // 0006: the user who sent it (Sent-folder scope); NULL = system
 }
 
 export interface InboundRow {
@@ -42,6 +43,7 @@ export interface InboundRow {
   body_text: string | null; // 0002: full plain-text body (detail view)
   html_body: string | null; // 0002: HTML part when present (sanitized before render)
   read_at: string | null; // 0002: ISO8601 when first opened; NULL = unread
+  owner_user_id: string | null; // 0006: roster user the message was delivered to (Inbox scope); NULL = unassigned
 }
 
 export interface MailboxRow {
@@ -50,6 +52,17 @@ export interface MailboxRow {
   provider: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface AttachmentRow {
+  id: string;
+  message_kind: "sent" | "inbound";
+  message_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  r2_key: string;
+  created_at: string;
 }
 
 // ---- opaque cursor codec (base64url of the row id; D3) ----
@@ -94,6 +107,9 @@ export async function insertSendClaim(
     htmlBody: string | null;
     ccJson: string;
     fromAddress: string;
+    // Owner = the human sender (Sent-folder scope). NULL for pure system/automation
+    // sends with no user on the call — they belong to no person's Sent folder.
+    ownerUserId: string | null;
   },
 ): Promise<number> {
   const now = nowIso();
@@ -101,8 +117,8 @@ export async function insertSendClaim(
     `INSERT OR IGNORE INTO mail_send_log
        (id, idempotency_key, req_hash, requester, to_json, subject, thread_id,
         provider, provider_message_id, status, error_code, created_at, updated_at,
-        text_body, html_body, cc_json, snippet, from_address)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, ?, ?)`,
+        text_body, html_body, cc_json, snippet, from_address, owner_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.idempotencyKey,
     row.reqHash,
@@ -117,6 +133,7 @@ export async function insertSendClaim(
     row.ccJson,
     snippetOf(row.textBody),
     row.fromAddress,
+    row.ownerUserId,
   );
   return res.meta.changes;
 }
@@ -187,14 +204,34 @@ function sendRowToDetail(r: SendLogRow): mail.MailSentDetail {
   return detail;
 }
 
+/** Read scope for the account-isolated mail queries. A plain userId string scopes a
+ *  query to that owner's own mail (the #169 per-account isolation, fail-closed). The
+ *  `{ readAll: true }` variant is the `mail:read_all` OVERSIGHT bypass: an authorized
+ *  supervisor / info@ / admin@ account sees EVERY row (owner filter dropped, including
+ *  NULL-owner archive/system rows). Callers resolve which variant to pass from the
+ *  caller's permissions — the repo never decides policy, only applies the given scope. */
+export type MailScope = string | { readAll: true };
+
+/** True when the scope is the mail:read_all oversight bypass (no owner filter). */
+function isReadAll(scope: MailScope): scope is { readAll: true } {
+  return typeof scope === "object";
+}
+
 /** List sent mail (status='sent'), newest first. id-based opaque cursor (like
  *  listInbound); ULID ids sort in creation order so the id cursor tracks created_at. */
 export async function listSent(
   db: DbClient,
-  q: { cursor?: string; limit: number },
+  q: { ownerUserId: MailScope; cursor?: string; limit: number },
 ): Promise<common.Paginated<mail.MailSentListItem>> {
+  // Fail-closed account scope: only the signed-in user's own delivered sends. A NULL
+  // owner_user_id (system send / legacy row) never matches `= ?`, so it is invisible.
+  // Oversight (mail:read_all) drops the owner filter entirely and returns every send.
   const where: string[] = ["status = 'sent'"];
   const binds: unknown[] = [];
+  if (!isReadAll(q.ownerUserId)) {
+    where.push("owner_user_id = ?");
+    binds.push(q.ownerUserId);
+  }
   if (q.cursor !== undefined) {
     where.push("id < ?");
     binds.push(decodeCursor(q.cursor));
@@ -215,8 +252,17 @@ export async function listSent(
 
 /** Full sent detail (body included) — backs GET /sent/:id. Only a delivered
  *  (status='sent') row is returned; a pending/failed row reads as not-found. */
-export async function getSentDetail(db: DbClient, id: string): Promise<mail.MailSentDetail | null> {
-  const row = await db.first<SendLogRow>(`SELECT * FROM mail_send_log WHERE id = ? AND status = 'sent'`, id);
+export async function getSentDetail(db: DbClient, id: string, scope: MailScope): Promise<mail.MailSentDetail | null> {
+  // Account scope: a user can only open their OWN sent mail — another user's id reads as
+  // not-found (fail-closed 404), never a 403 that would confirm the row exists. Oversight
+  // (mail:read_all) drops the owner filter so a supervisor can open any delivered send.
+  const binds: unknown[] = [id];
+  let sql = `SELECT * FROM mail_send_log WHERE id = ? AND status = 'sent'`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  const row = await db.first<SendLogRow>(sql, ...binds);
   return row ? sendRowToDetail(row) : null;
 }
 
@@ -239,13 +285,22 @@ export async function findInboundByMessageId(db: DbClient, messageId: string): P
 export async function insertInbound(
   db: DbClient,
   m: mail.MailMessage,
-  extra: { mailbox: string | null; autoSubmitted: string | null; loopMarker: string | null; bodyText: string; htmlBody: string | null },
+  extra: {
+    mailbox: string | null;
+    autoSubmitted: string | null;
+    loopMarker: string | null;
+    bodyText: string;
+    htmlBody: string | null;
+    // Owner = the roster user this message was delivered to (Inbox scope). NULL when no
+    // roster user matches the recipient — invisible to every account until assignable.
+    ownerUserId: string | null;
+  },
 ): Promise<number> {
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_inbound
        (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
-        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     m.id,
     m.messageId,
     m.threadId,
@@ -260,6 +315,7 @@ export async function insertInbound(
     nowIso(),
     extra.bodyText,
     extra.htmlBody,
+    extra.ownerUserId,
   );
   return res.meta.changes;
 }
@@ -295,36 +351,68 @@ export async function getInboundById(db: DbClient, id: string): Promise<mail.Mai
   return row ? rowToMailMessage(row) : null;
 }
 
-/** Full detail (body + read state) — backs GET /messages/:id. */
-export async function getInboundDetail(db: DbClient, id: string): Promise<mail.MailMessageDetail | null> {
-  const row = await db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE id = ?`, id);
+/** Full detail (body + read state) — backs GET /messages/:id. Account-scoped: another
+ *  user's message reads as not-found (fail-closed 404), never exposing its body. */
+export async function getInboundDetail(db: DbClient, id: string, scope: MailScope): Promise<mail.MailMessageDetail | null> {
+  // Oversight (mail:read_all) drops the owner filter so a supervisor sees any message body.
+  const binds: unknown[] = [id];
+  let sql = `SELECT * FROM mail_inbound WHERE id = ?`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  const row = await db.first<InboundRow>(sql, ...binds);
   return row ? rowToDetail(row) : null;
 }
 
-/** Every message in a thread, oldest→newest, as full details — backs GET /threads/:id. */
-export async function listThread(db: DbClient, threadId: string): Promise<mail.MailMessageDetail[]> {
-  const rows = await db.all<InboundRow>(
-    `SELECT * FROM mail_inbound WHERE thread_id = ? ORDER BY received_at ASC, id ASC`,
-    threadId,
-  );
+/** Every message in a thread, oldest→newest, as full details — backs GET /threads/:id.
+ *  Account-scoped: only the caller's own messages in the thread are returned (a thread
+ *  the caller owns no message in reads as empty → 404 at the route). */
+export async function listThread(db: DbClient, threadId: string, scope: MailScope): Promise<mail.MailMessageDetail[]> {
+  // Oversight (mail:read_all) drops the owner filter so a supervisor sees the whole thread.
+  const binds: unknown[] = [threadId];
+  let sql = `SELECT * FROM mail_inbound WHERE thread_id = ?`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  sql += ` ORDER BY received_at ASC, id ASC`;
+  const rows = await db.all<InboundRow>(sql, ...binds);
   return rows.map(rowToDetail);
 }
 
 /** Mark a message read (idempotent): stamps read_at only on the first open. Returns
- *  whether the message exists so the route can 404 an unknown id. */
-export async function markInboundRead(db: DbClient, id: string): Promise<{ found: boolean }> {
-  const row = await db.first<{ id: string }>(`SELECT id FROM mail_inbound WHERE id = ?`, id);
+ *  whether the message exists FOR THIS OWNER so the route can 404 an unknown/foreign id
+ *  (a user can never flip another account's read state). */
+export async function markInboundRead(db: DbClient, id: string, scope: MailScope): Promise<{ found: boolean }> {
+  // Oversight (mail:read_all) may open (and thus mark read) any message.
+  const readAll = isReadAll(scope);
+  const selSql = readAll ? `SELECT id FROM mail_inbound WHERE id = ?` : `SELECT id FROM mail_inbound WHERE id = ? AND owner_user_id = ?`;
+  const row = readAll
+    ? await db.first<{ id: string }>(selSql, id)
+    : await db.first<{ id: string }>(selSql, id, scope);
   if (!row) return { found: false };
-  await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND read_at IS NULL`, nowIso(), id);
+  if (readAll) {
+    await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND read_at IS NULL`, nowIso(), id);
+  } else {
+    await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND owner_user_id = ? AND read_at IS NULL`, nowIso(), id, scope);
+  }
   return { found: true };
 }
 
 export async function listInbound(
   db: DbClient,
-  q: { threadId?: string; cursor?: string; limit: number },
+  q: { ownerUserId: MailScope; threadId?: string; cursor?: string; limit: number },
 ): Promise<common.Paginated<mail.MailMessageListItem>> {
+  // Fail-closed account scope: only messages delivered to the signed-in user. A NULL
+  // owner_user_id (unassigned / legacy row) never matches `= ?`, so it stays invisible.
+  // Oversight (mail:read_all) drops the owner filter and lists every account's inbox.
   const where: string[] = [];
   const binds: unknown[] = [];
+  if (!isReadAll(q.ownerUserId)) {
+    where.push("owner_user_id = ?");
+    binds.push(q.ownerUserId);
+  }
   if (q.threadId !== undefined) {
     where.push("thread_id = ?");
     binds.push(q.threadId);
@@ -369,13 +457,82 @@ export async function upsertMailbox(db: DbClient, id: string, address: string): 
   }
 }
 
+// ---- attachments (metadata; bytes live in R2) ----
+export async function insertAttachment(
+  db: DbClient,
+  row: {
+    id: string;
+    messageKind: "sent" | "inbound";
+    messageId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    r2Key: string;
+    createdAt: string;
+  },
+): Promise<void> {
+  await db.run(
+    `INSERT OR IGNORE INTO mail_attachments
+       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    row.id,
+    row.messageKind,
+    row.messageId,
+    row.filename,
+    row.mimeType,
+    row.sizeBytes,
+    row.r2Key,
+    row.createdAt,
+  );
+}
+
+/** All attachments for one message, oldest first (stable display order). */
+export async function listAttachments(db: DbClient, kind: "sent" | "inbound", messageId: string): Promise<AttachmentRow[]> {
+  return db.all<AttachmentRow>(
+    `SELECT * FROM mail_attachments WHERE message_kind = ? AND message_id = ? ORDER BY created_at ASC, id ASC`,
+    kind,
+    messageId,
+  );
+}
+
+/** One attachment by id, scoped to its owning message (download route: 404 on mismatch). */
+export async function getAttachment(db: DbClient, kind: "sent" | "inbound", messageId: string, attId: string): Promise<AttachmentRow | null> {
+  return db.first<AttachmentRow>(
+    `SELECT * FROM mail_attachments WHERE id = ? AND message_kind = ? AND message_id = ?`,
+    attId,
+    kind,
+    messageId,
+  );
+}
+
+/** R2 keys of attachments whose rows are about to be purged (so the caller can delete the
+ *  bytes too). Uses the retention cutoffs for the owning message kind. */
+export async function attachmentKeysOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<string[]> {
+  const rows = await db.all<{ r2_key: string }>(
+    `SELECT r2_key FROM mail_attachments
+       WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
+    sendCutoff,
+    inboundCutoff,
+  );
+  return rows.map((r) => r.r2_key);
+}
+
 // ---- retention purge (scheduled) ----
-export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<{ sendLog: number; inbound: number }> {
+export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<{ sendLog: number; inbound: number; attachments: number }> {
   const sendLog = (await db.run(`DELETE FROM mail_send_log WHERE created_at < ?`, sendCutoff)).meta.changes;
   const inbound = (await db.run(`DELETE FROM mail_inbound WHERE created_at < ?`, inboundCutoff)).meta.changes;
-  return { sendLog, inbound };
+  const attachments = (
+    await db.run(
+      `DELETE FROM mail_attachments
+         WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
+      sendCutoff,
+      inboundCutoff,
+    )
+  ).meta.changes;
+  return { sendLog, inbound, attachments };
 }
 
 // ---- id mints ----
 export const newSendLogId = (): string => newId("maillog");
 export const newInboundId = (): string => newId("mailin");
+export const newAttachmentId = (): string => newId("mailatt");

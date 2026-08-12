@@ -6,6 +6,8 @@ export interface TaskFilterState {
   eventId: common.EventId;
   status: task.TaskStatus[];
   assigneeId?: common.UserId;
+  /** team view: undefined = 全体表示 (all teams); a team id = that team only. */
+  teamId?: common.TeamId;
   includeArchived: boolean;
   cursor?: string;
   limit?: number;
@@ -33,6 +35,7 @@ export function toListTasksQuery(f: TaskFilterState): task.ListTasksQuery {
     eventId: f.eventId,
     ...(f.status.length > 0 ? { status: f.status } : {}),
     ...(f.assigneeId !== undefined ? { assigneeId: f.assigneeId } : {}),
+    ...(f.teamId !== undefined ? { teamId: f.teamId } : {}),
     ...(f.includeArchived ? { includeArchived: true } : {}),
     ...(f.cursor !== undefined ? { cursor: f.cursor } : {}),
     ...(f.limit !== undefined ? { limit: f.limit } : {}),

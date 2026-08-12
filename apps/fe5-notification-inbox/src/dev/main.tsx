@@ -20,6 +20,7 @@ import { NotificationProvider, type NotificationDeps } from "../context";
 import { NotificationInboxPage } from "../components/NotificationInboxPage";
 import { NotificationPreferencesPage } from "../components/NotificationPreferencesPage";
 import { NotificationBell } from "../components/NotificationBell";
+import { ReleasePublishForm } from "../components/ReleasePublishForm";
 import { ROUTE_PREFERENCES } from "../lib/routes";
 
 const style = document.createElement("style");
@@ -80,18 +81,25 @@ function buildDeps(): NotificationDeps {
 const deps = buildDeps();
 
 function DevApp(): React.ReactNode {
-  const [route, setRoute] = useState<"inbox" | "prefs">("inbox");
+  const [route, setRoute] = useState<"inbox" | "prefs" | "publish">("inbox");
   return (
     <NotificationProvider deps={deps}>
       <header style={{ display: "flex", justifyContent: "space-between", padding: 16 }}>
         <nav style={{ display: "flex", gap: 12 }}>
           <button onClick={() => setRoute("inbox")}>Inbox</button>
           <button onClick={() => setRoute("prefs")}>Settings</button>
+          <button onClick={() => setRoute("publish")}>Publish (admin)</button>
         </nav>
         <NotificationBell />
       </header>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: 16 }}>
-        {route === "inbox" ? <NotificationInboxPage /> : <NotificationPreferencesPage />}
+        {route === "inbox" ? (
+          <NotificationInboxPage />
+        ) : route === "prefs" ? (
+          <NotificationPreferencesPage />
+        ) : (
+          <ReleasePublishForm onPublished={() => setRoute("inbox")} />
+        )}
       </main>
     </NotificationProvider>
   );

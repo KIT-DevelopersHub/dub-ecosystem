@@ -158,6 +158,14 @@ const NOTIFICATIONS: notification.InboxItem[] = [
 ];
 
 // ── mail ────────────────────────────────────────────────────────────────────
+// Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
+const DEMO_MAIL_BLOBS = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
+function seedMailBlob(id: string, filename: string, contentType: string, text: string): mail.MailAttachment {
+  const bytes = new TextEncoder().encode(text);
+  DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
+  return { id, filename, contentType, sizeBytes: bytes.byteLength };
+}
+
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_1", messageId: "<m1@demo>", threadId: "thr_1", from: { email: "hanako@example.com", name: "山田 花子" },
@@ -178,7 +186,11 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
   msg_1: { ...MAIL_LIST[0]!, textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。\n\nよろしくお願いいたします。" },
-  msg_2: { ...MAIL_LIST[1]!, textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。" },
+  msg_2: {
+    ...MAIL_LIST[1]!,
+    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。",
+    attachments: [seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…")],
+  },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
 };
 
@@ -187,6 +199,80 @@ const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
 };
+
+// ── demo accounts (per-account mail scope) ────────────────────────────────────
+// Two signed-in accounts so a viewer / the E2E can prove Gmail-style isolation in a
+// real browser: each account sees ONLY its own inbox + sent mail. The active account
+// is chosen by localStorage["dub_demo_account"] (email or id), read fresh on every
+// request so a reload after switching accounts re-scopes everything. Default = the
+// admin (usr_demo), so the existing single-account demo + E2E are unchanged.
+export interface DemoAccount {
+  id: string;
+  displayName: string;
+  email: string;
+  permissions: identity.PermissionKey[];
+  inbox: mail.MailMessageDetail[];
+}
+
+// Account B's inbox is a DISTINCT set (different sender/subject) so a screenshot makes
+// the isolation obvious: none of account A's mail appears here, and vice versa.
+const B_INBOX: mail.MailMessageDetail[] = [
+  {
+    id: "msg_b1", messageId: "<b1@demo>", threadId: "thr_b1",
+    from: { email: "chair@example.org", name: "実行委員長" },
+    to: [{ email: "taro@developershub.jp" }], subject: "委員会の議事録共有",
+    snippet: "本日の運営委員会の議事録を共有します。", receivedAt: "2026-08-03T02:00:00Z", read: false,
+    textBody: "佐藤さん\n\n本日の運営委員会の議事録を共有します。ご確認ください。",
+  },
+];
+
+// Fixed archive address auto-CC'd on every send (mirrors the mail-gateway MAIL_ARCHIVE_CC
+// behavior so the demo/E2E shows the archive copy in the Sent detail's Cc).
+const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+
+// Oversight account (info@): an INDIVIDUAL admin account holding mail:read_all, so it
+// sees EVERY account's inbox + sent mail — the supervisor / archive view. Contrast with
+// the two personal accounts above, which each see only their own mail.
+const OVERSIGHT_PERMISSIONS: identity.PermissionKey[] = [...DEMO_PERMISSIONS, "mail:read_all"];
+
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
+  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
+  { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+];
+
+/** True when the account holds the mail:read_all oversight permission. */
+function isOversight(a: DemoAccount): boolean {
+  return a.permissions.includes("mail:read_all");
+}
+
+const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
+
+/** The active demo account (localStorage-selected, default admin). Read per request. */
+function currentAccount(): DemoAccount {
+  let key: string | null = null;
+  try {
+    key = globalThis.localStorage?.getItem(DEMO_ACCOUNT_STORAGE_KEY) ?? null;
+  } catch {
+    key = null;
+  }
+  if (key) {
+    const match = DEMO_ACCOUNTS.find((a) => a.id === key || a.email === key);
+    if (match) return match;
+  }
+  return DEMO_ACCOUNTS[0]!;
+}
+
+/** The /me session for the active account (drives RequireAuth + the shell header). */
+function currentMe(): gateway.MeResponse {
+  const a = currentAccount();
+  return {
+    user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
+    orgId: ORG,
+    permissions: a.permissions,
+    sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+  };
+}
 
 // ── mail: stateful Inbox + Sent folders ───────────────────────────────────────
 // A tiny in-session store so the mail folders behave end-to-end: received messages
@@ -200,16 +286,74 @@ function firstLine(text: string, max = 140): string {
 }
 
 function createMailStore() {
-  // Received seed = the same clean sample set the demo already shows (msg_1..3), cloned
-  // so the read flag can be flipped in-session without mutating the module constants.
-  const received: mail.MailMessageDetail[] = Object.values(MAIL_DETAIL).map((m) => ({ ...m }));
-  const sent: mail.MailSentDetail[] = [];
+  // Per-account Inbox + Sent, mirroring the server's owner scope: each account sees ONLY
+  // its own mail. received[accountId] is seeded (cloned) from the account's inbox so the
+  // read flag can flip in-session; sent[accountId] starts empty. The active account is
+  // resolved fresh on every request (currentAccount) so a reload after switching accounts
+  // re-scopes every list. A message/thread/sent id owned by another account reads as 404.
+  const received: Record<string, mail.MailMessageDetail[]> = {};
   let seq = 0;
+  let attSeq = 0;
+  const b64ToBytes = (b64: string): Uint8Array => {
+    const bin = atob(b64.replace(/\s+/g, ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+
+  function inboxOf(id: string): mail.MailMessageDetail[] {
+    if (!received[id]) {
+      const acct = DEMO_ACCOUNTS.find((a) => a.id === id);
+      received[id] = (acct?.inbox ?? []).map((m) => ({ ...m }));
+    }
+    return received[id]!;
+  }
+  // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
+  // strictly account-scoped: a mail account A sent lives under A's key and is therefore
+  // invisible when the shell reloads as account B. Read fresh on every request.
+  const sentKey = (id: string): string => `dub_demo_sent_${id}`;
+  function sentOf(id: string): mail.MailSentDetail[] {
+    try {
+      const raw = globalThis.localStorage?.getItem(sentKey(id));
+      return raw ? (JSON.parse(raw) as mail.MailSentDetail[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveSent(id: string, list: mail.MailSentDetail[]): void {
+    try {
+      globalThis.localStorage?.setItem(sentKey(id), JSON.stringify(list));
+    } catch {
+      /* storage unavailable — Sent is best-effort in the demo */
+    }
+  }
 
   function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
-    // received: list / detail / mark-read (read state persists in-session)
+    // attachment download (messages|sent): stream the stored blob as a file.
+    {
+      const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const blob = DEMO_MAIL_BLOBS.get(decodeURIComponent(m[1]!));
+        if (!blob) return notFound(`GET ${pathname}`);
+        return new Response(blob.bytes as BodyInit, {
+          status: 200,
+          headers: { "content-type": blob.contentType, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(blob.filename)}` },
+        });
+      }
+    }
+    const me = currentAccount();
+    const outbox = sentOf(me.id);
+    // Oversight (mail:read_all): the read views aggregate EVERY account's mail; personal
+    // accounts stay scoped to their own. `readInbox` / `readSent` are the visible sets for
+    // the current viewer. Writes (send / mark-read) still target the account they belong to.
+    const oversight = isOversight(me);
+    const readInbox: mail.MailMessageDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)) : inboxOf(me.id);
+    const readSent: mail.MailSentDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)) : outbox;
+
+    // received: list / detail / mark-read (read state persists in-session). Scoped to the
+    // account, or every account under oversight (mail:read_all).
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
-      const items: mail.MailMessageListItem[] = received.map(({ textBody, htmlBody, ...li }) => {
+      const items: mail.MailMessageListItem[] = readInbox.map(({ textBody, htmlBody, ...li }) => {
         void textBody;
         void htmlBody;
         return li;
@@ -219,29 +363,49 @@ function createMailStore() {
     {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
-        const found = received.find((r) => r.id === decodeURIComponent(m[1]!));
+        const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
     if (method === "POST") {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)\/read$/.exec(pathname);
       if (m) {
-        const found = received.find((r) => r.id === decodeURIComponent(m[1]!));
-        if (found) found.read = true;
+        const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
+        if (!found) return notFound(`POST ${pathname}`); // another account's message (no oversight) → 404
+        found.read = true;
         return json({ read: true });
       }
     }
-    // sent: outbox append + list + detail
+    // thread: this account's messages in the thread (every account's under oversight).
+    {
+      const m = /^\/api\/v1\/mail\/threads\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const threadId = decodeURIComponent(m[1]!);
+        const messages = readInbox.filter((r) => r.threadId === threadId);
+        return messages.length > 0 ? json({ id: threadId, messages } satisfies mail.MailThread) : notFound(`GET ${pathname}`);
+      }
+    }
+    // sent: outbox append + list + detail — this account only
     if (method === "POST" && pathname === "/api/v1/mail/outbox") {
       const req = (body ?? {}) as Partial<mail.SendMailRequest>;
       const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
       const sentAt = new Date().toISOString();
       const providerMessageId = `<demo-${Date.now()}@developershub.jp>`;
+      const attachments: mail.MailAttachment[] = (req.attachments ?? []).map((a) => {
+        const attId = `mailatt_demo_${Date.now().toString(36)}_${attSeq++}`;
+        const bytes = b64ToBytes(a.contentBase64);
+        DEMO_MAIL_BLOBS.set(attId, { filename: a.filename, contentType: a.contentType, bytes });
+        return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
+      });
+      // Auto-CC the archive address (dedup against To/Cc) — mirrors MAIL_ARCHIVE_CC.
+      const baseCc = req.cc ?? [];
+      const alreadyArchived = [...(req.to ?? []), ...baseCc].some((a) => a.email?.trim().toLowerCase() === DEMO_ARCHIVE_CC);
+      const cc = alreadyArchived ? baseCc : [...baseCc, { email: DEMO_ARCHIVE_CC }];
       const detail: mail.MailSentDetail = {
         id,
-        from: { email: "demo@developershub.jp", name: "デモ 管理者" },
+        from: { email: me.email, name: me.displayName },
         to: req.to ?? [],
-        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        ...(cc.length > 0 ? { cc } : {}),
         subject: req.subject ?? "(件名なし)",
         snippet: firstLine(req.textBody ?? ""),
         sentAt,
@@ -250,13 +414,15 @@ function createMailStore() {
         status: "sent",
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       };
-      sent.unshift(detail);
+      outbox.unshift(detail);
+      saveSent(me.id, outbox);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
-      const items: mail.MailSentListItem[] = sent.map(({ textBody, htmlBody, ...listItem }) => {
+      const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
         return listItem;
@@ -266,7 +432,7 @@ function createMailStore() {
     if (method === "GET") {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
       if (m) {
-        const found = sent.find((s) => s.id === decodeURIComponent(m[1]!));
+        const found = readSent.find((s) => s.id === decodeURIComponent(m[1]!));
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
@@ -786,6 +952,151 @@ function createDriveShareStore() {
   return { handle };
 }
 
+// ── members (運営メンバー管理) ─────────────────────────────────────────────────
+// In-memory 運営メンバー store for the demo transport: seeded with a few teams +
+// members across all statuses, and full CRUD so add/edit/delete/status/team all
+// persist for the session (a reload resets). Mirrors services/member-service's wire
+// shapes (/api/v1/members/*).
+interface DemoTeam {
+  id: string;
+  key: string;
+  name: string;
+  color: string | null;
+  description: string | null;
+}
+interface DemoMember {
+  id: string;
+  orgId: string;
+  name: string;
+  roleTitle: string | null;
+  status: "added" | "invited" | "considering" | "declined";
+  teamIds: string[];
+  contact: string | null;
+  note: string | null;
+  sortOrder: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function createMembersStore() {
+  let seq = 100;
+  const nid = (p: string): string => `${p}_demo_${++seq}`;
+  // PDF「全体組織体制図」に寄せた構成: 統括チーム＋色付き5チーム、役割段は roleTitle で表現。
+  const teams: DemoTeam[] = [
+    { id: "team_hq", key: "soukatsu", name: "統括チーム", color: "#1e3a5f", description: "全体意思決定・進行統制・チーム間調整" },
+    { id: "team_dev", key: "dev", name: "開発チーム", color: "#0d9488", description: "運営ツール内製・名簿・当日連絡基盤" },
+    { id: "team_ops", key: "ops", name: "当日進行チーム", color: "#2563eb", description: "進行管理・タイムテーブル・人員配置" },
+    { id: "team_sponsor", key: "sponsor", name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
+    { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
+    { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
+  ];
+  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null): DemoMember => ({
+    id, orgId: ORG, name, roleTitle, status, teamIds, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+  });
+  const members: DemoMember[] = [
+    // 統括
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp"),
+    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1),
+    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2),
+    // 開発
+    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3),
+    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4),
+    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5),
+    // 当日進行
+    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6),
+    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7),
+    // スポンサー
+    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8),
+    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9),
+    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10),
+    // 会場
+    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11),
+    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12),
+    // 集客広報
+    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13),
+    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com"),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+  ];
+
+  const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
+
+  const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+  function handle(method: string, pathname: string, _url: URL, body: any): Response | null {
+    if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+    // canonical team list other apps read
+    if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
+
+    // teams
+    if (method === "POST" && pathname === "/api/v1/members/teams") {
+      const name = String(body?.name ?? "");
+      const t: DemoTeam = { id: nid("team"), key: slug(body?.key ?? name) || `team-${teams.length + 1}`, name, color: body?.color ?? null, description: body?.description ?? null };
+      teams.push(t);
+      return json(t, 201);
+    }
+    let m = /^\/api\/v1\/members\/teams\/([^/]+)$/.exec(pathname);
+    if (m) {
+      const t = teams.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!t) return notFound(`${method} ${pathname}`);
+      if (method === "PATCH") {
+        if (body?.name !== undefined) t.name = String(body.name);
+        if (body?.key !== undefined) t.key = slug(body.key) || t.key;
+        if (body?.color !== undefined) t.color = body.color ?? null;
+        if (body?.description !== undefined) t.description = body.description ?? null;
+        return json(t);
+      }
+      if (method === "DELETE") {
+        teams.splice(teams.indexOf(t), 1);
+        for (const mem of members) mem.teamIds = mem.teamIds.filter((id) => id !== t.id);
+        return json({ ok: true });
+      }
+    }
+
+    // people
+    if (method === "POST" && pathname === "/api/v1/members/people") {
+      const mem: DemoMember = {
+        id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
+        status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
+        createdAt: isoNow(), updatedAt: isoNow(),
+      };
+      members.push(mem);
+      return json(mem, 201);
+    }
+    m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
+    if (m) {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (method === "PATCH") {
+        if (typeof body?.version === "number" && body.version !== mem.version) {
+          const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+          return json(err, 409);
+        }
+        if (body?.name !== undefined) mem.name = String(body.name);
+        if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+        if (body?.status !== undefined) mem.status = body.status;
+        if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+        if (body?.contact !== undefined) mem.contact = body.contact ?? null;
+        if (body?.note !== undefined) mem.note = body.note ?? null;
+        if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;
+        mem.version += 1;
+        mem.updatedAt = isoNow();
+        return json({ ...mem, teamIds: [...mem.teamIds] });
+      }
+      if (method === "DELETE") {
+        members.splice(members.indexOf(mem), 1);
+        return json({ ok: true });
+      }
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -803,6 +1114,8 @@ export function createDemoFetch(): typeof fetch {
   const mailStore = createMailStore();
   // Mutable Hackit Drive sharing state (grant/change/revoke/link toggle persist).
   const driveShareStore = createDriveShareStore();
+  // Mutable 運営メンバー store (teams + members CRUD persists for the session).
+  const membersStore = createMembersStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -817,13 +1130,18 @@ export function createDemoFetch(): typeof fetch {
         parsedBody = undefined;
       }
     }
+    // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
+    // and reloading re-scopes the whole shell — the header title, permissions and mail.
+    if (method === "GET" && url.pathname === "/api/v1/me") return json(currentMe());
+
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
+      membersStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
-    // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.
+    // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.
     return boot(input, init);
   };
 

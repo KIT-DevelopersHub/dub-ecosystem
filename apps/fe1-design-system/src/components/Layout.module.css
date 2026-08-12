@@ -87,7 +87,7 @@
 .shellHeader {
   position: sticky;
   top: 0;
-  z-index: var(--dub-z-index-sticky);
+  z-index: var(--dub-zIndex-sticky);
   padding: var(--dub-space-3) var(--dub-space-6) 0;
   border-bottom: 1px solid var(--dub-color-border-default);
   background: color-mix(in srgb, var(--dub-color-surface-raised) 88%, transparent);

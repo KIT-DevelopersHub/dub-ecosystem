@@ -14,6 +14,10 @@ export interface IdentityPort {
    *  S2S route (x-dub-internal gated), so role fan-out works for any caller regardless
    *  of the acting user's identity:read permission. */
   listUserIdsByRole(roleKey: string, ctx: RequestContext): Promise<string[]>;
+  /** GET /internal/users?status=active (paged) — every active user id. Broadcast
+   *  fan-out for org-wide notifications (release notes). Same internal S2S route as
+   *  the role expansion, so it works regardless of the acting user's permissions. */
+  listAllUserIds(ctx: RequestContext): Promise<string[]>;
   /** GET /users/:id — resolve a user's email (null when absent/unknown). */
   getEmail(userId: string, ctx: RequestContext): Promise<string | null>;
 }
@@ -61,6 +65,23 @@ export function makeIdentityPort(binding: Fetcher): IdentityPort {
       // (feedback → admin inbox) silently fail; /internal/users is x-dub-internal gated.
       const res = await client.get<{ items: { id: string }[] }>(ctx, "/internal/users", { query: { roleKey } });
       return res.items.map((u) => u.id);
+    },
+    async listAllUserIds(ctx) {
+      // Page the internal roster (status=active) accumulating ids. Bounded loop so a
+      // misbehaving cursor can never spin forever; 200/page × 100 pages = 20k ceiling.
+      const ids: string[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 100; page++) {
+        const res = await client.get<{ items: { id: string }[]; nextCursor: string | null }>(
+          ctx,
+          "/internal/users",
+          { query: { status: "active", limit: "200", ...(cursor ? { cursor } : {}) } },
+        );
+        for (const u of res.items) ids.push(u.id);
+        if (!res.nextCursor) break;
+        cursor = res.nextCursor;
+      }
+      return ids;
     },
     async getEmail(userId, ctx) {
       const user = await client.get<identity.IdentityUser>(ctx, `/users/${encodeURIComponent(userId)}`);

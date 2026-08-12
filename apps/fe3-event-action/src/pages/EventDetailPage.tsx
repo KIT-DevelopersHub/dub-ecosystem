@@ -22,6 +22,14 @@ function EventDetailInner({ eventId }: { eventId: string }) {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Button
+            iconLeft={<Icon name="check-square" />}
+            variant="secondary"
+            onClick={() => nav.navigate(eventRoutes.tasks(eventId))}
+            testId="fe3-detail-open-tasks"
+          >
+            タスク・ガント
+          </Button>
+          <Button
             iconLeft={<Icon name="message-circle" />}
             variant="secondary"
             onClick={() => nav.navigate(chatHref(eventId))}

@@ -23,6 +23,8 @@ export { useUnreadStore, getUnreadCount } from "./store/unread-store";
 export { NotificationInboxPage } from "./components/NotificationInboxPage";
 export { NotificationPreferencesPage } from "./components/NotificationPreferencesPage";
 export { NotificationBell } from "./components/NotificationBell";
+export { ReleasePublishForm } from "./components/ReleasePublishForm";
+export type { ReleasePublishFormProps } from "./components/ReleasePublishForm";
 export { NotificationList } from "./components/NotificationList";
 export { NotificationListItem, itemLinkUrl } from "./components/NotificationListItem";
 export { NotificationFilterBar } from "./components/NotificationFilterBar";

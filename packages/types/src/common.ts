@@ -8,6 +8,7 @@ export type RoleId = string;
 export type EventId = string;
 export type ActionId = string;
 export type TaskId = string;
+export type TeamId = string;
 export type ChannelId = string;
 export type MessageId = string;
 export type FileId = string; // file-meta minted ULID (Drive raw id is drive.DriveFileId)

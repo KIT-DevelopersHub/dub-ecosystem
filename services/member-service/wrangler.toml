@@ -1,0 +1,26 @@
+# member-service Worker — PAID topology. account_id / database_id filled by infra at
+# Apply. member-service is a plain proxied service (no queues / events): the shared
+# dub-core D1 (member_* namespace) + identity-roster for authz are its only bindings.
+#
+# FREE-TIER deploy uses wrangler.free.toml (name = "dub-member-service").
+name = "member-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared core D1 (single DB, namespace = member_*).
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_AT_APPLY"
+
+# Service Bindings (x-dub-* propagation via @dub/http).
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"
+
+[observability]
+enabled = true
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"

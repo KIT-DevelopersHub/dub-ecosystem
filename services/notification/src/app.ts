@@ -31,10 +31,12 @@ import {
   parsePreferencesUpdate,
   parseCreateFeedback,
   parseListFeedbackQuery,
+  parseReleaseRequest,
 } from "./validation";
 import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
 import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
-import { FEEDBACK_ADMIN_PERMISSION } from "./config";
+import { publishRelease, seedInitialReleases } from "./release";
+import { FEEDBACK_ADMIN_PERMISSION, RELEASE_ADMIN_PERMISSION } from "./config";
 import type { IngestInput } from "./types";
 
 interface GetPreferencesResponse {
@@ -96,6 +98,29 @@ export function createApp(options: CreateAppOptions = {}) {
     const result = await ingest(deps, input);
     const res: NotifyResponse = result;
     return c.json(res, 202);
+  });
+
+  // ---- POST /release: admin-published "🎉 new feature" release note, broadcast to
+  // EVERY active user's inbox (in_app, forced on). External surface (gateway does NOT
+  // 404 it); admin gate is enforced in-service via notif:admin. Idempotent per dedupKey.
+  app.use("/release", authOnly);
+  app.post("/release", requireReleaseAdmin, async (c) => {
+    const parsed = parseReleaseRequest(await c.req.json().catch(() => null));
+    const ctx = ctxOf(c);
+    const actorId = c.req.header(HEADERS.userId) ?? null;
+    const result = await publishRelease(ingestDepsOf(c, ctx), ctx, parsed, actorId);
+    return c.json(result satisfies NotifyResponse, 202);
+  });
+
+  // ---- POST /internal/seed-releases: internal-only (x-dub-internal). (Re)publishes the
+  // curated release back-catalog idempotently — the automation seam a deploy hook can
+  // call so new releases surface without a manual admin publish.
+  app.post("/internal/seed-releases", async (c) => {
+    if (!c.req.header(HEADERS.internal)) throw errors.forbidden("seed-releases is internal-only");
+    const ctx = ctxOf(c);
+    const actorId = c.req.header(HEADERS.userId) ?? null;
+    const result = await seedInitialReleases(ingestDepsOf(c, ctx), ctx, actorId);
+    return c.json(result, 202);
   });
 
   // ---- self-scoped routes: requireAuth (trusted header -> x-dub-user-id = 本人).
@@ -218,4 +243,11 @@ const authOnly: MiddlewareHandler<AppBindings> = async (c, next) => {
 const requireFeedbackAdmin: MiddlewareHandler<AppBindings> = async (c, next) => {
   const client = c.get("authClient");
   return client.requirePermission(FEEDBACK_ADMIN_PERMISSION)(c, next);
+};
+
+// Admin gate for publishing release notes (POST /release). Runs AFTER authOnly, reusing
+// its per-request auth client to check notif:admin (identity /authz/check).
+const requireReleaseAdmin: MiddlewareHandler<AppBindings> = async (c, next) => {
+  const client = c.get("authClient");
+  return client.requirePermission(RELEASE_ADMIN_PERMISSION)(c, next);
 };

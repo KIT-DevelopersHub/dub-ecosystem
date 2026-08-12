@@ -30,6 +30,8 @@ import { usageRoutes, usageNav } from "../features/usage/index.tsx";
 import { UsageProvider } from "../features/usage/UsageProvider.tsx";
 import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
+import { membersRoutes, membersNav } from "../features/members/index.tsx";
+import { MembersProvider } from "../features/members/MembersProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -203,62 +205,72 @@ function adaptMail(api: ApiClient): FeatureModule {
 // ── usage (FE2-local feature module) ──────────────────────────────────────────
 // Like mail, the free-tier usage & billing-guard dashboard lives in the shell
 // (apps/fe2-app-shell/src/features/usage) rather than a separate FE package. It
-// ships a canonical FeatureModule so it registers, routes, and (would) authz-gate
-// exactly like the others. Its route is wrapped in UsageProvider (UsageApi built
-// from the one shell api-client); nav sits after mail (order 46), before admin.
+// ships a canonical FeatureModule so it registers, routes, and authz-gates exactly
+// like the others. Its route is wrapped in UsageProvider (UsageApi built from the
+// one shell api-client); nav sits after mail (order 46), before admin. The route +
+// nav carry auth:"required" but no requiredPermissions, matching usage-meter's server
+// gate: any signed-in user may view the (safe) free-tier numbers, so the launcher tile
+// shows and the route renders for everyone logged in. (The adapter still copies through
+// any requiredPermissions if a future policy adds one.)
 function adaptUsage(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(UsageProvider, api);
   const routes = (usageRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = usageNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 46 }));
+  const nav: NavEntry[] = usageNav.map((n) => {
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 46 };
+    if (n.requiredPermissions) e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
+    return e;
+  });
   return { id: "usage", routes, nav };
+}
+
+// ── members (FE2-local feature module) ────────────────────────────────────────
+// 運営メンバー管理 (invite status + team membership; the GUI replacement for the
+// hand-maintained 組織図 PDF). Like mail/usage it lives in the shell (features/members)
+// rather than a separate FE package. Nav sits after usage (order 47), before admin.
+// Route gate = identity:read; write actions are re-authorized server-side (identity:admin).
+function adaptMembers(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(MembersProvider, api);
+  const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = membersNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 47 }));
+  return { id: "members", routes, nav };
 }
 
 // ── driveshare (FE2-local feature module) ─────────────────────────────────────
 // Like mail/usage, the Hackit Drive sharing manager lives in the shell
 // (apps/fe2-app-shell/src/features/driveshare) rather than a separate FE package. Its
 // route is wrapped in DriveShareProvider (DriveShareApi built from the one shell
-// api-client); nav sits after usage (order 47), before admin. The backend
+// api-client); nav sits after members (order 48), before admin. The backend
 // (drive-share-service) is the authoritative drive:read/drive:write gate.
 function adaptDriveShare(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(DriveShareProvider, api);
   const routes = (driveShareRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = driveShareNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 47 }));
+  const nav: NavEntry[] = driveShareNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 48 }));
   return { id: "driveshare", routes, nav };
 }
-
-// 一旦非表示にする admin ナビの path 集合（機能・ルートは残し、ランチャー/ナビからだけ隠す）。
-// 社長判断: ロール管理・ユーザー名簿はまだ使わないので当面出さない。
-// ★戻すには: この集合から該当 path を消す（空配列にすれば全て再表示）。
-const HIDDEN_ADMIN_NAV_PATHS: ReadonlySet<string> = new Set([
-  "/admin/users", // ユーザー名簿
-  "/admin/roles", // ロール管理
-]);
 
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
   const src = adminModule.routes as readonly SourceRoute[];
-  // ルートは全て登録したまま（deep-link は生きる）。ナビ登録だけ絞る。
   const routes = src.map((r) => wrapRoute(r, wrap));
   // Map each admin route path -> its own requiredPermissions so the launcher can
   // hide the admin tools (ユーザー名簿 / ロール管理 / 変更履歴) from non-admins, matching
   // the route guard (defense in depth; a non-admin can neither see nor open them).
+  // 社長要望: admin ツール（ユーザー名簿・ロール管理・変更履歴）は全てナビ/ランチャーに表示する。
+  // 権限を持つユーザーには全て出す（アプリは減らさない）。
   const permByPath = new Map(src.map((r) => [r.path, r.requiredPermissions]));
-  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[])
-    // 一旦非表示ぶんをランチャー/ナビから除外（HIDDEN_ADMIN_NAV_PATHS）。
-    .filter((n) => !HIDDEN_ADMIN_NAV_PATHS.has(n.path))
-    .map((n, i) => {
-      const perms = permByPath.get(n.path);
-      const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
-      if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
-      return e;
-    });
+  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => {
+    const perms = permByPath.get(n.path);
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
+    if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
+    return e;
+  });
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, mail, usage, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, usage, members, driveshare, admin]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
@@ -270,9 +282,10 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptChat(api),
     adaptMail(api),
     adaptUsage(api),
+    adaptMembers(api),
     adaptDriveShare(api),
     adaptAdmin(api),
   ];
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptDriveShare, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptDriveShare, adaptAdmin, toIcon };

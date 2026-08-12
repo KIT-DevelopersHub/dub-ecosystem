@@ -2,7 +2,7 @@
 // bearer token per send; here the shell session authorizes the call, so there is
 // no token field at all. Route-level RequirePermission("mail:send") gates entry;
 // this screen focuses on the form. Built entirely from @dub/ui primitives.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Button, Card, Form, FormField, PageHeader, Stack, TextField, Textarea, useToast } from "@dub/ui";
@@ -10,12 +10,18 @@ import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
-import { parseRecipients } from "./mailApi.tsx";
+import { MAX_ATTACHMENTS, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES, fileToAttachment, formatBytes, parseRecipients } from "./mailApi.tsx";
 
 interface Fields {
   to: string;
   subject: string;
   body: string;
+}
+
+interface PickedAttachment {
+  filename: string;
+  sizeBytes: number;
+  input: mail.MailAttachmentInput;
 }
 
 function validate(fields: Fields): { req?: mail.SendMailRequest; errors: Partial<Record<keyof Fields, string>> } {
@@ -35,13 +41,16 @@ export function ComposeScreen(): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<Fields>({ to: "", subject: "", body: "" });
+  const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
   const [submitted, setSubmitted] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const send = useMutation({
     mutationFn: (req: mail.SendMailRequest) => mailApi.send(req),
     onSuccess: () => {
       toast.show({ kind: "success", title: "メールを送信しました。" });
       setFields({ to: "", subject: "", body: "" });
+      setAttachments([]);
       setSubmitted(false);
       // Invalidate the Sent list so the just-sent mail shows on arrival (defeats the
       // 30s staleTime after a prior empty visit), then land in the Sent folder.
@@ -58,9 +67,37 @@ export function ComposeScreen(): JSX.Element {
   const set = (k: keyof Fields) => (v: string) => setFields((f) => ({ ...f, [k]: v }));
   const showError = (k: keyof Fields): string | undefined => (submitted ? errors[k] : undefined);
 
+  async function onPickFiles(fileList: FileList | null): Promise<void> {
+    if (!fileList || fileList.length === 0) return;
+    const picked: PickedAttachment[] = [];
+    for (const file of Array.from(fileList)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.show({ kind: "error", title: `${file.name} は大きすぎます（上限 ${formatBytes(MAX_ATTACHMENT_BYTES)}）。` });
+        continue;
+      }
+      picked.push({ filename: file.name, sizeBytes: file.size, input: await fileToAttachment(file) });
+    }
+    setAttachments((prev) => {
+      const merged = [...prev, ...picked].slice(0, MAX_ATTACHMENTS);
+      const total = merged.reduce((n, a) => n + a.sizeBytes, 0);
+      if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+        toast.show({ kind: "error", title: `添付の合計が上限（${formatBytes(MAX_ATTACHMENTS_TOTAL_BYTES)}）を超えています。` });
+        return prev;
+      }
+      return merged;
+    });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeAttachment(idx: number): void {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   function onSubmit(): void {
     setSubmitted(true);
-    if (req) send.mutate(req);
+    if (!req) return;
+    const full = attachments.length > 0 ? { ...req, attachments: attachments.map((a) => a.input) } : req;
+    send.mutate(full);
   }
 
   return (
@@ -99,6 +136,29 @@ export function ComposeScreen(): JSX.Element {
                 {...(showError("body") ? { invalid: true } : {})}
               />
             </FormField>
+            <FormField label="添付ファイル" htmlFor="mail-attach" help={`1ファイル ${formatBytes(MAX_ATTACHMENT_BYTES)} まで・最大 ${MAX_ATTACHMENTS} 件`}>
+              <input
+                ref={fileInputRef}
+                id="mail-attach"
+                data-testid="fe2-mail-compose-attach-input"
+                type="file"
+                multiple
+                onChange={(e) => void onPickFiles(e.target.files)}
+              />
+            </FormField>
+            {attachments.length > 0 ? (
+              <Stack gap={1} testId="fe2-mail-compose-attach-list">
+                {attachments.map((a, i) => (
+                  <Stack key={`${a.filename}-${i}`} direction="row" gap={2} align="center">
+                    <span data-testid="fe2-mail-compose-attach-name">{a.filename}</span>
+                    <small>({formatBytes(a.sizeBytes)})</small>
+                    <Button variant="secondary" testId="fe2-mail-compose-attach-remove" onClick={() => removeAttachment(i)}>
+                      削除
+                    </Button>
+                  </Stack>
+                ))}
+              </Stack>
+            ) : null}
             <div>
               <Button testId="fe2-mail-compose-send" type="submit" loading={send.isPending}>
                 送信

@@ -106,12 +106,15 @@ deploy mail-gateway    services/mail-gateway/wrangler.free.toml
 deploy deploy-service  services/deploy-service/wrangler.free.toml
 deploy github-sync     services/github-sync/wrangler.free.toml
 deploy audit-log       services/audit-log/wrangler.free.toml
+# member-service (運営メンバー管理) binds only SVC_IDENTITY (step 1); no cross-binding with the
+# rest of this tier. api-gateway binds it (SVC_MEMBER, step 4), so it lands before the gateway.
+deploy member-service  services/member-service/wrangler.free.toml
 # usage-meter binds SVC_IDENTITY (step 1) + SVC_NOTIFICATION/SVC_MAIL_GATEWAY (above), and is
 # itself bound by api-gateway (SVC_USAGE_METER, step 4) — so it lands last in this tier, after
 # its own upstreams exist and before the gateway that binds it. SQLite-DO alarm, no cron slot.
 deploy usage-meter     services/usage-meter/wrangler.free.toml
 
-# --- 4. api-gateway (binds all 15 upstreams — deploy only after they exist) ---
+# --- 4. api-gateway (binds all 16 upstreams — deploy only after they exist) ---
 deploy api-gateway services/api-gateway/wrangler.free.toml
 
 # --- 4b. gateway smoke — fail-fast BEFORE the public faces (fe2/mo3) go out ---

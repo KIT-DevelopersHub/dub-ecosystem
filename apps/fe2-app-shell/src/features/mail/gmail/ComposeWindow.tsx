@@ -4,10 +4,10 @@
 // (chips + autocomplete), fed the feature's parseRecipients and correspondent
 // candidates from the store. On send it appends to the Sent folder via the store
 // and best-effort posts through the real MailApi (ignored under the demo mock).
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken } from "@dub/app-ui";
-import { parseRecipients } from "../mailApi.tsx";
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, fileToAttachment, formatBytes, parseRecipients } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore, type ComposeState } from "./useMailStore.tsx";
@@ -34,6 +34,23 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const removeIcon = <MailIcon name="x" size={12} />;
   const patch = (p: Partial<ComposeState>): void => dispatch({ type: "UPDATE_COMPOSE", id: compose.id, patch: p });
 
+  // Attachments live in local window state (the floating quick-compose): picked files are
+  // read to base64 and ride the SendMailRequest. Bounded by the shared per-file / count caps.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<{ filename: string; sizeBytes: number; input: mail.MailAttachmentInput }[]>([]);
+
+  const onPickFiles = async (fileList: FileList | null): Promise<void> => {
+    if (!fileList || fileList.length === 0) return;
+    const picked: { filename: string; sizeBytes: number; input: mail.MailAttachmentInput }[] = [];
+    for (const file of Array.from(fileList)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) continue;
+      picked.push({ filename: file.name, sizeBytes: file.size, input: await fileToAttachment(file) });
+    }
+    setAttachments((prev) => [...prev, ...picked].slice(0, MAX_ATTACHMENTS));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+  const removeAttachment = (idx: number): void => setAttachments((prev) => prev.filter((_, i) => i !== idx));
+
   const send = (): void => {
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
@@ -47,6 +64,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/
     // References (recipient threads the conversation; a further reply chains back to us).
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
+    if (attachments.length > 0) req.attachments = attachments.map((a) => a.input);
     void mailApi
       .send(req)
       .then(() => dispatch({ type: "REQUEST_SYNC" }))
@@ -154,9 +172,35 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             >
               送信 <MailIcon name="send" size={16} />
             </button>
-            <button type="button" aria-label="ファイルを添付" style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 6 }}>
+            <button
+              type="button"
+              aria-label="ファイルを添付"
+              data-testid="fe2-mail-compose-attach"
+              onClick={() => fileInputRef.current?.click()}
+              style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 6 }}
+            >
               <MailIcon name="paperclip" size={18} />
             </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              data-testid="fe2-mail-compose-attach-input"
+              onChange={(e) => void onPickFiles(e.target.files)}
+              style={{ display: "none" }}
+            />
+            {attachments.length > 0 ? (
+              <span data-testid="fe2-mail-compose-attach-count" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
+                {attachments.map((a, i) => (
+                  <span key={`${a.filename}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                    {a.filename} ({formatBytes(a.sizeBytes)})
+                    <button type="button" aria-label={`${a.filename} を削除`} onClick={() => removeAttachment(i)} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)" }}>
+                      <MailIcon name="x" size={12} />
+                    </button>
+                  </span>
+                ))}
+              </span>
+            ) : null}
             <span style={{ flex: 1 }} />
             <button type="button" aria-label="下書きを破棄" onClick={() => dispatch({ type: "CLOSE_COMPOSE", id: compose.id })} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 6 }}>
               <MailIcon name="trash" size={18} />

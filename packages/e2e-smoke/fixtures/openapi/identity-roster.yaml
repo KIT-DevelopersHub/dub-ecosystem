@@ -373,7 +373,7 @@ paths:
       description: Requires identity:read.
       responses:
         '200':
-          description: The 32-key catalog
+          description: The 33-key catalog
           content:
             application/json:
               schema:
@@ -508,7 +508,7 @@ components:
           type: integer
     PermissionKey:
       type: string
-      description: Permission key from the frozen 32-key PERMISSION_CATALOG, e.g. 'identity:read'.
+      description: Permission key from the frozen 33-key PERMISSION_CATALOG, e.g. 'identity:read'.
     UserStatus:
       type: string
       enum:

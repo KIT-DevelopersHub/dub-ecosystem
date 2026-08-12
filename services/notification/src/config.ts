@@ -53,3 +53,49 @@ export const FEEDBACK_NOTIFY_TYPE = "feedback";
 // Role IDs mirror the identity-roster system-role seed (identity-roster/src/schema.ts:
 // role_sys_admin / role_sys_maintainer). identity `GET /users?roleKey=` filters by roleId.
 export const FEEDBACK_NOTIFY_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"] as const;
+
+// ---- release notes (new-feature announcements) ----
+// A release note is broadcast to EVERY active user's inbox as an in_app notification of
+// type `release`. FE5 badges it "🎉 新機能". Publishing is admin-gated (POST /release,
+// notif:admin); the curated back-catalog below is (re)published idempotently by the
+// internal seed route so demo + prod both show the recent releases.
+export const RELEASE_NOTIFY_TYPE = "release";
+export const RELEASE_ADMIN_PERMISSION = "notif:admin" as const;
+export const RELEASE_TITLE_MAX = 200;
+export const RELEASE_BODY_MAX = 2000;
+export const RELEASE_APP_MAX = 60;
+
+// Curated back-catalog of shipped features, oldest→newest. `key` namespaces the dedup
+// key (release:<key>) so re-running the seed never duplicates an inbox item.
+export interface ReleaseNoteSeed {
+  key: string;
+  app: string; // target app / area (optional display); "" = whole product
+  title: string;
+  body: string;
+}
+export const INITIAL_RELEASE_NOTES: ReleaseNoteSeed[] = [
+  {
+    key: "member-roster",
+    app: "メンバー管理",
+    title: "🎉 メンバー管理が使えるようになりました",
+    body: "管理者はメンバー一覧から各ユーザーの表示名・ロールを設定できます。左上のアプリランチャー →「メンバー」から開けます。",
+  },
+  {
+    key: "gantt-notion",
+    app: "ガントチャート",
+    title: "🎉 ガントチャート（Notion風）を追加しました",
+    body: "タスクの期間・進捗・依存関係をタイムラインで一覧できます。バーをドラッグして期間を調整、依存線でブロッカーを可視化します。",
+  },
+  {
+    key: "mail-attachments",
+    app: "メール",
+    title: "🎉 メールにファイルを添付できるようになりました",
+    body: "メール作成画面でファイルを添付して送信できます。受信メールの添付ファイルもその場でプレビュー・ダウンロードできます。",
+  },
+  {
+    key: "usage-dashboard",
+    app: "使用量ダッシュボード",
+    title: "🎉 無料枠ダッシュボードを全ユーザーに開放しました",
+    body: "サインインしている全メンバーが、各サービスの無料枠の使用状況をダッシュボードで確認できるようになりました。",
+  },
+];

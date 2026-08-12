@@ -55,11 +55,25 @@ export interface UsageSummary {
   services: ServiceUsage[];
 }
 
-/** Where the currently-shown summary came from — used to surface a "sample data"
- *  notice when the live gateway is unreachable or in demo builds. */
-export type UsageSource = "live" | "mock" | "demo";
+/** Where the currently-shown summary came from.
+ *  - live        = real GET /usage/summary payload.
+ *  - demo        = VITE_DEMO build seed (mock; dev/demo only).
+ *  - unavailable = the live read failed / was forbidden / was malformed. The UI
+ *                  must render a NEUTRAL "取得できませんでした" state here — never the
+ *                  mock's illustrative warn/critical numbers, which would falsely
+ *                  look like the account is near its ceiling. */
+export type UsageSource = "live" | "demo" | "unavailable";
+
+/** Why a summary is `unavailable` — drives the neutral notice copy.
+ *  forbidden = the caller is not authenticated / the session lapsed (viewing needs
+ *  sign-in but no special permission); error = a transient/offline/contract failure. */
+export type UsageUnavailableReason = "forbidden" | "error";
 
 export interface UsageSummaryResult {
+  /** Always present so screens can map a stable card layout. For `unavailable`
+   *  this is a NEUTRAL summary (all statuses `unknown`, no percentages). */
   summary: UsageSummary;
   source: UsageSource;
+  /** Set only when `source === "unavailable"`. */
+  reason?: UsageUnavailableReason;
 }
