@@ -11,6 +11,9 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 - [3. 新しいコンポーネントの足し方](#3-新しいコンポーネントの足し方)
 - [4. スタイル規約 (トークン必須 / bespoke 禁止)](#4-スタイル規約-トークン必須--bespoke-禁止)
 - [5. 状態の扱い (loading / empty / error)](#5-状態の扱い-loading--empty--error)
+  - [5.1 ローディングとスケルトン UI（原則・必須）](#51-ローディングとスケルトン-ui原則必須)
+  - [5.2 Skeleton コンポーネント API](#52-skeleton-コンポーネント-api)
+  - [5.3 楽観的 UI（optimistic update）](#53-楽観的-uioptimistic-update)
 - [6. アクセシビリティ最低限](#6-アクセシビリティ最低限)
 - [7. 命名規約](#7-命名規約)
 - [8. チェックリスト](#8-チェックリスト)
@@ -123,7 +126,7 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 
 データを表示する画面は 3 状態を必ず用意する（①のコンポーネントを使う）:
 
-- **loading**: `SkeletonLoader` / `Spinner`。
+- **loading**: **スケルトン**（`SkeletonList` / `SkeletonTable` / `SkeletonCard` / `Skeleton` / `SkeletonLoader`）。§5.1 参照。
 - **empty**: `EmptyState`（0 件時。「データがありません」を各自で組まない）。
 - **error**: `ErrorState`（`DisplayableError` を渡す。retry があれば `onRetry`）。
 
@@ -131,7 +134,74 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 
 - **フィールド単位** = `FormField` の `error` prop（`aria-invalid` が付く）。
 - **フォーム全体** = `@dub/app-ui` の `FormError`（`role="alert"`）。
-- 楽観的更新の原則は memory `[[optimistic-ui-principle]]`（先に反映 → 失敗でロールバック）。
+
+### 5.1 ローディングとスケルトン UI（原則・必須）
+
+> **【デザインシステム原則】読み込み中は必ずスケルトン UI を出す。素の空表示を禁止する。**
+> データ取得を伴う UI は、データ到着前に**必ずスケルトン**（実際に出る要素の形を模したプレースホルダ）を描く。
+> 「空データ (0 件)」と「読み込み中」は**別物**として必ず描き分ける。
+
+**なぜ**: ローディング中に何も出さない／プレーンな空表示のままだと、ユーザーは「**データが無い**のか
+**読み込み中**なのか判別できない」。空表示は「0 件」だけを意味させ、読み込み中はスケルトンで「これから何か出る」
+ことを形で示す。これで体感速度も上がる（レイアウトが先に埋まり、ガタつき＝CLS が減る）。
+
+**ルール**:
+
+1. **リスト / カード / テーブル / 詳細パネルなど、データ取得を伴う UI は初期状態でスケルトンを出す。**
+   `isLoading` / `isPending` の分岐で**最初に**スケルトンを返す（`empty` / `error` より先に判定する）。
+2. **素の空表示・プレーンな「読み込み中…」テキスト・レイアウトの無い `Spinner` 単体は不可**
+   （リスト/テーブル/カードでは）。スケルトンは**実際のレイアウトの形**に寄せる（行数・カラム数・カードの
+   メディア枠を近似する）。
+3. **空データは明示的な `EmptyState`** で表す。**読み込み中に `EmptyState` へ落とさない**
+   （「データがありません」を一瞬見せない）。この 2 つを必ず描き分ける。
+4. **`Spinner` を使ってよいのは**、レイアウトを占有しない小さな箇所（ボタン内・トグル・インライン処理中）だけ。
+   一覧そのものの初期ロードには使わない。
+5. スケルトンは `role="status" aria-label="読み込み中"` を**1 つ**持つ（合成コンポーネントが自動で付ける）。
+   個々のブロックは `aria-hidden`。
+
+分岐の定石（**loading を最優先で判定**する）:
+
+```tsx
+{query.isLoading ? (
+  <SkeletonList rows={5} />          // 必ずスケルトン（素の空表示にしない）
+) : query.isError ? (
+  <ErrorState error={displayError(query.error)} onRetry={() => query.refetch()} />
+) : items.length === 0 ? (
+  <EmptyState title="イベントがありません" />   // 0 件のときだけ
+) : (
+  <div className={styles.grid}>{items.map(/* ... */)}</div>
+)}
+```
+
+### 5.2 Skeleton コンポーネント API
+
+`@dub/ui`（①）が提供する。ドメイン知識ゼロ・トークンのみ・ライト/ダーク両対応・`prefers-reduced-motion`
+尊重（アニメを止めて静的プレースホルダにフォールバック）。
+
+| 物 | 用途 | 主な props |
+|---|---|---|
+| `Skeleton` | 単一プレースホルダ（自分で並べる用）。**装飾なので `aria-hidden`** | `variant`=`text`\|`circle`\|`rect` / `width` / `height`（number=px）/ `radius` / `animation`=`shimmer`\|`pulse`\|`none` |
+| `SkeletonList` | 一覧のロード中。`role="status"` を内包 | `rows`(=3) / `avatar`(先頭に丸) / `animation` |
+| `SkeletonTable` | テーブルのロード中。ヘッダ＋セル格子 | `rows`(=5) / `columns`(=4) / `header`(=true) |
+| `SkeletonCard` | カードのロード中。メディア枠＋タイトル＋本文行 | `media`(先頭に矩形) / `lines`(=2) |
+| `SkeletonLoader` | 汎用の n 行スケルトン（既存・後方互換） | `lines`(=3) / `width` |
+
+使い分け: **一覧＝`SkeletonList`** / **表＝`SkeletonTable`** / **カードグリッド＝`SkeletonCard` を実カード枚数ぶん** /
+それ以外の任意形状は `Skeleton` を自分で compose。合成物（List/Table/Card）は `role="status"` を持つので、
+1 画面で複数出す時は**代表 1 つに testId** を付ける程度でよい。
+
+### 5.3 楽観的 UI（optimistic update）
+
+> **編集操作は楽観的 UI を原則にする**（先に UI へ反映 → 失敗したらロールバック）。毎回サーバ往復の
+> ローディングを待たせない。原則の背景は memory `[[optimistic-ui-principle]]`。
+
+- **やり方**: TanStack Query の `onMutate` で現在値を snapshot → キャッシュを**先に**新値へ更新して即描画 →
+  `onError` で snapshot に**ロールバック**＋トースト → `onSettled` で `invalidate`（サーバ正を再取得）。
+- **対象**: トグル / 並び替え（D&D）/ 追加・削除 / インライン編集など、成功が高確率で結果が可逆な操作。
+- **ローディングとの関係**: 楽観的更新できた操作では、その部分に**スピナー/スケルトンを出さない**
+  （既に反映済みだから）。スケルトンは「まだ手元に無いデータの**初期取得**」に使い、楽観的 UI は
+  「既にあるデータの**変更**」に使う——役割を混同しない。
+- 破壊的・不可逆（課金・確定送信など）は楽観的にせず、確認ダイアログ＋実ローディングにする。
 
 ## 6. アクセシビリティ最低限
 
@@ -160,6 +230,10 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 - [ ] 生値（hex/px/rgba）を直書きしていないか（トークンのみか）
 - [ ] 静的スタイルを inline `style` で書いていないか（CSS Modules / ②か）
 - [ ] loading / empty / error の 3 状態を用意したか
+- [ ] **ローディングがスケルトンになっているか**（素の空表示・プレーンな「読み込み中…」・一覧の `Spinner`
+      単体は不可）。**loading を最優先で判定**し、読み込み中に `EmptyState` へ落としていないか（§5.1）
+- [ ] **空データを `EmptyState` で明示**し、「読み込み中」と描き分けているか（§5.1）
+- [ ] 編集操作は**楽観的 UI**（先に反映 → 失敗でロールバック）にしたか（§5.3）
 - [ ] `aria-label` / `label`+`htmlFor` / フォーカスリングを満たすか
 - [ ] `testId` を既存から変えていないか
 - [ ] `typecheck` 緑 / 単体テスト緑（重い実ブラウザ E2E は別工程）
