@@ -33,7 +33,10 @@ function parseHash(): { path: string; search: string } {
 }
 
 function App() {
-  const api = useMemo(() => createMockEventApi({ events: 3, actionsPerEvent: 4 }, 0), []);
+  // Dev-only: VITE_MOCK_LATENCY (ms) lets us preview loading/skeleton states
+  // (FRONTEND_GUIDE §5). Defaults to 0 so normal `pnpm dev` is instant.
+  const latency = Number(import.meta.env.VITE_MOCK_LATENCY ?? 0);
+  const api = useMemo(() => createMockEventApi({ events: 3, actionsPerEvent: 4 }, latency), [latency]);
   const [loc, setLoc] = useState(parseHash());
   const setMe = useAuthStore((s) => s.setMe);
 
