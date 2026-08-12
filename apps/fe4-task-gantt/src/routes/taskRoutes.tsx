@@ -13,7 +13,6 @@ import { listTasks, resolveUsers } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { TaskListView } from "../components/TaskListView";
-import type { TaskView } from "../components/ViewSwitcher";
 import styles from "../styles/app.module.css";
 
 export interface TaskRouteContextValue {
@@ -42,25 +41,18 @@ export function parseEventIdFromPath(pathname: string): common.EventId | null {
   return m ? m[1]! : null;
 }
 
-/** Map the tasks* sub-segment to the initial view. */
-export function viewFromPath(pathname: string): TaskView {
-  if (pathname.includes("/tasks/board")) return "board";
-  if (pathname.includes("/tasks/gantt")) return "gantt";
-  return "list";
-}
-
 /**
- * Event-scoped workspace route: serves `/events/:eventId/tasks`, `.../board`,
- * `.../gantt`, and `.../:taskId`. eventId comes from the path (FE2 router owns the
- * param); permissions come from TaskRouteContext.
+ * Event-scoped workspace route: serves `/events/:eventId/tasks` (and the legacy
+ * `.../board`, `.../gantt`, `.../:taskId` sub-segments, all now the single gantt
+ * workspace). eventId comes from the path (FE2 router owns the param);
+ * permissions come from TaskRouteContext.
  */
 export function TaskWorkspaceRoute() {
   const { permissions } = useTaskRoute();
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
   const eventId = parseEventIdFromPath(pathname);
-  const initialView = viewFromPath(pathname);
   if (!eventId) return <p className={styles.banner}>イベントが指定されていません。</p>;
-  return <TaskWorkspacePage eventId={eventId} permissions={permissions} initialView={initialView} />;
+  return <TaskWorkspacePage eventId={eventId} permissions={permissions} />;
 }
 
 /**

@@ -41,6 +41,7 @@ export interface BarBox {
   y: number;
   progressWidth: number;
   progressPercent: number;
+  isCritical: boolean; // on the CPM critical path (zero slack) — coloured distinctly
 }
 
 export interface GanttGeometryOptions {
@@ -53,13 +54,15 @@ export function ganttGeometry(
   rows: readonly gantt.GanttRow[],
   bounds: DateBounds,
   opts: GanttGeometryOptions,
+  criticalIds?: ReadonlySet<common.TaskId>,
 ): BarBox[] {
   const pxPerDay = PX_PER_DAY[opts.zoom];
   const minW = opts.minBarWidth ?? 4;
   return rows.map((r, i): BarBox => {
     const y = i * opts.rowHeight;
+    const isCritical = criticalIds?.has(r.taskId) ?? false;
     if (!r.startsAt || !r.endsAt) {
-      return { taskId: r.taskId, hasBar: false, x: 0, width: 0, y, progressWidth: 0, progressPercent: r.progressPercent };
+      return { taskId: r.taskId, hasBar: false, x: 0, width: 0, y, progressWidth: 0, progressPercent: r.progressPercent, isCritical };
     }
     const start = Date.parse(r.startsAt);
     const end = Date.parse(r.endsAt);
@@ -75,8 +78,15 @@ export function ganttGeometry(
       y,
       progressWidth: (width * pct) / 100,
       progressPercent: pct,
+      isCritical,
     };
   });
+}
+
+/** X of the "today" marker within the canvas, or null when today is off-span. */
+export function todayLineX(bounds: DateBounds, zoom: gantt.GanttZoom, nowMs: number = Date.now()): number | null {
+  if (nowMs < bounds.minMs || nowMs > bounds.maxMs) return null;
+  return ((nowMs - bounds.minMs) / MS_PER_DAY) * PX_PER_DAY[zoom];
 }
 
 export interface DependencySegment {

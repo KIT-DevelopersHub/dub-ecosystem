@@ -1,0 +1,138 @@
+import { describe, it, expect } from "vitest";
+import type { gantt } from "@dub/types";
+import {
+  MS_PER_DAY,
+  PX_PER_DAY,
+  initialWindow,
+  extendWindow,
+  withGranularity,
+  xOf,
+  canvasWidth,
+  dayAtX,
+  todayX,
+  pxToDays,
+  topSegments,
+  bottomTicks,
+  weekendBands,
+  timelineBars,
+  shiftBar,
+  floorDayUtc,
+} from "../src/domain/timeline-axis";
+
+const row = (id: string, s: string | null, e: string | null, pct = 0): gantt.GanttRow => ({
+  taskId: id, title: id, startsAt: s, endsAt: e, progressPercent: pct, assigneeId: null,
+});
+
+const NOW = Date.parse("2026-08-12T00:00:00Z");
+
+describe("timeline-axis — endless (no-terminus) axis", () => {
+  const rows = [
+    row("a", "2026-08-05T00:00:00Z", "2026-08-07T00:00:00Z", 100),
+    row("b", "2026-09-02T00:00:00Z", "2026-09-03T00:00:00Z", 0),
+    row("c", null, null),
+  ];
+
+  it("window always contains today AND the latest task, with buffer past the end", () => {
+    const w = initialWindow(rows, "week", NOW);
+    // today is inside
+    expect(NOW).toBeGreaterThanOrEqual(w.originMs);
+    expect(NOW).toBeLessThan(w.endMs);
+    // the last task (9/3) is NOT the terminus — the axis extends well beyond it
+    const lastTaskEnd = Date.parse("2026-09-03T00:00:00Z");
+    expect(w.endMs).toBeGreaterThan(lastTaskEnd + 100 * MS_PER_DAY);
+  });
+
+  it("extendWindow grows the end without moving the origin (scrollLeft stays valid)", () => {
+    const w = initialWindow(rows, "week", NOW);
+    const w2 = extendWindow(w, 180);
+    expect(w2.originMs).toBe(w.originMs); // origin fixed
+    expect(w2.endMs).toBe(w.endMs + 180 * MS_PER_DAY); // end grew
+    expect(canvasWidth(w2)).toBeGreaterThan(canvasWidth(w));
+  });
+
+  it("today marker is always defined (never off-span)", () => {
+    const w = initialWindow(rows, "day", NOW);
+    const x = todayX(w, NOW);
+    expect(x).toBeGreaterThan(0);
+    expect(x).toBeLessThan(canvasWidth(w));
+  });
+
+  it("xOf and dayAtX round-trip a day", () => {
+    const w = initialWindow(rows, "day", NOW);
+    const day = floorDayUtc(Date.parse("2026-08-20T00:00:00Z"));
+    expect(dayAtX(xOf(day, w), w)).toBe(day);
+  });
+
+  it("withGranularity keeps span, changes px", () => {
+    const w = initialWindow(rows, "week", NOW);
+    const d = withGranularity(w, "day");
+    expect(d.originMs).toBe(w.originMs);
+    expect(d.endMs).toBe(w.endMs);
+    expect(d.px).toBe(PX_PER_DAY.day);
+  });
+
+  it("pxToDays quantizes a drag to whole days", () => {
+    const w = withGranularity(initialWindow(rows, "day", NOW), "day");
+    expect(pxToDays(PX_PER_DAY.day * 3 + 4, w)).toBe(3);
+    expect(pxToDays(-PX_PER_DAY.day * 2, w)).toBe(-2);
+  });
+});
+
+describe("timeline-axis — header tiers", () => {
+  const rows = [row("a", "2026-08-05T00:00:00Z", "2026-08-10T00:00:00Z")];
+
+  it("day granularity: top=months, bottom=one cell per day", () => {
+    const w = initialWindow(rows, "day", NOW);
+    const tops = topSegments(w, "day");
+    const bots = bottomTicks(w, "day", NOW);
+    expect(tops.every((s) => /年.+月/.test(s.label))).toBe(true);
+    // consecutive day ticks are exactly one px-per-day apart
+    expect(bots[1]!.x - bots[0]!.x).toBeCloseTo(PX_PER_DAY.day, 5);
+    expect(bots.some((t) => t.isToday)).toBe(true);
+  });
+
+  it("month granularity: top=years, bottom=month names", () => {
+    const w = initialWindow(rows, "month", NOW);
+    const tops = topSegments(w, "month");
+    const bots = bottomTicks(w, "month", NOW);
+    expect(tops.every((s) => /年$/.test(s.label))).toBe(true);
+    expect(bots.every((s) => /月$/.test(s.label))).toBe(true);
+  });
+
+  it("weekend bands exist at day/week scale and are dropped at month scale", () => {
+    const w = initialWindow(rows, "day", NOW);
+    expect(weekendBands(w, "day").length).toBeGreaterThan(0);
+    expect(weekendBands(w, "month")).toHaveLength(0);
+  });
+});
+
+describe("timeline-axis — bars & drag", () => {
+  const rows = [
+    row("a", "2026-08-05T00:00:00Z", "2026-08-08T00:00:00Z", 50),
+    row("c", null, null),
+  ];
+
+  it("dated rows get bars; null-date row keeps a slot but no bar", () => {
+    const w = initialWindow(rows, "day", NOW);
+    const bars = timelineBars(rows, w);
+    expect(bars).toHaveLength(2);
+    expect(bars[0]!.hasBar).toBe(true);
+    expect(bars[0]!.width).toBeGreaterThan(0);
+    expect(bars[1]!.hasBar).toBe(false);
+    expect(bars[1]!.width).toBe(0);
+  });
+
+  it("shiftBar: move slides both edges; resize slides one and keeps >=1 day", () => {
+    const s = "2026-08-05T00:00:00Z";
+    const e = "2026-08-08T00:00:00Z";
+    const moved = shiftBar(s, e, 2, "move");
+    expect(moved.startsAt).toBe("2026-08-07T00:00:00.000Z");
+    expect(moved.endsAt).toBe("2026-08-10T00:00:00.000Z");
+    const grown = shiftBar(s, e, 2, "resize-end");
+    expect(grown.startsAt).toBe("2026-08-05T00:00:00.000Z");
+    expect(grown.endsAt).toBe("2026-08-10T00:00:00.000Z");
+    // resize-start cannot cross the end (min 1 day)
+    const clamped = shiftBar(s, e, 99, "resize-start");
+    expect(Date.parse(clamped.startsAt)).toBe(Date.parse(e) - MS_PER_DAY);
+  });
+});

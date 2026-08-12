@@ -72,6 +72,34 @@ describe("MockApiClient contract enforcement (design tests 2/3/9/11/12)", () => 
   });
 });
 
+describe("PATCH /gantt/rows/:id — timeline bar move/resize persistence", () => {
+  it("stores the new schedule and mirrors endsAt onto the task dueAt", async () => {
+    const c = new MockApiClient({
+      tasks: [seedTask("t1", { eventId: "evt_1", dueAt: "2026-08-10T00:00:00Z" })],
+    });
+    const updated = await api.patchGanttRow(c, "t1", {
+      startsAt: "2026-08-15T00:00:00Z",
+      endsAt: "2026-08-18T00:00:00Z",
+    });
+    expect(updated.startsAt).toBe("2026-08-15T00:00:00Z");
+    expect(updated.endsAt).toBe("2026-08-18T00:00:00Z");
+    // reflected in the gantt DTO and on the task's dueAt
+    const dto = await api.getGantt(c, "evt_1");
+    const rowT1 = dto.rows.find((r) => r.taskId === "t1")!;
+    expect(rowT1.startsAt).toBe("2026-08-15T00:00:00Z");
+    expect(rowT1.endsAt).toBe("2026-08-18T00:00:00Z");
+    const task = await api.getTask(c, "t1");
+    expect(task.dueAt).toBe("2026-08-18T00:00:00Z");
+  });
+
+  it("404s for an unknown task", async () => {
+    const c = new MockApiClient({ tasks: [seedTask("t1")] });
+    await expect(
+      api.patchGanttRow(c, "missing", { startsAt: null, endsAt: null }),
+    ).rejects.toSatisfy((e: unknown) => isApiError(e) && e.status === 404);
+  });
+});
+
 describe("hasCycle util", () => {
   it("detects a 2-node cycle", () => {
     expect(hasCycle(new Map([["a", ["b"]], ["b", ["a"]]]))).toBe(true);

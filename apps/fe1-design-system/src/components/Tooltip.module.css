@@ -13,7 +13,7 @@
 }
 .bubble {
   position: absolute;
-  z-index: var(--dub-z-index-tooltip);
+  z-index: var(--dub-zIndex-tooltip);
   background: var(--dub-color-surface-overlay);
   color: var(--dub-color-text-inverse);
   font-size: var(--dub-font-size-xs);
@@ -26,7 +26,7 @@
 }
 .panel {
   position: absolute;
-  z-index: var(--dub-z-index-dropdown);
+  z-index: var(--dub-zIndex-dropdown);
   top: calc(100% + var(--dub-space-1));
   left: 0;
   min-width: 200px;
