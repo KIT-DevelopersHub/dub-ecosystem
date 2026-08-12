@@ -23,6 +23,11 @@ export { useUnreadStore, getUnreadCount } from "./store/unread-store";
 export { NotificationInboxPage } from "./components/NotificationInboxPage";
 export { NotificationPreferencesPage } from "./components/NotificationPreferencesPage";
 export { NotificationBell } from "./components/NotificationBell";
+export { NotificationDialog } from "./components/NotificationDialog";
+export {
+  useNotificationDialogStore,
+  openNotificationDialog,
+} from "./store/dialog-store";
 export { ReleasePublishForm } from "./components/ReleasePublishForm";
 export type { ReleasePublishFormProps } from "./components/ReleasePublishForm";
 export { NotificationList } from "./components/NotificationList";

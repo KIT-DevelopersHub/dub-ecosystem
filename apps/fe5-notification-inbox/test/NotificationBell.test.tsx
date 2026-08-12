@@ -1,12 +1,16 @@
 import { act } from "react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NotificationBell } from "../src/components/NotificationBell";
+import { useNotificationDialogStore } from "../src/store/dialog-store";
 import type { LiveConnector, LiveHandlers } from "../src/lib/unread-live";
 import { makeDeps, renderWithDeps } from "./helpers";
 
 describe("NotificationBell (headerWidget)", () => {
+  // The dialog open-state is a module singleton; reset it so tests don't leak.
+  beforeEach(() => useNotificationDialogStore.setState({ open: false }));
+
   it("shows the unread badge from the polled count (test 9)", async () => {
     const { deps } = makeDeps();
     renderWithDeps(<NotificationBell />, deps);
@@ -38,15 +42,17 @@ describe("NotificationBell (headerWidget)", () => {
     });
   });
 
-  it("opens the dropdown, lists recent, and 'See all' navigates to the inbox (test 9)", async () => {
-    const { deps, harness } = makeDeps();
+  it("opens the shared notification dialog and lists the inbox when clicked", async () => {
+    const { deps } = makeDeps();
     renderWithDeps(<NotificationBell />, deps);
     const user = userEvent.setup();
+    // The dialog is closed initially (no inbox rendered).
+    expect(screen.queryByTestId("fe5-notif-dialog")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("fe5-bell-button"));
-    await screen.findByTestId("fe5-bell-list");
-    expect(screen.getByTestId("fe5-bell-list")).toBeInTheDocument();
-    await user.click(screen.getByTestId("fe5-bell-seeall"));
-    expect(harness.navigate).toHaveBeenCalledWith("/notifications");
+    // Same modal both entry points share; renders the reused inbox list.
+    await screen.findByTestId("fe5-notif-dialog");
+    await screen.findByTestId("fe5-inbox-list");
+    expect(screen.getByTestId("fe5-inbox-list")).toBeInTheDocument();
   });
 
   it("updates the badge from a live push after the initial poll settles", async () => {
