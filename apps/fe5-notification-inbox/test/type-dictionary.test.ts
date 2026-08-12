@@ -27,4 +27,12 @@ describe("resolveTypeDisplay", () => {
   it("system.announcement gets the megaphone icon", () => {
     expect(resolveTypeDisplay("system.announcement").icon).toBe("megaphone");
   });
+
+  it("release notes resolve to the 🎉 新機能 badge in their own group", () => {
+    const d = resolveTypeDisplay("release");
+    expect(d.known).toBe(true);
+    expect(d.group).toBe("release");
+    expect(d.icon).toBe("megaphone");
+    expect(d.label).toContain("新機能");
+  });
 });

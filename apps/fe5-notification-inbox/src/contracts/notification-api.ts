@@ -42,3 +42,17 @@ export interface UpdatePreferencesRequest {
 export interface ReadAllRequest {
   type?: string;
 }
+
+// POST /release — admin publishes a "🎉 new feature" release note, broadcast to every
+// user's inbox (type=release, in_app). admin-gated (notif:admin) at the gateway/service.
+export interface PublishReleaseRequest {
+  title: string;
+  body: string;
+  app?: string; // target app / area (optional)
+  publishedAt?: string; // ISO8601 (optional; defaults to server now)
+  dedupKey?: string; // optional idempotency key
+}
+export interface PublishReleaseResponse {
+  notificationId: string;
+  deduplicated: boolean;
+}
