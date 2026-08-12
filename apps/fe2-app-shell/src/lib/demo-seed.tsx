@@ -200,6 +200,80 @@ const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
 };
 
+// ── demo accounts (per-account mail scope) ────────────────────────────────────
+// Two signed-in accounts so a viewer / the E2E can prove Gmail-style isolation in a
+// real browser: each account sees ONLY its own inbox + sent mail. The active account
+// is chosen by localStorage["dub_demo_account"] (email or id), read fresh on every
+// request so a reload after switching accounts re-scopes everything. Default = the
+// admin (usr_demo), so the existing single-account demo + E2E are unchanged.
+export interface DemoAccount {
+  id: string;
+  displayName: string;
+  email: string;
+  permissions: identity.PermissionKey[];
+  inbox: mail.MailMessageDetail[];
+}
+
+// Account B's inbox is a DISTINCT set (different sender/subject) so a screenshot makes
+// the isolation obvious: none of account A's mail appears here, and vice versa.
+const B_INBOX: mail.MailMessageDetail[] = [
+  {
+    id: "msg_b1", messageId: "<b1@demo>", threadId: "thr_b1",
+    from: { email: "chair@example.org", name: "実行委員長" },
+    to: [{ email: "taro@developershub.jp" }], subject: "委員会の議事録共有",
+    snippet: "本日の運営委員会の議事録を共有します。", receivedAt: "2026-08-03T02:00:00Z", read: false,
+    textBody: "佐藤さん\n\n本日の運営委員会の議事録を共有します。ご確認ください。",
+  },
+];
+
+// Fixed archive address auto-CC'd on every send (mirrors the mail-gateway MAIL_ARCHIVE_CC
+// behavior so the demo/E2E shows the archive copy in the Sent detail's Cc).
+const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+
+// Oversight account (info@): an INDIVIDUAL admin account holding mail:read_all, so it
+// sees EVERY account's inbox + sent mail — the supervisor / archive view. Contrast with
+// the two personal accounts above, which each see only their own mail.
+const OVERSIGHT_PERMISSIONS: identity.PermissionKey[] = [...DEMO_PERMISSIONS, "mail:read_all"];
+
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
+  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
+  { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+];
+
+/** True when the account holds the mail:read_all oversight permission. */
+function isOversight(a: DemoAccount): boolean {
+  return a.permissions.includes("mail:read_all");
+}
+
+const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
+
+/** The active demo account (localStorage-selected, default admin). Read per request. */
+function currentAccount(): DemoAccount {
+  let key: string | null = null;
+  try {
+    key = globalThis.localStorage?.getItem(DEMO_ACCOUNT_STORAGE_KEY) ?? null;
+  } catch {
+    key = null;
+  }
+  if (key) {
+    const match = DEMO_ACCOUNTS.find((a) => a.id === key || a.email === key);
+    if (match) return match;
+  }
+  return DEMO_ACCOUNTS[0]!;
+}
+
+/** The /me session for the active account (drives RequireAuth + the shell header). */
+function currentMe(): gateway.MeResponse {
+  const a = currentAccount();
+  return {
+    user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
+    orgId: ORG,
+    permissions: a.permissions,
+    sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+  };
+}
+
 // ── mail: stateful Inbox + Sent folders ───────────────────────────────────────
 // A tiny in-session store so the mail folders behave end-to-end: received messages
 // persist their read flag (opening one clears the unread badge on refetch), and a
@@ -212,10 +286,12 @@ function firstLine(text: string, max = 140): string {
 }
 
 function createMailStore() {
-  // Received seed = the same clean sample set the demo already shows (msg_1..3), cloned
-  // so the read flag can be flipped in-session without mutating the module constants.
-  const received: mail.MailMessageDetail[] = Object.values(MAIL_DETAIL).map((m) => ({ ...m }));
-  const sent: mail.MailSentDetail[] = [];
+  // Per-account Inbox + Sent, mirroring the server's owner scope: each account sees ONLY
+  // its own mail. received[accountId] is seeded (cloned) from the account's inbox so the
+  // read flag can flip in-session; sent[accountId] starts empty. The active account is
+  // resolved fresh on every request (currentAccount) so a reload after switching accounts
+  // re-scopes every list. A message/thread/sent id owned by another account reads as 404.
+  const received: Record<string, mail.MailMessageDetail[]> = {};
   let seq = 0;
   let attSeq = 0;
   const b64ToBytes = (b64: string): Uint8Array => {
@@ -224,6 +300,33 @@ function createMailStore() {
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
   };
+
+  function inboxOf(id: string): mail.MailMessageDetail[] {
+    if (!received[id]) {
+      const acct = DEMO_ACCOUNTS.find((a) => a.id === id);
+      received[id] = (acct?.inbox ?? []).map((m) => ({ ...m }));
+    }
+    return received[id]!;
+  }
+  // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
+  // strictly account-scoped: a mail account A sent lives under A's key and is therefore
+  // invisible when the shell reloads as account B. Read fresh on every request.
+  const sentKey = (id: string): string => `dub_demo_sent_${id}`;
+  function sentOf(id: string): mail.MailSentDetail[] {
+    try {
+      const raw = globalThis.localStorage?.getItem(sentKey(id));
+      return raw ? (JSON.parse(raw) as mail.MailSentDetail[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveSent(id: string, list: mail.MailSentDetail[]): void {
+    try {
+      globalThis.localStorage?.setItem(sentKey(id), JSON.stringify(list));
+    } catch {
+      /* storage unavailable — Sent is best-effort in the demo */
+    }
+  }
 
   function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
@@ -238,9 +341,19 @@ function createMailStore() {
         });
       }
     }
-    // received: list / detail / mark-read (read state persists in-session)
+    const me = currentAccount();
+    const outbox = sentOf(me.id);
+    // Oversight (mail:read_all): the read views aggregate EVERY account's mail; personal
+    // accounts stay scoped to their own. `readInbox` / `readSent` are the visible sets for
+    // the current viewer. Writes (send / mark-read) still target the account they belong to.
+    const oversight = isOversight(me);
+    const readInbox: mail.MailMessageDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)) : inboxOf(me.id);
+    const readSent: mail.MailSentDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)) : outbox;
+
+    // received: list / detail / mark-read (read state persists in-session). Scoped to the
+    // account, or every account under oversight (mail:read_all).
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
-      const items: mail.MailMessageListItem[] = received.map(({ textBody, htmlBody, ...li }) => {
+      const items: mail.MailMessageListItem[] = readInbox.map(({ textBody, htmlBody, ...li }) => {
         void textBody;
         void htmlBody;
         return li;
@@ -250,19 +363,29 @@ function createMailStore() {
     {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
-        const found = received.find((r) => r.id === decodeURIComponent(m[1]!));
+        const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
     if (method === "POST") {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)\/read$/.exec(pathname);
       if (m) {
-        const found = received.find((r) => r.id === decodeURIComponent(m[1]!));
-        if (found) found.read = true;
+        const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
+        if (!found) return notFound(`POST ${pathname}`); // another account's message (no oversight) → 404
+        found.read = true;
         return json({ read: true });
       }
     }
-    // sent: outbox append + list + detail
+    // thread: this account's messages in the thread (every account's under oversight).
+    {
+      const m = /^\/api\/v1\/mail\/threads\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const threadId = decodeURIComponent(m[1]!);
+        const messages = readInbox.filter((r) => r.threadId === threadId);
+        return messages.length > 0 ? json({ id: threadId, messages } satisfies mail.MailThread) : notFound(`GET ${pathname}`);
+      }
+    }
+    // sent: outbox append + list + detail — this account only
     if (method === "POST" && pathname === "/api/v1/mail/outbox") {
       const req = (body ?? {}) as Partial<mail.SendMailRequest>;
       const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
@@ -274,11 +397,15 @@ function createMailStore() {
         DEMO_MAIL_BLOBS.set(attId, { filename: a.filename, contentType: a.contentType, bytes });
         return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
       });
+      // Auto-CC the archive address (dedup against To/Cc) — mirrors MAIL_ARCHIVE_CC.
+      const baseCc = req.cc ?? [];
+      const alreadyArchived = [...(req.to ?? []), ...baseCc].some((a) => a.email?.trim().toLowerCase() === DEMO_ARCHIVE_CC);
+      const cc = alreadyArchived ? baseCc : [...baseCc, { email: DEMO_ARCHIVE_CC }];
       const detail: mail.MailSentDetail = {
         id,
-        from: { email: "demo@developershub.jp", name: "デモ 管理者" },
+        from: { email: me.email, name: me.displayName },
         to: req.to ?? [],
-        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        ...(cc.length > 0 ? { cc } : {}),
         subject: req.subject ?? "(件名なし)",
         snippet: firstLine(req.textBody ?? ""),
         sentAt,
@@ -289,12 +416,13 @@ function createMailStore() {
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
         ...(attachments.length > 0 ? { attachments } : {}),
       };
-      sent.unshift(detail);
+      outbox.unshift(detail);
+      saveSent(me.id, outbox);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
-      const items: mail.MailSentListItem[] = sent.map(({ textBody, htmlBody, ...listItem }) => {
+      const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
         return listItem;
@@ -304,7 +432,7 @@ function createMailStore() {
     if (method === "GET") {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
       if (m) {
-        const found = sent.find((s) => s.id === decodeURIComponent(m[1]!));
+        const found = readSent.find((s) => s.id === decodeURIComponent(m[1]!));
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
@@ -720,12 +848,16 @@ export function createDemoFetch(): typeof fetch {
         parsedBody = undefined;
       }
     }
+    // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
+    // and reloading re-scopes the whole shell — the header title, permissions and mail.
+    if (method === "GET" && url.pathname === "/api/v1/me") return json(currentMe());
+
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url);
     if (hit) return hit;
-    // Boot surface (/me, /bff/home, /auth/*) + NOT_FOUND for everything else.
+    // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.
     return boot(input, init);
   };
 

@@ -5,7 +5,7 @@ import { createDbClient, type DbClient } from "@dub/db";
 import { common } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import type { Env } from "./env";
-import { DEFAULT_FROM_ADDRESS } from "./config";
+import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_FROM_ADDRESS } from "./config";
 import { buildProvider, type MailProvider } from "./provider";
 import { r2Blobs, type MailBlobStore } from "./attachments";
 import { sendRetryOptions } from "./resilience";
@@ -41,6 +41,9 @@ export function buildSendDeps(
   // @developershub.jp address and passes it here; internal/system sends omit it and
   // keep the configured default (info@…).
   fromOverride?: string,
+  // Owner (Sent-folder account scope): the signed-in user's id for a user-facing send,
+  // or null for a pure system/automation send.
+  ownerUserId: string | null = null,
 ): SendDeps {
   const blobs = buildBlobs(env);
   return {
@@ -51,6 +54,10 @@ export function buildSendDeps(
     orgId: common.DUB_DEFAULT_ORG_ID,
     fromAddress: fromOverride ?? env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ctx,
+    ownerUserId,
+    // Archive CC: env override, else the frozen default. An explicit empty string
+    // disables the archive CC (opt-out) without falling back to the default.
+    archiveCc: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     retry: sendRetryOptions(env),
     ...(blobs ? { blobs } : {}),
   };
@@ -65,5 +72,7 @@ export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
     orgId: common.DUB_DEFAULT_ORG_ID,
     ctx,
     ...(blobs ? { blobs } : {}),
+    // identity binding: resolves an inbound recipient address → roster userId (Inbox scope).
+    identity: env.SVC_IDENTITY,
   };
 }

@@ -9,6 +9,12 @@ export const SERVICE_NAME = "mail-gateway";
 export const DEFAULT_MAILBOX = "info";
 export const DEFAULT_FROM_ADDRESS = "info@developershub.jp";
 
+// Fixed archive/BCC-style CC auto-added to EVERY outbound send (compliance archive).
+// The address is CC'd on send so a copy lands in the archive mailbox, and — once CF
+// Email Routing forwards archive@ back into this Worker — is ingested like any inbound
+// and surfaced to mail:read_all (oversight) holders. Overridable via MAIL_ARCHIVE_CC.
+export const DEFAULT_ARCHIVE_CC_ADDRESS = "archive@developershub.jp";
+
 // Retention windows (days) — purged by the daily scheduled handler (design §3).
 export const SEND_LOG_RETENTION_DAYS = 30;
 export const INBOUND_RETENTION_DAYS = 30;

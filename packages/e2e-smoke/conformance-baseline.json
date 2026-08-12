@@ -52,6 +52,7 @@
   },
   "identity-roster": {
     "missingInSpec": [
+      "GET /internal/users",
       "POST /identity/users/sync-email-routing",
       "POST /internal/users/lookup"
     ],

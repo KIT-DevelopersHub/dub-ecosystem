@@ -10,7 +10,7 @@ import { buildDeps } from "./deps";
 import type { Env } from "./env";
 
 export type { Env } from "./env";
-export { hashPassword, verifyPassword, seedPasswordCredential, seedDemoCredentials, DEMO_CREDENTIALS, KvPasswordStore, setCredential, generatePassword, encryptSecret, decryptSecret } from "./passwords";
+export { hashPassword, verifyPassword, seedPasswordCredential, seedDemoCredentials, DEMO_CREDENTIALS, seedOversightCredentials, OVERSIGHT_CREDENTIALS, KvPasswordStore, setCredential, generatePassword, encryptSecret, decryptSecret } from "./passwords";
 export type { PasswordStore, StoredCredential, SetCredentialParams } from "./passwords";
 
 export default {

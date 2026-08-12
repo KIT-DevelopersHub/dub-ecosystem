@@ -30,6 +30,9 @@ export interface Env {
   // --- outbound provider config (Workers Secrets; real send credentials) ---
   MAIL_OUTBOUND_PROVIDER?: string; // "resend" (default, ADR-0001) | "ses" | "mailchannels" | "mock"
   MAIL_FROM_ADDRESS?: string; // default From (e.g. info@developershub.jp)
+  // Fixed archive address auto-CC'd on EVERY send (compliance archive). Non-secret
+  // [vars]; defaults to archive@developershub.jp when unset. Empty string disables it.
+  MAIL_ARCHIVE_CC?: string;
 
   // SES (SigV4-signed HTTPS). Secrets: SES_ACCESS_KEY_ID / SES_SECRET_ACCESS_KEY.
   SES_REGION?: string;

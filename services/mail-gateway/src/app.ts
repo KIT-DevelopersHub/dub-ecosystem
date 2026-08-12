@@ -23,7 +23,7 @@ import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox } from "./repo";
+import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -34,6 +34,30 @@ export function createApp() {
 
   const ctxOf = (c: Context<AppBindings>): RequestContext => c.get("dubCtx");
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, ctxOf(c).requestId);
+  // The signed-in user for a request past withAuth (trusted x-dub-user-id). requireAuth
+  // already 401s when it is absent, so on the guarded read/outbox routes it is present;
+  // this throws (fail-closed) rather than silently scoping to "" if the guard ever changes.
+  const ownerOf = (c: Context<AppBindings>): string => {
+    const userId = c.req.header(HEADERS.userId);
+    if (!userId) throw errors.forbidden("account scope requires an authenticated user");
+    return userId;
+  };
+  // Read scope for the account-isolated read routes. A caller holding `mail:read_all`
+  // (oversight: admin / info@ / admin@) reads EVERY account's mail — the owner filter is
+  // dropped ({ readAll: true }); everyone else stays scoped to their own userId (#169,
+  // fail-closed). The permission is re-checked on the per-request auth client that
+  // withAuth("mail:read") already placed on the context, so the read guard runs first.
+  const scopeOf = async (c: Context<AppBindings>): Promise<MailScope> => {
+    const userId = ownerOf(c);
+    const client = c.get("authClient");
+    const readAll = await client.hasPermission(
+      userId,
+      common.DUB_DEFAULT_ORG_ID,
+      { permission: "mail:read_all" },
+      { requestId: ctxOf(c).requestId },
+    );
+    return readAll ? { readAll: true } : userId;
+  };
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
@@ -76,7 +100,8 @@ export function createApp() {
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
     assertAttachmentsSupported(c, req);
     const requester = c.req.header(HEADERS.caller) ?? userId ?? "unknown";
-    const deps = buildSendDeps(c.env, ctx);
+    // Owner = the user on the call (Sent-folder scope); null for a pure system send.
+    const deps = buildSendDeps(c.env, ctx, undefined, undefined, userId ?? null);
     const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
@@ -109,7 +134,8 @@ export function createApp() {
     const fromAddress = req.inReplyTo
       ? await resolveReplyFromAddress(c.env, ctx, dbOf(c), req.inReplyTo, userId)
       : await resolveUserFromAddress(c.env, ctx, userId);
-    const deps = buildSendDeps(c.env, ctx, undefined, fromAddress);
+    // Owner = the signed-in user so this send shows only in THEIR Sent folder (#169).
+    const deps = buildSendDeps(c.env, ctx, undefined, fromAddress, userId);
     const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
@@ -123,13 +149,13 @@ export function createApp() {
 
   ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listInbound(dbOf(c), q);
+    const page = await listInbound(dbOf(c), { ...q, ownerUserId: await scopeOf(c) });
     return c.json(page satisfies common.Paginated<mail.MailMessageListItem>);
   });
 
   ext.get("/messages/:id", async (c) => {
     const db = dbOf(c);
-    const msg = await getInboundDetail(db, c.req.param("id"));
+    const msg = await getInboundDetail(db, c.req.param("id"), await scopeOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     const attachments = await attachmentsFor(db, "inbound", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
@@ -141,7 +167,7 @@ export function createApp() {
   // External (user-facing via gateway) so it lives on `ext` under /mail and inherits the
   // ext.use("/messages/*", withAuth("mail:read")) guard above.
   ext.post("/messages/:id/read", async (c) => {
-    const { found } = await markInboundRead(dbOf(c), c.req.param("id"));
+    const { found } = await markInboundRead(dbOf(c), c.req.param("id"), await scopeOf(c));
     if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json({ read: true } satisfies mail.MailMessageState);
   });
@@ -150,13 +176,13 @@ export function createApp() {
   // detail. Only delivered (status='sent') rows are listed; pending/failed never show.
   ext.get("/sent", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listSent(dbOf(c), { limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    const page = await listSent(dbOf(c), { ownerUserId: await scopeOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
     return c.json(page satisfies common.Paginated<mail.MailSentListItem>);
   });
 
   ext.get("/sent/:id", async (c) => {
     const db = dbOf(c);
-    const msg = await getSentDetail(db, c.req.param("id"));
+    const msg = await getSentDetail(db, c.req.param("id"), await scopeOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `sent message not found: ${c.req.param("id")}`, { status: 404 });
     const attachments = await attachmentsFor(db, "sent", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
@@ -166,7 +192,7 @@ export function createApp() {
   ext.get("/threads/:id", async (c) => {
     const db = dbOf(c);
     const threadId = c.req.param("id");
-    const messages = await listThread(db, threadId);
+    const messages = await listThread(db, threadId, await scopeOf(c));
     if (messages.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
     for (const m of messages) {
       const attachments = await attachmentsFor(db, "inbound", m.id);

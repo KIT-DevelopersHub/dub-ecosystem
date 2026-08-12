@@ -21,6 +21,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0003_freeq_outbox.sql"),
   join(HERE, "../db/0004_send_body.sql"),
   join(HERE, "../db/0005_attachments.sql"),
+  join(HERE, "../db/0006_owner_scope.sql"),
 ];
 
 function norm(v: unknown): unknown {

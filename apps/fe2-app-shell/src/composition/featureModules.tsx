@@ -201,13 +201,20 @@ function adaptMail(api: ApiClient): FeatureModule {
 // ── usage (FE2-local feature module) ──────────────────────────────────────────
 // Like mail, the free-tier usage & billing-guard dashboard lives in the shell
 // (apps/fe2-app-shell/src/features/usage) rather than a separate FE package. It
-// ships a canonical FeatureModule so it registers, routes, and (would) authz-gate
-// exactly like the others. Its route is wrapped in UsageProvider (UsageApi built
-// from the one shell api-client); nav sits after mail (order 46), before admin.
+// ships a canonical FeatureModule so it registers, routes, and authz-gates exactly
+// like the others. Its route is wrapped in UsageProvider (UsageApi built from the
+// one shell api-client); nav sits after mail (order 46), before admin. The route +
+// nav carry requiredPermissions (infra:read), matching usage-meter's server gate:
+// wrapRoute copies the route perms (→ PermissionDeniedScreen), and the nav entry's
+// perms hide the launcher tile for anyone without infra:read.
 function adaptUsage(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(UsageProvider, api);
   const routes = (usageRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = usageNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 46 }));
+  const nav: NavEntry[] = usageNav.map((n) => {
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 46 };
+    if (n.requiredPermissions) e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
+    return e;
+  });
   return { id: "usage", routes, nav };
 }
 

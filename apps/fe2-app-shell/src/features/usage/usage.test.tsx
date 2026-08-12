@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
+import { ApiError, type ApiClient, type RequestInput } from "../../lib/api-client.tsx";
 import {
   CRITICAL_PCT,
   WARN_PCT,
@@ -20,7 +20,7 @@ import {
   worstStatusBanner,
 } from "./usageStatus.ts";
 import { createUsageApi, USAGE_SUMMARY_PATH, type UsageApi } from "./usageApi.tsx";
-import { buildMockUsageSummary } from "./mockUsageSummary.ts";
+import { buildMockUsageSummary, buildNeutralUsageSummary } from "./mockUsageSummary.ts";
 import { UsageApiProvider } from "./UsageProvider.tsx";
 import { UsageGauge } from "./components/UsageGauge.tsx";
 import { OverflowBadge } from "./components/OverflowBadge.tsx";
@@ -183,12 +183,26 @@ describe("createUsageApi", () => {
     expect(res.source).toBe("live");
     expect(res.summary).toBe(wire);
   });
-  it("falls back to the mock (source:mock) when the request rejects", async () => {
+  it("falls back to a NEUTRAL summary (source:unavailable, reason:error) when the request rejects", async () => {
     const request = vi.fn(() => Promise.reject(new Error("network")));
     const api = { request } as unknown as ApiClient;
     const res = await createUsageApi(api, {}).getSummary();
-    expect(res.source).toBe("mock");
+    expect(res.source).toBe("unavailable");
+    expect(res.reason).toBe("error");
+    // The neutral fallback must NEVER carry the mock's illustrative warn/critical
+    // numbers — every leaf is `unknown` and the roll-up is `unknown`.
+    expect(res.summary.worstStatus).toBe("unknown");
     expect(res.summary.services.length).toBeGreaterThan(0);
+    expect(res.summary.services.every((s) => s.status === "unknown")).toBe(true);
+    expect(res.summary.services.some((s) => s.status === "warn" || s.status === "critical")).toBe(false);
+  });
+  it("reports reason:forbidden on a 401/403 (missing infra:read)", async () => {
+    const forbidden = new ApiError(403, { error: { code: "FORBIDDEN", message: "no", retryable: false } });
+    const request = vi.fn(() => Promise.reject(forbidden));
+    const api = { request } as unknown as ApiClient;
+    const res = await createUsageApi(api, {}).getSummary();
+    expect(res.source).toBe("unavailable");
+    expect(res.reason).toBe("forbidden");
   });
   it("returns the mock (source:demo) without any request in demo builds", async () => {
     const { api, calls } = fakeApi(() => ({}));
@@ -196,17 +210,23 @@ describe("createUsageApi", () => {
     expect(calls).toHaveLength(0);
     expect(res.source).toBe("demo");
   });
-  it("falls back to the mock when the payload is malformed", async () => {
+  it("falls back to unavailable (not mock) when the payload is malformed", async () => {
     const { api } = fakeApi(() => ({ generatedAt: "x", worstStatus: "ok" }));
     const res = await createUsageApi(api, {}).getSummary();
-    expect(res.source).toBe("mock");
+    expect(res.source).toBe("unavailable");
+    expect(res.reason).toBe("error");
   });
 });
 
 // ── dashboard integration ───────────────────────────────────────────────────
-function fakeUsageApi(source: "live" | "mock" | "demo", summary: UsageSummary): { value: UsageApi; refresh: ReturnType<typeof vi.fn> } {
-  const getSummary = vi.fn(() => Promise.resolve({ summary, source }));
-  const refresh = vi.fn(() => Promise.resolve({ summary, source }));
+function fakeUsageApi(
+  source: "live" | "demo" | "unavailable",
+  summary: UsageSummary,
+  reason?: "forbidden" | "error",
+): { value: UsageApi; refresh: ReturnType<typeof vi.fn> } {
+  const result = { summary, source, ...(reason ? { reason } : {}) };
+  const getSummary = vi.fn(() => Promise.resolve(result));
+  const refresh = vi.fn(() => Promise.resolve(result));
   return { value: { getSummary, refresh }, refresh };
 }
 
@@ -235,12 +255,30 @@ describe("UsageDashboard", () => {
     expect(screen.queryByTestId("fe2-usage-sample-notice")).not.toBeInTheDocument();
   });
 
-  it("shows a sample-data notice when the summary is a mock fallback", async () => {
-    const summary = buildMockUsageSummary(new Date("2026-08-12T00:00:00Z"));
-    const { value } = fakeUsageApi("mock", summary);
+  it("shows a NEUTRAL 'could not read' notice (no fake %/danger) when the read is unavailable", async () => {
+    // Simulate the real degraded path: a neutral, all-unknown summary tagged forbidden.
+    const summary = buildNeutralUsageSummary(new Date("2026-08-12T00:00:00Z"));
+    const { value } = fakeUsageApi("unavailable", summary, "forbidden");
     render(wrap(<UsageDashboard />, value));
-    await waitFor(() => expect(screen.getByTestId("fe2-usage-sample-notice")).toBeInTheDocument());
-    expect(screen.getByTestId("fe2-usage-sample-notice")).toHaveAttribute("data-source", "mock");
+
+    await waitFor(() => expect(screen.getByTestId("fe2-usage-unavailable-notice")).toBeInTheDocument());
+    const notice = screen.getByTestId("fe2-usage-unavailable-notice");
+    expect(notice).toHaveAttribute("data-reason", "forbidden");
+    expect(notice).toHaveTextContent("権限がありません");
+    // The old yellow "sample data" notice must NOT appear.
+    expect(screen.queryByTestId("fe2-usage-sample-notice")).not.toBeInTheDocument();
+    // The page banner must be neutral (unknown) — never the red critical alarm.
+    const banner = screen.getByTestId("fe2-usage-summary-banner");
+    expect(banner).toHaveAttribute("data-status", "unknown");
+    expect(banner).not.toHaveTextContent("上限に迫っている");
+    // Every card renders as 取得不可 with no percentage and no 危険/警告 badge.
+    for (const svc of summary.services) {
+      const card = screen.getByTestId(`fe2-usage-card-${svc.metricKey}`);
+      expect(card).toHaveAttribute("data-status", "unknown");
+    }
+    expect(screen.queryByText("危険")).not.toBeInTheDocument();
+    expect(screen.queryByText("警告")).not.toBeInTheDocument();
+    expect(screen.queryByText(/%$/)).not.toBeInTheDocument();
   });
 
   it("re-fetches on 今すぐ更新", async () => {
