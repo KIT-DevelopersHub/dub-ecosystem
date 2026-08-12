@@ -418,6 +418,43 @@ export interface SkeletonLoaderProps extends TestableProps {
   width?: string;
 }
 
+// Skeleton family (FE1 §5 loading principle). A loading UI MUST render a
+// skeleton, never a bare blank, so the user can tell "loading" from "empty".
+export type SkeletonVariant = "text" | "circle" | "rect";
+export type SkeletonAnimation = "shimmer" | "pulse" | "none";
+
+/** A single placeholder block. Presentational (aria-hidden); wrap groups in a
+ *  composite or a role="status" region so loading is announced once. */
+export interface SkeletonProps extends TestableProps {
+  variant?: SkeletonVariant; // default "text"
+  width?: string | number; // number = px
+  height?: string | number; // number = px
+  radius?: string; // override border-radius (else per-variant default)
+  animation?: SkeletonAnimation; // default "shimmer"
+}
+
+/** Placeholder for a loading list: `rows` line rows, optional leading avatar. */
+export interface SkeletonListProps extends TestableProps {
+  rows?: number; // default 3
+  avatar?: boolean; // default false
+  animation?: SkeletonAnimation;
+}
+
+/** Placeholder for a loading table: optional header + `rows` × `columns` cells. */
+export interface SkeletonTableProps extends TestableProps {
+  rows?: number; // default 5
+  columns?: number; // default 4
+  header?: boolean; // default true
+  animation?: SkeletonAnimation;
+}
+
+/** Placeholder for a loading card: optional media block + title + `lines`. */
+export interface SkeletonCardProps extends TestableProps {
+  media?: boolean; // default false
+  lines?: number; // default 2
+  animation?: SkeletonAnimation;
+}
+
 // Rate-limit banner (FE1 §6 states family). Domain-agnostic: the consumer supplies the
 // label + the backend-derived state (mail-gateway GET /internal/status → rateLimit).
 // Renders nothing when `active` is false, so a surface can mount it unconditionally.
