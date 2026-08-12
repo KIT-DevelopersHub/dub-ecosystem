@@ -158,6 +158,86 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /mail/messages/{id}/attachments/{attId}:
+    get:
+      operationId: downloadInboundAttachment
+      summary: Download an inbound message attachment
+      tags:
+        - mail
+      description: |-
+        Requires mail:read. Streams the attachment body from R2 with a
+        `content-disposition: attachment` header. The attachment is scoped to
+        (message id, attachment id); a mismatched pair 404s. Returns 503 when
+        attachment storage (R2) is not configured.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Inbound message id.
+          schema:
+            type: string
+        - name: attId
+          in: path
+          required: true
+          description: Attachment id belonging to the message.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Attachment binary body.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Attachment storage (R2) is not configured.
+  /mail/sent/{id}/attachments/{attId}:
+    get:
+      operationId: downloadSentAttachment
+      summary: Download a sent message attachment
+      tags:
+        - mail
+      description: |-
+        Requires mail:read. Streams the attachment body from R2 with a
+        `content-disposition: attachment` header. The attachment is scoped to
+        (sent message id, attachment id); a mismatched pair 404s. Returns 503
+        when attachment storage (R2) is not configured.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Sent message id.
+          schema:
+            type: string
+        - name: attId
+          in: path
+          required: true
+          description: Attachment id belonging to the sent message.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Attachment binary body.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Attachment storage (R2) is not configured.
   /threads/{id}:
     get:
       operationId: getMailThread
