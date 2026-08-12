@@ -117,10 +117,18 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
   const columnTeams = teams.filter((t) => !isHqTeam(t));
   const inTeam = (teamId: string): OrgMember[] => active.filter((m) => m.teamIds.includes(teamId));
   const hqMembers = hq ? inTeam(hq.id) : [];
-  const unassigned = active.filter((m) => m.teamIds.length === 0);
 
-  // 末尾に「未所属」を neutral カラムとして足す（PDFには無いが取りこぼし防止）。
-  const columns: Array<{ team: MemberTeam; members: OrgMember[] }> = columnTeams.map((t) => ({ team: t, members: inTeam(t.id) }));
+  // 各 active メンバーを HQ箱 または チーム列 に配置しつつ、どこに描画したかを記録する。
+  const placed = new Set<string>(hqMembers.map((m) => m.id));
+  const columns: Array<{ team: MemberTeam; members: OrgMember[] }> = columnTeams.map((t) => {
+    const cm = inTeam(t.id);
+    for (const m of cm) placed.add(m.id);
+    return { team: t, members: cm };
+  });
+  // 取りこぼし防止（母集団の一致を保証）: teamIds が空の人だけでなく、実在しないチーム
+  // だけを指す(削除済み等)人も、HQにも列にも入らなかった active メンバーを全て「未所属」
+  // 列で必ず表示する。これで 一覧(辞退除く) と 組織図 の合計人数が常に一致する。
+  const unassigned = active.filter((m) => !placed.has(m.id));
   if (unassigned.length > 0) {
     columns.push({
       team: { id: "__unassigned", key: "unassigned", name: "未所属", color: "#94a3b8", description: null },

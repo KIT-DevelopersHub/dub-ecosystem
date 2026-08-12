@@ -122,4 +122,31 @@ describe("MembersPage", () => {
     await userEvent.click(within(confirm).getByRole("button", { name: "削除" }));
     await waitFor(() => expect(api.deleteMember).toHaveBeenCalledWith("m1"));
   });
+
+  // Regression: the 組織図 must reflect the SAME population as the 一覧 (辞退除く). Nobody
+  // should silently vanish — not team-less members, not members whose teamIds point at a
+  // team that no longer exists (orphan ref). Declined stays hidden by design.
+  it("組織図 shows every non-declined member (team-less + orphan-team refs included)", async () => {
+    const overview: MembersOverview = {
+      teams: [{ id: "t1", key: "venue", name: "会場", color: "#16a34a", description: null }],
+      members: [
+        { id: "p_team", orgId: "o", name: "所属アリ子", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_none", orgId: "o", name: "未所属無太郎", roleTitle: null, status: "added", teamIds: [], contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_orphan", orgId: "o", name: "幽霊参照子", roleTitle: null, status: "added", teamIds: ["deleted_team_999"], contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
+      ],
+    };
+    render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByText("所属アリ子");
+    await userEvent.click(screen.getByRole("tab", { name: "組織図" }));
+    await screen.findByTestId("members-orgchart");
+    // 3 non-declined members are ALL rendered as org chips; the declined one is not.
+    expect(screen.getByTestId("members-orgchip-p_team")).toBeInTheDocument();
+    expect(screen.getByTestId("members-orgchip-p_none")).toBeInTheDocument();
+    expect(screen.getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
+    expect(screen.queryByTestId("members-orgchip-p_gone")).not.toBeInTheDocument();
+    // team-less + orphan-ref members land in the catch-all 未所属 column.
+    const org = screen.getByTestId("members-orgchart");
+    expect(within(org).getByText("未所属")).toBeInTheDocument();
+  });
 });
