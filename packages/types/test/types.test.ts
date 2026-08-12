@@ -17,11 +17,11 @@ describe("@dub/types", () => {
     expect(common.MOBILE_API_PREFIX).toBe("/m/v1");
   });
 
-  it("PERMISSION_CATALOG is 32 closed keys, lowercase, unique", () => {
+  it("PERMISSION_CATALOG is 33 closed keys, lowercase, unique", () => {
     const cat = identity.PERMISSION_CATALOG;
-    expect(cat.length).toBe(32);
+    expect(cat.length).toBe(33);
     const keys = cat.map((e) => e.key);
-    expect(new Set(keys).size).toBe(32); // unique
+    expect(new Set(keys).size).toBe(33); // unique
     for (const key of keys) {
       const segs = key.split(":");
       // <domain>:<action>, plus an optional :self scope segment (self-service keys)
@@ -35,7 +35,9 @@ describe("@dub/types", () => {
     const dangerous = cat.filter((e) => e.dangerous).map((e) => e.key);
     expect(dangerous).toContain("identity:admin");
     expect(dangerous).toContain("infra:deploy");
+    expect(dangerous).toContain("mail:read_all"); // oversight = dangerous
     expect(dangerous).not.toContain("event:read");
+    expect(dangerous).not.toContain("mail:read"); // own-mail read stays non-dangerous
   });
 
   it("PermissionKey closed union round-trips a valid key", () => {

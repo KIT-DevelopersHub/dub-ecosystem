@@ -45,6 +45,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "notif:prefs:self": { label: "自分の通知設定", description: "自分の通知の受け取り方（設定）を確認・変更できるようになります。" },
   "mail:send": { label: "メールの送信", description: "組織のメールアドレスからメールを送信できるようになります。" },
   "mail:read": { label: "メールの閲覧", description: "メールのメッセージ・スレッド・振り分けルールを閲覧できるようになります。" },
+  "mail:read_all": { label: "全メールの閲覧（監督）", description: "オンにすると全ユーザーの送受信メールを閲覧できます。" },
   "mail:admin": { label: "メールの管理", description: "メールボックスや受信監視・振り分けルールの設定を管理できるようになります。" },
   "chat:create": { label: "チャンネルの作成", description: "チャットのチャンネルを新規作成できるようになります。" },
   "chat:moderate": { label: "チャットのモデレート", description: "チャンネルの管理や、他人のメッセージの削除ができるようになります。" },

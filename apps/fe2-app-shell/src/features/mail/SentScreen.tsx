@@ -6,13 +6,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Badge, Button, Card, Divider, EmptyState, ErrorState, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
+import { Badge, Button, Card, Divider, EmptyState, ErrorState, PageHeader, SkeletonLoader, Stack, useToast } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
 import { MailFolderTabs } from "./MailFolderTabs.tsx";
 import { sanitizeHtml } from "./sanitize.tsx";
+import { formatBytes, saveBlob } from "./mailApi.tsx";
 
 function formatSent(iso: string): string {
   const d = new Date(iso);
@@ -67,10 +68,19 @@ function SentBody({ message }: { message: mail.MailSentDetail }): JSX.Element {
 
 function SentDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
   const mailApi = useMailApi();
+  const toast = useToast();
   const query = useQuery({
     queryKey: queryKeys.feature("mail", "sent", id),
     queryFn: () => mailApi.getSent(id),
   });
+  const download = async (att: mail.MailAttachment): Promise<void> => {
+    try {
+      const blob = await mailApi.downloadAttachment("sent", id, att.id);
+      saveBlob(blob, att.filename);
+    } catch {
+      toast.show({ kind: "error", title: "添付ファイルをダウンロードできませんでした。" });
+    }
+  };
 
   const back = (
     <Button variant="secondary" testId="fe2-mail-sent-back" onClick={onBack}>
@@ -102,6 +112,16 @@ function SentDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
             <small>{formatSent(m.sentAt)}</small>
             <Divider />
             <SentBody message={m} />
+            {m.attachments && m.attachments.length > 0 ? (
+              <Stack gap={1} testId="fe2-mail-sent-attachments">
+                <small>添付ファイル ({m.attachments.length})</small>
+                {m.attachments.map((a) => (
+                  <Button key={a.id} variant="secondary" testId="fe2-mail-sent-attachment" onClick={() => void download(a)}>
+                    {a.filename} ({formatBytes(a.sizeBytes)})
+                  </Button>
+                ))}
+              </Stack>
+            ) : null}
           </Stack>
         </Card>
       </Stack>

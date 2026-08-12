@@ -4,7 +4,16 @@
 // MAIL_INVALID_REQUEST envelope (design §6).
 import { DubError, type FieldError } from "@dub/errors";
 import type { mail } from "@dub/types";
-import { DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT, MAX_RECIPIENTS, OUTBOUND_HEADER_ALLOWLIST, SUBJECT_MAX } from "./config";
+import {
+  DEFAULT_QUERY_LIMIT,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_ATTACHMENTS_TOTAL_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  MAX_QUERY_LIMIT,
+  MAX_RECIPIENTS,
+  OUTBOUND_HEADER_ALLOWLIST,
+  SUBJECT_MAX,
+} from "./config";
 
 const HEADER_ALLOW: ReadonlySet<string> = new Set(OUTBOUND_HEADER_ALLOWLIST);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -36,6 +45,65 @@ function parseAddressField(v: unknown, field: string, fe: FieldError[]): mail.Ma
     out.push(addr);
   });
   return out;
+}
+
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+const FILENAME_MAX = 255;
+
+/** Byte length a standard base64 string decodes to (without allocating the bytes). */
+function base64ByteLength(b64: string): number {
+  const s = b64.replace(/\s+/g, "");
+  if (s.length === 0) return 0;
+  const padding = s.endsWith("==") ? 2 : s.endsWith("=") ? 1 : 0;
+  return Math.floor((s.length * 3) / 4) - padding;
+}
+
+/** Validate the optional attachments array (base64 bodies + bounds). */
+function parseAttachments(v: unknown, fe: FieldError[]): mail.MailAttachmentInput[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v)) {
+    fe.push({ field: "attachments", reason: "invalid_type", message: "expected array" });
+    return undefined;
+  }
+  if (v.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    fe.push({ field: "attachments", reason: "too_many", message: `<= ${MAX_ATTACHMENTS_PER_MESSAGE}` });
+  }
+  const out: mail.MailAttachmentInput[] = [];
+  let total = 0;
+  v.forEach((raw, i) => {
+    if (!isPlainObject(raw)) {
+      fe.push({ field: `attachments[${i}]`, reason: "invalid_type" });
+      return;
+    }
+    const { filename, contentType, contentBase64 } = raw as Record<string, unknown>;
+    if (typeof filename !== "string" || filename.length === 0 || filename.length > FILENAME_MAX) {
+      fe.push({ field: `attachments[${i}].filename`, reason: "invalid_length", message: `1..${FILENAME_MAX}` });
+    }
+    if (typeof contentType !== "string" || contentType.length === 0) {
+      fe.push({ field: `attachments[${i}].contentType`, reason: "required" });
+    }
+    if (typeof contentBase64 !== "string" || contentBase64.length === 0 || !BASE64_RE.test(contentBase64.replace(/\s+/g, ""))) {
+      fe.push({ field: `attachments[${i}].contentBase64`, reason: "invalid_base64" });
+      return;
+    }
+    const size = base64ByteLength(contentBase64);
+    if (size === 0) {
+      fe.push({ field: `attachments[${i}].contentBase64`, reason: "empty" });
+      return;
+    }
+    if (size > MAX_ATTACHMENT_BYTES) {
+      fe.push({ field: `attachments[${i}]`, reason: "too_large", message: `<= ${MAX_ATTACHMENT_BYTES} bytes` });
+      return;
+    }
+    total += size;
+    if (typeof filename === "string" && typeof contentType === "string") {
+      out.push({ filename, contentType, contentBase64: contentBase64.replace(/\s+/g, "") });
+    }
+  });
+  if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+    fe.push({ field: "attachments", reason: "too_large_total", message: `<= ${MAX_ATTACHMENTS_TOTAL_BYTES} bytes total` });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /** Validate POST /send body (frozen mail.SendMailRequest). */
@@ -95,6 +163,8 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
     }
   }
 
+  const attachments = parseAttachments(b.attachments, fe);
+
   if (fe.length > 0) throw mailInvalid(fe);
 
   const out: mail.SendMailRequest = {
@@ -106,6 +176,7 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
   if (htmlBody !== undefined) out.htmlBody = htmlBody;
   if (inReplyTo !== undefined) out.inReplyTo = inReplyTo;
   if (loopHeaders !== undefined) out.loopHeaders = loopHeaders;
+  if (attachments !== undefined) out.attachments = attachments;
   return out;
 }
 

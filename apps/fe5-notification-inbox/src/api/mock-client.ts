@@ -24,6 +24,7 @@ export const DEFAULT_PREFERENCES: PreferenceEntry[] = [
   { type: "task.due_soon", channels: ["in_app", "email", "push"] }, // urgent -> email on
   { type: "event.*", channels: ["in_app", "push"] },
   { type: "system.announcement", channels: ["in_app"] }, // in_app forced, no push
+  { type: "release", channels: ["in_app"] }, // release notes: in_app forced (new-feature 🎉)
   // chat.* is intentionally absent -> chat inbox transcription off (test 18).
 ];
 
@@ -71,6 +72,11 @@ function seedItems(): InboxItem[] {
     resourceId: resource?.id ?? null,
   });
   return [
+    // Release notes surface at the top of the inbox so the "🎉 新機能" badge is visible.
+    // Seeded as read so the default unread count is unchanged; publishing via the admin
+    // form (or the seed route) produces fresh unread release notes.
+    mk(7, "release", "🎉 ガントチャート（Notion風）を追加しました", true),
+    mk(8, "release", "🎉 メールにファイルを添付できるようになりました", true),
     mk(1, "task.assigned", "You were assigned “Ship FE5”", false, { type: "task", id: "task_ship_fe5" }),
     mk(2, "task.due_soon", "“Design review” is due soon", false, { type: "task", id: "task_design" }),
     mk(3, "event.invited", "Invited to “北陸ITカンファレンス”", false, { type: "event", id: "event_hokuriku" }),
@@ -138,6 +144,24 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
 
     async post<T>(path: string, body?: unknown): Promise<T> {
       maybeFail(path);
+      if (path === `${BASE}/release`) {
+        // Admin publish: broadcast a release note. In the mock we just add it to the
+        // signed-in user's inbox (unread) so the demo shows the new "🎉 新機能" item.
+        const req = (body ?? {}) as { title?: string; body?: string };
+        const now = new Date();
+        const item: InboxItem = {
+          id: `notif_rel_${now.getTime()}`,
+          type: "release",
+          title: req.title ?? "🎉 新機能",
+          body: req.body ?? "",
+          readAt: null,
+          createdAt: now.toISOString(),
+          resourceType: "release",
+          resourceId: null,
+        };
+        store.items.unshift(item);
+        return { notificationId: item.id, deduplicated: false } as T;
+      }
       if (path === `${BASE}/inbox/read-all`) {
         const req = (body ?? {}) as ReadAllRequest;
         const now = new Date().toISOString();

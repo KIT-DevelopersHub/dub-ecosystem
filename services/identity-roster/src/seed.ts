@@ -87,12 +87,13 @@ export interface SeededDemoUser {
   roleName: string;
 }
 
-/** Idempotent: create the demo org + roles, then the 2 demo users with an org-wide
- *  role assignment each. Re-running never duplicates users or assignments. */
-export async function seedDemoUsers(d: SeedDeps, orgId: string): Promise<SeededDemoUser[]> {
+/** Idempotent: ensure each spec exists as an active user with an org-wide assignment of
+ *  its role. Shared by seedDemoUsers and seedOversightUsers so both use the identical
+ *  create-if-absent / assign-if-absent path. Re-running never duplicates. */
+async function seedUsersWithRole(d: SeedDeps, orgId: string, specs: readonly DemoUserSpec[]): Promise<SeededDemoUser[]> {
   await seedReferenceData(d, orgId);
   const out: SeededDemoUser[] = [];
-  for (const spec of DEMO_USERS) {
+  for (const spec of specs) {
     const email = spec.email.toLowerCase();
     let user = await d.repo.getUserByEmail(orgId, email);
     if (!user) {
@@ -128,4 +129,28 @@ export async function seedDemoUsers(d: SeedDeps, orgId: string): Promise<SeededD
     out.push({ email, userId: user.id, roleName: spec.roleName });
   }
   return out;
+}
+
+/** Idempotent: create the demo org + roles, then the 3 demo users with an org-wide
+ *  role assignment each. Re-running never duplicates users or assignments. */
+export async function seedDemoUsers(d: SeedDeps, orgId: string): Promise<SeededDemoUser[]> {
+  return seedUsersWithRole(d, orgId, DEMO_USERS);
+}
+
+// ---- oversight accounts (info@ / admin@) ------------------------------------
+// The two shared DevHub addresses are modeled as INDIVIDUAL real users (not a shared-
+// mailbox concept): each is one loginable account (a company-domain email => passes the
+// auth-service allowlist domain gate) carrying the admin role, so it holds mail:read_all
+// and can view EVERY user's mail (oversight). Personal @developershub.jp accounts keep
+// their own-mail scope. admin@ overlaps the admin DEMO_USER; getUserByEmail keeps it one
+// row, so seeding both sets is safe.
+export const OVERSIGHT_USERS: readonly DemoUserSpec[] = [
+  { email: "info@developershub.jp", displayName: "Info (DevHub)", roleName: "admin" },
+  { email: "admin@developershub.jp", displayName: "Admin (DevHub)", roleName: "admin" },
+] as const;
+
+/** Idempotent: seed the info@ / admin@ oversight accounts as individual admin-role users
+ *  (=> mail:read_all). Re-running never duplicates users or assignments. */
+export async function seedOversightUsers(d: SeedDeps, orgId: string): Promise<SeededDemoUser[]> {
+  return seedUsersWithRole(d, orgId, OVERSIGHT_USERS);
 }

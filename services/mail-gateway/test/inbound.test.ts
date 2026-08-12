@@ -64,7 +64,7 @@ describe("handleInbound", () => {
     expect(h.mailAuto.sends[0]!.payload).toEqual({ messageId: "inbound-1@outside.com", threadId: "inbound-1@outside.com" });
     expect(h.mailAuto.sends[0]!.actorId).toBeNull(); // system origin
 
-    const page = await listInbound(h.db, { limit: 10 });
+    const page = await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 });
     expect(page.items).toHaveLength(1);
     const stored = await getInboundById(h.db, page.items[0]!.id);
     expect(stored?.messageId).toBe("inbound-1@outside.com");
@@ -73,8 +73,8 @@ describe("handleInbound", () => {
   it("persists the plain-text body (unread) for the detail view", async () => {
     const h = makeHarness();
     await handleInbound(inboundDeps(h), rawMessage());
-    const page = await listInbound(h.db, { limit: 10 });
-    const detail = await getInboundDetail(h.db, page.items[0]!.id);
+    const page = await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 });
+    const detail = await getInboundDetail(h.db, page.items[0]!.id, "usr_info");
     expect(detail?.textBody).toContain("I have a question");
     expect(detail?.read).toBe(false); // fresh inbound is unread
     expect(detail?.htmlBody).toBeUndefined(); // Email Routing text-only in this slice
@@ -88,7 +88,7 @@ describe("handleInbound", () => {
     expect(second.processed).toBe(false);
     expect(h.mailAuto.sends).toHaveLength(1);
 
-    const page = await listInbound(h.db, { limit: 10 });
+    const page = await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 });
     expect(page.items).toHaveLength(1);
   });
 
@@ -97,7 +97,7 @@ describe("handleInbound", () => {
     const deps = inboundDeps(h);
     await handleInbound(deps, rawMessage({}, { "message-id": "<a@x.com>", references: "<root@x.com>" }));
     await handleInbound(deps, rawMessage({}, { "message-id": "<b@x.com>", references: "<root@x.com>" }));
-    const thread = await listInbound(h.db, { threadId: "root@x.com", limit: 10 });
+    const thread = await listInbound(h.db, { ownerUserId: "usr_info", threadId: "root@x.com", limit: 10 });
     expect(thread.items).toHaveLength(2);
   });
 });

@@ -42,6 +42,8 @@ export interface MailApi {
   listSent(query?: SentQuery): Promise<Paginated<MailSentListItem>>;
   /** Fetch one sent message's full detail — body + recipients (mail:read). */
   getSent(id: string): Promise<MailSentDetail>;
+  /** Download one attachment's bytes as a Blob (session-authorized; mail:read). */
+  downloadAttachment(kind: "messages" | "sent", messageId: string, attId: string): Promise<Blob>;
 }
 
 const MAIL = "/api/v1/mail";
@@ -69,6 +71,7 @@ export function createMailApi(api: ApiClient): MailApi {
       return api.request<Paginated<MailSentListItem>>({ method: "GET", path: `${MAIL}/sent`, ...(hasQuery ? { query: q } : {}) });
     },
     getSent: (id) => api.request<MailSentDetail>({ method: "GET", path: `${MAIL}/sent/${encodeURIComponent(id)}` }),
+    downloadAttachment: (kind, messageId, attId) => api.download(attachmentDownloadPath(kind, messageId, attId) as `/api/v1/${string}`),
   };
 }
 
@@ -97,4 +100,59 @@ export function parseRecipients(raw: string): { recipients: mail.MailAddress[]; 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email);
+}
+
+// ---- attachments (attachments slice) ----
+/** Per-file ceiling mirrored from the gateway (MAX_ATTACHMENT_BYTES). */
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+/** Per-message total ceiling mirrored from the gateway (MAX_ATTACHMENTS_TOTAL_BYTES). */
+export const MAX_ATTACHMENTS_TOTAL_BYTES = 25 * 1024 * 1024;
+/** Max attachment count mirrored from the gateway (MAX_ATTACHMENTS_PER_MESSAGE). */
+export const MAX_ATTACHMENTS = 10;
+
+/** Standard base64 of an ArrayBuffer (chunked so a large file never blows the call stack). */
+function bufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+/** Read a browser File into the gateway's MailAttachmentInput (base64 body). */
+export async function fileToAttachment(file: File): Promise<mail.MailAttachmentInput> {
+  const buf = await file.arrayBuffer();
+  return {
+    filename: file.name,
+    contentType: file.type || "application/octet-stream",
+    contentBase64: bufferToBase64(buf),
+  };
+}
+
+/** Same-origin download path for a stored attachment (the gateway streams the R2 body with
+ *  a download disposition). Used by the MailApi download call (session-authorized fetch). */
+export function attachmentDownloadPath(kind: "messages" | "sent", messageId: string, attId: string): string {
+  return `${MAIL}/${kind}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attId)}`;
+}
+
+/** Trigger a browser "Save as" for an in-memory Blob (from downloadAttachment). */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick so the click's navigation has grabbed the URL first.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** Human-readable byte size (KB/MB) for the attachment chips. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }

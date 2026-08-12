@@ -8,6 +8,8 @@ import type { ApiClient } from "../contracts/fe2";
 import type {
   GetPreferencesResponse,
   ListInboxResponse,
+  PublishReleaseRequest,
+  PublishReleaseResponse,
   ReadAllRequest,
   UnreadCountResponse,
   UpdatePreferencesRequest,
@@ -23,6 +25,8 @@ export interface NotificationApi {
   markAllRead(req: ReadAllRequest): Promise<void>;
   getPreferences(): Promise<GetPreferencesResponse>;
   updatePreferences(req: UpdatePreferencesRequest): Promise<void>;
+  /** Admin: publish a release note broadcast to every user's inbox. */
+  publishRelease(req: PublishReleaseRequest): Promise<PublishReleaseResponse>;
 }
 
 export function createNotificationApi(client: ApiClient): NotificationApi {
@@ -44,6 +48,9 @@ export function createNotificationApi(client: ApiClient): NotificationApi {
     },
     async updatePreferences(req) {
       await client.patch<void>(`${BASE}/preferences`, req);
+    },
+    publishRelease(req) {
+      return client.post<PublishReleaseResponse>(`${BASE}/release`, req);
     },
   };
 }

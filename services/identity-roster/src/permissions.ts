@@ -1,5 +1,5 @@
 // Permission-catalog helpers. The catalog itself is frozen in @dub/types
-// (PERMISSION_CATALOG, 32 keys). identity-roster never re-declares it.
+// (PERMISSION_CATALOG, 33 keys). identity-roster never re-declares it.
 import { identity } from "@dub/types";
 
 const CATALOG = identity.PERMISSION_CATALOG;

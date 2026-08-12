@@ -28,6 +28,12 @@ binding = "DB"
 database_name = "dub-core"
 database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
+# --- Attachment body store (R2 free tier 10GB). Metadata stays in D1 (mail_attachments);
+# the file bytes live here. Create once: `wrangler r2 bucket create dub-mail-attachments`.
+[[r2_buckets]]
+binding = "R2_MAIL"
+bucket_name = "dub-mail-attachments"
+
 # --- Service bindings (all targets are live free-tier workers) ---
 [[services]]
 binding = "SVC_IDENTITY"
@@ -51,6 +57,10 @@ crons = ["20 3 * * *"]
 MAIL_OUTBOUND_PROVIDER = "resend"
 SES_REGION = "ap-northeast-1"
 MAIL_FROM_ADDRESS = "info@developershub.jp"
+# Compliance archive: every outbound send is auto-CC'd here. Pair with a CF Email Routing
+# rule (matcher=archive@developershub.jp, action=worker:dub-mail-gateway) so the archived
+# copy is ingested back and visible to mail:read_all (oversight) holders. See README.
+MAIL_ARCHIVE_CC = "archive@developershub.jp"
 MAIL_SEND_MAX_ATTEMPTS = "3"
 MAIL_SEND_TIMEOUT_MS = "15000"
 MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"

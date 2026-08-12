@@ -9,6 +9,12 @@ export const SERVICE_NAME = "mail-gateway";
 export const DEFAULT_MAILBOX = "info";
 export const DEFAULT_FROM_ADDRESS = "info@developershub.jp";
 
+// Fixed archive/BCC-style CC auto-added to EVERY outbound send (compliance archive).
+// The address is CC'd on send so a copy lands in the archive mailbox, and — once CF
+// Email Routing forwards archive@ back into this Worker — is ingested like any inbound
+// and surfaced to mail:read_all (oversight) holders. Overridable via MAIL_ARCHIVE_CC.
+export const DEFAULT_ARCHIVE_CC_ADDRESS = "archive@developershub.jp";
+
 // Retention windows (days) — purged by the daily scheduled handler (design §3).
 export const SEND_LOG_RETENTION_DAYS = 30;
 export const INBOUND_RETENTION_DAYS = 30;
@@ -24,6 +30,17 @@ export const MAX_QUERY_LIMIT = 200;
 // Inbound raw read cap — we only need the snippet, never persist the body.
 export const INBOUND_RAW_READ_BYTES = 64 * 1024;
 export const SNIPPET_MAX = 200;
+
+// ---- attachments (attachments slice) ----
+// Bytes live in R2 (bucket dub-mail-attachments); D1 holds metadata only. Bounds keep a
+// single message off the free tier's rails and cap the inbound MIME we buffer for parsing.
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20MB / attachment (task ceiling)
+export const MAX_ATTACHMENTS_TOTAL_BYTES = 25 * 1024 * 1024; // 25MB / message (all files)
+// How much of an inbound RFC822 message we buffer to extract attachment parts. Only read
+// when the R2 bucket is bound; otherwise inbound stays at INBOUND_RAW_READ_BYTES (headers
+// + snippet only, unchanged). Sized to cover MAX_ATTACHMENTS_TOTAL_BYTES + base64 overhead.
+export const INBOUND_ATTACHMENT_READ_BYTES = 34 * 1024 * 1024;
 
 // The only headers a caller may influence on outbound (loop-prevention allowlist).
 // Anything else in SendMailRequest.headers-shaped input is rejected.

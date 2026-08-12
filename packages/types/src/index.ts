@@ -9,6 +9,7 @@ export * as auth from "./auth"; // #2  auth-service
 export * as identity from "./identity"; // #3  identity-roster (+PERMISSION_CATALOG)
 export * as event from "./event"; // #4  event-service
 export * as task from "./task"; // #5  task-service
+export * as team from "./team"; // canonical Team entity (shared across apps)
 export * as gantt from "./gantt"; // #6  gantt-service
 export * as ganttCalc from "./gantt-calc"; // #7  gantt-calc
 export * as notification from "./notification"; // #8  notification

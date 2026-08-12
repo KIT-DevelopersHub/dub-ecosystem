@@ -165,7 +165,9 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
     taskIds.push(id);
     await w.upsert(
       "task_tasks",
-      { id, event_id: eventId, title: `Demo task ${i + 1}`, description: null, status: statuses[i % statuses.length], priority: priorities[i % priorities.length], assignee_id: assignees[i % assignees.length], due_at: null, origin: "internal", version: 1, due_soon_notified_at: null, created_by: adminId, created_at: SEED_TS, updated_at: SEED_TS, archived_at: null },
+      // Staggered due dates (Aug 5 + 2·i days) so the gantt renders real, spread-out
+      // bars; combined with priority-driven durations this yields a legible chart.
+      { id, event_id: eventId, title: `Demo task ${i + 1}`, description: null, status: statuses[i % statuses.length], priority: priorities[i % priorities.length], assignee_id: assignees[i % assignees.length], due_at: new Date(Date.UTC(2026, 7, 5 + i * 2)).toISOString(), origin: "internal", version: 1, due_soon_notified_at: null, created_by: adminId, created_at: SEED_TS, updated_at: SEED_TS, archived_at: null },
       "replace",
       ["id"],
     );

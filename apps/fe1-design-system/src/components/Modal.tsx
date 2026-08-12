@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ConfirmDialogProps, DrawerProps, ModalProps } from "../types";
 import styles from "./Modal.module.css";
 import { cx } from "../utils/cx";
@@ -13,6 +14,43 @@ function useEscToClose(open: boolean, onClose: () => void) {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
+}
+
+// Ref-counted scroll lock so nested/stacked overlays don't fight over body.style,
+// and the original overflow is restored only once every overlay has closed.
+let scrollLockCount = 0;
+let savedBodyOverflow = "";
+function useScrollLock(open: boolean) {
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    if (scrollLockCount === 0) {
+      savedBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    scrollLockCount += 1;
+    return () => {
+      scrollLockCount -= 1;
+      if (scrollLockCount === 0) document.body.style.overflow = savedBodyOverflow;
+    };
+  }, [open]);
+}
+
+// Restore focus to the element that was focused before the overlay opened, so
+// keyboard users return to their place in the page after closing.
+function useFocusRestore(open: boolean) {
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    return () => previouslyFocused.current?.focus?.();
+  }, [open]);
+}
+
+// Render overlays at <body> via a portal so `position: fixed` is measured against
+// the viewport and the overlay escapes any ancestor stacking context / overflow clip.
+function OverlayPortal({ children }: { children: React.ReactNode }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(children, document.body);
 }
 
 // Minimal focus trap: keep Tab within the dialog container.
@@ -60,31 +98,35 @@ export function Modal({
   const ref = useRef<HTMLDivElement>(null);
   useEscToClose(open, onClose);
   useFocusTrap(open, ref);
+  useScrollLock(open);
+  useFocusRestore(open);
   if (!open) return null;
   return (
-    <div
-      className={cx(styles.overlay)}
-      onMouseDown={(e) => {
-        if (closeOnOverlayClick && e.target === e.currentTarget) onClose();
-      }}
-    >
+    <OverlayPortal>
       <div
-        ref={ref}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={cx(styles.dialog)}
-        data-size={size}
-        data-testid={testId}
+        className={cx(styles.overlay)}
+        onMouseDown={(e) => {
+          if (closeOnOverlayClick && e.target === e.currentTarget) onClose();
+        }}
       >
-        <header className={cx(styles.header)}>
-          <h2 className={cx(styles.title)}>{title}</h2>
-          <IconButton name="x" aria-label="閉じる" onClick={onClose} />
-        </header>
-        <div className={cx(styles.body)}>{children}</div>
-        {footer && <footer className={cx(styles.footer)}>{footer}</footer>}
+        <div
+          ref={ref}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          className={cx(styles.dialog)}
+          data-size={size}
+          data-testid={testId}
+        >
+          <header className={cx(styles.header)}>
+            <h2 className={cx(styles.title)}>{title}</h2>
+            <IconButton name="x" aria-label="閉じる" onClick={onClose} />
+          </header>
+          <div className={cx(styles.body)}>{children}</div>
+          {footer && <footer className={cx(styles.footer)}>{footer}</footer>}
+        </div>
       </div>
-    </div>
+    </OverlayPortal>
   );
 }
 
@@ -130,29 +172,33 @@ export function Drawer({ open, onClose, title, side = "right", testId, children 
   const ref = useRef<HTMLDivElement>(null);
   useEscToClose(open, onClose);
   useFocusTrap(open, ref);
+  useScrollLock(open);
+  useFocusRestore(open);
   if (!open) return null;
   return (
-    <div
-      className={cx(styles.overlay)}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <OverlayPortal>
       <div
-        ref={ref}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={cx(styles.drawer)}
-        data-side={side}
-        data-testid={testId}
+        className={cx(styles.overlay)}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
-        <header className={cx(styles.header)}>
-          {title && <h2 className={cx(styles.title)}>{title}</h2>}
-          <IconButton name="x" aria-label="閉じる" onClick={onClose} />
-        </header>
-        <div className={cx(styles.body)}>{children}</div>
+        <div
+          ref={ref}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          className={cx(styles.drawer)}
+          data-side={side}
+          data-testid={testId}
+        >
+          <header className={cx(styles.header)}>
+            {title && <h2 className={cx(styles.title)}>{title}</h2>}
+            <IconButton name="x" aria-label="閉じる" onClick={onClose} />
+          </header>
+          <div className={cx(styles.body)}>{children}</div>
+        </div>
       </div>
-    </div>
+    </OverlayPortal>
   );
 }

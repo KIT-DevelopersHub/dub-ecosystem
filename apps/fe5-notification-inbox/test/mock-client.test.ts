@@ -61,6 +61,24 @@ describe("mock notification api (contract adherence)", () => {
     }
   });
 
+  it("publishRelease adds a new unread release note to the top of the inbox", async () => {
+    const client = createMockApiClient();
+    const api = createNotificationApi(client);
+    const before = (await api.getUnreadCount()).count;
+    const res = await api.publishRelease({ title: "🎉 新機能テスト", body: "できること", app: "テスト" });
+    expect(res.deduplicated).toBe(false);
+    expect((await api.getUnreadCount()).count).toBe(before + 1);
+    const top = client.__store.items[0]!;
+    expect(top.type).toBe("release");
+    expect(top.title).toBe("🎉 新機能テスト");
+    expect(top.readAt).toBeNull();
+  });
+
+  it("seeds two release notes shown as type=release", async () => {
+    const client = createMockApiClient();
+    expect(client.__store.items.filter((i) => i.type === "release").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("failNext forces the next matching call to reject", async () => {
     const api = createNotificationApi(
       createMockApiClient({

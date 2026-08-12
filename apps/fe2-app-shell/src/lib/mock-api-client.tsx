@@ -72,6 +72,17 @@ function firstLine(text: string, max = 140): string {
 }
 
 function createMailMock() {
+  // In-memory attachment blob store (attId -> bytes + metadata) so download links serve
+  // real bytes in demo mode (mirrors the gateway's R2 store; nothing leaves the browser).
+  const blobs = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
+  let attSeq = 0;
+  const seedBlob = (filename: string, contentType: string, text: string): mail.MailAttachment => {
+    const id = `mailatt_seed_${attSeq++}`;
+    const bytes = new TextEncoder().encode(text);
+    blobs.set(id, { filename, contentType, bytes });
+    return { id, filename, contentType, sizeBytes: bytes.byteLength };
+  };
+
   const received: mail.MailMessageDetail[] = [
     {
       id: "msg_seed_1",
@@ -83,13 +94,37 @@ function createMailMock() {
       snippet: "カンファレンスでの登壇について相談させてください。",
       receivedAt: "2026-08-02T01:30:00.000Z",
       read: false,
-      textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。",
+      textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。資料を添付します。",
+      attachments: [seedBlob("登壇資料.txt", "text/plain", "登壇内容の概要とスケジュール")],
     },
   ];
   const sent: mail.MailSentDetail[] = [];
   let seq = 0;
 
+  /** Decode base64 to bytes (demo download parity with the gateway). */
+  const b64ToBytes = (b64: string): Uint8Array => {
+    const bin = atob(b64.replace(/\s+/g, ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+
   function handle(method: string, pathname: string, body: unknown): Response | null {
+    // attachment download (messages|sent): stream the stored blob as a file.
+    {
+      const m = /^\/api\/v1\/mail\/(messages|sent)\/([^/]+)\/attachments\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const blob = blobs.get(decodeURIComponent(m[3]!));
+        if (!blob) return errorEnvelope("NOT_FOUND", "attachment not found", 404);
+        return new Response(blob.bytes as BodyInit, {
+          status: 200,
+          headers: {
+            "content-type": blob.contentType,
+            "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(blob.filename)}`,
+          },
+        });
+      }
+    }
     // received list / detail / read
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
       const items: mail.MailMessageListItem[] = received.map(({ textBody, htmlBody, ...li }) => {
@@ -112,12 +147,29 @@ function createMailMock() {
       if (found) found.read = true;
       return json({ read: true });
     }
+    // thread detail (ThreadDetail): every received message in the thread, bodies included.
+    {
+      const m = /^\/api\/v1\/mail\/threads\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const threadId = decodeURIComponent(m[1]!);
+        const messages = received.filter((r) => r.threadId === threadId);
+        return messages.length > 0 ? json({ id: threadId, messages }) : errorEnvelope("NOT_FOUND", "thread not found", 404);
+      }
+    }
     // sent: outbox append + list + detail
     if (method === "POST" && pathname === "/api/v1/mail/outbox") {
       const req = (body ?? {}) as Partial<mail.SendMailRequest>;
       const id = `sent_mock_${Date.now().toString(36)}_${seq++}`;
       const sentAt = new Date().toISOString();
       const providerMessageId = `<mock-${Date.now()}@developershub.jp>`;
+      // Persist any attachments to the in-memory blob store + record their metadata, so the
+      // Sent detail lists them and the download link serves the bytes (gateway parity).
+      const attachments: mail.MailAttachment[] = (req.attachments ?? []).map((a) => {
+        const attId = `mailatt_${Date.now().toString(36)}_${attSeq++}`;
+        const bytes = b64ToBytes(a.contentBase64);
+        blobs.set(attId, { filename: a.filename, contentType: a.contentType, bytes });
+        return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
+      });
       const detail: mail.MailSentDetail = {
         id,
         from: { email: "demo@developershub.jp", name: "デモ ユーザー" },
@@ -131,6 +183,7 @@ function createMailMock() {
         status: "sent",
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       };
       sent.unshift(detail);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };

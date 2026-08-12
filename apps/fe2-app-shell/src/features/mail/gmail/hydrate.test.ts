@@ -1,7 +1,7 @@
 // Unit tests for the gateway-DTO -> client-model mappers.
 import { describe, expect, it } from "vitest";
 import type { mail } from "@dub/types";
-import { inboxItemsToThreads, sentDetailToMessage, sentItemsToThreads, threadDetailToMessages } from "./hydrate.ts";
+import { combineThreads, inboxItemsToThreads, sentDetailToMessage, sentItemsToThreads, threadDetailToMessages } from "./hydrate.ts";
 import { SELF } from "./mailModel.ts";
 
 const inbox: mail.MailMessageListItem[] = [
@@ -38,6 +38,24 @@ describe("sentItemsToThreads", () => {
       { id: "s2", to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent" },
     ];
     expect(sentItemsToThreads(items, SELF)[0]!.messages[0]!.from).toEqual(SELF);
+  });
+});
+
+describe("combineThreads", () => {
+  it("folds a sent REPLY into its received conversation (outbound=true), keeps other sends as Sent threads", () => {
+    const sent: mail.MailSentListItem[] = [
+      // reply to thread T — must fold into it, not appear as its own thread.
+      { id: "r1", from: { email: "info@developershub.jp" }, to: [{ email: "a@x.jp" }], subject: "Re: Hello", snippet: "our reply", sentAt: "2026-08-04T00:00:00.000Z", provider: "resend", status: "sent", threadId: "T" },
+      // standalone send (no matching inbox thread) — stays its own Sent thread.
+      { id: "s9", from: { email: "info@developershub.jp" }, to: [{ email: "z@z.z" }], subject: "Solo", snippet: "solo send", sentAt: "2026-08-06T00:00:00.000Z", provider: "resend", status: "sent", threadId: "Z" },
+    ];
+    const threads = combineThreads(inbox, sent, SELF);
+    const t = threads.find((x) => x.id === "T")!;
+    expect(t.messages.map((m) => m.id)).toEqual(["a1", "a2", "r1"]); // reply appended, date-ordered
+    expect(t.messages.at(-1)!.outbound).toBe(true);
+    expect(t.folder).toBe("inbox");
+    // the standalone send is still its own Sent thread.
+    expect(threads.find((x) => x.id === "s9")?.folder).toBe("sent");
   });
 });
 

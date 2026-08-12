@@ -18,8 +18,9 @@ import { CHANNELS } from "./config";
 import type { DeliveryJob, IngestInput, IngestResult, NotificationChannel } from "./types";
 
 // Forced-in_app types bypass preferences for the in_app channel (design §3: the sole
-// exception — system.announcement admin broadcast).
-const FORCE_IN_APP_TYPES: ReadonlySet<string> = new Set(["system.announcement"]);
+// exception — admin broadcast). `release` (new-feature announcements) always lands in
+// every recipient's inbox so nobody misses a release note, same as system.announcement.
+const FORCE_IN_APP_TYPES: ReadonlySet<string> = new Set(["system.announcement", "release"]);
 
 export interface IngestDeps {
   db: DbClient;

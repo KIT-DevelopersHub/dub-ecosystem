@@ -21,5 +21,18 @@ export function useGanttData(eventId: common.EventId) {
     qc.setQueryData(ganttQueryKey(eventId), fresh);
     return fresh;
   };
-  return { ...query, refetchFresh };
+  /** Optimistically move/resize a bar in the cache so the timeline updates the
+   *  same tick as the drag drop (before the persist round-trip resolves). */
+  const setRowScheduleOptimistic = (
+    taskId: common.TaskId,
+    startsAt: common.ISODateTime | null,
+    endsAt: common.ISODateTime | null,
+  ) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
+      old
+        ? { ...old, rows: old.rows.map((r) => (r.taskId === taskId ? { ...r, startsAt, endsAt } : r)) }
+        : old,
+    );
+  };
+  return { ...query, refetchFresh, setRowScheduleOptimistic };
 }

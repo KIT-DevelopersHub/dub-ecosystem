@@ -2,7 +2,7 @@
 // `@dub/types` and mounted under the frozen `/api/v1` prefix (common.API_PREFIX).
 // task uses `eventId`; gantt uses `event` (design §2-3 — kept per each owner's
 // contract,取り違え防止 is the client path/type surface).
-import type { task, gantt, identity, event, common } from "@dub/types";
+import type { task, gantt, identity, event, common, team } from "@dub/types";
 import type { ApiClient, ApiPath } from "../contracts/spa-shell";
 
 const P = "/api/v1"; // === common.API_PREFIX (kept literal for ApiPath template)
@@ -15,6 +15,7 @@ export function listTasks(client: ApiClient, q: task.ListTasksQuery): Promise<ta
     query: {
       ...(q.eventId !== undefined ? { eventId: q.eventId } : {}),
       ...(q.assigneeId !== undefined ? { assigneeId: q.assigneeId } : {}),
+      ...(q.teamId !== undefined ? { teamId: q.teamId } : {}),
       ...(q.status !== undefined ? { status: q.status.join(",") } : {}),
       ...(q.includeArchived !== undefined ? { includeArchived: q.includeArchived } : {}),
       ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
@@ -74,6 +75,19 @@ export function getGanttFresh(client: ApiClient, eventId: common.EventId): Promi
   });
 }
 
+/** Persist a bar's schedule after a timeline drag/resize (Notion-style edit). */
+export function patchGanttRow(
+  client: ApiClient,
+  taskId: common.TaskId,
+  body: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+): Promise<gantt.GanttRow> {
+  return client.request<gantt.GanttRow>({
+    method: "PATCH",
+    path: `${P}/gantt/rows/${taskId}` as ApiPath,
+    body,
+  });
+}
+
 export function getGanttDependencies(
   client: ApiClient,
   eventId: common.EventId,
@@ -104,6 +118,12 @@ export function putGanttView(
     query: { event: eventId },
     body,
   });
+}
+
+// ---- teams (canonical team.Team). Single fetch source: swap this to the
+//      member-service team list API later without touching consumers. ----
+export function listTeams(client: ApiClient): Promise<team.ListTeamsResponse> {
+  return client.request<team.ListTeamsResponse>({ method: "GET", path: `${P}/teams` });
 }
 
 // ---- identity-roster (batch user resolve; ?ids=, max 50) ----

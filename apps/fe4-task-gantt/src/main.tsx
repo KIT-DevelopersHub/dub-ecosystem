@@ -1,6 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import cssText from "@dub/tokens/css";
+// @dub/ui resolves to its built dist here (no source alias like fe7), so the
+// design-system's compiled stylesheet must be loaded explicitly or every
+// Button/Modal/Select/Badge renders unstyled.
+import "@dub/ui/style.css";
 import { App } from "./App";
 import { createDevClient, DEMO_EVENT_ID, DEMO_PERMISSIONS } from "./dev-seed";
 
