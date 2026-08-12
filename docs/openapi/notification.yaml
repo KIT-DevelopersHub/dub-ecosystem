@@ -58,6 +58,59 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
       security: []
+  /release:
+    post:
+      operationId: publishRelease
+      summary: Publish a release note (admin broadcast)
+      tags:
+        - notifications
+      description: |-
+        Publishes a "🎉 new feature" release note and broadcasts it to every active
+        user's inbox (in_app channel, forced on regardless of preferences). External
+        surface — the api-gateway does NOT 404 this path. Requires notif:admin,
+        enforced in-service. Idempotent per dedupKey (a default title/app hash is used
+        when none is supplied), so a double-submit never creates two broadcasts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseRequest'
+      responses:
+        '202':
+          description: Accepted — broadcast ingested (or deduplicated).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotifyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /internal/seed-releases:
+    post:
+      operationId: seedReleases
+      summary: (Re)publish the curated release back-catalog
+      tags:
+        - notifications
+      description: |-
+        Internal-only: requires x-dub-internal (service binding). (Re)publishes the
+        curated release note back-catalog idempotently — the automation seam a deploy
+        hook can call so new releases surface without a manual admin publish. Each note
+        is keyed, so an already-seeded release is reported as deduplicated, never
+        duplicated. No request body.
+      responses:
+        '202':
+          description: Accepted — seed run counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeedReleasesResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security: []
   /inbox:
     get:
       operationId: listInbox
@@ -357,6 +410,44 @@ components:
           type: integer
         deduped:
           type: integer
+    ReleaseRequest:
+      type: object
+      required:
+        - title
+        - body
+      properties:
+        title:
+          type: string
+          description: Release note title (1..N chars).
+        body:
+          type: string
+          description: Release note body (1..N chars).
+        app:
+          type: string
+          description: Target app / area (optional; shown as meta and a prefixed line).
+        publishedAt:
+          type: string
+          description: ISO8601 date/datetime (optional; defaults to ingest time).
+        dedupKey:
+          type: string
+          description: Stable idempotency key (optional; defaults to a title/app hash).
+    SeedReleasesResult:
+      type: object
+      description: Counts from a curated back-catalog seed run.
+      required:
+        - published
+        - deduplicated
+        - total
+      properties:
+        published:
+          type: integer
+          description: Notes that created a new broadcast.
+        deduplicated:
+          type: integer
+          description: Notes already present (idempotent re-run).
+        total:
+          type: integer
+          description: Total curated notes processed.
     InboxItem:
       type: object
       required:
