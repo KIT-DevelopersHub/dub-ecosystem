@@ -28,6 +28,8 @@ import { mailRoutes, mailNav } from "../features/mail/index.tsx";
 import { MailProvider } from "../features/mail/MailProvider.tsx";
 import { usageRoutes, usageNav } from "../features/usage/index.tsx";
 import { UsageProvider } from "../features/usage/UsageProvider.tsx";
+import { ganttRoutes, ganttNav } from "../features/gantt/index.tsx";
+import { GanttProvider } from "../features/gantt/GanttProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -219,6 +221,25 @@ function adaptUsage(api: ApiClient): FeatureModule {
   return { id: "usage", routes, nav };
 }
 
+// ── gantt (FE2-local feature module) ──────────────────────────────────────────
+// The task Gantt is event-scoped (`/events/:eventId/tasks/gantt`, owned by FE4),
+// so there is no top-level Gantt route to point a launcher tile at. This shell-local
+// feature adds a "ガントチャート" landing (`/gantt`) that lists the user's events and
+// opens the chosen event's Gantt — a proper Gantt entry point in the 9-dot launcher
+// without hiding or removing any existing app. nav sits right after マイタスク
+// (order 21) and carries task:read so the tile shows only for users who can open a
+// Gantt (matching FE4's event-scoped Gantt route gate).
+function adaptGantt(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(GanttProvider, api);
+  const routes = (ganttRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = ganttNav.map((n) => {
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 21 };
+    if (n.requiredPermissions) e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
+    return e;
+  });
+  return { id: "gantt", routes, nav };
+}
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(RosterProviders, api);
@@ -249,6 +270,7 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
   return [
     adaptEvents(api),
     adaptTasks(api),
+    adaptGantt(api),
     adaptNotifications(api),
     adaptChat(api),
     adaptMail(api),
@@ -257,4 +279,4 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
   ];
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptAdmin, toIcon };
