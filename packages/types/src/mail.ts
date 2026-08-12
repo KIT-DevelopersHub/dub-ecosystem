@@ -18,6 +18,25 @@ export interface SendMailRequest {
   htmlBody?: string;
   inReplyTo?: string; // Message-Id being replied to
   loopHeaders?: MailLoopHeaders;
+  // ADDITIVE (attachments slice; optional — omitting it is byte-identical to the frozen
+  // shape). File bytes ride as base64 in the JSON body; the gateway persists them to R2
+  // and hands the provider the structured attachment list. Bounded per-file / per-message
+  // (see mail-gateway config). Frozen consumers that ignore it keep working unchanged.
+  attachments?: MailAttachmentInput[];
+}
+/** One outbound attachment on a SendMailRequest: filename + MIME + base64-encoded bytes. */
+export interface MailAttachmentInput {
+  filename: string;
+  contentType: string;
+  contentBase64: string; // base64 (standard alphabet) of the raw file bytes
+}
+/** Stored attachment METADATA (bytes live in R2). Returned on message/sent detail so the
+ *  UI can list attachments and link each to its gateway download route. */
+export interface MailAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
 }
 export interface SendMailResponse {
   messageId: string;
@@ -67,6 +86,9 @@ export interface MailMessageListItem extends MailMessage, MailMessageState {}
 export interface MailMessageDetail extends MailMessageListItem {
   textBody: string;
   htmlBody?: string;
+  // ADDITIVE (attachments slice): attachment metadata for this message. Omitted/[] when
+  // the message carried none; each entry links to GET …/messages/:id/attachments/:attId.
+  attachments?: MailAttachment[];
 }
 /** A thread = its id plus every message in receipt order (each a full detail). */
 export interface MailThread {
@@ -99,6 +121,9 @@ export interface MailSentListItem {
 export interface MailSentDetail extends MailSentListItem {
   textBody: string;
   htmlBody?: string;
+  // ADDITIVE (attachments slice): attachment metadata for this sent message. Omitted/[]
+  // when none; each entry links to GET …/sent/:id/attachments/:attId.
+  attachments?: MailAttachment[];
 }
 
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----

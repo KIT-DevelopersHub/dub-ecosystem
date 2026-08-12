@@ -54,6 +54,17 @@ export interface MailboxRow {
   updated_at: string;
 }
 
+export interface AttachmentRow {
+  id: string;
+  message_kind: "sent" | "inbound";
+  message_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  r2_key: string;
+  created_at: string;
+}
+
 // ---- opaque cursor codec (base64url of the row id; D3) ----
 export function encodeCursor(id: string): string {
   return btoa(id).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -446,13 +457,82 @@ export async function upsertMailbox(db: DbClient, id: string, address: string): 
   }
 }
 
+// ---- attachments (metadata; bytes live in R2) ----
+export async function insertAttachment(
+  db: DbClient,
+  row: {
+    id: string;
+    messageKind: "sent" | "inbound";
+    messageId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    r2Key: string;
+    createdAt: string;
+  },
+): Promise<void> {
+  await db.run(
+    `INSERT OR IGNORE INTO mail_attachments
+       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    row.id,
+    row.messageKind,
+    row.messageId,
+    row.filename,
+    row.mimeType,
+    row.sizeBytes,
+    row.r2Key,
+    row.createdAt,
+  );
+}
+
+/** All attachments for one message, oldest first (stable display order). */
+export async function listAttachments(db: DbClient, kind: "sent" | "inbound", messageId: string): Promise<AttachmentRow[]> {
+  return db.all<AttachmentRow>(
+    `SELECT * FROM mail_attachments WHERE message_kind = ? AND message_id = ? ORDER BY created_at ASC, id ASC`,
+    kind,
+    messageId,
+  );
+}
+
+/** One attachment by id, scoped to its owning message (download route: 404 on mismatch). */
+export async function getAttachment(db: DbClient, kind: "sent" | "inbound", messageId: string, attId: string): Promise<AttachmentRow | null> {
+  return db.first<AttachmentRow>(
+    `SELECT * FROM mail_attachments WHERE id = ? AND message_kind = ? AND message_id = ?`,
+    attId,
+    kind,
+    messageId,
+  );
+}
+
+/** R2 keys of attachments whose rows are about to be purged (so the caller can delete the
+ *  bytes too). Uses the retention cutoffs for the owning message kind. */
+export async function attachmentKeysOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<string[]> {
+  const rows = await db.all<{ r2_key: string }>(
+    `SELECT r2_key FROM mail_attachments
+       WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
+    sendCutoff,
+    inboundCutoff,
+  );
+  return rows.map((r) => r.r2_key);
+}
+
 // ---- retention purge (scheduled) ----
-export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<{ sendLog: number; inbound: number }> {
+export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<{ sendLog: number; inbound: number; attachments: number }> {
   const sendLog = (await db.run(`DELETE FROM mail_send_log WHERE created_at < ?`, sendCutoff)).meta.changes;
   const inbound = (await db.run(`DELETE FROM mail_inbound WHERE created_at < ?`, inboundCutoff)).meta.changes;
-  return { sendLog, inbound };
+  const attachments = (
+    await db.run(
+      `DELETE FROM mail_attachments
+         WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
+      sendCutoff,
+      inboundCutoff,
+    )
+  ).meta.changes;
+  return { sendLog, inbound, attachments };
 }
 
 // ---- id mints ----
 export const newSendLogId = (): string => newId("maillog");
 export const newInboundId = (): string => newId("mailin");
+export const newAttachmentId = (): string => newId("mailatt");

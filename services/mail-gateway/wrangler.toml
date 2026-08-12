@@ -15,6 +15,12 @@ binding = "DB"
 database_name = "dub-core"
 database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
 
+# --- Attachment body store (R2 free tier 10GB). Metadata stays in D1 (mail_attachments);
+# the file bytes live here. Create once: `wrangler r2 bucket create dub-mail-attachments`.
+[[r2_buckets]]
+binding = "R2_MAIL"
+bucket_name = "dub-mail-attachments"
+
 # --- Service Bindings (contract-only; real targets wired in the infra波) ---
 [[services]]
 binding = "SVC_IDENTITY"

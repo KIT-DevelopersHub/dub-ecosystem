@@ -10,6 +10,7 @@ import { consoleSink } from "@dub/observability";
 import type { auditLog, mail } from "@dub/types";
 import { DEFAULT_SEND_BASE_DELAY_MS, DEFAULT_SEND_MAX_ATTEMPTS, SERVICE_NAME } from "./config";
 import { assembleMime } from "./mime";
+import { decodeInputAttachment, persistAttachments } from "./attachments";
 import { withRetry } from "./retry";
 import {
   findSendByKey,
@@ -32,6 +33,9 @@ export function hashRequest(req: mail.SendMailRequest): string {
     htmlBody: req.htmlBody ?? null,
     inReplyTo: req.inReplyTo ?? null,
     loopHeaders: req.loopHeaders ?? null,
+    // Attachment fingerprint: filename + type + base64 length (cheap, avoids hashing MBs
+    // of bytes while still tripping the 409 when the same key carries different files).
+    attachments: (req.attachments ?? []).map((a) => `${a.filename}:${a.contentType}:${a.contentBase64.length}`),
   });
   let h = 0x811c9dc5;
   for (let i = 0; i < canonical.length; i++) {
@@ -138,6 +142,11 @@ export async function sendMail(
 
   // 2) assemble + hand to the provider.
   const messageId = rfcMessageId(ownedId, fromAddress);
+  const outAttachments = (req.attachments ?? []).map((a) => ({
+    filename: a.filename,
+    contentType: a.contentType,
+    contentBase64: a.contentBase64,
+  }));
   const outbound: OutboundMail = {
     from: fromAddress,
     to: req.to,
@@ -157,7 +166,9 @@ export async function sendMail(
       messageId,
       inReplyTo: req.inReplyTo ?? null,
       ...(req.loopHeaders ? { loopHeaders: req.loopHeaders } : {}),
+      ...(outAttachments.length > 0 ? { attachments: outAttachments } : {}),
     }),
+    ...(outAttachments.length > 0 ? { attachments: outAttachments } : {}),
   };
 
   try {
@@ -168,6 +179,17 @@ export async function sendMail(
     const retry = deps.retry ?? { maxAttempts: DEFAULT_SEND_MAX_ATTEMPTS, baseDelayMs: DEFAULT_SEND_BASE_DELAY_MS };
     const { providerMessageId } = await withRetry(() => provider.send(outbound), retry);
     await markSendSent(db, ownedId, provider.name, providerMessageId);
+    // Store attachment bytes to R2 + metadata (keyed to this send-log row) so the Sent
+    // folder can list/download them. Best-effort: the email is already delivered, so a
+    // storage hiccup is logged inside persistAttachments, never a 5xx on a sent mail.
+    if (deps.blobs && req.attachments && req.attachments.length > 0) {
+      await persistAttachments(
+        { db, blobs: deps.blobs, orgId: deps.orgId, ctx: deps.ctx },
+        "sent",
+        ownedId,
+        req.attachments.map(decodeInputAttachment),
+      );
+    }
     await publishSent(deps, messageId, requester);
     await audit(deps, "success", messageId, requester, null);
     const response: mail.SendMailResponse = { messageId, provider: provider.name, acceptedAt: nowIso() };

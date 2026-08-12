@@ -90,6 +90,9 @@ export interface ResourceClient {
 
 export interface ApiClient {
   request<TRes, TBody = unknown>(input: RequestInput<TBody>): Promise<TRes>;
+  /** GET a binary resource as a Blob (attachments/exports). Same session + one-shot 401
+   *  refresh as request(); the caller triggers the browser save (createObjectURL). */
+  download(path: `/api/v1/${string}`): Promise<Blob>;
   auth: {
     passwordLogin(email: string, password: string): Promise<void>;
     logout(): Promise<void>;
@@ -223,6 +226,32 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     }
   }
 
+  async function downloadOnce(path: `/api/v1/${string}`): Promise<Blob> {
+    const res = await doFetch({ method: "GET", path });
+    if (res.ok) return await res.blob();
+    throw await parseError(res);
+  }
+
+  async function download(path: `/api/v1/${string}`): Promise<Blob> {
+    try {
+      return await downloadOnce(path);
+    } catch (e) {
+      if (ApiError.isApiError(e) && e.status === 401) {
+        const refreshed = await attemptRefresh();
+        if (refreshed) {
+          try {
+            return await downloadOnce(path);
+          } catch (e2) {
+            if (ApiError.isApiError(e2) && e2.status === 401) config.onUnauthenticated?.();
+            throw e2;
+          }
+        }
+        config.onUnauthenticated?.();
+      }
+      throw e;
+    }
+  }
+
   function makeResource(prefix: string): ResourceClient {
     const p = (path: string): `/api/v1/${string}` => `/api/v1/${prefix}${path}` as `/api/v1/${string}`;
     return {
@@ -236,6 +265,7 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
 
   return {
     request,
+    download,
     auth: {
       // Company email+password login. The server sets the session cookie on 200;
       // the caller then re-enters the shell (a full nav lets /me pick up the cookie).

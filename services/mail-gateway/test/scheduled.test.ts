@@ -29,7 +29,7 @@ describe("runRetentionPurge", () => {
     ).run("mailin_new", "m_new", fresh, fresh);
 
     const summary = await runRetentionPurge(env);
-    expect(summary).toEqual({ sendLog: 1, inbound: 1 });
+    expect(summary).toEqual({ sendLog: 1, inbound: 1, attachments: 0 });
 
     const sendLeft = raw.prepare(`SELECT COUNT(*) AS c FROM mail_send_log`).get() as { c: number };
     const inLeft = raw.prepare(`SELECT COUNT(*) AS c FROM mail_inbound`).get() as { c: number };

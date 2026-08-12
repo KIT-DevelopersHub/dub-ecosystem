@@ -7,12 +7,18 @@ import type { RequestContext } from "@dub/http";
 import type { Env } from "./env";
 import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_FROM_ADDRESS } from "./config";
 import { buildProvider, type MailProvider } from "./provider";
+import { r2Blobs, type MailBlobStore } from "./attachments";
 import { sendRetryOptions } from "./resilience";
 import { AUDIT_TOPIC, TOPIC_MAIL_AUTOMATION, TOPIC_NOTIFICATION, outboxQueue } from "./outbox";
 import type { AuditEnv, EventPublishEnv, InboundDeps, SendDeps } from "./types";
 
 export function buildDb(env: Env, requestId: string): DbClient {
   return createDbClient(env.DB, { namespace: "mail", requestId });
+}
+
+/** R2-backed attachment store when the bucket is bound; undefined otherwise (feature off). */
+export function buildBlobs(env: Env): MailBlobStore | undefined {
+  return env.R2_MAIL ? r2Blobs(env.R2_MAIL) : undefined;
 }
 
 // Prefer a real (paid) Queue binding when present; otherwise fall back to the free-tier
@@ -39,6 +45,7 @@ export function buildSendDeps(
   // or null for a pure system/automation send.
   ownerUserId: string | null = null,
 ): SendDeps {
+  const blobs = buildBlobs(env);
   return {
     db: buildDb(env, ctx.requestId),
     provider,
@@ -52,16 +59,19 @@ export function buildSendDeps(
     // disables the archive CC (opt-out) without falling back to the default.
     archiveCc: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     retry: sendRetryOptions(env),
+    ...(blobs ? { blobs } : {}),
   };
 }
 
 export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
+  const blobs = buildBlobs(env);
   return {
     db: buildDb(env, ctx.requestId),
     events: eventEnv(env),
     audit: buildAuditEnv(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     ctx,
+    ...(blobs ? { blobs } : {}),
     // identity binding: resolves an inbound recipient address → roster userId (Inbox scope).
     identity: env.SVC_IDENTITY,
   };

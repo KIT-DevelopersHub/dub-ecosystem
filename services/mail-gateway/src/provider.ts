@@ -17,6 +17,12 @@ export type ProviderName = mail.SendMailResponse["provider"];
 // A fully-assembled outbound message handed to the provider. `mime` is the RFC822
 // blob (SES SendRawEmail / MailChannels raw); structured fields let simpler APIs
 // (Resend) build their own payload without re-parsing.
+export interface OutboundAttachment {
+  filename: string;
+  contentType: string;
+  contentBase64: string; // standard-alphabet base64 of the raw file bytes
+}
+
 export interface OutboundMail {
   from: string;
   to: mail.MailAddress[];
@@ -27,6 +33,9 @@ export interface OutboundMail {
   messageId: string; // RFC Message-Id we minted (stamped into the MIME)
   inReplyTo: string | null;
   mime: string;
+  // Attachments (attachments slice). Already in the raw `mime` (multipart/mixed) for the
+  // raw-MIME providers (SES/MailChannels); structured providers (Resend) read this list.
+  attachments?: OutboundAttachment[];
 }
 
 export interface MailProvider {

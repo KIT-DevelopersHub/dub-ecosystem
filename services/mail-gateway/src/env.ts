@@ -1,6 +1,6 @@
 // Worker bindings (wrangler.toml) + Hono per-request variables.
 // Deploy is out of scope for this unit; every Service Binding / Queue is contract-only.
-import type { D1Database, Fetcher, Queue } from "@cloudflare/workers-types";
+import type { D1Database, Fetcher, Queue, R2Bucket } from "@cloudflare/workers-types";
 import type { AuthClient, AuthnContext } from "@dub/auth-client";
 import type { AuditRecordEnvelopeV1, DubEventEnvelope } from "@dub/events";
 import type { RequestContext } from "@dub/http";
@@ -8,6 +8,12 @@ import type { RequestContext } from "@dub/http";
 export interface Env {
   // --- data ---
   DB: D1Database; // shared dub-core D1 (mail_ namespace + freeq_outbox on free tier)
+
+  // --- attachment body store (R2 free tier 10GB; bucket dub-mail-attachments) ---
+  // Optional: when absent the gateway degrades gracefully — send rejects attachments
+  // (loud 400) and inbound skips attachment extraction (headers/snippet unchanged). D1
+  // keeps only metadata; the file bytes live here keyed by mail_attachments.r2_key.
+  R2_MAIL?: R2Bucket;
 
   // --- queue producers (PAID plan only) ---
   // Optional: on the Workers FREE plan these bindings are absent and deps.ts falls

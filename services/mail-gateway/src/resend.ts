@@ -55,6 +55,14 @@ export class ResendMailProvider implements MailProvider {
       headers["References"] = ref;
     }
 
+    // Resend attachments: [{ filename, content }] where content is base64 (docs
+    // "Attachments"). We already carry base64 bytes, so we pass them straight through.
+    const attachments = (msg.attachments ?? []).map((a) => ({
+      filename: a.filename,
+      content: a.contentBase64.replace(/\s+/g, ""),
+      ...(a.contentType ? { content_type: a.contentType } : {}),
+    }));
+
     const body = JSON.stringify({
       from: msg.from,
       to: msg.to.map(formatAddress),
@@ -62,6 +70,7 @@ export class ResendMailProvider implements MailProvider {
       subject: msg.subject,
       text: msg.textBody,
       ...(msg.htmlBody ? { html: msg.htmlBody } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
     });
 

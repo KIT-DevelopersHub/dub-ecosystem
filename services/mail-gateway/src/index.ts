@@ -7,13 +7,13 @@ import { buildInboundDeps } from "./deps";
 import { handleInbound } from "./inbound";
 import { headersToMap, type RawInbound } from "./mime";
 import { runRetentionPurge } from "./scheduled";
-import { INBOUND_RAW_READ_BYTES, SERVICE_NAME } from "./config";
+import { INBOUND_ATTACHMENT_READ_BYTES, INBOUND_RAW_READ_BYTES, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 
 const app = createApp();
 
-/** Read a bounded prefix of the raw RFC822 stream (we only need headers + snippet). */
-async function readRawPrefix(stream: ReadableStream<Uint8Array>, cap: number): Promise<string> {
+/** Read a bounded prefix of the raw RFC822 stream, returning the raw bytes. */
+async function readRawBytes(stream: ReadableStream<Uint8Array>, cap: number): Promise<Uint8Array> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -33,13 +33,15 @@ async function readRawPrefix(stream: ReadableStream<Uint8Array>, cap: number): P
       /* stream already closed */
     }
   }
-  const buf = new Uint8Array(total);
+  const buf = new Uint8Array(Math.min(total, cap));
   let off = 0;
   for (const ch of chunks) {
-    buf.set(ch, off);
-    off += ch.byteLength;
+    if (off >= buf.length) break;
+    const take = Math.min(ch.byteLength, buf.length - off);
+    buf.set(ch.subarray(0, take), off);
+    off += take;
   }
-  return new TextDecoder().decode(buf.subarray(0, cap));
+  return buf;
 }
 
 // Plain module handler (not typed as ExportedHandler to avoid the workers-types vs
@@ -52,13 +54,20 @@ const handler = {
   // Cloudflare Email Routing entry (9-B). System-origin (no user) — actorId = null.
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
     const ctx = { requestId: newRequestId(), caller: SERVICE_NAME };
-    const rawText = await readRawPrefix(message.raw, INBOUND_RAW_READ_BYTES);
+    // When R2 is bound, buffer more of the message so attachment parts can be extracted;
+    // otherwise keep the original headers-only cap. rawText (snippet/body) stays the first
+    // INBOUND_RAW_READ_BYTES so existing body/snippet extraction is byte-for-byte unchanged.
+    const hasR2 = Boolean(env.R2_MAIL);
+    const bytes = await readRawBytes(message.raw, hasR2 ? INBOUND_ATTACHMENT_READ_BYTES : INBOUND_RAW_READ_BYTES);
+    const decoder = new TextDecoder();
+    const rawText = decoder.decode(bytes.subarray(0, INBOUND_RAW_READ_BYTES));
     const raw: RawInbound = {
       from: message.from,
       to: message.to,
       headers: headersToMap(message.headers),
       rawText,
       rawSize: message.rawSize,
+      ...(hasR2 ? { rawFull: decoder.decode(bytes) } : {}),
     };
     await handleInbound(buildInboundDeps(env, ctx), raw);
   },
