@@ -82,51 +82,272 @@
   padding: var(--dub-space-2) 0;
 }
 
-/* org-chart view */
-.orgRoot {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-4);
+/* ══ 組織図ビュー — PDF「全体組織体制図」の構図を再現 ══════════════════════
+   統括の横長ダークネイビー箱 → コネクタ線 → チーム色の縦カラム
+   (オーガナイザー→リーダー→メンバー階層)。各カラムの --team アクセント色から
+   color-mix でチップの濃淡を動的生成し、DBの Team.color に追従させる。
+   常に白地(印刷/PNGでも同じ見た目)なので、ここだけ固定パレットを使う。 */
+.orgChart {
+  color: #1f2933;
 }
-.orgTeam {
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-lg);
-  background: var(--dub-color-surface-raised);
-  padding: var(--dub-space-4);
-}
-.orgTeamTitle {
-  display: flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  font-weight: var(--dub-font-weight-bold);
-  font-size: var(--dub-font-size-md);
+.orgHead {
   margin-bottom: var(--dub-space-3);
-  padding-bottom: var(--dub-space-2);
-  border-bottom: 2px solid var(--dub-color-border-strong);
 }
-.orgMembers {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--dub-space-3);
+.orgTitle {
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+  color: #0f2436;
 }
-.orgCard {
+.orgSub {
+  font-size: var(--dub-font-size-xs);
+  color: #55637a;
+  margin-top: 2px;
+}
+.orgLegend {
   display: flex;
+  gap: 14px;
   align-items: center;
-  gap: var(--dub-space-2);
-  padding: var(--dub-space-3);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md);
-  background: var(--dub-color-surface-base);
+  font-size: 11px;
+  color: #55637a;
+  margin-top: 6px;
+  flex-wrap: wrap;
 }
-.orgCardMain {
+.orgLegend .li {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.legendSw {
+  width: 24px;
+  height: 12px;
+  border-radius: 4px;
+  border: 1.4px solid #bfdbfe;
+  background: #eff6ff;
+  display: inline-block;
+}
+.legendSw.tent {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  border-style: dashed;
+}
+/* horizontal scroll for many teams; page body never scrolls sideways */
+.orgScroll {
+  overflow-x: auto;
+  padding-bottom: var(--dub-space-2);
+}
+.orgCanvas {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  align-items: center;
+  min-width: max-content;
+  padding-top: var(--dub-space-2);
 }
-.chips {
+
+/* 統括トップ箱 */
+.topbox {
+  background: var(--hq, #1e3a5f);
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 26px 12px;
+  text-align: center;
+  min-width: 620px;
+  box-shadow: 0 3px 8px rgba(30, 58, 95, 0.22);
+}
+.topTitle {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.topRole {
+  font-size: 11px;
+  color: #c7d6ea;
+  margin-top: 3px;
+}
+.topNames {
+  margin-top: 10px;
   display: flex;
-  gap: var(--dub-space-1);
+  gap: 12px;
+  justify-content: center;
   flex-wrap: wrap;
+}
+.namechip {
+  background: #fff;
+  border-radius: 9px;
+  padding: 8px 14px 9px;
+  min-width: 96px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #12324e;
+  position: relative;
+}
+.namechip.lead {
+  border-left: 7px solid var(--hq, #1e3a5f);
+}
+.namechip .miniBadge {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  background: #94a3b8;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+
+/* コネクタ */
+.connector {
+  position: relative;
+  height: 30px;
+}
+.connector .vtop {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 3px;
+  height: 20px;
+  background: #94a3b8;
+  transform: translateX(-50%);
+}
+.connector .hbar {
+  position: absolute;
+  top: 19px;
+  height: 3px;
+  background: #94a3b8;
+}
+.connector .vdrop {
+  position: absolute;
+  top: 19px;
+  width: 3px;
+  height: 23px;
+  background: #94a3b8;
+  transform: translateX(-50%);
+}
+
+/* チームカラム */
+.teamsRow {
+  display: flex;
+  gap: 13px;
+  justify-content: center;
+  align-items: stretch;
+}
+.orgCol {
+  flex: 1 1 0;
+  min-width: 150px;
+  max-width: 220px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.6px solid color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 2px 6px rgba(15, 36, 54, 0.08);
+  background: #fff;
+}
+.colHead {
+  padding: 8px 6px;
+  text-align: center;
+  color: #fff;
+  background: var(--team, #64748b);
+}
+.colName {
+  font-size: 14px;
+  font-weight: 800;
+}
+.colDesc {
+  font-size: 9px;
+  margin-top: 4px;
+  line-height: 1.4;
+  opacity: 0.95;
+}
+.colBody {
+  flex: 1;
+  padding: 7px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tierLabel {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #64748b;
+  text-align: center;
+  margin: 2px 0 0;
+}
+.tierLabel.dim {
+  color: #94a3b8;
+}
+.chip {
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  position: relative;
+  background: color-mix(in srgb, var(--team, #64748b) 12%, #fff);
+  border: 1.4px solid color-mix(in srgb, var(--team, #64748b) 32%, #fff);
+  color: color-mix(in srgb, var(--team, #64748b) 78%, #000);
+}
+/* オーガナイザー = 濃いめ + 太い左アクセント */
+.chip.top {
+  font-weight: 800;
+  border-width: 2px;
+  border-left-width: 7px;
+  border-color: var(--team, #64748b);
+  background: color-mix(in srgb, var(--team, #64748b) 48%, #fff);
+  color: color-mix(in srgb, var(--team, #64748b) 82%, #000);
+}
+/* メンバー = ↳ インデント破線 */
+.chip.sub {
+  border-style: dashed;
+  margin-left: 16px;
+  text-align: left;
+}
+.chip.sub .subrole {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin-left: 6px;
+  opacity: 0.7;
+}
+/* 打診中 = 淡いグレー破線 + バッジ (status !== added) */
+.chip.tent {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #94a3b8 !important;
+  border-style: dashed !important;
+}
+.chipBadge {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  background: #94a3b8;
+  color: #fff;
+  font-size: 7.5px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.tierConn {
+  width: 2px;
+  height: 8px;
+  background: #cbd5e1;
+  margin: 2px auto 0;
+}
+.colCount {
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.orgFoot {
+  margin-top: var(--dub-space-4);
+  font-size: 11px;
+  color: #9aa5b1;
+  border-top: 1px solid #e4e7eb;
+  padding-top: 7px;
 }
 .formStack {
   display: flex;
@@ -149,9 +370,20 @@
   gap: var(--dub-space-2);
 }
 
-/* print / PNG export: hide chrome, expand the org chart */
+/* print / PNG export: hide app chrome, print the org chart full-width on white */
 @media print {
   .noPrint {
     display: none !important;
+  }
+  .orgScroll {
+    overflow: visible !important;
+  }
+  .orgCanvas {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  .orgChart {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

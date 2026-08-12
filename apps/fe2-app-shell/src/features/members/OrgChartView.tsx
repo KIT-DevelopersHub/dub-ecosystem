@@ -1,64 +1,195 @@
-// 組織図ビュー: the hierarchical team → member view that replaces the hand-made PDF.
-// Read-only, print/PNG-friendly (window.print with a print stylesheet). Deliberately
-// simple (no graph lib): a titled block per team with member cards + status.
-import { Avatar, Badge } from "@dub/ui";
-import type { MemberTeam, OrgMember } from "./contracts.ts";
-import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
+// 組織図ビュー — 既存PDF「全体組織体制図」の構図をDBデータからDYNAMICに再現する。
+//   統括チーム(横長ダークネイビー箱・白ピル) → コネクタ線 → チーム色の縦カラム
+//   (オーガナイザー→リーダー→メンバー階層 / メンバーは「↳ 名前」インデント)。
+// PDFはhardcodeだが本ビューは Team(color) と Member(roleTitle→役割段 / status) から
+// 同じ構図を描く。印刷/PNGは MembersPage のツールバーの window.print() で出る。
+import type { CSSProperties } from "react";
+import type { MemberStatus, MemberTeam, OrgMember } from "./contracts.ts";
 import styles from "./members.module.css";
 
-function OrgMemberCard({ m }: { m: OrgMember }): JSX.Element {
+const HQ_NAVY = "#1e3a5f";
+
+/** 統括チームの判定（名前/keyに「統括」相当を含む）。 */
+function isHqTeam(t: MemberTeam): boolean {
+  return /統括/.test(t.name) || t.key === "soukatsu" || t.key === "hq";
+}
+
+type Tier = "organizer" | "leader" | "member";
+
+/** メンバーの役割段を roleTitle から推定する（PDFの オーガナイザー/リーダー/メンバー 段）。 */
+function tierOf(m: OrgMember): Tier {
+  const r = m.roleTitle ?? "";
+  if (/オーガナイザー|統括|委員長|責任者|代表|チーム長/.test(r)) return "organizer";
+  if (/リーダー|leader/i.test(r)) return "leader";
+  return "member";
+}
+
+/** 打診中(=未確定)扱い。added のみ確定、declined はビューから除外済み。 */
+function isTentative(s: MemberStatus): boolean {
+  return s === "invited" || s === "considering";
+}
+function tentBadge(s: MemberStatus): string {
+  return s === "invited" ? "打診中" : "検討中";
+}
+
+function Chip({ m, kind }: { m: OrgMember; kind: "top" | "leader" | "sub" }): JSX.Element {
+  const tent = isTentative(m.status);
+  const cls = [styles.chip, kind === "top" ? styles.top : "", kind === "sub" ? styles.sub : "", tent ? styles.tent : ""]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className={styles.orgCard} data-testid={`members-orgcard-${m.id}`}>
-      <Avatar name={m.name} size="sm" />
-      <div className={styles.orgCardMain}>
-        <span className={styles.memberName}>{m.name}</span>
-        {m.roleTitle ? <span className={styles.memberRole}>{m.roleTitle}</span> : null}
+    <div className={cls} data-testid={`members-orgchip-${m.id}`}>
+      {kind === "sub" ? "↳ " : ""}
+      {m.name}
+      {kind === "sub" ? <span className={styles.subrole}>メンバー</span> : null}
+      {tent ? <span className={styles.chipBadge}>{tentBadge(m.status)}</span> : null}
+    </div>
+  );
+}
+
+function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] }): JSX.Element {
+  const color = team.color ?? "#64748b";
+  const organizers = members.filter((m) => tierOf(m) === "organizer");
+  const leaders = members.filter((m) => tierOf(m) === "leader");
+  const plain = members.filter((m) => tierOf(m) === "member");
+  const confirmed = members.filter((m) => m.status === "added").length;
+  const tent = members.length - confirmed;
+
+  return (
+    <div className={styles.orgCol} style={{ ["--team" as string]: color } as CSSProperties} data-testid={`members-orgcol-${team.id}`}>
+      <div className={styles.colHead}>
+        <div className={styles.colName}>{team.name}</div>
+        {team.description ? <div className={styles.colDesc}>{team.description}</div> : null}
       </div>
-      <MemberStatusBadge status={m.status} />
+      <div className={styles.colBody}>
+        {organizers.length > 0 ? (
+          <>
+            <div className={styles.tierLabel}>オーガナイザー</div>
+            {organizers.map((m) => (
+              <Chip key={m.id} m={m} kind="top" />
+            ))}
+          </>
+        ) : null}
+        {leaders.length > 0 ? (
+          <>
+            {organizers.length > 0 ? <div className={styles.tierConn} /> : null}
+            <div className={`${styles.tierLabel} ${styles.dim}`}>リーダー</div>
+            {leaders.map((m) => (
+              <Chip key={m.id} m={m} kind="leader" />
+            ))}
+          </>
+        ) : null}
+        {plain.length > 0 ? (
+          <>
+            <div className={`${styles.tierLabel} ${styles.dim}`}>メンバー</div>
+            {plain.map((m) => (
+              <Chip key={m.id} m={m} kind="sub" />
+            ))}
+          </>
+        ) : null}
+        <div className={styles.colCount}>
+          計{confirmed}名{tent > 0 ? `（＋打診中${tent}）` : ""}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** N列に分岐するコネクタ線（縦→横バー→各列への縦ドロップ）。 */
+function Connector({ n }: { n: number }): JSX.Element {
+  const edge = (100 / (2 * n)).toFixed(3);
+  const drops = Array.from({ length: n }, (_, i) => (((2 * i + 1) / (2 * n)) * 100).toFixed(3));
+  return (
+    <div className={styles.connector} style={{ width: "100%" }} aria-hidden>
+      <div className={styles.vtop} />
+      <div className={styles.hbar} style={{ left: `${edge}%`, right: `${edge}%` }} />
+      {drops.map((d) => (
+        <div key={d} className={styles.vdrop} style={{ left: `${d}%` }} />
+      ))}
     </div>
   );
 }
 
 export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members: OrgMember[] }): JSX.Element {
-  const unassigned = members.filter((m) => m.teamIds.length === 0);
+  // 辞退(declined)は体制図に出さない。
+  const active = members.filter((m) => m.status !== "declined");
+  const hq = teams.find(isHqTeam) ?? null;
+  const columnTeams = teams.filter((t) => !isHqTeam(t));
+  const inTeam = (teamId: string): OrgMember[] => active.filter((m) => m.teamIds.includes(teamId));
+  const hqMembers = hq ? inTeam(hq.id) : [];
+  const unassigned = active.filter((m) => m.teamIds.length === 0);
+
+  // 末尾に「未所属」を neutral カラムとして足す（PDFには無いが取りこぼし防止）。
+  const columns: Array<{ team: MemberTeam; members: OrgMember[] }> = columnTeams.map((t) => ({ team: t, members: inTeam(t.id) }));
+  if (unassigned.length > 0) {
+    columns.push({
+      team: { id: "__unassigned", key: "unassigned", name: "未所属", color: "#94a3b8", description: null },
+      members: unassigned,
+    });
+  }
+
+  const totalConfirmed = active.filter((m) => m.status === "added").length;
+  const totalTent = active.length - totalConfirmed;
+  const hqColor = hq?.color ?? HQ_NAVY;
 
   return (
-    <div className={styles.orgRoot} data-testid="members-orgchart">
-      {teams.map((team) => {
-        const inTeam = members.filter((m) => m.teamIds.includes(team.id));
-        return (
-          <div key={team.id} className={styles.orgTeam}>
-            <div className={styles.orgTeamTitle}>
-              {team.color ? <span className={styles.colorDot} style={{ background: team.color }} aria-hidden /> : null}
-              <span>{team.name}</span>
-              <Badge tone="neutral">{inTeam.length}</Badge>
-            </div>
-            {inTeam.length === 0 ? (
-              <p className={styles.emptyTeamNote}>メンバー未割り当て</p>
-            ) : (
-              <div className={styles.orgMembers}>
-                {inTeam.map((m) => (
-                  <OrgMemberCard key={m.id} m={m} />
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className={styles.orgChart} data-testid="members-orgchart">
+      <div className={styles.orgHead}>
+        <div className={styles.orgTitle}>全体組織体制図</div>
+        <div className={styles.orgSub}>
+          統括チーム → オーガナイザー（チーム長）→ リーダー →（副リーダー・メンバー）の階層
+        </div>
+        <div className={styles.orgLegend}>
+          <span className={styles.li}>
+            <span className={styles.legendSw} />
+            確定
+          </span>
+          <span className={styles.li}>
+            <span className={`${styles.legendSw} ${styles.tent}`} />
+            打診中（淡色・破線）
+          </span>
+        </div>
+      </div>
 
-      {unassigned.length > 0 ? (
-        <div className={styles.orgTeam}>
-          <div className={styles.orgTeamTitle}>
-            <span>未所属</span>
-            <Badge tone="warning">{unassigned.length}</Badge>
-          </div>
-          <div className={styles.orgMembers}>
-            {unassigned.map((m) => (
-              <OrgMemberCard key={m.id} m={m} />
+      <div className={styles.orgScroll}>
+        <div className={styles.orgCanvas}>
+          {hq ? (
+            <div className={styles.topbox} style={{ ["--hq" as string]: hqColor } as CSSProperties} data-testid="members-orgchart-hq">
+              <div className={styles.topTitle}>{hq.name}</div>
+              {hq.description ? <div className={styles.topRole}>{hq.description}</div> : null}
+              <div className={styles.topNames}>
+                {hqMembers.map((m) => {
+                  const lead = tierOf(m) === "organizer";
+                  const tent = isTentative(m.status);
+                  return (
+                    <div
+                      key={m.id}
+                      className={`${styles.namechip} ${lead ? styles.lead : ""}`}
+                      data-testid={`members-orgchip-${m.id}`}
+                    >
+                      {m.name}
+                      {tent ? <span className={styles.miniBadge}>{tentBadge(m.status)}</span> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {hq && columns.length > 0 ? <Connector n={columns.length} /> : null}
+
+          <div className={styles.teamsRow}>
+            {columns.map(({ team, members: cm }) => (
+              <TeamColumn key={team.id} team={team} members={cm} />
             ))}
           </div>
         </div>
-      ) : null}
+      </div>
+
+      <div className={styles.orgFoot}>
+        現メンバー計{totalConfirmed}名{totalTent > 0 ? `＋打診中${totalTent}名` : ""} ／ {columnTeams.length}チーム
+        {hq ? `＋統括${hqMembers.length}名` : ""}
+      </div>
     </div>
   );
 }

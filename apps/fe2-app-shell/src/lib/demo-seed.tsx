@@ -683,17 +683,42 @@ interface DemoMember {
 function createMembersStore() {
   let seq = 100;
   const nid = (p: string): string => `${p}_demo_${++seq}`;
+  // PDF「全体組織体制図」に寄せた構成: 統括チーム＋色付き5チーム、役割段は roleTitle で表現。
   const teams: DemoTeam[] = [
-    { id: "team_venue", key: "venue", name: "会場", color: "#4f46e5", description: "会場設営・運営" },
-    { id: "team_pr", key: "pr", name: "広報", color: "#0ea5e9", description: "SNS・告知" },
-    { id: "team_sponsor", key: "sponsor", name: "スポンサー", color: "#f59e0b", description: "協賛対応" },
+    { id: "team_hq", key: "soukatsu", name: "統括チーム", color: "#1e3a5f", description: "全体意思決定・進行統制・チーム間調整" },
+    { id: "team_dev", key: "dev", name: "開発チーム", color: "#0d9488", description: "運営ツール内製・名簿・当日連絡基盤" },
+    { id: "team_ops", key: "ops", name: "当日進行チーム", color: "#2563eb", description: "進行管理・タイムテーブル・人員配置" },
+    { id: "team_sponsor", key: "sponsor", name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
+    { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
+    { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
   ];
+  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null): DemoMember => ({
+    id, orgId: ORG, name, roleTitle, status, teamIds, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+  });
   const members: DemoMember[] = [
-    { id: "member_1", orgId: ORG, name: "高岡 己太朗", roleTitle: "実行委員長", status: "added", teamIds: ["team_venue", "team_pr"], contact: "kota@developershub.jp", note: "全体統括", sortOrder: 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
-    { id: "member_2", orgId: ORG, name: "佐藤 花子", roleTitle: "会場リーダー", status: "added", teamIds: ["team_venue"], contact: null, note: null, sortOrder: 2048, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
-    { id: "member_3", orgId: ORG, name: "鈴木 一郎", roleTitle: "広報担当", status: "invited", teamIds: ["team_pr"], contact: "ichiro@example.com", note: "Xアカウント運用", sortOrder: 3072, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
-    { id: "member_4", orgId: ORG, name: "田中 次郎", roleTitle: null, status: "considering", teamIds: ["team_sponsor"], contact: null, note: "参加検討中", sortOrder: 4096, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
-    { id: "member_5", orgId: ORG, name: "山田 三郎", roleTitle: "デザイン", status: "declined", teamIds: [], contact: null, note: "今回は不参加", sortOrder: 5120, version: 1, createdAt: isoNow(), updatedAt: isoNow() },
+    // 統括
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp"),
+    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1),
+    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2),
+    // 開発
+    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3),
+    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4),
+    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5),
+    // 当日進行
+    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6),
+    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7),
+    // スポンサー
+    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8),
+    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9),
+    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10),
+    // 会場
+    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11),
+    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12),
+    // 集客広報
+    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13),
+    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com"),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
   ];
 
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
