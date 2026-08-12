@@ -37,9 +37,13 @@ function Stat({
 export function HomeScreen({
   api,
   homeWidgets = [],
+  onOpenNotifications,
 }: {
   api: ApiClient;
   homeWidgets?: HomeWidget[];
+  // When provided, the "未読の通知" card becomes a button that opens the shared
+  // notification dialog — the SAME modal the header bell opens.
+  onOpenNotifications?: () => void;
 }): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
   const eventsError = errorFor("event-service");
@@ -139,6 +143,26 @@ export function HomeScreen({
                 再試行
               </Button>
             </div>
+          ) : onOpenNotifications ? (
+            // Clickable "通知部分": opens the shared notification dialog.
+            <button
+              type="button"
+              className="fe2-notif-open"
+              data-testid="fe2-home-open-notifications"
+              onClick={onOpenNotifications}
+              aria-label={unread > 0 ? `通知を開く（未読 ${unread} 件）` : "通知を開く"}
+            >
+              {unread > 0 ? (
+                <span className="fe2-notice-row">
+                  <Badge tone="info">未読</Badge>
+                  <span data-testid="fe2-home-unread-count">未読 {unread} 件</span>
+                </span>
+              ) : (
+                <span data-testid="fe2-home-unread-empty" className="fe2-stat-hint">
+                  未読の通知はありません。
+                </span>
+              )}
+            </button>
           ) : unread > 0 ? (
             <div className="fe2-notice-row">
               <Badge tone="info">未読</Badge>

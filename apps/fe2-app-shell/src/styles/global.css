@@ -434,6 +434,31 @@ svg {
   color: var(--dub-color-text-primary);
 }
 
+/* Clickable "通知部分" on Home: a full-width button that opens the shared
+ * notification dialog. Resets the native button chrome and adds a hover surface
+ * so it reads as an interactive region rather than a raw button. */
+.fe2-notif-open {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: var(--dub-space-2);
+  margin: calc(-1 * var(--dub-space-2));
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--dub-radius-md);
+  color: inherit;
+  font: inherit;
+  transition: background-color var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.fe2-notif-open:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.fe2-notif-open .fe2-notice-row {
+  width: 100%;
+}
+
 /* ---- feedback widget (floating bottom-right, all authenticated screens) ---- */
 /* The FAB sits below the modal layer (z-index-sticky < z-index-modal) so opening
  * the panel overlays it, and clear of the demo banner via safe-area padding. */
