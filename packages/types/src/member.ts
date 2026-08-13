@@ -33,6 +33,10 @@ export interface Member {
   roleTitle: string | null;
   status: MemberStatus;
   teamIds: string[];
+  /** 学科 (任意). かつてメモ欄に混在していたのを専用フィールドへ分離。 */
+  department: string | null;
+  /** 学年 (任意, 自由記述: 例 "3年" / "M1"). メモ欄から専用フィールドへ分離。 */
+  grade: string | null;
   /** 連絡先 (任意). */
   contact: string | null;
   note: string | null;
@@ -74,6 +78,8 @@ export interface CreateMemberRequest {
   roleTitle?: string | null;
   status: MemberStatus;
   teamIds: string[];
+  department?: string | null;
+  grade?: string | null;
   contact?: string | null;
   note?: string | null;
 }
@@ -82,6 +88,8 @@ export interface UpdateMemberRequest {
   roleTitle?: string | null;
   status?: MemberStatus;
   teamIds?: string[];
+  department?: string | null;
+  grade?: string | null;
   contact?: string | null;
   note?: string | null;
   sortOrder?: number;

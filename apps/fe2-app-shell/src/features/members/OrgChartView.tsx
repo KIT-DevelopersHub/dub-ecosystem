@@ -42,6 +42,7 @@ function Chip({ m, kind }: { m: OrgMember; kind: "top" | "leader" | "sub" }): JS
       {kind === "sub" ? "↳ " : ""}
       {m.name}
       {kind === "sub" ? <span className={styles.subrole}>メンバー</span> : null}
+      {m.grade ? <span className={styles.subrole}>{m.grade}</span> : null}
       {tent ? <span className={styles.chipBadge}>{tentBadge(m.status)}</span> : null}
     </div>
   );

@@ -18,6 +18,8 @@ export function ListView({
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", cell: (m) => m.name },
+    { key: "department", header: "学科", cell: (m) => m.department ?? "—" },
+    { key: "grade", header: "学年", cell: (m) => m.grade ?? "—" },
     { key: "role", header: "担当・役割", cell: (m) => m.roleTitle ?? "—" },
     { key: "status", header: "ステータス", cell: (m) => <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> },
     {

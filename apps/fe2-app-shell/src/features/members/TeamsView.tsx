@@ -19,6 +19,9 @@ function MemberRow({
       <div className={styles.memberMain}>
         <span className={styles.memberName}>{m.name}</span>
         {m.roleTitle ? <span className={styles.memberRole}>{m.roleTitle}</span> : null}
+        {m.department || m.grade ? (
+          <span className={styles.memberRole}>{[m.department, m.grade].filter(Boolean).join(" ")}</span>
+        ) : null}
       </div>
       <MemberStatusBadge status={m.status} />
       <div className={styles.rowSpacer} />

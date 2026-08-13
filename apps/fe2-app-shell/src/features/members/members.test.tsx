@@ -29,8 +29,8 @@ const OVERVIEW: MembersOverview = {
     { id: "t2", key: "pr", name: "広報", color: null, description: null },
   ],
   members: [
-    { id: "m1", orgId: "o", name: "山田太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
-    { id: "m2", orgId: "o", name: "佐藤花子", roleTitle: null, status: "invited", teamIds: ["t2"], contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+    { id: "m1", orgId: "o", name: "山田太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: "情報工学科", grade: "3年", contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+    { id: "m2", orgId: "o", name: "佐藤花子", roleTitle: null, status: "invited", teamIds: ["t2"], department: null, grade: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
   ],
 };
 
@@ -90,6 +90,12 @@ describe("MembersPage", () => {
     // status badges
     expect(screen.getByTestId("members-status-m1")).toHaveTextContent("追加済");
     expect(screen.getByTestId("members-status-m2")).toHaveTextContent("招待中");
+    // 学科・学年 are their own columns (not buried in メモ)
+    const table = screen.getByTestId("members-table");
+    expect(within(table).getByText("学科")).toBeInTheDocument();
+    expect(within(table).getByText("学年")).toBeInTheDocument();
+    expect(within(table).getByText("情報工学科")).toBeInTheDocument();
+    expect(within(table).getByText("3年")).toBeInTheDocument();
   });
 
   it("switches to the team-grouped and org-chart views", async () => {
@@ -108,9 +114,11 @@ describe("MembersPage", () => {
     await userEvent.click(screen.getByTestId("members-add-member"));
     const dialog = await screen.findByTestId("members-form-dialog");
     await userEvent.type(within(dialog).getByTestId("members-form-name"), "新規 太郎");
+    await userEvent.type(within(dialog).getByTestId("members-form-department"), "情報工学科");
+    await userEvent.type(within(dialog).getByTestId("members-form-grade"), "2年");
     await userEvent.click(within(dialog).getByTestId("members-form-submit"));
     await waitFor(() => expect(api.createMember).toHaveBeenCalledTimes(1));
-    expect((api.createMember as any).mock.calls[0][0]).toMatchObject({ name: "新規 太郎" });
+    expect((api.createMember as any).mock.calls[0][0]).toMatchObject({ name: "新規 太郎", department: "情報工学科", grade: "2年" });
   });
 
   it("deletes a member via the confirm dialog", async () => {
@@ -130,10 +138,10 @@ describe("MembersPage", () => {
     const overview: MembersOverview = {
       teams: [{ id: "t1", key: "venue", name: "会場", color: "#16a34a", description: null }],
       members: [
-        { id: "p_team", orgId: "o", name: "所属アリ子", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_none", orgId: "o", name: "未所属無太郎", roleTitle: null, status: "added", teamIds: [], contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_orphan", orgId: "o", name: "幽霊参照子", roleTitle: null, status: "added", teamIds: ["deleted_team_999"], contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_team", orgId: "o", name: "所属アリ子", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_none", orgId: "o", name: "未所属無太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_orphan", orgId: "o", name: "幽霊参照子", roleTitle: null, status: "added", teamIds: ["deleted_team_999"], department: null, grade: null, contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], department: null, grade: null, contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
       ],
     };
     render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));

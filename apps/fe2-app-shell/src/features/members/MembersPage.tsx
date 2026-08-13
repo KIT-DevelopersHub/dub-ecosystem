@@ -47,7 +47,11 @@ export function MembersPage(): JSX.Element {
     const q = search.trim().toLowerCase();
     if (!q) return members;
     return members.filter(
-      (m) => m.name.toLowerCase().includes(q) || (m.roleTitle ?? "").toLowerCase().includes(q),
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        (m.roleTitle ?? "").toLowerCase().includes(q) ||
+        (m.department ?? "").toLowerCase().includes(q) ||
+        (m.grade ?? "").toLowerCase().includes(q),
     );
   }, [members, search]);
 
@@ -103,7 +107,7 @@ export function MembersPage(): JSX.Element {
           <div className={styles.toolbarSpacer} />
           {tab === "list" ? (
             <div className={styles.searchField}>
-              <TextField id="members-search" value={search} onChange={setSearch} placeholder="氏名・役割で検索" testId="members-search" />
+              <TextField id="members-search" value={search} onChange={setSearch} placeholder="氏名・役割・学科・学年で検索" testId="members-search" />
             </div>
           ) : null}
           {tab === "org" ? (

@@ -26,6 +26,8 @@ export interface PersonRow {
   name: string;
   roleTitle: string | null;
   status: MemberStatus;
+  department: string | null;
+  grade: string | null;
   contact: string | null;
   note: string | null;
   sortOrder: number;
