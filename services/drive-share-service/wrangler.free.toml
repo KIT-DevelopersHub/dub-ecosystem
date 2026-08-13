@@ -1,8 +1,8 @@
 # Free-tier deploy of drive-share-service as `dub-drive-share-service` (internal; reached
-# via the api-gateway SVC_DRIVE_SHARE service binding — workers.dev disabled). Owns no D1
-# and no Queues, so there is no free/paid divergence beyond the identity binding target
-# and workers_dev=false. Until the Hackit OAuth secrets are set the in-memory mock client
-# runs (still $0, fully usable for demo/E2E).
+# via the api-gateway SVC_DRIVE_SHARE service binding — workers.dev disabled). Binds the
+# shared dub-core D1 (driveshare_* namespace: role→file grant index + provenance ledger)
+# and no Queues ($0). Until the Hackit OAuth secrets are set the in-memory mock Drive
+# client runs (still $0, fully usable for demo/E2E).
 #
 # Deploy:
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
@@ -18,10 +18,19 @@ workers_dev = false
 [observability]
 enabled = true
 
+# --- D1 (driveshare_* namespace on the shared dub-core DB) ---
+# Role→file grant index + provenance ledger of the Drive permissions WE created (so
+# revoke/reconcile never deletes individual/pre-existing shares). Real prod dub-core id
+# (same physical DB as every other free-tier service; access is namespace-scoped by @dub/db).
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
 # --- Service Bindings (live free-tier workers) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"   # POST /authz/check (drive:read / drive:write)
+service = "dub-identity-roster"   # POST /authz/check (drive:read / drive:write) + role expansion
 
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"

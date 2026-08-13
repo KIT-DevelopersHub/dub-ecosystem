@@ -1,6 +1,7 @@
 # drive-share-service — Cloudflare Worker. GUI-driven Google Drive sharing manager for
-# the Hackit shared Gmail (hackit@gmail.com). Owns NO D1 and NO Queues ($0): Drive holds
-# the files/permissions, identity-roster is the only dependency (authz). The composition
+# the Hackit shared Gmail (hackit@gmail.com). Owns a driveshare_* namespace on the shared
+# dub-core D1 (role→file grant index + provenance ledger); Drive still holds the actual
+# files/permissions, identity-roster is the authz + role-expansion dependency. The composition
 # root (src/index.ts) wires the REAL Google Drive v3 client ONLY when the three
 # GOOGLE_HACKIT_OAUTH_* secrets are bound; until then (or DRIVESHARE_MOCK=1) an in-memory
 # mock client runs so the surface builds/deploys/E2Es at $0. Reached externally via the
@@ -20,7 +21,7 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"
-database_id = "REPLACE_AT_APPLY"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 
 # --- Service Bindings ---
 [[services]]
