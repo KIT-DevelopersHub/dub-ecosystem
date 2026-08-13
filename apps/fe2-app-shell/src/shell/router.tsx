@@ -84,7 +84,12 @@ export function createShellRouter(
     getParentRoute: () => shellRoute,
     path: "/",
     component: () => (
-      <HomeScreen api={api} homeWidgets={registry.homeWidgets} onOpenNotifications={openNotificationDialog} />
+      <HomeScreen
+        api={api}
+        homeWidgets={registry.homeWidgets}
+        onOpenNotifications={openNotificationDialog}
+        {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
+      />
     ),
   });
 
