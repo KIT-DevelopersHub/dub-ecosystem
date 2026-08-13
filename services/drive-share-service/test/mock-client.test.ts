@@ -26,6 +26,47 @@ describe("mock drive client", () => {
     expect(files[0]!.id).toBe("fil_budget");
   });
 
+  it("lists only root-level entries when no folderId is given", async () => {
+    const c = createMockDriveShareClient();
+    const { files } = await c.listFiles({ pageSize: 50 });
+    const ids = files.map((f) => f.id);
+    // the five root seeds are present …
+    expect(ids).toEqual(expect.arrayContaining(["fld_root", "fld_designs", "fil_budget", "fil_flyer", "fil_runsheet"]));
+    // … and NO deeper children leak into the root listing.
+    expect(ids).not.toContain("fld_sponsors");
+    expect(ids).not.toContain("fil_contract");
+  });
+
+  it("folderId returns exactly the direct children (folder-first)", async () => {
+    const c = createMockDriveShareClient();
+    const { files } = await c.listFiles({ pageSize: 50, folderId: "fld_root" });
+    expect(files.map((f) => f.id)).toEqual(["fld_sponsors", "fil_schedule"]);
+    // folder before file
+    expect(files[0]!.isFolder).toBe(true);
+    expect(files[1]!.isFolder).toBe(false);
+  });
+
+  it("supports nesting deeper than one level", async () => {
+    const c = createMockDriveShareClient();
+    const { files } = await c.listFiles({ pageSize: 50, folderId: "fld_sponsors" });
+    expect(files.map((f) => f.id).sort()).toEqual(["fil_contract", "fil_sponsor_deck"]);
+  });
+
+  it("returns an empty child set for a leaf folder", async () => {
+    const c = createMockDriveShareClient();
+    const { files } = await c.listFiles({ pageSize: 50, folderId: "fld_banners" });
+    expect(files.map((f) => f.id)).toEqual(["fil_web_banner"]);
+    const empty = await c.listFiles({ pageSize: 50, folderId: "fil_web_banner" });
+    expect(empty.files).toHaveLength(0);
+  });
+
+  it("search ignores the parent constraint (flat fallback across all depths)", async () => {
+    const c = createMockDriveShareClient();
+    // 協賛 matches a depth-2 file even though we pass no folderId.
+    const { files } = await c.listFiles({ pageSize: 50, q: "協賛" });
+    expect(files.map((f) => f.id).sort()).toEqual(["fil_contract", "fil_sponsor_deck"]);
+  });
+
   it("lists permissions for a file and 404s an unknown file", async () => {
     const c = createMockDriveShareClient();
     const { permissions } = await c.listPermissions("fld_root");
