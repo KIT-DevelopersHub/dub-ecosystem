@@ -98,7 +98,15 @@ export function ChannelList({
                       aria-current={isActive ? "page" : undefined}
                     >
                       <span className={styles.channelGlyph} aria-hidden>
-                        {isDm ? <Dot p={getPresence(c.id)} /> : c.archived ? "🗄" : "#"}
+                        {isDm ? (
+                          <Dot p={getPresence(c.id)} />
+                        ) : c.archived ? (
+                          "🗄"
+                        ) : c.visibility === "private" ? (
+                          "🔒"
+                        ) : (
+                          "#"
+                        )}
                       </span>
                       <span className={styles.channelName}>{c.name}</span>
                       {mentioned ? (
