@@ -66,3 +66,37 @@ export interface SetLinkSharingRequest {
   /** Role granted to anyone-with-the-link when enabling. Defaults to reader. */
   role?: Exclude<ShareRole, "owner" | "writer"> | "writer";
 }
+
+// ---- role-based sharing (driveshare_* D1) ----
+// NOTE: these role-grant shapes are intentionally NOT declared in @dub/types. They are
+// a drive-share-service-local contract (same local-declaration convention as
+// DRIVE_READ/DRIVE_WRITE in permissions.ts, which are not yet in the frozen catalog).
+// The SPA consumes them via the api-gateway. If they ever stabilise into a shared
+// contract they can move to @dub/types with zero wire change.
+
+/** Drive capability assignable to a role's members. Mirrors the assignable subset of
+ *  ShareRole (never `owner`). */
+export type AssignableDriveRole = "reader" | "commenter" | "writer";
+
+/** A role→file grant as shown by the file-list chips + the detail panel. `memberCount`
+ *  is the number of active emails currently in the role; `appliedCount` is how many of
+ *  those members now have a Drive permission in place (created by us OR a recorded
+ *  pre-existing individual share). They diverge when role membership changes after the
+ *  last apply — the SPA renders that drift and offers "re-apply". */
+export interface RoleFileGrant {
+  id: string;
+  fileId: string;
+  roleId: string;
+  roleName: string;
+  driveRole: AssignableDriveRole;
+  memberCount: number;
+  appliedCount: number;
+  grantedBy: string;
+  grantedAt: string;
+}
+
+/** POST /driveshare/files/:id/role-grants body. */
+export interface CreateRoleGrantRequest {
+  roleId: string;
+  driveRole: AssignableDriveRole;
+}

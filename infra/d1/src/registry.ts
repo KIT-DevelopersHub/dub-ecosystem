@@ -48,6 +48,11 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   { ns: "seed", ownerUnit: "infra-d1-seed#28", tables: ["seed_runs"] },
   { ns: "usage", ownerUnit: "usage-meter", tables: ["usage_snapshot"] },
   { ns: "member", ownerUnit: "member-service", tables: ["member_teams", "member_people", "member_team_links"] },
+  {
+    ns: "driveshare",
+    ownerUnit: "drive-share-service",
+    tables: ["driveshare_role_file_grants", "driveshare_role_grant_members"],
+  },
 ];
 
 // Compile-time guard: every NAMESPACES entry appears exactly once in the registry.

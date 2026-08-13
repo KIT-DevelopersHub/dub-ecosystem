@@ -101,6 +101,9 @@ deploy gantt-service   services/gantt-service/wrangler.free.toml
 deploy notification    services/notification/wrangler.free.toml
 deploy file-meta       services/file-meta/wrangler.free.toml
 deploy drive-proxy     services/drive-proxy/wrangler.free.toml
+# drive-share-service binds only SVC_IDENTITY (step 1); api-gateway binds it (SVC_DRIVE_SHARE,
+# step 4), so it lands before the gateway. Owns a driveshare_* namespace on shared dub-core D1.
+deploy drive-share-service services/drive-share-service/wrangler.free.toml
 deploy chat-service    services/chat-service/wrangler.free.toml
 deploy mail-gateway    services/mail-gateway/wrangler.free.toml
 deploy deploy-service  services/deploy-service/wrangler.free.toml
