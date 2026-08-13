@@ -56,6 +56,24 @@ describe("HomeScreen", () => {
     expect(screen.queryByTestId("fe2-home-unread-count")).not.toBeInTheDocument();
   });
 
+  it("keeps the notification dialog reachable from Home even on a partial error", async () => {
+    // Regression: a /bff/home partial error on the notification aggregate must
+    // NOT remove the Home entry point to the shared dialog. When onOpenNotifications
+    // is wired (the real shell always wires it), the card stays an openable button
+    // that fires the handler — the dialog itself re-fetches the inbox as the retry.
+    const home: gateway.BffHomeResponse = {
+      ...OK_HOME,
+      partialErrors: [{ source: "notification", code: "UPSTREAM_TIMEOUT" }],
+    };
+    const opened: number[] = [];
+    render(wrap(<HomeScreen api={makeApi(home)} onOpenNotifications={() => opened.push(1)} />));
+    const btn = await screen.findByTestId("fe2-home-open-notifications");
+    // The inline retry card (no dialog entry point) must NOT be used here.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    btn.click();
+    expect(opened).toHaveLength(1);
+  });
+
   it("renders feature-contributed home widgets in titled frames", async () => {
     const widgets: HomeWidget[] = [
       { id: "tasks", title: "自分のタスク", Body: () => <p data-testid="tasks-body">3 件</p> },
