@@ -69,3 +69,22 @@ CREATE TABLE chat_read_states (
 );
 `.trim(),
 };
+
+// Forward-only add-on (Slack-parity: pinned messages). Additive only — no change to
+// 0001 tables, so the existing ledger hash is untouched. Physical mirror lives in
+// infra/d1/migrations/chat/0002_pins.sql. A pin is (channel, message) unique; pinned_by
+// / pinned_at are app-supplied (no DDL DEFAULT for datetime, D2). Same-namespace FKs only.
+export const CHAT_PINS_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0002_pins",
+  up: `
+CREATE TABLE chat_pins (
+  channel_id TEXT NOT NULL REFERENCES chat_channels(id),
+  message_id TEXT NOT NULL REFERENCES chat_messages(id),
+  pinned_by  TEXT NOT NULL,
+  pinned_at  TEXT NOT NULL,
+  PRIMARY KEY (channel_id, message_id)
+);
+CREATE INDEX idx_chat_pins_channel ON chat_pins(channel_id, message_id DESC);
+`.trim(),
+};

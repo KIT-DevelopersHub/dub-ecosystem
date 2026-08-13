@@ -13,7 +13,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
 import { createDbClient, applyMigrations, assertAllApplied } from "@dub/db";
 import { createD1ChatRepo } from "../../src/d1-repo";
-import { CHAT_SCHEMA_MIGRATION } from "../../src/schema";
+import { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION } from "../../src/schema";
 import type { ChatRepo, ChannelRow, MemberRow, MessageRow } from "../../src/types";
 
 const AT = "2026-08-10T05:00:00.000Z";
@@ -70,7 +70,7 @@ function message(over: Partial<MessageRow> & Pick<MessageRow, "id" | "channelId"
 
 beforeAll(async () => {
   // Apply the chat DDL to the empty miniflare D1 (idempotent via the ledger).
-  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION]);
+  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION]);
   assertAllApplied(results);
 });
 
@@ -336,5 +336,67 @@ describe("d1-repo: read state + unread", () => {
     await repo.setReadState(chan.id, me, m2.id, AT);
     expect((await repo.getReadState(chan.id, me))?.lastReadMessageId).toBe(m2.id);
     expect(await repo.countUnread(chan.id, me, m2.id)).toBe(0);
+  });
+});
+
+describe("d1-repo: pins", () => {
+  it("addPin is idempotent; listPinnedMessages excludes tombstones, newest-first; removePin reports change", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    await repo.createChannel(chan);
+    const m1 = message({ id: id.msg(1), channelId: chan.id, authorId: id.user(1), body: "first" });
+    const m2 = message({ id: id.msg(2), channelId: chan.id, authorId: id.user(1), body: "second" });
+    const gone = message({ id: id.msg(3), channelId: chan.id, authorId: id.user(1), body: "deleted", deletedAt: AT });
+    for (const m of [m1, m2, gone]) await repo.createMessage(m);
+
+    expect(await repo.isPinned(chan.id, m1.id)).toBe(false);
+    await repo.addPin(chan.id, m1.id, id.user(1), AT);
+    await repo.addPin(chan.id, m1.id, id.user(1), AT); // ON CONFLICT DO NOTHING
+    await repo.addPin(chan.id, m2.id, id.user(1), AT);
+    await repo.addPin(chan.id, gone.id, id.user(1), AT); // pinned but tombstoned -> hidden
+    expect(await repo.isPinned(chan.id, m1.id)).toBe(true);
+
+    const pinned = await repo.listPinnedMessages(chan.id);
+    expect(pinned.map((m) => m.id)).toEqual([m2.id, m1.id]); // id desc, tombstone excluded
+
+    expect(await repo.removePin(chan.id, m1.id)).toBe(true);
+    expect(await repo.removePin(chan.id, m1.id)).toBe(false); // already gone
+    expect((await repo.listPinnedMessages(chan.id)).map((m) => m.id)).toEqual([m2.id]);
+  });
+});
+
+describe("d1-repo: search", () => {
+  it("matches body substring case-insensitively, scopes to readable channels, newest-first, bounded", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const me = id.user(1);
+    const pub = channel({ id: id.chan(1), visibility: "public", name: "general", createdBy: id.user(2) });
+    const priv = channel({ id: id.chan(2), visibility: "private", name: "secret", createdBy: id.user(2) });
+    await repo.createChannel(pub);
+    await repo.createChannel(priv);
+    // caller is a member of neither; public is still readable, private is not.
+    const inPub = message({ id: id.msg(1), channelId: pub.id, authorId: id.user(2), body: "Deploy the ROCKET" });
+    const inPubOther = message({ id: id.msg(2), channelId: pub.id, authorId: id.user(2), body: "lunch?" });
+    const inPriv = message({ id: id.msg(3), channelId: priv.id, authorId: id.user(2), body: "rocket launch codes" });
+    const tomb = message({ id: id.msg(4), channelId: pub.id, authorId: id.user(2), body: "rocket", deletedAt: AT });
+    for (const m of [inPub, inPubOther, inPriv, tomb]) await repo.createMessage(m);
+
+    // case-insensitive substring; private channel excluded; tombstone excluded
+    const hits = await repo.searchMessages({ userId: me, text: "rocket", limit: 50 });
+    expect(hits.map((h) => h.message.id)).toEqual([inPub.id]);
+    expect(hits[0]!.channelName).toBe("general");
+    expect(hits[0]!.channelType).toBe("topic");
+
+    // when the caller joins the private channel it becomes searchable
+    await repo.addMember(member(priv.id, me));
+    const hits2 = await repo.searchMessages({ userId: me, text: "rocket", limit: 50 });
+    expect(hits2.map((h) => h.message.id)).toEqual([inPriv.id, inPub.id]); // id desc
+
+    // channelId scope + limit
+    const scoped = await repo.searchMessages({ userId: me, text: "rocket", channelId: pub.id, limit: 50 });
+    expect(scoped.map((h) => h.message.id)).toEqual([inPub.id]);
+    const bounded = await repo.searchMessages({ userId: me, text: "rocket", limit: 1 });
+    expect(bounded).toHaveLength(1);
   });
 });

@@ -32,19 +32,24 @@ chat-service is an **internal** service (no public hostname) fronted by two call
 
 | Caller | External path | Internal path | Auth carried in |
 |---|---|---|---|
-| `api-gateway` (web, FE6) | `/api/v1/chat/…` | `/…` (prefix `/api/v1/chat` stripped) | `x-dub-user-id` (trusted; gateway verified the session) |
-| `mo3-mobile-bff` (native) | `/m/v1/chat/…` | `/…` | `x-dub-user-id` (trusted; BFF verified the bearer) |
+| `api-gateway` (web, FE6) | `/api/v1/chat/…` | `/chat/…` (gateway strips **only** `/api/v1`; the `chat` segment is preserved) | `x-dub-user-id` (trusted; gateway verified the session) |
+| `mo3-mobile-bff` (native) | `/m/v1/chat/…` | `/chat/…` | `x-dub-user-id` (trusted; BFF verified the bearer) |
 | `notification` (service) | — | `/internal/system-messages` | `x-dub-internal: 1` |
 
 The service **trusts** `x-dub-user-id` and does not re-verify tokens (`trustedHeader` mode).
-Every user-facing group (`/channels*`, `/messages*`, `/unread`) runs `requireAuth()`; a
-request with no trusted user header is rejected `401 UNAUTHENTICATED` before any handler
-runs. All paths below are written in their **external** `/api/v1/chat` form; drop the
-`/api/v1/chat` prefix for the internal / service-binding form.
+The user-facing routes are mounted under **`/chat`** (mirrors identity-roster's `/identity`,
+member-service's `/members`) because api-gateway strips only the `/api/v1` prefix and
+**preserves the `chat` segment** — `/api/v1/chat/channels` reaches the Worker as
+`/chat/channels`. `/health` and the internal `/internal/system-messages` surface (addressed
+directly by service bindings, never via the gateway) stay at bare paths. Every user-facing
+group (`/chat/channels*`, `/chat/messages*`, `/chat/unread`, `/chat/search`) runs
+`requireAuth()`; a request with no trusted user header is rejected `401 UNAUTHENTICATED`
+before any handler runs. Paths below are written in their **external** `/api/v1/chat` form;
+replace the `/api/v1` prefix with nothing (keep `/chat/…`) for the internal Worker form.
 
 **Realtime is gateway-bypassing.** The gateway mount forwards HTTP only; the WebSocket
 upgrade never traverses the gateway. Clients open the socket **directly** against the
-`doUrl` returned by `GET /channels/:id/ws-ticket` (see §7). The ChatRoom DO — one instance
+`doUrl` returned by `GET /chat/channels/:id/ws-ticket` (see §7). The ChatRoom DO — one instance
 per channel — is the sole WS gate: it verifies the ticket, enforces Origin, and fans out
 `ChatRealtimeEvent`s.
 
@@ -160,10 +165,14 @@ All external paths are under the gateway mount `/api/v1/chat` (native: `/m/v1/ch
 | `POST /api/v1/chat/channels` | session + `chat:create` | Create a channel (DM is idempotent per member set) |
 | `GET /api/v1/chat/channels/:id` | session | Read a channel + the caller's membership |
 | `PATCH /api/v1/chat/channels/:id` | session + channel-admin | Rename / retopic / archive (version-checked) |
+| `GET /api/v1/chat/channels/:id/members` | session (readable) | List the channel's member roster (presence / admin badge) |
 | `POST /api/v1/chat/channels/:id/members` | session + channel-admin | Add a member (idempotent) |
 | `DELETE /api/v1/chat/channels/:id/members/:userId` | session + admin or self | Remove a member (idempotent) |
+| `GET /api/v1/chat/channels/:id/pins` | session (readable) | List pinned messages (newest-first, tombstones excluded) |
+| `POST /api/v1/chat/channels/:id/pins` | session + member | Pin/unpin a message (body `{messageId}`); returns the updated pin list |
 | `POST /api/v1/chat/channels/:id/read` | session + member | Set the caller's read cursor; returns unread count |
 | `GET /api/v1/chat/channels/:id/ws-ticket` | session + member | Mint a short-lived WS ticket + `doUrl` |
+| `GET /api/v1/chat/search?q=…&channelId=…&limit=…` | session | Search messages across readable channels (newest-first) |
 | `GET /api/v1/chat/messages?channelId=…` | session + member | List messages (paginated / thread / gap-fill) |
 | `POST /api/v1/chat/messages` | session + member | Post a message |
 | `PATCH /api/v1/chat/messages/:id` | session + author | Edit own message (version-checked) |
