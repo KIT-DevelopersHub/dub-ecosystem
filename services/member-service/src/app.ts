@@ -79,5 +79,16 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ ok: true });
   });
 
+  // ---- 参加届 (participation) ----
+  // Submit is open to any authenticated 運営 (they file their own 届, which self-
+  // registers/promotes them on the roster). The admin list is gated by identity:read.
+  app.post("/members/participation", async (c) => {
+    const body = await readJson<member.SubmitParticipationRequest>(c);
+    return c.json(await svc.submitParticipation(reqCtx(c), body), 201);
+  });
+  app.get("/members/participation", authz.requirePermission(READ), async (c) => {
+    return c.json(await svc.listParticipations(reqCtx(c)));
+  });
+
   return app;
 }
