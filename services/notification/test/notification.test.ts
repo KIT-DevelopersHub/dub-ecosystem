@@ -461,4 +461,29 @@ describe("HTTP app", () => {
     const res = await req("/inbox", { headers: {} }, h);
     expect(res.status).toBe(401);
   });
+
+  // Regression: the api-gateway strips only API_PREFIX, so external inbox reads arrive
+  // here under the "/notifications" segment ("/api/v1/notifications/inbox" -> post-strip
+  // "/notifications/inbox"). These MUST be served (not 404) — the bug where the inbox
+  // dialog showed "Couldn't load notifications" was every "/notifications/*" call 404ing.
+  it("gateway segment paths (/notifications/*) are served, not 404", async () => {
+    const h = makeTestEnv();
+    await req("/notify", internalPost({ type: "release", recipientIds: ["u1"], title: "Hi", body: "there", channels: ["in_app"] }), h);
+
+    const inbox = await req("/notifications/inbox", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(inbox.status).toBe(200);
+    const page = (await inbox.json()) as { items: { id: string }[] };
+    expect(page.items).toHaveLength(1);
+
+    const uc = await req("/notifications/inbox/unread-count", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(uc.status).toBe(200);
+    expect((await uc.json()) as { count: number }).toEqual({ count: 1 });
+
+    const prefs = await req("/notifications/preferences", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(prefs.status).toBe(200);
+
+    // the segment path also enforces auth (same middleware as the bare path)
+    const unauth = await req("/notifications/inbox", { headers: {} }, h);
+    expect(unauth.status).toBe(401);
+  });
 });

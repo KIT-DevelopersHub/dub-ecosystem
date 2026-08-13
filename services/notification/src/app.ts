@@ -70,6 +70,16 @@ export function createApp(options: CreateAppOptions = {}) {
   const ingestDepsOf = (c: Context<AppBindings>, ctx: RequestContext) =>
     buildIngestDeps(c.env, ctx, options.identity ? { identity: options.identity } : {});
 
+  // User-facing notification routes (inbox / preferences / release) live under the
+  // gateway segment "notifications": the api-gateway strips only API_PREFIX, so an
+  // external "/api/v1/notifications/inbox" arrives here as "/notifications/inbox"
+  // (like task-service serves "/tasks/*", event-service "/events/*"). Internal binding
+  // callers historically address the bare paths ("/inbox/unread-count", bff-home), so
+  // this sub-app is mounted at BOTH "/" and "/notifications" (see the app.route calls
+  // below) — the segment path serves the gateway, the bare path keeps internal callers
+  // working. (Feedback is its own gateway segment → stays at "/feedback" on the root app.)
+  const domain = new Hono<AppBindings>();
+
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
 
@@ -103,8 +113,8 @@ export function createApp(options: CreateAppOptions = {}) {
   // ---- POST /release: admin-published "🎉 new feature" release note, broadcast to
   // EVERY active user's inbox (in_app, forced on). External surface (gateway does NOT
   // 404 it); admin gate is enforced in-service via notif:admin. Idempotent per dedupKey.
-  app.use("/release", authOnly);
-  app.post("/release", requireReleaseAdmin, async (c) => {
+  domain.use("/release", authOnly);
+  domain.post("/release", requireReleaseAdmin, async (c) => {
     const parsed = parseReleaseRequest(await c.req.json().catch(() => null));
     const ctx = ctxOf(c);
     const actorId = c.req.header(HEADERS.userId) ?? null;
@@ -126,24 +136,24 @@ export function createApp(options: CreateAppOptions = {}) {
   // ---- self-scoped routes: requireAuth (trusted header -> x-dub-user-id = 本人).
   // No requirePermission: notif:inbox:self / notif:prefs:self are not in the frozen
   // PERMISSION_CATALOG; self-access is enforced by scoping every query to userId.
-  app.use("/inbox/*", authOnly);
-  app.use("/inbox", authOnly);
-  app.use("/preferences", authOnly);
+  domain.use("/inbox/*", authOnly);
+  domain.use("/inbox", authOnly);
+  domain.use("/preferences", authOnly);
 
-  app.get("/inbox", async (c) => {
+  domain.get("/inbox", async (c) => {
     const userId = getUserId(c);
     const q = parseListInboxQuery(c.req.query());
     const page = await listInbox(dbOf(c), userId, q);
     return c.json(page satisfies notification.ListInboxResponse);
   });
 
-  app.get("/inbox/unread-count", async (c) => {
+  domain.get("/inbox/unread-count", async (c) => {
     const userId = getUserId(c);
     const count = await unreadCount(dbOf(c), userId);
     return c.json({ count } satisfies notification.UnreadCountResponse);
   });
 
-  app.patch("/inbox/:id/read", async (c) => {
+  domain.patch("/inbox/:id/read", async (c) => {
     const userId = getUserId(c);
     const ok = await markRead(dbOf(c), userId, c.req.param("id"));
     if (!ok) {
@@ -152,21 +162,21 @@ export function createApp(options: CreateAppOptions = {}) {
     return c.json({ ok: true });
   });
 
-  app.post("/inbox/read-all", async (c) => {
+  domain.post("/inbox/read-all", async (c) => {
     const userId = getUserId(c);
     const { type } = parseReadAll(await c.req.json().catch(() => null));
     const updated = await markAllRead(dbOf(c), userId, type);
     return c.json({ updated });
   });
 
-  app.get("/preferences", async (c) => {
+  domain.get("/preferences", async (c) => {
     const userId = getUserId(c);
     const overrides = await listPreferenceOverrides(dbOf(c), userId);
     const res: GetPreferencesResponse = { userId, entries: mergedView(overrides) };
     return c.json(res);
   });
 
-  app.patch("/preferences", async (c) => {
+  domain.patch("/preferences", async (c) => {
     const userId = getUserId(c);
     const entries = parsePreferencesUpdate(await c.req.json().catch(() => null));
     const db = dbOf(c);
@@ -227,6 +237,14 @@ export function createApp(options: CreateAppOptions = {}) {
     }
     return c.json({ ok: true });
   });
+
+  // Mount the user-facing domain routes at BOTH the bare paths (internal binding
+  // callers: bff-home "/inbox/unread-count", etc.) and under the "/notifications"
+  // gateway segment (external "/api/v1/notifications/*" arrives post-strip as
+  // "/notifications/*"). Without the segment mount every gateway inbox/preferences/
+  // release call 404s — the inbox-load failure this fixes.
+  app.route("/", domain);
+  app.route("/notifications", domain);
 
   return app;
 }
