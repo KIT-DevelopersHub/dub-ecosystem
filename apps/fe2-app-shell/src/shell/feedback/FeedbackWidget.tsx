@@ -14,9 +14,11 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { capturePageContext, submitFeedback } from "./feedbackApi.tsx";
 import type { FeedbackCategory } from "./feedbackApi.tsx";
 
+// Values MUST be members of the backend FEEDBACK_CATEGORIES enum (bug|idea|question|
+// other); "改善要望" maps to "idea" (a value outside the enum 400s on submit).
 const CATEGORY_OPTIONS: SelectOption<FeedbackCategory>[] = [
   { value: "bug", label: "バグ・不具合" },
-  { value: "request", label: "改善要望" },
+  { value: "idea", label: "改善要望" },
   { value: "other", label: "その他" },
 ];
 
