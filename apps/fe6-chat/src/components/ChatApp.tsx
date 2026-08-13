@@ -8,8 +8,10 @@ import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
 import type { Channel } from "../api/contract";
 import { getLastChannel, setLastChannel } from "../store/draft";
+import type { CreateChannelRequest } from "../api/contract";
 import { ChannelList } from "./ChannelList";
 import { ChannelPage } from "./ChannelPage";
+import { CreateChannelModal } from "./CreateChannelModal";
 import styles from "../styles/chat.module.css";
 
 export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: common.ChannelId; eventId?: common.EventId }) {
@@ -19,14 +21,20 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const [channels, setChannels] = useState<Channel[]>([]);
   const [active, setActive] = useState<common.ChannelId | null>(initialChannelId ?? null);
   const [threadOpen, setThreadOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const reloadChannels = useCallback(async () => {
+    const [list, unreadList] = await Promise.all([api.listChannels(eventId), api.listUnread()]);
+    setChannels(list);
+    setUnread(unreadList);
+    return list;
+  }, [api, eventId, setUnread]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [list, unreadList] = await Promise.all([api.listChannels(eventId), api.listUnread()]);
+      const list = await reloadChannels();
       if (cancelled) return;
-      setChannels(list);
-      setUnread(unreadList);
       setActive((cur) => {
         if (cur) return cur;
         if (eventId) {
@@ -41,12 +49,21 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
     return () => {
       cancelled = true;
     };
-  }, [api, eventId, setUnread]);
+  }, [reloadChannels, eventId]);
 
   const onSelect = useCallback((channelId: common.ChannelId) => {
     setActive(channelId);
     setLastChannel(channelId);
   }, []);
+
+  const onCreateChannel = useCallback(
+    async (req: CreateChannelRequest) => {
+      const created = await api.createChannel(req);
+      await reloadChannels();
+      onSelect(created.id);
+    },
+    [api, reloadChannels, onSelect],
+  );
 
   return (
     <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-testid="fe6-chat-app">
@@ -70,15 +87,24 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
         activeChannelId={active}
         canCreate={can("chat:create")}
         onSelect={onSelect}
+        onCreate={() => setCreateOpen(true)}
       />
 
       {active ? (
-        <ChannelPage key={active} channelId={active} onThreadOpenChange={setThreadOpen} />
+        <ChannelPage
+          key={active}
+          channelId={active}
+          onThreadOpenChange={setThreadOpen}
+          onSelectChannel={onSelect}
+          onChannelsChanged={() => void reloadChannels()}
+        />
       ) : (
         <section className={styles.main}>
           <div className={styles.emptyState}>チャネルを選択してください</div>
         </section>
       )}
+
+      <CreateChannelModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={onCreateChannel} />
     </div>
   );
 }

@@ -120,6 +120,31 @@ export interface ReactionToggleResponse {
   reactions: Record<string, common.UserId[]>;
 }
 
+// ---- search (Slack-parity workspace/channel search) ----
+export interface SearchMessagesQuery {
+  q: string;
+  channelId?: common.ChannelId; // scope to one channel; omit = all readable channels
+  limit?: number;
+}
+// A search match: the message + enough channel context for the FE to render/navigate.
+export interface SearchHit {
+  message: Message;
+  channelId: common.ChannelId;
+  channelName: string;
+  channelType: ChannelType;
+}
+
+// ---- pins (Slack-parity pinned messages) ----
+export interface PinToggleRequest {
+  messageId: common.MessageId;
+}
+// A message row joined with its channel context, as returned by repo.searchMessages.
+export interface SearchRow {
+  message: MessageRow;
+  channelName: string;
+  channelType: ChannelType;
+}
+
 // WsTicketResponse is frozen in @dub/types (chat); re-export under the local name.
 export type WsTicketResponse = chat.WsTicketResponse;
 
@@ -252,6 +277,21 @@ export interface ChatRepo {
   setReadState(channelId: common.ChannelId, userId: common.UserId, lastReadMessageId: common.MessageId, at: string): Promise<void>;
   getReadState(channelId: common.ChannelId, userId: common.UserId): Promise<{ lastReadMessageId: common.MessageId | null } | null>;
   countUnread(channelId: common.ChannelId, userId: common.UserId, lastReadMessageId: common.MessageId | null): Promise<number>;
+
+  // pins (channel-scoped; newest-pinned message first, tombstones excluded)
+  listPinnedMessages(channelId: common.ChannelId): Promise<MessageRow[]>;
+  isPinned(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean>;
+  addPin(channelId: common.ChannelId, messageId: common.MessageId, userId: common.UserId, at: string): Promise<void>;
+  removePin(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean>;
+
+  // search: substring match over readable channels (public OR the caller is a member),
+  // tombstones excluded, newest-first, bounded by limit.
+  searchMessages(q: {
+    userId: common.UserId;
+    text: string;
+    channelId?: common.ChannelId;
+    limit: number;
+  }): Promise<SearchRow[]>;
 }
 
 export interface AppDeps {

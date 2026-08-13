@@ -3,7 +3,7 @@
 // No cross-namespace joins (chat is the DB-split first candidate).
 import type { DbClient } from "@dub/db";
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind } from "./types";
 
 interface ChannelDbRow {
   id: string;
@@ -281,6 +281,67 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       const binds: unknown[] = lastReadMessageId === null ? [channelId, userId] : [channelId, userId, lastReadMessageId];
       const r = await db.first<{ n: number }>(sql, ...binds);
       return r?.n ?? 0;
+    },
+
+    // ---- pins ----
+    async listPinnedMessages(channelId: common.ChannelId): Promise<MessageRow[]> {
+      // Join pins -> messages; exclude tombstones; newest-pinned message first (id desc).
+      const rows = await db.all<MessageDbRow>(
+        `SELECT m.* FROM chat_pins p
+           JOIN chat_messages m ON m.id = p.message_id
+          WHERE p.channel_id = ? AND m.deleted_at IS NULL
+          ORDER BY m.id DESC`,
+        channelId,
+      );
+      return rows.map(toMessageRow);
+    },
+    async isPinned(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean> {
+      const r = await db.first<{ one: number }>(
+        `SELECT 1 AS one FROM chat_pins WHERE channel_id = ? AND message_id = ?`,
+        channelId, messageId,
+      );
+      return r !== null;
+    },
+    async addPin(channelId, messageId, userId, at): Promise<void> {
+      await db.run(
+        `INSERT INTO chat_pins (channel_id, message_id, pinned_by, pinned_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(channel_id, message_id) DO NOTHING`,
+        channelId, messageId, userId, at,
+      );
+    },
+    async removePin(channelId, messageId): Promise<boolean> {
+      const res = await db.run(`DELETE FROM chat_pins WHERE channel_id = ? AND message_id = ?`, channelId, messageId);
+      return res.meta.changes > 0;
+    },
+
+    // ---- search ----
+    async searchMessages(q): Promise<SearchRow[]> {
+      // Substring (case-insensitive over ASCII via lower(); CJK unaffected on both sides),
+      // scoped to readable channels (public OR caller is a member). Newest-first, bounded.
+      const where: string[] = [
+        "m.deleted_at IS NULL",
+        "instr(lower(m.body), ?) > 0",
+        "(c.visibility = 'public' OR EXISTS (SELECT 1 FROM chat_channel_members mm WHERE mm.channel_id = c.id AND mm.user_id = ?))",
+      ];
+      const binds: unknown[] = [q.text.toLowerCase(), q.userId];
+      if (q.channelId) {
+        where.push("m.channel_id = ?");
+        binds.push(q.channelId);
+      }
+      binds.push(q.limit);
+      const rows = await db.all<MessageDbRow & { channel_name: string; channel_type: string }>(
+        `SELECT m.*, c.name AS channel_name, c.type AS channel_type
+           FROM chat_messages m
+           JOIN chat_channels c ON c.id = m.channel_id
+          WHERE ${where.join(" AND ")}
+          ORDER BY m.id DESC LIMIT ?`,
+        ...binds,
+      );
+      return rows.map((r) => ({
+        message: toMessageRow(r),
+        channelName: r.channel_name,
+        channelType: r.channel_type as ChannelType,
+      }));
     },
   } satisfies ChatRepo;
 }

@@ -17,4 +17,26 @@ describe("segmentBody", () => {
   it("returns a single text segment when there are no tokens", () => {
     expect(segmentBody("plain")).toEqual([{ type: "text", value: "plain" }]);
   });
+
+  it("parses bold / italic / strike inline styles", () => {
+    expect(segmentBody("a *b* _i_ ~s~")).toEqual([
+      { type: "text", value: "a " },
+      { type: "bold", value: "b" },
+      { type: "text", value: " " },
+      { type: "italic", value: "i" },
+      { type: "text", value: " " },
+      { type: "strike", value: "s" },
+    ]);
+  });
+
+  it("parses links [label](url)", () => {
+    expect(segmentBody("see [docs](https://example.com/x)")).toEqual([
+      { type: "text", value: "see " },
+      { type: "link", label: "docs", href: "https://example.com/x" },
+    ]);
+  });
+
+  it("does not treat markers inside code as inline styles", () => {
+    expect(segmentBody("`a*b*c`")).toEqual([{ type: "code", value: "a*b*c" }]);
+  });
 });
