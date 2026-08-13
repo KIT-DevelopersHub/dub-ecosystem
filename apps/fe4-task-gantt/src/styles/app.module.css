@@ -833,3 +833,156 @@
 }
 .childCreateBtn:hover { background: var(--dub-color-brand-100); border-color: var(--dub-color-brand-400); }
 .childCreateHint { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); font-weight: 400; }
+
+/* ================= My Tasks hub ================= */
+.myPage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-6);
+  max-width: 1200px;
+  margin: 0 auto;
+  color: var(--dub-color-text-primary);
+  font-family: var(--dub-font-family-sans, system-ui, sans-serif);
+}
+.myHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+}
+.myTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-2xl, 1.5rem);
+  font-weight: var(--dub-font-weight-bold, 700);
+  letter-spacing: -0.01em;
+}
+.mySubtitle { margin: 4px 0 0; font-size: var(--dub-font-size-sm, 0.85rem); color: var(--dub-color-text-secondary); }
+
+/* ---- lens tabs (担当 / 依頼 / すべて) ---- */
+.lensTabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg, 10px);
+  width: fit-content;
+}
+.lensTab {
+  min-width: 72px;
+  padding: 6px var(--dub-space-4);
+  border: none;
+  border-radius: var(--dub-radius-md, 8px);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  font-weight: var(--dub-font-weight-medium, 600);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.lensTab:hover { color: var(--dub-color-text-primary); }
+.lensTabActive {
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-brand-700);
+  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
+}
+
+/* ---- filter bar (two rows: inputs, then chips) ---- */
+.myFilterBar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg, 12px);
+}
+.filterRow { display: flex; gap: var(--dub-space-2); align-items: center; flex-wrap: wrap; }
+.selectLabelled { display: inline-flex; align-items: center; gap: var(--dub-space-1); min-width: 0; }
+.selectLead { font-size: var(--dub-font-size-xs, 0.72rem); font-weight: 600; color: var(--dub-color-text-secondary); white-space: nowrap; }
+
+/* ---- unified list table ---- */
+.myTable { width: 100%; border-collapse: collapse; font-size: var(--dub-font-size-sm, 0.88rem); }
+.myTable thead th {
+  text-align: left;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-bottom: 1px solid var(--dub-color-border-strong);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--dub-color-text-secondary);
+  white-space: nowrap;
+}
+.myTable td {
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  vertical-align: middle;
+}
+.colFromTo { min-width: 220px; }
+.cellTitle { font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); }
+.myRow { cursor: pointer; transition: background 0.1s ease; }
+.myRow:hover { background: var(--dub-color-surface-sunken); }
+.myRow:focus-visible { outline: 2px solid var(--dub-color-border-focus); outline-offset: -2px; }
+.rowOverdue { background: var(--dub-color-danger-50, rgba(220, 38, 38, 0.05)); }
+.muted { color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+.dueOverdue { color: var(--dub-color-danger-600, var(--dub-color-danger-500)); font-weight: 600; white-space: nowrap; }
+.overdueTag { font-size: var(--dub-font-size-xs, 0.68rem); font-weight: 700; }
+.listFoot { display: flex; align-items: center; justify-content: space-between; gap: var(--dub-space-3); margin-top: var(--dub-space-3); flex-wrap: wrap; }
+.countHint { font-size: var(--dub-font-size-sm, 0.8rem); color: var(--dub-color-text-secondary); }
+
+/* ---- from → to cell ---- */
+.fromTo { display: inline-flex; align-items: center; gap: var(--dub-space-2); min-width: 0; }
+.party { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.partyName {
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  color: var(--dub-color-text-primary);
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fromToArrow { flex: 0 0 auto; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+
+.createHint {
+  margin: 0 0 var(--dub-space-3);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-text-secondary);
+}
+
+/* ================= standalone demo shell ================= */
+.demoShell { min-height: 100vh; background: var(--dub-color-surface-base); color: var(--dub-color-text-primary); }
+.demoNav {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-3) var(--dub-space-6);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.demoBrand { font-weight: 700; font-size: var(--dub-font-size-sm, 0.9rem); color: var(--dub-color-text-secondary); }
+.demoTabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--dub-color-surface-sunken); border-radius: var(--dub-radius-lg, 10px); }
+.demoTab {
+  padding: 6px var(--dub-space-4);
+  border: none;
+  border-radius: var(--dub-radius-md, 8px);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  font-weight: 600;
+  cursor: pointer;
+}
+.demoTabActive { background: var(--dub-color-surface-base); color: var(--dub-color-brand-700); box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08)); }
+.demoMain { display: block; }
+
+@media (max-width: 720px) {
+  .myPage { padding: var(--dub-space-4); }
+  .colFromTo { min-width: 140px; }
+  .partyName { display: none; }
+  .myTable thead { display: none; }
+}

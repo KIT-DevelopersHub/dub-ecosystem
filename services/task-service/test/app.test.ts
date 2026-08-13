@@ -293,6 +293,39 @@ describe("GET /tasks (list + paging)", () => {
     const res = await app.request(`/tasks?assigneeId=usr_alice`, userInit("GET", undefined, { userId: "usr_alice" }));
     expect(res.status).toBe(200);
   });
+
+  it("exposes createdBy (the requester / from) on created + listed tasks", async () => {
+    const { app } = setup();
+    const t = await create(app, { assigneeId: "usr_bob" }); // creator = usr_alice (userInit default)
+    expect(t.createdBy).toBe("usr_alice");
+    const res = await app.request(`/tasks?eventId=evt_1`, userInit("GET"));
+    const body = (await res.json()) as task.ListTasksResponse;
+    expect(body.items[0]!.createdBy).toBe("usr_alice");
+  });
+
+  it("allows omitting eventId for tasks the caller issued (createdById=self, 依頼 lens)", async () => {
+    const { app } = setup();
+    // usr_alice issues a task assigned to someone else.
+    await create(app, { assigneeId: "usr_bob" }, (m, b) => userInit(m, b, { userId: "usr_alice" }));
+    const res = await app.request(
+      `/tasks?createdById=usr_alice`,
+      userInit("GET", undefined, { userId: "usr_alice" }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.ListTasksResponse;
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.assigneeId).toBe("usr_bob");
+    expect(body.items[0]!.createdBy).toBe("usr_alice");
+  });
+
+  it("400 when eventId omitted and createdById is another user (no cross-user leak)", async () => {
+    const { app } = setup();
+    const res = await app.request(
+      `/tasks?createdById=usr_other`,
+      userInit("GET", undefined, { userId: "usr_alice" }),
+    );
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("routing + authz + correlation", () => {
