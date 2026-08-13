@@ -13,10 +13,19 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
+# --- D1 (driveshare_* namespace on the shared dub-core DB) ---
+# Role→file grant index + provenance ledger of the Drive permissions WE created (so
+# revoke/reconcile never deletes individual/pre-existing shares). database_id is filled
+# by infra at Apply; local `wrangler dev` / tests use a local sqlite file.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_AT_APPLY"
+
 # --- Service Bindings ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "identity-roster"   # identity-roster /authz/check (drive:read / drive:write)
+service = "identity-roster"   # identity-roster /authz/check (drive:read / drive:write) + role expansion
 
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"

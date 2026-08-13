@@ -981,6 +981,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4
         version: 4.20260702.1
+      '@dub/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors
