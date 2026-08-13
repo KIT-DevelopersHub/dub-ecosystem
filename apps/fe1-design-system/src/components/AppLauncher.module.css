@@ -81,6 +81,21 @@
   outline: 2px solid var(--dub-color-border-focus, var(--dub-color-accent, #2563eb));
   outline-offset: 2px;
 }
+/* Access-off tile: grayed and inert. Stays in the grid (apps are never hidden),
+   but reads clearly as unavailable and cannot be activated. */
+.tileDisabled,
+.tile:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.tile:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+}
+.tile:disabled:hover .tileIcon {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+}
 .tileIcon {
   position: relative;
   display: inline-flex;

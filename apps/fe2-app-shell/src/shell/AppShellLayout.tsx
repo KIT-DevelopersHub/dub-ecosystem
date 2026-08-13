@@ -52,14 +52,16 @@ export interface AppShellLayoutProps {
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
 // injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal), sorted by
-// order. Entries carrying requiredPermissions are hidden unless the viewer holds
-// them all (can() is fail-closed while /me loads), so the admin (ロール管理) tools
-// appear for admins only — mirroring each route's own guard (defense in depth).
+// order. Entries carrying requiredPermissions the viewer lacks are DISABLED (grayed +
+// not clickable) — NOT hidden. Apps are never removed from the launcher (社長方針
+// 「消さずグレーアウト」); a role turning an app off simply deactivates its tile.
+// can() is fail-closed while /me loads, so tiles start disabled until permissions
+// resolve, mirroring each route's own guard (defense in depth).
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
   return [...navEntries]
-    .filter((entry) => (entry.requiredPermissions ?? []).every((p) => can(p)))
     .sort((a, b) => a.order - b.order)
     .map((entry) => {
+      const allowed = (entry.requiredPermissions ?? []).every((p) => can(p));
       const badge = entry.badgeSource?.();
       const item: AppLauncherItem = {
         id: entry.path,
@@ -67,6 +69,10 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         icon: entry.icon,
         href: entry.path,
       };
+      if (!allowed) {
+        item.disabled = true;
+        item.disabledReason = "権限がオフです";
+      }
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
       return item;
     });
@@ -99,7 +105,9 @@ export function AppShellLayout({
             title="アプリ"
             label="アプリ一覧"
             items={toLauncherItems(navEntries, can)}
-            {...(onNavigate ? { onSelect: (item: AppLauncherItem) => onNavigate(item.href ?? item.id) } : {})}
+            {...(onNavigate
+              ? { onSelect: (item: AppLauncherItem) => { if (!item.disabled) onNavigate(item.href ?? item.id); } }
+              : {})}
           />
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />

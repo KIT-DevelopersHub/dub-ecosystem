@@ -327,6 +327,11 @@ export interface AppLauncherItem {
   icon?: IconName; // resolved via FE1 Icon
   href?: string; // consumer's renderLink/onSelect maps this to router navigation
   badgeCount?: number;
+  // Access is decided upstream (role/permission). When the viewer's role has the
+  // app turned off, the tile is DISABLED (grayed + not clickable) rather than
+  // removed — apps are never hidden, only visibly deactivated.
+  disabled?: boolean;
+  disabledReason?: string; // hover tooltip, e.g. "権限がオフです"
 }
 export interface AppLauncherProps extends TestableProps {
   items: AppLauncherItem[];

@@ -8,6 +8,7 @@ import { useState } from "react";
 import type { identity } from "@dub/types";
 import { TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { PermissionMatrix } from "./PermissionMatrix";
+import { AppAccessMatrix } from "./AppAccessMatrix";
 import { usePermissionCatalog, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
@@ -62,6 +63,9 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
           <TextField id={`${ns}-name`} value={name} onChange={(v) => setName(v)} disabled={readOnly} testId={`${ns}-name`} />
         </FormField>
       ) : null}
+      {/* App-access on/off (coarse view over the permission bundle). Turning an app
+          off here grays out its tile in the launcher for members of this role. */}
+      <AppAccessMatrix selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
       {catalog.data ? (
         <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
       ) : (

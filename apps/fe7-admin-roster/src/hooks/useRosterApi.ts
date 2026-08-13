@@ -195,6 +195,12 @@ export function useUpdateRole(roleId: common.RoleId) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.roles() });
       qc.invalidateQueries({ queryKey: queryKeys.role(roleId) });
+      // Editing a role's permissions/app-access changes the effective permissions of
+      // its members. When mounted in the FE2 shell (shared QueryClient), refetch the
+      // session so the AppLauncher re-evaluates which app tiles are active — the
+      // viewer sees an app they just turned off gray out immediately (no reload). The
+      // standalone FE7 harness has no ["me"] query, so this is a harmless no-op there.
+      qc.invalidateQueries({ queryKey: ["me"] });
     },
   });
 }

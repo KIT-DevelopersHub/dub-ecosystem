@@ -121,9 +121,10 @@ describe("AppShellLayout", () => {
     expect(screen.queryByText("Events")).not.toBeInTheDocument();
   });
 
-  it("hides launcher items whose requiredPermissions the viewer lacks (admin-only tools)", async () => {
+  it("grays out (disables, not hides) launcher items whose requiredPermissions the viewer lacks", async () => {
     const me: gateway.MeResponse = { ...ME, permissions: ["event:read"] };
     const gatedApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const onNavigate = vi.fn();
     const nav: NavEntry[] = [
       { label: "Events", path: "/events", icon: "calendar", order: 10 },
       { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50, requiredPermissions: ["identity:read"] },
@@ -132,7 +133,7 @@ describe("AppShellLayout", () => {
     render(
       <QueryClientProvider client={qc}>
         <AuthProvider api={gatedApi}>
-          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+          <AppShellLayout navEntries={nav} onNavigate={onNavigate}>
             <div data-testid="outlet">content</div>
           </AppShellLayout>
         </AuthProvider>
@@ -141,12 +142,17 @@ describe("AppShellLayout", () => {
     // /me resolves async; wait for the launcher trigger then open it.
     const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
     await userEvent.click(trigger);
-    expect(screen.getByText("Events")).toBeInTheDocument();
-    // Viewer lacks identity:read -> the admin tool is filtered out.
-    expect(screen.queryByText("ロール管理")).not.toBeInTheDocument();
+    // Apps are never hidden: the admin tile is still present, but disabled + grayed.
+    const roles = screen.getByText("ロール管理").closest("button")!;
+    expect(roles).toBeDisabled();
+    // Events is accessible -> enabled.
+    expect(screen.getByText("Events").closest("button")!).not.toBeDisabled();
+    // A disabled tile does not navigate when clicked.
+    await userEvent.click(roles);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it("shows admin launcher items once the viewer holds the required permission", async () => {
+  it("enables admin launcher items once the viewer holds the required permission", async () => {
     const me: gateway.MeResponse = { ...ME, permissions: ["event:read", "identity:read"] };
     const adminApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
     const nav: NavEntry[] = [
@@ -164,6 +170,6 @@ describe("AppShellLayout", () => {
     );
     const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
     await userEvent.click(trigger);
-    expect(await screen.findByText("ロール管理")).toBeInTheDocument();
+    expect((await screen.findByText("ロール管理")).closest("button")!).not.toBeDisabled();
   });
 });

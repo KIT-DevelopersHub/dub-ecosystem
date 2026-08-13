@@ -72,11 +72,14 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 33-key catalog", async () => {
+  it("serves the 3 system tiers + the editable 運営スタッフ role, and the 33-key catalog", async () => {
     const a = api();
     const list = await roles(a);
-    expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
-    expect(list.items.every((r) => r.isSystem)).toBe(true);
+    // The demo admin holds the editable 運営スタッフ role (so App-access toggles are
+    // exercisable); the three tiers admin / maintainer / member stay system (read-only).
+    expect(list.items.map((r) => r.name)).toEqual(["admin", "運営スタッフ", "maintainer", "member"]);
+    expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
+    expect(list.items.find((r) => r.name === "運営スタッフ")?.isSystem).toBe(false);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
     expect(catalog).toHaveLength(33);
   });

@@ -82,9 +82,14 @@ export function AppLauncher({
                 key={item.id}
                 type="button"
                 role="menuitem"
-                className={cx(styles.tile)}
+                className={cx(styles.tile, item.disabled && styles.tileDisabled)}
+                // Grayed + not clickable when access is off. Kept in the grid (never
+                // hidden); `disabled` blocks activation and drives the :disabled style.
+                disabled={item.disabled}
+                aria-disabled={item.disabled || undefined}
+                title={item.disabled ? item.disabledReason : undefined}
                 data-testid={testId ? `${testId}-item-${item.id.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}` : undefined}
-                onClick={() => select(item)}
+                onClick={() => { if (!item.disabled) select(item); }}
               >
                 <span className={cx(styles.tileIcon)}>
                   {item.icon ? <Icon name={item.icon} size="md" /> : null}

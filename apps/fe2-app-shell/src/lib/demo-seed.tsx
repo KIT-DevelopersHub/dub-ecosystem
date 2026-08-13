@@ -476,7 +476,11 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
 const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
 
 const SEED_USERS: identity.IdentityUser[] = [
-  { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
+  // The demo admin holds the editable role_ops (not the system role_admin) so the
+  // App-access toggle demo can turn an app off on the admin's OWN role and watch the
+  // launcher tile gray out. role_ops carries the full permission set, so nothing is
+  // lost until an app is explicitly toggled off.
+  { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", roleIds: ["role_ops"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_carol", orgId: ORG, displayName: "鈴木 一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_dave", orgId: ORG, displayName: "田中 次郎", email: "jiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
@@ -484,6 +488,9 @@ const SEED_USERS: identity.IdentityUser[] = [
 
 const SEED_ROLES: identity.Role[] = [
   { id: "role_admin", orgId: ORG, name: "admin", permissions: DEMO_PERMISSIONS, isSystem: true },
+  // Editable (non-system) role the demo admin actually holds — lets the App-access
+  // toggle be exercised end-to-end (system roles reject PATCH). Full permissions.
+  { id: "role_ops", orgId: ORG, name: "運営スタッフ", permissions: DEMO_PERMISSIONS, isSystem: false },
   { id: "role_maintainer", orgId: ORG, name: "maintainer", permissions: MAINTAINER_PERMISSIONS, isSystem: true },
   { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true },
 ];
@@ -501,7 +508,7 @@ interface DemoRoleAssignment {
 }
 
 const SEED_USER_ROLES: Record<string, DemoRoleAssignment[]> = {
-  [ME_ID]: [{ id: "asg_1", userId: ME_ID, roleId: "role_admin", roleName: "admin", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
+  [ME_ID]: [{ id: "asg_1", userId: ME_ID, roleId: "role_ops", roleName: "運営スタッフ", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
   usr_bob: [{ id: "asg_2", userId: "usr_bob", roleId: "role_maintainer", roleName: "maintainer", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
   usr_carol: [{ id: "asg_3", userId: "usr_carol", roleId: "role_member", roleName: "member", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
 };
@@ -552,10 +559,16 @@ function createRosterStore() {
 
   const rid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
   const summaries = (): identity.UserSummary[] => users.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
-  const detail = (u: identity.IdentityUser): identity.IdentityUserDetail => ({
-    ...u,
-    permissions: [...new Set(roles.filter((r) => u.roleIds.includes(r.id)).flatMap((r) => r.permissions))],
-  });
+  const permsOf = (u: identity.IdentityUser): identity.PermissionKey[] =>
+    [...new Set(roles.filter((r) => u.roleIds.includes(r.id)).flatMap((r) => r.permissions))];
+  const detail = (u: identity.IdentityUser): identity.IdentityUserDetail => ({ ...u, permissions: permsOf(u) });
+  // Effective permissions for a user id, or null if unknown to the store. Lets the
+  // demo /me be computed from the live roster (so editing a role's app-access updates
+  // the signed-in user's launcher on refetch) instead of a frozen list.
+  const permissionsFor = (userId: string): identity.PermissionKey[] | null => {
+    const u = users.find((x) => x.id === userId);
+    return u ? permsOf(u) : null;
+  };
   function audit(action: string, resourceType: string, resourceId: string, details: Record<string, unknown>): void {
     const ts = new Date().toISOString();
     audits.unshift({ id: rid("aud"), action, actorId: ME_ID, orgId: ORG, result: "success", resourceType, resourceId, details, requestId: rid("req"), occurredAt: ts, recordedAt: ts });
@@ -732,7 +745,7 @@ function createRosterStore() {
     return null;
   }
 
-  return { handle };
+  return { handle, permissionsFor };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -1220,7 +1233,15 @@ export function createDemoFetch(): typeof fetch {
     }
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
     // and reloading re-scopes the whole shell — the header title, permissions and mail.
-    if (method === "GET" && url.pathname === "/api/v1/me") return json(currentMe());
+    // For the demo admin, permissions are read LIVE from the roster store so that
+    // editing a role's app-access (which the admin holds) updates their launcher on the
+    // next /me refetch — the App-access on/off demo end-to-end. Other accounts keep
+    // their static permission list (unchanged behavior).
+    if (method === "GET" && url.pathname === "/api/v1/me") {
+      const acct = currentAccount();
+      const live = acct.id === ME_ID ? roster.permissionsFor(ME_ID) : null;
+      return json(live ? { ...currentMe(), permissions: live } : currentMe());
+    }
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
