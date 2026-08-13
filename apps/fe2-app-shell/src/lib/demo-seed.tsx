@@ -1091,6 +1091,46 @@ function createMembersStore() {
       }
     }
 
+    // 参加届 (participation): submit reflects onto the roster exactly like member-
+    // service — name match (space/width-folded) promotes 招待中/検討中 → 追加済 (merging
+    // the desired team, non-destructive contact), else creates a new 追加済 member.
+    if (method === "POST" && pathname === "/api/v1/members/participation") {
+      const name = String(body?.name ?? "").trim();
+      const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+      const target = norm(name);
+      const desiredTeamId: string | null = body?.desiredTeamId ?? null;
+      const contact: string | null = body?.contact ?? null;
+      const note: string | null = body?.note ?? null;
+      const existing = members.find((mem) => norm(mem.name) === target);
+      let matchKind: "linked_existing" | "created_new";
+      let resolved: DemoMember;
+      if (existing) {
+        if (existing.status === "invited" || existing.status === "considering") existing.status = "added";
+        if (desiredTeamId && !existing.teamIds.includes(desiredTeamId)) existing.teamIds.push(desiredTeamId);
+        if (existing.contact === null && contact) existing.contact = contact;
+        if (existing.note === null && note) existing.note = note;
+        existing.version += 1;
+        existing.updatedAt = isoNow();
+        resolved = existing;
+        matchKind = "linked_existing";
+      } else {
+        resolved = {
+          id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added",
+          teamIds: desiredTeamId ? [desiredTeamId] : [], contact, note,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(resolved);
+        matchKind = "created_new";
+      }
+      const participation = {
+        id: nid("part"), orgId: ORG, memberId: resolved.id, name, normalizedName: target,
+        nameKana: body?.nameKana ?? null, grade: body?.grade ?? null, department: body?.department ?? null,
+        contact, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
+        status: "submitted", matchKind, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      };
+      return json({ participation, member: { ...resolved, teamIds: [...resolved.teamIds] }, matchKind }, 201);
+    }
+
     return null;
   }
 
