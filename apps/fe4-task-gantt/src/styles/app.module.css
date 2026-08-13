@@ -22,6 +22,20 @@
   flex-wrap: wrap;
 }
 .pageHeaderText { display: flex; flex-direction: column; gap: var(--dub-space-1); }
+.headerActions { display: flex; align-items: center; gap: var(--dub-space-3); }
+/* organizer edit affordance — placeholder role indicator (real perms wired later). */
+.roleBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-sunken);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 600;
+  color: var(--dub-color-text-secondary);
+  white-space: nowrap;
+}
 .pageTitle {
   margin: 0;
   font-size: var(--dub-font-size-2xl, 1.5rem);
@@ -310,6 +324,15 @@
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
+/* team accent stripe on a row (team-grouped rows are ordered by team; the stripe
+   makes each group's boundary legible without a heavyweight section header). */
+.tlTeamStripe { flex: 0 0 auto; width: 3px; align-self: stretch; border-radius: 2px; margin-right: 2px; background: var(--dub-color-gray-300); }
+/* team legend chips under the toolbar. */
+.tlLegend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px var(--dub-space-3); border-bottom: 1px solid var(--dub-color-border-default); }
+.tlLegendItem { display: inline-flex; align-items: center; gap: 5px; font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
+.tlLegendSwatch { width: 10px; height: 10px; border-radius: 3px; background: var(--dub-color-gray-300); }
+/* thin team-coloured cap at the left edge of each bar. */
+.barTeamCap { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-top-left-radius: inherit; border-bottom-left-radius: inherit; }
 .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tlRowMeta {
   flex: 0 0 auto;

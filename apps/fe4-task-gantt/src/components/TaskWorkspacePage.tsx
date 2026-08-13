@@ -61,6 +61,30 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const userList = useMemo(() => [...users.values()], [users]);
   const statusById = useMemo(() => new Map(tasks.map((t) => [t.id, t.status] as const)), [tasks]);
+  // team accent colour per task (team-grouped rows), and a legend of the teams
+  // actually present on the board — drives the row stripe / bar cap / legend chips.
+  const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t] as const)), [teams]);
+  const teamColorById = useMemo(() => {
+    const m = new Map<common.TaskId, string>();
+    for (const t of tasks) {
+      const color = t.teamId ? teamById.get(t.teamId)?.color : undefined;
+      if (color) m.set(t.id, color);
+    }
+    return m;
+  }, [tasks, teamById]);
+  const teamLegend = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { id: string; name: string; color: string }[] = [];
+    for (const t of tasks) {
+      if (!t.teamId || seen.has(t.teamId)) continue;
+      const team = teamById.get(t.teamId);
+      if (team?.color) {
+        seen.add(t.teamId);
+        out.push({ id: team.id, name: team.name, color: team.color });
+      }
+    }
+    return out;
+  }, [tasks, teamById]);
   const assigneeNameById = useMemo(() => {
     const m = new Map<common.TaskId, string>();
     for (const t of tasks) {
@@ -184,9 +208,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
         {caps.canWrite && (
-          <Button iconLeft={<span aria-hidden>＋</span>} onClick={() => setCreating(true)} testId="fe4-create-open">
-            タスク作成
-          </Button>
+          <div className={styles.headerActions}>
+            {/* Organizer edit affordance. Placeholder gating today: canWrite comes
+                from effectivePermissions (task:write). Wire the real organizer role
+                by mapping the org role -> task:write in permissions.ts later. */}
+            <span className={styles.roleBadge} title="編集できるのはチームのオーガナイザーです（権限は後日 role と接続）" data-testid="fe4-organizer-badge">
+              オーガナイザー編集
+            </span>
+            <Button iconLeft={<span aria-hidden>＋</span>} onClick={() => setCreating(true)} testId="fe4-create-open">
+              タスク作成
+            </Button>
+          </div>
         )}
       </header>
 
@@ -223,6 +255,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
           assigneeNameById={assigneeNameById}
+          teamColorById={teamColorById}
+          teamLegend={teamLegend}
           canWrite={caps.canWrite}
         />
       )}

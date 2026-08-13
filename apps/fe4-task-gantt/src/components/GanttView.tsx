@@ -45,6 +45,10 @@ export interface GanttViewProps {
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
   /** taskId -> assignee display name, shown as a left-pane property. */
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
+  /** taskId -> team accent colour, for the row stripe + bar cap (team grouping). */
+  teamColorById?: ReadonlyMap<common.TaskId, string>;
+  /** ordered [teamId,{name,color}] for the legend under the toolbar. */
+  teamLegend?: ReadonlyArray<{ id: string; name: string; color: string }>;
   canWrite?: boolean;
 }
 
@@ -81,6 +85,8 @@ export function GanttView({
   onCreateOnDate,
   statusById,
   assigneeNameById,
+  teamColorById,
+  teamLegend,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -299,6 +305,17 @@ export function GanttView({
         </div>
       </div>
 
+      {teamLegend && teamLegend.length > 0 && (
+        <div className={styles.tlLegend} data-testid="fe4-gantt-legend" aria-label="チーム凡例">
+          {teamLegend.map((t) => (
+            <span key={t.id} className={styles.tlLegendItem}>
+              <span className={styles.tlLegendSwatch} style={{ background: t.color }} aria-hidden />
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
+
       {truncated && (
         <div className={styles.banner} data-testid="fe4-gantt-truncated">
           表示上限に達しました。担当者・期間フィルタで絞り込んでください。
@@ -333,6 +350,9 @@ export function GanttView({
                     onClick={() => onSelect?.(r.taskId)}
                     data-testid={`fe4-gantt-row-${r.taskId}`}
                   >
+                    {teamColorById?.get(r.taskId) && (
+                      <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
+                    )}
                     <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
                     <span className={styles.tlRowName}>{r.title}</span>
                     {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
@@ -423,6 +443,9 @@ export function GanttView({
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
                     >
+                      {teamColorById?.get(b.taskId) && (
+                        <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
+                      )}
                       <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
                       {canWrite && onSchedule && (
                         <span
