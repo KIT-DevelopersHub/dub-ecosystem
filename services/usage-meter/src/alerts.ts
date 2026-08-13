@@ -16,6 +16,10 @@ import type { UsageServiceSummary, UsageSummary } from "./types";
 const SERVICE_NAME = "usage-meter";
 const ALERT_TYPE = "usage.threshold_breached";
 const DEFAULT_ALERT_EMAIL = "admin@developershub.jp";
+// Default admin fan-out roles (mirrors the feedback -> admin flow: role_sys_admin /
+// role_sys_maintainer). The notification service expands these to inboxes, so in-app
+// alerts reach admins WITHOUT any USAGE_ALERT_ADMIN_USER_IDS config.
+const DEFAULT_ALERT_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"];
 
 /** Persistence for per-day alert dedup (implemented over Durable Object storage). */
 export interface DedupStore {
@@ -47,12 +51,18 @@ export function buildAlertLines(breaches: readonly UsageServiceSummary[]): strin
   );
 }
 
-function parseAdminIds(csv: string | undefined): string[] {
+function parseCsv(csv: string | undefined): string[] {
   if (!csv) return [];
   return csv
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/** Roles to fan out the in-app alert to: env override, else the default admin/maintainer. */
+function alertRoleIds(env: Env): string[] {
+  const configured = parseCsv(env.USAGE_ALERT_ADMIN_ROLE_IDS);
+  return configured.length > 0 ? configured : DEFAULT_ALERT_ROLE_IDS;
 }
 
 function buildEmail(to: string, breaches: readonly UsageServiceSummary[]): mail.SendMailRequest {
@@ -70,9 +80,13 @@ function buildEmail(to: string, breaches: readonly UsageServiceSummary[]): mail.
   };
 }
 
-function buildNotify(recipientIds: string[], breaches: readonly UsageServiceSummary[]): notification.NotifyRequest {
+function buildNotify(
+  recipientIds: string[],
+  recipientRoles: string[],
+  breaches: readonly UsageServiceSummary[],
+): notification.NotifyRequest {
   const worst = breaches.some((b) => b.status === "critical") ? "critical" : "warn";
-  return {
+  const req: notification.NotifyRequest = {
     type: ALERT_TYPE,
     recipientIds,
     title: `無料枠しきい値超過 (${breaches.length}件・最大 ${worst})`,
@@ -82,6 +96,8 @@ function buildNotify(recipientIds: string[], breaches: readonly UsageServiceSumm
     resourceType: "usage",
     resourceId: "summary",
   };
+  if (recipientRoles.length > 0) req.recipientRoles = recipientRoles;
+  return req;
 }
 
 /** Evaluate the summary and dispatch admin alerts for newly-breached metrics. Best-effort:
@@ -126,22 +142,23 @@ export async function runAlerts(
     }
   }
 
-  // ---- channel 2: in-app EVT_NOTIFICATION ----
-  const adminIds = parseAdminIds(env.USAGE_ALERT_ADMIN_USER_IDS);
-  if (env.SVC_NOTIFICATION && adminIds.length > 0) {
+  // ---- channel 2: in-app EVT_NOTIFICATION (role fan-out, reliable) ----
+  // Roles default to admin/maintainer so this fires WITHOUT any user-id config; an
+  // explicit USAGE_ALERT_ADMIN_USER_IDS list (if set) is unioned in.
+  const adminIds = parseCsv(env.USAGE_ALERT_ADMIN_USER_IDS);
+  const roleIds = alertRoleIds(env);
+  if (env.SVC_NOTIFICATION) {
     result.inAppAttempted = true;
     try {
       const client = createServiceClient(env.SVC_NOTIFICATION, { service: "notification", caller: SERVICE_NAME });
       await client.post<{ notificationId: string; deduplicated: boolean }, notification.NotifyRequest>(
         ctx,
         "/notify",
-        buildNotify(adminIds, fresh),
+        buildNotify(adminIds, roleIds, fresh),
       );
     } catch (err) {
       log?.("usage alert in-app notify failed (best-effort)", { error: err instanceof Error ? err.message : String(err) });
     }
-  } else if (env.SVC_NOTIFICATION) {
-    log?.("usage alert in-app skipped: no USAGE_ALERT_ADMIN_USER_IDS configured");
   }
 
   // mark dedup for every fresh breach (regardless of channel outcome) -> <=1 alert/day/level

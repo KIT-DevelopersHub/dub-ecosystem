@@ -82,7 +82,11 @@ export function createApp(options: CreateAppOptions = {}) {
     const actorId = c.req.header(HEADERS.userId) ?? null;
     const input: IngestInput = {
       type: parsed.type,
-      recipients: { userIds: parsed.recipientIds },
+      // Role fan-out (mirrors feedback): the resolver unions userIds + roles -> user ids.
+      recipients: {
+        userIds: parsed.recipientIds,
+        ...(parsed.recipientRoles && parsed.recipientRoles.length > 0 ? { roles: parsed.recipientRoles } : {}),
+      },
       title: parsed.title,
       body: parsed.body,
       priority: "normal",

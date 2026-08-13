@@ -8,6 +8,7 @@ describe("buildUsageQuery", () => {
     const { query, variables } = buildUsageQuery("acct_123", NOW);
     expect(query).toContain("workersInvocationsAdaptive");
     expect(query).toContain("d1AnalyticsAdaptiveGroups");
+    expect(query).toContain("d1StorageAdaptiveGroups"); // d1_storage now queried (was never)
     expect(query).toContain("kvOperationsAdaptiveGroups");
     expect(query).toContain("r2OperationsAdaptiveGroups");
     expect(query).toContain("r2StorageAdaptiveGroups");
@@ -19,43 +20,88 @@ describe("buildUsageQuery", () => {
       monthStart: "2026-08-01",
     });
   });
+
+  it("does NOT order by date (the orderBy on r2Storage null-nuked the whole response)", () => {
+    const { query } = buildUsageQuery("acct_123", NOW);
+    expect(query).not.toContain("orderBy");
+    expect(query).not.toContain("date_DESC");
+  });
+
+  it("uses the metered D1 row dimensions rowsRead/rowsWritten (not read/writeQueries)", () => {
+    const { query } = buildUsageQuery("acct_123", NOW);
+    expect(query).toContain("rowsRead");
+    expect(query).toContain("rowsWritten");
+    expect(query).not.toContain("readQueries");
+    expect(query).not.toContain("writeQueries");
+  });
+
+  it("groups D1 storage by databaseId (account-wide total spans multiple DBs)", () => {
+    const { query } = buildUsageQuery("acct_123", NOW);
+    expect(query).toContain("databaseSizeBytes");
+    expect(query).toContain("databaseId");
+  });
 });
 
 describe("extractMetrics", () => {
-  it("parses a full response into metric keys", () => {
+  it("parses a full (real-shaped) response into every metric key", () => {
+    // Fixture mirrors the values probed live against the prod account.
     const body = {
       data: {
         viewer: {
           accounts: [
             {
-              workersInvocationsAdaptive: [{ sum: { requests: 1200 } }],
-              d1AnalyticsAdaptiveGroups: [{ sum: { readQueries: 40000, writeQueries: 800 } }],
+              workersInvocationsAdaptive: [{ sum: { requests: 3368 } }],
+              d1AnalyticsAdaptiveGroups: [{ sum: { rowsRead: 23373, rowsWritten: 4270 } }],
+              d1StorageAdaptiveGroups: [
+                { max: { databaseSizeBytes: 1355776 }, dimensions: { databaseId: "db_a" } },
+                { max: { databaseSizeBytes: 110592 }, dimensions: { databaseId: "db_b" } },
+              ],
               kvOperationsAdaptiveGroups: [
-                { dimensions: { actionType: "read" }, sum: { requests: 500 } },
-                { dimensions: { actionType: "write" }, sum: { requests: 30 } },
+                { dimensions: { actionType: "read" }, sum: { requests: 1530 } },
+                { dimensions: { actionType: "write" }, sum: { requests: 40 } },
+                { dimensions: { actionType: "delete" }, sum: { requests: 10 } },
               ],
               r2OperationsAdaptiveGroups: [
-                { dimensions: { actionType: "PutObject" }, sum: { requests: 100 } },
-                { dimensions: { actionType: "GetObject" }, sum: { requests: 900 } },
+                { dimensions: { actionType: "HeadBucket" }, sum: { requests: 12 } }, // Class B via default
               ],
-              r2StorageAdaptiveGroups: [{ max: { payloadSize: 2048 } }],
-              durableObjectsInvocationsAdaptiveGroups: [{ sum: { requests: 77 } }],
+              r2StorageAdaptiveGroups: [{ max: { payloadSize: 0, metadataSize: 0 } }],
+              durableObjectsInvocationsAdaptiveGroups: [{ sum: { requests: 210 } }],
             },
           ],
         },
       },
     };
     expect(extractMetrics(body)).toEqual({
-      workers_requests_day: 1200,
-      d1_rows_read_day: 40000,
-      d1_rows_written_day: 800,
-      kv_reads_day: 500,
-      kv_writes_day: 30,
-      r2_class_a_month: 100,
-      r2_class_b_month: 900,
-      r2_storage: 2048,
-      do_requests_day: 77,
+      workers_requests_day: 3368,
+      d1_rows_read_day: 23373,
+      d1_rows_written_day: 4270,
+      d1_storage: 1466368, // SUM of the per-databaseId max sizes (1355776 + 110592)
+      kv_reads_day: 1530, // read
+      kv_writes_day: 50, // write + delete
+      r2_class_a_month: 0,
+      r2_class_b_month: 12, // HeadBucket -> Class B
+      r2_storage: 0,
+      do_requests_day: 210,
     });
+  });
+
+  it("sums D1 storage across databaseId groups (account-wide free-tier ceiling)", () => {
+    const body = {
+      data: {
+        viewer: {
+          accounts: [
+            {
+              d1StorageAdaptiveGroups: [
+                { max: { databaseSizeBytes: 1000 }, dimensions: { databaseId: "a" } },
+                { max: { databaseSizeBytes: 2500 }, dimensions: { databaseId: "b" } },
+                { max: { databaseSizeBytes: 500 }, dimensions: { databaseId: "c" } },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    expect(extractMetrics(body)).toEqual({ d1_storage: 4000 });
   });
 
   it("omits datasets that are missing/misshaped (they become unknown downstream)", () => {
