@@ -24,10 +24,14 @@ export interface Env {
   CLOUDFLARE_API_TOKEN?: string;
   CF_ACCOUNT_ID?: string; // account tag the GraphQL query filters by
 
-  // Alert routing. Email is the reliable channel (no id resolution). In-app is added when
-  // a comma-separated admin user-id list is configured.
+  // Alert routing. Email is the reliable channel (no id resolution). In-app fires via role
+  // fan-out (default admin/maintainer roles) so it works WITHOUT any user-id config; an
+  // explicit user-id list is unioned in when set.
   USAGE_ALERT_EMAIL?: string; // default admin@developershub.jp
-  USAGE_ALERT_ADMIN_USER_IDS?: string; // csv of user ids -> notification /notify recipients
+  USAGE_ALERT_ADMIN_USER_IDS?: string; // csv of user ids -> notification /notify recipients (optional)
+  // csv of role keys the notification service expands to admin inboxes. Defaults to
+  // role_sys_admin,role_sys_maintainer (mirrors the feedback -> admin fan-out).
+  USAGE_ALERT_ADMIN_ROLE_IDS?: string;
 
   ENVIRONMENT?: string;
 }
