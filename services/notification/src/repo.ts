@@ -3,6 +3,7 @@
 import { type DbClient, newId, nowIso } from "@dub/db";
 import { errors } from "@dub/errors";
 import type { notification } from "@dub/types";
+import { BROADCAST_IN_APP_TYPES } from "./config";
 import type {
   DeliveryOutcome,
   IngestInput,
@@ -109,6 +110,32 @@ export async function insertInbox(db: DbClient, notificationId: string, userId: 
     userId,
     nowIso(),
   );
+}
+
+/**
+ * Lazily materialize any broadcast (release / system.announcement) inbox rows this user
+ * is missing. Broadcasts are fanned out at PUBLISH time only, so a user created after a
+ * broadcast (e.g. info@ / admin@ individualized later, or any late-joining member) never
+ * received its inbox row and re-seeding is a no-op (dedup short-circuit). Calling this on
+ * every inbox read guarantees every user always sees every broadcast, as unread. Cheap:
+ * broadcasts are few, and already-present users insert nothing (NOT EXISTS + INSERT OR
+ * IGNORE). Returns the number of rows newly created. notif_* tables only (@dub/db guard).
+ */
+export async function backfillBroadcastInbox(db: DbClient, userId: string): Promise<number> {
+  const placeholders = BROADCAST_IN_APP_TYPES.map(() => "?").join(", ");
+  const missing = await db.all<{ id: string }>(
+    `SELECT n.id FROM notif_notifications n
+      WHERE n.type IN (${placeholders})
+        AND NOT EXISTS (
+          SELECT 1 FROM notif_inbox i WHERE i.notification_id = n.id AND i.user_id = ?
+        )`,
+    ...BROADCAST_IN_APP_TYPES,
+    userId,
+  );
+  for (const r of missing) {
+    await insertInbox(db, r.id, userId);
+  }
+  return missing.length;
 }
 
 function rowToInboxItem(r: InboxRow): notification.InboxItem {
