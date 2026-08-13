@@ -17,6 +17,7 @@ import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { HomeScreen } from "./screens/HomeScreen.tsx";
+import { openNotificationDialog } from "@dub/fe5-notification-inbox";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
 
@@ -82,7 +83,9 @@ export function createShellRouter(
   const homeRoute = createRoute({
     getParentRoute: () => shellRoute,
     path: "/",
-    component: () => <HomeScreen api={api} homeWidgets={registry.homeWidgets} />,
+    component: () => (
+      <HomeScreen api={api} homeWidgets={registry.homeWidgets} onOpenNotifications={openNotificationDialog} />
+    ),
   });
 
   const featureRoutes = registry.routes.map((r) => {

@@ -15,6 +15,7 @@ import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import { TaskApiClientProvider, ChatRuntimeProvider, WsChatClient, type ChatRuntime } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
+import { useBffHome } from "../bff/useBffHome.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { useToast } from "@dub/ui";
 import {
@@ -46,10 +47,16 @@ export function TaskProviders({ api, children }: { api: ApiClient; children: Rea
   return <TaskApiClientProvider client={client}>{children}</TaskApiClientProvider>;
 }
 
-/** FE5 notifications: api + shell navigate + shell toast (kinds line up). */
+/** FE5 notifications: api + shell navigate + shell toast (kinds line up).
+ *  Seeds the unread badge from the SAME /bff/home aggregate the Home screen shows,
+ *  so the header bell + launcher badge match Home immediately on load (no waiting
+ *  on the first poll, and no header/Home mismatch). react-query dedupes this with
+ *  Home's own useBffHome (shared queryKey). */
 export function NotificationProviders({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
+  const { data } = useBffHome(api);
+  const initialUnreadHint = data?.unreadCount;
   const deps = useMemo<NotificationDeps>(
     () => ({
       api: createNotificationClient(api),
@@ -59,8 +66,9 @@ export function NotificationProviders({ api, children }: { api: ApiClient; child
       toast: {
         show: (kind, message) => toast.show({ kind, title: message }),
       },
+      ...(typeof initialUnreadHint === "number" ? { initialUnreadHint } : {}),
     }),
-    [api, navigate, toast],
+    [api, navigate, toast, initialUnreadHint],
   );
   return <NotificationProvider deps={deps}>{children}</NotificationProvider>;
 }
