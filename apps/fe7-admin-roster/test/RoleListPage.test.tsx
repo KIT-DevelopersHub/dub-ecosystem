@@ -6,6 +6,16 @@ import { RoleListPage } from "../src/components/RoleListPage";
 import { renderWithProviders, makeMe } from "./renderWithProviders";
 
 describe("RoleListPage (single-screen inline permissions)", () => {
+  it("shows a skeleton while loading (not the empty state), then the list (FRONTEND_GUIDE §5)", async () => {
+    renderWithProviders(<RoleListPage />);
+    // initial render is loading: skeleton is shown, empty state is NOT
+    expect(screen.getByTestId("fe7-roles-skeleton")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-roles-empty")).not.toBeInTheDocument();
+    // once data arrives the skeleton is replaced by the real list
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-list")).toBeInTheDocument());
+    expect(screen.queryByTestId("fe7-roles-skeleton")).not.toBeInTheDocument();
+  });
+
   it("expands a role in place and shows its permission matrix on the SAME screen", async () => {
     const user = userEvent.setup();
     const { navigate } = renderWithProviders(<RoleListPage />);

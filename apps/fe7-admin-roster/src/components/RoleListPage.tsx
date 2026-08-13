@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { identity } from "@dub/types";
-import { PageHeader, Badge, Button, ConfirmDialog, EmptyState, ErrorState } from "@dub/ui";
+import { PageHeader, Badge, Button, ConfirmDialog, EmptyState, ErrorState, SkeletonList } from "@dub/ui";
 import { useRoles, useDeleteRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
@@ -63,7 +63,13 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
         testId="fe7-roles-header"
         actions={canAdmin ? <Button variant="primary" onClick={onNew} testId="fe7-roles-new">ロールを作成</Button> : null}
       />
-      {roles.isError ? (
+      {roles.isLoading ? (
+        // Loading MUST show a skeleton, not fall through to EmptyState, so the user
+        // can tell "loading" from "no roles" (FRONTEND_GUIDE §5).
+        <div style={listStyle} data-testid="fe7-roles-skeleton">
+          <SkeletonList rows={4} />
+        </div>
+      ) : roles.isError ? (
         <ErrorState error={displayError(roles.error)} onRetry={() => roles.refetch()} testId="fe7-roles-error" />
       ) : items.length === 0 ? (
         <EmptyState title="ロールがありません" testId="fe7-roles-empty" />

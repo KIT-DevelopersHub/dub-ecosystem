@@ -81,10 +81,13 @@ function paginate<T>(items: T[]): common.Paginated<T> {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Construct an in-memory client. Each call gets isolated state. */
-export function createMockClient(seed?: MockSeed): ResourceClient {
+export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient {
   const s = seedState(seed);
+  // Dev-only: delay reads so loading/skeleton states are previewable (FRONTEND_GUIDE §5).
+  const readDelay = () => (latencyMs > 0 ? new Promise((r) => setTimeout(r, latencyMs)) : Promise.resolve());
 
   async function get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
+    await readDelay();
     if (path.endsWith("/permissions/catalog")) return [...identity.PERMISSION_CATALOG] as unknown as T;
     if (path.endsWith("/identity/roles")) return paginate([...s.roles.values()]) as unknown as T;
     if (path.endsWith("/identity/users")) {
