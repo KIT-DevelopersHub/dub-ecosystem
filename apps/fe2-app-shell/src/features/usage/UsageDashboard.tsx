@@ -1,16 +1,18 @@
 // UsageDashboard — the "無料枠 / 課金ガード" screen. Reads GET /usage/summary via
-// UsageApi (which falls back to the documented mock when the gateway is absent),
-// renders the worst-status banner, a reassurance note about Cloudflare's free plan,
-// and a responsive grid of ServiceUsageCards. "今すぐ更新" re-fetches. No optimistic
-// UI — a plain refetch is the whole interaction.
+// UsageApi (which falls back to a NEUTRAL summary when the gateway is absent), then
+// renders: a worst-status summary banner (with the billing-guard reassurance line), a
+// short reassurance card, and the metrics GROUPED by provider (Cloudflare / Resend /
+// [future GCP]) with worst-status-first ordering inside each group. "今すぐ更新"
+// re-fetches. No optimistic UI — a plain refetch is the whole interaction.
 import type { CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toCssVarName } from "@dub/tokens";
-import { Button, Card, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
+import { Button, Card, Icon, PageHeader, SkeletonLoader, Stack } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useUsageApi } from "./UsageProvider.tsx";
 import { UsageSummaryBanner } from "./components/UsageSummaryBanner.tsx";
-import { ServiceUsageCard } from "./components/ServiceUsageCard.tsx";
+import { ServiceGroup } from "./components/ServiceGroup.tsx";
+import { groupServicesByProvider } from "./usageStatus.ts";
 
 function formatGeneratedAt(iso: string): string {
   const d = new Date(iso);
@@ -31,21 +33,17 @@ const sampleNoticeStyle: CSSProperties = {
 };
 // Neutral (not warning-tinted) notice for the "could not read" state. It must not
 // borrow an alarm color — the whole point is that we DON'T know the usage, so the
-// surface stays calm/gray rather than yellow/red.
+// surface stays calm/gray rather than yellow/red, and it is clearly NOT real 0% data.
 const neutralNoticeStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: toCssVarName("space.2"),
   fontSize: toCssVarName("font.size.sm"),
   color: toCssVarName("color.text.secondary"),
-  padding: `${toCssVarName("space.2")} ${toCssVarName("space.3")}`,
+  padding: `${toCssVarName("space.3")} ${toCssVarName("space.4")}`,
   borderRadius: toCssVarName("radius.md"),
   background: toCssVarName("color.gray.100"),
-};
-
-/** Responsive auto-fit grid (min 260px columns). Kept inline (token-spaced) since
- *  @dub/ui Grid is fixed-column; auto-fit is the right fit for variable card counts. */
-const gridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-  gap: toCssVarName("space.4"),
+  border: `1px dashed ${toCssVarName("color.border.strong")}`,
 };
 
 export function UsageDashboard(): JSX.Element {
@@ -95,9 +93,12 @@ export function UsageDashboard(): JSX.Element {
     const notice =
       source === "unavailable" ? (
         <div role="note" data-testid="fe2-usage-unavailable-notice" data-reason={reason} style={neutralNoticeStyle}>
-          {reason === "forbidden"
-            ? "使用状況を表示する権限がありません（管理者にお問い合わせください）。表示中の各項目はサンプルではなく「取得不可」です。"
-            : "使用状況を取得できませんでした（取得中、または一時的に利用できません）。表示中の各項目はサンプルではなく「取得不可」です。"}
+          <Icon name="info" size="sm" aria-hidden="true" />
+          <span>
+            {reason === "forbidden"
+              ? "使用状況を表示する権限がありません（管理者にお問い合わせください）。表示中の各項目はサンプルでも 0% でもなく「取得不可」です。"
+              : "使用状況を取得できませんでした（取得中、または一時的に利用できません）。表示中の各項目はサンプルでも 0% でもなく「取得不可」です。"}
+          </span>
         </div>
       ) : source === "demo" ? (
         <div role="note" data-testid="fe2-usage-sample-notice" data-source={source} style={sampleNoticeStyle}>
@@ -105,16 +106,18 @@ export function UsageDashboard(): JSX.Element {
         </div>
       ) : null;
 
+    const groups = groupServicesByProvider(summary.services);
+
     body = (
-      <Stack gap={4}>
-        <UsageSummaryBanner worstStatus={summary.worstStatus} />
+      <Stack gap={5}>
+        <UsageSummaryBanner worstStatus={summary.worstStatus} services={summary.services} />
         {notice}
         {reassurance}
-        <div style={gridStyle} data-testid="fe2-usage-grid">
-          {summary.services.map((s) => (
-            <ServiceUsageCard key={`${s.provider}:${s.metricKey}`} service={s} />
+        <Stack gap={6} testId="fe2-usage-groups">
+          {groups.map((g) => (
+            <ServiceGroup key={g.provider} group={g} />
           ))}
-        </div>
+        </Stack>
         <span style={noteStyle} data-testid="fe2-usage-generated-at">
           最終更新: {formatGeneratedAt(summary.generatedAt)}
         </span>
@@ -126,7 +129,7 @@ export function UsageDashboard(): JSX.Element {
     <main data-testid="fe2-usage-dashboard">
       <PageHeader
         title="無料枠 / 課金ガード"
-        description="各サービスの無料枠の使用状況と、上限を超えたときの挙動を表示します。"
+        description="各サービスの無料枠の使用状況と、上限を超えたときの挙動（自動停止か課金か）を表示します。"
         actions={refreshAction}
       />
       {body}
