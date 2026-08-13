@@ -66,9 +66,11 @@ export function App() {
   // (e.g. "http://localhost:8787") to exercise the real fetch client against a
   // live/stub gateway — the same createHttpClient FE2 wires in production.
   const apiBase = import.meta.env.VITE_ROSTER_API_BASE as string | undefined;
+  // Dev-only: VITE_MOCK_LATENCY (ms) previews loading/skeleton states (FRONTEND_GUIDE §5).
+  const latency = Number(import.meta.env.VITE_MOCK_LATENCY ?? 0);
   const client = useMemo(
-    () => (apiBase ? createHttpClient({ baseUrl: apiBase }) : createMockClient({ me: MOCK_ME })),
-    [apiBase],
+    () => (apiBase ? createHttpClient({ baseUrl: apiBase }) : createMockClient({ me: MOCK_ME }, latency)),
+    [apiBase, latency],
   );
   const qc = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }), []);
   const [path, setPath] = useState("/admin/users");

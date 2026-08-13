@@ -13,6 +13,10 @@ export interface GatewayEnv {
   SVC_NOTIFICATION: Fetcher;
   SVC_FILE_META: Fetcher;
   SVC_DRIVE_PROXY: Fetcher;
+  // drive-share-service (Hackit Drive sharing manager). Optional so existing test
+  // env builders (which don't set it) still satisfy the interface; the real gateway
+  // binds it in wrangler. A missing binding → upstreamUnavailable on /driveshare only.
+  SVC_DRIVE_SHARE?: Fetcher;
   SVC_CHAT: Fetcher;
   SVC_MAIL_GATEWAY: Fetcher;
   SVC_DEPLOY: Fetcher;
@@ -20,6 +24,7 @@ export interface GatewayEnv {
   SVC_AUDIT_LOG: Fetcher;
   SVC_WEBHOOK_INGEST: Fetcher;
   SVC_USAGE_METER: Fetcher;
+  SVC_MEMBER: Fetcher;
 
   // ---- Queue producer (the one publish exception) ----
   EVT_NOTIFICATION?: Queue<DubEventEnvelope>;

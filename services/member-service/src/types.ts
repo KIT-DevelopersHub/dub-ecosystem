@@ -1,0 +1,78 @@
+// Service-local types for member-service (運営メンバー管理). Wire contracts come from
+// the CANONICAL @dub/types `member` namespace (Team is the single shared team
+// definition across all apps); this file adds only the internal persistence rows and
+// injected-dependency interfaces. Distinct from identity_* (RBAC login accounts).
+import type { common, identity, member } from "@dub/types";
+import type { MiddlewareHandler, Context } from "hono";
+
+export type MemberStatus = member.MemberStatus;
+export const MEMBER_STATUSES = ["added", "invited", "considering", "declined"] as const;
+
+// ---- internal persistence rows (superset of the wire types) ----
+export interface TeamRow {
+  id: string;
+  orgId: common.OrgId;
+  key: string;
+  name: string;
+  color: string | null;
+  description: string | null;
+  sortOrder: number;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+}
+export interface PersonRow {
+  id: string;
+  orgId: common.OrgId;
+  name: string;
+  roleTitle: string | null;
+  status: MemberStatus;
+  contact: string | null;
+  note: string | null;
+  sortOrder: number;
+  version: number;
+  archivedAt: common.ISODateTime | null;
+  createdBy: common.UserId;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+}
+
+// ---- injected dependencies (enables full HTTP-level tests with fakes) ----
+export interface Authz {
+  requireAuth(): MiddlewareHandler;
+  requirePermission(
+    permission: identity.PermissionKey,
+    resolve?: (c: Context) => { orgId?: string; resourceType?: string; resourceId?: string },
+  ): MiddlewareHandler;
+  hasPermission(userId: common.UserId, orgId: common.OrgId, query: identity.AuthzQuery): Promise<boolean>;
+}
+
+export interface MemberRepo {
+  // teams
+  createTeam(row: TeamRow): Promise<void>;
+  getTeam(id: string): Promise<TeamRow | null>;
+  getTeamByKey(orgId: common.OrgId, key: string): Promise<TeamRow | null>;
+  listTeams(orgId: common.OrgId): Promise<TeamRow[]>;
+  updateTeam(row: TeamRow): Promise<boolean>;
+  deleteTeam(id: string): Promise<void>;
+  maxTeamSortOrder(orgId: common.OrgId): Promise<number>;
+
+  // people
+  createPerson(row: PersonRow, teamIds: string[]): Promise<void>;
+  getPerson(id: string): Promise<PersonRow | null>;
+  listPeople(orgId: common.OrgId): Promise<PersonRow[]>;
+  updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean>;
+  archivePerson(id: string): Promise<void>;
+  maxPersonSortOrder(orgId: common.OrgId): Promise<number>;
+
+  // team membership (person_id -> team_ids) for the whole org in one read.
+  teamLinksForOrg(orgId: common.OrgId): Promise<Array<{ personId: string; teamId: string }>>;
+}
+
+export interface AppDeps {
+  repo: MemberRepo;
+  authz: Authz;
+  orgId: common.OrgId;
+  now: () => string;
+  newTeamId: () => string;
+  newMemberId: () => string;
+}

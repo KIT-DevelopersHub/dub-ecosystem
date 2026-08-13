@@ -1,0 +1,33 @@
+# Free-tier deploy of drive-share-service as `dub-drive-share-service` (internal; reached
+# via the api-gateway SVC_DRIVE_SHARE service binding — workers.dev disabled). Owns no D1
+# and no Queues, so there is no free/paid divergence beyond the identity binding target
+# and workers_dev=false. Until the Hackit OAuth secrets are set the in-memory mock client
+# runs (still $0, fully usable for demo/E2E).
+#
+# Deploy:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config services/drive-share-service/wrangler.free.toml
+# Secrets (GOOGLE_HACKIT_OAUTH_*) are set out-of-band via `wrangler secret put` and
+# persist across deploys; never commit them (機密はローカルのみ).
+name = "dub-drive-share-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# --- Service Bindings (live free-tier workers) ---
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (drive:read / drive:write)
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+DRIVESHARE_LIST_PAGE_SIZE = "50"
+
+# --- Secrets (set via `wrangler secret put`, never in this file) ---
+# GOOGLE_HACKIT_OAUTH_CLIENT_ID
+# GOOGLE_HACKIT_OAUTH_CLIENT_SECRET
+# GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN

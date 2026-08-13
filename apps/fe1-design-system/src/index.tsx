@@ -56,6 +56,12 @@ export type {
   DisplayableError,
   ErrorStateProps,
   SkeletonLoaderProps,
+  SkeletonVariant,
+  SkeletonAnimation,
+  SkeletonProps,
+  SkeletonListProps,
+  SkeletonTableProps,
+  SkeletonCardProps,
   RateLimitNoticeProps,
   TimelineScale,
   TimelineRow,
@@ -93,6 +99,7 @@ export { AppLauncher } from "./components/AppLauncher";
 export { Sidebar } from "./components/Sidebar";
 export { Tabs } from "./components/Tabs";
 export { EmptyState, ErrorState, SkeletonLoader } from "./components/States";
+export { Skeleton, SkeletonList, SkeletonTable, SkeletonCard } from "./components/Skeleton";
 export { RateLimitNotice, formatRecoveryText } from "./components/RateLimitNotice";
 export { Timeline } from "./components/Timeline";
 export { MessageList } from "./components/MessageList";

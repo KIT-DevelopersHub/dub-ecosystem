@@ -63,6 +63,11 @@ service = "dub-drive-proxy"
 environment = "production"
 
 [[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "dub-drive-share-service"
+environment = "production"
+
+[[services]]
 binding = "SVC_CHAT"
 service = "dub-chat-service"
 environment = "production"
@@ -95,4 +100,9 @@ environment = "production"
 [[services]]
 binding = "SVC_USAGE_METER"
 service = "dub-usage-meter"
+environment = "production"
+
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"
 environment = "production"

@@ -35,6 +35,8 @@ describe("assembleFeatureModules", () => {
       "chat",
       "mail",
       "usage",
+      "members",
+      "driveshare",
       "admin",
     ]);
   });
@@ -44,7 +46,7 @@ describe("assembleFeatureModules", () => {
     const registry = buildRegistry(assembleFeatureModules(api));
     const paths = registry.routes.map((r) => r.path);
     // core segments each feature owns
-    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/gantt", "/notifications", "/chat", "/mail", "/usage", "/admin/users"]));
+    expect(paths).toEqual(expect.arrayContaining(["/events", "/me/tasks", "/gantt", "/notifications", "/chat", "/mail", "/usage", "/members", "/driveshare", "/admin/users"]));
     // no duplicates survived the flatten + ownership check
     expect(new Set(paths).size).toBe(paths.length);
   });

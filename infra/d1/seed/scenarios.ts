@@ -299,6 +299,57 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
         ["id"],
       );
     }
+
+    // 8. 運営メンバー管理 (member-service): teams + people across all statuses, so the
+    //    運営メンバー screen (一覧 / チーム別 / 組織図) renders with representative data.
+    // PDF「全体組織体制図」に寄せた構成: 統括チーム＋色付き5チーム、役割段は role_title で表現。
+    const memberTeams = [
+      { id: `member_team_hq${sfx}`, key: `soukatsu${sfx}`, name: "統括チーム", color: "#1e3a5f", description: "全体意思決定・進行統制・チーム間調整" },
+      { id: `member_team_dev${sfx}`, key: `dev${sfx}`, name: "開発チーム", color: "#0d9488", description: "運営ツール内製・名簿・当日連絡基盤" },
+      { id: `member_team_ops${sfx}`, key: `ops${sfx}`, name: "当日進行チーム", color: "#2563eb", description: "進行管理・タイムテーブル・人員配置" },
+      { id: `member_team_sponsor${sfx}`, key: `sponsor${sfx}`, name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
+      { id: `member_team_venue${sfx}`, key: `venue${sfx}`, name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
+      { id: `member_team_pr${sfx}`, key: `pr${sfx}`, name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
+    ];
+    for (let i = 0; i < memberTeams.length; i++) {
+      const t = memberTeams[i]!;
+      await w.upsert(
+        "member_teams",
+        { id: t.id, org_id: SEED.orgs.primary.id, key: t.key, name: t.name, color: t.color, description: t.description, sort_order: (i + 1) * 1024, created_at: SEED_TS, updated_at: SEED_TS },
+        "replace",
+        ["id"],
+      );
+    }
+    const memberPeople = [
+      { id: `member_p1${sfx}`, name: "高岡 己太朗", role: "実行委員長", status: "added", teams: [0], contact: "kota@developershub.jp" },
+      { id: `member_p2${sfx}`, name: "黒川", role: "統括メンバー", status: "added", teams: [0], contact: null },
+      { id: `member_p3${sfx}`, name: "荒木", role: "オーガナイザー", status: "added", teams: [1], contact: null },
+      { id: `member_p4${sfx}`, name: "阿閉", role: "リーダー", status: "added", teams: [1], contact: null },
+      { id: `member_p5${sfx}`, name: "久米", role: "オーガナイザー", status: "added", teams: [2], contact: null },
+      { id: `member_p6${sfx}`, name: "吉岡", role: "オーガナイザー", status: "added", teams: [3], contact: null },
+      { id: `member_p7${sfx}`, name: "松島", role: "メンバー", status: "invited", teams: [3], contact: null },
+      { id: `member_p8${sfx}`, name: "清水", role: "オーガナイザー", status: "added", teams: [4], contact: null },
+      { id: `member_p9${sfx}`, name: "白木", role: "オーガナイザー", status: "added", teams: [5], contact: null },
+      { id: `member_p10${sfx}`, name: "鈴木 一郎", role: "広報担当", status: "invited", teams: [5], contact: "ichiro@example.com" },
+      { id: `member_p11${sfx}`, name: "山田 三郎", role: "デザイン", status: "declined", teams: [] as number[], contact: null },
+    ];
+    for (let i = 0; i < memberPeople.length; i++) {
+      const p = memberPeople[i]!;
+      await w.upsert(
+        "member_people",
+        { id: p.id, org_id: SEED.orgs.primary.id, name: p.name, role_title: p.role, status: p.status, contact: p.contact, note: null, sort_order: (i + 1) * 1024, version: 1, archived_at: null, created_by: adminId, created_at: SEED_TS, updated_at: SEED_TS },
+        "replace",
+        ["id"],
+      );
+      for (const teamIdx of p.teams) {
+        await w.upsert(
+          "member_team_links",
+          { person_id: p.id, team_id: memberTeams[teamIdx]!.id, created_at: SEED_TS, updated_at: SEED_TS },
+          "replace",
+          ["person_id", "team_id"],
+        );
+      }
+    }
   }
 
   // seed_runs ledger (idempotent: UNIQUE(dataset, run_id, fixture_hash)).

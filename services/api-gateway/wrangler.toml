@@ -55,6 +55,10 @@ binding = "SVC_DRIVE_PROXY"
 service = "dub-drive-proxy"
 
 [[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "dub-drive-share-service"
+
+[[services]]
 binding = "SVC_CHAT"
 service = "chat-service"
 
@@ -81,6 +85,10 @@ service = "dub-webhook-ingest"
 [[services]]
 binding = "SVC_USAGE_METER"
 service = "usage-meter"
+
+[[services]]
+binding = "SVC_MEMBER"
+service = "member-service"
 
 # ---- Queue producer (the single publish exception: public.inquiry.received) ----
 [[queues.producers]]

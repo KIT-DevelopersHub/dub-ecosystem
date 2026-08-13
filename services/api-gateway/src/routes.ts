@@ -47,6 +47,9 @@ export const ROUTES: readonly GatewayRoute[] = [
   { segment: "feedback", binding: "SVC_NOTIFICATION", auth: "required" },
   { segment: "files", binding: "SVC_FILE_META", auth: "required" }, // body cap resolved from env at runtime
   { segment: "drive", binding: "SVC_DRIVE_PROXY", auth: "required" },
+  // Hackit Drive sharing manager (fe2 driveshare feature). Manages Google Drive
+  // permissions for the shared Gmail via drive-share-service (drive:read / drive:write).
+  { segment: "driveshare", binding: "SVC_DRIVE_SHARE", auth: "required" },
   { segment: "chat", binding: "SVC_CHAT", auth: "required" }, // HTTP only; WS upgrade is rejected
   {
     // User-facing mail: inbox reads (/mail/messages, /mail/threads) + compose
@@ -72,6 +75,10 @@ export const ROUTES: readonly GatewayRoute[] = [
   // "internal" has no route -> 404). auth=required forwards x-dub-user-id; usage-meter
   // re-checks authentication (any signed-in user may view — the numbers are safe to show).
   { segment: "usage", binding: "SVC_USAGE_METER", auth: "required" },
+  // 運営メンバー管理 (member-service): teams + people CRUD + /members/overview. auth=required
+  // forwards x-dub-user-id; member-service re-checks identity:read (read) / identity:admin
+  // (write). Plain proxied segment (no internal-only paths).
+  { segment: "members", binding: "SVC_MEMBER", auth: "required" },
 ] as const;
 
 const ROUTE_BY_SEGMENT = new Map<string, GatewayRoute>(ROUTES.map((r) => [r.segment, r]));
