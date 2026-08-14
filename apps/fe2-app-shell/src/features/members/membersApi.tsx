@@ -2,11 +2,12 @@
 // shell api-client (src/lib/api-client.tsx): session cookie, 401→refresh, requestId,
 // error normalization. Callers never write fetch. All paths are /api/v1/members/*
 // and resolve at the gateway to services/member-service.
-import type { member } from "@dub/types";
+import type { common, identity, member } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type {
   CreateMemberRequest,
   CreateTeamRequest,
+  LinkIdentityRequest,
   MembersOverview,
   MemberTeam,
   OrgMember,
@@ -25,6 +26,11 @@ export interface MembersApi {
   createMember(input: CreateMemberRequest): Promise<OrgMember>;
   updateMember(id: string, patch: UpdateMemberRequest): Promise<OrgMember>;
   deleteMember(id: string): Promise<void>;
+  /** Link (or unlink with identityUserId=null via updateMember) a member to a login
+   *  account. Human-confirmed; the candidate list comes from listIdentityUsers. */
+  linkIdentity(id: string, input: LinkIdentityRequest): Promise<OrgMember>;
+  /** Roster login accounts (identity:read) — the candidate pool for the link dialog. */
+  listIdentityUsers(): Promise<common.Paginated<identity.IdentityUser>>;
 }
 
 const BASE = "/api/v1/members";
@@ -47,5 +53,9 @@ export function createMembersApi(api: ApiClient): MembersApi {
     deleteMember: async (id) => {
       await api.request<{ ok: true }>({ method: "DELETE", path: `${BASE}/people/${encodeURIComponent(id)}` });
     },
+    linkIdentity: (id, input) =>
+      api.request<OrgMember, LinkIdentityRequest>({ method: "POST", path: `${BASE}/people/${encodeURIComponent(id)}/identity-link`, body: input }),
+    listIdentityUsers: () =>
+      api.request<common.Paginated<identity.IdentityUser>>({ method: "GET", path: `/api/v1/identity/users` }),
   };
 }

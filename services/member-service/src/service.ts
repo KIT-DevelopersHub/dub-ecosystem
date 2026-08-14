@@ -145,6 +145,7 @@ export class MemberService {
       name: name(body.name),
       roleTitle: optText(body.roleTitle, "roleTitle"),
       status: body.status,
+      identityUserId: null,
       contact: optText(body.contact, "contact"),
       note: optText(body.note, "note"),
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
@@ -166,11 +167,16 @@ export class MemberService {
       throw errors.validationFailed([{ field: "status", reason: "invalid" }]);
     }
     const teamIds = body.teamIds !== undefined ? await this.validateTeamIds(body.teamIds) : undefined;
+    const identityUserId =
+      body.identityUserId !== undefined
+        ? await this.resolveIdentityLink(body.identityUserId, cur.id)
+        : cur.identityUserId;
     const next: PersonRow = {
       ...cur,
       name: body.name !== undefined ? name(body.name) : cur.name,
       roleTitle: body.roleTitle !== undefined ? optText(body.roleTitle, "roleTitle") : cur.roleTitle,
       status: body.status ?? cur.status,
+      identityUserId,
       contact: body.contact !== undefined ? optText(body.contact, "contact") : cur.contact,
       note: body.note !== undefined ? optText(body.note, "note") : cur.note,
       sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : cur.sortOrder,
@@ -187,6 +193,47 @@ export class MemberService {
     const cur = await this.deps.repo.getPerson(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
     await this.deps.repo.archivePerson(id);
+  }
+
+  // ---- identity linking (#1: bridge 組織図 <-> RBAC 真実) ----
+  /**
+   * Validate an identityUserId assignment for `personId`. `null` unlinks. A non-empty
+   * string links, but the same account may not be linked to two 運営メンバー at once
+   * (409 conflict) — the relationship is 1:1 so offboarding fan-out is unambiguous.
+   */
+  private async resolveIdentityLink(value: unknown, personId: string): Promise<string | null> {
+    if (value === null) return null;
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw errors.validationFailed([{ field: "identityUserId", reason: "invalid" }]);
+    }
+    const id = value.trim();
+    const other = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, id);
+    if (other && other.id !== personId) {
+      throw new DubError("MEMBER_IDENTITY_ALREADY_LINKED", `identity user ${id} is already linked to another member`, {
+        status: 409,
+        details: [{ field: "identityUserId", reason: "already_linked", message: other.id }],
+      });
+    }
+    return id;
+  }
+
+  /** Link (or re-link) a member to an identity account. Optimistic-concurrency by version. */
+  async linkIdentity(_ctx: ReqCtx, id: string, body: member.LinkIdentityRequest): Promise<member.Member> {
+    if (typeof body?.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    const cur = await this.deps.repo.getPerson(id);
+    if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
+    const identityUserId = await this.resolveIdentityLink(body.identityUserId, cur.id);
+    const next: PersonRow = { ...cur, identityUserId, version: body.version + 1, updatedAt: this.deps.now() };
+    const ok = await this.deps.repo.updatePerson(next, body.version);
+    if (!ok) throw errVersionConflict(id);
+    return toMember(next, await this.currentTeamIds(id));
+  }
+
+  /** Reverse lookup used by offboarding fan-out: the member linked to an identity user. */
+  async getByIdentityUserId(_ctx: ReqCtx, identityUserId: string): Promise<member.Member | null> {
+    const cur = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, identityUserId);
+    if (!cur) return null;
+    return toMember(cur, await this.currentTeamIds(cur.id));
   }
 
   private async currentTeamIds(personId: string): Promise<string[]> {

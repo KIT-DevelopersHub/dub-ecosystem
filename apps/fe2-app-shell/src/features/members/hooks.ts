@@ -10,6 +10,7 @@ import { useMembersApi } from "./MembersProvider.tsx";
 import type {
   CreateMemberRequest,
   CreateTeamRequest,
+  LinkIdentityRequest,
   MembersOverview,
   OrgMember,
   UpdateMemberRequest,
@@ -17,12 +18,20 @@ import type {
 } from "./contracts.ts";
 
 export const OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "overview");
+export const IDENTITY_USERS_KEY: QueryKey = queryKeys.feature("members", "identity-users");
 
 const EMPTY_OVERVIEW: MembersOverview = { teams: [], members: [] };
 
 export function useMembersOverview() {
   const api = useMembersApi();
   return useQuery({ queryKey: OVERVIEW_KEY, queryFn: () => api.getOverview() });
+}
+
+/** Roster login accounts — the candidate pool for linking (#1). Cached a bit longer
+ *  than the overview since the account set changes less often than 組織図 edits. */
+export function useIdentityUsers() {
+  const api = useMembersApi();
+  return useQuery({ queryKey: IDENTITY_USERS_KEY, queryFn: () => api.listIdentityUsers(), staleTime: 60_000 });
 }
 
 function messageFor(err: unknown, fallback: string): string {
@@ -129,6 +138,36 @@ export function useDeleteMember() {
     optimistic: (prev, id) => ({ ...prev, members: prev.members.filter((m) => m.id !== id) }),
     successMessage: "メンバーを削除しました",
     errorFallback: "メンバーを削除できませんでした",
+  });
+}
+
+/** Link (or unlink with identityUserId=null) a member to a login account (#1). Optimistic:
+ *  the linked account shows immediately, rolling back on error (e.g. 409 already-linked). */
+export function useLinkIdentity() {
+  const api = useMembersApi();
+  return useOverviewMutation<{ id: string; req: LinkIdentityRequest }, OrgMember>({
+    mutationFn: ({ id, req }) => api.linkIdentity(id, req),
+    optimistic: (prev, { id, req }) => ({
+      ...prev,
+      members: prev.members.map((m) =>
+        m.id === id ? { ...m, identityUserId: req.identityUserId, version: m.version + 1 } : m,
+      ),
+    }),
+    successMessage: "アカウントを紐付けました",
+    errorFallback: "アカウントを紐付けできませんでした",
+  });
+}
+
+export function useUnlinkIdentity() {
+  const api = useMembersApi();
+  return useOverviewMutation<{ id: string; version: number }, OrgMember>({
+    mutationFn: ({ id, version }) => api.updateMember(id, { identityUserId: null, version }),
+    optimistic: (prev, { id }) => ({
+      ...prev,
+      members: prev.members.map((m) => (m.id === id ? { ...m, identityUserId: null, version: m.version + 1 } : m)),
+    }),
+    successMessage: "紐付けを解除しました",
+    errorFallback: "紐付けを解除できませんでした",
   });
 }
 
