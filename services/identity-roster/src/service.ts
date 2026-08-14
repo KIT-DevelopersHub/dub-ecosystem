@@ -11,6 +11,8 @@ import type {
   AssignRoleRequest,
   CreateRoleRequest,
   EffectivePermissionsResponse,
+  EmailRoutingDiffRow,
+  EmailRoutingSyncPreview,
   IdentityUserDetailView,
   IdentityUserView,
   InviteUserResponse,
@@ -331,6 +333,73 @@ export class IdentityService {
    * All addresses are validated before any write, so a bad address aborts cleanly
    * with no partial mutation. Synchronous D1 upsert; independent of the freeq drain.
    */
+  /** Normalize + de-dupe incoming Email Routing addresses (shared by preview + sync).
+   *  Throws on a bad address before any caller does work (fail-fast, no partial state). */
+  private normalizeRoutingAddresses(req: SyncEmailRoutingRequest): { email: string; enabled: boolean }[] {
+    if (!req || !Array.isArray(req.addresses)) {
+      throw errors.validationFailed([{ field: "addresses", reason: "required" }]);
+    }
+    const seen = new Set<string>();
+    const out: { email: string; enabled: boolean }[] = [];
+    for (const a of req.addresses) {
+      const email = requireEmail(a?.address ?? "");
+      if (seen.has(email)) continue;
+      seen.add(email);
+      out.push({ email, enabled: a?.enabled !== false });
+    }
+    return out;
+  }
+
+  /**
+   * #5: READ-ONLY diff of what syncEmailRouting would change — the console shows this and
+   * requires an explicit apply. Mirrors the apply's reconciliation exactly (upsert-by-email
+   * + logical deactivation of owned rows that vanished, admin-guarded) but performs NO
+   * writes. `projected` is the SyncEmailRoutingResult the apply is expected to return.
+   */
+  async previewEmailRouting(orgId: string, req: SyncEmailRoutingRequest): Promise<EmailRoutingSyncPreview> {
+    const org = await this.d.repo.getOrg(orgId);
+    if (!org) throw errors.notFound("org", orgId);
+    const normalized = this.normalizeRoutingAddresses(req);
+    const seen = new Set(normalized.map((n) => n.email.toLowerCase()));
+
+    const toAdd: EmailRoutingDiffRow[] = [];
+    const toReactivate: EmailRoutingDiffRow[] = [];
+    const toRelink: EmailRoutingDiffRow[] = [];
+    let updated = 0;
+    for (const { email, enabled } of normalized) {
+      const existing = await this.d.repo.getUserByEmail(orgId, email);
+      if (!existing) {
+        toAdd.push({ email, enabled });
+        continue;
+      }
+      updated++; // apply marks every existing matched row source=email-routing
+      if (enabled && existing.status === "disabled" && existing.source === "email-routing") {
+        toReactivate.push({ email, userId: existing.id, enabled });
+      } else if (existing.source !== "email-routing") {
+        toRelink.push({ email, userId: existing.id });
+      }
+    }
+
+    const toDeactivate: EmailRoutingDiffRow[] = [];
+    const adminKept: EmailRoutingDiffRow[] = [];
+    const admins = new Set(await this.d.repo.usersWithOrgWidePermission(orgId, ADMIN));
+    const owned = await this.d.repo.listUsersBySource(orgId, "email-routing");
+    for (const u of owned) {
+      if (seen.has(u.email.toLowerCase()) || u.status === "disabled") continue;
+      if (admins.has(u.id)) adminKept.push({ email: u.email, userId: u.id });
+      else toDeactivate.push({ email: u.email, userId: u.id });
+    }
+
+    return {
+      toAdd,
+      toReactivate,
+      toRelink,
+      toDeactivate,
+      adminKept,
+      projected: { added: toAdd.length, updated, deactivated: toDeactivate.length, total: normalized.length },
+    };
+  }
+
   async syncEmailRouting(orgId: string, req: SyncEmailRoutingRequest, ctx: RequestCtx): Promise<SyncEmailRoutingResult> {
     const org = await this.d.repo.getOrg(orgId);
     if (!org) throw errors.notFound("org", orgId);

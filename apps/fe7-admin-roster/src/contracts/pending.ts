@@ -89,6 +89,21 @@ export interface SyncEmailRoutingResult {
   total: number;
 }
 
+// #5: read-only diff preview of a sync (owned by identity-roster; modeled locally).
+export interface EmailRoutingDiffRow {
+  email: string;
+  userId?: string;
+  enabled?: boolean;
+}
+export interface EmailRoutingSyncPreview {
+  toAdd: EmailRoutingDiffRow[];
+  toReactivate: EmailRoutingDiffRow[];
+  toRelink: EmailRoutingDiffRow[];
+  toDeactivate: EmailRoutingDiffRow[];
+  adminKept: EmailRoutingDiffRow[];
+  projected: SyncEmailRoutingResult;
+}
+
 // PATCH sends only the changed fields (enable/disable toggle, or new destination).
 export interface UpdateEmailAddressRequest {
   enabled?: boolean;

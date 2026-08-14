@@ -113,6 +113,11 @@ export function createApp(opts: AppOptions): App {
   // Reconcile the roster with the Cloudflare Email Routing @developershub.jp addresses.
   // The caller (roster console, holds mail:admin) relays the addresses it read from the
   // mail-gateway proxy; identity upserts them by email (source=email-routing) synchronously.
+  // #5: read-only diff preview — no writes; the console applies with the endpoint below.
+  ext.post("/users/sync-email-routing/preview", requirePermission("identity:admin"), async (c) => {
+    const body = await readJson<{ addresses?: unknown }>(c);
+    return c.json(await svc.previewEmailRouting(orgId, body as never));
+  });
   ext.post("/users/sync-email-routing", requirePermission("identity:admin"), async (c) => {
     const body = await readJson<{ addresses?: unknown }>(c);
     return c.json(await svc.syncEmailRouting(orgId, body as never, ctxOf(c)));

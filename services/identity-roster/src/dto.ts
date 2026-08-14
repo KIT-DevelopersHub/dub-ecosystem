@@ -28,6 +28,24 @@ export interface SyncEmailRoutingResult {
   total: number; // addresses accepted from the request
 }
 
+// ---- Email Routing sync PREVIEW (#5): read-only diff before applying ----
+// Same reconciliation as syncEmailRouting, but computes the plan WITHOUT writing so the
+// console can show what would change and require an explicit apply. `projected` equals the
+// SyncEmailRoutingResult the subsequent apply is expected to return.
+export interface EmailRoutingDiffRow {
+  email: string;
+  userId?: string; // present for rows that already exist on the roster
+  enabled?: boolean; // present for incoming addresses (add/reactivate)
+}
+export interface EmailRoutingSyncPreview {
+  toAdd: EmailRoutingDiffRow[]; // in Email Routing, not yet on the roster -> new row
+  toReactivate: EmailRoutingDiffRow[]; // disabled email-routing rows re-appearing enabled
+  toRelink: EmailRoutingDiffRow[]; // existing manual rows whose provenance would flip to email-routing
+  toDeactivate: EmailRoutingDiffRow[]; // owned rows no longer present -> would be disabled
+  adminKept: EmailRoutingDiffRow[]; // owned rows that WOULD deactivate but are admins (kept, guarded)
+  projected: SyncEmailRoutingResult; // the counts the apply is expected to produce
+}
+
 export interface UpdateUserRequest {
   displayName?: string;
   githubLogin?: string | null;

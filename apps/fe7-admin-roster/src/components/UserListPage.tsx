@@ -20,7 +20,8 @@ import { UserStatusBadge } from "./UserStatusBadge";
 import { UserInlineEditor } from "./UserInlineEditor";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
-import { useUsers, useSyncEmailRouting, isEmailRoutingUnconfigured } from "../hooks/useRosterApi";
+import { SyncPreviewDialog } from "./SyncPreviewDialog";
+import { useUsers, useSyncEmailRouting, usePreviewEmailRouting, isEmailRoutingUnconfigured } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
@@ -82,12 +83,27 @@ export function UserListPage() {
   const { me } = useRosterContext();
   const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
   const sync = useSyncEmailRouting();
+  const preview = usePreviewEmailRouting();
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const currentUserId = me?.user.id ?? "";
   const canInvite = can("identity:admin");
   const canManageRouting = can("mail:admin"); // read the proxy / issue addresses
   const canSync = canInvite && canManageRouting; // relay proxy -> roster upsert
-  const notConnected = isEmailRoutingUnconfigured(sync.error);
+  const notConnected = isEmailRoutingUnconfigured(sync.error) || isEmailRoutingUnconfigured(preview.error);
+
+  // #5: preview first (read-only diff), then apply from the dialog with an explicit button.
+  function openPreview() {
+    preview.mutate(undefined, { onSuccess: () => setPreviewOpen(true) });
+  }
+  function applySync() {
+    sync.mutate(undefined, {
+      onSuccess: () => {
+        setPreviewOpen(false);
+        preview.reset();
+      },
+    });
+  }
 
   const items = query.data?.items ?? [];
   // Resolve the selection against the freshest list so the pane reflects saved edits
@@ -127,11 +143,11 @@ export function UserListPage() {
             {canSync ? (
               <Button
                 variant="primary"
-                onClick={() => sync.mutate()}
-                disabled={sync.isPending}
+                onClick={openPreview}
+                disabled={preview.isPending || sync.isPending}
                 testId="fe7-users-sync"
               >
-                {sync.isPending ? <Spinner /> : "Email Routing から同期"}
+                {preview.isPending ? <Spinner /> : "Email Routing から同期"}
               </Button>
             ) : null}
             {canManageRouting ? (
@@ -249,7 +265,14 @@ export function UserListPage() {
       <NewEmailAddressDialog
         open={issueOpen}
         onClose={() => setIssueOpen(false)}
-        onCreated={() => sync.mutate()}
+        onCreated={openPreview}
+      />
+      <SyncPreviewDialog
+        open={previewOpen}
+        preview={preview.data ?? null}
+        applying={sync.isPending}
+        onApply={applySync}
+        onCancel={() => setPreviewOpen(false)}
       />
     </div>
   );

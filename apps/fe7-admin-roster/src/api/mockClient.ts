@@ -5,7 +5,7 @@
 import { identity } from "@dub/types"; // value import: identity.PERMISSION_CATALOG (runtime) + types
 import type { common, auditLog, gateway, member } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
 import { EMAIL_ROUTING_DOMAIN } from "../contracts/pending";
 
 // Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
@@ -197,6 +197,45 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       };
       s.assignments.set(userId, [...list, asg]);
       return asg as unknown as T;
+    }
+    if (path.endsWith("/users/sync-email-routing/preview")) {
+      const req = body as { addresses?: Array<{ address: string; enabled?: boolean }> };
+      const list = Array.isArray(req?.addresses) ? req.addresses : [];
+      const seen = new Set<string>();
+      const normalized: { email: string; enabled: boolean }[] = [];
+      for (const a of list) {
+        const email = (a?.address ?? "").trim().toLowerCase();
+        if (!EMAIL_RE.test(email)) throw err("VALIDATION_FAILED", "invalid address", [{ field: "address", reason: "format", message: email }]);
+        if (seen.has(email)) continue;
+        seen.add(email);
+        normalized.push({ email, enabled: a?.enabled !== false });
+      }
+      const toAdd: EmailRoutingSyncPreview["toAdd"] = [];
+      const toReactivate: EmailRoutingSyncPreview["toReactivate"] = [];
+      const toRelink: EmailRoutingSyncPreview["toRelink"] = [];
+      let updated = 0;
+      for (const { email, enabled } of normalized) {
+        const existing = [...s.users.values()].find((u) => u.email.toLowerCase() === email);
+        if (!existing) { toAdd.push({ email, enabled }); continue; }
+        updated++;
+        if (enabled && existing.status === "disabled" && existing.source === "email-routing") toReactivate.push({ email, userId: existing.id, enabled });
+        else if (existing.source !== "email-routing") toRelink.push({ email, userId: existing.id });
+      }
+      const adminRoleIds = new Set([...s.roles.values()].filter((r) => r.permissions.includes("identity:admin")).map((r) => r.id));
+      const isAdmin = (uid: string) => (s.assignments.get(uid) ?? []).some((a) => a.resourceType === null && adminRoleIds.has(a.roleId));
+      const toDeactivate: EmailRoutingSyncPreview["toDeactivate"] = [];
+      const adminKept: EmailRoutingSyncPreview["adminKept"] = [];
+      for (const u of [...s.users.values()]) {
+        if (u.source !== "email-routing" || u.status === "disabled") continue;
+        if (seen.has(u.email.toLowerCase())) continue;
+        if (isAdmin(u.id)) adminKept.push({ email: u.email, userId: u.id });
+        else toDeactivate.push({ email: u.email, userId: u.id });
+      }
+      const result: EmailRoutingSyncPreview = {
+        toAdd, toReactivate, toRelink, toDeactivate, adminKept,
+        projected: { added: toAdd.length, updated, deactivated: toDeactivate.length, total: normalized.length },
+      };
+      return result as unknown as T;
     }
     if (path.endsWith("/users/sync-email-routing")) {
       const req = body as { addresses?: Array<{ address: string; enabled?: boolean }> };

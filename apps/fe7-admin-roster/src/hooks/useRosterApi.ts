@@ -21,6 +21,7 @@ import type {
   RoleAssignment,
   RosterUser,
   SyncEmailRoutingResult,
+  EmailRoutingSyncPreview,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
   UpdateEmailAddressRequest,
@@ -254,6 +255,28 @@ export function useInviteUser() {
  * it rejects with EMAIL_ROUTING_UNCONFIGURED — the caller reads `mutation.error`
  * (isEmailRoutingUnconfigured) to render the "未接続" notice instead of a toast.
  */
+/**
+ * #5: PREVIEW the Email Routing sync. Reads the @developershub.jp addresses through the
+ * proxy (needs mail:admin), then asks identity for the read-only diff (needs
+ * identity:admin) WITHOUT applying it. Surfaces EMAIL_ROUTING_UNCONFIGURED the same way
+ * as the apply, so the caller reuses isEmailRoutingUnconfigured for the "未接続" notice.
+ */
+export function usePreviewEmailRouting() {
+  const { api } = useRosterContext();
+  const { toast } = useToast();
+  return useMutation<EmailRoutingSyncPreview>({
+    mutationFn: async () => {
+      const { items } = await api.listRosterEmailAddresses();
+      return api.previewEmailRouting(items);
+    },
+    onError: (err) => {
+      if (isEmailRoutingUnconfigured(err)) return; // inline notice, not a toast
+      const p = presentError(err);
+      toast({ kind: "error", title: "プレビューの取得に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
+}
+
 export function useSyncEmailRouting() {
   const { api } = useRosterContext();
   const qc = useQueryClient();

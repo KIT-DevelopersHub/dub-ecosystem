@@ -12,6 +12,7 @@ import type {
   EmailRoutingAddress,
   CreateEmailAddressRequest,
   UpdateEmailAddressRequest,
+  EmailRoutingSyncPreview,
   OffboardUserResult,
   RosterUser,
   SyncEmailRoutingAddress,
@@ -51,6 +52,8 @@ export interface RosterApi {
   /** Roster sync SOURCE: the @developershub.jp RECEIVING addresses (routing rules,
    *  zone-scoped), i.e. every issued address — not the ~1 account-scoped destination. */
   listRosterEmailAddresses(): Promise<{ items: SyncEmailRoutingAddress[] }>;
+  /** #5: read-only diff of what a sync WOULD change (no writes) — shown before apply. */
+  previewEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<EmailRoutingSyncPreview>;
   /** Reconcile the roster with the @developershub.jp Email Routing addresses. */
   syncEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<SyncEmailRoutingResult>;
   listRoles(): Promise<common.Paginated<identity.Role>>;
@@ -97,6 +100,8 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     patchMember: (memberId, patch) => client.patch<member.Member>(`${MEMBERS}/people/${memberId}`, patch),
     listRosterEmailAddresses: () =>
       client.get<{ items: SyncEmailRoutingAddress[] }>(`${EMAIL_ROUTING}/roster-addresses`),
+    previewEmailRouting: (addresses) =>
+      client.post<EmailRoutingSyncPreview>(`${IDENTITY}/users/sync-email-routing/preview`, { addresses }),
     syncEmailRouting: (addresses) =>
       client.post<SyncEmailRoutingResult>(`${IDENTITY}/users/sync-email-routing`, { addresses }),
     listRoles: () => client.get<common.Paginated<identity.Role>>(`${IDENTITY}/roles`),
