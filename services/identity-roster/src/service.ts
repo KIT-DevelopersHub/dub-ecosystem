@@ -14,6 +14,8 @@ import type {
   IdentityUserDetailView,
   IdentityUserView,
   InviteUserResponse,
+  OffboardUserResult,
+  OffboardStepResult,
   ProvisionUserResponse,
   RoleAssignmentView,
   RoleWithMemberCount,
@@ -250,6 +252,71 @@ export class IdentityService {
     const updated = (await this.d.repo.getUser(userId))!;
     const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
     return this.toIdentityUser(updated, assignments);
+  }
+
+  // ---------- offboarding (退任): one-shot within identity ----------
+  /**
+   * Retire an account in one call: revoke live sessions (fail-close), strip every role
+   * assignment (org-wide + resource-scoped), then disable the account. Idempotent — a
+   * re-run on an already-disabled, role-less user is a no-op that still returns 200 with
+   * every step "skipped". Guards the last active org-wide identity:admin (mirrors
+   * updateUser) so a退任 can never lock the org out of its own RBAC console.
+   */
+  async offboardUser(userId: string, orgId: string, ctx: RequestCtx): Promise<OffboardUserResult> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+
+    // last-admin guard: only fires while the target is still an ACTIVE sole admin
+    // (usersWithOrgWidePermission counts active only), so an idempotent re-run is fine.
+    const admins = await this.d.repo.usersWithOrgWidePermission(orgId, ADMIN);
+    if (admins.length === 1 && admins[0] === userId) {
+      throw errors.conflict("cannot offboard the last identity:admin holder", { code: "LAST_ADMIN" });
+    }
+
+    const alreadyDisabled = user.status !== "active";
+    const steps: OffboardStepResult[] = [];
+
+    // 1) revoke sessions — fail-close. Skip when already disabled (no live sessions to cut,
+    // and the account cannot re-auth). If the revoker throws, abort before any mutation.
+    if (alreadyDisabled) {
+      steps.push({ step: "revoke-sessions", status: "skipped", detail: "account not active" });
+    } else {
+      await this.d.revoker.revokeUser(userId, ctx);
+      steps.push({ step: "revoke-sessions", status: "done" });
+    }
+
+    // 2) strip all role assignments (org-wide + resource-scoped).
+    const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    for (const a of assignments) await this.d.repo.deleteAssignment(a.id);
+    steps.push(
+      assignments.length > 0
+        ? { step: "revoke-roles", status: "done", detail: String(assignments.length) }
+        : { step: "revoke-roles", status: "skipped", detail: "0" },
+    );
+
+    // 3) disable the account.
+    if (alreadyDisabled) {
+      steps.push({ step: "disable-account", status: "skipped", detail: user.status });
+    } else {
+      await this.d.repo.updateUser(userId, { status: "disabled" }, this.d.now());
+      steps.push({ step: "disable-account", status: "done" });
+    }
+
+    await this.d.audit.publish(
+      this.record("identity.user.offboarded", "success", ctx, orgId, "user", userId, {
+        revokedAssignments: assignments.length,
+        alreadyDisabled,
+      }),
+    );
+
+    const updated = (await this.d.repo.getUser(userId))!;
+    const finalAssignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    return {
+      user: this.toIdentityUser(updated, finalAssignments),
+      revokedAssignments: assignments.length,
+      alreadyDisabled,
+      steps,
+    };
   }
 
   // ---------- Email Routing sync ----------

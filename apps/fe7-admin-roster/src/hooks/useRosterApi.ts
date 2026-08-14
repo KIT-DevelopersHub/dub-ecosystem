@@ -13,6 +13,7 @@ import { type AuditFilters } from "../lib/auditQuery";
 import { type MailStatusResponse } from "../lib/mailStatus";
 import { presentError } from "../lib/errorDisplay";
 import { applyRoleGrant, makePendingAssignment } from "../lib/optimistic";
+import { runOffboard } from "../lib/offboard";
 import type {
   CreateRoleRequest,
   UpdateRoleRequest,
@@ -206,6 +207,33 @@ export function useDeleteRole() {
   return useMutation({
     mutationFn: (roleId: common.RoleId) => api.deleteRole(roleId),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.roles() }),
+  });
+}
+
+/** #2: one-shot退任 (offboard). Runs the identity one-shot + member在籍更新 + Email
+ *  Routing削除, then refreshes the affected caches. Returns the per-step OffboardOutcome
+ *  so the caller can render partial success. NON-optimistic (destructive, after confirm). */
+export function useOffboardUser() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (user: { id: common.UserId; email: string }) => runOffboard(api, user),
+    onSuccess: (outcome) => {
+      qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users"] });
+      qc.invalidateQueries({ queryKey: queryKeys.user(outcome.identity!.user.id) });
+      qc.invalidateQueries({ queryKey: queryKeys.userRoles(outcome.identity!.user.id) });
+      qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() });
+      toast(
+        outcome.ok
+          ? { kind: "success", title: "オフボードが完了しました" }
+          : { kind: "error", title: "一部の処理が失敗しました", description: "詳細を確認してください" },
+      );
+    },
+    onError: (err) => {
+      const p = presentError(err);
+      toast({ kind: "error", title: "オフボードに失敗しました", description: "message" in p ? p.message : undefined });
+    },
   });
 }
 

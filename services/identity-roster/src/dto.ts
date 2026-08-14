@@ -34,6 +34,24 @@ export interface UpdateUserRequest {
   status?: identity.UserStatus; // "disabled"/"rejected" => sync session revoke
 }
 
+// ---- Offboarding (退任): one-shot within identity ----
+// Composes the identity-LOCAL退任 steps atomically + idempotently: revoke live
+// sessions (fail-close), strip every role assignment, then disable the account. The
+// cross-service steps (Email Routing削除・member在籍更新) are chained by the caller
+// (fe7) around this and reported alongside these results for partial-success visibility.
+export type OffboardStepStatus = "done" | "skipped" | "failed";
+export interface OffboardStepResult {
+  step: "revoke-sessions" | "revoke-roles" | "disable-account";
+  status: OffboardStepStatus;
+  detail?: string; // e.g. count for revoke-roles, or an error reason for failed
+}
+export interface OffboardUserResult {
+  user: identity.IdentityUser; // status now "disabled"
+  revokedAssignments: number; // roles stripped this call (0 when idempotent re-run)
+  alreadyDisabled: boolean; // true when the account was already disabled on entry
+  steps: OffboardStepResult[];
+}
+
 export interface CreateRoleRequest {
   name: string;
   permissions: identity.PermissionKey[];

@@ -123,6 +123,12 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.updateUser(c.req.param("id"), orgId, body, ctxOf(c)));
   });
 
+  // One-shot退任: revoke sessions + strip roles + disable, atomically & idempotently.
+  // The cross-service steps (Email Routing削除・member在籍更新) are chained by the caller.
+  ext.post("/users/:id/offboard", requirePermission("identity:admin"), async (c) => {
+    return c.json(await svc.offboardUser(c.req.param("id"), orgId, ctxOf(c)));
+  });
+
   ext.get("/roles", requirePermission("identity:read"), async (c) => {
     return c.json(await svc.listRoles(orgId, numParam(c.req.query("limit")), c.req.query("cursor")));
   });
