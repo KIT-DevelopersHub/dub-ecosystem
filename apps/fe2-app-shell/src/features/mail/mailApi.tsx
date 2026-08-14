@@ -44,6 +44,10 @@ export interface MailApi {
   getSent(id: string): Promise<MailSentDetail>;
   /** Download one attachment's bytes as a Blob (session-authorized; mail:read). */
   downloadAttachment(kind: "messages" | "sent", messageId: string, attId: string): Promise<Blob>;
+  /** List the signed-in user's persisted thread flags (star/archive/trash) (mail:read). */
+  listFlags(): Promise<mail.MailThreadFlags[]>;
+  /** Persist a thread's flags (PATCH: only provided flags change). Returns the new state. */
+  setFlags(threadId: string, patch: mail.MailThreadFlagsPatch): Promise<mail.MailThreadFlags>;
 }
 
 const MAIL = "/api/v1/mail";
@@ -72,6 +76,12 @@ export function createMailApi(api: ApiClient): MailApi {
     },
     getSent: (id) => api.request<MailSentDetail>({ method: "GET", path: `${MAIL}/sent/${encodeURIComponent(id)}` }),
     downloadAttachment: (kind, messageId, attId) => api.download(attachmentDownloadPath(kind, messageId, attId) as `/api/v1/${string}`),
+    listFlags: () =>
+      api
+        .request<{ items: mail.MailThreadFlags[] }>({ method: "GET", path: `${MAIL}/flags` })
+        .then((r) => r.items),
+    setFlags: (threadId, patch) =>
+      api.request<mail.MailThreadFlags, mail.MailThreadFlagsPatch>({ method: "POST", path: `${MAIL}/flags/${encodeURIComponent(threadId)}`, body: patch }),
   };
 }
 

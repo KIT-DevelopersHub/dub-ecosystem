@@ -247,6 +247,64 @@ describe("read routes (/mail/messages)", () => {
   });
 });
 
+describe("per-user thread flags (/mail/flags — 改善#8)", () => {
+  it("401s without a trusted user header", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/mail/flags", { headers: headers() }), env);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns an empty list before anything is flagged", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items: [] });
+  });
+
+  it("persists a star and reads it back (survives a reload)", async () => {
+    const { env } = makeEnv();
+    const post = await app.fetch(
+      new Request("https://svc/mail/flags/thr_1", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ starred: true }) }),
+      env,
+    );
+    expect(post.status).toBe(200);
+    expect(await post.json()).toEqual({ threadId: "thr_1", starred: true, archived: false, trashed: false });
+    // A fresh request (new "session") reads the persisted flag from the same DB.
+    const get = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_1", starred: true, archived: false, trashed: false }] });
+  });
+
+  it("PATCH semantics: a later archive keeps the earlier star", async () => {
+    const { env } = makeEnv();
+    const h = headers({ "x-dub-user-id": "usr_bob" });
+    await app.fetch(new Request("https://svc/mail/flags/thr_2", { method: "POST", headers: h, body: JSON.stringify({ starred: true }) }), env);
+    const res = await app.fetch(new Request("https://svc/mail/flags/thr_2", { method: "POST", headers: h, body: JSON.stringify({ archived: true }) }), env);
+    expect(await res.json()).toEqual({ threadId: "thr_2", starred: true, archived: true, trashed: false });
+  });
+
+  it("flags are per-user (Bob never sees Alice's stars)", async () => {
+    const { env } = makeEnv();
+    await app.fetch(new Request("https://svc/mail/flags/thr_3", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ starred: true }) }), env);
+    const bob = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_bob" }) }), env);
+    expect(await bob.json()).toEqual({ items: [] });
+  });
+
+  it("400s on a non-boolean flag", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(
+      new Request("https://svc/mail/flags/thr_4", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ starred: "yes" }) }),
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("403s when mail:read is denied", async () => {
+    const { env } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(false) });
+    const res = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
+    expect(res.status).toBe(403);
+  });
+});
+
 // The external surface is mounted under /mail so the gateway-forwarded /api/v1/mail/*
 // (segment preserved, API_PREFIX stripped) reaches the Worker. Guard against a
 // regression to bare external paths (which would 404 every gateway-forwarded request).

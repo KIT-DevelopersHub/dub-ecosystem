@@ -560,6 +560,68 @@ export async function attachmentKeysOlderThan(db: DbClient, sendCutoff: string, 
   return rows.map((r) => r.r2_key);
 }
 
+// ---- per-user thread flags (改善#8: star/archive/trash persisted server-side) ----
+export interface UserFlagRow {
+  owner_user_id: string;
+  thread_id: string;
+  starred: number;
+  archived: number;
+  trashed: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToFlags(r: UserFlagRow): mail.MailThreadFlags {
+  return { threadId: r.thread_id, starred: r.starred === 1, archived: r.archived === 1, trashed: r.trashed === 1 };
+}
+
+/** Every flag row for one user (absent thread = all-false default; not returned). Only rows
+ *  with at least one non-default flag matter to the client, but we return all stored rows. */
+export async function listUserFlags(db: DbClient, ownerUserId: string): Promise<mail.MailThreadFlags[]> {
+  const rows = await db.all<UserFlagRow>(`SELECT * FROM mail_user_flags WHERE owner_user_id = ?`, ownerUserId);
+  return rows.map(rowToFlags);
+}
+
+/** Upsert one thread's flags for a user (PATCH semantics: only provided flags change; a
+ *  first write defaults the others to false). Returns the resulting full flag state.
+ *  Read-modify-write with INSERT OR REPLACE (the @dub/db namespace guard rejects
+ *  `ON CONFLICT ... DO UPDATE SET`, reading "SET" as a foreign table). Flag toggles are
+ *  per-user + low-contention, so the non-atomic read→write is acceptable; created_at is
+ *  preserved from the existing row so the first-seen timestamp is stable. */
+export async function upsertUserFlags(
+  db: DbClient,
+  ownerUserId: string,
+  threadId: string,
+  patch: mail.MailThreadFlagsPatch,
+): Promise<mail.MailThreadFlags> {
+  const now = nowIso();
+  const existing = await db.first<UserFlagRow>(
+    `SELECT * FROM mail_user_flags WHERE owner_user_id = ? AND thread_id = ?`,
+    ownerUserId,
+    threadId,
+  );
+  const cur = existing ? rowToFlags(existing) : { threadId, starred: false, archived: false, trashed: false };
+  const merged: mail.MailThreadFlags = {
+    threadId,
+    starred: patch.starred ?? cur.starred,
+    archived: patch.archived ?? cur.archived,
+    trashed: patch.trashed ?? cur.trashed,
+  };
+  await db.run(
+    `INSERT OR REPLACE INTO mail_user_flags
+       (owner_user_id, thread_id, starred, archived, trashed, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ownerUserId,
+    threadId,
+    merged.starred ? 1 : 0,
+    merged.archived ? 1 : 0,
+    merged.trashed ? 1 : 0,
+    existing?.created_at ?? now,
+    now,
+  );
+  return merged;
+}
+
 // ---- retention purge (scheduled) ----
 export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<{ sendLog: number; inbound: number; attachments: number }> {
   const sendLog = (await db.run(`DELETE FROM mail_send_log WHERE created_at < ?`, sendCutoff)).meta.changes;

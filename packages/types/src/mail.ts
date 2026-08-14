@@ -133,6 +133,23 @@ export interface MailSentDetail extends MailSentListItem {
   attachments?: MailAttachment[];
 }
 
+// ---- ⑤ per-user thread flags (改善#8; ADDITIVE — frozen ① untouched) ----
+// Star / archive / trash persisted server-side, per user + per thread, so they survive a
+// reload (previously in-memory only). A thread with no stored row is all-false (default).
+/** One thread's flag state for the signed-in user. */
+export interface MailThreadFlags {
+  threadId: string;
+  starred: boolean;
+  archived: boolean;
+  trashed: boolean;
+}
+/** Partial flag update (PATCH-style): only the provided flags change. */
+export interface MailThreadFlagsPatch {
+  starred?: boolean;
+  archived?: boolean;
+  trashed?: boolean;
+}
+
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----
 export interface Mailbox {
   address: string; // STUB

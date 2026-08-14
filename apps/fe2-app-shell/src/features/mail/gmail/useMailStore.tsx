@@ -71,6 +71,7 @@ export type MailAction =
   // ---- server sync ----
   | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
+  | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean }[] } // restore server-persisted star/archive/trash
   | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
 
 let seq = 0;
@@ -248,6 +249,22 @@ export function reducer(state: MailState, action: MailAction): MailState {
         ...state,
         threads: state.threads.map((t) => (t.id === action.threadId ? { ...t, messages: action.messages } : t)),
       };
+    case "APPLY_FLAGS": {
+      // Restore server-persisted flags after a hydrate (改善#8: star/archive/trash survive a
+      // reload). starred maps straight through; archived/trashed move the thread into the
+      // matching folder (trash wins over archive), mirroring the ARCHIVE/TRASH reducers. A
+      // thread with no flag row keeps its hydrated (inbox/sent) placement.
+      const byId = new Map(action.flags.map((f) => [f.threadId, f]));
+      return {
+        ...state,
+        threads: state.threads.map((t) => {
+          const f = byId.get(t.id);
+          if (!f) return t;
+          const folder = f.trashed ? "trash" : f.archived ? "archive" : t.folder;
+          return { ...t, starred: f.starred, folder };
+        }),
+      };
+    }
     case "REQUEST_SYNC":
       return { ...state, syncNonce: state.syncNonce + 1 };
     default:
