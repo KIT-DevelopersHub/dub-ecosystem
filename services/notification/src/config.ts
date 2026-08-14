@@ -29,6 +29,14 @@ export const MAX_QUERY_LIMIT = 200;
 // The 4 frozen channels (theme4). slack is intentionally excluded.
 export const CHANNELS = ["in_app", "email", "chat", "push"] as const;
 
+// Broadcast (org-wide) notification types. Two invariants ride on this list:
+//   1) forced into every recipient's in_app inbox at publish time regardless of prefs
+//      (design §3 — nobody misses a release / system announcement), and
+//   2) lazily backfilled on inbox read (repo.backfillBroadcastInbox) so a user created
+//      AFTER a broadcast was published (e.g. info@ / admin@ individualized later) still
+//      sees it — fan-out is write-time only, so late joiners would otherwise miss them.
+export const BROADCAST_IN_APP_TYPES = ["system.announcement", "release"] as const;
+
 // ---- in-app feedback (widget -> admin) ----
 // Closed category vocabulary (mirrors notification.FeedbackCategory).
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "question", "other"] as const;
