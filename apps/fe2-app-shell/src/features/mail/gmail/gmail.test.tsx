@@ -281,4 +281,32 @@ describe("GmailApp (hydrates from the gateway)", () => {
     await userEvent.click(firstStar);
     expect(screen.getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0);
   });
+
+  it("shows attachments in the 3-pane reading view and downloads a stored one (改善#1)", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    // getThread fills the full detail, which now carries attachment metadata.
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-attachments")).toBeInTheDocument());
+    const chips = screen.getAllByTestId("fe2-mail-attachment");
+    expect(chips).toHaveLength(2);
+    // The stored file downloads via the session-authorized MailApi (kind=messages, inbound).
+    const stored = screen.getByRole("button", { name: /資料\.pdf をダウンロード/ });
+    await userEvent.click(stored);
+    await waitFor(() => expect(api.downloadAttachment).toHaveBeenCalledWith("messages", "mailin_1", "att_ok"));
+  });
+
+  it("surfaces an oversize attachment as a disabled chip instead of dropping it silently (改善#2)", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-attachments")).toBeInTheDocument());
+    const dropped = screen.getByRole("button", { name: /動画\.mp4/ });
+    expect(dropped).toBeDisabled();
+    expect(dropped).toHaveTextContent(/サイズ超過/);
+    await userEvent.click(dropped).catch(() => undefined);
+    expect(api.downloadAttachment).not.toHaveBeenCalled();
+  });
 });

@@ -69,4 +69,21 @@ describe("full-body mappers", () => {
     const detail: mail.MailSentDetail = { id: "s1", from: { email: "a@b.jp" }, to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent", textBody: "full sent body" };
     expect(sentDetailToMessage(detail, SELF).body).toBe("full sent body");
   });
+
+  it("threadDetailToMessages carries attachment metadata (改善#1: 3-pane list/download)", () => {
+    const att: mail.MailAttachment[] = [{ id: "att1", filename: "spec.pdf", contentType: "application/pdf", sizeBytes: 2048 }];
+    const thread: mail.MailThread = { id: "T", messages: [{ ...inbox[0]!, textBody: "b", attachments: att }] };
+    expect(threadDetailToMessages(thread)[0]!.attachments).toEqual(att);
+  });
+
+  it("threadDetailToMessages omits attachments when none (byte-identical to prior shape)", () => {
+    const thread: mail.MailThread = { id: "T", messages: [{ ...inbox[0]!, textBody: "b" }] };
+    expect("attachments" in threadDetailToMessages(thread)[0]!).toBe(false);
+  });
+
+  it("sentDetailToMessage carries attachment metadata", () => {
+    const att: mail.MailAttachment[] = [{ id: "a9", filename: "img.png", contentType: "image/png", sizeBytes: 500 }];
+    const detail: mail.MailSentDetail = { id: "s1", to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent", textBody: "b", attachments: att };
+    expect(sentDetailToMessage(detail, SELF).attachments).toEqual(att);
+  });
 });

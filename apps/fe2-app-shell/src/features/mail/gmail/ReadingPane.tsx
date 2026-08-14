@@ -20,6 +20,7 @@ import {
 import { MailIcon } from "./icons.tsx";
 import { useMailStore } from "./useMailStore.tsx";
 import { useMailApi } from "../MailProvider.tsx";
+import { formatBytes, saveBlob } from "../mailApi.tsx";
 
 function fmtList(people: MailPerson[]): string {
   return people.map(displayName).join(", ");
@@ -56,6 +57,71 @@ function quote(msg: MailMsg): string {
     .map((l) => `> ${l}`)
     .join("\n");
   return `\n\n${when} ${who} <${msg.from.email}>:\n${quoted}`;
+}
+
+/** Attachment strip inside an open message. A "stored" attachment downloads its R2 body
+ *  via the session-authorized MailApi; a non-stored one (too large / message truncated,
+ *  改善#2) shows as a disabled chip with the reason so the file is never silently dropped.
+ *  kind picks the gateway route: our own sent message -> "sent", received -> "messages". */
+function Attachments({ msg }: { msg: MailMsg }): JSX.Element | null {
+  const mailApi = useMailApi();
+  const [busy, setBusy] = useState<string | null>(null);
+  const list = msg.attachments ?? [];
+  if (list.length === 0) return null;
+  const kind: "messages" | "sent" = msg.outbound ? "sent" : "messages";
+  const download = async (att: mail.MailAttachment): Promise<void> => {
+    setBusy(att.id);
+    try {
+      const blob = await mailApi.downloadAttachment(kind, msg.id, att.id);
+      saveBlob(blob, att.filename);
+    } catch {
+      /* best-effort: a failed download leaves the chip enabled for a retry */
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div
+      data-testid="fe2-mail-attachments"
+      style={{ marginTop: 16, marginLeft: 48, display: "flex", flexWrap: "wrap", gap: 8 }}
+    >
+      {list.map((a) => {
+        const dropped = a.status !== undefined && a.status !== "stored";
+        const reason = a.status === "dropped_too_large" ? "サイズ超過のため保存されませんでした" : a.status === "dropped_truncated" ? "メール全体が大きすぎて取得できませんでした" : "";
+        return (
+          <button
+            key={a.id}
+            type="button"
+            data-testid="fe2-mail-attachment"
+            disabled={dropped || busy === a.id}
+            aria-label={dropped ? `${a.filename}（${reason}）` : `${a.filename} をダウンロード`}
+            title={dropped ? reason : a.filename}
+            onClick={dropped ? undefined : () => void download(a)}
+            style={{
+              all: "unset",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 12px",
+              borderRadius: "var(--dub-radius-md)",
+              border: `1px solid ${dropped ? "var(--dub-color-border-default)" : "var(--dub-color-border-strong)"}`,
+              cursor: dropped ? "not-allowed" : "pointer",
+              opacity: dropped || busy === a.id ? 0.6 : 1,
+              fontSize: "var(--dub-font-size-sm)",
+              color: dropped ? "var(--dub-color-text-muted)" : "var(--dub-color-text-secondary)",
+              maxWidth: 260,
+            }}
+          >
+            <MailIcon name={dropped ? "alert" : "paperclip"} size={16} />
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.filename}</span>
+            <span style={{ color: "var(--dub-color-text-muted)", flexShrink: 0 }}>
+              {dropped ? reason : formatBytes(a.sizeBytes)}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function MessageBlock({ msg, defaultOpen }: { msg: MailMsg; defaultOpen: boolean }): JSX.Element {
@@ -118,6 +184,7 @@ function MessageBlock({ msg, defaultOpen }: { msg: MailMsg; defaultOpen: boolean
           {msg.body}
         </div>
       ) : null}
+      {open ? <Attachments msg={msg} /> : null}
     </div>
   );
 }

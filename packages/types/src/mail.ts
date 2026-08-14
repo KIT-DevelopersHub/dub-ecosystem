@@ -37,6 +37,13 @@ export interface MailAttachment {
   filename: string;
   contentType: string;
   sizeBytes: number;
+  // ADDITIVE (改善#2 大容量対策): persistence status. Omitted/"stored" = bytes are in R2 and
+  // downloadable (the frozen behaviour). A "dropped_*" status marks an attachment the gateway
+  // could NOT store — too large for the per-file/total ceiling, or the inbound MIME was
+  // truncated before its bytes arrived — so the UI surfaces it (disabled chip + reason)
+  // instead of the file silently vanishing. sizeBytes carries the DECLARED size when known
+  // (0 when unknown, e.g. a truncated tail). Download routes reject a non-"stored" id.
+  status?: "stored" | "dropped_too_large" | "dropped_truncated";
 }
 export interface SendMailResponse {
   messageId: string;

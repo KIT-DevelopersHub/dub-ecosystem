@@ -26,6 +26,7 @@ export type MailIconName =
   | "refresh"
   | "tag"
   | "paperclip"
+  | "alert"
   | "chevron-down"
   | "check";
 
@@ -129,6 +130,13 @@ const PATHS: Record<MailIconName, JSX.Element> = {
     </>
   ),
   paperclip: <path d="M20 11l-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7" />,
+  alert: (
+    <>
+      <path d="M12 4l9 16H3z" />
+      <path d="M12 10v4" />
+      <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none" />
+    </>
+  ),
   "chevron-down": <path d="M6 9l6 6 6-6" />,
   check: <path d="M5 12l5 5 9-11" />,
 };

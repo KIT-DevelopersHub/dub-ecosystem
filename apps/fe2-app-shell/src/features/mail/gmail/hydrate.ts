@@ -88,7 +88,9 @@ export function sentItemsToThreads(items: mail.MailSentListItem[], me: MailPerso
   }));
 }
 
-/** Full thread detail -> messages with real bodies (received thread reading pane). */
+/** Full thread detail -> messages with real bodies (received thread reading pane). Carries
+ *  each message's attachment metadata so the 3-pane reading view can list + download them
+ *  (list endpoints omit attachments; only this detail fetch has them). */
 export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
   return thread.messages.map((m) => ({
     id: m.id,
@@ -98,10 +100,12 @@ export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
     date: m.receivedAt,
     body: m.textBody,
     read: m.read,
+    ...(m.attachments && m.attachments.length > 0 ? { attachments: m.attachments } : {}),
   }));
 }
 
-/** Full sent detail -> the single message with its real body (sent reading pane). */
+/** Full sent detail -> the single message with its real body (sent reading pane). Carries
+ *  attachment metadata so a sent message's files are listable + downloadable in the pane. */
 export function sentDetailToMessage(detail: mail.MailSentDetail, me: MailPerson): MailMsg {
   return {
     id: detail.id,
@@ -112,5 +116,6 @@ export function sentDetailToMessage(detail: mail.MailSentDetail, me: MailPerson)
     body: detail.textBody,
     read: true,
     outbound: true,
+    ...(detail.attachments && detail.attachments.length > 0 ? { attachments: detail.attachments } : {}),
   };
 }

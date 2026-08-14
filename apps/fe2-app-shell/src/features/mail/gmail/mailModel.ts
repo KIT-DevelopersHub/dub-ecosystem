@@ -6,6 +6,7 @@
 // persists it server-side). Nothing here is a Google asset — it is our own generic
 // data shape. Demo fixtures used to live here; they now belong to tests only
 // (mailModel.fixtures.ts).
+import type { mail } from "@dub/types";
 
 export type FolderId = "inbox" | "starred" | "sent" | "drafts" | "trash" | "archive";
 
@@ -46,6 +47,13 @@ export interface MailMsg {
    *  replies visible in a conversation across a getThread refresh and (b) target a reply
    *  at the last message that ISN'T ours (the external correspondent), never at ourselves. */
   outbound?: boolean;
+  /** Attachment METADATA for this message (bytes live in R2; each links to a gateway
+   *  download route). Filled only from the full detail fetch (getThread / getSent) —
+   *  the list/snippet endpoints omit it — so it is absent for list-derived rows. A
+   *  `status` other than "stored" marks an attachment the gateway could NOT persist
+   *  (too large / message truncated), surfaced as a disabled chip rather than silently
+   *  dropped (改善#2). */
+  attachments?: mail.MailAttachment[];
 }
 
 export interface MailThreadModel {
