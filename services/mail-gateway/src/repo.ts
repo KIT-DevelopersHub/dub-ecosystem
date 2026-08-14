@@ -280,6 +280,43 @@ export async function findInboundByMessageId(db: DbClient, messageId: string): P
   return db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE message_id = ?`, messageId);
 }
 
+/** One send-log row by its internal id (= the local-part of our RFC Message-Id
+ *  `<send-log id>@domain`). Backs thread normalization when a reply references one of
+ *  OUR earlier sends rather than a received message. */
+export async function findSendLogById(db: DbClient, id: string): Promise<SendLogRow | null> {
+  return db.first<SendLogRow>(`SELECT * FROM mail_send_log WHERE id = ?`, id);
+}
+
+/**
+ * Resolve the canonical (root) thread id for a message from the RFC Message-Ids it
+ * references (References tokens + In-Reply-To, most-ancestral first). Walks each candidate
+ * against known messages and adopts the FIRST match's thread:
+ *   - a received message (mail_inbound.message_id) -> its thread_id
+ *   - one of OUR sent messages (RFC id = "<send-log id>@domain") -> that send's thread_id,
+ *     or the candidate itself when that send OPENED the conversation (thread_id NULL)
+ * Returns null when no candidate is known, so the caller keeps its own fallback (a fresh
+ * thread). This is the normalization that keeps a 3+ message conversation on ONE thread id
+ * even when a client trims its References chain to just the immediate parent, or when we
+ * reply to our own thread (改善#3 スレッドID正規化 / #4 送信返信の連結). Read-only: it never
+ * mutates existing rows, so already-stored threads are untouched (後方互換).
+ */
+export async function resolveThreadId(db: DbClient, candidateIds: string[]): Promise<string | null> {
+  const seen = new Set<string>();
+  for (const raw of candidateIds) {
+    const ref = raw.trim().replace(/^<|>$/g, "").trim();
+    if (!ref || seen.has(ref)) continue;
+    seen.add(ref);
+    const inbound = await findInboundByMessageId(db, ref);
+    if (inbound) return inbound.thread_id;
+    const localPart = ref.split("@")[0] ?? "";
+    if (localPart.startsWith("maillog_")) {
+      const sent = await findSendLogById(db, localPart);
+      if (sent) return sent.thread_id ?? ref;
+    }
+  }
+  return null;
+}
+
 /** Persist a normalized inbound message. INSERT OR IGNORE on message_id makes an
  *  Email-Routing redelivery a no-op; returns changes (0 = duplicate). */
 export async function insertInbound(

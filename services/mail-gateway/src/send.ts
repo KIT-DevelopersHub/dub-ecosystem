@@ -18,6 +18,7 @@ import {
   markSendFailed,
   markSendSent,
   newSendLogId,
+  resolveThreadId,
   type SendLogRow,
 } from "./repo";
 import type { OutboundMail } from "./provider";
@@ -97,7 +98,11 @@ export async function sendMail(
   // first so every downstream use (hash, claim, MIME, provider) sees the same recipients.
   const req = withArchiveCc(rawReq, deps.archiveCc);
   const reqHash = hashRequest(req);
-  const threadId = req.inReplyTo ?? null;
+  // Thread id for a REPLY = the ROOT thread of the message we answer, not the immediate
+  // parent's Message-Id. Storing the parent id (the old behaviour) orphaned our reply from
+  // a 3+ message conversation whose root differs from the parent (改善#4). Normalize against
+  // known messages; fall back to inReplyTo when the parent is not (yet) on record.
+  const threadId = req.inReplyTo ? ((await resolveThreadId(db, [req.inReplyTo])) ?? req.inReplyTo) : null;
 
   // 1) reconcile against any existing claim for this key.
   const existing = await findSendByKey(db, idempotencyKey);

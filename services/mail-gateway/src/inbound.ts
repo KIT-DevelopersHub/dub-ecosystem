@@ -17,7 +17,7 @@ import {
   parseAddress,
   parseAddressList,
 } from "./mime";
-import { insertInbound, newInboundId, seenInbound } from "./repo";
+import { insertInbound, newInboundId, resolveThreadId, seenInbound } from "./repo";
 import { persistAttachments } from "./attachments";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
@@ -33,6 +33,17 @@ function firstRef(value: string | undefined): string | null {
   if (m && m[1]) return m[1].trim();
   const token = value.split(/\s+/)[0];
   return token ? stripAngle(token) || null : null;
+}
+/** All Message-Ids in a References/In-Reply-To header value, in order (angle-bracketed
+ *  tokens preferred; falls back to whitespace-split bare tokens). */
+function allRefs(value: string | undefined): string[] {
+  if (!value) return [];
+  const bracketed = [...value.matchAll(/<([^>]+)>/g)].map((m) => m[1]!.trim()).filter(Boolean);
+  if (bracketed.length > 0) return bracketed;
+  return value
+    .split(/\s+/)
+    .map((t) => stripAngle(t))
+    .filter(Boolean);
 }
 function localPart(address: string): string | null {
   const email = parseAddress(address).email;
@@ -69,10 +80,14 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
   if (h["auto-submitted"]) loop["auto-submitted"] = h["auto-submitted"];
   if (h["x-dub-mail-loop"]) loop["x-dub-mail-loop"] = h["x-dub-mail-loop"];
 
+  // Ancestral Message-Ids (References first, then In-Reply-To) used to normalize the
+  // thread id against messages we already have on record (改善#3).
+  const references = [...allRefs(h["references"]), ...allRefs(h["in-reply-to"])];
+
   // Body is persisted for the inbox detail view (frozen MailMessage still carries only
   // the snippet). Email Routing hands us the raw RFC822 as text; we keep the plain-text
   // body. HTML-part extraction is out of this slice's scope → htmlBody stays null.
-  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null };
+  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null, references };
 }
 
 /**
@@ -81,7 +96,14 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw);
-  const { message, loop, mailbox, bodyText, htmlBody } = parsed;
+  const { message, loop, mailbox, bodyText, htmlBody, references } = parsed;
+
+  // Normalize the thread id against messages we already have (改善#3): if any referenced
+  // ancestor is a known inbound/sent message, adopt ITS thread so a trimmed References
+  // chain (or a reply to our own send) still joins the root conversation instead of
+  // forking a new thread. Falls back to parseInbound's firstRef when nothing is known.
+  const resolvedThread = await resolveThreadId(deps.db, references);
+  if (resolvedThread) message.threadId = resolvedThread;
 
   if (await seenInbound(deps.db, message.messageId)) {
     return { processed: false, message };
