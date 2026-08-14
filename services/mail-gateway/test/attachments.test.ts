@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { mail } from "@dub/types";
-import { assembleMime, extractAttachments, b64encodeUtf8 } from "../src/mime";
+import { assembleMime, extractAttachments, extractAttachmentsDetailed, b64encodeUtf8 } from "../src/mime";
 import { parseSendMailRequest } from "../src/validation";
 import { sendMail } from "../src/send";
 import { handleInbound } from "../src/inbound";
 import { attachmentsFor, r2Blobs, type MailBlobStore } from "../src/attachments";
-import { listAttachments } from "../src/repo";
+import { getAttachment, listAttachments } from "../src/repo";
 import { makeHarness, sendDeps, inboundDeps } from "./helpers";
 import type { RawInbound } from "../src/mime";
 
@@ -99,6 +99,34 @@ describe("extractAttachments — inbound MIME", () => {
 
   it("respects the per-file size cap", () => {
     expect(extractAttachments(rawFull, { ...limits, maxBytesPerFile: 3 })).toEqual([]);
+  });
+
+  it("reports an over-ceiling part as DROPPED instead of silently skipping it (改善#2)", () => {
+    const res = extractAttachmentsDetailed(rawFull, { ...limits, maxBytesPerFile: 3 });
+    expect(res.attachments).toEqual([]); // still not stored
+    expect(res.dropped).toHaveLength(1);
+    expect(res.dropped[0]!.filename).toBe("doc.pdf");
+    expect(res.dropped[0]!.reason).toBe("dropped_too_large");
+    expect(res.dropped[0]!.sizeBytes).toBe(9); // "PDF-BYTES"
+  });
+
+  it("drops the second file when the per-MESSAGE total would be exceeded (改善#2)", () => {
+    const two =
+      `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n` +
+      `--${boundary}\r\n` +
+      `Content-Type: application/pdf; name="a.pdf"\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `Content-Disposition: attachment; filename="a.pdf"\r\n\r\n` +
+      `${b64encodeUtf8("SEVEN!!")}\r\n` + // 7 bytes
+      `--${boundary}\r\n` +
+      `Content-Type: application/pdf; name="b.pdf"\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `Content-Disposition: attachment; filename="b.pdf"\r\n\r\n` +
+      `${b64encodeUtf8("EIGHT!!!")}\r\n` + // 8 bytes
+      `--${boundary}--\r\n`;
+    const res = extractAttachmentsDetailed(two, { maxCount: 10, maxBytesPerFile: 1000, maxTotalBytes: 10 });
+    expect(res.attachments.map((a) => a.filename)).toEqual(["a.pdf"]); // 7 fits
+    expect(res.dropped.map((d) => d.filename)).toEqual(["b.pdf"]); // 7+8 > 10 -> dropped
   });
 });
 
@@ -215,6 +243,38 @@ describe("handleInbound — attachments", () => {
     const deps = inboundDeps(h); // no blobs
     const { message } = await handleInbound(deps, rawWithAttachment());
     expect(await attachmentsFor(h.db, "inbound", message.id)).toHaveLength(0);
+  });
+
+  it("records a truncated inbound message's lost tail as a VISIBLE stub, not a silent loss (改善#2)", async () => {
+    const h = makeHarness();
+    const blobs = memBlobs();
+    const deps = inboundDeps(h, { blobs, orgId: "org_devhub" });
+    // The oversize-per-part PATH is covered at the mime level above; here we assert the
+    // TRUNCATED path (message larger than our read buffer) produces a visible stub while the
+    // small stored file is still saved.
+    const raw = rawWithAttachment();
+    raw.truncated = true; // message exceeded the read buffer (tail cut off)
+    const { message } = await handleInbound(deps, raw);
+    const metas = await attachmentsFor(h.db, "inbound", message.id);
+    // The stored small file PLUS a dropped_truncated stub are both listed.
+    expect(metas.some((m) => m.status === undefined && m.filename === "data.csv")).toBe(true);
+    const stub = metas.find((m) => m.status === "dropped_truncated");
+    expect(stub).toBeTruthy();
+    expect(stub!.filename).toContain("サイズ超過");
+  });
+
+  it("marks a truncated stub non-downloadable (attachmentsFor surfaces status)", async () => {
+    const h = makeHarness();
+    const blobs = memBlobs();
+    const deps = inboundDeps(h, { blobs });
+    const raw = rawWithAttachment();
+    raw.truncated = true;
+    const { message } = await handleInbound(deps, raw);
+    const stub = (await attachmentsFor(h.db, "inbound", message.id)).find((m) => m.status === "dropped_truncated")!;
+    // A stub has no R2 body; the download route rejects it (asserted in app.test).
+    const row = await getAttachment(h.db, "inbound", message.id, stub.id);
+    expect(row!.r2_key).toBe("");
+    expect(row!.status).toBe("dropped_truncated");
   });
 });
 

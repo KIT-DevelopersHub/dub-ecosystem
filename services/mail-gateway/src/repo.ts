@@ -63,6 +63,7 @@ export interface AttachmentRow {
   size_bytes: number;
   r2_key: string;
   created_at: string;
+  status: "stored" | "dropped_too_large" | "dropped_truncated"; // 0007: 'stored' default
 }
 
 // ---- opaque cursor codec (base64url of the row id; D3) ----
@@ -506,12 +507,16 @@ export async function insertAttachment(
     sizeBytes: number;
     r2Key: string;
     createdAt: string;
+    // 0007: persistence status. Defaults to 'stored' (bytes in R2). A 'dropped_*' stub
+    // carries r2Key='' and records an attachment we could NOT persist so the UI can
+    // surface it instead of the file vanishing silently (改善#2).
+    status?: AttachmentRow["status"];
   },
 ): Promise<void> {
   await db.run(
     `INSERT OR IGNORE INTO mail_attachments
-       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.messageKind,
     row.messageId,
@@ -520,6 +525,7 @@ export async function insertAttachment(
     row.sizeBytes,
     row.r2Key,
     row.createdAt,
+    row.status ?? "stored",
   );
 }
 

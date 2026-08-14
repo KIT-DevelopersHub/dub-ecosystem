@@ -11,14 +11,14 @@ import type { mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import {
   decodeHeaderWord,
-  extractAttachments,
+  extractAttachmentsDetailed,
   extractBody,
   extractSnippet,
   parseAddress,
   parseAddressList,
 } from "./mime";
 import { insertInbound, newInboundId, resolveThreadId, seenInbound } from "./repo";
-import { persistAttachments } from "./attachments";
+import { persistAttachments, persistDroppedAttachments, type DroppedReason } from "./attachments";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
 import type { InboundDeps, ParsedInbound } from "./types";
@@ -130,7 +130,7 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   // is bound) and persist bytes->R2 + metadata->D1, keyed to this inbound message row.
   // Best-effort (persistAttachments logs per-file failures); ingest already succeeded.
   if (deps.blobs && raw.rawFull) {
-    const extracted = extractAttachments(raw.rawFull, {
+    const { attachments: extracted, dropped } = extractAttachmentsDetailed(raw.rawFull, {
       maxCount: MAX_ATTACHMENTS_PER_MESSAGE,
       maxBytesPerFile: MAX_ATTACHMENT_BYTES,
       maxTotalBytes: MAX_ATTACHMENTS_TOTAL_BYTES,
@@ -142,6 +142,18 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
         message.id,
         extracted,
       );
+    }
+    // 改善#2: make unstorable attachments VISIBLE instead of silently dropping them.
+    //  - parts over the per-file / per-message ceiling -> dropped_too_large stubs
+    //  - a message larger than our read buffer (tail cut off) -> one dropped_truncated stub
+    const stubs: { filename: string; contentType: string; sizeBytes: number; reason: DroppedReason }[] = dropped.map(
+      (d) => ({ filename: d.filename, contentType: d.contentType, sizeBytes: d.sizeBytes, reason: d.reason }),
+    );
+    if (raw.truncated) {
+      stubs.push({ filename: "添付ファイル（サイズ超過）", contentType: "application/octet-stream", sizeBytes: raw.rawSize, reason: "dropped_truncated" });
+    }
+    if (stubs.length > 0) {
+      await persistDroppedAttachments({ db: deps.db, ctx: deps.ctx }, "inbound", message.id, stubs);
     }
   }
 

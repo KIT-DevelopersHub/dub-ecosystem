@@ -225,6 +225,26 @@ describe("read routes (/mail/messages)", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("MAIL_MESSAGE_NOT_FOUND");
   });
+
+  it("409s downloading a DROPPED attachment stub (改善#2: unstorable, never a phantom download)", async () => {
+    // A fake R2 bucket so buildBlobs is non-null (the route must 409 BEFORE touching it).
+    const bucket = { get: async () => null, put: async () => undefined, delete: async () => undefined };
+    const { env, raw } = makeEnv({ R2_MAIL: bucket as never });
+    // Seed a dropped stub directly (r2_key='' — no bytes were ever stored).
+    raw
+      .prepare(
+        `INSERT INTO mail_attachments (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status)
+         VALUES (?, 'inbound', ?, ?, 'application/octet-stream', ?, '', ?, 'dropped_too_large')`,
+      )
+      .run("mailatt_drop", "mailin_x", "巨大.zip", 41943040, "2026-08-10T00:00:00.000Z");
+    const res = await app.fetch(
+      new Request("https://svc/mail/messages/mailin_x/attachments/mailatt_drop", { headers: headers({ "x-dub-user-id": "usr_alice" }) }),
+      env,
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("MAIL_ATTACHMENT_NOT_STORED");
+  });
 });
 
 // The external surface is mounted under /mail so the gateway-forwarded /api/v1/mail/*

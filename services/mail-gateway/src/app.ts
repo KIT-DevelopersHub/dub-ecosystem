@@ -211,6 +211,11 @@ export function createApp() {
     const attId = c.req.param("attId") ?? "";
     const row = await getAttachment(dbOf(c), kind, messageId, attId);
     if (!row) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `attachment not found: ${attId}`, { status: 404 });
+    // A 'dropped_*' stub (改善#2: too large / truncated) has no R2 body — never fetch it.
+    // 409 (not 404) so the UI can distinguish "unstorable" from "unknown id".
+    if (row.status && row.status !== "stored") {
+      throw new DubError("MAIL_ATTACHMENT_NOT_STORED", `attachment not stored (${row.status}): ${attId}`, { status: 409 });
+    }
     const obj = await blobs.get(row.r2_key);
     if (!obj) throw new DubError("MAIL_MESSAGE_NOT_FOUND", "attachment body missing", { status: 404 });
     return new Response(obj.body, {
