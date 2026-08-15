@@ -1,6 +1,7 @@
 // D1 schema for the `member` namespace. Semantic source of truth for the physical
 // migrations under infra/d1/migrations/member/. Each const MUST stay in lockstep with
-// its .sql file (schema-lockstep.test.ts) — change the const and the .sql together.
+// its .sql file (schema-lockstep.test.ts) — change the const and its .sql together, and
+// keep MEMBER_MIGRATIONS ordered by id ascending (forward-only, one file per const).
 import type { Migration } from "@dub/db";
 
 export const MEMBER_SCHEMA_MIGRATION: Migration = {
@@ -60,11 +61,22 @@ CREATE INDEX IF NOT EXISTS idx_member_people_identity
 `.trim(),
 };
 
+// 0003: 学科(department)・学年(grade) を note(メモ) から専用カラムへ分離する非破壊 ALTER。
+// 既存行を保持し NULL 許容カラムを足すだけ (mirrors 0003_person_dept_grade.sql).
+export const MEMBER_PERSON_COLS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0003_person_dept_grade",
+  up: `
+ALTER TABLE member_people ADD COLUMN department TEXT;
+ALTER TABLE member_people ADD COLUMN grade TEXT;
+`.trim(),
+};
+
 // 参加届 (participation submissions). Additive: a person's self-submitted intent to
 // join, resolved to a member_people row on submit (invited -> added, or new added).
 export const MEMBER_PARTICIPATION_MIGRATION: Migration = {
   namespace: "member",
-  id: "0003_participation",
+  id: "0004_participation",
   up: `
 CREATE TABLE member_participations (
   id               TEXT PRIMARY KEY,
@@ -97,7 +109,7 @@ CREATE INDEX idx_member_participations_member ON member_participations(member_id
 // without a default). Retained on member_people too so the roster keeps both channels.
 export const MEMBER_PARTICIPATION_EMAILS_MIGRATION: Migration = {
   namespace: "member",
-  id: "0004_participation_emails",
+  id: "0005_participation_emails",
   up: `
 ALTER TABLE member_participations ADD COLUMN school_email TEXT;
 ALTER TABLE member_participations ADD COLUMN gmail TEXT;
@@ -110,6 +122,7 @@ ALTER TABLE member_people ADD COLUMN gmail TEXT;
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
   MEMBER_IDENTITY_LINK_MIGRATION,
+  MEMBER_PERSON_COLS_MIGRATION,
   MEMBER_PARTICIPATION_MIGRATION,
   MEMBER_PARTICIPATION_EMAILS_MIGRATION,
 ];

@@ -157,6 +157,8 @@ export class MemberService {
       name: name(body.name),
       roleTitle: optText(body.roleTitle, "roleTitle"),
       status: body.status,
+      department: optText(body.department, "department"),
+      grade: optText(body.grade, "grade"),
       identityUserId: null,
       contact: optText(body.contact, "contact"),
       schoolEmail: null,
@@ -190,6 +192,8 @@ export class MemberService {
       name: body.name !== undefined ? name(body.name) : cur.name,
       roleTitle: body.roleTitle !== undefined ? optText(body.roleTitle, "roleTitle") : cur.roleTitle,
       status: body.status ?? cur.status,
+      department: body.department !== undefined ? optText(body.department, "department") : cur.department,
+      grade: body.grade !== undefined ? optText(body.grade, "grade") : cur.grade,
       identityUserId,
       contact: body.contact !== undefined ? optText(body.contact, "contact") : cur.contact,
       note: body.note !== undefined ? optText(body.note, "note") : cur.note,
@@ -301,6 +305,8 @@ export class MemberService {
     const { member: resolved, matchKind } = await this.resolveMemberForParticipation(ctx, {
       displayName,
       normalized,
+      department,
+      grade,
       contact,
       schoolEmail,
       gmail,
@@ -341,6 +347,8 @@ export class MemberService {
     input: {
       displayName: string;
       normalized: string;
+      department: string | null;
+      grade: member.Grade | null;
       contact: string | null;
       schoolEmail: string;
       gmail: string;
@@ -364,6 +372,8 @@ export class MemberService {
         status: promote ? "added" : match.status,
         // non-destructive: only fill when currently empty. Both 参加届 emails are
         // retained on the roster (default `contact` to the school address when unset).
+        department: match.department ?? input.department,
+        grade: match.grade ?? input.grade,
         contact: match.contact ?? input.schoolEmail,
         schoolEmail: match.schoolEmail ?? input.schoolEmail,
         gmail: match.gmail ?? input.gmail,
@@ -385,6 +395,8 @@ export class MemberService {
       name: input.displayName,
       roleTitle: null,
       status: "added",
+      department: input.department,
+      grade: input.grade,
       identityUserId: null,
       contact: input.contact ?? input.schoolEmail,
       schoolEmail: input.schoolEmail,

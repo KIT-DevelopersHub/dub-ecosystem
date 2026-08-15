@@ -1075,6 +1075,8 @@ interface DemoMember {
   roleTitle: string | null;
   status: "added" | "invited" | "considering" | "declined";
   teamIds: string[];
+  department: string | null;
+  grade: string | null;
   identityUserId: string | null;
   contact: string | null;
   schoolEmail: string | null;
@@ -1098,32 +1100,43 @@ function createMembersStore() {
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
   ];
-  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null, identityUserId: string | null = null): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, identityUserId, contact, schoolEmail: null, gmail: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+  const mk = (
+    id: string,
+    name: string,
+    roleTitle: string | null,
+    status: DemoMember["status"],
+    teamIds: string[],
+    i: number,
+    contact: string | null = null,
+    department: string | null = null,
+    grade: string | null = null,
+    identityUserId: string | null = null,
+  ): DemoMember => ({
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
-    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", ME_ID),
-    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1),
-    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2),
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
+    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1, null, "情報工学科", "3年"),
+    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年"),
     // 開発
-    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3),
-    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4),
-    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5),
+    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
+    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年"),
+    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年"),
     // 当日進行
-    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6),
-    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7),
+    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6, null, "機械工学科", "3年"),
+    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7, null, "経営情報学科", "2年"),
     // スポンサー
-    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8),
-    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9),
-    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10),
+    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8, null, "経営情報学科", "3年"),
+    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9, null, "情報工学科", "2年"),
+    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10, null, "電気電子工学科", "1年"),
     // 会場
-    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11),
-    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12),
+    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11, null, "建築学科", "3年"),
+    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12, null, "建築学科", "2年"),
     // 集客広報
-    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13),
-    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14),
-    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com"),
+    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13, null, "メディア情報学科", "3年"),
+    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
   ];
 
@@ -1185,6 +1198,7 @@ function createMembersStore() {
       const mem: DemoMember = {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
         contact: body?.contact ?? null, schoolEmail: null, gmail: null, note: body?.note ?? null,
         sortOrder: (members.length + 1) * 1024, version: 1,
@@ -1232,6 +1246,8 @@ function createMembersStore() {
         if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
         if (body?.status !== undefined) mem.status = body.status;
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+        if (body?.department !== undefined) mem.department = body.department ?? null;
+        if (body?.grade !== undefined) mem.grade = body.grade ?? null;
         if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
         if (body?.note !== undefined) mem.note = body.note ?? null;
@@ -1260,6 +1276,8 @@ function createMembersStore() {
       const schoolEmail: string = String(body?.schoolEmail ?? "");
       const gmail: string = String(body?.gmail ?? "");
       const note: string | null = body?.note ?? null;
+      const department: string | null = body?.department ?? null;
+      const grade: string | null = body?.grade ?? null;
       const existing = members.find((mem) => norm(mem.name) === target);
       let matchKind: "linked_existing" | "created_new";
       let resolved: DemoMember;
@@ -1267,6 +1285,8 @@ function createMembersStore() {
         if (existing.status === "invited" || existing.status === "considering") existing.status = "added";
         if (desiredTeamId && !existing.teamIds.includes(desiredTeamId)) existing.teamIds.push(desiredTeamId);
         if (existing.contact === null) existing.contact = contact ?? schoolEmail;
+        if (existing.department === null && department) existing.department = department;
+        if (existing.grade === null && grade) existing.grade = grade;
         if (existing.schoolEmail === null && schoolEmail) existing.schoolEmail = schoolEmail;
         if (existing.gmail === null && gmail) existing.gmail = gmail;
         if (existing.note === null && note) existing.note = note;
@@ -1277,6 +1297,7 @@ function createMembersStore() {
       } else {
         resolved = {
           id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added", identityUserId: null,
+          department, grade,
           teamIds: desiredTeamId ? [desiredTeamId] : [], contact: contact ?? schoolEmail,
           schoolEmail: schoolEmail || null, gmail: gmail || null, note,
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
