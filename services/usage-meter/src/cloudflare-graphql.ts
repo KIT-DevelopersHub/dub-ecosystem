@@ -321,40 +321,65 @@ export interface CfFetchDeps {
   token: string;
   accountId: string;
   fetchImpl?: typeof fetch;
+  /** Transient-failure retries (network throw / 5xx / 429). Default 2 → up to 3 attempts. */
+  maxRetries?: number;
 }
 
-/** Fetch usage from Cloudflare GraphQL. Never throws: returns {} on any failure so every
- *  affected metric degrades to status="unknown". A partial (per-dataset) error still
- *  yields the metrics that DID resolve. */
+/** A status worth retrying: server-side (5xx) or rate-limited (429). 4xx (auth/bad-arg) and
+ *  a clean 200 are terminal — retrying them only wastes calls. */
+function isTransientStatus(status: number): boolean {
+  return status >= 500 || status === 429;
+}
+
+/** Fetch usage from Cloudflare GraphQL. Never throws: returns {} on any terminal failure so
+ *  every affected metric degrades to status="unknown". A partial (per-dataset) error still
+ *  yields the metrics that DID resolve.
+ *
+ *  Retries transient failures (network throw / 5xx / 429). The daily collector runs the whole
+ *  account query in one shot, so a single transient CF hiccup previously blanked ALL Cloudflare
+ *  cards for the day; a bounded immediate retry absorbs those blips at the source (the read
+ *  path in snapshot-repo carries forward the last known value as a second line of defence). */
 export async function fetchCloudflareUsage(
   deps: CfFetchDeps,
   now: Date,
   log?: (msg: string, fields?: Record<string, unknown>) => void,
 ): Promise<Partial<Record<string, number>>> {
   const doFetch = deps.fetchImpl ?? fetch;
+  const maxRetries = deps.maxRetries ?? 2;
   const { query, variables } = buildUsageQuery(deps.accountId, now);
-  try {
-    const res = await doFetch(CF_GRAPHQL_ENDPOINT, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${deps.token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ query, variables }),
-    });
-    if (!res.ok) {
-      log?.("cf graphql non-2xx", { status: res.status });
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await doFetch(CF_GRAPHQL_ENDPOINT, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${deps.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ query, variables }),
+      });
+      if (!res.ok) {
+        if (isTransientStatus(res.status) && attempt < maxRetries) {
+          log?.("cf graphql transient non-2xx, retrying", { status: res.status, attempt });
+          continue;
+        }
+        log?.("cf graphql non-2xx", { status: res.status });
+        return {};
+      }
+      const body = (await res.json().catch(() => null)) as unknown;
+      const errs = (body as { errors?: unknown[] })?.errors;
+      if (Array.isArray(errs) && errs.length > 0) {
+        // partial data may still be present; extract what we can and note the errors
+        log?.("cf graphql returned errors", { errors: errs.length });
+      }
+      return extractMetrics(body);
+    } catch (err) {
+      if (attempt < maxRetries) {
+        log?.("cf graphql fetch failed, retrying", { error: err instanceof Error ? err.message : String(err), attempt });
+        continue;
+      }
+      log?.("cf graphql fetch failed", { error: err instanceof Error ? err.message : String(err) });
       return {};
     }
-    const body = (await res.json().catch(() => null)) as unknown;
-    const errs = (body as { errors?: unknown[] })?.errors;
-    if (Array.isArray(errs) && errs.length > 0) {
-      // partial data may still be present; extract what we can and note the errors
-      log?.("cf graphql returned errors", { errors: errs.length });
-    }
-    return extractMetrics(body);
-  } catch (err) {
-    log?.("cf graphql fetch failed", { error: err instanceof Error ? err.message : String(err) });
-    return {};
   }
 }

@@ -146,4 +146,76 @@ describe("fetchCloudflareUsage (graceful)", () => {
     );
     expect(res).toEqual({ workers_requests_day: 42 });
   });
+
+  it("retries a transient 5xx, then succeeds (a single blip must not blank the day)", async () => {
+    const body = { data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ sum: { requests: 7 } }] }] } } };
+    let calls = 0;
+    const res = await fetchCloudflareUsage(
+      {
+        token: "t",
+        accountId: "a",
+        fetchImpl: async () => {
+          calls += 1;
+          return calls < 2 ? new Response("busy", { status: 503 }) : new Response(JSON.stringify(body), { status: 200 });
+        },
+      },
+      NOW,
+    );
+    expect(calls).toBe(2);
+    expect(res).toEqual({ workers_requests_day: 7 });
+  });
+
+  it("retries a network throw, then succeeds", async () => {
+    const body = { data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ sum: { requests: 9 } }] }] } } };
+    let calls = 0;
+    const res = await fetchCloudflareUsage(
+      {
+        token: "t",
+        accountId: "a",
+        fetchImpl: async () => {
+          calls += 1;
+          if (calls < 2) throw new Error("boom");
+          return new Response(JSON.stringify(body), { status: 200 });
+        },
+      },
+      NOW,
+    );
+    expect(calls).toBe(2);
+    expect(res).toEqual({ workers_requests_day: 9 });
+  });
+
+  it("does NOT retry a terminal 4xx (auth) — returns {} on the first call", async () => {
+    let calls = 0;
+    const res = await fetchCloudflareUsage(
+      {
+        token: "t",
+        accountId: "a",
+        fetchImpl: async () => {
+          calls += 1;
+          return new Response("nope", { status: 403 });
+        },
+      },
+      NOW,
+    );
+    expect(calls).toBe(1);
+    expect(res).toEqual({});
+  });
+
+  it("gives up after maxRetries on a persistent transient failure (still never throws)", async () => {
+    let calls = 0;
+    const res = await fetchCloudflareUsage(
+      {
+        token: "t",
+        accountId: "a",
+        maxRetries: 2,
+        fetchImpl: async () => {
+          calls += 1;
+          return new Response("busy", { status: 503 });
+        },
+      },
+      NOW,
+    );
+    expect(calls).toBe(3); // 1 initial + 2 retries
+    expect(res).toEqual({});
+  });
 });
