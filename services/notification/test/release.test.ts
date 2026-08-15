@@ -11,7 +11,7 @@ import {
   makeChatAdapter,
   makePushAdapter,
 } from "../src/adapters";
-import { unreadCount, upsertPreference } from "../src/repo";
+import { unreadCount, upsertPreference, backfillBroadcastInbox, listInbox } from "../src/repo";
 import {
   publishRelease,
   buildReleaseInput,
@@ -130,6 +130,56 @@ describe("release notes — seed back-catalog", () => {
     expect(second.published).toBe(0);
     expect(second.deduplicated).toBe(INITIAL_RELEASE_NOTES.length);
     expect(await unreadCount(h.db, "u1")).toBe(INITIAL_RELEASE_NOTES.length);
+  });
+});
+
+describe("release notes — late-join backfill (bugfix: admin created after a broadcast)", () => {
+  it("backfillBroadcastInbox materializes releases a late-joining user never received", async () => {
+    const h = makeTestEnv();
+    // Broadcast fans out to u1 only (the roster at publish time).
+    const deps = broadcastDeps(h, ["u1"]);
+    await seedInitialReleases(deps, ctx(), null);
+    // u2 was created AFTER the broadcast — no fan-out row exists yet.
+    expect(await unreadCount(h.db, "u2")).toBe(0);
+
+    const created = await backfillBroadcastInbox(h.db, "u2");
+    expect(created).toBe(INITIAL_RELEASE_NOTES.length);
+    expect(await unreadCount(h.db, "u2")).toBe(INITIAL_RELEASE_NOTES.length);
+
+    // Idempotent: a second backfill creates nothing.
+    expect(await backfillBroadcastInbox(h.db, "u2")).toBe(0);
+    expect(await unreadCount(h.db, "u2")).toBe(INITIAL_RELEASE_NOTES.length);
+  });
+
+  it("preserves read state: a backfilled-then-read release is not resurrected as unread", async () => {
+    const h = makeTestEnv();
+    const deps = broadcastDeps(h, ["u1"]);
+    await publishRelease(deps, ctx(), { title: "🎉 A", body: "b", dedupKey: "release:a" }, null);
+    await backfillBroadcastInbox(h.db, "u2");
+    const page = await listInbox(h.db, "u2", { limit: 50 });
+    // (mark it read via the returned inbox id, then re-run backfill)
+    const { markRead } = await import("../src/repo");
+    await markRead(h.db, "u2", page.items[0]!.id);
+    expect(await unreadCount(h.db, "u2")).toBe(0);
+    expect(await backfillBroadcastInbox(h.db, "u2")).toBe(0);
+    expect(await unreadCount(h.db, "u2")).toBe(0);
+  });
+
+  it("GET /inbox backfills broadcasts for a user with no prior fan-out row", async () => {
+    const h = makeTestEnv();
+    const deps = broadcastDeps(h, ["u1"]);
+    await seedInitialReleases(deps, ctx(), null);
+    const app = createApp();
+    // u2 (late joiner) hits GET /inbox and must see every release note.
+    const res = await app.request(
+      "/inbox",
+      { headers: { "x-dub-user-id": "u2" } },
+      h.env as unknown as Record<string, unknown>,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { type: string }[] };
+    expect(body.items.length).toBe(INITIAL_RELEASE_NOTES.length);
+    expect(body.items.every((i) => i.type === "release")).toBe(true);
   });
 });
 

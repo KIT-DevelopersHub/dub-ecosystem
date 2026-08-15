@@ -40,6 +40,7 @@ const C_ARCHIVED = "chn_archived0000000000000000";
 
 const ch = (over: Partial<Channel> & Pick<Channel, "id" | "type" | "name">): Channel => ({
   orgId: "org_devhub",
+  visibility: "public",
   topic: null,
   eventId: null,
   archived: false,
@@ -54,7 +55,7 @@ const channels: Channel[] = [
   ch({ id: C_GENERAL, type: "topic", name: "general", topic: "全体連絡・お知らせ 📣" }),
   ch({ id: C_RANDOM, type: "topic", name: "random", topic: "雑談なんでも" }),
   ch({ id: C_DEV, type: "topic", name: "dev", topic: "開発・デプロイ・レビュー" }),
-  ch({ id: C_DESIGN, type: "topic", name: "design", topic: "UI/UX・デザインレビュー", memberCount: 4 }),
+  ch({ id: C_DESIGN, type: "topic", visibility: "private", name: "design", topic: "UI/UX・デザインレビュー", memberCount: 4 }),
   ch({ id: C_CONF, type: "event", name: "北陸itカンファレンス", topic: "運営チャネル", eventId: "evt_conf000000000000000000", memberCount: 5 }),
   ch({ id: C_DM_HANAKO, type: "dm", name: "佐藤 花子", memberCount: 2 }),
   ch({ id: C_DM_KENICHI, type: "dm", name: "山本 健一", memberCount: 2 }),
@@ -109,6 +110,20 @@ const messages: Message[] = [
   m(THREAD_ROOT, C_GENERAL, MISAKI, "新しいロゴ案、3パターン用意しました。意見ください！", t(9, 10, 30), {
     replyCount: 3,
     reactions: [react("🎨", ME, HANAKO, DAISUKE), react("❤️", KENICHI)],
+    attachments: [
+      {
+        fileId: "fil_logo0000000000000000000x",
+        name: "logo-proposal-B.svg",
+        mime: "image/svg+xml",
+        size: 4213,
+        // tiny inline SVG so the demo shows an inline image without a network fetch
+        url:
+          "data:image/svg+xml;utf8," +
+          encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="120"><rect width="220" height="120" rx="12" fill="#3358e8"/><circle cx="60" cy="60" r="30" fill="#fff"/><text x="110" y="68" font-family="sans-serif" font-size="26" font-weight="700" fill="#fff">DevHub</text></svg>',
+          ),
+      },
+    ],
   }),
   // thread replies (ids sort after the root but below the channel's newest top-level)
   m("msg_00061000000000000000000x", C_GENERAL, HANAKO, "B案がいいと思います！余白の取り方が好き", t(9, 10, 35), { threadRootId: THREAD_ROOT }),
@@ -170,6 +185,9 @@ setPresence({
   [C_DM_KENICHI]: "offline",
 });
 
+// Pre-pin the bot's daily-schedule post so the pinned-items popover has content.
+const pins = [{ channelId: C_GENERAL, messageId: "msg_00020000000000000000000x" }];
+
 export function demoSeed(): MockSeed {
-  return { currentUserId: ME, channels, messages, members, users };
+  return { currentUserId: ME, channels, messages, members, users, pins };
 }

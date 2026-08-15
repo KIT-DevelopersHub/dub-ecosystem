@@ -36,6 +36,8 @@ export type {
   PostMessageResponse,
   ReactionToggleRequest,
   ReadStateUpdateRequest,
+  SearchHit,
+  SearchMessagesRequest,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,

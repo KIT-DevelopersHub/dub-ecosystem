@@ -235,10 +235,26 @@ const DEMO_ARCHIVE_CC = "archive@developershub.jp";
 // the two personal accounts above, which each see only their own mail.
 const OVERSIGHT_PERMISSIONS: identity.PermissionKey[] = [...DEMO_PERMISSIONS, "mail:read_all"];
 
+// A general MEMBER account (no dangerous permissions → not privileged) so a viewer /
+// the E2E can prove the member release gate: only member-published apps (メール) are
+// active in the launcher, every other app is greyed-out. mail:read is granted so the
+// one published app actually opens; no *:admin / *:send etc. so isPrivilegedViewer()
+// stays false and the gate applies.
+const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "file:read",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "mail:read",
+];
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+  { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
 ];
 
 /** True when the account holds the mail:read_all oversight permission. */

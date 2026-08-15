@@ -47,7 +47,7 @@ describe("HomeScreen", () => {
   it("surfaces per-frame partial errors without dropping the other card", async () => {
     const home: gateway.BffHomeResponse = {
       ...OK_HOME,
-      partialErrors: [{ source: "notification", code: "UPSTREAM_TIMEOUT" }],
+      partialErrors: [{ source: "notification-service", code: "UPSTREAM_TIMEOUT" }],
     };
     render(wrap(<HomeScreen api={makeApi(home)} />));
     // Notifications frame shows its error; events frame still renders its list.
@@ -63,7 +63,7 @@ describe("HomeScreen", () => {
     // that fires the handler — the dialog itself re-fetches the inbox as the retry.
     const home: gateway.BffHomeResponse = {
       ...OK_HOME,
-      partialErrors: [{ source: "notification", code: "UPSTREAM_TIMEOUT" }],
+      partialErrors: [{ source: "notification-service", code: "UPSTREAM_TIMEOUT" }],
     };
     const opened: number[] = [];
     render(wrap(<HomeScreen api={makeApi(home)} onOpenNotifications={() => opened.push(1)} />));

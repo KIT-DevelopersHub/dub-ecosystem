@@ -18,13 +18,15 @@ export interface MessageTimelineProps {
   canModerate: boolean;
   lastReadMessageId: common.MessageId | null;
   hasOlder: boolean;
+  pinnedIds?: ReadonlySet<common.MessageId>;
   resolveUser?: (id: common.UserId) => identity.UserSummary | undefined;
   onLoadOlder?: () => void;
   onToggleReaction?: (id: common.MessageId, emoji: string) => void;
-  onEdit?: (message: Message) => void;
+  onSubmitEdit?: (message: Message, body: string) => void | Promise<void>;
   onDelete?: (message: Message) => void;
   onReply?: (message: Message) => void;
   onOpenThread?: (message: Message) => void;
+  onTogglePin?: (message: Message) => void;
   onResend?: (clientTempId: string) => void;
   onDiscard?: (clientTempId: string) => void;
 }
@@ -80,12 +82,14 @@ export function MessageTimeline(props: MessageTimelineProps) {
               canModerate={props.canModerate}
               grouped={grouped}
               mentionsMe={mentionsMe}
+              pinned={props.pinnedIds?.has(m.id) ?? false}
               resolveUser={props.resolveUser}
               onToggleReaction={props.onToggleReaction}
-              onEdit={props.onEdit}
+              onSubmitEdit={props.onSubmitEdit}
               onDelete={props.onDelete}
               onReply={props.onReply}
               onOpenThread={props.onOpenThread}
+              onTogglePin={props.onTogglePin}
             />
           </div>
         );
