@@ -10,9 +10,10 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTeams } from "../api/endpoints";
+import { listTeams, listEvents } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
+import type { EventOption } from "../components/MyTaskCreateModal";
 import styles from "../styles/app.module.css";
 
 export interface TaskRouteContextValue {
@@ -58,13 +59,16 @@ export function TaskWorkspaceRoute() {
 /**
  * Standalone "マイタスク" route (`/me/tasks`): the current user's task hub across
  * events — 担当(assigned) / 依頼(issued) lenses, from→to list, filters + create.
- * Teams come from the (future member-service) team list; the roster/event options
- * are derived from the fetched tasks when the shell has none to hand.
+ * Teams come from the (future member-service) team list; the event options come
+ * from event-service so 「タスクを発行」 can pick a 対象イベント (task-service
+ * requires a real eventId). Both degrade gracefully — the hub falls back to the
+ * events/people derived from the fetched tasks when a fetch yields nothing.
  */
 export function MeTasksRoute() {
   const client = useApiClient();
   const { currentUserId } = useTaskRoute();
   const [teams, setTeams] = useState<readonly team.Team[]>([]);
+  const [events, setEvents] = useState<readonly EventOption[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -75,6 +79,16 @@ export function MeTasksRoute() {
       .catch(() => {
         /* teams are optional; the hub degrades gracefully without them */
       });
+    // Supply the real event list so 「タスクを発行」 is enabled and can target a
+    // live event. Without this the button stayed disabled for admins who had no
+    // existing tasks to derive an event from (issue: 発行ボタンが押せない).
+    void listEvents(client)
+      .then((res) => {
+        if (live) setEvents(res.items.map((e) => ({ id: e.id, name: e.title })));
+      })
+      .catch(() => {
+        /* events are optional; the hub falls back to task-derived events */
+      });
     return () => {
       live = false;
     };
@@ -84,7 +98,7 @@ export function MeTasksRoute() {
 
   return (
     <ToastProvider>
-      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} events={[]} />
+      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} events={events} />
     </ToastProvider>
   );
 }
