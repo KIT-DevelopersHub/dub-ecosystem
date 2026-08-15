@@ -123,4 +123,23 @@ describe("seedScenario", () => {
     expect(count(raw, "task_tasks")).toBe(10);
     expect(fkViolations(raw)).toEqual([]);
   });
+
+  // Regression (prod incident 2026-08-15): every system role must grant the FE5
+  // self-service notification scopes. The notifications inbox (/notifications) and
+  // preferences (/settings/notifications) pages gate on these in the SPA, so a role
+  // missing them makes 通知一覧 a 403 for that tier — invisible to the demo, whose
+  // DEMO_PERMISSIONS hard-code both perms. Migration 0004_notif_self_perms closes it.
+  it("every system role grants notif:inbox:self + notif:prefs:self (migration only)", async () => {
+    const { raw } = await migratedD1();
+    const roles = ["role_sys_admin", "role_sys_maintainer", "role_sys_organizer", "role_sys_member"];
+    const perms = ["notif:inbox:self", "notif:prefs:self"];
+    for (const roleId of roles) {
+      for (const permKey of perms) {
+        const row = raw
+          .prepare("SELECT 1 AS ok FROM identity_role_permissions WHERE role_id = ? AND permission_key = ?")
+          .get(roleId, permKey) as { ok: number } | undefined;
+        expect(row?.ok, `${roleId} must grant ${permKey}`).toBe(1);
+      }
+    }
+  });
 });
