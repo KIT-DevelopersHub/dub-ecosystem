@@ -82,6 +82,49 @@ export interface DueSoonRow {
   dueAt: common.ISODateTime;
 }
 
+// snake-cased D1 row for task_attachments.
+export interface AttachmentRow {
+  id: string;
+  task_id: string;
+  kind: task.TaskAttachmentKind;
+  name: string;
+  url: string;
+  file_id: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_by: string;
+  created_at: string;
+  archived_at: string | null;
+}
+
+export function rowToAttachment(r: AttachmentRow): task.TaskAttachment {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    kind: r.kind,
+    name: r.name,
+    url: r.url,
+    fileId: r.file_id,
+    mimeType: r.mime_type,
+    sizeBytes: r.size_bytes,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+  };
+}
+
+export interface InsertAttachmentInput {
+  id: string;
+  taskId: common.TaskId;
+  kind: task.TaskAttachmentKind;
+  name: string;
+  url: string;
+  fileId: common.FileId | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  createdBy: common.UserId;
+  now: common.ISODateTime;
+}
+
 export interface TaskRepo {
   insert(input: InsertTaskInput): Promise<task.Task>;
   getById(id: string, includeArchived?: boolean): Promise<task.Task | null>;
@@ -105,6 +148,12 @@ export interface TaskRepo {
   ): Promise<{ ok: boolean; added: common.TaskId[]; removed: common.TaskId[] }>;
   /** Find + mark tasks whose due_at is within [now, now+window] and not yet notified. */
   scanDueSoon(nowMs: number, windowMs: number, now: string): Promise<DueSoonRow[]>;
+  /** Append an attachment (file/url) to a task. */
+  addAttachment(input: InsertAttachmentInput): Promise<task.TaskAttachment>;
+  /** A task's live (non-archived) attachments, newest first. */
+  listAttachments(taskId: string): Promise<task.TaskAttachment[]>;
+  /** Soft-delete one attachment; false if not found / already archived. */
+  archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean>;
 }
 
 export function encodeCursor(id: string): string {
@@ -316,6 +365,53 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       }));
       await db.batch(stmts);
       return rows.map((r) => ({ taskId: r.id, eventId: r.event_id, dueAt: r.due_at }));
+    },
+
+    async addAttachment(input: InsertAttachmentInput): Promise<task.TaskAttachment> {
+      await db.run(
+        `INSERT INTO task_attachments
+           (id, task_id, kind, name, url, file_id, mime_type, size_bytes, created_by, created_at, archived_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        input.id,
+        input.taskId,
+        input.kind,
+        input.name,
+        input.url,
+        input.fileId,
+        input.mimeType,
+        input.sizeBytes,
+        input.createdBy,
+        input.now,
+      );
+      const row = await db.first<AttachmentRow>(
+        `SELECT id, task_id, kind, name, url, file_id, mime_type, size_bytes, created_by, created_at, archived_at
+         FROM task_attachments WHERE id = ?`,
+        input.id,
+      );
+      if (!row) throw new Error("attachment insert readback failed");
+      return rowToAttachment(row);
+    },
+
+    async listAttachments(taskId: string): Promise<task.TaskAttachment[]> {
+      const rows = await db.all<AttachmentRow>(
+        `SELECT id, task_id, kind, name, url, file_id, mime_type, size_bytes, created_by, created_at, archived_at
+         FROM task_attachments
+         WHERE task_id = ? AND archived_at IS NULL
+         ORDER BY created_at DESC, id DESC`,
+        taskId,
+      );
+      return rows.map(rowToAttachment);
+    },
+
+    async archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean> {
+      const res = await db.run(
+        `UPDATE task_attachments SET archived_at = ?
+         WHERE id = ? AND task_id = ? AND archived_at IS NULL`,
+        now,
+        attachmentId,
+        taskId,
+      );
+      return res.meta.changes > 0;
     },
   };
 }

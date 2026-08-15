@@ -354,6 +354,78 @@ export function buildApp(deps: Deps): Hono {
     return c.json(archived ?? { ok: true });
   });
 
+  // ---- GET /tasks/:id/attachments (list a task's file/url attachments) ----
+  app.get("/tasks/:id/attachments", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:read");
+    const id = c.req.param("id");
+    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
+    const found = await deps.repo.getById(id);
+    if (!found) throw taskErrors.notFound(id);
+    const items = await deps.repo.listAttachments(id);
+    const res: task.ListTaskAttachmentsResponse = { items };
+    return c.json(res);
+  });
+
+  // ---- POST /tasks/:id/attachments (attach a file's meta or an external URL) ----
+  // The file BLOB lives in file-meta/R2 (uploaded by the client via POST /files);
+  // here we persist only the task↔attachment index + display meta. `url` is the
+  // file-meta download path (kind=file) or the external URL (kind=url).
+  app.post("/tasks/:id/attachments", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
+    const found = await deps.repo.getById(id);
+    if (!found) throw taskErrors.notFound(id);
+
+    const body = await readJson<Partial<task.CreateTaskAttachmentRequest>>(c);
+    const fe: FieldError[] = [];
+    if (body.kind !== "file" && body.kind !== "url") fe.push({ field: "kind", reason: "invalid_type" });
+    if (typeof body.name !== "string" || body.name.trim().length === 0 || body.name.length > 300) {
+      fe.push({ field: "name", reason: "required" });
+    }
+    if (typeof body.url !== "string" || body.url.length === 0) fe.push({ field: "url", reason: "required" });
+    else if (body.kind === "url" && !/^https?:\/\//i.test(body.url)) fe.push({ field: "url", reason: "invalid_url" });
+    if (body.fileId !== undefined && typeof body.fileId !== "string") fe.push({ field: "fileId", reason: "invalid_type" });
+    if (body.mimeType !== undefined && typeof body.mimeType !== "string") fe.push({ field: "mimeType", reason: "invalid_type" });
+    if (body.sizeBytes !== undefined && (typeof body.sizeBytes !== "number" || body.sizeBytes < 0)) {
+      fe.push({ field: "sizeBytes", reason: "invalid_type" });
+    }
+    assertValid(fe);
+
+    const now = nowIso();
+    const actorId = actorIdOf(principal);
+    const created = await deps.repo.addAttachment({
+      id: newId("tatt"),
+      taskId: id,
+      kind: body.kind!,
+      name: body.name!.trim(),
+      url: body.url!,
+      fileId: body.fileId ?? null,
+      mimeType: body.mimeType ?? null,
+      sizeBytes: body.sizeBytes ?? null,
+      createdBy: actorId,
+      now,
+    });
+    return c.json(created, 201);
+  });
+
+  // ---- DELETE /tasks/:id/attachments/:attachmentId (soft-remove) ----
+  app.delete("/tasks/:id/attachments/:attachmentId", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    const attachmentId = c.req.param("attachmentId");
+    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
+    const ok = await deps.repo.archiveAttachment(id, attachmentId, nowIso());
+    if (!ok) throw taskErrors.notFound(attachmentId);
+    return c.json({ ok: true });
+  });
+
   // ---- PUT /tasks/:id/dependencies (full replace; cycle-checked) ----
   app.put("/tasks/:id/dependencies", async (c) => {
     const ctx = ctxOf(c);
