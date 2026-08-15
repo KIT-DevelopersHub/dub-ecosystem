@@ -121,7 +121,7 @@ export const MAX_ATTACHMENTS_TOTAL_BYTES = 25 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 10;
 
 /** Standard base64 of an ArrayBuffer (chunked so a large file never blows the call stack). */
-function bufferToBase64(buf: ArrayBuffer): string {
+export function bufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   let bin = "";
   const CHUNK = 0x8000;

@@ -28,7 +28,10 @@ export type MailIconName =
   | "paperclip"
   | "alert"
   | "chevron-down"
-  | "check";
+  | "check"
+  | "image"
+  | "file"
+  | "download";
 
 const PATHS: Record<MailIconName, JSX.Element> = {
   inbox: (
@@ -139,6 +142,26 @@ const PATHS: Record<MailIconName, JSX.Element> = {
   ),
   "chevron-down": <path d="M6 9l6 6 6-6" />,
   check: <path d="M5 12l5 5 9-11" />,
+  image: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9" r="1.5" />
+      <path d="M4 17l5-5 4 4 3-3 4 4" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M6 3h9l3 3v15H6z" />
+      <path d="M14 3v4h4" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 4v10" />
+      <path d="M8 11l4 4 4-4" />
+      <path d="M5 19h14" />
+    </>
+  ),
 };
 
 export function MailIcon({

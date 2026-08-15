@@ -4,10 +4,12 @@
 // (chips + autocomplete), fed the feature's parseRecipients and correspondent
 // candidates from the store. On send it appends to the Sent folder via the store
 // and best-effort posts through the real MailApi (ignored under the demo mock).
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken } from "@dub/app-ui";
-import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, fileToAttachment, formatBytes, parseRecipients } from "../mailApi.tsx";
+import { parseRecipients } from "../mailApi.tsx";
+import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
+import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore, type ComposeState } from "./useMailStore.tsx";
@@ -34,27 +36,45 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const removeIcon = <MailIcon name="x" size={12} />;
   const patch = (p: Partial<ComposeState>): void => dispatch({ type: "UPDATE_COMPOSE", id: compose.id, patch: p });
 
-  // Attachments live in local window state (the floating quick-compose): picked files are
-  // read to base64 and ride the SendMailRequest. Bounded by the shared per-file / count caps.
+  // Attachments live in the shared compose-attachment hook (Gmail parity): clip-pick OR
+  // drag-and-drop, forbidden-type/size/count rules with explicit errors, per-file read
+  // progress and image thumbnails. `readyInputs()` rides the SendMailRequest; the gateway
+  // persists the bytes to R2 and hands the provider the structured attachment list.
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [attachments, setAttachments] = useState<{ filename: string; sizeBytes: number; input: mail.MailAttachmentInput }[]>([]);
+  const att = useComposeAttachments();
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepth = useRef(0);
 
-  const onPickFiles = async (fileList: FileList | null): Promise<void> => {
-    if (!fileList || fileList.length === 0) return;
-    const picked: { filename: string; sizeBytes: number; input: mail.MailAttachmentInput }[] = [];
-    for (const file of Array.from(fileList)) {
-      if (file.size > MAX_ATTACHMENT_BYTES) continue;
-      picked.push({ filename: file.name, sizeBytes: file.size, input: await fileToAttachment(file) });
-    }
-    setAttachments((prev) => [...prev, ...picked].slice(0, MAX_ATTACHMENTS));
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const onDragEnter = (e: DragEvent): void => {
+    if (minimized || !Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
   };
-  const removeAttachment = (idx: number): void => setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  const onDragOver = (e: DragEvent): void => {
+    if (minimized || !Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+  const onDragLeave = (): void => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  };
+  const onDrop = (e: DragEvent): void => {
+    if (minimized) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    att.addFiles(e.dataTransfer?.files ?? null);
+  };
 
   const send = (): void => {
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
     if (to.length === 0) return;
+    // Don't drop a file that is still being read: wait for the read to finish (Gmail keeps
+    // Send disabled until the upload settles). The button is disabled while hasPending.
+    if (att.hasPending) return;
     // Optimistic: show it in Sent immediately. The real send follows; once the gateway
     // confirms, REQUEST_SYNC re-fetches GET /mail/sent so the entry is server-backed and
     // survives a reload (the From is the gateway-resolved <user>@developershub.jp).
@@ -64,7 +84,8 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/
     // References (recipient threads the conversation; a further reply chains back to us).
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
-    if (attachments.length > 0) req.attachments = attachments.map((a) => a.input);
+    const inputs = att.readyInputs();
+    if (inputs.length > 0) req.attachments = inputs;
     void mailApi
       .send(req)
       .then(() => dispatch({ type: "REQUEST_SYNC" }))
@@ -82,6 +103,10 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   return (
     <div
       data-testid="fe2-mail-compose-window"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       style={{
         ...frame,
         display: "flex",
@@ -94,6 +119,30 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         overflow: "hidden",
       }}
     >
+      {dragOver && !minimized ? (
+        <div
+          data-testid="fe2-mail-compose-dropzone"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            background: "var(--dub-color-brand-50, rgba(59,130,246,0.10))",
+            border: "2px dashed var(--dub-color-brand-500)",
+            borderRadius: "inherit",
+            color: "var(--dub-color-brand-600, var(--dub-color-brand-500))",
+            fontSize: "var(--dub-font-size-sm)",
+            fontWeight: 600,
+            pointerEvents: "none",
+          }}
+        >
+          <MailIcon name="paperclip" size={20} />
+          ここにドロップして添付
+        </div>
+      ) : null}
       <div
         onClick={() => minimized && patch({ minimized: false })}
         style={{
@@ -163,12 +212,20 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             placeholder="本文を入力…"
             style={{ flex: 1, padding: 12, border: "none", outline: "none", resize: "none", background: "transparent", color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-sm)", lineHeight: 1.6, fontFamily: "inherit" }}
           />
+          {att.errors.length > 0 || att.items.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 12px", borderTop: "1px solid var(--dub-color-border-default)", maxHeight: 160, overflowY: "auto", flexShrink: 0 }}>
+              <AttachmentErrors errors={att.errors} onDismiss={att.dismissErrors} />
+              <AttachmentTray items={att.items} onRemove={att.remove} />
+            </div>
+          ) : null}
           <div style={{ display: "flex", alignItems: "center", gap: 8, height: 56, padding: "0 12px", borderTop: "1px solid var(--dub-color-border-default)", flexShrink: 0 }}>
             <button
               type="button"
               data-testid="fe2-mail-compose-send"
               onClick={send}
-              style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 24px", borderRadius: "var(--dub-radius-full)", background: "var(--dub-color-brand-500)", color: "#fff", fontWeight: 600, fontSize: "var(--dub-font-size-sm)" }}
+              disabled={att.hasPending}
+              title={att.hasPending ? "添付ファイルを処理中です…" : undefined}
+              style={{ all: "unset", cursor: att.hasPending ? "not-allowed" : "pointer", opacity: att.hasPending ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 24px", borderRadius: "var(--dub-radius-full)", background: "var(--dub-color-brand-500)", color: "#fff", fontWeight: 600, fontSize: "var(--dub-font-size-sm)" }}
             >
               送信 <MailIcon name="send" size={16} />
             </button>
@@ -186,19 +243,15 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
               type="file"
               multiple
               data-testid="fe2-mail-compose-attach-input"
-              onChange={(e) => void onPickFiles(e.target.files)}
+              onChange={(e) => {
+                att.addFiles(e.target.files);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
               style={{ display: "none" }}
             />
-            {attachments.length > 0 ? (
-              <span data-testid="fe2-mail-compose-attach-count" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
-                {attachments.map((a, i) => (
-                  <span key={`${a.filename}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                    {a.filename} ({formatBytes(a.sizeBytes)})
-                    <button type="button" aria-label={`${a.filename} を削除`} onClick={() => removeAttachment(i)} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)" }}>
-                      <MailIcon name="x" size={12} />
-                    </button>
-                  </span>
-                ))}
+            {att.items.length > 0 ? (
+              <span data-testid="fe2-mail-compose-attach-count" style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
+                {att.items.length} 件
               </span>
             ) : null}
             <span style={{ flex: 1 }} />

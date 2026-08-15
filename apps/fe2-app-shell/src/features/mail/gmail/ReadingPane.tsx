@@ -3,8 +3,9 @@
 // subject, star and archive/delete actions; each message shows a round initial
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { mail } from "@dub/types";
+import { isImageType } from "../attach.ts";
 import {
   avatarColor,
   displayName,
@@ -63,6 +64,76 @@ function quote(msg: MailMsg): string {
  *  via the session-authorized MailApi; a non-stored one (too large / message truncated,
  *  改善#2) shows as a disabled chip with the reason so the file is never silently dropped.
  *  kind picks the gateway route: our own sent message -> "sent", received -> "messages". */
+/** Inline thumbnail for a STORED image attachment (Gmail shows images inline). Lazy-fetches
+ *  the R2 bytes via the session-authorized MailApi on mount, renders the image, and clicking
+ *  it downloads the original. Object URL revoked on unmount. Falls back silently if the fetch
+ *  fails (the generic download chip below still covers it). */
+function InlineImage({ msg, att, kind }: { msg: MailMsg; att: mail.MailAttachment; kind: "messages" | "sent" }): JSX.Element {
+  const mailApi = useMailApi();
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let url: string | null = null;
+    let alive = true;
+    void (async () => {
+      try {
+        const blob = await mailApi.downloadAttachment(kind, msg.id, att.id);
+        if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return;
+        url = URL.createObjectURL(blob);
+        if (alive) setSrc(url);
+        else URL.revokeObjectURL(url);
+      } catch {
+        /* fall back to the download chip */
+      }
+    })();
+    return () => {
+      alive = false;
+      if (url && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(url);
+    };
+  }, [mailApi, msg.id, att.id, kind]);
+
+  const save = async (): Promise<void> => {
+    try {
+      const blob = await mailApi.downloadAttachment(kind, msg.id, att.id);
+      saveBlob(blob, att.filename);
+    } catch {
+      /* best-effort */
+    }
+  };
+  return (
+    <button
+      type="button"
+      data-testid="fe2-mail-attachment-image"
+      aria-label={`${att.filename} をダウンロード`}
+      title={att.filename}
+      onClick={() => void save()}
+      style={{
+        all: "unset",
+        cursor: "pointer",
+        display: "flex",
+        flexDirection: "column",
+        width: 200,
+        borderRadius: "var(--dub-radius-md)",
+        border: "1px solid var(--dub-color-border-default)",
+        overflow: "hidden",
+        background: "var(--dub-color-surface-sunken)",
+      }}
+    >
+      <span style={{ height: 130, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        {src ? (
+          <img src={src} alt={att.filename} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <MailIcon name="image" size={28} style={{ color: "var(--dub-color-text-muted)" }} />
+        )}
+      </span>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-secondary)" }}>
+        <MailIcon name="download" size={14} />
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.filename}</span>
+        <span style={{ color: "var(--dub-color-text-muted)", flexShrink: 0 }}>{formatBytes(att.sizeBytes)}</span>
+      </span>
+    </button>
+  );
+}
+
 function Attachments({ msg }: { msg: MailMsg }): JSX.Element | null {
   const mailApi = useMailApi();
   const [busy, setBusy] = useState<string | null>(null);
@@ -83,11 +154,16 @@ function Attachments({ msg }: { msg: MailMsg }): JSX.Element | null {
   return (
     <div
       data-testid="fe2-mail-attachments"
-      style={{ marginTop: 16, marginLeft: 48, display: "flex", flexWrap: "wrap", gap: 8 }}
+      style={{ marginTop: 16, marginLeft: 48, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-start" }}
     >
       {list.map((a) => {
         const dropped = a.status !== undefined && a.status !== "stored";
         const reason = a.status === "dropped_too_large" ? "サイズ超過のため保存されませんでした" : a.status === "dropped_truncated" ? "メール全体が大きすぎて取得できませんでした" : "";
+        // Stored images render as an inline thumbnail (Gmail parity); everything else — and any
+        // dropped attachment — stays a compact download/disabled chip.
+        if (!dropped && isImageType(a.contentType)) {
+          return <InlineImage key={a.id} msg={msg} att={a} kind={kind} />;
+        }
         return (
           <button
             key={a.id}
