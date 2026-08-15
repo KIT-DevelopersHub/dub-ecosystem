@@ -1022,6 +1022,25 @@ function createMembersStore() {
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
   ];
 
+  // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
+  // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
+  const participations: any[] = [
+    {
+      id: "part_seed_1", orgId: ORG, memberId: "member_h2", name: "黒川", normalizedName: "黒川",
+      nameKana: "くろかわ", grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp",
+      schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
+      desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
+      matchKind: "linked_existing", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      id: "part_seed_2", orgId: ORG, memberId: "member_demo_new", name: "田中 実", normalizedName: "田中実",
+      nameKana: "たなか みのる", grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp",
+      schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "event", note: null, status: "submitted",
+      matchKind: "created_new", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+  ];
+
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
 
   const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -1138,6 +1157,7 @@ function createMembersStore() {
         contact, schoolEmail, gmail, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
         status: "submitted", matchKind, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
       };
+      participations.unshift(participation);
       return { participation, member: resolved, matchKind };
     };
 
@@ -1158,6 +1178,11 @@ function createMembersStore() {
     if (method === "POST" && pathname === "/api/v1/members/participation") {
       const { participation, member, matchKind } = reflectParticipation();
       return json({ participation, member: { ...member, teamIds: [...member.teamIds] }, matchKind }, 201);
+    }
+
+    // 運営専用の回答一覧 (identity:read はデモでは全許可)。最新順で返す。
+    if (method === "GET" && pathname === "/api/v1/members/participation") {
+      return json({ participations: participations.map((p) => ({ ...p })) });
     }
 
     return null;

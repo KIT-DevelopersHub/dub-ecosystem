@@ -63,3 +63,33 @@
   color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
   margin: 0;
 }
+
+/* 回答一覧の詳細 Drawer — 定義リスト表示 (@dub/tokens のみ). */
+.detailList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  margin: 0;
+}
+.detailRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.detailLabel {
+  font-size: var(--dub-font-size-sm, var(--dub-font-size-md));
+  color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
+  margin: 0;
+}
+.detailValue {
+  color: var(--dub-color-text-primary);
+  margin: 0;
+  word-break: break-word;
+}
+
+/* アプリ内フォームから公開フォームへの導線 (共有用 URL の案内). */
+.shareHint {
+  margin: 0 0 var(--dub-space-4);
+  color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
+  font-size: var(--dub-font-size-sm, var(--dub-font-size-md));
+}

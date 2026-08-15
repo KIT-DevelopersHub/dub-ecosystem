@@ -268,7 +268,14 @@ function adaptMembers(api: ApiClient): FeatureModule {
 function adaptParticipation(api: ApiClient): FeatureModule {
   const wrap = providerWrapper(ParticipationProvider, api);
   const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = participationNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 49 }));
+  const nav: NavEntry[] = participationNav.map((n, i) => {
+    // 参加届(提出)は全員に、回答一覧は identity:read を持つ運営だけにランチャー表示。
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 49 + i };
+    if (n.requiredPermissions && n.requiredPermissions.length > 0) {
+      e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
+    }
+    return e;
+  });
   return { id: "participation", routes, nav };
 }
 

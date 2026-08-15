@@ -2,7 +2,7 @@
 // ParticipationForm drives the ParticipationApi (fill → validate → submit → サンクス).
 // The submit targets the PUBLIC endpoint and the サンクス is generic (no member echo).
 // All run against a faked ParticipationApi / ApiClient — no real network, green offline.
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
@@ -12,7 +12,8 @@ import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
 import { ParticipationPage } from "./ParticipationPage.tsx";
-import type { PublicParticipationResponse } from "./contracts.ts";
+import { ParticipationListPage } from "./ParticipationListPage.tsx";
+import type { Participation, PublicParticipationResponse } from "./contracts.ts";
 
 function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: RequestInput[] } {
   const calls: RequestInput[] = [];
@@ -63,6 +64,12 @@ describe("createParticipationApi", () => {
     const { api, calls } = fakeApiClient({ teams: [] });
     await createParticipationApi(api).listTeams();
     expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/members/teams" });
+  });
+
+  it("list GETs /api/v1/members/participation", async () => {
+    const { api, calls } = fakeApiClient({ participations: [] });
+    await createParticipationApi(api).list();
+    expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/members/participation" });
   });
 });
 
@@ -118,5 +125,47 @@ describe("ParticipationPage", () => {
     await fillRequired("既存 花子");
     await userEvent.click(screen.getByTestId("participation-submit"));
     expect(await screen.findByText(/登録済みの情報を更新しました/)).toBeInTheDocument();
+  });
+
+  it("links to the public form for sharing", () => {
+    render(wrap(<ParticipationPage />, makeApi()));
+    const link = screen.getByTestId("participation-public-link").querySelector("a");
+    expect(link?.getAttribute("href")).toBe("/participate");
+  });
+});
+
+const SUBMISSION: Participation = {
+  id: "p_1", orgId: "org", memberId: "m_1", name: "黒川", nameKana: "くろかわ", grade: "3",
+  department: "情報工学科", contact: "kurokawa@school.ac.jp", schoolEmail: "kurokawa@school.ac.jp",
+  gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
+  status: "submitted", matchKind: "linked_existing", submittedBy: "u_1",
+  submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",
+};
+
+describe("ParticipationListPage", () => {
+  it("renders submitted 参加届 rows with the school email + Gmail", async () => {
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })) });
+    render(wrap(<ParticipationListPage />, api));
+    expect(await screen.findByTestId("participation-list-table")).toBeInTheDocument();
+    expect(screen.getByText("kurokawa@school.ac.jp")).toBeInTheDocument();
+    expect(screen.getByText("kurokawa.dev@gmail.com")).toBeInTheDocument();
+    // 希望チーム resolves via the canonical team list (t1 → 会場).
+    expect(screen.getByText("会場")).toBeInTheDocument();
+  });
+
+  it("opens the detail drawer on row click", async () => {
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })) });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByText("黒川"));
+    const detail = await screen.findByTestId("participation-detail");
+    expect(detail).toBeInTheDocument();
+    expect(within(detail).getByText("よろしく")).toBeInTheDocument();
+    expect(within(detail).getByText("情報工学科")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when there are no submissions", async () => {
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [] })) });
+    render(wrap(<ParticipationListPage />, api));
+    expect(await screen.findByText("まだ参加届はありません")).toBeInTheDocument();
   });
 });

@@ -10,12 +10,19 @@ import { useParticipationApi } from "./ParticipationProvider.tsx";
 import type { PublicParticipationResponse, SubmitParticipationRequest } from "./contracts.ts";
 
 export const TEAMS_KEY: QueryKey = queryKeys.feature("participation", "teams");
+export const LIST_KEY: QueryKey = queryKeys.feature("participation", "list");
 
 export function useParticipationTeams() {
   const api = useParticipationApi();
   // Populates the 希望チーム select. Non-fatal if the caller lacks identity:read:
   // the page falls back to submitting without a team.
   return useQuery({ queryKey: TEAMS_KEY, queryFn: () => api.listTeams(), retry: false });
+}
+
+export function useParticipationList() {
+  const api = useParticipationApi();
+  // 運営用の回答一覧 (identity:read gate is enforced server-side + on the route).
+  return useQuery({ queryKey: LIST_KEY, queryFn: () => api.list() });
 }
 
 export function useSubmitParticipation() {

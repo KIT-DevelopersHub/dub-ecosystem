@@ -7,18 +7,24 @@
 // shows for every signed-in user. Write reflection onto the roster is re-authorized
 // server-side by member-service.
 import type { ComponentType } from "react";
+import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { ParticipationPage } from "./ParticipationPage.tsx";
+import { ParticipationListPage } from "./ParticipationListPage.tsx";
+
+type PermissionKey = identity.PermissionKey;
 
 export interface ParticipationSourceRoute {
   path: string;
   lazy: () => Promise<{ Component: ComponentType }>;
   auth: "required" | "public";
+  requiredPermissions?: PermissionKey[];
 }
 export interface ParticipationNavEntry {
   label: string;
   path: string;
   icon: IconName;
+  requiredPermissions?: PermissionKey[];
 }
 
 export const participationRoutes: ParticipationSourceRoute[] = [
@@ -27,10 +33,18 @@ export const participationRoutes: ParticipationSourceRoute[] = [
     lazy: () => Promise.resolve({ Component: ParticipationPage }),
     auth: "required",
   },
+  {
+    // 回答一覧 (運営専用). identity:read = member-service の list ゲートと一致。
+    path: "/participation/list",
+    lazy: () => Promise.resolve({ Component: ParticipationListPage }),
+    auth: "required",
+    requiredPermissions: ["identity:read"],
+  },
 ];
 
 export const participationNav: ParticipationNavEntry[] = [
   { label: "参加届", path: "/participation", icon: "check-square" },
+  { label: "参加届の回答一覧", path: "/participation/list", icon: "users", requiredPermissions: ["identity:read"] },
 ];
 
 // PUBLIC standalone route (unauthenticated). Mounted by the shell router OUTSIDE the
