@@ -65,7 +65,22 @@ export async function upsertSnapshot(db: DbClient, rows: readonly SnapshotRow[],
   }
 }
 
-/** Read the most recent day's snapshot rows. Empty array when nothing collected yet. */
+/** How many days back a metric's last KNOWN value may be surfaced before it is allowed to
+ *  go "unknown". Bounds how stale a carried-forward reading can be (see readLatestSnapshot). */
+const KNOWN_VALUE_LOOKBACK_DAYS = 7;
+
+/** Read the freshest USABLE snapshot: per metric, the most recent day whose reading is NOT
+ *  "unknown", within a bounded lookback of the latest capture day. Empty array when nothing
+ *  usable was ever collected.
+ *
+ *  WHY not simply "the latest capture_day": collection can transiently fail for one provider
+ *  (e.g. a Cloudflare GraphQL 5xx/timeout writes that day's CF rows as status="unknown"). If
+ *  the read took only MAX(capture_day), that single blip would blank EVERY Cloudflare card to
+ *  "取得不可" even though yesterday's real values are one row away — the exact production bug
+ *  this fixes. Instead each metric independently surfaces its last known-good reading, so an
+ *  intermittent upstream hiccup degrades to a slightly-stale number, never to a blank board.
+ *  A metric with no known value inside the lookback is simply omitted → buildSummary renders
+ *  it "unknown" (genuinely un-collectable, not a transient blip). */
 export async function readLatestSnapshot(db: DbClient): Promise<SnapshotRow[]> {
   const rows = await db.all<{
     provider: SnapshotRow["provider"];
@@ -79,8 +94,16 @@ export async function readLatestSnapshot(db: DbClient): Promise<SnapshotRow[]> {
     status: SnapshotRow["status"];
   }>(
     `SELECT provider, metric_key, label, used, limit_value, pct, unit, overflow_behavior, status
-       FROM usage_snapshot
-      WHERE capture_day = (SELECT MAX(capture_day) FROM usage_snapshot)`,
+       FROM usage_snapshot s
+      WHERE s.status != 'unknown'
+        AND s.capture_day = (
+          SELECT MAX(s2.capture_day)
+            FROM usage_snapshot s2
+           WHERE s2.provider = s.provider
+             AND s2.metric_key = s.metric_key
+             AND s2.status != 'unknown'
+             AND s2.capture_day >= date((SELECT MAX(capture_day) FROM usage_snapshot), '-${KNOWN_VALUE_LOOKBACK_DAYS} days')
+        )`,
   );
   return rows.map((r) => ({
     provider: r.provider,

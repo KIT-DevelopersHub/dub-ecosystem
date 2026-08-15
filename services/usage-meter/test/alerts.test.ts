@@ -72,7 +72,10 @@ describe("runAlerts", () => {
     expect(mail.calls[0]!.url).toContain("/send");
     expect(notif.calls).toHaveLength(1);
     expect(notif.calls[0]!.url).toContain("/notify");
-    expect((notif.calls[0]!.body as { recipientIds: string[] }).recipientIds).toEqual(["usr_1", "usr_2"]);
+    const notifyBody = notif.calls[0]!.body as { recipientIds: string[]; recipientRoles: string[] };
+    expect(notifyBody.recipientIds).toEqual(["usr_1", "usr_2"]);
+    // role fan-out defaults to admin/maintainer (unioned with the explicit user ids)
+    expect(notifyBody.recipientRoles).toEqual(["role_sys_admin", "role_sys_maintainer"]);
 
     // second run same day -> deduped, no new sends
     const r2 = await runAlerts(env, summary, NOW, dedup);
@@ -81,17 +84,33 @@ describe("runAlerts", () => {
     expect(notif.calls).toHaveLength(1);
   });
 
-  it("skips in-app when no admin ids are configured but still emails", async () => {
+  it("fires in-app via default role fan-out even with no admin user ids configured", async () => {
     const mail = recorder(200, { messageId: "m", provider: "resend", acceptedAt: "t" });
-    const notif = recorder();
+    const notif = recorder(200, { notificationId: "n", deduplicated: false });
     const env = { SVC_MAIL_GATEWAY: mail.svc, SVC_NOTIFICATION: notif.svc } as unknown as Env;
     const summary = buildSummary([row("resend_emails_day", "warn", 75)], NOW);
 
     const r = await runAlerts(env, summary, NOW, memDedup());
     expect(r.emailAttempted).toBe(true);
-    expect(r.inAppAttempted).toBe(false);
+    expect(r.inAppAttempted).toBe(true);
     expect(mail.calls).toHaveLength(1);
-    expect(notif.calls).toHaveLength(0);
+    expect(notif.calls).toHaveLength(1);
+    const body = notif.calls[0]!.body as { recipientIds: string[]; recipientRoles: string[] };
+    expect(body.recipientIds).toEqual([]); // no explicit user ids
+    expect(body.recipientRoles).toEqual(["role_sys_admin", "role_sys_maintainer"]);
+  });
+
+  it("honors USAGE_ALERT_ADMIN_ROLE_IDS override for the in-app fan-out roles", async () => {
+    const notif = recorder(200, { notificationId: "n", deduplicated: false });
+    const env = {
+      SVC_NOTIFICATION: notif.svc,
+      USAGE_ALERT_ADMIN_ROLE_IDS: "role_ops, role_oncall",
+    } as unknown as Env;
+    const summary = buildSummary([row("workers_requests_day", "critical", 95)], NOW);
+
+    await runAlerts(env, summary, NOW, memDedup());
+    expect(notif.calls).toHaveLength(1);
+    expect((notif.calls[0]!.body as { recipientRoles: string[] }).recipientRoles).toEqual(["role_ops", "role_oncall"]);
   });
 
   it("is best-effort: a channel failure never throws and dedup still records", async () => {

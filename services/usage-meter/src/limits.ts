@@ -138,6 +138,10 @@ export const MASTER: readonly MetricDef[] = [
     reset: "daily",
     source: "Cloudflare Durable Objects Free: 100,000 requests/day (2026, re-check)",
   },
+  // ---- GCP (future) ----
+  // When a GCP collector lands (collectors/gcp.ts + one line in COLLECTORS), add its
+  // free-tier metric rows here with provider: "gcp" — e.g. a "gcp_cloud_run_requests_month"
+  // row mirroring the shape above. Nothing else needs to change.
   // ---- Resend (transactional email) ----
   {
     provider: "resend",
