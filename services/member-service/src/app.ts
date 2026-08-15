@@ -70,6 +70,17 @@ export function createApp(deps: AppDeps): Hono {
     const body = await readJson<member.CreateMemberRequest>(c);
     return c.json(await svc.createMember(reqCtx(c), body), 201);
   });
+
+  // ---- identity linking (#1) ----
+  // Reverse lookup FIRST so the literal segment isn't shadowed by /people/:id/... routes.
+  app.get("/members/people/by-identity/:identityUserId", authz.requirePermission(READ), async (c) => {
+    const member = await svc.getByIdentityUserId(reqCtx(c), c.req.param("identityUserId"));
+    return c.json({ member });
+  });
+  app.post("/members/people/:id/identity-link", authz.requirePermission(WRITE), async (c) => {
+    const body = await readJson<member.LinkIdentityRequest>(c);
+    return c.json(await svc.linkIdentity(reqCtx(c), c.req.param("id"), body));
+  });
   app.patch("/members/people/:id", authz.requirePermission(WRITE), async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));

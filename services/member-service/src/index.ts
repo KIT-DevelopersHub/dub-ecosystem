@@ -46,5 +46,10 @@ export { createApp } from "./app";
 export { MemberService } from "./service";
 export { createD1MemberRepo } from "./d1-repo";
 export { InMemoryMemberRepo } from "./memory-repo";
-export { MEMBER_SCHEMA_MIGRATION, MEMBER_PERSON_COLS_MIGRATION, MEMBER_MIGRATIONS } from "./schema";
+export {
+  MEMBER_SCHEMA_MIGRATION,
+  MEMBER_IDENTITY_LINK_MIGRATION,
+  MEMBER_PERSON_COLS_MIGRATION,
+  MEMBER_MIGRATIONS,
+} from "./schema";
 export type { AppDeps } from "./types";

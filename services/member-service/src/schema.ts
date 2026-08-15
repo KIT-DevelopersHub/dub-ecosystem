@@ -48,16 +48,33 @@ CREATE INDEX idx_member_team_links_team ON member_team_links(team_id);
 `.trim(),
 };
 
-// 学科(department)・学年(grade) を note(メモ) から専用カラムへ分離する非破壊 ALTER。
-// 既存行を保持し NULL 許容カラムを足すだけ (mirrors 0002_person_dept_grade.sql).
+// 0002: link a 運営メンバー to its identity-roster login account (RBAC 橋渡し).
+// Additive ALTER — see infra/d1/migrations/member/0002_identity_link.sql (kept in
+// lockstep by schema-lockstep.test.ts). Not a cross-namespace FK (ids stay strings).
+export const MEMBER_IDENTITY_LINK_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0002_identity_link",
+  up: `
+ALTER TABLE member_people ADD COLUMN identity_user_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_member_people_identity
+  ON member_people(identity_user_id) WHERE identity_user_id IS NOT NULL;
+`.trim(),
+};
+
+// 0003: 学科(department)・学年(grade) を note(メモ) から専用カラムへ分離する非破壊 ALTER。
+// 既存行を保持し NULL 許容カラムを足すだけ (mirrors 0003_person_dept_grade.sql).
 export const MEMBER_PERSON_COLS_MIGRATION: Migration = {
   namespace: "member",
-  id: "0002_person_dept_grade",
+  id: "0003_person_dept_grade",
   up: `
 ALTER TABLE member_people ADD COLUMN department TEXT;
 ALTER TABLE member_people ADD COLUMN grade TEXT;
 `.trim(),
 };
 
-/** All member migrations, forward-only, ordered by id ascending. */
-export const MEMBER_MIGRATIONS: Migration[] = [MEMBER_SCHEMA_MIGRATION, MEMBER_PERSON_COLS_MIGRATION];
+/** All member-namespace migrations in apply order (infra collects the .sql正本). */
+export const MEMBER_MIGRATIONS: readonly Migration[] = [
+  MEMBER_SCHEMA_MIGRATION,
+  MEMBER_IDENTITY_LINK_MIGRATION,
+  MEMBER_PERSON_COLS_MIGRATION,
+];

@@ -39,6 +39,8 @@ export interface MockSeed {
   rowDates?: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }>;
   /** critical-path task ids the gantt DTO reports (bar colouring). */
   criticalTaskIds?: common.TaskId[];
+  /** "current user" the mock stamps as createdBy on POST /tasks (from→to "from"). */
+  currentUserId?: common.UserId;
 }
 
 export class MockApiClient implements ApiClient {
@@ -50,6 +52,7 @@ export class MockApiClient implements ApiClient {
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
   private criticalTaskIds: common.TaskId[] = [];
+  private currentUserId: common.UserId;
 
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
@@ -69,6 +72,7 @@ export class MockApiClient implements ApiClient {
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
+    this.currentUserId = seed.currentUserId ?? "usr_me";
   }
 
   async request<T, TBody = unknown>(req: RequestInput<TBody>): Promise<T> {
@@ -155,6 +159,7 @@ export class MockApiClient implements ApiClient {
     let items = [...this.taskById.values()];
     if (q.eventId) items = items.filter((t) => t.eventId === q.eventId);
     if (q.assigneeId) items = items.filter((t) => t.assigneeId === q.assigneeId);
+    if (q.createdById) items = items.filter((t) => t.createdBy === q.createdById);
     if (q.teamId) items = items.filter((t) => t.teamId === q.teamId);
     if (q.status) {
       const statuses = String(q.status).split(",");
@@ -187,6 +192,7 @@ export class MockApiClient implements ApiClient {
       priority: body.priority ?? "medium",
       assigneeId: body.assigneeId ?? null,
       teamId: body.teamId ?? null,
+      createdBy: this.currentUserId, // server stamps created_by from the principal
       dueAt: body.dueAt ?? null,
       origin: body.origin ?? "internal",
       archivedAt: null,

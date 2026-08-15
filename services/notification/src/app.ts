@@ -16,6 +16,7 @@ import {
   unreadCount,
   markRead,
   markAllRead,
+  backfillBroadcastInbox,
   listPreferenceOverrides,
   upsertPreference,
   deletePreference,
@@ -132,14 +133,22 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.get("/inbox", async (c) => {
     const userId = getUserId(c);
+    const db = dbOf(c);
+    // Backfill broadcast rows this user is missing (late-join safety) before listing, so
+    // release notes always appear regardless of when the user was created (bugfix).
+    await backfillBroadcastInbox(db, userId);
     const q = parseListInboxQuery(c.req.query());
-    const page = await listInbox(dbOf(c), userId, q);
+    const page = await listInbox(db, userId, q);
     return c.json(page satisfies notification.ListInboxResponse);
   });
 
   app.get("/inbox/unread-count", async (c) => {
     const userId = getUserId(c);
-    const count = await unreadCount(dbOf(c), userId);
+    const db = dbOf(c);
+    // Same backfill as GET /inbox so the header unread badge counts broadcasts a late-join
+    // user never received a fan-out row for.
+    await backfillBroadcastInbox(db, userId);
+    const count = await unreadCount(db, userId);
     return c.json({ count } satisfies notification.UnreadCountResponse);
   });
 

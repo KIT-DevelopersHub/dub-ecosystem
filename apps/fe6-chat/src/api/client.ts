@@ -18,6 +18,8 @@ import type {
   PostMessageResponse,
   ReactionToggleRequest,
   ReadStateUpdateRequest,
+  SearchHit,
+  SearchMessagesRequest,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -30,6 +32,10 @@ export interface ChatApiClient {
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel>;
   addMember(id: common.ChannelId, userId: common.UserId, role?: ChannelMember["role"]): Promise<ChannelMember>;
   removeMember(id: common.ChannelId, userId: common.UserId): Promise<void>;
+  listMembers(id: common.ChannelId): Promise<ChannelMember[]>;
+  searchMessages(req: SearchMessagesRequest): Promise<SearchHit[]>;
+  listPinned(id: common.ChannelId): Promise<Message[]>;
+  togglePin(id: common.ChannelId, messageId: common.MessageId): Promise<Message[]>;
   listMessages(req: ListMessagesRequest): Promise<ListMessagesResponse>;
   postMessage(req: PostMessageRequest): Promise<PostMessageResponse>;
   editMessage(id: common.MessageId, req: EditMessageRequest): Promise<Message>;
@@ -123,6 +129,18 @@ export class HttpChatClient implements ChatApiClient {
   }
   removeMember(id: common.ChannelId, userId: common.UserId): Promise<void> {
     return this.request<void>("DELETE", `${CHAT}/channels/${id}/members/${userId}`);
+  }
+  listMembers(id: common.ChannelId): Promise<ChannelMember[]> {
+    return this.request<ChannelMember[]>("GET", `${CHAT}/channels/${id}/members`);
+  }
+  searchMessages(req: SearchMessagesRequest): Promise<SearchHit[]> {
+    return this.request<SearchHit[]>("GET", `${CHAT}/search${qs({ q: req.q, channelId: req.channelId, limit: req.limit })}`);
+  }
+  listPinned(id: common.ChannelId): Promise<Message[]> {
+    return this.request<Message[]>("GET", `${CHAT}/channels/${id}/pins`);
+  }
+  togglePin(id: common.ChannelId, messageId: common.MessageId): Promise<Message[]> {
+    return this.request<Message[]>("POST", `${CHAT}/channels/${id}/pins`, { messageId });
   }
   listMessages(req: ListMessagesRequest): Promise<ListMessagesResponse> {
     const { channelId, cursor, limit, threadRootId, afterMessageId } = req;

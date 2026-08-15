@@ -29,8 +29,8 @@ const OVERVIEW: MembersOverview = {
     { id: "t2", key: "pr", name: "広報", color: null, description: null },
   ],
   members: [
-    { id: "m1", orgId: "o", name: "山田太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: "情報工学科", grade: "3年", contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
-    { id: "m2", orgId: "o", name: "佐藤花子", roleTitle: null, status: "invited", teamIds: ["t2"], department: null, grade: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+    { id: "m1", orgId: "o", name: "山田太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: "情報工学科", grade: "3年", identityUserId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+    { id: "m2", orgId: "o", name: "佐藤花子", roleTitle: null, status: "invited", teamIds: ["t2"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
   ],
 };
 
@@ -44,6 +44,8 @@ function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
     createMember: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
     updateMember: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
     deleteMember: vi.fn(() => Promise.resolve()),
+    linkIdentity: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
+    listIdentityUsers: vi.fn(() => Promise.resolve({ items: [], nextCursor: null })),
     ...overrides,
   } as MembersApi;
 }
@@ -138,10 +140,10 @@ describe("MembersPage", () => {
     const overview: MembersOverview = {
       teams: [{ id: "t1", key: "venue", name: "会場", color: "#16a34a", description: null }],
       members: [
-        { id: "p_team", orgId: "o", name: "所属アリ子", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_none", orgId: "o", name: "未所属無太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_orphan", orgId: "o", name: "幽霊参照子", roleTitle: null, status: "added", teamIds: ["deleted_team_999"], department: null, grade: null, contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], department: null, grade: null, contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_team", orgId: "o", name: "所属アリ子", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_none", orgId: "o", name: "未所属無太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_orphan", orgId: "o", name: "幽霊参照子", roleTitle: null, status: "added", teamIds: ["deleted_team_999"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
       ],
     };
     render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));

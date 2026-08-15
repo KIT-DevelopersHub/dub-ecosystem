@@ -8,6 +8,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import cssText from "@dub/tokens/css";
+import "@dub/ui/style.css"; // @dub/ui component CSS (Modal overlay, Avatar, etc.) — standalone only
 import type { identity } from "@dub/types";
 import { ChatRuntimeProvider, type ChatRuntime } from "./context";
 import { ChatApp } from "./components/ChatApp";

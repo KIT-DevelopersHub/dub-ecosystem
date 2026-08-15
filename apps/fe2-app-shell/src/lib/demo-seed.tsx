@@ -235,10 +235,26 @@ const DEMO_ARCHIVE_CC = "archive@developershub.jp";
 // the two personal accounts above, which each see only their own mail.
 const OVERSIGHT_PERMISSIONS: identity.PermissionKey[] = [...DEMO_PERMISSIONS, "mail:read_all"];
 
+// A general MEMBER account (no dangerous permissions → not privileged) so a viewer /
+// the E2E can prove the member release gate: only member-published apps (メール) are
+// active in the launcher, every other app is greyed-out. mail:read is granted so the
+// one published app actually opens; no *:admin / *:send etc. so isPrivilegedViewer()
+// stays false and the gate applies.
+const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "file:read",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "mail:read",
+];
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+  { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
 ];
 
 /** True when the account holds the mail:read_all oversight permission. */
@@ -1061,6 +1077,7 @@ interface DemoMember {
   teamIds: string[];
   department: string | null;
   grade: string | null;
+  identityUserId: string | null;
   contact: string | null;
   note: string | null;
   sortOrder: number;
@@ -1091,12 +1108,13 @@ function createMembersStore() {
     contact: string | null = null,
     department: string | null = null,
     grade: string | null = null,
+    identityUserId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
-    // 統括
-    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年"),
+    // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
     mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1, null, "情報工学科", "3年"),
     mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年"),
     // 開発
@@ -1160,11 +1178,38 @@ function createMembersStore() {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         department: body?.department ?? null, grade: body?.grade ?? null,
+        identityUserId: null,
         contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
       return json(mem, 201);
+    }
+    // reverse lookup: member linked to an identity user (offboarding fan-out, #1/#2).
+    m = /^\/api\/v1\/members\/people\/by-identity\/([^/]+)$/.exec(pathname);
+    if (m && method === "GET") {
+      const iid = decodeURIComponent(m[1]!);
+      const mem = members.find((x) => x.identityUserId === iid);
+      return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
+    }
+    // link / unlink to an identity account (#1).
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      const target = body?.identityUserId ?? null;
+      if (target !== null && members.some((x) => x.id !== mem.id && x.identityUserId === target)) {
+        const err: ErrorResponse = { error: { code: "MEMBER_IDENTITY_ALREADY_LINKED", message: "この account は既に別のメンバーに紐付いています", retryable: false } };
+        return json(err, 409);
+      }
+      mem.identityUserId = target;
+      mem.version += 1;
+      mem.updatedAt = isoNow();
+      return json({ ...mem, teamIds: [...mem.teamIds] });
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
@@ -1181,6 +1226,7 @@ function createMembersStore() {
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
         if (body?.department !== undefined) mem.department = body.department ?? null;
         if (body?.grade !== undefined) mem.grade = body.grade ?? null;
+        if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
         if (body?.note !== undefined) mem.note = body.note ?? null;
         if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;

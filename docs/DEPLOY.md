@@ -76,7 +76,8 @@ CF 専用アカウント（`developershub.jp` 保有アカウント）でトー�
    `event-service` / `task-service` / `gantt-service` / `notification` / `file-meta` /
    `drive-proxy` / `chat-service` / `mail-gateway` / `deploy-service` / `github-sync` / `audit-log`
 4. `api-gateway` — 14 本の `SVC_*` を bind するので、上流が出揃ってから最後に。
-5. `fe2-app-shell` — 静的 SPA（assets）。ビルド時に prod gateway URL を焼き込み済み。
+5. `dub-fe2-app-shell` — 静的 SPA（assets）。ビルド時に prod gateway URL を焼き込み済み。
+   worker 名は正規の `dub-fe2-app-shell` に統一（旧 `fe2-app-shell` は split-brain の原因で廃止）。
 6. `mo3-mobile-bff` — `SVC_AUTH/IDENTITY/EVENT/TASK/NOTIFICATION` を bind。
 
 理由: bind 先 Worker が未デプロイだと wrangler が Service Binding を解決できずデプロイが

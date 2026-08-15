@@ -15,6 +15,7 @@ export function listTasks(client: ApiClient, q: task.ListTasksQuery): Promise<ta
     query: {
       ...(q.eventId !== undefined ? { eventId: q.eventId } : {}),
       ...(q.assigneeId !== undefined ? { assigneeId: q.assigneeId } : {}),
+      ...(q.createdById !== undefined ? { createdById: q.createdById } : {}),
       ...(q.teamId !== undefined ? { teamId: q.teamId } : {}),
       ...(q.status !== undefined ? { status: q.status.join(",") } : {}),
       ...(q.includeArchived !== undefined ? { includeArchived: q.includeArchived } : {}),
