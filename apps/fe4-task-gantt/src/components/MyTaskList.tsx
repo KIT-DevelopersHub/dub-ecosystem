@@ -23,7 +23,8 @@ export interface MyTaskListProps {
   users: UserCache;
   teamNames: Map<common.TeamId, string>;
   loading?: boolean;
-  onOpen: (id: common.TaskId) => void;
+  /** open the task detail dialog (feedback #2 — row click shows 内容, not navigate). */
+  onSelect: (task: task.Task) => void;
   /** number of rows currently revealed (windowing for large lists). */
   visibleCount: number;
   onShowMore: () => void;
@@ -41,7 +42,7 @@ export function MyTaskList({
   users,
   teamNames,
   loading,
-  onOpen,
+  onSelect,
   visibleCount,
   onShowMore,
   now = Date.now(),
@@ -87,14 +88,15 @@ export function MyTaskList({
               <tr
                 key={t.id}
                 className={`${styles.myRow} ${overdue ? styles.rowOverdue : ""}`}
-                onClick={() => onOpen(t.id)}
+                onClick={() => onSelect(t)}
                 data-testid={`fe4-mytask-row-${t.id}`}
                 tabIndex={0}
                 role="button"
+                aria-label={`${t.title} の詳細を開く`}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onOpen(t.id);
+                    onSelect(t);
                   }
                 }}
               >

@@ -16,6 +16,7 @@ import {
 import { MyTasksFilterBar } from "./MyTasksFilterBar";
 import { MyTaskList } from "./MyTaskList";
 import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
+import { TaskDetailDialog } from "./TaskDetailDialog";
 import styles from "../styles/app.module.css";
 
 const PAGE_SIZE = 25;
@@ -51,6 +52,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
+  const [selected, setSelected] = useState<task.Task | null>(null);
   const reqSeq = useRef(0);
 
   const teamNames = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
@@ -109,9 +111,11 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     return sortMyTasks(filtered, filter.sort);
   }, [tasks, filter]);
 
-  const onOpen = (id: common.TaskId) => {
-    const t = tasks.find((x) => x.id === id);
-    if (t && typeof window !== "undefined") window.location.assign(`/events/${t.eventId}/tasks/${id}`);
+  // Explicit escape hatch from the detail dialog to the full ガント workspace —
+  // the row click itself now opens the dialog (feedback #2), so this no longer
+  // fires on every click and the two behaviors don't conflict.
+  const openWorkspace = (t: task.Task) => {
+    if (typeof window !== "undefined") window.location.assign(`/events/${t.eventId}/tasks/${t.id}`);
   };
 
   const onCreate = async (draft: MyTaskDraft) => {
@@ -202,9 +206,17 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         users={users}
         teamNames={teamNames}
         loading={loading}
-        onOpen={onOpen}
+        onSelect={setSelected}
         visibleCount={visibleCount}
         onShowMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
+      />
+
+      <TaskDetailDialog
+        task={selected}
+        users={users}
+        teamNames={teamNames}
+        onClose={() => setSelected(null)}
+        onOpenWorkspace={openWorkspace}
       />
 
       <MyTaskCreateModal

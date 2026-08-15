@@ -952,6 +952,52 @@
   color: var(--dub-color-text-secondary);
 }
 
+/* ---- task detail dialog (feedback #2) ---- */
+.detailBody { display: flex; flex-direction: column; gap: var(--dub-space-4); }
+.detailSection { display: flex; flex-direction: column; gap: 6px; }
+.detailHeading {
+  margin: 0;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--dub-color-text-secondary);
+}
+.detailDesc {
+  margin: 0;
+  font-size: var(--dub-font-size-sm, 0.9rem);
+  line-height: 1.6;
+  color: var(--dub-color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.detailEmpty {
+  margin: 0;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+}
+.detailGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; }
+.detailRow {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) 0;
+  border-top: 1px solid var(--dub-color-border-default);
+}
+.detailLabel {
+  margin: 0;
+  font-size: var(--dub-font-size-sm, 0.8rem);
+  font-weight: 600;
+  color: var(--dub-color-text-secondary);
+}
+.detailValue {
+  margin: 0;
+  font-size: var(--dub-font-size-sm, 0.88rem);
+  color: var(--dub-color-text-primary);
+  min-width: 0;
+}
+
 /* ================= standalone demo shell ================= */
 .demoShell { min-height: 100vh; background: var(--dub-color-surface-base); color: var(--dub-color-text-primary); }
 .demoNav {
