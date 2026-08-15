@@ -2,6 +2,7 @@
 // namespace (participation lives in member-service, alongside 運営メンバー管理). Re-
 // exported under local names so the screens stay decoupled from the import path.
 import { member } from "@dub/types";
+import type { gateway } from "@dub/types";
 
 export type Participation = member.Participation;
 export type ParticipationMatchKind = member.ParticipationMatchKind;
@@ -10,6 +11,8 @@ export type Grade = member.Grade;
 export type SubmitParticipationRequest = member.SubmitParticipationRequest;
 export type SubmitParticipationResponse = member.SubmitParticipationResponse;
 export type ListParticipationsResponse = member.ListParticipationsResponse;
+/** Minimal response from the PUBLIC (unauthenticated) submit endpoint — no member echo. */
+export type PublicParticipationResponse = gateway.PublicParticipationResponse;
 
 /** Canonical shared team entity read from GET /api/v1/members/teams. */
 export type MemberTeam = member.Team;

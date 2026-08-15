@@ -46,6 +46,9 @@ const api = createApiClient({
   requestIdFactory: () => crypto.randomUUID(),
   ...(fetchOverride ? { fetchImpl: fetchOverride } : {}),
   onUnauthenticated: () => {
+    // The public 参加届 form is anonymous by design: a 401 there (e.g. the global /me
+    // probe, or the optional teams lookup) must NOT bounce the visitor to /login.
+    if (globalThis.location.pathname.startsWith("/participate")) return;
     redirectAfterLogin = globalThis.location.pathname + globalThis.location.search;
     router.navigate({ to: "/login" });
   },

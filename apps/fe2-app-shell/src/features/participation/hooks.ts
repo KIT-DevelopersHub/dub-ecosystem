@@ -7,7 +7,7 @@ import { useToast } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useParticipationApi } from "./ParticipationProvider.tsx";
-import type { SubmitParticipationRequest, SubmitParticipationResponse } from "./contracts.ts";
+import type { PublicParticipationResponse, SubmitParticipationRequest } from "./contracts.ts";
 
 export const TEAMS_KEY: QueryKey = queryKeys.feature("participation", "teams");
 
@@ -21,7 +21,7 @@ export function useParticipationTeams() {
 export function useSubmitParticipation() {
   const api = useParticipationApi();
   const toast = useToast();
-  return useMutation<SubmitParticipationResponse, unknown, SubmitParticipationRequest>({
+  return useMutation<PublicParticipationResponse, unknown, SubmitParticipationRequest>({
     mutationFn: (input) => api.submit(input),
     onSuccess: () => {
       toast.show({ kind: "success", title: "参加届を送信しました" });

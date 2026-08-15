@@ -6,6 +6,14 @@ import { MEMBER_STATUSES } from "./types";
 export const SORT_ORDER_GAP = 1024;
 export const MAX_NAME_LEN = 200;
 
+/** Pragmatic email shape check (same class as the gateway's public-inquiry guard):
+ *  one @, no whitespace, a dotted domain. Not RFC-exhaustive — just rejects obvious
+ *  non-addresses so a 参加届's two required emails are well-formed before persisting. */
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+export function isEmail(v: unknown): v is string {
+  return typeof v === "string" && EMAIL_RE.test(v.trim());
+}
+
 export function isMemberStatus(v: unknown): v is MemberStatus {
   return typeof v === "string" && (MEMBER_STATUSES as readonly string[]).includes(v);
 }
@@ -52,6 +60,8 @@ export function toMember(r: PersonRow, teamIds: string[]): member.Member {
     status: r.status,
     teamIds,
     contact: r.contact,
+    schoolEmail: r.schoolEmail,
+    gmail: r.gmail,
     note: r.note,
     sortOrder: r.sortOrder,
     version: r.version,
@@ -70,6 +80,8 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     grade: r.grade,
     department: r.department,
     contact: r.contact,
+    schoolEmail: r.schoolEmail,
+    gmail: r.gmail,
     desiredTeamId: r.desiredTeamId,
     desiredActivity: r.desiredActivity,
     note: r.note,

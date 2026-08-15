@@ -32,3 +32,8 @@ export const participationRoutes: ParticipationSourceRoute[] = [
 export const participationNav: ParticipationNavEntry[] = [
   { label: "参加届", path: "/participation", icon: "check-square" },
 ];
+
+// PUBLIC standalone route (unauthenticated). Mounted by the shell router OUTSIDE the
+// authenticated shell (sibling of /login) so participants can submit without signing in.
+// Kept distinct from the in-shell "/participation" tile (which 運営 use while signed in).
+export const PUBLIC_PARTICIPATION_PATH = "/participate";

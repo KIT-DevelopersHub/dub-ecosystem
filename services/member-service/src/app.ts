@@ -4,17 +4,31 @@
 // permission gates rather than introducing new catalog keys).
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { dubContext, type RequestContext } from "@dub/http";
+import { dubContext, DUB_HEADERS, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
 import type { member } from "@dub/types";
 import type { AppDeps } from "./types";
 import { MemberService, type ReqCtx } from "./service";
+
+// Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
+// The gateway forwards it as a genuine service-to-service call (x-dub-internal), but
+// there is no signed-in user, so submissions are attributed to this system principal.
+const PUBLIC_PARTICIPATION_ACTOR = "system:public-participation";
 
 function reqCtx(c: Context): ReqCtx {
   const ctx = c.get("dubCtx") as RequestContext | undefined;
   const requestId = ctx?.requestId ?? c.req.header("x-dub-request-id") ?? "";
   const userId = ctx?.userId ?? c.req.header("x-dub-user-id");
   if (!userId) throw errors.unauthenticated("x-dub-user-id absent");
+  return { requestId, userId };
+}
+
+// Like reqCtx, but for the public (unauthenticated) internal route: no signed-in user,
+// so attribute the 参加届 to the system principal instead of 401ing.
+function internalReqCtx(c: Context): ReqCtx {
+  const ctx = c.get("dubCtx") as RequestContext | undefined;
+  const requestId = ctx?.requestId ?? c.req.header("x-dub-request-id") ?? "";
+  const userId = ctx?.userId ?? c.req.header("x-dub-user-id") ?? PUBLIC_PARTICIPATION_ACTOR;
   return { requestId, userId };
 }
 
@@ -39,7 +53,29 @@ export function createApp(deps: AppDeps): Hono {
   const READ = "identity:read" as const;
   const WRITE = "identity:admin" as const;
 
-  app.use("/members/*", authz.requireAuth());
+  // ---- internal-only guard: /members/internal/* requires the x-dub-internal marker.
+  // The gateway strips all x-dub-* off external requests (spoof-defense), so only genuine
+  // service-to-service calls carry it; external callers get a 404 (route never exposed).
+  app.use("/members/internal/*", async (c, next) => {
+    if (!c.req.header(DUB_HEADERS.internal)) throw errors.notFound("route", c.req.path);
+    await next();
+  });
+
+  // Public 参加届 (unauthenticated at the edge): the gateway's /public/participation
+  // handler verifies Turnstile / rate-limits, then forwards here with a system actor.
+  // No requireAuth — the internal guard above is the only gate. Roster write is the same
+  // non-destructive resolve as the authenticated path.
+  app.post("/members/internal/participation", async (c) => {
+    const body = await readJson<member.SubmitParticipationRequest>(c);
+    return c.json(await svc.submitParticipation(internalReqCtx(c), body), 201);
+  });
+
+  // Auth for the rest of /members/*. The public internal route above is handled before
+  // this runs, so exclude it here (it must not require a signed-in user).
+  app.use("/members/*", async (c, next) => {
+    if (c.req.path.startsWith("/members/internal/")) return next();
+    return authz.requireAuth()(c, next);
+  });
 
   // ---- overview (all three views) ----
   app.get("/members/overview", authz.requirePermission(READ), async (c) => {

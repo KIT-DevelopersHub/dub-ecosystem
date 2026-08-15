@@ -6,6 +6,7 @@ import type { common, member } from "@dub/types";
 import type { AppDeps, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
   isDesiredActivity,
+  isEmail,
   isGrade,
   isMemberStatus,
   MAX_NAME_LEN,
@@ -157,6 +158,8 @@ export class MemberService {
       roleTitle: optText(body.roleTitle, "roleTitle"),
       status: body.status,
       contact: optText(body.contact, "contact"),
+      schoolEmail: null,
+      gmail: null,
       note: optText(body.note, "note"),
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
@@ -241,12 +244,19 @@ export class MemberService {
     const department = optText(body.department, "department");
     const contact = optText(body.contact, "contact");
     const note = optText(body.note, "note");
+    // 学校メール + Gmail は必須 & メール形式.
+    if (!isEmail(body.schoolEmail)) throw errors.validationFailed([{ field: "schoolEmail", reason: "invalid" }]);
+    if (!isEmail(body.gmail)) throw errors.validationFailed([{ field: "gmail", reason: "invalid" }]);
+    const schoolEmail = body.schoolEmail.trim();
+    const gmail = body.gmail.trim();
     const desiredTeamId = await this.optTeamId(body.desiredTeamId);
 
     const { member: resolved, matchKind } = await this.resolveMemberForParticipation(ctx, {
       displayName,
       normalized,
       contact,
+      schoolEmail,
+      gmail,
       note,
       desiredTeamId,
     });
@@ -262,6 +272,8 @@ export class MemberService {
       grade,
       department,
       contact,
+      schoolEmail,
+      gmail,
       desiredTeamId,
       desiredActivity,
       note,
@@ -279,7 +291,15 @@ export class MemberService {
   /** Resolve (promote-or-create) the roster member behind a submission. */
   private async resolveMemberForParticipation(
     ctx: ReqCtx,
-    input: { displayName: string; normalized: string; contact: string | null; note: string | null; desiredTeamId: string | null },
+    input: {
+      displayName: string;
+      normalized: string;
+      contact: string | null;
+      schoolEmail: string;
+      gmail: string;
+      note: string | null;
+      desiredTeamId: string | null;
+    },
   ): Promise<{ member: member.Member; matchKind: member.ParticipationMatchKind }> {
     const orgId = this.deps.orgId;
     const people = await this.deps.repo.listPeople(orgId);
@@ -295,7 +315,11 @@ export class MemberService {
       const next: PersonRow = {
         ...match,
         status: promote ? "added" : match.status,
-        contact: match.contact ?? input.contact, // non-destructive: only fill when empty
+        // non-destructive: only fill when currently empty. Both 参加届 emails are
+        // retained on the roster (default `contact` to the school address when unset).
+        contact: match.contact ?? input.schoolEmail,
+        schoolEmail: match.schoolEmail ?? input.schoolEmail,
+        gmail: match.gmail ?? input.gmail,
         note: match.note ?? input.note,
         version: match.version + 1,
         updatedAt: this.deps.now(),
@@ -314,7 +338,9 @@ export class MemberService {
       name: input.displayName,
       roleTitle: null,
       status: "added",
-      contact: input.contact,
+      contact: input.contact ?? input.schoolEmail,
+      schoolEmail: input.schoolEmail,
+      gmail: input.gmail,
       note: input.note,
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,

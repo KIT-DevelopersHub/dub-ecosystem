@@ -972,6 +972,8 @@ interface DemoMember {
   status: "added" | "invited" | "considering" | "declined";
   teamIds: string[];
   contact: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
@@ -992,7 +994,7 @@ function createMembersStore() {
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
   ];
   const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, contact, schoolEmail: null, gmail: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
     // 統括
@@ -1059,7 +1061,8 @@ function createMembersStore() {
       const mem: DemoMember = {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
-        contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
+        contact: body?.contact ?? null, schoolEmail: null, gmail: null, note: body?.note ?? null,
+        sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
@@ -1091,15 +1094,19 @@ function createMembersStore() {
       }
     }
 
-    // 参加届 (participation): submit reflects onto the roster exactly like member-
-    // service — name match (space/width-folded) promotes 招待中/検討中 → 追加済 (merging
-    // the desired team, non-destructive contact), else creates a new 追加済 member.
-    if (method === "POST" && pathname === "/api/v1/members/participation") {
+    // 参加届 (participation): submit reflects onto the roster exactly like member-service
+    // — name match (space/width-folded) promotes 招待中/検討中 → 追加済 (merging the desired
+    // team, non-destructive contact + the two emails), else creates a new 追加済 member.
+    // Both endpoints share this reflect: the PUBLIC one (unauthenticated) returns a minimal
+    // { accepted, matchKind }; the authenticated one returns the full participation + member.
+    const reflectParticipation = (): { participation: unknown; member: DemoMember; matchKind: "linked_existing" | "created_new" } => {
       const name = String(body?.name ?? "").trim();
       const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
       const target = norm(name);
       const desiredTeamId: string | null = body?.desiredTeamId ?? null;
       const contact: string | null = body?.contact ?? null;
+      const schoolEmail: string = String(body?.schoolEmail ?? "");
+      const gmail: string = String(body?.gmail ?? "");
       const note: string | null = body?.note ?? null;
       const existing = members.find((mem) => norm(mem.name) === target);
       let matchKind: "linked_existing" | "created_new";
@@ -1107,7 +1114,9 @@ function createMembersStore() {
       if (existing) {
         if (existing.status === "invited" || existing.status === "considering") existing.status = "added";
         if (desiredTeamId && !existing.teamIds.includes(desiredTeamId)) existing.teamIds.push(desiredTeamId);
-        if (existing.contact === null && contact) existing.contact = contact;
+        if (existing.contact === null) existing.contact = contact ?? schoolEmail;
+        if (existing.schoolEmail === null && schoolEmail) existing.schoolEmail = schoolEmail;
+        if (existing.gmail === null && gmail) existing.gmail = gmail;
         if (existing.note === null && note) existing.note = note;
         existing.version += 1;
         existing.updatedAt = isoNow();
@@ -1116,7 +1125,8 @@ function createMembersStore() {
       } else {
         resolved = {
           id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added",
-          teamIds: desiredTeamId ? [desiredTeamId] : [], contact, note,
+          teamIds: desiredTeamId ? [desiredTeamId] : [], contact: contact ?? schoolEmail,
+          schoolEmail: schoolEmail || null, gmail: gmail || null, note,
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(resolved);
@@ -1125,10 +1135,29 @@ function createMembersStore() {
       const participation = {
         id: nid("part"), orgId: ORG, memberId: resolved.id, name, normalizedName: target,
         nameKana: body?.nameKana ?? null, grade: body?.grade ?? null, department: body?.department ?? null,
-        contact, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
+        contact, schoolEmail, gmail, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
         status: "submitted", matchKind, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
       };
-      return json({ participation, member: { ...resolved, teamIds: [...resolved.teamIds] }, matchKind }, 201);
+      return { participation, member: resolved, matchKind };
+    };
+
+    // PUBLIC (unauthenticated) submit — the form posts here. Minimal response (no member echo).
+    if (method === "POST" && pathname === "/api/v1/public/participation") {
+      const school = String(body?.schoolEmail ?? "").trim();
+      const gm = String(body?.gmail ?? "").trim();
+      const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+      if (!String(body?.name ?? "").trim() || !emailRe.test(school) || !emailRe.test(gm)) {
+        const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
+        return json(err, 400);
+      }
+      const { matchKind } = reflectParticipation();
+      return json({ accepted: true, matchKind }, 200);
+    }
+
+    // Authenticated submit (back-compat): full participation + member echo.
+    if (method === "POST" && pathname === "/api/v1/members/participation") {
+      const { participation, member, matchKind } = reflectParticipation();
+      return json({ participation, member: { ...member, teamIds: [...member.teamIds] }, matchKind }, 201);
     }
 
     return null;

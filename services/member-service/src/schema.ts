@@ -79,8 +79,23 @@ CREATE INDEX idx_member_participations_member ON member_participations(member_id
 `.trim(),
 };
 
+// 参加届: 学校メール + Gmail の2アドレス. Additive ALTER (non-destructive): both are
+// required at the app layer but nullable in DDL (SQLite ADD COLUMN can't be NOT NULL
+// without a default). Retained on member_people too so the roster keeps both channels.
+export const MEMBER_PARTICIPATION_EMAILS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0003_participation_emails",
+  up: `
+ALTER TABLE member_participations ADD COLUMN school_email TEXT;
+ALTER TABLE member_participations ADD COLUMN gmail TEXT;
+ALTER TABLE member_people ADD COLUMN school_email TEXT;
+ALTER TABLE member_people ADD COLUMN gmail TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
   MEMBER_PARTICIPATION_MIGRATION,
+  MEMBER_PARTICIPATION_EMAILS_MIGRATION,
 ];

@@ -27,6 +27,8 @@ export interface PersonRow {
   roleTitle: string | null;
   status: MemberStatus;
   contact: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
@@ -48,6 +50,8 @@ export interface ParticipationRow {
   grade: member.Grade | null;
   department: string | null;
   contact: string | null;
+  schoolEmail: string;
+  gmail: string;
   desiredTeamId: string | null;
   desiredActivity: member.DesiredActivity | null;
   note: string | null;

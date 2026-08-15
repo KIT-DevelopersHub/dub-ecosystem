@@ -35,6 +35,10 @@ export interface Member {
   teamIds: string[];
   /** 連絡先 (任意). */
   contact: string | null;
+  /** 学校メールアドレス — retained on the roster from a 参加届 (任意 / additive). */
+  schoolEmail?: string | null;
+  /** Gmail アドレス — retained on the roster from a 参加届 (任意 / additive). */
+  gmail?: string | null;
   note: string | null;
   sortOrder: number;
   /** Optimistic-concurrency version; PATCH must echo the last seen value. */
@@ -117,6 +121,10 @@ export interface Participation {
   department: string | null;
   /** 連絡先 (email など). */
   contact: string | null;
+  /** 学校メールアドレス (必須). */
+  schoolEmail: string;
+  /** Gmail アドレス (必須). */
+  gmail: string;
   /** 希望チーム — references Team.id (canonical member_teams). */
   desiredTeamId: string | null;
   desiredActivity: DesiredActivity | null;
@@ -130,9 +138,15 @@ export interface Participation {
   updatedAt: ISODateTime;
 }
 
-/** POST /api/v1/members/participation — submit a 参加届 (name required, rest optional). */
+/** Submit a 参加届. `name`, `schoolEmail`, `gmail` are required; the rest optional.
+ *  Reaches member-service either via the authenticated POST /api/v1/members/participation
+ *  or the public POST /api/v1/public/participation (gateway-owned, unauthenticated). */
 export interface SubmitParticipationRequest {
   name: string;
+  /** 学校メールアドレス (必須・メール形式). */
+  schoolEmail: string;
+  /** Gmail アドレス (必須・メール形式). */
+  gmail: string;
   nameKana?: string | null;
   grade?: Grade | null;
   department?: string | null;

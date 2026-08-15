@@ -37,6 +37,8 @@ export function ListView({
         ),
     },
     { key: "contact", header: "連絡先", cell: (m) => m.contact ?? "—" },
+    { key: "schoolEmail", header: "学校メール", cell: (m) => m.schoolEmail ?? "—" },
+    { key: "gmail", header: "Gmail", cell: (m) => m.gmail ?? "—" },
     {
       key: "actions",
       header: "操作",

@@ -9,6 +9,7 @@ import { healthzHandler } from "./handlers/healthz";
 import { meHandler } from "./handlers/me";
 import { bffHomeHandler } from "./handlers/bff-home";
 import { createPublicInquiryHandler } from "./handlers/public-inquiry";
+import { createPublicParticipationHandler } from "./handlers/public-participation";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
 import { gatewayRouteHandler } from "./gateway-route";
 import { API_PREFIX } from "./routes";
@@ -45,6 +46,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.get(`${API_PREFIX}/me`, meHandler);
   app.get(`${API_PREFIX}/bff/home`, bffHomeHandler);
   app.post(`${API_PREFIX}/public/inquiries`, createPublicInquiryHandler(options.turnstile));
+  // Public 参加届: unauthenticated submit → member-service internal route (roster reflect).
+  app.post(`${API_PREFIX}/public/participation`, createPublicParticipationHandler(options.turnstile));
 
   // Password management (themes #5a/#5b/#5c). Gateway-owned because auth-service's admin
   // routes are internal-only and the `auth` proxy segment strips tokens: these compose
