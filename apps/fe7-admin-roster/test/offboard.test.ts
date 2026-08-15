@@ -19,7 +19,7 @@ function identityResult(): OffboardUserResult {
 }
 
 function member_(over: Partial<member.Member> = {}): member.Member {
-  return { id: "member_bob", orgId: "o", name: "佐藤 太郎", roleTitle: null, status: "added", teamIds: [], identityUserId: "user_bob", contact: null, note: null, sortOrder: 1, version: 3, createdAt: "t", updatedAt: "t", ...over };
+  return { id: "member_bob", orgId: "o", name: "佐藤 太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1, version: 3, createdAt: "t", updatedAt: "t", ...over };
 }
 
 function fakeApi(over: Partial<OffboardApi> = {}): OffboardApi {

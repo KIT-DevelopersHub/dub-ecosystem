@@ -90,6 +90,35 @@ describe("member-service HTTP surface", () => {
     expect(ov2.json.members).toHaveLength(0);
   });
 
+  it("学科(department)・学年(grade) round-trip as their own fields on create/edit", async () => {
+    const app = createApp(makeDeps());
+    const created = await call(app, "POST", "/members/people", {
+      body: { name: "田中", status: "added", teamIds: [], department: "情報工学科", grade: "3年" },
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.department).toBe("情報工学科");
+    expect(created.json.grade).toBe("3年");
+    const memberId = created.json.id as string;
+
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members[0].department).toBe("情報工学科");
+    expect(ov.json.members[0].grade).toBe("3年");
+
+    // edit only 学年, leave 学科 untouched; blanks clear the field
+    const upd = await call(app, "PATCH", `/members/people/${memberId}`, {
+      body: { grade: "M1", version: 1 },
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.json.grade).toBe("M1");
+    expect(upd.json.department).toBe("情報工学科");
+
+    const cleared = await call(app, "PATCH", `/members/people/${memberId}`, {
+      body: { department: "", version: 2 },
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.department).toBeNull();
+  });
+
   it("rejects invalid status and unknown teamIds", async () => {
     const app = createApp(makeDeps());
     const bad = await call(app, "POST", "/members/people", { body: { name: "A", status: "bogus", teamIds: [] } });

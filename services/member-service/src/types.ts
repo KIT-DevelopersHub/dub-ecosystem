@@ -26,6 +26,8 @@ export interface PersonRow {
   name: string;
   roleTitle: string | null;
   status: MemberStatus;
+  department: string | null;
+  grade: string | null;
   /** Linked identity-roster account (identity userId), or null when unlinked. */
   identityUserId: string | null;
   contact: string | null;

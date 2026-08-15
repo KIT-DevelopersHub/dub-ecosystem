@@ -20,6 +20,8 @@ interface PersonDbRow {
   name: string;
   role_title: string | null;
   status: string;
+  department: string | null;
+  grade: string | null;
   identity_user_id: string | null;
   contact: string | null;
   note: string | null;
@@ -51,6 +53,8 @@ function toPersonRow(r: PersonDbRow): PersonRow {
     name: r.name,
     roleTitle: r.role_title,
     status: r.status as MemberStatus,
+    department: r.department,
+    grade: r.grade,
     identityUserId: r.identity_user_id,
     contact: r.contact,
     note: r.note,
@@ -122,9 +126,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async createPerson(row: PersonRow, teamIds: string[]): Promise<void> {
       await db.run(
         `INSERT INTO member_people
-          (id, org_id, name, role_title, status, identity_user_id, contact, note, sort_order, version, archived_at, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        row.id, row.orgId, row.name, row.roleTitle, row.status, row.identityUserId, row.contact, row.note,
+          (id, org_id, name, role_title, status, department, grade, identity_user_id, contact, note, sort_order, version, archived_at, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        row.id, row.orgId, row.name, row.roleTitle, row.status, row.department, row.grade, row.identityUserId, row.contact, row.note,
         row.sortOrder, row.version, row.archivedAt, row.createdBy, row.createdAt, row.updatedAt,
       );
       await replaceLinks(row.id, teamIds, row.createdAt);
@@ -153,9 +157,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean> {
       const res = await db.run(
         `UPDATE member_people SET
-           name = ?, role_title = ?, status = ?, identity_user_id = ?, contact = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
+           name = ?, role_title = ?, status = ?, department = ?, grade = ?, identity_user_id = ?, contact = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
          WHERE id = ? AND version = ? AND archived_at IS NULL`,
-        next.name, next.roleTitle, next.status, next.identityUserId, next.contact, next.note, next.sortOrder,
+        next.name, next.roleTitle, next.status, next.department, next.grade, next.identityUserId, next.contact, next.note, next.sortOrder,
         next.version, next.updatedAt, next.id, expectedVersion,
       );
       if (res.meta.changes === 0) return false;

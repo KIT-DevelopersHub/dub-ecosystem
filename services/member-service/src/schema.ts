@@ -1,6 +1,7 @@
 // D1 schema for the `member` namespace. Semantic source of truth for the physical
-// migration applied from infra/d1/migrations/member/0001_init.sql. The two MUST stay
-// in lockstep (schema-lockstep.test.ts) — change this const and that .sql together.
+// migrations under infra/d1/migrations/member/. Each const MUST stay in lockstep with
+// its .sql file (schema-lockstep.test.ts) — change the const and its .sql together, and
+// keep MEMBER_MIGRATIONS ordered by id ascending (forward-only, one file per const).
 import type { Migration } from "@dub/db";
 
 export const MEMBER_SCHEMA_MIGRATION: Migration = {
@@ -60,8 +61,20 @@ CREATE INDEX IF NOT EXISTS idx_member_people_identity
 `.trim(),
 };
 
+// 0003: 学科(department)・学年(grade) を note(メモ) から専用カラムへ分離する非破壊 ALTER。
+// 既存行を保持し NULL 許容カラムを足すだけ (mirrors 0003_person_dept_grade.sql).
+export const MEMBER_PERSON_COLS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0003_person_dept_grade",
+  up: `
+ALTER TABLE member_people ADD COLUMN department TEXT;
+ALTER TABLE member_people ADD COLUMN grade TEXT;
+`.trim(),
+};
+
 /** All member-namespace migrations in apply order (infra collects the .sql正本). */
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
   MEMBER_IDENTITY_LINK_MIGRATION,
+  MEMBER_PERSON_COLS_MIGRATION,
 ];
