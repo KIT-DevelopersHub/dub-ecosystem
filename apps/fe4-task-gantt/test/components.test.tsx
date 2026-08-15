@@ -37,6 +37,44 @@ describe("GanttView render (design test 4/7)", () => {
     render(<GanttView dto={dto} zoom="week" truncated />);
     expect(screen.getByTestId("fe4-gantt-truncated")).toBeInTheDocument();
   });
+
+  it("always renders the parent-child vs dependency guide legend (feedback #3)", () => {
+    render(<GanttView dto={dto} zoom="week" />);
+    const guide = screen.getByTestId("fe4-gantt-guide");
+    expect(guide).toBeInTheDocument();
+    expect(guide.textContent).toMatch(/親子/);
+    expect(guide.textContent).toMatch(/依存/);
+  });
+
+  const wbsDto: gantt.GanttChartDTO = {
+    eventId: "evt_1",
+    rows: [
+      { taskId: "p", title: "設計フェーズ", startsAt: "2026-08-12T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: null, depth: 0, hasChildren: true },
+      { taskId: "c1", title: "子1", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-09T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 1 },
+      { taskId: "c2", title: "子2", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-08-22T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 1 },
+    ],
+    dependencies: [],
+  };
+
+  it("collapses children by default and reveals them on toggle (parent-child)", () => {
+    render(<GanttView dto={wbsDto} zoom="week" />);
+    // parent visible, children hidden until expanded
+    expect(screen.getByTestId("fe4-gantt-row-p")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-gantt-row-c1")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p"));
+    expect(screen.getByTestId("fe4-gantt-row-c1")).toBeInTheDocument();
+    // expanded parent draws its faint enclosing group band
+    expect(screen.getByTestId("fe4-gantt-group-p")).toBeInTheDocument();
+  });
+
+  it("parent bar is a summary that has no resize handles (rolled-up, not editable)", () => {
+    const onSchedule = vi.fn();
+    render(<GanttView dto={wbsDto} zoom="week" onSchedule={onSchedule} canWrite />);
+    // parent bar exists but exposes no drag handles (children carry the edits)
+    expect(screen.getByTestId("fe4-gantt-bar-p")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-l")).toBeNull();
+    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-r")).toBeNull();
+  });
 });
 
 describe("ViewSwitcher", () => {

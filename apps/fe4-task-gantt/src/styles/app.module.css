@@ -323,8 +323,28 @@
   transition: background 0.1s ease;
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
-/* WBS leaf rows read a touch lighter than their work-package parent. */
-.tlRowChild { color: var(--dub-color-text-secondary); font-size: var(--dub-font-size-xs, 0.78rem); }
+/* WBS leaf rows read a touch lighter than their work-package parent, and carry a
+   vertical tree guide so the parent-child nesting is legible at a glance (this is
+   the "親子" affordance — dependency is shown only by arrows on the timeline). */
+.tlRowChild { position: relative; color: var(--dub-color-text-secondary); font-size: var(--dub-font-size-xs, 0.78rem); }
+.tlRowChild::before {
+  content: "";
+  position: absolute;
+  left: 21px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--dub-color-border-strong, var(--dub-color-border-default));
+}
+.tlRowChild::after {
+  content: "";
+  position: absolute;
+  left: 21px;
+  top: 50%;
+  width: 7px;
+  height: 1px;
+  background: var(--dub-color-border-strong, var(--dub-color-border-default));
+}
 /* collapse/expand chevron for a work-package row (rendered as a span, not a nested
    button, since the row itself is a button). */
 .tlToggle {
@@ -352,6 +372,45 @@
 .tlLegend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px var(--dub-space-3); border-bottom: 1px solid var(--dub-color-border-default); }
 .tlLegendItem { display: inline-flex; align-items: center; gap: 5px; font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
 .tlLegendSwatch { width: 10px; height: 10px; border-radius: 3px; background: var(--dub-color-gray-300); }
+/* "how to read this chart" guide: parent-child vs dependency. Always shown so the
+   two relationships never get confused. */
+.tlGuide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 6px var(--dub-space-3);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-sunken);
+}
+.tlGuideItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-secondary);
+}
+.tlGuideTree {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-secondary);
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.tlGuideSummary {
+  width: 24px;
+  height: 10px;
+  border: 1.5px solid var(--dub-color-brand-600, var(--dub-color-brand-500));
+  border-radius: 3px;
+  background: transparent;
+}
+.tlGuideDepIcon { display: inline-block; vertical-align: middle; }
 /* thin team-coloured cap at the left edge of each bar. */
 .barTeamCap { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-top-left-radius: inherit; border-bottom-left-radius: inherit; }
 .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -438,7 +497,25 @@
 }
 .tlTickToday { color: var(--dub-color-brand-600); font-weight: 700; }
 
-.tlBody { position: relative; }
+/* `isolation` traps every timeline artefact (bars go up to z-index 6 while
+   dragging) inside the body's own stacking context. The body as a whole then
+   sits at z-index 1, strictly below the sticky time-axis header (`.tlHeader`,
+   z-index 2) — so a bar scrolled up under the header can never paint over the
+   "8月 / 2026年" labels (vertical-overlay fix). Ordering is guaranteed at the
+   component level, not by tuning individual bar z-indexes. */
+.tlBody { position: relative; z-index: 1; isolation: isolate; }
+/* faint enclosure behind an open parent + its children — reads as "these rows
+   belong together" (parent-child), visually separate from dependency arrows. */
+.tlGroupBand {
+  position: absolute;
+  left: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 8px);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 5%, transparent);
+  z-index: 0;
+  pointer-events: none;
+}
 .tlWeekend { position: absolute; top: 0; background: var(--dub-color-gray-50); z-index: 0; }
 .tlRowLine {
   box-sizing: border-box;
@@ -449,8 +526,11 @@
   z-index: 0;
 }
 .tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
-.tlDep { stroke: var(--dub-color-gray-300); stroke-width: 1.5; stroke-dasharray: 3 3; }
-.tlDepArrow { fill: var(--dub-color-gray-300); }
+/* dependency connectors: a distinct indigo (not the gray gridline colour), so a
+   dependency arrow never reads as a border. Paired with the legend + a hover
+   tooltip so the meaning is unambiguous vs the parent-child grouping. */
+.tlDep { stroke: var(--dub-color-brand-500); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.85; }
+.tlDepArrow { fill: var(--dub-color-brand-500); }
 
 .tlToday {
   position: absolute;
@@ -491,6 +571,33 @@
 .barCancelled .barLabel, .barCancelled .barLabelOut { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
 .barDragging { cursor: grabbing; z-index: 6; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
+
+/* parent = rolled-up summary bar. Slimmer, hollow, square-ended "bracket" shape
+   so it reads as a span-over-children, not an editable leaf task. Not draggable
+   (handles are suppressed for parents in the view). */
+.barSummary {
+  align-self: center;
+  height: 12px !important;
+  margin-top: 0;
+  background: transparent;
+  border: 1.5px solid var(--dub-color-brand-600, var(--dub-color-brand-500));
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow: none;
+}
+.barSummary::before,
+.barSummary::after {
+  content: "";
+  position: absolute;
+  bottom: -4px;
+  width: 1.5px;
+  height: 5px;
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
+}
+.barSummary::before { left: 0; }
+.barSummary::after { right: 0; }
+.barSummary .barProgress { background: color-mix(in srgb, var(--dub-color-brand-500) 30%, transparent); border-radius: 2px; }
+.barSummary:hover { box-shadow: none; filter: none; }
 
 .barProgress {
   position: absolute;

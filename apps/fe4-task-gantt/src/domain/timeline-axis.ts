@@ -259,6 +259,47 @@ export interface TimelineBar {
   progressPercent: number;
 }
 
+/**
+ * Roll parent (work-package) rows up to the union of their descendants' spans.
+ *
+ * WBS parents own a stored date range, but a parent bar must ALWAYS enclose its
+ * children (feedback #2): widen a child and the parent (and thus the axis) grow;
+ * a manually-narrowed parent never "splits" a child. This derives that invariant
+ * purely — children are untouched, each parent's start/end becomes
+ * min/max(own, all descendants). Processed deepest-first so multi-level trees
+ * roll up correctly. Original row order is preserved.
+ */
+export function rollupRowDates(rows: readonly gantt.GanttRow[]): gantt.GanttRow[] {
+  const childrenOf = new Map<string, string[]>();
+  for (const r of rows) {
+    if (r.parentTaskId) {
+      const arr = childrenOf.get(r.parentTaskId);
+      if (arr) arr.push(r.taskId);
+      else childrenOf.set(r.parentTaskId, [r.taskId]);
+    }
+  }
+  // No hierarchy => nothing to roll up; return the input untouched.
+  if (childrenOf.size === 0) return rows as gantt.GanttRow[];
+
+  const byId = new Map(rows.map((r) => [r.taskId, { ...r }]));
+  const deepestFirst = [...rows].sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+  for (const r of deepestFirst) {
+    const kids = childrenOf.get(r.taskId);
+    if (!kids || kids.length === 0) continue;
+    const self = byId.get(r.taskId)!;
+    let min = self.startsAt ? Date.parse(self.startsAt) : Number.POSITIVE_INFINITY;
+    let max = self.endsAt ? Date.parse(self.endsAt) : Number.NEGATIVE_INFINITY;
+    for (const cid of kids) {
+      const c = byId.get(cid)!; // already rolled up (deepest-first)
+      if (c.startsAt) min = Math.min(min, Date.parse(c.startsAt));
+      if (c.endsAt) max = Math.max(max, Date.parse(c.endsAt));
+    }
+    if (Number.isFinite(min)) self.startsAt = new Date(min).toISOString();
+    if (Number.isFinite(max)) self.endsAt = new Date(max).toISOString();
+  }
+  return rows.map((r) => byId.get(r.taskId)!);
+}
+
 /** Minimum bar width so a same-day task stays grabbable. */
 const MIN_BAR_PX = 16;
 

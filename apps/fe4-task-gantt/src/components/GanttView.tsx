@@ -11,6 +11,7 @@ import {
   extendWindow,
   initialWindow,
   pxToDays,
+  rollupRowDates,
   shiftBar,
   timelineBars,
   todayX,
@@ -107,11 +108,24 @@ export function GanttView({
     });
   }, []);
 
+  // Parent (work-package) bars always enclose their children: roll each parent's
+  // span up to the union of its descendants before any geometry runs, so widening
+  // a child auto-grows the parent bar (and, via the window effect, the axis).
+  const rolledRows = useMemo(() => rollupRowDates(dto.rows), [dto.rows]);
+
   // Rows actually shown: a child (has a parent) is hidden unless its parent is open.
   const rows = useMemo(
-    () => dto.rows.filter((r) => !(r.parentTaskId && !openParents.has(r.parentTaskId))),
-    [dto.rows, openParents],
+    () => rolledRows.filter((r) => !(r.parentTaskId && !openParents.has(r.parentTaskId))),
+    [rolledRows, openParents],
   );
+
+  // taskId -> true when the row is a WBS parent (its bar is a rolled-up summary,
+  // not a directly-editable task bar).
+  const parentIds = useMemo(() => {
+    const s = new Set<common.TaskId>();
+    for (const r of dto.rows) if (r.hasChildren) s.add(r.taskId);
+    return s;
+  }, [dto.rows]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
@@ -163,10 +177,29 @@ export function GanttView({
           y1: from.y + ROW_HEIGHT / 2,
           x2: to.x,
           y2: to.y + ROW_HEIGHT / 2,
+          tip: `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
-  }, [dto.dependencies, barById]);
+  }, [dto.dependencies, barById, titleById]);
+
+  // Faint enclosing band drawn behind an open parent + its (contiguous) children,
+  // so the parent-child grouping reads as a container — distinct from the arrows,
+  // which mean dependency. Children render right after their parent, so the run
+  // is contiguous.
+  const groupBands = useMemo(() => {
+    const bands: { id: common.TaskId; top: number; height: number }[] = [];
+    rows.forEach((r, i) => {
+      if (!(r.hasChildren && openParents.has(r.taskId))) return;
+      let n = 0;
+      for (let j = i + 1; j < rows.length; j++) {
+        if (rows[j]!.parentTaskId === r.taskId) n += 1;
+        else break;
+      }
+      if (n > 0) bands.push({ id: r.taskId, top: i * ROW_HEIGHT, height: (n + 1) * ROW_HEIGHT });
+    });
+    return bands;
+  }, [rows, openParents]);
 
   // ---- centre on today (initial + on zoom change) ----
   const scrollToToday = useCallback(
@@ -207,6 +240,12 @@ export function GanttView({
 
   // ---- bar pointer session (move + resize + click-to-open) ----
   const beginDrag = (e: React.PointerEvent, bar: TimelineBar, mode: DragMode) => {
+    // Parent bars are rolled-up summaries of their children — they are not
+    // directly schedulable, so a tap only opens the row (edit the leaves instead).
+    if (parentIds.has(bar.taskId)) {
+      if (mode === "move") onSelect?.(bar.taskId);
+      return;
+    }
     if (!canWrite || !onSchedule) {
       // read-only: a tap still opens detail
       if (mode === "move") onSelect?.(bar.taskId);
@@ -261,7 +300,9 @@ export function GanttView({
     const status = statusById?.get(taskId);
     const cls = status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
-    return `${styles.bar} ${cls} ${dragging}`;
+    // parent = rolled-up summary bar (bracket style), visually distinct from leaf bars.
+    const summary = parentIds.has(taskId) ? styles.barSummary : "";
+    return `${styles.bar} ${cls} ${summary} ${dragging}`;
   };
 
   // ---- left-pane resize ----
@@ -333,6 +374,29 @@ export function GanttView({
           ))}
         </div>
       )}
+
+      {/* how to read the chart: parent-child (toggle/indent) vs dependency (arrow) */}
+      <div className={styles.tlGuide} data-testid="fe4-gantt-guide" aria-label="表記の凡例">
+        <span className={styles.tlGuideItem}>
+          <span className={styles.tlGuideTree} aria-hidden>▸</span>
+          親子（トグルで開閉・インデント）
+        </span>
+        <span className={styles.tlGuideItem}>
+          <span className={styles.tlGuideSummary} aria-hidden />
+          まとめバー（親＝子の期間を合算）
+        </span>
+        <span className={styles.tlGuideItem}>
+          <svg className={styles.tlGuideDepIcon} width="26" height="10" aria-hidden>
+            <defs>
+              <marker id="fe4-legend-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L5,3 L0,6 Z" className={styles.tlDepArrow} />
+              </marker>
+            </defs>
+            <path d="M1,5 H20" fill="none" className={styles.tlDep} markerEnd="url(#fe4-legend-arrow)" />
+          </svg>
+          依存（前工程 → 後工程）
+        </span>
+      </div>
 
       {truncated && (
         <div className={styles.banner} data-testid="fe4-gantt-truncated">
@@ -446,6 +510,16 @@ export function GanttView({
                 style={{ width, height: rowsH }}
                 onClick={onCanvasBackgroundClick}
               >
+                {/* parent-child grouping: faint enclosure behind an open parent + its children */}
+                {groupBands.map((g) => (
+                  <div
+                    key={`grp-${g.id}`}
+                    className={styles.tlGroupBand}
+                    style={{ top: g.top, height: g.height, width }}
+                    data-testid={`fe4-gantt-group-${g.id}`}
+                    aria-hidden
+                  />
+                ))}
                 {/* weekend shading */}
                 {weekends.map((b) => (
                   <div key={b.key} className={styles.tlWeekend} style={{ left: b.x, width: b.width, height: rowsH }} aria-hidden />
@@ -467,7 +541,9 @@ export function GanttView({
                       const midX = Math.max(s.x1 + 10, s.x2 - 10);
                       const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
                       return (
-                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`} />
+                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`}>
+                          <title>{s.tip}</title>
+                        </path>
                       );
                     })}
                   </svg>
@@ -494,7 +570,7 @@ export function GanttView({
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
                       )}
                       <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
-                      {canWrite && onSchedule && (
+                      {canWrite && onSchedule && !parentIds.has(b.taskId) && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleL}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-l`}
@@ -503,7 +579,7 @@ export function GanttView({
                         />
                       )}
                       {showInside && <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>}
-                      {canWrite && onSchedule && (
+                      {canWrite && onSchedule && !parentIds.has(b.taskId) && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleR}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-r`}
