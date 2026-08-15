@@ -33,6 +33,16 @@ export interface Member {
   roleTitle: string | null;
   status: MemberStatus;
   teamIds: string[];
+  /** 学科 (任意). かつてメモ欄に混在していたのを専用フィールドへ分離。 */
+  department: string | null;
+  /** 学年 (任意, 自由記述: 例 "3年" / "M1"). メモ欄から専用フィールドへ分離。 */
+  grade: string | null;
+  /**
+   * The linked identity-roster login account (identity userId), or null when this
+   * 運営メンバー is not yet tied to an account. The bridge between the 組織図 (this
+   * record) and RBAC/認証 (identity_users). Set/cleared via PATCH (human-confirmed).
+   */
+  identityUserId: string | null;
   /** 連絡先 (任意). */
   contact: string | null;
   note: string | null;
@@ -74,6 +84,8 @@ export interface CreateMemberRequest {
   roleTitle?: string | null;
   status: MemberStatus;
   teamIds: string[];
+  department?: string | null;
+  grade?: string | null;
   contact?: string | null;
   note?: string | null;
 }
@@ -82,10 +94,21 @@ export interface UpdateMemberRequest {
   roleTitle?: string | null;
   status?: MemberStatus;
   teamIds?: string[];
+  department?: string | null;
+  grade?: string | null;
+  /** Set (link) or null (unlink) the identity-roster account. Omit = leave unchanged. */
+  identityUserId?: string | null;
   contact?: string | null;
   note?: string | null;
   sortOrder?: number;
   /** Required: the version the edit was based on (409 on mismatch). */
+  version: number;
+}
+
+/** Create/set a link in one call (POST /members/people/:id/identity-link). The member's
+ *  version is checked for optimistic concurrency, mirroring UpdateMemberRequest. */
+export interface LinkIdentityRequest {
+  identityUserId: string;
   version: number;
 }
 

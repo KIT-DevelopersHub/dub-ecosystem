@@ -90,6 +90,35 @@ describe("member-service HTTP surface", () => {
     expect(ov2.json.members).toHaveLength(0);
   });
 
+  it("学科(department)・学年(grade) round-trip as their own fields on create/edit", async () => {
+    const app = createApp(makeDeps());
+    const created = await call(app, "POST", "/members/people", {
+      body: { name: "田中", status: "added", teamIds: [], department: "情報工学科", grade: "3年" },
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.department).toBe("情報工学科");
+    expect(created.json.grade).toBe("3年");
+    const memberId = created.json.id as string;
+
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members[0].department).toBe("情報工学科");
+    expect(ov.json.members[0].grade).toBe("3年");
+
+    // edit only 学年, leave 学科 untouched; blanks clear the field
+    const upd = await call(app, "PATCH", `/members/people/${memberId}`, {
+      body: { grade: "M1", version: 1 },
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.json.grade).toBe("M1");
+    expect(upd.json.department).toBe("情報工学科");
+
+    const cleared = await call(app, "PATCH", `/members/people/${memberId}`, {
+      body: { department: "", version: 2 },
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.department).toBeNull();
+  });
+
   it("rejects invalid status and unknown teamIds", async () => {
     const app = createApp(makeDeps());
     const bad = await call(app, "POST", "/members/people", { body: { name: "A", status: "bogus", teamIds: [] } });
@@ -112,5 +141,74 @@ describe("member-service HTTP surface", () => {
     expect(ov.json.teams).toHaveLength(0);
     expect(ov.json.members).toHaveLength(1);
     expect(ov.json.members[0].teamIds).toEqual([]);
+  });
+});
+
+describe("member-service identity linking (#1)", () => {
+  it("new members start unlinked (identityUserId=null)", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "A", status: "added", teamIds: [] } });
+    expect(m.json.identityUserId).toBeNull();
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members[0].identityUserId).toBeNull();
+  });
+
+  it("links a member to an identity account and looks it up in reverse", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "山田", status: "added", teamIds: [] } });
+    const id = m.json.id as string;
+
+    const linked = await call(app, "POST", `/members/people/${id}/identity-link`, {
+      body: { identityUserId: "usr_yamada", version: m.json.version },
+    });
+    expect(linked.status).toBe(200);
+    expect(linked.json.identityUserId).toBe("usr_yamada");
+    expect(linked.json.version).toBe(m.json.version + 1);
+
+    const rev = await call(app, "GET", "/members/people/by-identity/usr_yamada");
+    expect(rev.status).toBe(200);
+    expect(rev.json.member.id).toBe(id);
+
+    const missing = await call(app, "GET", "/members/people/by-identity/usr_nobody");
+    expect(missing.json.member).toBeNull();
+  });
+
+  it("unlinks via identity-link with null and via PATCH", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "B", status: "added", teamIds: [] } });
+    const id = m.json.id as string;
+    const linked = await call(app, "POST", `/members/people/${id}/identity-link`, { body: { identityUserId: "usr_b", version: m.json.version } });
+    const unlinked = await call(app, "POST", `/members/people/${id}/identity-link`, { body: { identityUserId: null, version: linked.json.version } });
+    expect(unlinked.json.identityUserId).toBeNull();
+    // PATCH can also set the link
+    const relinked = await call(app, "PATCH", `/members/people/${id}`, { body: { identityUserId: "usr_b2", version: unlinked.json.version } });
+    expect(relinked.json.identityUserId).toBe("usr_b2");
+  });
+
+  it("rejects linking the same identity account to two members (409)", async () => {
+    const app = createApp(makeDeps());
+    const m1 = await call(app, "POST", "/members/people", { body: { name: "C1", status: "added", teamIds: [] } });
+    const m2 = await call(app, "POST", "/members/people", { body: { name: "C2", status: "added", teamIds: [] } });
+    await call(app, "POST", `/members/people/${m1.json.id}/identity-link`, { body: { identityUserId: "usr_dup", version: m1.json.version } });
+    const clash = await call(app, "POST", `/members/people/${m2.json.id}/identity-link`, { body: { identityUserId: "usr_dup", version: m2.json.version } });
+    expect(clash.status).toBe(409);
+    expect(clash.json.error.code).toBe("MEMBER_IDENTITY_ALREADY_LINKED");
+  });
+
+  it("link honors optimistic concurrency (stale version -> 409)", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "D", status: "added", teamIds: [] } });
+    const stale = await call(app, "POST", `/members/people/${m.json.id}/identity-link`, { body: { identityUserId: "usr_d", version: 999 } });
+    expect(stale.status).toBe(409);
+    expect(stale.json.error.code).toBe("MEMBER_VERSION_CONFLICT");
+  });
+
+  it("re-linking the SAME member to its current account is idempotent (no conflict)", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "E", status: "added", teamIds: [] } });
+    const l1 = await call(app, "POST", `/members/people/${m.json.id}/identity-link`, { body: { identityUserId: "usr_e", version: m.json.version } });
+    const l2 = await call(app, "POST", `/members/people/${m.json.id}/identity-link`, { body: { identityUserId: "usr_e", version: l1.json.version } });
+    expect(l2.status).toBe(200);
+    expect(l2.json.identityUserId).toBe("usr_e");
   });
 });

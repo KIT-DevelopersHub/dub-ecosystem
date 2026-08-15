@@ -24,6 +24,8 @@ import type {
   PostSystemMessageRequest,
   ReactionToggleResponse,
   ReadStateUpdateRequest,
+  ChannelMember,
+  SearchHit,
   UnreadResponse,
   UnreadSummary,
   WsTicketResponse,
@@ -276,6 +278,15 @@ export class ChatService {
     await this.audit(ctx, "chat.member.remove", "channel", id, { userId, self: isSelf });
   }
 
+  // Members roster (FE6 presence / admin-badge popover). Any caller who can READ the
+  // channel (member, or anyone for a public channel) may list its members; a private
+  // channel stays hidden from non-members (loadReadable -> 404).
+  async listMembers(ctx: ReqCtx, id: common.ChannelId): Promise<ChannelMember[]> {
+    await this.loadReadable(id, ctx.userId);
+    const rows = await this.deps.repo.listMembers(id);
+    return rows.map(toMember);
+  }
+
   // ---- messages ----
   async postMessage(ctx: ReqCtx, body: PostMessageRequest): Promise<Message> {
     const text = requireBody(body.body);
@@ -416,6 +427,60 @@ export class ChatService {
     else await this.deps.repo.addReaction(id, clean, ctx.userId, this.deps.now());
     const reactions = await this.deps.repo.reactionsFor([id]);
     return { messageId: id, reactions: reactions.get(id) ?? {} };
+  }
+
+  // ---- search (workspace / single-channel; readable scope enforced in the repo) ----
+  async search(ctx: ReqCtx, q: { q?: string; channelId?: common.ChannelId; limit?: number }): Promise<SearchHit[]> {
+    // Empty / whitespace query -> no results (matches the FE contract; not a 400).
+    const text = (typeof q.q === "string" ? q.q : "").trim();
+    if (text.length === 0) return [];
+    const limit = requireLimit(q.limit);
+    const rows = await this.deps.repo.searchMessages({
+      userId: ctx.userId,
+      text,
+      ...(q.channelId ? { channelId: q.channelId } : {}),
+      limit,
+    });
+    const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.message.id));
+    return rows.map((r) => ({
+      message: toMessage(r.message, reactions.get(r.message.id) ?? {}),
+      channelId: r.message.channelId,
+      channelName: r.channelName,
+      channelType: r.channelType,
+    }));
+  }
+
+  // ---- pins ----
+  private async pinnedList(channelId: common.ChannelId): Promise<Message[]> {
+    const rows = await this.deps.repo.listPinnedMessages(channelId);
+    const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.id));
+    return rows.map((r) => toMessage(r, reactions.get(r.id) ?? {}));
+  }
+
+  // List a channel's pinned messages. Readable scope (member, or public channel).
+  async listPins(ctx: ReqCtx, id: common.ChannelId): Promise<Message[]> {
+    await this.loadReadable(id, ctx.userId);
+    return this.pinnedList(id);
+  }
+
+  // Toggle a pin (Slack: any channel member may pin/unpin). Returns the updated list so
+  // the FE can reconcile in one round-trip. Not in the frozen RT/event catalog -> audit only.
+  async togglePin(ctx: ReqCtx, id: common.ChannelId, messageId: common.MessageId): Promise<Message[]> {
+    const cleanMessageId = nonEmptyString(messageId, "messageId");
+    const { channel } = await this.loadReadable(id, ctx.userId);
+    await this.requireMember(channel, ctx.userId);
+    if (channel.archivedAt) throw errArchived(channel.id);
+
+    const msg = await this.deps.repo.getMessage(cleanMessageId);
+    if (!msg || msg.deletedAt || msg.channelId !== channel.id) {
+      throw errors.validationFailed([{ field: "messageId", reason: "not_in_channel" }]);
+    }
+
+    const pinned = await this.deps.repo.isPinned(channel.id, cleanMessageId);
+    if (pinned) await this.deps.repo.removePin(channel.id, cleanMessageId);
+    else await this.deps.repo.addPin(channel.id, cleanMessageId, ctx.userId, this.deps.now());
+    await this.audit(ctx, pinned ? "chat.message.unpin" : "chat.message.pin", "message", cleanMessageId, { channelId: channel.id });
+    return this.pinnedList(channel.id);
   }
 
   // ---- read state / unread ----

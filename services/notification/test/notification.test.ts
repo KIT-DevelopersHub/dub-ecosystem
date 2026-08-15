@@ -457,6 +457,27 @@ describe("HTTP app", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("NOTIF_VALIDATION_FAILED");
   });
 
+  it("GAP-2: routes are also served under the '/notifications' gateway segment", async () => {
+    // The api-gateway forwards its "/notifications/*" segment verbatim (transparent proxy,
+    // no strip), so the real service must answer that prefix — not only bare "/inbox".
+    // Regression guard for the prod 通知ダイアログ "Couldn't load" (external
+    // /api/v1/notifications/inbox 404'd because the service only mounted at /inbox).
+    const h = makeTestEnv();
+    const res = await req("/notifications/notify", internalPost({ type: "system.announcement", recipientIds: ["u1"], title: "Hi", body: "there", channels: ["in_app"] }), h);
+    expect(res.status).toBe(202);
+
+    const inbox = await req("/notifications/inbox", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(inbox.status).toBe(200);
+    const page = (await inbox.json()) as { items: { id: string }[] };
+    expect(page.items).toHaveLength(1);
+
+    const uc = await req("/notifications/inbox/unread-count", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect((await uc.json()) as { count: number }).toEqual({ count: 1 });
+
+    const prefs = await req("/notifications/preferences", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(prefs.status).toBe(200);
+  });
+
   it("#15 POST /notify without x-dub-internal -> 403 FORBIDDEN", async () => {
     const h = makeTestEnv();
     const res = await req("/notify", {

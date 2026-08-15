@@ -26,6 +26,15 @@
   background: var(--dub-color-surface-raised);
 }
 
+/* Unread rows read as unread at a glance: heavier title + primary (not secondary) body. */
+.unread .title {
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.unread .snippet {
+  color: var(--dub-color-text-primary);
+}
+
 .body {
   flex: 1;
   min-width: 0;

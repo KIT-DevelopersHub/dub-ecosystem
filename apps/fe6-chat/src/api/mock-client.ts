@@ -15,6 +15,8 @@ import type {
   PostMessageResponse,
   ReactionToggleRequest,
   ReadStateUpdateRequest,
+  SearchHit,
+  SearchMessagesRequest,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -31,6 +33,7 @@ export interface MockSeed {
   messages?: Message[];
   members?: ChannelMember[];
   users?: identity.UserSummary[];
+  pins?: { channelId: common.ChannelId; messageId: common.MessageId }[];
 }
 
 export class MockChatClient implements ChatApiClient {
@@ -39,6 +42,7 @@ export class MockChatClient implements ChatApiClient {
   private members: ChannelMember[] = [];
   private users = new Map<common.UserId, identity.UserSummary>();
   private readState = new Map<common.ChannelId, common.MessageId>();
+  private pins = new Map<common.ChannelId, Set<common.MessageId>>();
   private readonly me: common.UserId;
   /** Latency injected per call (ms). 0 = synchronous microtask. */
   latencyMs = 0;
@@ -51,6 +55,11 @@ export class MockChatClient implements ChatApiClient {
     this.messages = (seed.messages ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : 1));
     this.members = seed.members ?? [];
     for (const u of seed.users ?? []) this.users.set(u.id, u);
+    for (const p of seed.pins ?? []) {
+      const set = this.pins.get(p.channelId) ?? new Set<common.MessageId>();
+      set.add(p.messageId);
+      this.pins.set(p.channelId, set);
+    }
   }
 
   private async settle<T>(value: T): Promise<T> {
@@ -74,6 +83,7 @@ export class MockChatClient implements ChatApiClient {
       id,
       orgId: "org_devhub",
       type: req.type,
+      visibility: req.visibility ?? "public",
       name: req.name,
       topic: req.topic ?? null,
       eventId: req.eventId ?? null,
@@ -126,6 +136,57 @@ export class MockChatClient implements ChatApiClient {
     const channel = this.channels.get(id);
     if (channel) this.channels.set(id, { ...channel, memberCount: Math.max(0, channel.memberCount - 1) });
     return this.settle(undefined);
+  }
+
+  async listMembers(id: common.ChannelId): Promise<ChannelMember[]> {
+    const recorded = this.members.filter((m) => m.channelId === id);
+    const channel = this.channels.get(id);
+    // Synthesize a populated roster for the demo: topic/event channels include the
+    // whole workspace (caller = admin); DMs keep just the recorded members. This
+    // keeps the members popover realistic without bloating the seed.
+    if (channel && channel.type !== "dm") {
+      const byUser = new Map(recorded.map((m) => [m.userId, m]));
+      for (const u of this.users.keys()) {
+        if (!byUser.has(u)) {
+          byUser.set(u, { channelId: id, userId: u, role: u === this.me ? "admin" : "member", joinedAt: now() });
+        }
+      }
+      return this.settle([...byUser.values()]);
+    }
+    return this.settle(recorded);
+  }
+
+  async searchMessages(req: SearchMessagesRequest): Promise<SearchHit[]> {
+    const q = req.q.trim().toLowerCase();
+    if (q.length === 0) return this.settle([]);
+    const limit = req.limit ?? 50;
+    const hits: SearchHit[] = [];
+    // newest first
+    for (let i = this.messages.length - 1; i >= 0 && hits.length < limit; i--) {
+      const m = this.messages[i]!;
+      if (m.deletedAt) continue;
+      if (req.channelId && m.channelId !== req.channelId) continue;
+      if (!m.body.toLowerCase().includes(q)) continue;
+      const ch = this.channels.get(m.channelId);
+      if (!ch) continue;
+      hits.push({ message: m, channelId: ch.id, channelName: ch.name, channelType: ch.type });
+    }
+    return this.settle(hits);
+  }
+
+  async listPinned(id: common.ChannelId): Promise<Message[]> {
+    const set = this.pins.get(id);
+    if (!set) return this.settle([]);
+    const out = this.messages.filter((m) => set.has(m.id) && !m.deletedAt).sort((a, b) => (a.id < b.id ? 1 : -1));
+    return this.settle(out);
+  }
+
+  async togglePin(id: common.ChannelId, messageId: common.MessageId): Promise<Message[]> {
+    const set = this.pins.get(id) ?? new Set<common.MessageId>();
+    if (set.has(messageId)) set.delete(messageId);
+    else set.add(messageId);
+    this.pins.set(id, set);
+    return this.listPinned(id);
   }
 
   async listMessages(req: ListMessagesRequest): Promise<ListMessagesResponse> {

@@ -370,6 +370,58 @@
   gap: var(--dub-space-2);
 }
 
+/* identity-link candidate picker (#1) */
+.linkCandidateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  padding: var(--dub-space-2);
+}
+.linkCandidate {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--dub-radius-md);
+  cursor: pointer;
+  text-align: left;
+}
+.linkCandidate:hover:not(:disabled) {
+  background: var(--dub-color-surface-hover, rgba(127, 127, 127, 0.08));
+}
+.linkCandidate[data-selected="true"] {
+  border-color: var(--dub-color-border-brand, var(--dub-color-accent, #4f46e5));
+  background: var(--dub-color-surface-brand-subtle, rgba(79, 70, 229, 0.08));
+}
+.linkCandidate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.linkCandidateMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.linkCandidateName {
+  font-weight: 600;
+}
+.linkCandidateEmail {
+  font-size: 0.85em;
+  color: var(--dub-color-text-muted);
+}
+
 /* print / PNG export: hide app chrome, print the org chart full-width on white */
 @media print {
   .noPrint {

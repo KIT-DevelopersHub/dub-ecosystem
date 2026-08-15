@@ -28,10 +28,46 @@ export interface SyncEmailRoutingResult {
   total: number; // addresses accepted from the request
 }
 
+// ---- Email Routing sync PREVIEW (#5): read-only diff before applying ----
+// Same reconciliation as syncEmailRouting, but computes the plan WITHOUT writing so the
+// console can show what would change and require an explicit apply. `projected` equals the
+// SyncEmailRoutingResult the subsequent apply is expected to return.
+export interface EmailRoutingDiffRow {
+  email: string;
+  userId?: string; // present for rows that already exist on the roster
+  enabled?: boolean; // present for incoming addresses (add/reactivate)
+}
+export interface EmailRoutingSyncPreview {
+  toAdd: EmailRoutingDiffRow[]; // in Email Routing, not yet on the roster -> new row
+  toReactivate: EmailRoutingDiffRow[]; // disabled email-routing rows re-appearing enabled
+  toRelink: EmailRoutingDiffRow[]; // existing manual rows whose provenance would flip to email-routing
+  toDeactivate: EmailRoutingDiffRow[]; // owned rows no longer present -> would be disabled
+  adminKept: EmailRoutingDiffRow[]; // owned rows that WOULD deactivate but are admins (kept, guarded)
+  projected: SyncEmailRoutingResult; // the counts the apply is expected to produce
+}
+
 export interface UpdateUserRequest {
   displayName?: string;
   githubLogin?: string | null;
   status?: identity.UserStatus; // "disabled"/"rejected" => sync session revoke
+}
+
+// ---- Offboarding (退任): one-shot within identity ----
+// Composes the identity-LOCAL退任 steps atomically + idempotently: revoke live
+// sessions (fail-close), strip every role assignment, then disable the account. The
+// cross-service steps (Email Routing削除・member在籍更新) are chained by the caller
+// (fe7) around this and reported alongside these results for partial-success visibility.
+export type OffboardStepStatus = "done" | "skipped" | "failed";
+export interface OffboardStepResult {
+  step: "revoke-sessions" | "revoke-roles" | "disable-account";
+  status: OffboardStepStatus;
+  detail?: string; // e.g. count for revoke-roles, or an error reason for failed
+}
+export interface OffboardUserResult {
+  user: identity.IdentityUser; // status now "disabled"
+  revokedAssignments: number; // roles stripped this call (0 when idempotent re-run)
+  alreadyDisabled: boolean; // true when the account was already disabled on entry
+  steps: OffboardStepResult[];
 }
 
 export interface CreateRoleRequest {

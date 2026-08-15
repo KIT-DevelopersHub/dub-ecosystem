@@ -24,6 +24,13 @@ export interface Task extends Versioned {
   assigneeId: UserId | null;
   /** Owning team (canonical team.Team). Additive; null = unassigned to a team. */
   teamId?: TeamId | null;
+  /**
+   * Requester — the user who issued (created) the task. This is the "from" in the
+   * from→to relationship the My Tasks hub renders (createdBy → assigneeId). Server
+   * always populates it (task_tasks.created_by, NOT NULL); typed optional so the
+   * many existing Task literals across the monorepo need not be touched (additive).
+   */
+  createdBy?: UserId;
   dueAt: ISODateTime | null;
   origin: TaskOrigin;
   archivedAt: ISODateTime | null;
@@ -70,6 +77,8 @@ export interface ListTasksQuery extends CursorQuery {
   eventId?: EventId;
   status?: TaskStatus[];
   assigneeId?: UserId;
+  /** Requester filter — tasks issued (created) by this user. Powers the "依頼" lens. */
+  createdById?: UserId;
   teamId?: TeamId;
   includeArchived?: boolean;
 }

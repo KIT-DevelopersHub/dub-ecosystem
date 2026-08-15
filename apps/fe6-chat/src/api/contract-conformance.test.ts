@@ -45,7 +45,9 @@ const messageSchema = z.object({
   threadRootId: z.string().nullable(),
   replyCount: z.number(),
   reactions: z.array(reactionSchema),
-  attachments: z.array(z.object({ fileId: z.string(), name: z.string(), mime: z.string(), size: z.number() })),
+  attachments: z.array(
+    z.object({ fileId: z.string(), name: z.string(), mime: z.string(), size: z.number(), url: z.string().nullish() }),
+  ),
   editedAt: z.string().nullable(),
   deletedAt: z.string().nullable(),
   version: z.number(),
@@ -55,6 +57,7 @@ const channelSchema = z.object({
   id: z.string(),
   orgId: z.string(),
   type: z.enum(["topic", "event", "dm"]),
+  visibility: z.enum(["public", "private"]),
   name: z.string(),
   topic: z.string().nullable(),
   eventId: z.string().nullable(),

@@ -47,3 +47,4 @@ export function newUlid(prefix = ""): string {
 export const newMessageId = (): string => newUlid("msg_");
 export const newChannelId = (): string => newUlid("chn_");
 export const newClientTempId = (): string => newUlid("tmp_");
+export const newFileId = (): string => newUlid("fil_");

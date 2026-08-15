@@ -47,9 +47,11 @@ export function HomeScreen({
 }): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
   const eventsError = errorFor("event-service");
-  // FE5's upstream reports as "notification" in the BFF aggregate (matches the
-  // useBffHome contract test fixture).
-  const notificationsError = errorFor("notification");
+  // The gateway BFF (bff-home) reports the notification upstream as "notification-service"
+  // (same "<svc>-service" convention as "event-service"). Matching it here restores the
+  // "取得できませんでした" card when notification-service degrades — previously the mismatched
+  // "notification" key silently left the card at 未読 0 件 (bugfix).
+  const notificationsError = errorFor("notification-service");
 
   const events = data?.upcomingEvents ?? [];
   const unread = data?.unreadCount ?? 0;

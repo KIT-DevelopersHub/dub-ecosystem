@@ -135,7 +135,9 @@ if [ "${SKIP_HEALTHCHECK:-0}" != "1" ]; then
 fi
 
 # --- 5. fe2 admin SPA (assets-only; built earlier with the prod API base URL) ---
-deploy fe2-app-shell apps/fe2-app-shell/wrangler.free.toml
+# Worker name is `dub-fe2-app-shell` (defined in the config). The old unprefixed
+# `fe2-app-shell` worker is a decommissioned orphan (308-redirects to canonical).
+deploy dub-fe2-app-shell apps/fe2-app-shell/wrangler.free.toml
 
 # --- 6. mo3 mobile BFF (binds SVC_AUTH/IDENTITY/EVENT/TASK/NOTIFICATION) ---
 deploy mo3-mobile-bff apps/mo3-mobile-bff/wrangler.free.toml

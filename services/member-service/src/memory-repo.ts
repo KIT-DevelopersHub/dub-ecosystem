@@ -58,6 +58,12 @@ export class InMemoryMemberRepo implements MemberRepo {
     const r = this.people.get(id);
     return r && r.archivedAt === null ? { ...r } : null;
   }
+  async getPersonByIdentityUserId(orgId: common.OrgId, identityUserId: string): Promise<PersonRow | null> {
+    for (const p of this.people.values()) {
+      if (p.orgId === orgId && p.archivedAt === null && p.identityUserId === identityUserId) return { ...p };
+    }
+    return null;
+  }
   async listPeople(orgId: common.OrgId): Promise<PersonRow[]> {
     return [...this.people.values()]
       .filter((p) => p.orgId === orgId && p.archivedAt === null)
