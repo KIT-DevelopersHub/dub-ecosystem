@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { identity } from "@dub/types";
 import { seedScenario } from "../seed/scenarios";
 import { applyAndSeed } from "../seed/seed-demo";
 import { SEED } from "../seed/fixtures";
@@ -141,5 +142,22 @@ describe("seedScenario", () => {
         expect(row?.ok, `${roleId} must grant ${permKey}`).toBe(1);
       }
     }
+  });
+
+  // Super-admin invariant (prod incident 2026-08-15 — "adminなのに操作ボタンが押せない" が頻発):
+  // the `admin` system role must hold EVERY key in the frozen RBAC catalog. The 0002 seed
+  // drifted below the catalog and single holes were patched reactively (drive:* / mail:read_all /
+  // notif self / github:* / webhook:read). This guard fails the build the instant a new catalog
+  // key is added without granting it to admin — so "admin is missing a permission" can never
+  // silently ship again. The fill migrations are the 正本; admin = the full catalog, always.
+  it("admin holds the ENTIRE frozen permission catalog (no missing keys, migration only)", async () => {
+    const { raw } = await migratedD1();
+    const granted = new Set(
+      (raw
+        .prepare("SELECT permission_key FROM identity_role_permissions WHERE role_id = 'role_sys_admin'")
+        .all() as Array<{ permission_key: string }>).map((r) => r.permission_key),
+    );
+    const missing = identity.PERMISSION_CATALOG.map((e) => e.key).filter((k) => !granted.has(k));
+    expect(missing, `admin missing catalog perms: ${missing.join(", ")}`).toEqual([]);
   });
 });
