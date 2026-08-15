@@ -55,6 +55,23 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
     if (!recipientIds.every((r) => typeof r === "string" && r.length > 0)) fe.push({ field: "recipientIds", reason: "invalid_type" });
   }
 
+  // Optional role fan-out: expanded to user ids by the ingest recipient resolver. When
+  // present + non-empty, recipientIds may be empty (at least one of the two must resolve).
+  const recipientRoles = b.recipientRoles;
+  let hasRoles = false;
+  if (recipientRoles !== undefined) {
+    if (!Array.isArray(recipientRoles) || !recipientRoles.every((r) => typeof r === "string" && r.length > 0)) {
+      fe.push({ field: "recipientRoles", reason: "invalid_type" });
+    } else {
+      if (recipientRoles.length > MAX_DIRECT_RECIPIENTS) fe.push({ field: "recipientRoles", reason: "too_long", message: `<= ${MAX_DIRECT_RECIPIENTS}` });
+      hasRoles = recipientRoles.length > 0;
+    }
+  }
+  // Require at least one recipient source (ids or roles).
+  if (Array.isArray(recipientIds) && recipientIds.length === 0 && !hasRoles) {
+    fe.push({ field: "recipientIds", reason: "required", message: "recipientIds or recipientRoles must be non-empty" });
+  }
+
   const title = b.title;
   if (typeof title !== "string" || title.length < TITLE_MIN || title.length > TITLE_MAX) {
     fe.push({ field: "title", reason: "invalid_length", message: `${TITLE_MIN}..${TITLE_MAX}` });
@@ -86,6 +103,7 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
     title: title as string,
     body: bodyText as string,
   };
+  if (hasRoles) out.recipientRoles = recipientRoles as string[];
   if (channels !== undefined) out.channels = channels as NotificationChannel[];
   if (dedupKey !== undefined) out.dedupKey = dedupKey as string;
   if (resourceType !== undefined) out.resourceType = resourceType as string;

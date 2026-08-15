@@ -59,6 +59,21 @@ export function buildMockUsageSummary(now: Date = new Date()): UsageSummary {
         status: "critical",
       },
       {
+        // Storage metric: no rollover window (resetsAt null) and a byte unit the UI
+        // renders as human GB. The backend now collects D1 storage, so demo mode shows
+        // the full metric set including a storage-type line.
+        provider: "cloudflare",
+        metricKey: "d1_storage",
+        label: "D1 ストレージ",
+        used: 3_650_000_000,
+        limit: 5_000_000_000,
+        pct: 73.0,
+        unit: "bytes",
+        resetsAt: null,
+        overflowBehavior: "halt",
+        status: "warn",
+      },
+      {
         provider: "resend",
         metricKey: "emails_month",
         label: "メール送信(月)",
@@ -81,6 +96,20 @@ export function buildMockUsageSummary(now: Date = new Date()): UsageSummary {
         resetsAt: null,
         overflowBehavior: "bill",
         status: "unknown",
+      },
+      {
+        // Future provider (backend is adding "gcp" to the union). Demo includes it so
+        // the [GCP] section renders and unknown-provider grouping is exercised.
+        provider: "gcp",
+        metricKey: "gcp_logging_ingest_month",
+        label: "Cloud Logging 取り込み(月)",
+        used: 12_000_000_000,
+        limit: 50_000_000_000,
+        pct: 24.0,
+        unit: "bytes",
+        resetsAt: iso(9 * DAY),
+        overflowBehavior: "bill",
+        status: "ok",
       },
     ],
   };

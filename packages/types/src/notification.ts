@@ -7,6 +7,10 @@ export type NotificationType = string; // open vocabulary
 export interface NotifyRequest {
   type: NotificationType;
   recipientIds: UserId[];
+  /** Role keys expanded to user ids by the notification service (identity roster). Lets a
+   *  caller fan out to admins/maintainers without knowing user ids. At least one of
+   *  recipientIds / recipientRoles must be non-empty; the two union. */
+  recipientRoles?: string[];
   title: string;
   body: string;
   channels?: NotificationChannel[]; // P0 delivers in_app only; others are adapter stubs
