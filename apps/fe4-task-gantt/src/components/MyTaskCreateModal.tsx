@@ -5,6 +5,23 @@ import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
 import { DateField } from "./DateField";
 import styles from "../styles/app.module.css";
 
+/** A file the requester attached in the modal — read into a self-contained data:
+ *  URL (minimal impl; a file-meta/R2 blob upload is a documented follow-up). */
+export interface DraftFileAttachment {
+  name: string;
+  url: string; // data: URL
+  mimeType: string;
+  sizeBytes: number;
+}
+export interface DraftUrlAttachment {
+  name: string;
+  url: string;
+}
+export interface DraftAttachments {
+  files: DraftFileAttachment[];
+  urls: DraftUrlAttachment[];
+}
+
 export interface MyTaskDraft {
   eventId: common.EventId;
   title: string;
@@ -13,6 +30,19 @@ export interface MyTaskDraft {
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
   dueAt: common.ISODateTime | null;
+  attachments: DraftAttachments;
+}
+
+/** Per-file cap for the data-URL (meta+URL minimal impl) attachment path. */
+export const MAX_ATTACHMENT_BYTES = 1024 * 1024; // 1 MB
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error ?? new Error("read failed"));
+    r.readAsDataURL(file);
+  });
 }
 
 export interface EventOption {
@@ -47,6 +77,11 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
   const [due, setDue] = useState<string | null>(null);
   const [description, setDescription] = useState("");
+  const [files, setFiles] = useState<DraftFileAttachment[]>([]);
+  const [urls, setUrls] = useState<DraftUrlAttachment[]>([]);
+  const [urlInput, setUrlInput] = useState("");
+  const [urlName, setUrlName] = useState("");
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -60,6 +95,39 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setTeamId(null);
     setDue(null);
     setDescription("");
+    setFiles([]);
+    setUrls([]);
+    setUrlInput("");
+    setUrlName("");
+    setAttachError(null);
+  };
+
+  const onPickFiles = async (list: FileList | null) => {
+    if (!list) return;
+    setAttachError(null);
+    const added: DraftFileAttachment[] = [];
+    for (const file of Array.from(list)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setAttachError(`「${file.name}」は1MBを超えています（添付できるのは1MBまで）`);
+        continue;
+      }
+      const url = await readFileAsDataUrl(file);
+      added.push({ name: file.name, url, mimeType: file.type || "application/octet-stream", sizeBytes: file.size });
+    }
+    if (added.length > 0) setFiles((prev) => [...prev, ...added]);
+  };
+
+  const addUrl = () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      setAttachError("URLは http(s):// から始めてください");
+      return;
+    }
+    setAttachError(null);
+    setUrls((prev) => [...prev, { url, name: urlName.trim() || url }]);
+    setUrlInput("");
+    setUrlName("");
   };
 
   const close = () => {
@@ -82,6 +150,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         assigneeId,
         teamId,
         dueAt: isoFromDateInput(due),
+        attachments: { files, urls },
       });
       reset();
       onClose();
@@ -200,6 +269,77 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             placeholder="依頼の詳細や補足を書けます"
             testId="fe4-mytask-create-desc"
           />
+        </div>
+
+        <div className={styles.formFieldFull}>
+          <label className={styles.formLabel}>添付（ファイル・URL）</label>
+          <div className={styles.attachRow}>
+            <input
+              type="file"
+              multiple
+              className={styles.attachFileInput}
+              onChange={(e) => {
+                void onPickFiles(e.target.files);
+                e.target.value = "";
+              }}
+              data-testid="fe4-mytask-create-file"
+              aria-label="ファイルを添付"
+            />
+          </div>
+          <div className={styles.attachUrlRow}>
+            <TextField
+              id="fe4-mytask-url-name"
+              value={urlName}
+              onChange={setUrlName}
+              placeholder="表示名（任意）"
+              testId="fe4-mytask-create-url-name"
+            />
+            <TextField
+              id="fe4-mytask-url"
+              value={urlInput}
+              onChange={setUrlInput}
+              placeholder="https://example.com/..."
+              testId="fe4-mytask-create-url"
+            />
+            <Button variant="ghost" onClick={addUrl} disabled={!urlInput.trim()} testId="fe4-mytask-create-url-add">
+              URLを追加
+            </Button>
+          </div>
+          {attachError && (
+            <p className={styles.attachError} data-testid="fe4-mytask-create-attach-error">
+              {attachError}
+            </p>
+          )}
+          {(files.length > 0 || urls.length > 0) && (
+            <ul className={styles.attachDraftList} data-testid="fe4-mytask-create-attach-list">
+              {files.map((f, i) => (
+                <li key={`f-${i}`} className={styles.attachDraftItem}>
+                  <span className={styles.attachDraftName}>📎 {f.name}</span>
+                  <button
+                    type="button"
+                    className={styles.attachDraftRemove}
+                    onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                    aria-label={`${f.name} を外す`}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+              {urls.map((u, i) => (
+                <li key={`u-${i}`} className={styles.attachDraftItem}>
+                  <span className={styles.attachDraftName}>🔗 {u.name}</span>
+                  <button
+                    type="button"
+                    className={styles.attachDraftRemove}
+                    onClick={() => setUrls((prev) => prev.filter((_, j) => j !== i))}
+                    aria-label={`${u.name} を外す`}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </Modal>

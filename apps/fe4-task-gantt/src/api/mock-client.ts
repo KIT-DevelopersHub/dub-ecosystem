@@ -53,6 +53,7 @@ export class MockApiClient implements ApiClient {
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
   private criticalTaskIds: common.TaskId[] = [];
   private currentUserId: common.UserId;
+  private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
 
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
@@ -88,6 +89,13 @@ export class MockApiClient implements ApiClient {
     if (path === "/api/v1/tasks" && req.method === "POST") return this.createTask(req.body as task.CreateTaskRequest) as T;
     const taskDeps = path.match(/^\/api\/v1\/tasks\/([^/]+)\/dependencies$/);
     if (taskDeps && req.method === "PUT") return this.replaceDeps(taskDeps[1]!, req.body as task.ReplaceDependenciesRequest) as T;
+    const taskAtts = path.match(/^\/api\/v1\/tasks\/([^/]+)\/attachments$/);
+    if (taskAtts) {
+      if (req.method === "GET") return this.listAttachments(taskAtts[1]!) as T;
+      if (req.method === "POST") return this.addAttachment(taskAtts[1]!, req.body as task.CreateTaskAttachmentRequest) as T;
+    }
+    const taskAtt = path.match(/^\/api\/v1\/tasks\/([^/]+)\/attachments\/([^/]+)$/);
+    if (taskAtt && req.method === "DELETE") return this.removeAttachment(taskAtt[1]!, taskAtt[2]!) as T;
     const taskId = path.match(/^\/api\/v1\/tasks\/([^/]+)$/);
     if (taskId) {
       const id = taskId[1]!;
@@ -179,6 +187,41 @@ export class MockApiClient implements ApiClient {
     const t = this.taskById.get(id);
     if (!t) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     return t;
+  }
+
+  private listAttachments(taskId: string): task.ListTaskAttachmentsResponse {
+    if (!this.taskById.has(taskId)) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
+    return { items: [...(this.attachmentsByTask.get(taskId) ?? [])] };
+  }
+
+  private addAttachment(taskId: string, body: task.CreateTaskAttachmentRequest): task.TaskAttachment {
+    if (!this.taskById.has(taskId)) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
+    if (body.kind !== "file" && body.kind !== "url") throw err(400, "VALIDATION_FAILED", "invalid kind");
+    if (!body.name?.trim() || !body.url) throw err(400, "VALIDATION_FAILED", "name and url are required");
+    if (body.kind === "url" && !/^https?:\/\//i.test(body.url)) throw err(400, "VALIDATION_FAILED", "url must be http(s)");
+    const att: task.TaskAttachment = {
+      id: mintId("tatt"),
+      taskId,
+      kind: body.kind,
+      name: body.name.trim(),
+      url: body.url,
+      fileId: body.fileId ?? null,
+      mimeType: body.mimeType ?? null,
+      sizeBytes: body.sizeBytes ?? null,
+      createdBy: this.currentUserId,
+      createdAt: new Date().toISOString(),
+    };
+    const list = this.attachmentsByTask.get(taskId) ?? [];
+    this.attachmentsByTask.set(taskId, [att, ...list]);
+    return att;
+  }
+
+  private removeAttachment(taskId: string, attachmentId: string): { ok: true } {
+    const list = this.attachmentsByTask.get(taskId) ?? [];
+    const next = list.filter((a) => a.id !== attachmentId);
+    if (next.length === list.length) throw err(404, "TASK_NOT_FOUND", `attachment not found: ${attachmentId}`);
+    this.attachmentsByTask.set(taskId, next);
+    return { ok: true };
   }
 
   private createTask(body: task.CreateTaskRequest): task.Task {
