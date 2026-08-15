@@ -1075,6 +1075,7 @@ interface DemoMember {
   roleTitle: string | null;
   status: "added" | "invited" | "considering" | "declined";
   teamIds: string[];
+  identityUserId: string | null;
   contact: string | null;
   note: string | null;
   sortOrder: number;
@@ -1095,12 +1096,12 @@ function createMembersStore() {
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
   ];
-  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null, identityUserId: string | null = null): DemoMember => ({
+    id, orgId: ORG, name, roleTitle, status, teamIds, identityUserId, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
-    // 統括
-    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp"),
+    // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", ME_ID),
     mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1),
     mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2),
     // 開発
@@ -1163,11 +1164,38 @@ function createMembersStore() {
       const mem: DemoMember = {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        identityUserId: null,
         contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
       return json(mem, 201);
+    }
+    // reverse lookup: member linked to an identity user (offboarding fan-out, #1/#2).
+    m = /^\/api\/v1\/members\/people\/by-identity\/([^/]+)$/.exec(pathname);
+    if (m && method === "GET") {
+      const iid = decodeURIComponent(m[1]!);
+      const mem = members.find((x) => x.identityUserId === iid);
+      return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
+    }
+    // link / unlink to an identity account (#1).
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      const target = body?.identityUserId ?? null;
+      if (target !== null && members.some((x) => x.id !== mem.id && x.identityUserId === target)) {
+        const err: ErrorResponse = { error: { code: "MEMBER_IDENTITY_ALREADY_LINKED", message: "この account は既に別のメンバーに紐付いています", retryable: false } };
+        return json(err, 409);
+      }
+      mem.identityUserId = target;
+      mem.version += 1;
+      mem.updatedAt = isoNow();
+      return json({ ...mem, teamIds: [...mem.teamIds] });
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
@@ -1182,6 +1210,7 @@ function createMembersStore() {
         if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
         if (body?.status !== undefined) mem.status = body.status;
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+        if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
         if (body?.note !== undefined) mem.note = body.note ?? null;
         if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;

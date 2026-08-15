@@ -12,10 +12,11 @@ import { Button, TextField, ConfirmDialog, FormField, Divider } from "@dub/ui";
 import { RoleAssignmentList } from "./RoleAssignmentList";
 import { RoleAssignDialog } from "./RoleAssignDialog";
 import { UserPasswordSection } from "./UserPasswordSection";
-import { usePatchUser } from "../hooks/useRosterApi";
+import { usePatchUser, useOffboardUser } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { errorMessage } from "../lib/errorDisplay";
+import type { OffboardOutcome } from "../lib/offboard";
 
 const sectionStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 12 };
 const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
@@ -38,6 +39,7 @@ export function UserInlineEditor({
   events?: { id: string; name: string }[];
 }) {
   const patch = usePatchUser(user.id);
+  const offboard = useOffboardUser();
   const { can } = usePermissions();
   const { toast } = useToast();
   const canAdmin = can("identity:admin");
@@ -45,6 +47,8 @@ export function UserInlineEditor({
   const [displayName, setDisplayName] = useState(user.displayName);
   const [githubLogin, setGithubLogin] = useState(user.githubLogin ?? "");
   const [statusConfirm, setStatusConfirm] = useState<identity.UserStatus | null>(null);
+  const [offboardConfirm, setOffboardConfirm] = useState(false);
+  const [outcome, setOutcome] = useState<OffboardOutcome | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
 
   // active -> disable; anything else (disabled / invited / rejected) -> reactivate.
@@ -69,6 +73,22 @@ export function UserInlineEditor({
     );
     setStatusConfirm(null);
   }
+
+  function runOffboardAction() {
+    setOffboardConfirm(false);
+    setOutcome(null);
+    offboard.mutate(
+      { id: user.id, email: user.email },
+      { onSuccess: (res) => setOutcome(res) },
+    );
+  }
+
+  const STEP_LABEL: Record<string, string> = {
+    identity: "アカウント（セッション・ロール・利用停止）",
+    "member-status": "運営メンバー在籍",
+    "email-routing": "Email Routing アドレス",
+  };
+  const STATUS_MARK: Record<string, string> = { done: "完了", skipped: "対象なし", failed: "失敗" };
 
   return (
     <div style={sectionStyle} data-testid={`fe7-user-inline-${user.id}`}>
@@ -104,6 +124,40 @@ export function UserInlineEditor({
           >
             {nextStatus === "disabled" ? "利用停止" : "在籍に戻す"}
           </Button>
+          <Button
+            variant="danger"
+            onClick={() => setOffboardConfirm(true)}
+            disabled={offboard.isPending}
+            testId="fe7-user-offboard"
+          >
+            オフボード（退任）
+          </Button>
+        </div>
+      ) : null}
+
+      {outcome ? (
+        <div
+          style={{
+            border: "1px solid var(--dub-color-border-default, #d0d7de)",
+            borderRadius: 8,
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+          data-testid="fe7-user-offboard-result"
+        >
+          <strong style={{ fontSize: 13 }}>
+            オフボード結果{outcome.ok ? "" : "（一部失敗）"}
+          </strong>
+          {outcome.steps.map((st) => (
+            <div key={st.step} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }} data-testid={`fe7-offboard-step-${st.step}`}>
+              <span>{STEP_LABEL[st.step] ?? st.step}</span>
+              <span style={{ color: st.status === "failed" ? "var(--dub-color-fg-danger, #cf222e)" : "var(--dub-color-fg-muted, #57606a)" }}>
+                {STATUS_MARK[st.status] ?? st.status}・{st.detail}
+              </span>
+            </div>
+          ))}
         </div>
       ) : null}
 
@@ -141,6 +195,16 @@ export function UserInlineEditor({
         onConfirm={applyStatus}
         onCancel={() => setStatusConfirm(null)}
         testId="fe7-user-status-confirm"
+      />
+      <ConfirmDialog
+        title="オフボード（退任）"
+        message="このユーザーを1アクションで退任させます: 全セッション失効・全ロール剥奪・利用停止に加え、紐付く運営メンバーを退任状態に更新し、対応する Email Routing アドレスを削除します。最後の管理者はサーバ側で拒否されます。冪等なので再実行しても安全です。"
+        open={offboardConfirm}
+        danger
+        confirmLabel="オフボードする"
+        onConfirm={runOffboardAction}
+        onCancel={() => setOffboardConfirm(false)}
+        testId="fe7-user-offboard-confirm"
       />
     </div>
   );

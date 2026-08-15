@@ -2,7 +2,7 @@
 // `/api/v1/*` boundary (design §2-4). This unit implements against the contract
 // types only; the concrete transport (auth cookie, base URL, error reconstruction)
 // is FE2's ResourceClient.
-import type { identity, common, auditLog, auth } from "@dub/types";
+import type { identity, common, auditLog, auth, member } from "@dub/types";
 import type { ResourceClient } from "../shell/contract";
 import type {
   CreateRoleRequest,
@@ -12,6 +12,8 @@ import type {
   EmailRoutingAddress,
   CreateEmailAddressRequest,
   UpdateEmailAddressRequest,
+  EmailRoutingSyncPreview,
+  OffboardUserResult,
   RosterUser,
   SyncEmailRoutingAddress,
   SyncEmailRoutingResult,
@@ -28,6 +30,8 @@ const ADMIN = `${BASE}/admin`;
 // mail-gateway registers the Email Routing admin surface under its `/mail` gateway
 // segment, so the external path is /api/v1/mail/admin/email-routing/* (not /admin/*).
 const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
+// 運営メンバー管理 (member-service) — reverse lookup + 在籍更新 during offboarding.
+const MEMBERS = `${BASE}/members`;
 
 export interface RosterApi {
   listUsers(filters: UserListFilters): Promise<common.Paginated<RosterUser>>;
@@ -38,9 +42,18 @@ export interface RosterApi {
     patch: { displayName?: string; status?: identity.UserStatus; githubLogin?: string | null },
   ): Promise<identity.IdentityUser>;
   inviteUser(req: identity.InviteUserRequest): Promise<identity.IdentityUser>;
+  /** One-shot退任: identity-local revoke sessions + strip roles + disable (#2). The
+   *  cross-service steps are orchestrated by useOffboardUser around this call. */
+  offboardUser(userId: common.UserId): Promise<OffboardUserResult>;
+  /** Reverse lookup: the 運営メンバー linked to an identity account, or null (#1/#2). */
+  getMemberByIdentity(identityUserId: common.UserId): Promise<{ member: member.Member | null }>;
+  /** Update a linked member's在籍status during offboarding (member-service). */
+  patchMember(memberId: string, patch: member.UpdateMemberRequest): Promise<member.Member>;
   /** Roster sync SOURCE: the @developershub.jp RECEIVING addresses (routing rules,
    *  zone-scoped), i.e. every issued address — not the ~1 account-scoped destination. */
   listRosterEmailAddresses(): Promise<{ items: SyncEmailRoutingAddress[] }>;
+  /** #5: read-only diff of what a sync WOULD change (no writes) — shown before apply. */
+  previewEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<EmailRoutingSyncPreview>;
   /** Reconcile the roster with the @developershub.jp Email Routing addresses. */
   syncEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<SyncEmailRoutingResult>;
   listRoles(): Promise<common.Paginated<identity.Role>>;
@@ -81,8 +94,14 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     getUser: (id) => client.get<identity.IdentityUserDetail>(`${IDENTITY}/users/${id}`),
     patchUser: (id, patch) => client.patch<identity.IdentityUser>(`${IDENTITY}/users/${id}`, patch),
     inviteUser: (req) => client.post<identity.IdentityUser>(`${IDENTITY}/users/invite`, req),
+    offboardUser: (userId) => client.post<OffboardUserResult>(`${IDENTITY}/users/${userId}/offboard`, {}),
+    getMemberByIdentity: (identityUserId) =>
+      client.get<{ member: member.Member | null }>(`${MEMBERS}/people/by-identity/${identityUserId}`),
+    patchMember: (memberId, patch) => client.patch<member.Member>(`${MEMBERS}/people/${memberId}`, patch),
     listRosterEmailAddresses: () =>
       client.get<{ items: SyncEmailRoutingAddress[] }>(`${EMAIL_ROUTING}/roster-addresses`),
+    previewEmailRouting: (addresses) =>
+      client.post<EmailRoutingSyncPreview>(`${IDENTITY}/users/sync-email-routing/preview`, { addresses }),
     syncEmailRouting: (addresses) =>
       client.post<SyncEmailRoutingResult>(`${IDENTITY}/users/sync-email-routing`, { addresses }),
     listRoles: () => client.get<common.Paginated<identity.Role>>(`${IDENTITY}/roles`),

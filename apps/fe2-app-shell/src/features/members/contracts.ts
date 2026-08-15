@@ -17,3 +17,4 @@ export type CreateTeamRequest = member.CreateTeamRequest;
 export type UpdateTeamRequest = member.UpdateTeamRequest;
 export type CreateMemberRequest = member.CreateMemberRequest;
 export type UpdateMemberRequest = member.UpdateMemberRequest;
+export type LinkIdentityRequest = member.LinkIdentityRequest;

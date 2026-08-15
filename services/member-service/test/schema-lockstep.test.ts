@@ -4,9 +4,10 @@
 // whitespace so only DDL changes trip the guard.
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { MEMBER_SCHEMA_MIGRATION } from "../src/schema";
+import { MEMBER_SCHEMA_MIGRATION, MEMBER_IDENTITY_LINK_MIGRATION } from "../src/schema";
 
 const PHYSICAL_SQL_PATH = new URL("../../../infra/d1/migrations/member/0001_init.sql", import.meta.url);
+const PHYSICAL_LINK_SQL_PATH = new URL("../../../infra/d1/migrations/member/0002_identity_link.sql", import.meta.url);
 
 function normalizeDdl(sql: string): string {
   return sql
@@ -23,5 +24,10 @@ describe("schema.ts <-> physical migration lockstep", () => {
   it("member-service schema const equals infra/d1/migrations/member/0001_init.sql", () => {
     const physical = readFileSync(PHYSICAL_SQL_PATH, "utf8");
     expect(normalizeDdl(MEMBER_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
+  });
+
+  it("identity-link migration const equals infra/d1/migrations/member/0002_identity_link.sql", () => {
+    const physical = readFileSync(PHYSICAL_LINK_SQL_PATH, "utf8");
+    expect(normalizeDdl(MEMBER_IDENTITY_LINK_MIGRATION.up)).toBe(normalizeDdl(physical));
   });
 });

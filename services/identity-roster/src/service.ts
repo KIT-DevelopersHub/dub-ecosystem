@@ -11,9 +11,13 @@ import type {
   AssignRoleRequest,
   CreateRoleRequest,
   EffectivePermissionsResponse,
+  EmailRoutingDiffRow,
+  EmailRoutingSyncPreview,
   IdentityUserDetailView,
   IdentityUserView,
   InviteUserResponse,
+  OffboardUserResult,
+  OffboardStepResult,
   ProvisionUserResponse,
   RoleAssignmentView,
   RoleWithMemberCount,
@@ -252,6 +256,71 @@ export class IdentityService {
     return this.toIdentityUser(updated, assignments);
   }
 
+  // ---------- offboarding (退任): one-shot within identity ----------
+  /**
+   * Retire an account in one call: revoke live sessions (fail-close), strip every role
+   * assignment (org-wide + resource-scoped), then disable the account. Idempotent — a
+   * re-run on an already-disabled, role-less user is a no-op that still returns 200 with
+   * every step "skipped". Guards the last active org-wide identity:admin (mirrors
+   * updateUser) so a退任 can never lock the org out of its own RBAC console.
+   */
+  async offboardUser(userId: string, orgId: string, ctx: RequestCtx): Promise<OffboardUserResult> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+
+    // last-admin guard: only fires while the target is still an ACTIVE sole admin
+    // (usersWithOrgWidePermission counts active only), so an idempotent re-run is fine.
+    const admins = await this.d.repo.usersWithOrgWidePermission(orgId, ADMIN);
+    if (admins.length === 1 && admins[0] === userId) {
+      throw errors.conflict("cannot offboard the last identity:admin holder", { code: "LAST_ADMIN" });
+    }
+
+    const alreadyDisabled = user.status !== "active";
+    const steps: OffboardStepResult[] = [];
+
+    // 1) revoke sessions — fail-close. Skip when already disabled (no live sessions to cut,
+    // and the account cannot re-auth). If the revoker throws, abort before any mutation.
+    if (alreadyDisabled) {
+      steps.push({ step: "revoke-sessions", status: "skipped", detail: "account not active" });
+    } else {
+      await this.d.revoker.revokeUser(userId, ctx);
+      steps.push({ step: "revoke-sessions", status: "done" });
+    }
+
+    // 2) strip all role assignments (org-wide + resource-scoped).
+    const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    for (const a of assignments) await this.d.repo.deleteAssignment(a.id);
+    steps.push(
+      assignments.length > 0
+        ? { step: "revoke-roles", status: "done", detail: String(assignments.length) }
+        : { step: "revoke-roles", status: "skipped", detail: "0" },
+    );
+
+    // 3) disable the account.
+    if (alreadyDisabled) {
+      steps.push({ step: "disable-account", status: "skipped", detail: user.status });
+    } else {
+      await this.d.repo.updateUser(userId, { status: "disabled" }, this.d.now());
+      steps.push({ step: "disable-account", status: "done" });
+    }
+
+    await this.d.audit.publish(
+      this.record("identity.user.offboarded", "success", ctx, orgId, "user", userId, {
+        revokedAssignments: assignments.length,
+        alreadyDisabled,
+      }),
+    );
+
+    const updated = (await this.d.repo.getUser(userId))!;
+    const finalAssignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    return {
+      user: this.toIdentityUser(updated, finalAssignments),
+      revokedAssignments: assignments.length,
+      alreadyDisabled,
+      steps,
+    };
+  }
+
   // ---------- Email Routing sync ----------
   /**
    * Reconcile the roster against the Cloudflare Email Routing @developershub.jp
@@ -264,6 +333,73 @@ export class IdentityService {
    * All addresses are validated before any write, so a bad address aborts cleanly
    * with no partial mutation. Synchronous D1 upsert; independent of the freeq drain.
    */
+  /** Normalize + de-dupe incoming Email Routing addresses (shared by preview + sync).
+   *  Throws on a bad address before any caller does work (fail-fast, no partial state). */
+  private normalizeRoutingAddresses(req: SyncEmailRoutingRequest): { email: string; enabled: boolean }[] {
+    if (!req || !Array.isArray(req.addresses)) {
+      throw errors.validationFailed([{ field: "addresses", reason: "required" }]);
+    }
+    const seen = new Set<string>();
+    const out: { email: string; enabled: boolean }[] = [];
+    for (const a of req.addresses) {
+      const email = requireEmail(a?.address ?? "");
+      if (seen.has(email)) continue;
+      seen.add(email);
+      out.push({ email, enabled: a?.enabled !== false });
+    }
+    return out;
+  }
+
+  /**
+   * #5: READ-ONLY diff of what syncEmailRouting would change — the console shows this and
+   * requires an explicit apply. Mirrors the apply's reconciliation exactly (upsert-by-email
+   * + logical deactivation of owned rows that vanished, admin-guarded) but performs NO
+   * writes. `projected` is the SyncEmailRoutingResult the apply is expected to return.
+   */
+  async previewEmailRouting(orgId: string, req: SyncEmailRoutingRequest): Promise<EmailRoutingSyncPreview> {
+    const org = await this.d.repo.getOrg(orgId);
+    if (!org) throw errors.notFound("org", orgId);
+    const normalized = this.normalizeRoutingAddresses(req);
+    const seen = new Set(normalized.map((n) => n.email.toLowerCase()));
+
+    const toAdd: EmailRoutingDiffRow[] = [];
+    const toReactivate: EmailRoutingDiffRow[] = [];
+    const toRelink: EmailRoutingDiffRow[] = [];
+    let updated = 0;
+    for (const { email, enabled } of normalized) {
+      const existing = await this.d.repo.getUserByEmail(orgId, email);
+      if (!existing) {
+        toAdd.push({ email, enabled });
+        continue;
+      }
+      updated++; // apply marks every existing matched row source=email-routing
+      if (enabled && existing.status === "disabled" && existing.source === "email-routing") {
+        toReactivate.push({ email, userId: existing.id, enabled });
+      } else if (existing.source !== "email-routing") {
+        toRelink.push({ email, userId: existing.id });
+      }
+    }
+
+    const toDeactivate: EmailRoutingDiffRow[] = [];
+    const adminKept: EmailRoutingDiffRow[] = [];
+    const admins = new Set(await this.d.repo.usersWithOrgWidePermission(orgId, ADMIN));
+    const owned = await this.d.repo.listUsersBySource(orgId, "email-routing");
+    for (const u of owned) {
+      if (seen.has(u.email.toLowerCase()) || u.status === "disabled") continue;
+      if (admins.has(u.id)) adminKept.push({ email: u.email, userId: u.id });
+      else toDeactivate.push({ email: u.email, userId: u.id });
+    }
+
+    return {
+      toAdd,
+      toReactivate,
+      toRelink,
+      toDeactivate,
+      adminKept,
+      projected: { added: toAdd.length, updated, deactivated: toDeactivate.length, total: normalized.length },
+    };
+  }
+
   async syncEmailRouting(orgId: string, req: SyncEmailRoutingRequest, ctx: RequestCtx): Promise<SyncEmailRoutingResult> {
     const org = await this.d.repo.getOrg(orgId);
     if (!org) throw errors.notFound("org", orgId);
