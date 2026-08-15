@@ -380,30 +380,249 @@ svg {
 .fe2-home {
   display: flex;
   flex-direction: column;
-  gap: var(--dub-space-4);
-  max-height: calc(100dvh - 150px);
-  min-height: 360px;
-  overflow: hidden;
+  gap: var(--dub-space-5);
 }
 .fe2-home > [data-testid="fe2-home-header"] {
   padding-bottom: var(--dub-space-1);
 }
-.fe2-home-body {
-  flex: 1;
-  min-height: 0;
+/* Dashboard body: main visualization column + a live-panel rail. The dashboard
+ * scrolls naturally (the KPI row above keeps the concise overview at the top). */
+.fe2-dash-body {
   display: grid;
   grid-template-columns: minmax(0, 2.1fr) minmax(280px, 1fr);
   gap: var(--dub-space-4);
-  align-items: stretch;
+  align-items: start;
+}
+.fe2-dash-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.fe2-dash-section-title {
+  margin: var(--dub-space-1) 0 0;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-secondary);
 }
 @media (max-width: 860px) {
-  .fe2-home {
-    max-height: none;
-    overflow: visible;
-  }
-  .fe2-home-body {
+  .fe2-dash-body {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---- KPI row (at-a-glance overview) --------------------------------------- */
+.fe2-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--dub-space-3);
+}
+.fe2-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-4);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  box-shadow: var(--dub-shadow-sm);
+  min-height: 118px;
+  transition:
+    border-color var(--dub-motion-fast) var(--dub-motion-easing),
+    box-shadow var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.fe2-kpi:hover {
+  border-color: var(--dub-color-border-strong);
+  box-shadow: var(--dub-shadow-md);
+}
+.fe2-kpi-skeleton {
+  justify-content: center;
+}
+.fe2-kpi-top {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+.fe2-kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--dub-radius-md);
+}
+.fe2-kpi-icon > svg {
+  width: 16px;
+  height: 16px;
+}
+.fe2-kpi-label {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe2-kpi-demo {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px var(--dub-space-2);
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-muted);
+  font-size: 10px;
+  font-weight: var(--dub-font-weight-medium);
+  letter-spacing: 0.02em;
+}
+.fe2-kpi-mid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+}
+.fe2-kpi-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.fe2-kpi-value {
+  font-size: var(--dub-font-size-3xl);
+  font-weight: var(--dub-font-weight-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--dub-color-text-primary);
+}
+.fe2-kpi-unit {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+}
+.fe2-kpi-hint {
+  margin: 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- charts: ring / meter / segment bar ----------------------------------- */
+.fe2-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.fe2-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.fe2-meter {
+  width: 100%;
+  height: var(--dub-space-2);
+  background: var(--dub-color-border-default);
+  border-radius: var(--dub-radius-full);
+  overflow: hidden;
+}
+.fe2-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--dub-radius-full);
+  transition: width var(--dub-motion-normal) var(--dub-motion-easing);
+}
+
+/* free-tier usage list inside the dashboard card */
+.fe2-usage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.fe2-usage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fe2-usage-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+}
+.fe2-usage-label {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe2-usage-pct {
+  flex: 0 0 auto;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* segmented stacked bar (task breakdown) + legend */
+.fe2-segbar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.fe2-segbar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: var(--dub-radius-full);
+  overflow: hidden;
+  background: var(--dub-color-border-default);
+}
+.fe2-segbar-seg {
+  height: 100%;
+  transition: width var(--dub-motion-normal) var(--dub-motion-easing);
+}
+.fe2-segbar-seg + .fe2-segbar-seg {
+  box-shadow: inset 1px 0 0 var(--dub-color-surface-raised);
+}
+.fe2-seglegend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-2) var(--dub-space-4);
+}
+.fe2-seglegend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-secondary);
+}
+.fe2-seglegend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--dub-radius-full);
+  flex: 0 0 auto;
+}
+.fe2-seglegend-count {
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Left: clickable app tiles. auto-fill so tiles reflow to the available width;

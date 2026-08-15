@@ -1,17 +1,38 @@
-// Home / dashboard (design 2-1, revamp). FE2 owns the frame. The screen is a
-// single, no-scroll launchpad: a grid of clickable app tiles (each navigates to
-// a feature route) on the left, and the two BFF-data-driven live panels
-// (upcoming events, unread notifications) on the right. The tiles for イベント /
-// 通知 carry live counts from the same /bff/home aggregate, so the numbers that
-// used to sit in a separate KPI row now live on the very tile that navigates
-// there — no duplicated element. Partial upstream failure is surfaced per-frame
-// via useBffHome().errorFor — no global toast. FE3–FE7 may still contribute a
-// homeWidget via registry.homeWidgets; each renders in its own error boundary.
+// Home / dashboard (design 2-1, revamp → "ダッシュボード"). FE2 owns the frame.
+//
+// The screen opens with a KPI row so the whole operation reads at a glance: a live
+// countdown to 本戦, task-completion and free-tier gauges, and the live unread /
+// upcoming-event counts. Below it, two visualization cards (無料枠の使用状況・タスクの
+// 内訳) make the percentages tangible, then the full app launchpad (every app kept —
+// this is the daily workspace), and a right rail of live panels (直近のイベント・未読の
+// 通知) unchanged from the launchpad.
+//
+// Data honesty: the countdown (wall clock), unread count and upcoming-event list come
+// from /bff/home and are LIVE. Task-completion, free-tier usage and member/team counts
+// are not aggregated by /bff/home yet, so they render illustrative values tagged "デモ".
+// Partial upstream failure is surfaced per-frame via useBffHome().errorFor — no global
+// toast. FE3–FE7 may still contribute a homeWidget; each renders in its own boundary.
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
+import { toCssVarName } from "@dub/tokens";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
+import { KpiTile } from "./dashboard/KpiTile.tsx";
+import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
+import {
+  CONFERENCE,
+  FREE_TIER,
+  TASK_SEGMENTS,
+  TEAM_STATS,
+  daysUntil,
+  statusMeta,
+  taskCompletionPct,
+  taskTotal,
+  usageStatusFromPct,
+  worstFreeTier,
+  type MetricStatus,
+} from "./dashboard/dashboardData.ts";
 
 type IconName = Parameters<typeof Icon>[0]["name"];
 
@@ -83,6 +104,20 @@ function NavTile({
   );
 }
 
+/** Higher completion is better (opposite of usage): good ≥60, warn ≥30, else critical. */
+function completionStatus(pct: number): MetricStatus {
+  if (pct >= 60) return "good";
+  if (pct >= 30) return "warn";
+  return "critical";
+}
+
+/** Countdown urgency: ≤3d 逼迫, ≤7d 注意, else 情報. */
+function countdownStatus(days: number): MetricStatus {
+  if (days <= 3) return "critical";
+  if (days <= 7) return "warn";
+  return "info";
+}
+
 export function HomeScreen({
   api,
   homeWidgets = [],
@@ -123,28 +158,169 @@ export function HomeScreen({
     }
   };
 
+  // ── derived KPI values ────────────────────────────────────────────────────────
+  const days = daysUntil(CONFERENCE.dateISO);
+  const cdStatus = days === null ? "info" : countdownStatus(days);
+  const completion = taskCompletionPct();
+  const compStatus = completionStatus(completion);
+  const worst = worstFreeTier();
+  const worstStatus = usageStatusFromPct(worst.pct);
+  const unreadStatus: MetricStatus = notificationsError ? "info" : unread > 0 ? "warn" : "good";
+
   return (
-    <main data-testid="fe2-home" className="fe2-page fe2-home">
+    <main data-testid="fe2-home" className="fe2-page fe2-home fe2-dashboard">
       <PageHeader
         testId="fe2-home-header"
-        title="ホーム"
-        description="DevHub 運営コンソール — 各機能へのショートカットと最新の状況"
+        title="ダッシュボード"
+        description="DevHub 運営の概況 — 主要指標と各機能へのショートカット"
       />
 
-      <div className="fe2-home-body">
-        <section className="fe2-home-apps" aria-label="機能へ移動">
-          <div className="fe2-home-apps-grid">
-            {APP_TILES.map((tile) => (
-              <NavTile
-                key={tile.id}
-                tile={tile}
-                {...(badgeFor(tile.id) !== undefined ? { badge: badgeFor(tile.id) } : {})}
-                {...(onNavigate ? { onNavigate } : {})}
-              />
+      {/* ── KPI row: at-a-glance overview ─────────────────────────────────────── */}
+      <section className="fe2-kpi-row" aria-label="概況の主要指標" data-testid="fe2-home-kpis">
+        {isPending ? (
+          <>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="fe2-kpi fe2-kpi-skeleton" data-testid="fe2-home-kpi-skeleton">
+                <SkeletonLoader lines={3} />
+              </div>
             ))}
-          </div>
-        </section>
+          </>
+        ) : (
+          <>
+            <KpiTile
+              testId="fe2-kpi-countdown"
+              icon="clock"
+              label="本戦まで"
+              value={days === null ? "—" : String(days)}
+              unit="日"
+              status={cdStatus}
+              hint={`${CONFERENCE.name}・${CONFERENCE.dateLabel}`}
+            />
+            <KpiTile
+              testId="fe2-kpi-tasks"
+              icon="check-square"
+              label="タスク完了率"
+              value={`${Math.round(completion)}%`}
+              status={compStatus}
+              demo
+              ring={{ pct: completion, status: compStatus, ariaLabel: "タスク完了率" }}
+              hint={`全 ${taskTotal()} 件`}
+            />
+            <KpiTile
+              testId="fe2-kpi-freetier"
+              icon="shield"
+              label="無料枠 最逼迫"
+              value={`${Math.round(worst.pct)}%`}
+              status={worstStatus}
+              demo
+              meter={{ pct: worst.pct, status: worstStatus, ariaLabel: "無料枠の最逼迫指標" }}
+              hint={worst.label}
+            />
+            <KpiTile
+              testId="fe2-kpi-unread"
+              icon="bell"
+              label="未読の通知"
+              value={notificationsError ? "—" : String(unread)}
+              unit={notificationsError ? undefined : "件"}
+              status={unreadStatus}
+              hint={notificationsError ? "一部取得できませんでした" : unread > 0 ? "要確認" : "未読はありません"}
+            />
+            <KpiTile
+              testId="fe2-kpi-events"
+              icon="calendar"
+              label="直近のイベント"
+              value={eventsError ? "—" : String(events.length)}
+              unit={eventsError ? undefined : "件"}
+              status="info"
+              hint={eventsError ? "取得できませんでした" : "進行中・予定"}
+            />
+            <KpiTile
+              testId="fe2-kpi-members"
+              icon="users"
+              label="運営メンバー"
+              value={String(TEAM_STATS.members)}
+              unit="名"
+              status="info"
+              demo
+              hint={`${TEAM_STATS.teams} チーム`}
+            />
+          </>
+        )}
+      </section>
 
+      <div className="fe2-dash-body">
+        {/* ── left: visualizations + app launchpad ─────────────────────────────── */}
+        <div className="fe2-dash-main">
+          <Card
+            testId="fe2-home-usage"
+            header={
+              <div className="fe2-home-card-head">
+                <span className="fe2-stat-label">
+                  <Icon name="shield" />
+                  無料枠の使用状況
+                  <span className="fe2-kpi-demo">デモ</span>
+                </span>
+                <a href="/usage" className="fe2-home-cardlink" data-testid="fe2-home-usage-all" onClick={go("/usage")}>
+                  詳細
+                  <Icon name="chevron-right" />
+                </a>
+              </div>
+            }
+          >
+            <ul className="fe2-usage-list">
+              {FREE_TIER.map((m) => {
+                const st = usageStatusFromPct(m.pct);
+                const meta = statusMeta(st);
+                return (
+                  <li key={m.key} className="fe2-usage-row" data-testid={`fe2-usage-${m.key}`}>
+                    <div className="fe2-usage-top">
+                      <span className="fe2-usage-label">{m.label}</span>
+                      <span className="fe2-usage-pct" style={{ color: toCssVarName(meta.colorPath) }}>
+                        {m.pct.toFixed(1)}%
+                      </span>
+                    </div>
+                    <Meter pct={m.pct} status={st} ariaLabel={m.label} />
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+
+          <Card
+            testId="fe2-home-tasks"
+            header={
+              <div className="fe2-home-card-head">
+                <span className="fe2-stat-label">
+                  <Icon name="check-square" />
+                  タスクの内訳
+                  <span className="fe2-kpi-demo">デモ</span>
+                </span>
+                <a href="/me/tasks" className="fe2-home-cardlink" data-testid="fe2-home-tasks-all" onClick={go("/me/tasks")}>
+                  詳細
+                  <Icon name="chevron-right" />
+                </a>
+              </div>
+            }
+          >
+            <SegmentBar segments={TASK_SEGMENTS} testId="fe2-home-task-segbar" />
+          </Card>
+
+          <section className="fe2-home-apps" aria-label="機能へ移動">
+            <h2 className="fe2-dash-section-title">アプリ</h2>
+            <div className="fe2-home-apps-grid">
+              {APP_TILES.map((tile) => (
+                <NavTile
+                  key={tile.id}
+                  tile={tile}
+                  {...(badgeFor(tile.id) !== undefined ? { badge: badgeFor(tile.id) } : {})}
+                  {...(onNavigate ? { onNavigate } : {})}
+                />
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* ── right: live BFF panels (unchanged testIds/behavior) ───────────────── */}
         <aside className="fe2-home-side">
           <Card
             testId="fe2-home-events"
