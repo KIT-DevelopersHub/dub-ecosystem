@@ -106,7 +106,7 @@ function FileRow({
       <Card>
         <Stack gap={1}>
           <Stack direction="row" gap={2} align="center">
-            <Icon name={file.isFolder ? "list" : "file"} />
+            <Icon name={file.isFolder ? "folder" : "file"} />
             <strong style={{ fontWeight: active ? 700 : 500 }}>{file.name}</strong>
             {file.linkShared ? (
               <Badge tone="info" testId="fe2-driveshare-linkbadge">

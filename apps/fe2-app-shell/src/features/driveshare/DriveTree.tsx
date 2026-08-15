@@ -16,6 +16,7 @@ import { Badge, Icon, SkeletonLoader } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useDriveShareApi } from "./DriveShareProvider.tsx";
 import { ariaLevel, childrenQueryKey, nextFocusIndex, toggleExpanded } from "./tree.ts";
+import styles from "./driveshare.module.css";
 import {
   driveRoleTone,
   roleGrantChipLabel,
@@ -37,10 +38,7 @@ function formatUpdated(iso: string | null): string {
 function NodeChips({ grants }: { grants: readonly RoleFileGrant[] }): JSX.Element | null {
   if (grants.length === 0) return null;
   return (
-    <span
-      data-testid="fe2-driveshare-file-chips"
-      style={{ display: "inline-flex", gap: "var(--dub-space-1)", flexWrap: "wrap", alignItems: "center" }}
-    >
+    <span data-testid="fe2-driveshare-file-chips" className={styles.chips}>
       {grants.map((g) => (
         <Badge key={g.id} tone={driveRoleTone(g.driveRole)} testId="fe2-driveshare-file-chip">
           {roleGrantChipLabel(g)}
@@ -75,100 +73,51 @@ function TreeNode({ file, depth, ctx }: { file: DriveFile; depth: number; ctx: T
     ctx.register(file);
   });
 
-  const rowPad = `calc(var(--dub-space-5) * ${depth})`;
-  const [focused, setFocused] = useState(false);
-
   return (
     <li
       role="treeitem"
+      className={styles.treeitem}
       aria-level={ariaLevel(depth)}
       aria-selected={active}
       {...(isFolder ? { "aria-expanded": isOpen } : {})}
       data-node-id={file.id}
       data-folder={isFolder ? "true" : "false"}
       tabIndex={ctx.focusedId === file.id ? 0 : -1}
-      onFocus={(e) => {
-        // only the treeitem itself owns the focus ring (not bubbled child focus).
-        if (e.target === e.currentTarget) setFocused(true);
-      }}
-      onBlur={(e) => {
-        if (e.target === e.currentTarget) setFocused(false);
-      }}
-      style={{ listStyle: "none", outline: "none" }}
     >
-      <div
-        data-active={active ? "true" : "false"}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--dub-space-2)",
-          paddingBlock: "var(--dub-space-2)",
-          paddingInline: "var(--dub-space-2)",
-          paddingInlineStart: `calc(var(--dub-space-2) + ${rowPad})`,
-          borderRadius: "var(--dub-radius-md)",
-          background: active ? "var(--dub-color-brand-100)" : "transparent",
-          boxShadow: focused ? "0 0 0 2px var(--dub-color-border-focus)" : "none",
-        }}
-      >
+      <div className={styles.row} data-active={active ? "true" : "false"} data-folder={isFolder ? "true" : "false"}>
         {isFolder ? (
           <button
             type="button"
             data-testid="fe2-driveshare-toggle"
+            className={styles.toggle}
             tabIndex={-1}
             aria-hidden="true"
             onClick={(e) => {
               e.stopPropagation();
               ctx.onToggle(file.id);
             }}
-            style={{
-              all: "unset",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "1.25rem",
-              height: "1.25rem",
-              borderRadius: "var(--dub-radius-sm)",
-              color: "var(--dub-color-text-muted)",
-            }}
           >
             <Icon name={isOpen ? "chevron-down" : "chevron-right"} />
           </button>
         ) : (
           // keep files aligned with their sibling folders (no toggle glyph).
-          <span aria-hidden="true" style={{ display: "inline-block", width: "1.25rem" }} />
+          <span aria-hidden="true" className={styles.togglePlaceholder} />
         )}
 
         <button
           type="button"
           data-testid="fe2-driveshare-file"
+          className={styles.rowMain}
           tabIndex={-1}
           aria-pressed={active}
           aria-label={`${file.name}${isFolder ? "（フォルダ）" : ""}`}
           onClick={() => ctx.onSelect(file)}
-          style={{
-            all: "unset",
-            cursor: "pointer",
-            flex: 1,
-            minWidth: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--dub-space-1)",
-          }}
         >
-          <span style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-2)", minWidth: 0 }}>
-            <Icon name={isFolder ? "list" : "file"} />
-            <strong
-              style={{
-                fontWeight: active ? "var(--dub-font-weight-bold)" : "var(--dub-font-weight-medium)",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                color: "var(--dub-color-text-primary)",
-              }}
-            >
-              {file.name}
-            </strong>
+          <span className={styles.rowTitle}>
+            <span className={isFolder ? styles.folderIcon : styles.fileIcon} aria-hidden="true">
+              <Icon name={isFolder ? (isOpen ? "folder-open" : "folder") : "file"} />
+            </span>
+            <strong className={styles.name}>{file.name}</strong>
             {file.linkShared ? (
               <Badge tone="info" testId="fe2-driveshare-linkbadge">
                 リンク共有中
@@ -176,7 +125,7 @@ function TreeNode({ file, depth, ctx }: { file: DriveFile; depth: number; ctx: T
             ) : null}
             <NodeChips grants={grants} />
           </span>
-          <small style={{ color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)" }}>
+          <small className={styles.rowMeta}>
             {file.ownerName ? `オーナー: ${file.ownerName}` : ""}
             {file.modifiedTime ? ` ・ 更新 ${formatUpdated(file.modifiedTime)}` : ""}
           </small>
@@ -197,11 +146,9 @@ function ChildGroup({ folderId, depth, ctx }: { folderId: string; depth: number;
     queryFn: () => driveApi.listFiles({ folderId, limit: 200 }),
   });
 
-  const indent = `calc(var(--dub-space-2) + calc(var(--dub-space-5) * ${depth}))`;
-
   if (query.isPending) {
     return (
-      <div data-testid="fe2-driveshare-tree-loading" style={{ paddingInlineStart: indent, paddingBlock: "var(--dub-space-1)" }}>
+      <div data-testid="fe2-driveshare-tree-loading" className={styles.childState}>
         <SkeletonLoader lines={2} />
       </div>
     );
@@ -211,15 +158,15 @@ function ChildGroup({ folderId, depth, ctx }: { folderId: string; depth: number;
       ? toDisplayableError(query.error)
       : { code: "INTERNAL", message: "フォルダを読み込めませんでした。" };
     return (
-      <div style={{ paddingInlineStart: indent, paddingBlock: "var(--dub-space-1)" }}>
-        <small style={{ color: "var(--dub-color-danger-500, #b00)" }}>
+      <div className={styles.childState}>
+        <small className={styles.errorText}>
           {display.message}{" "}
           <button
             type="button"
             data-testid="fe2-driveshare-tree-retry"
+            className={styles.retryLink}
             tabIndex={-1}
             onClick={() => void query.refetch()}
-            style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-brand-600)", textDecoration: "underline" }}
           >
             再読み込み
           </button>
@@ -230,13 +177,13 @@ function ChildGroup({ folderId, depth, ctx }: { folderId: string; depth: number;
   const children = query.data.files;
   if (children.length === 0) {
     return (
-      <div style={{ paddingInlineStart: indent, paddingBlock: "var(--dub-space-1)" }}>
-        <small style={{ color: "var(--dub-color-text-muted)" }}>（空のフォルダ）</small>
+      <div className={styles.childState}>
+        <small className={styles.mutedText}>（空のフォルダ）</small>
       </div>
     );
   }
   return (
-    <ul role="group" style={{ margin: 0, padding: 0 }}>
+    <ul role="group" className={styles.group}>
       {children.map((f) => (
         <TreeNode key={f.id} file={f} depth={depth} ctx={ctx} />
       ))}
@@ -349,10 +296,10 @@ export function DriveTree({
     <ul
       ref={treeRef}
       role="tree"
+      className={styles.tree}
       aria-label="共有ドライブのファイルとフォルダ"
       data-testid="fe2-driveshare-tree"
       onKeyDown={handleKeyDown}
-      style={{ margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--dub-space-1)" }}
     >
       {files.map((f) => (
         <TreeNode key={f.id} file={f} depth={0} ctx={ctx} />
