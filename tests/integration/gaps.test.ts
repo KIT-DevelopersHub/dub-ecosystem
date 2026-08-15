@@ -20,18 +20,19 @@ describe("GAP-1: gateway /me composition calls identity /users/:id, which identi
   });
 });
 
-describe("GAP-2: notification service mounts inbox at /inbox, gateway forwards /notifications/inbox", () => {
-  it("documented: external /api/v1/notifications/inbox strips to /notifications/inbox, but the real service serves /inbox", async () => {
-    // The harness notification STUB normalises both prefixes so gateway routing is
-    // still validated (see S5). The REAL notification-service (services/notification
-    // /src/app.ts) registers "/inbox/*" WITHOUT the "/notifications" segment, so the
-    // proxied external path would 404 against the real Worker. FIX: mount the real
-    // routes under "/notifications" (matching event-service's "/events" convention)
-    // OR add a gateway strip rule. This assertion just anchors the finding.
+describe("GAP-2 (RESOLVED): notification service serves both /inbox and /notifications/inbox", () => {
+  it("external /api/v1/notifications/inbox is served by the real service's /notifications mount", async () => {
+    // FIXED: the REAL notification-service (services/notification/src/app.ts) now mounts
+    // its domain routes under BOTH the bare root ("/inbox", for internal service bindings)
+    // AND the "/notifications" segment (matching event-service's "/events" convention), so
+    // the gateway's verbatim-forwarded "/notifications/inbox" no longer 404s. The unit
+    // regression guard lives in services/notification/test/notification.test.ts ("GAP-2:
+    // routes are also served under the '/notifications' gateway segment"). Here the harness
+    // notification STUB accepts both prefixes, so this only re-confirms gateway routing.
     const h = await createHarness();
     const member = await h.login("member");
     const res = await h.gw("GET", "/api/v1/notifications/inbox", { token: member });
-    expect(res.status).toBe(200); // passes only because the STUB accepts both prefixes
+    expect(res.status).toBe(200);
   });
 });
 

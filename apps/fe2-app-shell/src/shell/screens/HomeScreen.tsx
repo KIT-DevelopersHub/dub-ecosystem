@@ -47,9 +47,11 @@ export function HomeScreen({
 }): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
   const eventsError = errorFor("event-service");
-  // FE5's upstream reports as "notification" in the BFF aggregate (matches the
-  // useBffHome contract test fixture).
-  const notificationsError = errorFor("notification");
+  // The gateway BFF (bff-home) reports the notification upstream as "notification-service"
+  // (same "<svc>-service" convention as "event-service"). Matching it here restores the
+  // "取得できませんでした" card when notification-service degrades — previously the mismatched
+  // "notification" key silently left the card at 未読 0 件 (bugfix).
+  const notificationsError = errorFor("notification-service");
 
   const events = data?.upcomingEvents ?? [];
   const unread = data?.unreadCount ?? 0;
@@ -136,23 +138,32 @@ export function HomeScreen({
         >
           {isPending ? (
             <SkeletonLoader lines={2} />
-          ) : notificationsError ? (
-            <div role="alert" data-testid="fe2-home-notifications-error" className="fe2-inline-error">
-              <p>通知を取得できませんでした。</p>
-              <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                再試行
-              </Button>
-            </div>
           ) : onOpenNotifications ? (
-            // Clickable "通知部分": opens the shared notification dialog.
+            // Clickable "通知部分": ALWAYS opens the shared notification dialog —
+            // the same modal the header bell opens. A /bff/home *partial* error on
+            // the notification aggregate must NOT remove this entry point: it used
+            // to fall through to an inline error card, leaving the dialog
+            // unreachable from Home (bug: "未読の通知カードを押しても開かない").
+            // The dialog fetches the inbox itself via useInbox, so opening it also
+            // serves as the retry when the home aggregate is degraded.
             <button
               type="button"
               className="fe2-notif-open"
               data-testid="fe2-home-open-notifications"
               onClick={onOpenNotifications}
-              aria-label={unread > 0 ? `通知を開く（未読 ${unread} 件）` : "通知を開く"}
+              aria-label={
+                notificationsError
+                  ? "通知を開く（一部の通知情報を取得できませんでした）"
+                  : unread > 0
+                    ? `通知を開く（未読 ${unread} 件）`
+                    : "通知を開く"
+              }
             >
-              {unread > 0 ? (
+              {notificationsError ? (
+                <span data-testid="fe2-home-notifications-error" className="fe2-stat-hint">
+                  通知情報の一部を取得できませんでした。開いて再読み込みできます。
+                </span>
+              ) : unread > 0 ? (
                 <span className="fe2-notice-row">
                   <Badge tone="info">未読</Badge>
                   <span data-testid="fe2-home-unread-count">未読 {unread} 件</span>
@@ -163,6 +174,15 @@ export function HomeScreen({
                 </span>
               )}
             </button>
+          ) : notificationsError ? (
+            // Fallback only when there is NO dialog entry point wired (e.g. a
+            // context that does not pass onOpenNotifications): inline retry card.
+            <div role="alert" data-testid="fe2-home-notifications-error" className="fe2-inline-error">
+              <p>通知を取得できませんでした。</p>
+              <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                再試行
+              </Button>
+            </div>
           ) : unread > 0 ? (
             <div className="fe2-notice-row">
               <Badge tone="info">未読</Badge>

@@ -9,6 +9,8 @@ import type { identity } from "@dub/types";
 import type { common } from "@dub/types";
 import { applyMention, detectMentionTrigger } from "../lib/mentions";
 import { clearDraft, DRAFT_MAX_LEN, loadDraft, saveDraft } from "../store/draft";
+import { newFileId } from "../lib/ulid";
+import type { Attachment } from "../api/contract";
 import styles from "../styles/chat.module.css";
 
 export interface MessageComposerProps {
@@ -18,7 +20,18 @@ export interface MessageComposerProps {
   disabledReason?: string;
   error?: string | null;
   resolveMentionCandidates?: (query: string) => identity.UserSummary[];
-  onSend: (body: string) => void | Promise<void>;
+  onSend: (body: string, attachments?: Attachment[]) => void | Promise<void>;
+}
+
+const MAX_ATTACH_BYTES = 5 * 1024 * 1024; // 5MB per file (demo guard)
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 const EMOJIS = ["😀", "😅", "🎉", "👍", "🙏", "🔥", "✅", "👀", "❤️", "🚀"];
@@ -36,7 +49,35 @@ export function MessageComposer({
   const [caret, setCaret] = useState(0);
   const [selected, setSelected] = useState(0);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // reset attachments when switching channels (drafts persist; files don't)
+    setAttachments([]);
+    setAttachError(null);
+  }, [channelId]);
+
+  const onFilesPicked = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setAttachError(null);
+    const picked: Attachment[] = [];
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_ATTACH_BYTES) {
+        setAttachError(`${file.name} は 5MB を超えています`);
+        continue;
+      }
+      const url = await readAsDataUrl(file);
+      picked.push({ fileId: newFileId(), name: file.name, mime: file.type || "application/octet-stream", size: file.size, url });
+    }
+    if (picked.length > 0) setAttachments((prev) => [...prev, ...picked]);
+  }, []);
+
+  const removeAttachment = useCallback((fileId: string) => {
+    setAttachments((prev) => prev.filter((a) => a.fileId !== fileId));
+  }, []);
 
   useEffect(() => {
     setText(loadDraft(channelId));
@@ -52,7 +93,7 @@ export function MessageComposer({
     [trigger, resolveMentionCandidates],
   );
 
-  const canSend = text.trim().length > 0 && !disabled;
+  const canSend = (text.trim().length > 0 || attachments.length > 0) && !disabled;
 
   const focusCaret = useCallback((pos: number) => {
     requestAnimationFrame(() => {
@@ -107,11 +148,14 @@ export function MessageComposer({
   const submit = useCallback(async () => {
     if (!canSend) return;
     const body = text;
+    const files = attachments;
     setText("");
+    setAttachments([]);
+    setAttachError(null);
     setEmojiOpen(false);
     clearDraft(channelId);
-    await onSend(body);
-  }, [canSend, text, channelId, onSend]);
+    await onSend(body, files.length > 0 ? files : undefined);
+  }, [canSend, text, attachments, channelId, onSend]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (candidates.length > 0) {
@@ -194,10 +238,55 @@ export function MessageComposer({
           <button type="button" className={styles.toolbarBtn} aria-label="メンション" title="メンション" disabled={disabled} onClick={() => insertAt("@")}>
             @
           </button>
-          <button type="button" className={styles.toolbarBtn} aria-label="添付" title="ファイルを添付" disabled={disabled}>
+          <button
+            type="button"
+            className={styles.toolbarBtn}
+            aria-label="添付"
+            title="ファイルを添付"
+            disabled={disabled}
+            data-testid="fe6-composer-attach"
+            onClick={() => fileRef.current?.click()}
+          >
             📎
           </button>
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            aria-hidden
+            data-testid="fe6-composer-file-input"
+            onChange={(e) => {
+              void onFilesPicked(e.target.files);
+              e.target.value = "";
+            }}
+          />
         </div>
+
+        {attachments.length > 0 && (
+          <div className={styles.attachTray} data-testid="fe6-composer-attach-tray">
+            {attachments.map((a) => (
+              <div key={a.fileId} className={styles.attachChip}>
+                {a.url && a.mime.startsWith("image/") ? (
+                  <img src={a.url} alt={a.name} className={styles.attachChipThumb} />
+                ) : (
+                  <span className={styles.attachChipGlyph} aria-hidden>
+                    📄
+                  </span>
+                )}
+                <span className={styles.attachChipName}>{a.name}</span>
+                <button
+                  type="button"
+                  className={styles.attachChipRemove}
+                  aria-label={`${a.name} を削除`}
+                  onClick={() => removeAttachment(a.fileId)}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         <textarea
           ref={ref}
@@ -225,9 +314,9 @@ export function MessageComposer({
         </div>
       </div>
 
-      {error && (
+      {(error || attachError) && (
         <div className={styles.composerError} role="alert" data-testid="fe6-composer-error">
-          {error}
+          {error ?? attachError}
         </div>
       )}
       <div className={styles.composerHelp}>Enter で送信 · Shift+Enter で改行 · @ でメンション</div>

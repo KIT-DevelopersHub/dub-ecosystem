@@ -73,9 +73,15 @@
     background 120ms ease,
     border-color 120ms ease;
 }
-.tile:hover {
+.tile:hover:not(:disabled) {
   background: var(--dub-color-surface-sunken);
   border-color: var(--dub-color-border-default);
+}
+/* Release-gated tile: greyed and non-interactive, but still present in the grid
+   (消さない). Keep the label/icon readable enough to recognise the app. */
+.tile:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 .tile:focus-visible {
   outline: 2px solid var(--dub-color-border-focus, var(--dub-color-accent, #2563eb));
@@ -92,7 +98,7 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-secondary);
 }
-.tile:hover .tileIcon {
+.tile:hover:not(:disabled) .tileIcon {
   background: var(--dub-color-surface-raised);
   color: var(--dub-color-text-primary);
 }

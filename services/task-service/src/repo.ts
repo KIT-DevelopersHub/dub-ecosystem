@@ -31,6 +31,7 @@ export function rowToTask(r: TaskRow): task.Task {
     status: r.status,
     priority: r.priority,
     assigneeId: r.assignee_id,
+    createdBy: r.created_by,
     dueAt: r.due_at,
     origin: r.origin,
     version: r.version,
@@ -67,6 +68,8 @@ export interface TaskPatch {
 export interface ListFilter {
   eventId?: string;
   assigneeId?: string;
+  /** Requester filter (task_tasks.created_by). Powers the "issued by me" lens. */
+  createdById?: string;
   statuses?: task.TaskStatus[];
   includeArchived: boolean;
   limit: number;
@@ -161,6 +164,10 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (filter.assigneeId) {
         where.push("assignee_id = ?");
         binds.push(filter.assigneeId);
+      }
+      if (filter.createdById) {
+        where.push("created_by = ?");
+        binds.push(filter.createdById);
       }
       if (filter.statuses && filter.statuses.length > 0) {
         where.push(`status IN (${filter.statuses.map(() => "?").join(",")})`);

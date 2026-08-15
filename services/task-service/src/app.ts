@@ -117,12 +117,17 @@ export function buildApp(deps: Deps): Hono {
 
     const eventId = c.req.query("eventId");
     const assigneeId = c.req.query("assigneeId");
+    const createdById = c.req.query("createdById");
     const includeArchived = c.req.query("includeArchived") === "true";
     if (includeArchived) await deps.authz.require(ctx, principal, "task:delete");
 
-    // /me rule: eventId may be omitted only when listing the caller's own tasks.
+    // /me rule: eventId may be omitted only when listing the caller's OWN tasks —
+    // either assigned to them (担当) or issued by them (依頼). Both scope to self,
+    // so the cross-event "My Tasks" hub never leaks other people's task lists.
     if (!eventId) {
-      const isSelf = principal.kind === "user" && assigneeId === principal.userId;
+      const isSelf =
+        principal.kind === "user" &&
+        (assigneeId === principal.userId || createdById === principal.userId);
       if (!isSelf) throw errors.validationFailed([{ field: "eventId", reason: "required" }]);
     }
 
@@ -137,6 +142,7 @@ export function buildApp(deps: Deps): Hono {
       limit: normalizeLimit(c.req.query("limit")),
       ...(eventId ? { eventId } : {}),
       ...(assigneeId ? { assigneeId } : {}),
+      ...(createdById ? { createdById } : {}),
       ...(statusRaw.length > 0 ? { statuses: statusRaw as task.TaskStatus[] } : {}),
       ...(cursorRaw ? { cursorId: decodeCursor(cursorRaw) } : {}),
     };

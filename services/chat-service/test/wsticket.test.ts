@@ -30,8 +30,8 @@ describe("GET /channels/:id/ws-ticket", () => {
   it("member gets a verifiable ticket + absolute doUrl", async () => {
     const deps = makeDeps();
     const app = createApp(deps);
-    const c = await call(app, "POST", "/channels", { body: topic });
-    const res = await call(app, "GET", `/channels/${c.json.id}/ws-ticket`);
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
+    const res = await call(app, "GET", `/chat/channels/${c.json.id}/ws-ticket`);
     expect(res.status).toBe(200);
     expect(res.json.doUrl).toBe(`wss://chat-rt.test/ws/${c.json.id}`);
     expect(typeof res.json.expiresAt).toBe("string");
@@ -42,8 +42,8 @@ describe("GET /channels/:id/ws-ticket", () => {
 
   it("non-member cannot get a ws-ticket", async () => {
     const app = createApp(makeDeps());
-    const c = await call(app, "POST", "/channels", { body: topic });
-    const res = await call(app, "GET", `/channels/${c.json.id}/ws-ticket`, { userId: "user_stranger" });
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
+    const res = await call(app, "GET", `/chat/channels/${c.json.id}/ws-ticket`, { userId: "user_stranger" });
     expect(res.status).toBe(403);
   });
 });

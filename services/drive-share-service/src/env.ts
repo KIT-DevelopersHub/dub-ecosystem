@@ -7,11 +7,17 @@
 // GOOGLE_HACKIT_OAUTH_* secrets are present the REAL Drive v3 client is wired;
 // when they are absent the in-memory MOCK client runs, so the whole surface builds,
 // runs, and is E2E-testable at $0 before any real refresh token exists.
-import type { Fetcher } from "@cloudflare/workers-types";
+import type { D1Database, Fetcher } from "@cloudflare/workers-types";
 
 export interface Env {
+  // ---- D1 (driveshare_* namespace) ----
+  // Role→file grant index + provenance ledger of the Drive permissions WE created.
+  // Google Drive still holds the files/permissions themselves; this is only the
+  // role-based-sharing bookkeeping that makes fan-out non-destructive & reconcilable.
+  DB: D1Database;
+
   // ---- Service Bindings ----
-  SVC_IDENTITY: Fetcher; // identity-roster /authz/check (drive:read / drive:write)
+  SVC_IDENTITY: Fetcher; // identity-roster /authz/check (drive:read / drive:write) + role expansion
 
   // ---- Secrets (Hackit shared-Gmail OAuth; never logged) ----
   // A personal Gmail cannot use a service account / domain-wide delegation, so the

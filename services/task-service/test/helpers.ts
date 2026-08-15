@@ -43,10 +43,9 @@ export class InMemoryTaskRepo implements TaskRepo {
   }
 
   private toTask(r: Rec): task.Task {
-    const { createdBy: _c, dueSoonNotifiedAt: _d, ...t } = r;
-    void _c;
+    const { dueSoonNotifiedAt: _d, ...t } = r;
     void _d;
-    return { ...t };
+    return { ...t }; // createdBy kept — the real repo exposes it (from→to "from").
   }
 
   async getById(id: string, includeArchived = false): Promise<task.Task | null> {
@@ -61,6 +60,7 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (!filter.includeArchived) recs = recs.filter((r) => r.archivedAt === null);
     if (filter.eventId) recs = recs.filter((r) => r.eventId === filter.eventId);
     if (filter.assigneeId) recs = recs.filter((r) => r.assigneeId === filter.assigneeId);
+    if (filter.createdById) recs = recs.filter((r) => r.createdBy === filter.createdById);
     if (filter.statuses && filter.statuses.length > 0) {
       const set = new Set(filter.statuses);
       recs = recs.filter((r) => set.has(r.status));

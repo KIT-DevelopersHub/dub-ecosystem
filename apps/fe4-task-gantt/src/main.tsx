@@ -5,8 +5,8 @@ import cssText from "@dub/tokens/css";
 // design-system's compiled stylesheet must be loaded explicitly or every
 // Button/Modal/Select/Badge renders unstyled.
 import "@dub/ui/style.css";
-import { App } from "./App";
-import { createDevClient, DEMO_EVENT_ID, DEMO_PERMISSIONS } from "./dev-seed";
+import { DemoApp } from "./DemoApp";
+import { createDevClient } from "./dev-seed";
 
 // inject design tokens (@dub/tokens CSS variables) once
 const style = document.createElement("style");
@@ -17,7 +17,7 @@ const el = document.getElementById("root");
 if (el) {
   createRoot(el).render(
     <StrictMode>
-      <App client={createDevClient()} eventId={DEMO_EVENT_ID} permissions={DEMO_PERMISSIONS} />
+      <DemoApp client={createDevClient()} />
     </StrictMode>,
   );
 }

@@ -1,9 +1,14 @@
 // W7a composition tests: the assembled FeatureModule array is shape-correct and
 // registry-mergeable, and every feature client is genuinely fed by the shell
 // api-client (the adapters translate onto ApiClient.request).
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { gateway } from "@dub/types";
+import { useTaskRoute } from "@dub/fe4-task-gantt/src/routes/taskRoutes";
 import type { ApiClient, RequestInput } from "../lib/api-client.tsx";
+import { AuthProvider } from "../auth/AuthProvider.tsx";
 import { buildRegistry } from "../modules/registry.tsx";
 import { assembleFeatureModules, toIcon } from "./featureModules.tsx";
 import {
@@ -12,6 +17,37 @@ import {
   createPrefixedHttpClient,
 } from "./appClients.tsx";
 import { EventProviders, TaskProviders } from "./moduleProviders.tsx";
+
+/** /me session used to drive TaskProviders' TaskRouteContext wiring. */
+const TASK_ME: gateway.MeResponse = {
+  user: { id: "usr_me", displayName: "私", avatarUrl: null },
+  orgId: "org_devhub",
+  permissions: ["task:read"],
+  sessionExpiresAt: Date.now() + 60_000,
+};
+
+/** Render `ui` under a resolved AuthProvider + TaskProviders (the shell path). */
+function renderTasksWithAuth(taskApi: ApiClient, ui: ReactNode) {
+  const authApi = { auth: { me: () => Promise.resolve(TASK_ME) } } as unknown as ApiClient;
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <AuthProvider api={authApi}>
+        <TaskProviders api={taskApi}>{ui}</TaskProviders>
+      </AuthProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function TaskRouteProbe() {
+  const { currentUserId, permissions } = useTaskRoute();
+  return (
+    <>
+      <div data-testid="uid">{currentUserId ?? "none"}</div>
+      <div data-testid="perms">{(permissions ?? []).join(",")}</div>
+    </>
+  );
+}
 
 /** Minimal ApiClient double: only `request` is exercised by the adapters. */
 function fakeApi(): { api: ApiClient; calls: RequestInput[] } {
@@ -187,13 +223,22 @@ describe("runtime providers wrap their routes", () => {
     expect(screen.getByTestId("child")).toHaveTextContent("events-child");
   });
 
-  it("TaskProviders mounts and passes children through", () => {
+  it("TaskProviders mounts and passes children through", async () => {
     const { api } = fakeApi();
-    render(
-      <TaskProviders api={api}>
-        <div data-testid="child">tasks-child</div>
-      </TaskProviders>,
-    );
-    expect(screen.getByTestId("child")).toHaveTextContent("tasks-child");
+    renderTasksWithAuth(api, <div data-testid="child">tasks-child</div>);
+    await waitFor(() => expect(screen.getByTestId("child")).toHaveTextContent("tasks-child"));
+  });
+
+  // Regression (mytasks revamp): the shell must feed the standalone マイタスク route
+  // (`/me/tasks`) its currentUserId + permissions via TaskRouteContext. Without this
+  // wiring the route renders "ユーザー情報を読み込んでいます…" forever — the app is
+  // dead-on-arrival in the real shell even though the fe4 demo works.
+  it("TaskProviders feeds the マイタスク route its currentUserId + permissions from /me", async () => {
+    const { api } = fakeApi();
+    renderTasksWithAuth(api, <TaskRouteProbe />);
+    // fail-closed while /me is loading
+    expect(screen.getByTestId("uid").textContent).toBe("none");
+    await waitFor(() => expect(screen.getByTestId("uid").textContent).toBe("usr_me"));
+    expect(screen.getByTestId("perms").textContent).toBe("task:read");
   });
 });

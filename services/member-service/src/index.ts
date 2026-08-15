@@ -49,6 +49,7 @@ export { createD1MemberRepo } from "./d1-repo";
 export { InMemoryMemberRepo } from "./memory-repo";
 export {
   MEMBER_SCHEMA_MIGRATION,
+  MEMBER_IDENTITY_LINK_MIGRATION,
   MEMBER_PARTICIPATION_MIGRATION,
   MEMBER_PARTICIPATION_EMAILS_MIGRATION,
   MEMBER_MIGRATIONS,

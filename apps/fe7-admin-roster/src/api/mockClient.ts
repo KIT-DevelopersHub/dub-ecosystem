@@ -3,9 +3,9 @@
 // 実装時の依存先はモックサーバ(契約準拠スタブ)"). NOT shipped to production —
 // FE2 provides the real ResourceClient there.
 import { identity } from "@dub/types"; // value import: identity.PERMISSION_CATALOG (runtime) + types
-import type { common, auditLog, gateway } from "@dub/types";
+import type { common, auditLog, gateway, member } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
 import { EMAIL_ROUTING_DOMAIN } from "../contracts/pending";
 
 // Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
@@ -30,6 +30,7 @@ interface MockState {
   assignments: Map<string, RoleAssignment[]>; // userId -> assignments
   audits: auditLog.AuditRecord[];
   emailAddresses: EmailRoutingAddress[];
+  members: member.Member[]; // 運営メンバー (member-service) — for #1/#2 link + offboard
   me: gateway.MeResponse;
   mailRateLimit: MailRateLimitStatus;
   // userId -> current plaintext password (admin set/view surface, #5a/#5c). The real
@@ -61,6 +62,12 @@ function seedState(seed?: MockSeed): MockState {
     { id: "eml_1", localPart: "info", address: `info@${EMAIL_ROUTING_DOMAIN}`, destination: "staff@example.com", enabled: true, createdAt: now() },
     { id: "eml_2", localPart: "support", address: `support@${EMAIL_ROUTING_DOMAIN}`, destination: "help@example.com", enabled: true, createdAt: now() },
     { id: "eml_3", localPart: "noreply", address: `noreply@${EMAIL_ROUTING_DOMAIN}`, destination: "void@example.com", enabled: false, createdAt: now() },
+    // Bob has an issued @developershub.jp address so his offboard demonstrates the删除 step.
+    { id: "eml_bob", localPart: "bob", address: `bob@${EMAIL_ROUTING_DOMAIN}`, destination: "bob@example.com", enabled: true, createdAt: now() },
+  ];
+  // 運営メンバー: 佐藤 太郎 is linked to user_bob (#1) so退任 fans out to the org-chart.
+  const members: member.Member[] = [
+    { id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: [], identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
   ];
   const me: gateway.MeResponse = seed?.me ?? {
     user: { id: "user_alice", displayName: "Alice Admin", avatarUrl: null },
@@ -71,7 +78,7 @@ function seedState(seed?: MockSeed): MockState {
   // user_alice starts with a viewable credential (demo/E2E); others are unset until an
   // admin issues one (view then rejects with PASSWORD_NOT_VIEWABLE, like the backend).
   const passwords = new Map<string, string>([["user_alice", "Alice-Init-0001"]]);
-  return { users, roles, assignments, audits, emailAddresses, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords };
+  return { users, roles, assignments, audits, emailAddresses, members, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords };
 }
 
 function paginate<T>(items: T[]): common.Paginated<T> {
@@ -110,6 +117,11 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       const u = s.users.get(userMatch[1]!);
       if (!u) throw err("NOT_FOUND", "user not found");
       return u as unknown as T;
+    }
+    const byIdentity = path.match(/\/members\/people\/by-identity\/([^/]+)$/);
+    if (byIdentity) {
+      const m = s.members.find((x) => x.identityUserId === byIdentity[1]!) ?? null;
+      return { member: m } as unknown as T;
     }
     if (path.endsWith("/admin/email-routing/roster-addresses")) {
       // roster sync source: the RECEIVING addresses (one per issued rule), not destinations.
@@ -186,6 +198,45 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       s.assignments.set(userId, [...list, asg]);
       return asg as unknown as T;
     }
+    if (path.endsWith("/users/sync-email-routing/preview")) {
+      const req = body as { addresses?: Array<{ address: string; enabled?: boolean }> };
+      const list = Array.isArray(req?.addresses) ? req.addresses : [];
+      const seen = new Set<string>();
+      const normalized: { email: string; enabled: boolean }[] = [];
+      for (const a of list) {
+        const email = (a?.address ?? "").trim().toLowerCase();
+        if (!EMAIL_RE.test(email)) throw err("VALIDATION_FAILED", "invalid address", [{ field: "address", reason: "format", message: email }]);
+        if (seen.has(email)) continue;
+        seen.add(email);
+        normalized.push({ email, enabled: a?.enabled !== false });
+      }
+      const toAdd: EmailRoutingSyncPreview["toAdd"] = [];
+      const toReactivate: EmailRoutingSyncPreview["toReactivate"] = [];
+      const toRelink: EmailRoutingSyncPreview["toRelink"] = [];
+      let updated = 0;
+      for (const { email, enabled } of normalized) {
+        const existing = [...s.users.values()].find((u) => u.email.toLowerCase() === email);
+        if (!existing) { toAdd.push({ email, enabled }); continue; }
+        updated++;
+        if (enabled && existing.status === "disabled" && existing.source === "email-routing") toReactivate.push({ email, userId: existing.id, enabled });
+        else if (existing.source !== "email-routing") toRelink.push({ email, userId: existing.id });
+      }
+      const adminRoleIds = new Set([...s.roles.values()].filter((r) => r.permissions.includes("identity:admin")).map((r) => r.id));
+      const isAdmin = (uid: string) => (s.assignments.get(uid) ?? []).some((a) => a.resourceType === null && adminRoleIds.has(a.roleId));
+      const toDeactivate: EmailRoutingSyncPreview["toDeactivate"] = [];
+      const adminKept: EmailRoutingSyncPreview["adminKept"] = [];
+      for (const u of [...s.users.values()]) {
+        if (u.source !== "email-routing" || u.status === "disabled") continue;
+        if (seen.has(u.email.toLowerCase())) continue;
+        if (isAdmin(u.id)) adminKept.push({ email: u.email, userId: u.id });
+        else toDeactivate.push({ email: u.email, userId: u.id });
+      }
+      const result: EmailRoutingSyncPreview = {
+        toAdd, toReactivate, toRelink, toDeactivate, adminKept,
+        projected: { added: toAdd.length, updated, deactivated: toDeactivate.length, total: normalized.length },
+      };
+      return result as unknown as T;
+    }
     if (path.endsWith("/users/sync-email-routing")) {
       const req = body as { addresses?: Array<{ address: string; enabled?: boolean }> };
       const list = Array.isArray(req?.addresses) ? req.addresses : [];
@@ -250,6 +301,30 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       s.emailAddresses.push(addr);
       return addr as unknown as T;
     }
+    const offboardMatch = path.match(/\/identity\/users\/([^/]+)\/offboard$/);
+    if (offboardMatch) {
+      const u = s.users.get(offboardMatch[1]!);
+      if (!u) throw err("NOT_FOUND", "user not found");
+      // last active org-wide admin guard (mirrors identity-roster).
+      const adminRoleIds = new Set([...s.roles.values()].filter((r) => r.permissions.includes("identity:admin")).map((r) => r.id));
+      const activeAdmins = [...s.users.values()].filter(
+        (x) => x.status === "active" && (s.assignments.get(x.id) ?? []).some((a) => a.resourceType === null && adminRoleIds.has(a.roleId)),
+      );
+      if (activeAdmins.length === 1 && activeAdmins[0]!.id === u.id) {
+        throw err("CONFLICT", "cannot offboard the last identity:admin holder", { code: "LAST_ADMIN" });
+      }
+      const alreadyDisabled = u.status !== "active";
+      const assignments = s.assignments.get(u.id) ?? [];
+      const steps: OffboardUserResult["steps"] = [];
+      steps.push(alreadyDisabled ? { step: "revoke-sessions", status: "skipped", detail: "account not active" } : { step: "revoke-sessions", status: "done" });
+      s.assignments.set(u.id, []);
+      steps.push(assignments.length > 0 ? { step: "revoke-roles", status: "done", detail: String(assignments.length) } : { step: "revoke-roles", status: "skipped", detail: "0" });
+      const disabled: MockUser = { ...u, status: "disabled", roleIds: [], updatedAt: now() };
+      s.users.set(u.id, disabled);
+      steps.push(alreadyDisabled ? { step: "disable-account", status: "skipped", detail: u.status } : { step: "disable-account", status: "done" });
+      const result: OffboardUserResult = { user: stripDetail(disabled), revokedAssignments: assignments.length, alreadyDisabled, steps };
+      return result as unknown as T;
+    }
     const setPwMatch = path.match(/\/admin\/users\/([^/]+)\/password$/);
     if (setPwMatch) {
       const u = s.users.get(setPwMatch[1]!);
@@ -289,6 +364,17 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       const updated: MockUser = { ...u, ...req, updatedAt: now() };
       s.users.set(u.id, updated);
       return stripDetail(updated) as unknown as T;
+    }
+    const memberMatch = path.match(/\/members\/people\/([^/]+)$/);
+    if (memberMatch) {
+      const idx = s.members.findIndex((m) => m.id === memberMatch[1]!);
+      if (idx === -1) throw err("NOT_FOUND", "member not found");
+      const cur = s.members[idx]!;
+      const req = body as Partial<member.Member> & { version?: number };
+      if (typeof req.version === "number" && req.version !== cur.version) throw err("MEMBER_VERSION_CONFLICT", "version conflict");
+      const updated: member.Member = { ...cur, ...(req.status !== undefined ? { status: req.status } : {}), ...(req.identityUserId !== undefined ? { identityUserId: req.identityUserId } : {}), version: cur.version + 1, updatedAt: now() };
+      s.members[idx] = updated;
+      return updated as unknown as T;
     }
     const emailMatch = path.match(/\/admin\/email-routing\/addresses\/([^/]+)$/);
     if (emailMatch) {

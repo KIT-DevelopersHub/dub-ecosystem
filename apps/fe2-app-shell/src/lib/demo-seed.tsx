@@ -235,10 +235,26 @@ const DEMO_ARCHIVE_CC = "archive@developershub.jp";
 // the two personal accounts above, which each see only their own mail.
 const OVERSIGHT_PERMISSIONS: identity.PermissionKey[] = [...DEMO_PERMISSIONS, "mail:read_all"];
 
+// A general MEMBER account (no dangerous permissions → not privileged) so a viewer /
+// the E2E can prove the member release gate: only member-published apps (メール) are
+// active in the launcher, every other app is greyed-out. mail:read is granted so the
+// one published app actually opens; no *:admin / *:send etc. so isPrivilegedViewer()
+// stays false and the gate applies.
+const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "file:read",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "mail:read",
+];
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+  { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
 ];
 
 /** True when the account holds the mail:read_all oversight permission. */
@@ -882,6 +898,49 @@ function createDriveShareStore() {
   const byId = new Map(files.map((f) => [f.id, f]));
   let seq = 100;
 
+  // ── role-based grants (identity roles → whole-role Drive sharing) ─────────────
+  // Mirrors drive-share-service's role-grants fan-out: granting a role to a file
+  // expands to a Drive permission per role member (memberCount), tracked so revoke
+  // can undo them and re-apply can re-sync. roleMembers / ROLE_NAME mirror the
+  // identity roster's roles (GET /identity/roles: admin / maintainer / member).
+  const ROLE_NAME: Record<string, string> = { role_admin: "admin", role_maintainer: "maintainer", role_member: "member" };
+  const roleMembers: Record<string, string[]> = {
+    role_admin: ["demo@developershub.jp", "kota@developershub.jp", "kurokawa@developershub.jp", "kanai@developershub.jp"],
+    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp"],
+    role_member: ["ichiro@developershub.jp", "jiro@developershub.jp"],
+  };
+  interface DemoRoleGrant {
+    id: string;
+    fileId: string;
+    roleId: string;
+    roleName: string;
+    driveRole: "reader" | "commenter" | "writer";
+    memberCount: number;
+    appliedCount: number;
+    grantedBy: string;
+    grantedAt: string;
+    permIds: string[]; // internal: the fanned-out Drive permission ids on the file
+  }
+  const roleGrants: DemoRoleGrant[] = [];
+  const grantView = (g: DemoRoleGrant) => ({
+    id: g.id, fileId: g.fileId, roleId: g.roleId, roleName: g.roleName, driveRole: g.driveRole,
+    memberCount: g.memberCount, appliedCount: g.appliedCount, grantedBy: g.grantedBy, grantedAt: g.grantedAt,
+  });
+  // Fan a role's members out onto a file as individual Drive permissions.
+  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant): void => {
+    const emails = roleMembers[g.roleId] ?? [];
+    for (const email of emails) {
+      const id = `perm_role_${seq++}`;
+      g.permIds.push(id);
+      f.permissions.push({ id, type: "user", role: g.driveRole, emailAddress: email, displayName: email.split("@")[0]!, domain: null });
+    }
+    g.appliedCount = emails.length;
+  };
+  const clearFan = (f: DemoDriveFile, g: DemoRoleGrant): void => {
+    f.permissions = f.permissions.filter((p) => !g.permIds.includes(p.id));
+    g.permIds = [];
+  };
+
   const fileView = (f: DemoDriveFile) => ({
     id: f.id, name: f.name, mimeType: f.mimeType, isFolder: f.mimeType === DRIVE_FOLDER_MIME_DEMO,
     ownerName: f.ownerName, modifiedTime: f.modifiedTime, webViewLink: f.webViewLink,
@@ -890,6 +949,51 @@ function createDriveShareStore() {
   const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p })) });
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    // ── role-based grants (matched before the generic file routes) ─────────────
+    if (method === "GET" && pathname === "/api/v1/driveshare/role-grants") {
+      return json({ items: roleGrants.map(grantView) });
+    }
+    const reapplyMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)\/reapply$/.exec(pathname);
+    if (reapplyMatch && method === "POST") {
+      const f = byId.get(reapplyMatch[1]!);
+      const g = roleGrants.find((x) => x.fileId === reapplyMatch[1]! && x.roleId === decodeURIComponent(reapplyMatch[2]!));
+      if (!f || !g) return notFound(`${method} ${pathname}`);
+      clearFan(f, g);
+      fanOut(f, g);
+      return json(grantView(g));
+    }
+    const roleGrantItemMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)$/.exec(pathname);
+    if (roleGrantItemMatch && method === "DELETE") {
+      const f = byId.get(roleGrantItemMatch[1]!);
+      const roleId = decodeURIComponent(roleGrantItemMatch[2]!);
+      const idx = roleGrants.findIndex((x) => x.fileId === roleGrantItemMatch[1]! && x.roleId === roleId);
+      if (!f || idx === -1) return notFound(`${method} ${pathname}`);
+      clearFan(f, roleGrants[idx]!);
+      roleGrants.splice(idx, 1);
+      return json({ ok: true });
+    }
+    const roleGrantsMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants$/.exec(pathname);
+    if (roleGrantsMatch) {
+      const f = byId.get(roleGrantsMatch[1]!);
+      if (!f) return notFound(`${method} ${pathname}`);
+      if (method === "GET") return json({ items: roleGrants.filter((g) => g.fileId === f.id).map(grantView) });
+      if (method === "POST") {
+        const req = body as { roleId?: string; driveRole?: DemoRoleGrant["driveRole"] };
+        const roleId = req.roleId ?? "";
+        if (!roleId || !(roleId in ROLE_NAME)) return problem("VALIDATION", "unknown roleId", 400);
+        if (roleGrants.some((g) => g.fileId === f.id && g.roleId === roleId)) {
+          return problem("CONFLICT", "role already granted on this file", 409);
+        }
+        const emails = roleMembers[roleId] ?? [];
+        const g: DemoRoleGrant = {
+          id: `rg_${seq++}`, fileId: f.id, roleId, roleName: ROLE_NAME[roleId]!, driveRole: req.driveRole ?? "reader",
+          memberCount: emails.length, appliedCount: 0, grantedBy: "demo@developershub.jp", grantedAt: new Date().toISOString(), permIds: [],
+        };
+        fanOut(f, g);
+        roleGrants.push(g);
+        return json(grantView(g), 201);
+      }
+    }
     if (method === "GET" && pathname === "/api/v1/driveshare/files") {
       const needle = (url.searchParams.get("q") ?? "").trim().toLowerCase();
       const matched = files
@@ -971,6 +1075,7 @@ interface DemoMember {
   roleTitle: string | null;
   status: "added" | "invited" | "considering" | "declined";
   teamIds: string[];
+  identityUserId: string | null;
   contact: string | null;
   schoolEmail: string | null;
   gmail: string | null;
@@ -993,12 +1098,12 @@ function createMembersStore() {
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
   ];
-  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, contact, schoolEmail: null, gmail: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null, identityUserId: string | null = null): DemoMember => ({
+    id, orgId: ORG, name, roleTitle, status, teamIds, identityUserId, contact, schoolEmail: null, gmail: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
-    // 統括
-    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp"),
+    // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", ME_ID),
     mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1),
     mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2),
     // 開発
@@ -1080,12 +1185,39 @@ function createMembersStore() {
       const mem: DemoMember = {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        identityUserId: null,
         contact: body?.contact ?? null, schoolEmail: null, gmail: null, note: body?.note ?? null,
         sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
       return json(mem, 201);
+    }
+    // reverse lookup: member linked to an identity user (offboarding fan-out, #1/#2).
+    m = /^\/api\/v1\/members\/people\/by-identity\/([^/]+)$/.exec(pathname);
+    if (m && method === "GET") {
+      const iid = decodeURIComponent(m[1]!);
+      const mem = members.find((x) => x.identityUserId === iid);
+      return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
+    }
+    // link / unlink to an identity account (#1).
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      const target = body?.identityUserId ?? null;
+      if (target !== null && members.some((x) => x.id !== mem.id && x.identityUserId === target)) {
+        const err: ErrorResponse = { error: { code: "MEMBER_IDENTITY_ALREADY_LINKED", message: "この account は既に別のメンバーに紐付いています", retryable: false } };
+        return json(err, 409);
+      }
+      mem.identityUserId = target;
+      mem.version += 1;
+      mem.updatedAt = isoNow();
+      return json({ ...mem, teamIds: [...mem.teamIds] });
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
@@ -1100,6 +1232,7 @@ function createMembersStore() {
         if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
         if (body?.status !== undefined) mem.status = body.status;
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+        if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
         if (body?.note !== undefined) mem.note = body.note ?? null;
         if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;
@@ -1143,7 +1276,7 @@ function createMembersStore() {
         matchKind = "linked_existing";
       } else {
         resolved = {
-          id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added",
+          id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added", identityUserId: null,
           teamIds: desiredTeamId ? [desiredTeamId] : [], contact: contact ?? schoolEmail,
           schoolEmail: schoolEmail || null, gmail: gmail || null, note,
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),

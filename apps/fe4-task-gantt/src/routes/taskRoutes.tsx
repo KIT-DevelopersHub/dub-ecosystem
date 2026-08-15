@@ -6,13 +6,13 @@
 //   <QueryClientProvider> + FE4 <ApiClientProvider> (adapting @dub/api-client) +
 //   <TaskRouteProvider> (currentUserId + effectivePermissions from FE2 auth).
 // Standalone dev keeps using App.tsx (dev-seed) — this module is the shell path.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { common, identity, task } from "@dub/types";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import type { common, identity, team } from "@dub/types";
+import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, resolveUsers } from "../api/endpoints";
-import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
+import { listTeams } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
-import { TaskListView } from "../components/TaskListView";
+import { MyTasksPage } from "../components/MyTasksPage";
 import styles from "../styles/app.module.css";
 
 export interface TaskRouteContextValue {
@@ -56,51 +56,35 @@ export function TaskWorkspaceRoute() {
 }
 
 /**
- * Standalone "マイタスク" route (`/me/tasks`): the current user's tasks across
- * events (assignee-scoped list). Real wiring over FE4 endpoints — no gantt.
+ * Standalone "マイタスク" route (`/me/tasks`): the current user's task hub across
+ * events — 担当(assigned) / 依頼(issued) lenses, from→to list, filters + create.
+ * Teams come from the (future member-service) team list; the roster/event options
+ * are derived from the fetched tasks when the shell has none to hand.
  */
 export function MeTasksRoute() {
   const client = useApiClient();
   const { currentUserId } = useTaskRoute();
-  const [tasks, setTasks] = useState<task.Task[]>([]);
-  const [users, setUsers] = useState<UserCache>(() => createUserCache());
-  const [loading, setLoading] = useState(false);
-
-  const query = useMemo<task.ListTasksQuery>(
-    () => ({ ...(currentUserId ? { assigneeId: currentUserId } : {}) }),
-    [currentUserId],
-  );
+  const [teams, setTeams] = useState<readonly team.Team[]>([]);
 
   useEffect(() => {
     let live = true;
-    setLoading(true);
-    void listTasks(client, query)
+    void listTeams(client)
       .then((res) => {
-        if (live) setTasks(res.items);
+        if (live) setTeams(res.items);
       })
-      .finally(() => {
-        if (live) setLoading(false);
+      .catch(() => {
+        /* teams are optional; the hub degrades gracefully without them */
       });
     return () => {
       live = false;
     };
-  }, [client, query]);
+  }, [client]);
 
-  useEffect(() => {
-    const ids = tasks.map((t) => t.assigneeId);
-    void ensureUsers(users, ids, (batch) => resolveUsers(client, batch)).then((c) => setUsers(new Map(c)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks.length]);
-
-  const onOpen = (id: common.TaskId) => {
-    const t = tasks.find((x) => x.id === id);
-    if (t && typeof window !== "undefined") window.location.assign(`/events/${t.eventId}/tasks/${id}`);
-  };
+  if (!currentUserId) return <p className={styles.banner}>ユーザー情報を読み込んでいます…</p>;
 
   return (
-    <section data-testid="fe4-me-tasks">
-      <h1 className={styles.actionPanelTitle}>マイタスク</h1>
-      <TaskListView tasks={tasks} users={users} hasMore={false} onLoadMore={() => {}} onOpen={onOpen} loading={loading} />
-    </section>
+    <ToastProvider>
+      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} events={[]} />
+    </ToastProvider>
   );
 }

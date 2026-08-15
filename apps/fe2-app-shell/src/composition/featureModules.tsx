@@ -312,6 +312,14 @@ function adaptAdmin(api: ApiClient): FeatureModule {
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 
+/** Stamp the owning module id onto every nav entry so the launcher/route guard can
+ *  look up the app's member-release status (lib/releaseGate). Done once here rather
+ *  than in each adaptX so the appId can never drift from the module it belongs to. */
+function withNavAppId(module: FeatureModule): FeatureModule {
+  module.nav = module.nav.map((n) => ({ ...n, appId: module.id }));
+  return module;
+}
+
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
  * notifications, chat, mail, usage, members, participation, driveshare, admin]. Each module's routes are wrapped in its runtime
@@ -331,7 +339,7 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptParticipation(api),
     adaptDriveShare(api),
     adaptAdmin(api),
-  ];
+  ].map(withNavAppId);
 }
 
 export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptAdmin, toIcon };

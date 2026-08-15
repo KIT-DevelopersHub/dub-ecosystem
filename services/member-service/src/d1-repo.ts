@@ -21,6 +21,7 @@ interface PersonDbRow {
   name: string;
   role_title: string | null;
   status: string;
+  identity_user_id: string | null;
   contact: string | null;
   school_email: string | null;
   gmail: string | null;
@@ -101,6 +102,7 @@ function toPersonRow(r: PersonDbRow): PersonRow {
     name: r.name,
     roleTitle: r.role_title,
     status: r.status as MemberStatus,
+    identityUserId: r.identity_user_id,
     contact: r.contact,
     schoolEmail: r.school_email,
     gmail: r.gmail,
@@ -173,9 +175,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async createPerson(row: PersonRow, teamIds: string[]): Promise<void> {
       await db.run(
         `INSERT INTO member_people
-          (id, org_id, name, role_title, status, contact, school_email, gmail, note, sort_order, version, archived_at, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        row.id, row.orgId, row.name, row.roleTitle, row.status, row.contact, row.schoolEmail, row.gmail, row.note,
+          (id, org_id, name, role_title, status, identity_user_id, contact, school_email, gmail, note, sort_order, version, archived_at, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        row.id, row.orgId, row.name, row.roleTitle, row.status, row.identityUserId, row.contact, row.schoolEmail, row.gmail, row.note,
         row.sortOrder, row.version, row.archivedAt, row.createdBy, row.createdAt, row.updatedAt,
       );
       await replaceLinks(row.id, teamIds, row.createdAt);
@@ -184,6 +186,13 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
       const r = await db.first<PersonDbRow>(
         `SELECT * FROM member_people WHERE id = ? AND archived_at IS NULL`,
         id,
+      );
+      return r ? toPersonRow(r) : null;
+    },
+    async getPersonByIdentityUserId(orgId, identityUserId: string): Promise<PersonRow | null> {
+      const r = await db.first<PersonDbRow>(
+        `SELECT * FROM member_people WHERE org_id = ? AND identity_user_id = ? AND archived_at IS NULL`,
+        orgId, identityUserId,
       );
       return r ? toPersonRow(r) : null;
     },
@@ -197,9 +206,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean> {
       const res = await db.run(
         `UPDATE member_people SET
-           name = ?, role_title = ?, status = ?, contact = ?, school_email = ?, gmail = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
+           name = ?, role_title = ?, status = ?, identity_user_id = ?, contact = ?, school_email = ?, gmail = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
          WHERE id = ? AND version = ? AND archived_at IS NULL`,
-        next.name, next.roleTitle, next.status, next.contact, next.schoolEmail, next.gmail, next.note, next.sortOrder,
+        next.name, next.roleTitle, next.status, next.identityUserId, next.contact, next.schoolEmail, next.gmail, next.note, next.sortOrder,
         next.version, next.updatedAt, next.id, expectedVersion,
       );
       if (res.meta.changes === 0) return false;

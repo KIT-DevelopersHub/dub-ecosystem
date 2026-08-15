@@ -26,6 +26,8 @@ export interface PersonRow {
   name: string;
   roleTitle: string | null;
   status: MemberStatus;
+  /** Linked identity-roster account (identity userId), or null when unlinked. */
+  identityUserId: string | null;
   contact: string | null;
   schoolEmail: string | null;
   gmail: string | null;
@@ -86,6 +88,8 @@ export interface MemberRepo {
   // people
   createPerson(row: PersonRow, teamIds: string[]): Promise<void>;
   getPerson(id: string): Promise<PersonRow | null>;
+  /** Reverse lookup: the (non-archived) person linked to an identity user, or null. */
+  getPersonByIdentityUserId(orgId: common.OrgId, identityUserId: string): Promise<PersonRow | null>;
   listPeople(orgId: common.OrgId): Promise<PersonRow[]>;
   updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean>;
   archivePerson(id: string): Promise<void>;

@@ -16,6 +16,7 @@ export type ChatRealtimeEvent = chat.ChatRealtimeEvent;
 export type WsTicketResponse = chat.WsTicketResponse;
 
 export type ChannelType = "topic" | "event" | "dm";
+export type ChannelVisibility = "public" | "private";
 export type MemberRole = "admin" | "member";
 
 export interface Reaction {
@@ -28,12 +29,16 @@ export interface Attachment {
   name: string;
   mime: string;
   size: number;
+  // Preview URL (data: URL in standalone/mock; object storage URL when served by
+  // file-meta). Optional so the frozen upload hand-off (fileId only) still holds.
+  url?: string | null;
 }
 
 export interface Channel extends common.Versioned {
   id: common.ChannelId;
   orgId: common.OrgId;
   type: ChannelType;
+  visibility: ChannelVisibility; // "private" channels show a lock and are invite-only
   name: string;
   topic: string | null;
   eventId: common.EventId | null; // set when type === "event"
@@ -72,6 +77,7 @@ export interface Message extends common.Versioned {
 
 export interface CreateChannelRequest {
   type: ChannelType;
+  visibility?: ChannelVisibility; // defaults to "public"
   name: string;
   topic?: string;
   eventId?: common.EventId; // required when type === "event"
@@ -127,4 +133,18 @@ export interface UnreadSummary {
   unreadCount: number;
   lastReadMessageId: common.MessageId | null;
   mentioned: boolean;
+}
+
+// A search match: the message plus enough channel context to render + navigate.
+export interface SearchHit {
+  message: Message;
+  channelId: common.ChannelId;
+  channelName: string;
+  channelType: ChannelType;
+}
+
+export interface SearchMessagesRequest {
+  q: string;
+  channelId?: common.ChannelId; // scope to one channel; omit = workspace-wide
+  limit?: number;
 }

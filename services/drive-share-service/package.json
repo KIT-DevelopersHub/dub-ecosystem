@@ -11,6 +11,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*"

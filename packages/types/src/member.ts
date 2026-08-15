@@ -33,6 +33,12 @@ export interface Member {
   roleTitle: string | null;
   status: MemberStatus;
   teamIds: string[];
+  /**
+   * The linked identity-roster login account (identity userId), or null when this
+   * 運営メンバー is not yet tied to an account. The bridge between the 組織図 (this
+   * record) and RBAC/認証 (identity_users). Set/cleared via PATCH (human-confirmed).
+   */
+  identityUserId: string | null;
   /** 連絡先 (任意). */
   contact: string | null;
   /** 学校メールアドレス — retained on the roster from a 参加届 (任意 / additive). */
@@ -86,6 +92,8 @@ export interface UpdateMemberRequest {
   roleTitle?: string | null;
   status?: MemberStatus;
   teamIds?: string[];
+  /** Set (link) or null (unlink) the identity-roster account. Omit = leave unchanged. */
+  identityUserId?: string | null;
   contact?: string | null;
   note?: string | null;
   sortOrder?: number;
@@ -166,6 +174,13 @@ export interface SubmitParticipationResponse {
 /** GET /api/v1/members/participation — admin list of submissions. */
 export interface ListParticipationsResponse {
   participations: Participation[];
+}
+
+/** Create/set a link in one call (POST /members/people/:id/identity-link). The member's
+ *  version is checked for optimistic concurrency, mirroring UpdateMemberRequest. */
+export interface LinkIdentityRequest {
+  identityUserId: string;
+  version: number;
 }
 
 /** Internal id alias (plain string, like the other common ids). */

@@ -7,20 +7,20 @@ const topic = { type: "topic", visibility: "public", name: "General" } as const;
 describe("acceptance: conversation master end-to-end (test #17)", () => {
   it("create channel -> post -> cursor history -> read -> unread flows green via the app", async () => {
     const app = createApp(makeDeps());
-    const c = await call(app, "POST", "/channels", { body: { ...topic, visibility: "private", memberIds: ["user_b"] } });
+    const c = await call(app, "POST", "/chat/channels", { body: { ...topic, visibility: "private", memberIds: ["user_b"] } });
     const channelId = c.json.id as string;
 
-    await call(app, "POST", "/messages", { userId: "user_b", body: { channelId, body: "hi caller" } });
-    const last = await call(app, "POST", "/messages", { userId: "user_b", body: { channelId, body: "you there?" } });
+    await call(app, "POST", "/chat/messages", { userId: "user_b", body: { channelId, body: "hi caller" } });
+    const last = await call(app, "POST", "/chat/messages", { userId: "user_b", body: { channelId, body: "you there?" } });
 
-    const history = await call(app, "GET", "/messages", { query: { channelId, limit: 50 } });
+    const history = await call(app, "GET", "/chat/messages", { query: { channelId, limit: 50 } });
     expect(history.json.items.length).toBe(2);
 
-    const before = await call(app, "GET", "/unread");
+    const before = await call(app, "GET", "/chat/unread");
     expect(before.json.items.find((x: any) => x.channelId === channelId).unreadCount).toBe(2);
 
-    await call(app, "POST", `/channels/${channelId}/read`, { body: { lastReadMessageId: last.json.id } });
-    const after = await call(app, "GET", "/unread");
+    await call(app, "POST", `/chat/channels/${channelId}/read`, { body: { lastReadMessageId: last.json.id } });
+    const after = await call(app, "GET", "/chat/unread");
     expect(after.json.items.find((x: any) => x.channelId === channelId).unreadCount).toBe(0);
   });
 });

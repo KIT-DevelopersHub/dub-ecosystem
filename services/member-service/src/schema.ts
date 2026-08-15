@@ -47,11 +47,24 @@ CREATE INDEX idx_member_team_links_team ON member_team_links(team_id);
 `.trim(),
 };
 
+// 0002: link a 運営メンバー to its identity-roster login account (RBAC 橋渡し).
+// Additive ALTER — see infra/d1/migrations/member/0002_identity_link.sql (kept in
+// lockstep by schema-lockstep.test.ts). Not a cross-namespace FK (ids stay strings).
+export const MEMBER_IDENTITY_LINK_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0002_identity_link",
+  up: `
+ALTER TABLE member_people ADD COLUMN identity_user_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_member_people_identity
+  ON member_people(identity_user_id) WHERE identity_user_id IS NOT NULL;
+`.trim(),
+};
+
 // 参加届 (participation submissions). Additive: a person's self-submitted intent to
 // join, resolved to a member_people row on submit (invited -> added, or new added).
 export const MEMBER_PARTICIPATION_MIGRATION: Migration = {
   namespace: "member",
-  id: "0002_participation",
+  id: "0003_participation",
   up: `
 CREATE TABLE member_participations (
   id               TEXT PRIMARY KEY,
@@ -84,7 +97,7 @@ CREATE INDEX idx_member_participations_member ON member_participations(member_id
 // without a default). Retained on member_people too so the roster keeps both channels.
 export const MEMBER_PARTICIPATION_EMAILS_MIGRATION: Migration = {
   namespace: "member",
-  id: "0003_participation_emails",
+  id: "0004_participation_emails",
   up: `
 ALTER TABLE member_participations ADD COLUMN school_email TEXT;
 ALTER TABLE member_participations ADD COLUMN gmail TEXT;
@@ -96,6 +109,7 @@ ALTER TABLE member_people ADD COLUMN gmail TEXT;
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
+  MEMBER_IDENTITY_LINK_MIGRATION,
   MEMBER_PARTICIPATION_MIGRATION,
   MEMBER_PARTICIPATION_EMAILS_MIGRATION,
 ];
