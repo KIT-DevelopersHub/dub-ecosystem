@@ -112,71 +112,33 @@ svg {
 
 /* ---- shell chrome (FE2 wiring around @dub/ui AppShell) --------------------- */
 
-/* Brand lockup pinned to the top of the sidebar. */
-.fe2-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  padding: var(--dub-space-4) var(--dub-space-4) var(--dub-space-3);
-  min-width: 0;
-}
-.fe2-brand-mark {
+/* Header brand lockup: "DevHub" (bold, primary) is the app label AND the home导线;
+ * the account email rides alongside — small, muted, secondary. Rendered inside the
+ * @dub/ui PageHeader <h1>, so the anchor inherits the bold title weight/size. */
+.fe2-brandline {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  border-radius: var(--dub-radius-md);
-  background: linear-gradient(135deg, var(--dub-color-brand-400), var(--dub-color-brand-600));
-  color: #fff;
-  font-weight: var(--dub-font-weight-bold);
-  font-size: var(--dub-font-size-md);
-  box-shadow: var(--dub-shadow-sm);
-}
-.fe2-brand-text {
-  display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: var(--dub-space-2);
   min-width: 0;
-  overflow: hidden;
 }
-.fe2-brand-title {
-  font-size: var(--dub-font-size-sm);
-  font-weight: var(--dub-font-weight-bold);
+.fe2-brandline-home {
   color: var(--dub-color-text-primary);
-  line-height: var(--dub-font-line-height-tight);
-  white-space: nowrap;
+  text-decoration: none;
+  border-radius: var(--dub-radius-sm);
+  transition: color var(--dub-motion-fast) var(--dub-motion-easing);
 }
-.fe2-brand-sub {
+.fe2-brandline-home:hover {
+  color: var(--dub-color-text-link);
+}
+.fe2-brandline-account {
+  min-width: 0;
   font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-regular);
+  line-height: var(--dub-font-line-height-tight);
   color: var(--dub-color-text-muted);
   white-space: nowrap;
-}
-
-/* Header user cluster. */
-.fe2-header-user {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  padding-left: var(--dub-space-2);
-  margin-left: var(--dub-space-1);
-  border-left: 1px solid var(--dub-color-border-default);
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm);
-  white-space: nowrap;
-}
-.fe2-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--dub-radius-full);
-  background: var(--dub-color-brand-100);
-  color: var(--dub-color-brand-700);
-  font-size: var(--dub-font-size-xs);
-  font-weight: var(--dub-font-weight-bold);
-  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Content max width so wide screens keep comfortable line lengths. */
@@ -372,35 +334,49 @@ svg {
   color: var(--dub-color-text-muted);
 }
 
-/* ---- home launchpad (revamp) ---------------------------------------------- */
-/* The whole screen is bounded to one viewport: no page scroll. Chrome (sticky
- * header + shellContent padding + demo banner) is subtracted; the value is a
- * safe over-estimate so we prefer a small bottom gap over a scrollbar. On short
- * screens the min-height floor + inner card scroll keep it from collapsing. */
-.fe2-home {
+/* ---- home dashboard (revamp) ---------------------------------------------- */
+/* The dashboard is clamped to exactly one viewport — its height is set inline by
+ * useViewportFit (window height minus the chrome measured above it) and overflow
+ * is hidden, so the PAGE never scrolls. Any surplus is absorbed by the internal
+ * scroll regions (app grid / event list), never by the body. A centered max-width
+ * keeps the grid comfortable on ultra-wide screens. */
+.fe2-home.fe2-dashboard {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--dub-space-5);
+  gap: var(--dub-space-4);
+  overflow: hidden;
 }
 .fe2-home > [data-testid="fe2-home-header"] {
-  padding-bottom: var(--dub-space-1);
+  padding-bottom: 0;
 }
-/* Dashboard body: main visualization column + a live-panel rail. The dashboard
- * scrolls naturally (the KPI row above keeps the concise overview at the top). */
+/* Dashboard body fills the remaining height below the KPI row; min-height:0 lets
+ * its children own their overflow instead of pushing the page. */
 .fe2-dash-body {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.1fr) minmax(280px, 1fr);
   gap: var(--dub-space-4);
-  align-items: start;
+  align-items: stretch;
 }
 .fe2-dash-main {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--dub-space-4);
 }
+/* The two visualization cards sit side by side to save vertical space. */
+.fe2-dash-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--dub-space-4);
+}
 .fe2-dash-section-title {
-  margin: var(--dub-space-1) 0 0;
+  margin: 0 0 var(--dub-space-2);
   font-size: var(--dub-font-size-sm);
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-secondary);
@@ -408,25 +384,44 @@ svg {
 @media (max-width: 860px) {
   .fe2-dash-body {
     grid-template-columns: 1fr;
+    /* On a single column the body is allowed to scroll internally (still no page
+     * scroll — the dashboard itself stays clamped with overflow hidden). */
+    overflow-y: auto;
+    grid-auto-rows: min-content;
+  }
+  .fe2-dash-cards {
+    grid-template-columns: 1fr;
   }
 }
 
 /* ---- KPI row (at-a-glance overview) --------------------------------------- */
+/* Six tiles on one row at desktop widths (auto-fit keeps them from wrapping into
+ * a tall block); they reflow to 3/2 columns as the viewport narrows. */
 .fe2-kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--dub-space-3);
+}
+@media (max-width: 1100px) {
+  .fe2-kpi-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 560px) {
+  .fe2-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .fe2-kpi {
   display: flex;
   flex-direction: column;
   gap: var(--dub-space-2);
-  padding: var(--dub-space-4);
+  padding: var(--dub-space-3);
   background: var(--dub-color-surface-raised);
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg);
   box-shadow: var(--dub-shadow-sm);
-  min-height: 118px;
+  min-height: 96px;
   transition:
     border-color var(--dub-motion-fast) var(--dub-motion-easing),
     box-shadow var(--dub-motion-fast) var(--dub-motion-easing);
@@ -490,7 +485,7 @@ svg {
   min-width: 0;
 }
 .fe2-kpi-value {
-  font-size: var(--dub-font-size-3xl);
+  font-size: var(--dub-font-size-2xl);
   font-weight: var(--dub-font-weight-bold);
   letter-spacing: -0.02em;
   line-height: 1.05;
@@ -625,23 +620,31 @@ svg {
   font-variant-numeric: tabular-nums;
 }
 
-/* Left: clickable app tiles. auto-fill so tiles reflow to the available width;
- * align-content:start keeps them top-packed instead of stretching vertically. */
+/* Left: clickable app tiles. The section fills the remaining height of the main
+ * column and its grid scrolls internally — the safety valve that keeps the page
+ * itself from ever scrolling when many tiles + cards exceed one viewport. */
 .fe2-home-apps {
+  flex: 1;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .fe2-home-apps-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: var(--dub-space-3);
+  grid-template-columns: repeat(auto-fill, minmax(166px, 1fr));
+  grid-auto-rows: min-content;
+  gap: var(--dub-space-2);
   align-content: start;
 }
 .fe2-home-tile {
   display: flex;
   align-items: center;
-  gap: var(--dub-space-3);
-  padding: var(--dub-space-3) var(--dub-space-4);
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-3);
   background: var(--dub-color-surface-raised);
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg);
@@ -668,8 +671,8 @@ svg {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border-radius: var(--dub-radius-md);
   background: var(--dub-color-brand-100);
   color: var(--dub-color-brand-700);
@@ -677,7 +680,7 @@ svg {
 .fe2-home-tile-main {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
   flex: 1;
 }
@@ -686,6 +689,9 @@ svg {
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-primary);
   line-height: var(--dub-font-line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .fe2-home-tile-desc {
   font-size: var(--dub-font-size-xs);
@@ -724,14 +730,15 @@ svg {
   transform: translateX(0);
 }
 
-/* Right: live BFF panels. The column stacks and never pushes the page — the
- * events list scrolls inside its own card instead. */
+/* Right: live BFF panels. The column fills the body height and scrolls internally
+ * (its own safety valve) so it never pushes the page — the dashboard stays clamped. */
 .fe2-home-side {
   display: flex;
   flex-direction: column;
   gap: var(--dub-space-4);
   min-height: 0;
   min-width: 0;
+  overflow-y: auto;
 }
 .fe2-home-card-head {
   display: flex;

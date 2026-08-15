@@ -12,6 +12,7 @@
 // are not aggregated by /bff/home yet, so they render illustrative values tagged "デモ".
 // Partial upstream failure is surfaced per-frame via useBffHome().errorFor — no global
 // toast. FE3–FE7 may still contribute a homeWidget; each renders in its own boundary.
+import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
 import type { ApiClient } from "../../lib/api-client.tsx";
@@ -118,6 +119,34 @@ function countdownStatus(days: number): MetricStatus {
   return "info";
 }
 
+// Shell content bottom padding (@dub/ui `.shellContent` uses --dub-space-6 = 24px).
+// Left over below the clamped dashboard so the shell总高 lands on exactly 100vh.
+const SHELL_CONTENT_PAD_BOTTOM = 24;
+const MIN_DASHBOARD_H = 360;
+
+/** Locks the dashboard to a single viewport (hard requirement: Home never scrolls
+ *  the page). Measures the element's offset from the top of the window — the shell
+ *  header + content padding stacked above it — and sets its height to fill the rest,
+ *  minus the shell's bottom padding. With `overflow: hidden` on the dashboard, any
+ *  surplus content is absorbed by the internal scroll regions (event list / app
+ *  grid) rather than the page. Recomputes on resize (the header can re-wrap narrow). */
+function useViewportFit<T extends HTMLElement>(): RefObject<T> {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof window === "undefined") return;
+    const apply = (): void => {
+      const top = el.getBoundingClientRect().top;
+      const h = Math.max(MIN_DASHBOARD_H, window.innerHeight - top - SHELL_CONTENT_PAD_BOTTOM);
+      el.style.height = `${h}px`;
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
+  return ref;
+}
+
 export function HomeScreen({
   api,
   homeWidgets = [],
@@ -167,8 +196,10 @@ export function HomeScreen({
   const worstStatus = usageStatusFromPct(worst.pct);
   const unreadStatus: MetricStatus = notificationsError ? "info" : unread > 0 ? "warn" : "good";
 
+  const rootRef = useViewportFit<HTMLElement>();
+
   return (
-    <main data-testid="fe2-home" className="fe2-page fe2-home fe2-dashboard">
+    <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">
       <PageHeader
         testId="fe2-home-header"
         title="ダッシュボード"
@@ -251,6 +282,7 @@ export function HomeScreen({
       <div className="fe2-dash-body">
         {/* ── left: visualizations + app launchpad ─────────────────────────────── */}
         <div className="fe2-dash-main">
+          <div className="fe2-dash-cards">
           <Card
             testId="fe2-home-usage"
             header={
@@ -304,6 +336,7 @@ export function HomeScreen({
           >
             <SegmentBar segments={TASK_SEGMENTS} testId="fe2-home-task-segbar" />
           </Card>
+          </div>
 
           <section className="fe2-home-apps" aria-label="機能へ移動">
             <h2 className="fe2-dash-section-title">アプリ</h2>
