@@ -3,7 +3,7 @@
 // through the proxy and upserts them as roster users; degrades to a "未接続" notice
 // when the proxy is unconfigured.
 import { describe, it, expect } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { UserListPage } from "../src/components/UserListPage";
 import { renderWithProviders, makeMe } from "./renderWithProviders";
 import { createMockClient } from "../src/api/mockClient";
@@ -27,19 +27,26 @@ describe("UserListPage — Email Routing sync", () => {
     expect(screen.getByTestId("fe7-users-invite")).toBeInTheDocument();
   });
 
-  it("syncs Email Routing addresses into the roster as source=email-routing rows", async () => {
+  it("previews the diff first, then applies only on the explicit 適用 button (#5)", async () => {
     renderWithProviders(<UserListPage />, { me: ADMIN });
     await waitFor(() => expect(screen.getByTestId("fe7-users-row-user_alice")).toBeInTheDocument());
     // seeded routing addresses (info/support/noreply@developershub.jp) are not users yet
     expect(screen.queryByText("info@developershub.jp")).not.toBeInTheDocument();
 
+    // clicking sync shows the read-only preview — the roster is NOT changed yet.
     fireEvent.click(screen.getByTestId("fe7-users-sync"));
+    await waitFor(() => expect(screen.getByTestId("fe7-sync-preview")).toBeInTheDocument());
+    expect(screen.getByTestId("fe7-sync-add")).toBeInTheDocument(); // adds bucket lists new addresses
+    // still not applied: no new roster row for info yet.
+    const table = screen.getByTestId("fe7-users-table");
+    expect(within(table).queryByText("info@developershub.jp")).not.toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByText("info@developershub.jp")).toBeInTheDocument());
-    expect(screen.getByText("support@developershub.jp")).toBeInTheDocument();
-    expect(screen.getByText("noreply@developershub.jp")).toBeInTheDocument();
+    // explicit apply.
+    fireEvent.click(screen.getByTestId("fe7-sync-apply"));
+    await waitFor(() => expect(within(screen.getByTestId("fe7-users-table")).getByText("info@developershub.jp")).toBeInTheDocument());
+    expect(within(screen.getByTestId("fe7-users-table")).getByText("support@developershub.jp")).toBeInTheDocument();
     // provenance badge is rendered for a synced row
-    const infoRow = screen.getByText("info@developershub.jp").closest("tr")!;
+    const infoRow = within(screen.getByTestId("fe7-users-table")).getByText("info@developershub.jp").closest("tr")!;
     expect(infoRow.textContent).toContain("Email Routing");
   });
 

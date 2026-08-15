@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DevHub Chat (FE6)</title>
+    <style>
+      /* Standalone host reset. The chat feature (.app) uses height:100% and
+         expects its host chain to establish a full-viewport box. In admin-spa
+         the FE2 shell provides this; standalone must supply it here or the grid
+         collapses to content height and the browser's default 8px body margin
+         leaves a stray border around the app (the "謎の余白"). */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

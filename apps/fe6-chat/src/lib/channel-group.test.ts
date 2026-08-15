@@ -7,6 +7,7 @@ function chan(id: string, over: Partial<Channel>): Channel {
     id,
     orgId: "org",
     type: "topic",
+    visibility: "public",
     name: id,
     topic: null,
     eventId: null,

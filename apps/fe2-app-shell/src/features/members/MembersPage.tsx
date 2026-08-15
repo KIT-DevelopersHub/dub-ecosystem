@@ -13,12 +13,13 @@ import {
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
+import { useMembersOverview, useDeleteMember, useDeleteTeam, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
 import { ListView } from "./ListView.tsx";
 import { TeamsView } from "./TeamsView.tsx";
 import { OrgChartView } from "./OrgChartView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { TeamFormDialog } from "./TeamFormDialog.tsx";
+import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import styles from "./members.module.css";
 
@@ -28,11 +29,14 @@ export function MembersPage(): JSX.Element {
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
+  const identityUsers = useIdentityUsers();
+  const unlinkIdentity = useUnlinkIdentity();
 
   const [tab, setTab] = useState<TabId>("list");
   const [search, setSearch] = useState("");
   const [memberDialog, setMemberDialog] = useState<{ open: boolean; editing: OrgMember | null }>({ open: false, editing: null });
   const [teamDialog, setTeamDialog] = useState<{ open: boolean; editing: MemberTeam | null }>({ open: false, editing: null });
+  const [linkDialog, setLinkDialog] = useState<{ open: boolean; member: OrgMember | null }>({ open: false, member: null });
   const [confirm, setConfirm] = useState<
     | { kind: "member"; target: OrgMember }
     | { kind: "team"; target: MemberTeam }
@@ -43,11 +47,27 @@ export function MembersPage(): JSX.Element {
   const members = overview.data?.members ?? [];
   const teamsById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
 
+  // identity userId -> display label for the linked-account column, and the set of
+  // accounts already linked to some member (disabled in the link picker; 1:1 link).
+  const accountLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const u of identityUsers.data?.items ?? []) map.set(u.id, u.email || u.displayName);
+    return map;
+  }, [identityUsers.data]);
+  const takenIds = useMemo(
+    () => new Set(members.map((m) => m.identityUserId).filter((id): id is string => !!id)),
+    [members],
+  );
+
   const filteredMembers = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return members;
     return members.filter(
-      (m) => m.name.toLowerCase().includes(q) || (m.roleTitle ?? "").toLowerCase().includes(q),
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        (m.roleTitle ?? "").toLowerCase().includes(q) ||
+        (m.department ?? "").toLowerCase().includes(q) ||
+        (m.grade ?? "").toLowerCase().includes(q),
     );
   }, [members, search]);
 
@@ -103,7 +123,7 @@ export function MembersPage(): JSX.Element {
           <div className={styles.toolbarSpacer} />
           {tab === "list" ? (
             <div className={styles.searchField}>
-              <TextField id="members-search" value={search} onChange={setSearch} placeholder="氏名・役割で検索" testId="members-search" />
+              <TextField id="members-search" value={search} onChange={setSearch} placeholder="氏名・役割・学科・学年で検索" testId="members-search" />
             </div>
           ) : null}
           {tab === "org" ? (
@@ -115,7 +135,15 @@ export function MembersPage(): JSX.Element {
       </div>
 
       {tab === "list" ? (
-        <ListView members={filteredMembers} teamsById={teamsById} onEdit={openEditMember} onDelete={(m) => setConfirm({ kind: "member", target: m })} />
+        <ListView
+          members={filteredMembers}
+          teamsById={teamsById}
+          accountLabels={accountLabels}
+          onEdit={openEditMember}
+          onDelete={(m) => setConfirm({ kind: "member", target: m })}
+          onLink={(m) => setLinkDialog({ open: true, member: m })}
+          onUnlink={(m) => unlinkIdentity.mutate({ id: m.id, version: m.version })}
+        />
       ) : null}
       {tab === "teams" ? (
         <TeamsView
@@ -139,6 +167,13 @@ export function MembersPage(): JSX.Element {
         open={teamDialog.open}
         onClose={() => setTeamDialog({ open: false, editing: null })}
         editing={teamDialog.editing}
+      />
+
+      <LinkIdentityDialog
+        open={linkDialog.open}
+        onClose={() => setLinkDialog({ open: false, member: null })}
+        member={linkDialog.member}
+        takenIds={takenIds}
       />
 
       <ConfirmDialog

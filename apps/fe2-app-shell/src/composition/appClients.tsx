@@ -32,6 +32,8 @@ import type {
   PostMessageResponse,
   ReactionToggleRequest,
   ReadStateUpdateRequest,
+  SearchHit,
+  SearchMessagesRequest,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -152,6 +154,16 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       }),
     removeMember: (id: common.ChannelId, userId: common.UserId) =>
       api.request<void>({ method: "DELETE", path: `${CHAT}/channels/${id}/members/${userId}` as ApiPath }),
+    listMembers: (id: common.ChannelId) =>
+      api.request<ChannelMember[]>({ method: "GET", path: `${CHAT}/channels/${id}/members` as ApiPath }),
+    searchMessages: (req: SearchMessagesRequest) => {
+      const query = normalizeQuery({ q: req.q, channelId: req.channelId, limit: req.limit });
+      return api.request<SearchHit[]>({ method: "GET", path: `${CHAT}/search`, ...(query ? { query } : {}) });
+    },
+    listPinned: (id: common.ChannelId) =>
+      api.request<Message[]>({ method: "GET", path: `${CHAT}/channels/${id}/pins` as ApiPath }),
+    togglePin: (id: common.ChannelId, messageId: common.MessageId) =>
+      api.request<Message[]>({ method: "POST", path: `${CHAT}/channels/${id}/pins` as ApiPath, body: { messageId } }),
     listMessages: (req: ListMessagesRequest) => {
       const query = normalizeQuery({
         channelId: req.channelId,

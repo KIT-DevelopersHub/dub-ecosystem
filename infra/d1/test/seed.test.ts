@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { identity } from "@dub/types";
 import { seedScenario } from "../seed/scenarios";
 import { applyAndSeed } from "../seed/seed-demo";
 import { SEED } from "../seed/fixtures";
@@ -122,5 +123,41 @@ describe("seedScenario", () => {
     expect(h.scenario).toBe("conference-demo");
     expect(count(raw, "task_tasks")).toBe(10);
     expect(fkViolations(raw)).toEqual([]);
+  });
+
+  // Regression (prod incident 2026-08-15): every system role must grant the FE5
+  // self-service notification scopes. The notifications inbox (/notifications) and
+  // preferences (/settings/notifications) pages gate on these in the SPA, so a role
+  // missing them makes 通知一覧 a 403 for that tier — invisible to the demo, whose
+  // DEMO_PERMISSIONS hard-code both perms. Migration 0004_notif_self_perms closes it.
+  it("every system role grants notif:inbox:self + notif:prefs:self (migration only)", async () => {
+    const { raw } = await migratedD1();
+    const roles = ["role_sys_admin", "role_sys_maintainer", "role_sys_organizer", "role_sys_member"];
+    const perms = ["notif:inbox:self", "notif:prefs:self"];
+    for (const roleId of roles) {
+      for (const permKey of perms) {
+        const row = raw
+          .prepare("SELECT 1 AS ok FROM identity_role_permissions WHERE role_id = ? AND permission_key = ?")
+          .get(roleId, permKey) as { ok: number } | undefined;
+        expect(row?.ok, `${roleId} must grant ${permKey}`).toBe(1);
+      }
+    }
+  });
+
+  // Super-admin invariant (prod incident 2026-08-15 — "adminなのに操作ボタンが押せない" が頻発):
+  // the `admin` system role must hold EVERY key in the frozen RBAC catalog. The 0002 seed
+  // drifted below the catalog and single holes were patched reactively (drive:* / mail:read_all /
+  // notif self / github:* / webhook:read). This guard fails the build the instant a new catalog
+  // key is added without granting it to admin — so "admin is missing a permission" can never
+  // silently ship again. The fill migrations are the 正本; admin = the full catalog, always.
+  it("admin holds the ENTIRE frozen permission catalog (no missing keys, migration only)", async () => {
+    const { raw } = await migratedD1();
+    const granted = new Set(
+      (raw
+        .prepare("SELECT permission_key FROM identity_role_permissions WHERE role_id = 'role_sys_admin'")
+        .all() as Array<{ permission_key: string }>).map((r) => r.permission_key),
+    );
+    const missing = identity.PERMISSION_CATALOG.map((e) => e.key).filter((k) => !granted.has(k));
+    expect(missing, `admin missing catalog perms: ${missing.join(", ")}`).toEqual([]);
   });
 });

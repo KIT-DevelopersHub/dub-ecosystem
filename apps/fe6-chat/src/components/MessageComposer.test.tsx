@@ -30,7 +30,7 @@ describe("MessageComposer", () => {
     const input = screen.getByTestId("fe6-composer-input");
     await user.type(input, "ship it");
     await user.click(screen.getByTestId("fe6-composer-send"));
-    expect(onSend).toHaveBeenCalledWith("ship it");
+    expect(onSend).toHaveBeenCalledWith("ship it", undefined);
     expect(loadDraft("chn_a")).toBe("");
   });
 

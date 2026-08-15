@@ -1,7 +1,7 @@
 // In-memory ChatRepo: backs unit tests and local runs. Mirrors the D1 repo's
 // keyset (by ULID id) so pagination / gap-fill tests are representative.
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow } from "./types";
 
 function cmpStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -19,6 +19,7 @@ export class InMemoryChatRepo implements ChatRepo {
   private messages = new Map<common.MessageId, MessageRow>();
   private reactions = new Map<common.MessageId, ReactionKey[]>();
   private reads = new Map<string, { lastReadMessageId: common.MessageId | null }>(); // channelId|userId
+  private pins = new Map<common.ChannelId, Map<common.MessageId, string>>(); // channelId -> (messageId -> pinnedAt)
 
   private mkey(channelId: string, userId: string): string {
     return `${channelId}|${userId}`;
@@ -173,5 +174,45 @@ export class InMemoryChatRepo implements ChatRepo {
       if (lastReadMessageId === null || m.id > lastReadMessageId) n++;
     }
     return n;
+  }
+
+  // ---- pins ----
+  async listPinnedMessages(channelId: common.ChannelId): Promise<MessageRow[]> {
+    const set = this.pins.get(channelId);
+    if (!set) return [];
+    return [...this.messages.values()]
+      .filter((m) => m.channelId === channelId && m.deletedAt === null && set.has(m.id))
+      .sort((a, b) => cmpStr(b.id, a.id)) // newest-pinned message first (id desc)
+      .map((m) => ({ ...m, attachmentFileIds: [...m.attachmentFileIds] }));
+  }
+  async isPinned(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean> {
+    return this.pins.get(channelId)?.has(messageId) ?? false;
+  }
+  async addPin(channelId: common.ChannelId, messageId: common.MessageId, _userId: common.UserId, at: string): Promise<void> {
+    const set = this.pins.get(channelId) ?? new Map<common.MessageId, string>();
+    if (!set.has(messageId)) set.set(messageId, at);
+    this.pins.set(channelId, set);
+  }
+  async removePin(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean> {
+    return this.pins.get(channelId)?.delete(messageId) ?? false;
+  }
+
+  // ---- search ----
+  async searchMessages(q: { userId: common.UserId; text: string; channelId?: common.ChannelId; limit: number }): Promise<SearchRow[]> {
+    const needle = q.text.toLowerCase();
+    const out: SearchRow[] = [];
+    const rows = [...this.messages.values()].sort((a, b) => cmpStr(b.id, a.id)); // newest first
+    for (const m of rows) {
+      if (out.length >= q.limit) break;
+      if (m.deletedAt !== null) continue;
+      if (q.channelId && m.channelId !== q.channelId) continue;
+      if (!m.body.toLowerCase().includes(needle)) continue;
+      const ch = this.channels.get(m.channelId);
+      if (!ch) continue;
+      const readable = ch.visibility === "public" || this.members.has(this.mkey(ch.id, q.userId));
+      if (!readable) continue;
+      out.push({ message: { ...m, attachmentFileIds: [...m.attachmentFileIds] }, channelName: ch.name, channelType: ch.type });
+    }
+    return out;
   }
 }

@@ -13,6 +13,7 @@ import { type AuditFilters } from "../lib/auditQuery";
 import { type MailStatusResponse } from "../lib/mailStatus";
 import { presentError } from "../lib/errorDisplay";
 import { applyRoleGrant, makePendingAssignment } from "../lib/optimistic";
+import { runOffboard } from "../lib/offboard";
 import type {
   CreateRoleRequest,
   UpdateRoleRequest,
@@ -20,6 +21,7 @@ import type {
   RoleAssignment,
   RosterUser,
   SyncEmailRoutingResult,
+  EmailRoutingSyncPreview,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
   UpdateEmailAddressRequest,
@@ -209,6 +211,33 @@ export function useDeleteRole() {
   });
 }
 
+/** #2: one-shot退任 (offboard). Runs the identity one-shot + member在籍更新 + Email
+ *  Routing削除, then refreshes the affected caches. Returns the per-step OffboardOutcome
+ *  so the caller can render partial success. NON-optimistic (destructive, after confirm). */
+export function useOffboardUser() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (user: { id: common.UserId; email: string }) => runOffboard(api, user),
+    onSuccess: (outcome) => {
+      qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users"] });
+      qc.invalidateQueries({ queryKey: queryKeys.user(outcome.identity!.user.id) });
+      qc.invalidateQueries({ queryKey: queryKeys.userRoles(outcome.identity!.user.id) });
+      qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() });
+      toast(
+        outcome.ok
+          ? { kind: "success", title: "オフボードが完了しました" }
+          : { kind: "error", title: "一部の処理が失敗しました", description: "詳細を確認してください" },
+      );
+    },
+    onError: (err) => {
+      const p = presentError(err);
+      toast({ kind: "error", title: "オフボードに失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
+}
+
 /** NON-optimistic: invite. */
 export function useInviteUser() {
   const { api } = useRosterContext();
@@ -226,6 +255,28 @@ export function useInviteUser() {
  * it rejects with EMAIL_ROUTING_UNCONFIGURED — the caller reads `mutation.error`
  * (isEmailRoutingUnconfigured) to render the "未接続" notice instead of a toast.
  */
+/**
+ * #5: PREVIEW the Email Routing sync. Reads the @developershub.jp addresses through the
+ * proxy (needs mail:admin), then asks identity for the read-only diff (needs
+ * identity:admin) WITHOUT applying it. Surfaces EMAIL_ROUTING_UNCONFIGURED the same way
+ * as the apply, so the caller reuses isEmailRoutingUnconfigured for the "未接続" notice.
+ */
+export function usePreviewEmailRouting() {
+  const { api } = useRosterContext();
+  const { toast } = useToast();
+  return useMutation<EmailRoutingSyncPreview>({
+    mutationFn: async () => {
+      const { items } = await api.listRosterEmailAddresses();
+      return api.previewEmailRouting(items);
+    },
+    onError: (err) => {
+      if (isEmailRoutingUnconfigured(err)) return; // inline notice, not a toast
+      const p = presentError(err);
+      toast({ kind: "error", title: "プレビューの取得に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
+}
+
 export function useSyncEmailRouting() {
   const { api } = useRosterContext();
   const qc = useQueryClient();

@@ -113,6 +113,11 @@ export function createApp(opts: AppOptions): App {
   // Reconcile the roster with the Cloudflare Email Routing @developershub.jp addresses.
   // The caller (roster console, holds mail:admin) relays the addresses it read from the
   // mail-gateway proxy; identity upserts them by email (source=email-routing) synchronously.
+  // #5: read-only diff preview — no writes; the console applies with the endpoint below.
+  ext.post("/users/sync-email-routing/preview", requirePermission("identity:admin"), async (c) => {
+    const body = await readJson<{ addresses?: unknown }>(c);
+    return c.json(await svc.previewEmailRouting(orgId, body as never));
+  });
   ext.post("/users/sync-email-routing", requirePermission("identity:admin"), async (c) => {
     const body = await readJson<{ addresses?: unknown }>(c);
     return c.json(await svc.syncEmailRouting(orgId, body as never, ctxOf(c)));
@@ -121,6 +126,12 @@ export function createApp(opts: AppOptions): App {
   ext.patch("/users/:id", requirePermission("identity:admin"), async (c) => {
     const body = await readJson<Record<string, unknown>>(c);
     return c.json(await svc.updateUser(c.req.param("id"), orgId, body, ctxOf(c)));
+  });
+
+  // One-shot退任: revoke sessions + strip roles + disable, atomically & idempotently.
+  // The cross-service steps (Email Routing削除・member在籍更新) are chained by the caller.
+  ext.post("/users/:id/offboard", requirePermission("identity:admin"), async (c) => {
+    return c.json(await svc.offboardUser(c.req.param("id"), orgId, ctxOf(c)));
   });
 
   ext.get("/roles", requirePermission("identity:read"), async (c) => {

@@ -84,7 +84,15 @@ export function AppLauncher({
                 role="menuitem"
                 className={cx(styles.tile)}
                 data-testid={testId ? `${testId}-item-${item.id.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}` : undefined}
-                onClick={() => select(item)}
+                // Release-gated tiles stay in the grid (消さない) but are greyed +
+                // non-interactive; the reason surfaces as a native tooltip.
+                disabled={item.disabled ?? false}
+                aria-disabled={item.disabled ?? undefined}
+                title={item.disabled ? item.disabledReason : undefined}
+                onClick={() => {
+                  if (item.disabled) return;
+                  select(item);
+                }}
               >
                 <span className={cx(styles.tileIcon)}>
                   {item.icon ? <Icon name={item.icon} size="md" /> : null}

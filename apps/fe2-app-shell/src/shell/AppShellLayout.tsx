@@ -15,6 +15,7 @@ import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
+import { isAppPublished, isPrivilegedViewer, UNPUBLISHED_TILE_REASON } from "../lib/releaseGate.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -53,12 +54,16 @@ export interface AppShellLayoutProps {
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
 // injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal), sorted by
-// order. Entries carrying requiredPermissions are hidden unless the viewer holds
-// them all (can() is fail-closed while /me loads), so the admin (ロール管理) tools
-// appear for admins only — mirroring each route's own guard (defense in depth).
+// order. Member release-gating (社長決定 2026-08-14, see lib/releaseGate): every tile
+// is ALWAYS rendered (消さない — apps are never removed from the launcher, per
+// [[dub-never-hide-or-reduce-apps]]); an app the current viewer may not open yet is
+// greyed-out + disabled instead. Admins/maintainers (isPrivilegedViewer) bypass the
+// gate and see every app active for testing/development; a general member sees only
+// member-published apps active (メールのみ as of 2026-08-14) and the rest greyed with
+// a "準備中" tooltip. Route guards (router.tsx) enforce the same on direct navigation.
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
+  const privileged = isPrivilegedViewer(can);
   return [...navEntries]
-    .filter((entry) => (entry.requiredPermissions ?? []).every((p) => can(p)))
     .sort((a, b) => a.order - b.order)
     .map((entry) => {
       const badge = entry.badgeSource?.();
@@ -69,6 +74,11 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
+      // Greyed for a general member when the owning app is not member-published.
+      if (!privileged && !isAppPublished(entry.appId)) {
+        item.disabled = true;
+        item.disabledReason = UNPUBLISHED_TILE_REASON;
+      }
       return item;
     });
 }

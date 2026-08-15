@@ -6,7 +6,7 @@ const topic = { type: "topic", visibility: "public", name: "General" } as const;
 describe("POST /internal/system-messages", () => {
   it("without the x-dub-internal marker -> 404 (hidden)", async () => {
     const app = createApp(makeDeps());
-    const c = await call(app, "POST", "/channels", { body: topic });
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
     const res = await call(app, "POST", "/internal/system-messages", { body: { channelId: c.json.id, body: "sys" } });
     expect(res.status).toBe(404);
   });
@@ -14,7 +14,7 @@ describe("POST /internal/system-messages", () => {
   it("posts a system message to a channel (kind=system, authorId=null) without emitting chat.message.created", async () => {
     const deps = makeDeps();
     const app = createApp(deps);
-    const c = await call(app, "POST", "/channels", { body: topic });
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
     const res = await call(app, "POST", "/internal/system-messages", { internal: true, body: { channelId: c.json.id, body: "maintenance at 5pm" } });
     expect(res.status).toBe(201);
     expect(res.json.kind).toBe("system");
