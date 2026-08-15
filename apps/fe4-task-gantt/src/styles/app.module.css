@@ -323,6 +323,27 @@
   transition: background 0.1s ease;
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
+/* WBS leaf rows read a touch lighter than their work-package parent. */
+.tlRowChild { color: var(--dub-color-text-secondary); font-size: var(--dub-font-size-xs, 0.78rem); }
+/* collapse/expand chevron for a work-package row (rendered as a span, not a nested
+   button, since the row itself is a button). */
+.tlToggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  border-radius: var(--dub-radius-sm, 4px);
+  color: var(--dub-color-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.tlToggle:hover { background: var(--dub-color-surface-base); color: var(--dub-color-text-primary); }
+/* keeps childless top-level rows' text aligned with rows that have a chevron. */
+.tlToggleSpacer { flex: 0 0 auto; width: 16px; margin-right: 2px; }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
 /* team accent stripe on a row (team-grouped rows are ordered by team; the stripe
    makes each group's boundary legible without a heavyweight section header). */
@@ -370,7 +391,11 @@
 .tlResizer:hover { background: var(--dub-color-brand-200); }
 
 /* ---- right pane (timeline) ---- */
-.tlRight { flex: 0 0 auto; }
+/* `isolation` + a z-index make this pane its own stacking context, so its bars
+   (z-index up to 6 while dragging) stay trapped BELOW the sticky left pane
+   (`.tlLeft`, z-index 3) instead of tying it on z-index and painting over it as
+   the user scrolls horizontally. */
+.tlRight { flex: 0 0 auto; position: relative; z-index: 1; isolation: isolate; }
 .tlHeader {
   position: sticky;
   top: 0;

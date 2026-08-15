@@ -12,6 +12,17 @@ export interface GanttRow {
   assigneeId: UserId | null;
   /** Owning team (canonical team.Team), for team-scoped views. Additive. */
   teamId?: TeamId | null;
+  /** WBS hierarchy (all additive/optional; absent ⇒ a flat top-level row).
+   *  A row whose `parentTaskId` points at another row is a child (WBS leaf) of
+   *  that work-package; the UI indents it and hides it when the parent collapses. */
+  parentTaskId?: TaskId | null;
+  /** Depth in the WBS tree: 0 = work-package (top-level), 1 = leaf. */
+  depth?: number;
+  /** True when at least one other row lists this row as its `parentTaskId`
+   *  (the UI renders a collapse/expand toggle for it). */
+  hasChildren?: boolean;
+  /** WBS code (e.g. "4.9.3"), for stable ordering + a legible row label. */
+  wbs?: string;
 }
 
 export interface GanttDependencyLine {

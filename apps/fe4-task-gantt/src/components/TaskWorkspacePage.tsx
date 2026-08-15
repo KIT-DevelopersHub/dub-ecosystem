@@ -43,7 +43,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const gantt = useGanttData(eventId);
   const teams = useTeams().data ?? [];
 
-  const query = useMemo(() => toListTasksQuery(filter), [filter]);
+  // Load the whole event in one page: the gantt intersects its rows with this
+  // store set (see `filteredDto`), so a short default page would silently drop
+  // work-packages/leaves from the timeline. The WBS tree is ~170 rows.
+  const WORKSPACE_PAGE_LIMIT = 500;
+  const query = useMemo(
+    () => toListTasksQuery({ ...filter, limit: filter.limit ?? WORKSPACE_PAGE_LIMIT }),
+    [filter],
+  );
 
   useEffect(() => {
     void store.load(client, query);

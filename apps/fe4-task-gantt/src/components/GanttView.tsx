@@ -94,6 +94,24 @@ export function GanttView({
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
   const [collapsed, setCollapsed] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // WBS drill-down: set of expanded work-package ids. Empty = all collapsed, so the
+  // view opens on the 41 work-packages and each toggle reveals its leaf children.
+  const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() => new Set());
+
+  const toggleParent = useCallback((id: common.TaskId) => {
+    setOpenParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Rows actually shown: a child (has a parent) is hidden unless its parent is open.
+  const rows = useMemo(
+    () => dto.rows.filter((r) => !(r.parentTaskId && !openParents.has(r.parentTaskId))),
+    [dto.rows, openParents],
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
@@ -123,14 +141,14 @@ export function GanttView({
   }, [dto.rows]);
 
   const width = canvasWidth(win);
-  const bars = useMemo(() => timelineBars(dto.rows, win), [dto.rows, win]);
+  const bars = useMemo(() => timelineBars(rows, win), [rows, win]);
   const tops = useMemo(() => topSegments(win, zoom), [win, zoom]);
   const ticks = useMemo(() => bottomTicks(win, zoom), [win, zoom]);
   const weekends = useMemo(() => weekendBands(win, zoom), [win, zoom]);
   const tX = todayX(win);
-  const rowsH = Math.max(dto.rows.length * ROW_HEIGHT, ROW_HEIGHT);
+  const rowsH = Math.max(rows.length * ROW_HEIGHT, ROW_HEIGHT);
 
-  const titleById = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r.title])), [dto.rows]);
+  const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
   const segs = useMemo(() => {
@@ -282,7 +300,7 @@ export function GanttView({
       <div className={styles.tlToolbar}>
         <div className={styles.tlToolbarLeft}>
           <span className={styles.tlViewName}>タイムライン</span>
-          <span className={styles.tlCount}>{dto.rows.length} 件</span>
+          <span className={styles.tlCount}>{rows.length} 件</span>
         </div>
         <div className={styles.tlToolbarRight}>
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
@@ -340,24 +358,53 @@ export function GanttView({
                     ‹
                   </button>
                 </div>
-                {dto.rows.map((r) => (
-                  <button
-                    key={r.taskId}
-                    type="button"
-                    className={styles.tlRow}
-                    style={{ height: ROW_HEIGHT }}
-                    title={r.title}
-                    onClick={() => onSelect?.(r.taskId)}
-                    data-testid={`fe4-gantt-row-${r.taskId}`}
-                  >
-                    {teamColorById?.get(r.taskId) && (
-                      <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
-                    )}
-                    <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
-                    <span className={styles.tlRowName}>{r.title}</span>
-                    {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
-                  </button>
-                ))}
+                {rows.map((r) => {
+                  const depth = r.depth ?? 0;
+                  const isOpen = openParents.has(r.taskId);
+                  return (
+                    <button
+                      key={r.taskId}
+                      type="button"
+                      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""}`}
+                      style={{ height: ROW_HEIGHT, paddingLeft: 12 + depth * 18 }}
+                      title={r.title}
+                      onClick={() => onSelect?.(r.taskId)}
+                      data-testid={`fe4-gantt-row-${r.taskId}`}
+                    >
+                      {r.hasChildren ? (
+                        <span
+                          className={styles.tlToggle}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={isOpen ? "子タスクを閉じる" : "子タスクを開く"}
+                          aria-expanded={isOpen}
+                          data-testid={`fe4-gantt-toggle-${r.taskId}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleParent(r.taskId);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleParent(r.taskId);
+                            }
+                          }}
+                        >
+                          {isOpen ? "▾" : "▸"}
+                        </span>
+                      ) : (
+                        depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
+                      )}
+                      {teamColorById?.get(r.taskId) && (
+                        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
+                      )}
+                      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+                      <span className={styles.tlRowName}>{r.title}</span>
+                      {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
+                    </button>
+                  );
+                })}
                 {canWrite && onCreateOnDate && (
                   <button type="button" className={styles.tlAddRow} style={{ height: ROW_HEIGHT }} onClick={() => onCreateOnDate(null)} data-testid="fe4-gantt-addrow">
                     ＋ 新規タスク
@@ -404,7 +451,7 @@ export function GanttView({
                   <div key={b.key} className={styles.tlWeekend} style={{ left: b.x, width: b.width, height: rowsH }} aria-hidden />
                 ))}
                 {/* row lines / hover stripes */}
-                {dto.rows.map((_, i) => (
+                {rows.map((_, i) => (
                   <div key={i} className={styles.tlRowLine} style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }} aria-hidden />
                 ))}
 

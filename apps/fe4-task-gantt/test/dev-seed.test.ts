@@ -18,11 +18,30 @@ describe("dev-seed (real LMB conference data)", () => {
     expect(res.items.every((t) => typeof t.color === "string")).toBe(true);
   });
 
-  it("renders all 41 section work-packages as gantt rows, each with a bar", async () => {
+  it("renders the 41 work-packages + 128 WBS leaves as a two-level tree, each with a bar", async () => {
     const dto = await getDto();
-    expect(dto.rows).toHaveLength(41);
+    const parents = dto.rows.filter((r) => (r.depth ?? 0) === 0);
+    const leaves = dto.rows.filter((r) => (r.depth ?? 0) === 1);
+    expect(parents).toHaveLength(41); // LMB's 41 section work-packages
+    expect(leaves).toHaveLength(128); // 129 config leaves − the 3.3 self-leaf
+    expect(dto.rows).toHaveLength(169);
     expect(dto.rows.every((r) => r.startsAt !== null && r.endsAt !== null)).toBe(true);
     expect(dto.rows.every((r) => r.teamId !== null)).toBe(true);
+    // every leaf points at a real parent row that advertises children
+    const byId = new Map(dto.rows.map((r) => [r.taskId, r]));
+    expect(leaves.every((l) => byId.get(l.parentTaskId!)?.hasChildren === true)).toBe(true);
+  });
+
+  it("hangs the WBS leaves under their work-package parent (togglable drill-down)", async () => {
+    const dto = await getDto();
+    const sponsor = dto.rows.find((r) => r.taskId === "task_4_1"); // スポンサー: 打診・契約
+    expect(sponsor?.hasChildren).toBe(true);
+    const leaf = dto.rows.find((r) => r.taskId === "task_4_1_1");
+    expect(leaf?.parentTaskId).toBe("task_4_1");
+    expect(leaf?.depth).toBe(1);
+    expect(leaf?.wbs).toBe("4.1.1");
+    // the 開発 work-package (3.3) has no distinct leaves ⇒ no toggle
+    expect(dto.rows.find((r) => r.taskId === "task_3_3")?.hasChildren).toBe(false);
   });
 
   it("keeps the two real in-repo dates for WBS 3.4 (2026-08-16 → 2026-09-15)", async () => {
@@ -43,8 +62,8 @@ describe("dev-seed (real LMB conference data)", () => {
 
   it("lists tasks under the conference event with real assignee owners", async () => {
     const client = createDevClient();
-    const res = await client.request<task.ListTasksResponse>({ method: "GET", path: "/api/v1/tasks", query: { eventId: DEMO_EVENT_ID, limit: 100 } });
-    expect(res.items.length).toBe(41);
+    const res = await client.request<task.ListTasksResponse>({ method: "GET", path: "/api/v1/tasks", query: { eventId: DEMO_EVENT_ID, limit: 200 } });
+    expect(res.items.length).toBe(169); // 41 work-packages + 128 WBS leaves
     const kickoff = res.items.find((t) => t.id === "task_3_1");
     expect(kickoff?.assigneeId).toBe("usr_takaoka"); // 本部 owner = 高岡 己太朗
     expect(kickoff?.status).toBe("done");

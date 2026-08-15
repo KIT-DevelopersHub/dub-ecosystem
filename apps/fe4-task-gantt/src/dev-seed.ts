@@ -9,8 +9,10 @@
 //   leaders-meetup-bot/migrations/0077_gantt_tracker.sql                 (team/phase/wbs schema)
 //
 // Fidelity notes:
-//  - Each row below is a REAL section work-package (title/team/phase/WBS are verbatim
-//    from the LMB config). We render the section level (= LMB's GanttSummaryRow view).
+//  - Each section below is a REAL work-package (title/team/phase/WBS verbatim from the
+//    LMB config); under each we hang its REAL WBS leaves (the 129 leaf codes from the
+//    same config) as collapsible child rows — so the tree matches LMB's GanttSummaryRow
+//    view (41 work-packages) plus one level of drill-down (WBS leaves).
 //  - Per-task start/end dates are NOT committed in the public LMB repo (they live only
 //    in prod D1). We therefore derive each bar from its phase window (documented below)
 //    so the demo shows a faithful, legible timeline. The two tasks that DO carry real
@@ -129,7 +131,71 @@ const SECTIONS: Sec[] = [
   { wbs: "7.5", title: "本部: 事後処理・振り返り・引き継ぎ", team: "本部", phase: "F7" },
 ];
 
+// The 129 real WBS leaves (verbatim codes from LMB's summaryGroups config), keyed
+// by their parent section work-package. Each leaf becomes a child row that hangs
+// under its work-package and shows/hides via the parent's toggle. Leaf *titles* and
+// per-leaf dates are not committed in the public LMB repo (they live in prod D1),
+// so — like the section bars above — each leaf renders its real WBS code under its
+// process name, and its bar is sliced from the parent's phase window.
+const SECTION_LEAVES: Record<string, string[]> = {
+  "1.1": ["1.1.0", "1.1.1", "1.1.2", "1.1.3", "1.1.4", "1.1.5", "1.1.6", "1.1.7", "1.1.8", "1.1.9"],
+  "1.2": ["1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.2.5"],
+  "1.3": ["1.3.1", "1.3.2", "1.3.3", "1.3.4"],
+  "1.4": ["1.4.1", "1.4.2"],
+  "3.1": ["3.1.1", "3.1.2", "3.1.4", "3.1.5"],
+  "3.2": ["3.2.1", "3.1.3"],
+  "3.3": ["3.3"],
+  "3.4": ["3.4.1", "3.4.2", "3.4.3", "3.4.4", "3.4.5"],
+  "3.5": ["3.5.1", "3.5.2", "3.5.3"],
+  "3.6": ["3.6.1", "3.6.2", "3.6.3"],
+  "3.7": ["3.7.1", "3.7.2"],
+  "4.1": ["4.1.1"],
+  "4.2": ["4.2.1", "4.2.2", "4.2.3", "4.2.4", "4.2.5"],
+  "4.5": ["4.5.1", "4.5.2", "4.5.3", "4.5.4"],
+  "4.6": ["4.6.1", "4.6.2", "4.6.3"],
+  "4.7": ["4.7.1", "4.7.2"],
+  "4.8": ["4.8.1", "4.8.2"],
+  "4.9": ["4.9.1", "4.9.2", "4.9.3", "4.9.4", "4.9.5", "4.9.6", "4.9.7", "4.9.8"],
+  "4.10": ["4.10.1", "4.10.2", "4.10.3", "4.10.4", "4.10.5"],
+  "4.3": ["4.3.1"],
+  "4.4": ["4.4.1", "4.4.2", "4.4.3"],
+  "4.11": ["4.11.1", "4.11.2", "4.11.3"],
+  "4.12": ["4.12.1", "4.12.2", "4.12.3"],
+  "4.13": ["4.13.1"],
+  "4.14": ["1.5.2", "4.14.1", "4.14.2"],
+  "5.1": ["5.1.1"],
+  "5.2": ["5.2.1", "5.2.2"],
+  "6.1": ["6.1.1", "6.1.2"],
+  "6.2": ["6.2.1", "6.2.2"],
+  "6.3": ["6.3.1"],
+  "6.4": ["6.4.1", "6.4.2", "6.4.3"],
+  "6.5": ["6.5.1", "6.5.2", "6.5.3"],
+  "6.6": ["6.6.1", "6.6.2", "6.6.3", "6.6.4"],
+  "6.7": ["6.7.1", "6.7.2", "6.7.3"],
+  "6.8": ["6.8.1", "6.8.2", "6.8.3", "6.8.4"],
+  "6.9": ["6.9.1", "6.9.2"],
+  "7.1": ["7.1.1", "7.1.2"],
+  "7.2": ["7.2.1"],
+  "7.3": ["7.3.1", "7.3.6", "7.3.2", "7.3.3", "7.3.4", "7.3.5"],
+  "7.4": ["7.4.1", "7.4.2", "7.4.3", "7.4.4"],
+  "7.5": ["7.5.1", "7.5.2", "7.5.3", "7.5.4"],
+};
+
 const secId = (wbs: string): common.TaskId => `task_${wbs.replace(/\./g, "_")}`;
+
+/** Short process label for a leaf row: the section title without its team prefix
+ *  and trailing parenthetical, e.g. "会計: 法人設立（…）" -> "法人設立". */
+function shortProcess(title: string): string {
+  const afterTeam = title.includes(": ") ? title.slice(title.indexOf(": ") + 2) : title;
+  const paren = afterTeam.search(/[（(]/);
+  return (paren >= 0 ? afterTeam.slice(0, paren) : afterTeam).trim();
+}
+
+/** Row-hierarchy overlay the mock projects onto each GanttRow. */
+type MockSeedHierarchy = Record<
+  common.TaskId,
+  { parentTaskId: common.TaskId | null; depth: number; wbs?: string }
+>;
 
 // Real dependency edges we can represent at section level: the phase spine (critical)
 // plus real cross-section handoffs. from = predecessor (先行), to = successor (後続).
@@ -160,14 +226,24 @@ function defaultStatus(phase: Phase, end: number): task.TaskStatus {
   return "todo";
 }
 
-/** Build a task + its derived bar for each section (bars staggered within each phase). */
-function build(): { tasks: task.Task[]; rowDates: MockSeedRowDates; deps: gantt.GanttDependencyLine[] } {
+/** Build the work-package (parent) + WBS-leaf (child) tasks and their derived
+ *  bars. Parents are staggered within each phase; each parent's leaves are then
+ *  sliced across the parent's own bar so a waterfall reads under it when opened. */
+function build(): {
+  tasks: task.Task[];
+  rowDates: MockSeedRowDates;
+  deps: gantt.GanttDependencyLine[];
+  hierarchy: MockSeedHierarchy;
+} {
   const now = "2026-06-01T00:00:00.000Z";
   const byPhase = new Map<Phase, Sec[]>();
   for (const s of SECTIONS) (byPhase.get(s.phase) ?? byPhase.set(s.phase, []).get(s.phase)!).push(s);
 
   const tasks: task.Task[] = [];
   const rowDates: MockSeedRowDates = {};
+  const hierarchy: MockSeedHierarchy = {};
+
+  const pushTask = (t: task.Task) => tasks.push(t);
 
   for (const [phase, secs] of byPhase) {
     const win = PHASE_WINDOW[phase];
@@ -187,7 +263,8 @@ function build(): { tasks: task.Task[]; rowDates: MockSeedRowDates; deps: gantt.
       }
       const status = s.status ?? defaultStatus(phase, endMs);
       const dueAt = new Date(endMs).toISOString();
-      tasks.push({
+      // ---- parent (work-package) row ----
+      pushTask({
         id,
         eventId: DEMO_EVENT_ID,
         title: s.title,
@@ -204,6 +281,38 @@ function build(): { tasks: task.Task[]; rowDates: MockSeedRowDates; deps: gantt.
         version: 1,
       });
       rowDates[id] = { startsAt: new Date(startMs).toISOString(), endsAt: dueAt };
+      hierarchy[id] = { parentTaskId: null, depth: 0, wbs: s.wbs };
+
+      // ---- children (WBS leaves), sliced across the parent's bar ----
+      const leaves = (SECTION_LEAVES[s.wbs] ?? []).filter((w) => w !== s.wbs);
+      const proc = shortProcess(s.title);
+      const k = leaves.length;
+      const cSlot = k > 0 ? (endMs - startMs) / k : 0;
+      leaves.forEach((w, j) => {
+        const cid = secId(w);
+        const cStart = startMs + j * cSlot;
+        const cEnd = j === k - 1 ? endMs : startMs + (j + 1) * cSlot;
+        const cStatus = defaultStatus(phase, cEnd);
+        const cDue = new Date(cEnd).toISOString();
+        pushTask({
+          id: cid,
+          eventId: DEMO_EVENT_ID,
+          title: `${proc} ${w}`,
+          description: `WBS ${w} ・ ${phase} ・ ${s.team}`,
+          status: cStatus,
+          priority: "medium",
+          assigneeId: OWNER[s.team] ?? null,
+          teamId: TEAM_ID[s.team] ?? null,
+          dueAt: cDue,
+          origin: "internal",
+          archivedAt: null,
+          createdAt: now,
+          updatedAt: now,
+          version: 1,
+        });
+        rowDates[cid] = { startsAt: new Date(cStart).toISOString(), endsAt: cDue };
+        hierarchy[cid] = { parentTaskId: id, depth: 1, wbs: w };
+      });
     });
   }
   const deps = DEP_PAIRS.map(([from, to]): gantt.GanttDependencyLine => {
@@ -211,7 +320,7 @@ function build(): { tasks: task.Task[]; rowDates: MockSeedRowDates; deps: gantt.
     const t = secId(to);
     return { id: `${f}->${t}`, fromTaskId: f, toTaskId: t, type: "FS", lagDays: 0 };
   });
-  return { tasks, rowDates, deps };
+  return { tasks, rowDates, deps, hierarchy };
 }
 
 type MockSeedRowDates = Record<
@@ -220,13 +329,14 @@ type MockSeedRowDates = Record<
 >;
 
 export function createDevClient(): MockApiClient {
-  const { tasks, rowDates, deps } = build();
+  const { tasks, rowDates, deps, hierarchy } = build();
   return new MockApiClient({
     users,
     teams,
     tasks,
     dependencies: deps,
     rowDates,
+    hierarchy,
     criticalTaskIds: CRITICAL_WBS.map(secId),
   });
 }
