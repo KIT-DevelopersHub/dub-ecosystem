@@ -134,3 +134,35 @@ export interface PublishBroadcastBatchResponse {
   deduplicatedCount: number; // already published (skipped)
   failedCount: number;
 }
+
+// POST /notifications/manage/:id/unpublish — the inverse of publish. Retracts the members
+// broadcast derived from an admin notification so members no longer see it (the broadcast
+// row + its per-user inbox rows are removed). Idempotent: unpublishing something that was
+// never published (or already retracted) is a no-op with retracted=false. The source admin
+// notification itself is untouched, so the row simply flips back to publishable.
+export interface UnpublishBroadcastResponse {
+  notificationId: NotificationId; // the source admin notification id
+  retracted: boolean; // true when a broadcast was removed; false on a no-op (not published)
+  removedBroadcastId: NotificationId | null; // the broadcast id removed (null on no-op)
+}
+
+// POST /notifications/manage/unpublish-batch — retract MANY broadcasts in one round trip
+// (bulk「選択したものを公開解除」). Each id is unpublished idempotently and INDEPENDENTLY, so
+// one bad/unpublished id never fails the others; the per-item outcome tells the UI which
+// rows flipped back to unpublished, which were already unpublished (no-op), and which failed.
+export interface UnpublishBroadcastBatchRequest {
+  ids: NotificationId[]; // 1..N source (audience='admin') notification ids
+}
+export interface UnpublishBroadcastBatchItem {
+  id: NotificationId; // the source admin notification id
+  ok: boolean; // true when retracted OR already-unpublished (no-op); false on error
+  retracted?: boolean; // true when a broadcast was removed; false when it was a no-op
+  removedBroadcastId?: NotificationId; // present when a broadcast was removed
+  code?: string; // error code when ok=false (e.g. NOTIF_NOTIFICATION_NOT_FOUND)
+}
+export interface UnpublishBroadcastBatchResponse {
+  results: UnpublishBroadcastBatchItem[];
+  retractedCount: number; // broadcasts actually removed
+  noopCount: number; // ids that were not published (already unpublished)
+  failedCount: number;
+}

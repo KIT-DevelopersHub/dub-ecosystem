@@ -367,6 +367,24 @@ export async function getNotificationById(db: DbClient, id: string): Promise<Sou
   );
 }
 
+/**
+ * Hard-delete a members broadcast and everything fanned out from it — its per-user inbox
+ * rows, its delivery records, and the canonical notification row. Used to UNPUBLISH: after
+ * this the broadcast is gone from every member inbox and its dedup key is freed, so the
+ * source admin notification flips back to publishable (re-publishable) and re-reading an
+ * inbox never re-materializes the rows (backfillBroadcastInbox has no notification to seed
+ * from). notif_* tables only (@dub/db guard). Returns per-table row counts.
+ */
+export async function deleteBroadcastCascade(
+  db: DbClient,
+  broadcastId: string,
+): Promise<{ inbox: number; deliveries: number; notification: number }> {
+  const inbox = (await db.run(`DELETE FROM notif_inbox WHERE notification_id = ?`, broadcastId)).meta.changes;
+  const deliveries = (await db.run(`DELETE FROM notif_deliveries WHERE notification_id = ?`, broadcastId)).meta.changes;
+  const notification = (await db.run(`DELETE FROM notif_notifications WHERE id = ?`, broadcastId)).meta.changes;
+  return { inbox, deliveries, notification };
+}
+
 // ---- deliveries ----
 
 export async function recordDelivery(

@@ -60,3 +60,20 @@ export function allPublishableSelected(items: AdminNotificationItem[], selected:
   const ids = publishableIds(items);
   return ids.length > 0 && ids.every((id) => selected.has(id));
 }
+
+/** Ids in `items` that are already published (candidates for 公開解除 / unpublish). */
+export function unpublishableIds(items: AdminNotificationItem[]): string[] {
+  return items.filter((it) => it.publishedBroadcastId !== null).map((it) => it.id);
+}
+
+/** Every id in `items` — both states are selectable (publish acts on the unpublished subset,
+ *  公開解除 on the published subset), so select-all spans the whole visible list. */
+export function selectableIds(items: AdminNotificationItem[]): string[] {
+  return items.map((it) => it.id);
+}
+
+/** True when every selectable (visible) item is selected — drives the select-all checkbox. */
+export function allSelected(items: AdminNotificationItem[], selected: ReadonlySet<string>): boolean {
+  const ids = selectableIds(items);
+  return ids.length > 0 && ids.every((id) => selected.has(id));
+}

@@ -27,6 +27,10 @@ export type PublishBroadcastResponse = notification.PublishBroadcastResponse;
 export type PublishBroadcastBatchRequest = notification.PublishBroadcastBatchRequest;
 export type PublishBroadcastBatchResponse = notification.PublishBroadcastBatchResponse;
 export type PublishBroadcastBatchItem = notification.PublishBroadcastBatchItem;
+export type UnpublishBroadcastResponse = notification.UnpublishBroadcastResponse;
+export type UnpublishBroadcastBatchRequest = notification.UnpublishBroadcastBatchRequest;
+export type UnpublishBroadcastBatchResponse = notification.UnpublishBroadcastBatchResponse;
+export type UnpublishBroadcastBatchItem = notification.UnpublishBroadcastBatchItem;
 // GET /notifications/manage query params (cursor paging only).
 export interface ListAdminNotificationsParams {
   cursor?: string;

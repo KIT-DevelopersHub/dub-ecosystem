@@ -16,6 +16,8 @@ import {
 import {
   publishBroadcastFromNotification,
   publishBroadcastBatch,
+  unpublishBroadcastFromNotification,
+  unpublishBroadcastBatch,
   buildBroadcastInput,
 } from "../src/broadcast";
 import { makeTestEnv, ctx, fakeIdentity, type TestEnvHandle } from "./helpers";
@@ -218,6 +220,132 @@ describe("publishBroadcastBatch (bulk publish)", () => {
   });
 });
 
+describe("unpublishBroadcastFromNotification (retract)", () => {
+  function depsFor(h: TestEnvHandle, allUsers: string[]) {
+    return buildIngestDeps(h.env, ctx("req_pub"), { identity: fakeIdentity({ allUsers }) });
+  }
+
+  it("removes the members broadcast so members no longer see it; source admin row survives", async () => {
+    const h = makeTestEnv();
+    const srcId = await insertNotification(h.db, adminInput());
+    await insertInbox(h.db, srcId, "usr_admin"); // admin's own row for the source
+    await publishBroadcastFromNotification(depsFor(h, ["u1", "u2"]), ctx(), srcId, "usr_admin");
+    expect(await unreadCount(h.db, "u1")).toBe(1);
+
+    const res = await unpublishBroadcastFromNotification(h.db, srcId);
+    expect(res.retracted).toBe(true);
+    expect(res.removedBroadcastId).not.toBeNull();
+
+    // Members no longer see it (broadcast row + inbox rows gone); backfill does NOT revive it.
+    expect(await unreadCount(h.db, "u1")).toBe(0);
+    expect(await unreadCount(h.db, "u2")).toBe(0);
+    expect((await listInbox(h.db, "u1", { limit: 10 })).items).toHaveLength(0);
+
+    // The source admin notification is untouched → back to publishable (badge null again).
+    const after = await listAdminNotifications(h.db, { limit: 10 });
+    expect(after.items[0]!.id).toBe(srcId);
+    expect(after.items[0]!.publishedBroadcastId).toBeNull();
+  });
+
+  it("is idempotent — unpublishing something never published is a no-op (retracted=false)", async () => {
+    const h = makeTestEnv();
+    const srcId = await insertNotification(h.db, adminInput());
+    const res = await unpublishBroadcastFromNotification(h.db, srcId);
+    expect(res.retracted).toBe(false);
+    expect(res.removedBroadcastId).toBeNull();
+  });
+
+  it("is idempotent — a second unpublish after a retract is a no-op", async () => {
+    const h = makeTestEnv();
+    const srcId = await insertNotification(h.db, adminInput());
+    await publishBroadcastFromNotification(depsFor(h, ["u1"]), ctx(), srcId, "usr_admin");
+    const first = await unpublishBroadcastFromNotification(h.db, srcId);
+    const second = await unpublishBroadcastFromNotification(h.db, srcId);
+    expect(first.retracted).toBe(true);
+    expect(second.retracted).toBe(false);
+  });
+
+  it("supports publish → unpublish → re-publish (toggle) creating a fresh broadcast", async () => {
+    const h = makeTestEnv();
+    const srcId = await insertNotification(h.db, adminInput());
+    const p1 = await publishBroadcastFromNotification(depsFor(h, ["u1"]), ctx(), srcId, "usr_admin");
+    await unpublishBroadcastFromNotification(h.db, srcId);
+    const p2 = await publishBroadcastFromNotification(depsFor(h, ["u1"]), ctx(), srcId, "usr_admin");
+    expect(p2.deduplicated).toBe(false); // dedup key was freed by the retract
+    expect(p2.notificationId).not.toBe(p1.notificationId);
+    expect(await unreadCount(h.db, "u1")).toBe(1);
+  });
+
+  it("404s an unknown source id", async () => {
+    const h = makeTestEnv();
+    await expect(unpublishBroadcastFromNotification(h.db, "ntfn_missing")).rejects.toMatchObject({
+      code: "NOTIF_NOTIFICATION_NOT_FOUND",
+    });
+  });
+
+  it("refuses to unpublish a non-admin-audience notification (409)", async () => {
+    const h = makeTestEnv();
+    const srcId = await insertNotification(h.db, adminInput({ audience: "members" }));
+    await expect(unpublishBroadcastFromNotification(h.db, srcId)).rejects.toMatchObject({
+      code: "NOTIF_NOT_ADMIN_AUDIENCE",
+    });
+  });
+});
+
+describe("unpublishBroadcastBatch (bulk retract)", () => {
+  function depsFor(h: TestEnvHandle, allUsers: string[]) {
+    return buildIngestDeps(h.env, ctx("req_batch"), { identity: fakeIdentity({ allUsers }) });
+  }
+
+  it("retracts many broadcasts in one call; counts reflect the outcome", async () => {
+    const h = makeTestEnv();
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "d:a" }));
+    const b = await insertNotification(h.db, adminInput({ dedupKey: "d:b" }));
+    await publishBroadcastBatch(depsFor(h, ["u1", "u2"]), ctx(), [a, b], "usr_admin");
+    expect(await unreadCount(h.db, "u1")).toBe(2);
+
+    const res = await unpublishBroadcastBatch(h.db, [a, b]);
+    expect(res.retractedCount).toBe(2);
+    expect(res.noopCount).toBe(0);
+    expect(res.failedCount).toBe(0);
+    expect(res.results.every((r) => r.ok && r.retracted && r.removedBroadcastId)).toBe(true);
+    expect(await unreadCount(h.db, "u1")).toBe(0);
+  });
+
+  it("is idempotent — a second batch reports every id as a no-op (noopCount)", async () => {
+    const h = makeTestEnv();
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "d:a" }));
+    await publishBroadcastBatch(depsFor(h, ["u1"]), ctx(), [a], "usr_admin");
+    await unpublishBroadcastBatch(h.db, [a]);
+    const again = await unpublishBroadcastBatch(h.db, [a]);
+    expect(again.noopCount).toBe(1);
+    expect(again.retractedCount).toBe(0);
+  });
+
+  it("reports per-item failures without aborting the batch (partial success)", async () => {
+    const h = makeTestEnv();
+    const ok = await insertNotification(h.db, adminInput({ dedupKey: "d:ok" }));
+    await publishBroadcastFromNotification(depsFor(h, ["u1"]), ctx(), ok, "usr_admin");
+    const members = await insertNotification(h.db, adminInput({ audience: "members", dedupKey: "d:m" }));
+    const res = await unpublishBroadcastBatch(h.db, [ok, members, "ntfn_missing"]);
+    expect(res.retractedCount).toBe(1);
+    expect(res.failedCount).toBe(2);
+    const byId = new Map(res.results.map((r) => [r.id, r]));
+    expect(byId.get(ok)!.ok).toBe(true);
+    expect(byId.get(members)!.code).toBe("NOTIF_NOT_ADMIN_AUDIENCE");
+    expect(byId.get("ntfn_missing")!.code).toBe("NOTIF_NOTIFICATION_NOT_FOUND");
+  });
+
+  it("collapses duplicate ids in the request (retracts once)", async () => {
+    const h = makeTestEnv();
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "d:a" }));
+    await publishBroadcastFromNotification(depsFor(h, ["u1"]), ctx(), a, "usr_admin");
+    const res = await unpublishBroadcastBatch(h.db, [a, a, a]);
+    expect(res.results).toHaveLength(1);
+    expect(res.retractedCount).toBe(1);
+  });
+});
+
 describe("listAdminNotifications (published badge)", () => {
   it("lists audience='admin' items; publishedBroadcastId flips null -> broadcast id after publish", async () => {
     const h = makeTestEnv();
@@ -376,5 +504,68 @@ describe("HTTP — Notification management gate + end-to-end publish", () => {
     // The manage list now shows it as published.
     const manage2 = (await (await req("/manage", { headers: { "x-dub-user-id": "usr_admin" } })).json()) as notification.ListAdminNotificationsResponse;
     expect(manage2.items[0]!.publishedBroadcastId).toBe(pub.notificationId);
+
+    // Now UNPUBLISH: member sees the broadcast disappear; manage list flips back to unpublished.
+    const unpubRes = await req(`/manage/${srcId}/unpublish`, { method: "POST", headers: { "x-dub-user-id": "usr_admin" } });
+    expect(unpubRes.status).toBe(202);
+    const unpub = (await unpubRes.json()) as notification.UnpublishBroadcastResponse;
+    expect(unpub.retracted).toBe(true);
+    expect(unpub.removedBroadcastId).toBe(pub.notificationId);
+
+    const memberFinal = (await (await req("/inbox", { headers: { "x-dub-user-id": "usr_member" } })).json()) as notification.ListInboxResponse;
+    expect(memberFinal.items).toHaveLength(0);
+
+    const manage3 = (await (await req("/manage", { headers: { "x-dub-user-id": "usr_admin" } })).json()) as notification.ListAdminNotificationsResponse;
+    expect(manage3.items[0]!.publishedBroadcastId).toBeNull();
+  });
+
+  it("POST /manage/:id/unpublish without notif:broadcast_publish -> 403", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins([]) });
+    const app = createApp();
+    const res = await reqOf(app, h)("/manage/ntfn_x/unpublish", {
+      method: "POST",
+      headers: { "x-dub-user-id": "usr_member" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /manage/unpublish-batch: admin retracts a selection in one call (202 + counts)", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins(["usr_admin"]) });
+    const app = createApp({ identity: fakeIdentity({ allUsers: ["usr_admin", "usr_member"] }) });
+    const req = reqOf(app, h);
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "http:ua" }));
+    const b = await insertNotification(h.db, adminInput({ dedupKey: "http:ub" }));
+    // Publish both first so there is something to retract.
+    await req("/manage/publish-batch", {
+      method: "POST",
+      headers: { "x-dub-user-id": "usr_admin", "content-type": "application/json" },
+      body: JSON.stringify({ ids: [a, b] }),
+    });
+    const memberMid = (await (await req("/inbox", { headers: { "x-dub-user-id": "usr_member" } })).json()) as notification.ListInboxResponse;
+    expect(memberMid.items).toHaveLength(2);
+
+    const res = await req("/manage/unpublish-batch", {
+      method: "POST",
+      headers: { "x-dub-user-id": "usr_admin", "content-type": "application/json" },
+      body: JSON.stringify({ ids: [a, b] }),
+    });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as notification.UnpublishBroadcastBatchResponse;
+    expect(body.retractedCount).toBe(2);
+
+    // Member now sees neither broadcast.
+    const memberAfter = (await (await req("/inbox", { headers: { "x-dub-user-id": "usr_member" } })).json()) as notification.ListInboxResponse;
+    expect(memberAfter.items).toHaveLength(0);
+  });
+
+  it("POST /manage/unpublish-batch with an empty ids array -> 400", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins(["usr_admin"]) });
+    const app = createApp();
+    const res = await reqOf(app, h)("/manage/unpublish-batch", {
+      method: "POST",
+      headers: { "x-dub-user-id": "usr_admin", "content-type": "application/json" },
+      body: JSON.stringify({ ids: [] }),
+    });
+    expect(res.status).toBe(400);
   });
 });

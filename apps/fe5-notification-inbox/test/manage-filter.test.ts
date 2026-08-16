@@ -5,6 +5,9 @@ import {
   availableCategories,
   filterByCategory,
   publishableIds,
+  unpublishableIds,
+  selectableIds,
+  allSelected,
   allPublishableSelected,
 } from "../src/lib/manage-filter";
 
@@ -57,5 +60,20 @@ describe("manage-filter", () => {
     const systemOnly = filterByCategory(items, "system");
     expect(allPublishableSelected(systemOnly, new Set(["c"]))).toBe(true);
     expect(allPublishableSelected(systemOnly, new Set())).toBe(false);
+  });
+
+  it("unpublishableIds includes only already-published rows", () => {
+    expect(unpublishableIds(items)).toEqual(["d"]); // only d is published
+    expect(unpublishableIds(filterByCategory(items, "release"))).toEqual([]);
+  });
+
+  it("selectableIds spans every row (both states are selectable)", () => {
+    expect(selectableIds(items)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("allSelected reflects the whole visible set, not just the publishable subset", () => {
+    expect(allSelected(items, new Set(["a", "b", "c"]))).toBe(false); // d not selected
+    expect(allSelected(items, new Set(["a", "b", "c", "d"]))).toBe(true);
+    expect(allSelected(items, new Set())).toBe(false);
   });
 });
