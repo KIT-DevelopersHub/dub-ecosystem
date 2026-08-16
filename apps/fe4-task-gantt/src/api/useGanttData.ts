@@ -15,6 +15,12 @@ export function useGanttData(eventId: common.EventId) {
     queryKey: ganttQueryKey(eventId),
     queryFn: (): Promise<gantt.GanttChartDTO> => getGantt(client, eventId),
   });
+  /** Read the LIVE cached rows at call time (not a render-snapshot). Deferred
+   *  commands (undo/redo run long after they were pushed) must compute against
+   *  the current bar positions, else a relative shift is applied to a stale base
+   *  and overshoots — see the parent drag-shift undo bug. */
+  const currentRows = (): gantt.GanttChartDTO["rows"] =>
+    qc.getQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId))?.rows ?? [];
   /** after an edit, refetch with Cache-Control: no-cache (design test 6). */
   const refetchFresh = async () => {
     const fresh = await getGanttFresh(client, eventId);
@@ -34,5 +40,5 @@ export function useGanttData(eventId: common.EventId) {
         : old,
     );
   };
-  return { ...query, refetchFresh, setRowScheduleOptimistic };
+  return { ...query, currentRows, refetchFresh, setRowScheduleOptimistic };
 }
