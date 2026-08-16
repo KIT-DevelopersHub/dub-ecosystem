@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
 import { Button } from "@dub/ui";
+import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
-import { patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
+import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
 import { useTeams } from "../api/useTeams";
 import { useTaskStore } from "../store/useTaskStore";
@@ -47,6 +48,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
   const teams = useTeams().data ?? [];
+
+  // Undo/redo (判断57). A reusable command stack (@dub/app-ui) — every state-
+  // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
+  // hotkey is off for read-only users and never steals a focused field's own undo.
+  const history = useUndoRedo();
+  useUndoRedoHotkeys(history, { enabled: caps.canWrite });
 
   // Load the whole event in one page: the gantt intersects its rows with this
   // store set (see `filteredDto`), so a short default page would silently drop
@@ -150,11 +157,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       ? fieldErrorMap((store.lastError as unknown as { details?: unknown }).details)
       : undefined;
 
-  // Bar move/resize on the timeline: optimistically update the cache (bar jumps
-  // the same tick as the drop), then persist the new schedule to the backend.
-  const onSchedule = (id: common.TaskId, startsAt: common.ISODateTime, endsAt: common.ISODateTime) => {
+  // ---- raw appliers (no history push) — the reversible primitives the undo
+  //      commands re-issue. Each is an idempotent "set", so undo = apply the
+  //      previous value and redo = apply the new one. ----
+
+  // Persist one row's schedule (bar move/resize) optimistically, then to the API.
+  const applyScheduleRaw = (id: common.TaskId, startsAt: common.ISODateTime, endsAt: common.ISODateTime) => {
     gantt.setRowScheduleOptimistic(id, startsAt, endsAt);
-    void patchGanttRow(client, id, { startsAt, endsAt })
+    return patchGanttRow(client, id, { startsAt, endsAt })
       .then(() => gantt.refetchFresh())
       .then(() => store.load(client, query))
       .catch(() => {
@@ -164,11 +174,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const MS_PER_DAY = 86_400_000;
 
-  // Parent (work-package) drag-move: shift the parent AND its whole subtree by the
-  // same number of days so the children follow. Rollup keeps the parent bar as the
-  // union of its (now shifted) children, so the parent stays visually consistent.
-  const onScheduleShift = (parentId: common.TaskId, deltaDays: number) => {
-    if (!gantt.data || deltaDays === 0) return;
+  // Shift a parent + its whole subtree by whole days (children follow).
+  const applyShiftRaw = (parentId: common.TaskId, deltaDays: number) => {
+    if (!gantt.data || deltaDays === 0) return Promise.resolve();
     const rows = gantt.data.rows;
     // BFS the subtree (parent + all descendants at any depth).
     const ids: common.TaskId[] = [parentId];
@@ -184,12 +192,62 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         endsAt: new Date(Date.parse(r.endsAt!) + deltaDays * MS_PER_DAY).toISOString() as common.ISODateTime,
       }));
     for (const s of shifts) gantt.setRowScheduleOptimistic(s.id, s.startsAt, s.endsAt);
-    void Promise.all(shifts.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
+    return Promise.all(shifts.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
       .then(() => gantt.refetchFresh())
       .then(() => store.load(client, query))
       .catch(() => {
         void gantt.refetchFresh();
       });
+  };
+
+  // Re-issue a task's WBS parent and/or predecessors as a plain "set" (undo-safe).
+  // `undefined` means "leave untouched"; `null` parent detaches to top-level.
+  const applyRelationsRaw = async (
+    id: common.TaskId,
+    parentTaskId: common.TaskId | null | undefined,
+    dependsOnIds: common.TaskId[] | undefined,
+  ) => {
+    try {
+      const cur = await getTask(client, id); // fresh version (undo runs much later)
+      let version = cur.version;
+      if (parentTaskId !== undefined) {
+        const server = await updateTask(client, id, { version, parentTaskId });
+        version = server.version;
+      }
+      if (dependsOnIds !== undefined) {
+        await replaceDependencies(client, id, { version, dependsOnIds });
+      }
+    } finally {
+      await store.load(client, query);
+      await gantt.refetchFresh();
+    }
+  };
+
+  // ---- timeline bar edits (push an undo command around each raw apply) ----
+
+  // Bar move/resize: record where the bar WAS so Ctrl-Z can snap it back.
+  const onSchedule = (id: common.TaskId, startsAt: common.ISODateTime, endsAt: common.ISODateTime) => {
+    const prev = gantt.data?.rows.find((r) => r.taskId === id);
+    void applyScheduleRaw(id, startsAt, endsAt);
+    if (prev?.startsAt && prev?.endsAt && (prev.startsAt !== startsAt || prev.endsAt !== endsAt)) {
+      const prevStart = prev.startsAt, prevEnd = prev.endsAt;
+      history.push({
+        label: "バーの移動/リサイズ",
+        undo: () => applyScheduleRaw(id, prevStart, prevEnd),
+        redo: () => applyScheduleRaw(id, startsAt, endsAt),
+      });
+    }
+  };
+
+  // Parent drag-move (subtree shift): the inverse is simply the opposite shift.
+  const onScheduleShift = (parentId: common.TaskId, deltaDays: number) => {
+    if (deltaDays === 0) return;
+    void applyShiftRaw(parentId, deltaDays);
+    history.push({
+      label: "親タスクの移動",
+      undo: () => applyShiftRaw(parentId, -deltaDays),
+      redo: () => applyShiftRaw(parentId, deltaDays),
+    });
   };
 
   const openCreate = (opts: { due?: string | null; parent?: common.TaskId | null; deps?: common.TaskId[]; predecessorFor?: common.TaskId | null }) => {
@@ -289,35 +347,37 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
     if (!selectedTask) return;
     const needsRelations = relations.parentChanged || relations.depsChanged;
+    // Field-only edit (title/status/…): keep the optimistic fast-path. Field edits
+    // are not in the undo history yet — see the PR notes (需要があれば拡張).
+    const { parentTaskId: _p, ...fieldOnlyPatch } = patch;
+    const hasFieldPatch = Object.keys(fieldOnlyPatch).some((k) => k !== "version");
     if (!needsRelations) {
       void store
-        .patchOptimistic(client, selectedTask.id, patch, selectedTask.version, patch)
+        .patchOptimistic(client, selectedTask.id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
         .then((ok) => {
           if (ok) void gantt.refetchFresh();
         });
       return;
     }
-    // Combined edit (fields + re-parent + dependencies). Re-parent rides in the
-    // same updateTask (parentTaskId is on UpdateTaskRequest); dependencies follow
-    // with the bumped version, then we resync the store + gantt.
+    // Relation edit (親子 / 依存). Snapshot the BEFORE state so Ctrl-Z can restore
+    // the previous parent/predecessors, apply the AFTER state, then record it.
     const id = selectedTask.id;
+    const prevParent = selectedParentId;
+    const prevDeps = selectedDependsOn;
+    const nextParent = relations.parentChanged ? relations.parentTaskId : undefined;
+    const nextDeps = relations.depsChanged ? relations.dependsOnIds : undefined;
     void (async () => {
-      try {
-        let version = selectedTask.version;
-        const hasFieldPatch = Object.keys(patch).some((k) => k !== "version");
-        if (hasFieldPatch) {
-          const server = await updateTask(client, id, patch);
-          version = server.version;
-        }
-        if (relations.depsChanged) {
-          const withDeps = await replaceDependencies(client, id, { version, dependsOnIds: relations.dependsOnIds });
-          version = withDeps.version;
-        }
-      } finally {
-        await store.load(client, query);
-        await gantt.refetchFresh();
+      if (hasFieldPatch) {
+        // apply the field changes first (own optimistic path), then the relations.
+        await store.patchOptimistic(client, id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch);
       }
+      await applyRelationsRaw(id, nextParent, nextDeps);
     })();
+    history.push({
+      label: relations.depsChanged ? "先行タスク（依存）の変更" : "親タスク（親子）の変更",
+      undo: () => applyRelationsRaw(id, relations.parentChanged ? prevParent : undefined, relations.depsChanged ? prevDeps : undefined),
+      redo: () => applyRelationsRaw(id, nextParent, nextDeps),
+    });
   };
 
   const onDeleteDetail = () => {
@@ -346,6 +406,30 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
             <span className={styles.roleBadge} title="編集できるのはチームのオーガナイザーです（権限は後日 role と接続）" data-testid="fe4-organizer-badge">
               オーガナイザー編集
             </span>
+            <div className={styles.undoRedo} role="group" aria-label="元に戻す / やり直す">
+              <button
+                type="button"
+                className={styles.undoBtn}
+                onClick={() => void history.undo()}
+                disabled={!history.canUndo}
+                title={`元に戻す${history.undoLabel ? `: ${history.undoLabel}` : ""}（Ctrl/⌘+Z）`}
+                aria-label="元に戻す"
+                data-testid="fe4-undo"
+              >
+                ↶<span className={styles.undoBtnLabel}>元に戻す</span>
+              </button>
+              <button
+                type="button"
+                className={styles.undoBtn}
+                onClick={() => void history.redo()}
+                disabled={!history.canRedo}
+                title={`やり直す${history.redoLabel ? `: ${history.redoLabel}` : ""}（Ctrl/⌘+Shift+Z）`}
+                aria-label="やり直す"
+                data-testid="fe4-redo"
+              >
+                ↷
+              </button>
+            </div>
             <Button iconLeft={<span aria-hidden>＋</span>} onClick={() => setCreating(true)} testId="fe4-create-open">
               タスク作成
             </Button>

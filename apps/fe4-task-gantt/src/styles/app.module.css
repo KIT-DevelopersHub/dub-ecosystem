@@ -23,6 +23,27 @@
 }
 .pageHeaderText { display: flex; flex-direction: column; gap: var(--dub-space-1); }
 .headerActions { display: flex; align-items: center; gap: var(--dub-space-3); }
+/* undo / redo controls (判断57). The keyboard shortcut is the primary path; these
+   buttons make it discoverable and give touch users an affordance. */
+.undoRedo { display: inline-flex; align-items: center; gap: 4px; }
+.undoBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--dub-radius-md, 8px);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+.undoBtn:hover:not(:disabled) { background: var(--dub-color-surface-sunken); border-color: var(--dub-color-border-strong, var(--dub-color-border-default)); }
+.undoBtn:disabled { opacity: 0.4; cursor: default; }
+.undoBtnLabel { font-size: var(--dub-font-size-xs, 0.75rem); }
+@media (max-width: 640px) { .undoBtnLabel { display: none; } }
 /* organizer edit affordance — placeholder role indicator (real perms wired later). */
 .roleBadge {
   display: inline-flex;
