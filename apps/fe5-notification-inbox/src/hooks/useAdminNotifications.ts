@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApiError } from "../contracts/fe2";
 import { isApiError } from "../contracts/fe2";
-import type { AdminNotificationItem } from "../contracts/notification-api";
+import type { AdminNotificationItem, PublishBroadcastBatchResponse } from "../contracts/notification-api";
 import { useNotificationDeps } from "../context";
 
 // Placeholder id used while a publish is in flight so the badge/button reflect the
@@ -20,6 +20,9 @@ export interface UseAdminNotificationsResult {
   /** ids currently being published (button shows a spinner). */
   publishing: ReadonlySet<string>;
   publish(id: string): Promise<void>;
+  /** Bulk publish many ids in ONE request; optimistic + per-item reconcile. Returns the
+   *  batch outcome (null when nothing was eligible) so the caller can clear its selection. */
+  publishMany(ids: string[]): Promise<PublishBroadcastBatchResponse | null>;
   reload(): Promise<void>;
 }
 
@@ -78,5 +81,56 @@ export function useAdminNotifications(): UseAdminNotificationsResult {
     [api, items, publishing, setPublished, toast],
   );
 
-  return { items, loading, error, publishing, publish, reload };
+  const publishMany = useCallback(
+    async (ids: string[]): Promise<PublishBroadcastBatchResponse | null> => {
+      // Only eligible ids: exist, not already published, not mid-flight. Dedupe.
+      const byId = new Map(items.map((it) => [it.id, it]));
+      const eligible = [...new Set(ids)].filter((id) => {
+        const it = byId.get(id);
+        return it && it.publishedBroadcastId === null && !publishing.has(id);
+      });
+      if (eligible.length === 0) return null;
+
+      // Optimistic: flip every eligible row to 公開済み + mark them publishing — ONE state
+      // update each (not per-id churn), so a large selection stays responsive.
+      setItems((prev) => prev.map((it) => (eligible.includes(it.id) ? { ...it, publishedBroadcastId: PENDING_BROADCAST_ID } : it)));
+      setPublishing((s) => {
+        const next = new Set(s);
+        for (const id of eligible) next.add(id);
+        return next;
+      });
+
+      try {
+        const res = await api.publishBroadcastBatch(eligible);
+        // Reconcile per item in a single pass: ok → real id, failed → rollback to null.
+        const outcome = new Map(res.results.map((r) => [r.id, r]));
+        setItems((prev) =>
+          prev.map((it) => {
+            const r = outcome.get(it.id);
+            if (!r) return it;
+            return { ...it, publishedBroadcastId: r.ok ? (r.publishedBroadcastId ?? PENDING_BROADCAST_ID) : null };
+          }),
+        );
+        const parts = [`${res.publishedCount}件を公開`];
+        if (res.deduplicatedCount > 0) parts.push(`${res.deduplicatedCount}件は既公開`);
+        if (res.failedCount > 0) parts.push(`${res.failedCount}件失敗`);
+        toast.show(res.failedCount > 0 ? "error" : "success", parts.join(" / "));
+        return res;
+      } catch (err) {
+        // Whole request failed → roll back every optimistic flip.
+        setItems((prev) => prev.map((it) => (eligible.includes(it.id) ? { ...it, publishedBroadcastId: null } : it)));
+        toast.show("error", isApiError(err) ? `一括公開に失敗しました (${err.code})` : "一括公開に失敗しました");
+        return null;
+      } finally {
+        setPublishing((s) => {
+          const next = new Set(s);
+          for (const id of eligible) next.delete(id);
+          return next;
+        });
+      }
+    },
+    [api, items, publishing, toast],
+  );
+
+  return { items, loading, error, publishing, publish, publishMany, reload };
 }

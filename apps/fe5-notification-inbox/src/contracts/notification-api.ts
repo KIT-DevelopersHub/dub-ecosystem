@@ -24,6 +24,9 @@ export type PreferenceEntry = notification.PreferenceEntry;
 export type AdminNotificationItem = notification.AdminNotificationItem;
 export type ListAdminNotificationsResponse = notification.ListAdminNotificationsResponse;
 export type PublishBroadcastResponse = notification.PublishBroadcastResponse;
+export type PublishBroadcastBatchRequest = notification.PublishBroadcastBatchRequest;
+export type PublishBroadcastBatchResponse = notification.PublishBroadcastBatchResponse;
+export type PublishBroadcastBatchItem = notification.PublishBroadcastBatchItem;
 // GET /notifications/manage query params (cursor paging only).
 export interface ListAdminNotificationsParams {
   cursor?: string;

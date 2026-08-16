@@ -12,6 +12,8 @@ import type {
   ListInboxResponse,
   PreferenceEntry,
   PublishBroadcastResponse,
+  PublishBroadcastBatchItem,
+  PublishBroadcastBatchResponse,
   ReadAllRequest,
   UnreadCountResponse,
   UpdatePreferencesRequest,
@@ -141,6 +143,30 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
   const visibleItems = (): InboxItem[] =>
     store.viewer === "admin" ? store.items : store.items.filter((i) => i.audience !== "admin");
 
+  // Publish one admin notification to members (idempotent). Throws MockApiError on an
+  // unknown id. Shared by the single + batch endpoints so their behaviour is identical.
+  const publishOne = (id: string): PublishBroadcastResponse => {
+    const admin = store.adminItems.find((a) => a.id === id);
+    if (!admin) throw new MockApiError("NOTIF_NOTIFICATION_NOT_FOUND", 404, `notification not found: ${id}`);
+    if (admin.publishedBroadcastId) {
+      return { notificationId: admin.publishedBroadcastId, deduplicated: true, publishedBroadcastId: admin.publishedBroadcastId };
+    }
+    const broadcastId = `ntfn_bc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    admin.publishedBroadcastId = broadcastId;
+    store.items.unshift({
+      id: broadcastId,
+      type: "system.announcement",
+      title: admin.title,
+      body: admin.body,
+      readAt: null,
+      createdAt: new Date().toISOString(),
+      resourceType: "notification",
+      resourceId: admin.id,
+      audience: "members",
+    });
+    return { notificationId: broadcastId, deduplicated: false, publishedBroadcastId: broadcastId };
+  };
+
   const maybeFail = (path: string): void => {
     if (failNext && path.includes(failNext.pathIncludes)) {
       const err = failNext.error;
@@ -211,31 +237,29 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
         store.items.unshift(item);
         return { notificationId: item.id, deduplicated: false } as T;
       }
+      if (path === `${BASE}/manage/publish-batch`) {
+        const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
+        const seen = new Set<string>();
+        const results: PublishBroadcastBatchItem[] = [];
+        let publishedCount = 0, deduplicatedCount = 0, failedCount = 0;
+        for (const id of ids) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          try {
+            const r = publishOne(id);
+            results.push({ id, ok: true, deduplicated: r.deduplicated, publishedBroadcastId: r.publishedBroadcastId });
+            if (r.deduplicated) deduplicatedCount++; else publishedCount++;
+          } catch (e) {
+            results.push({ id, ok: false, code: e instanceof MockApiError ? e.code : "NOTIF_PUBLISH_FAILED" });
+            failedCount++;
+          }
+        }
+        return { results, publishedCount, deduplicatedCount, failedCount } satisfies PublishBroadcastBatchResponse as T;
+      }
       const publishMatch = path.match(new RegExp(`^${BASE}/manage/([^/]+)/publish$`));
       if (publishMatch) {
         const id = decodeURIComponent(publishMatch[1]!);
-        const admin = store.adminItems.find((a) => a.id === id);
-        if (!admin) throw new MockApiError("NOTIF_NOTIFICATION_NOT_FOUND", 404, `notification not found: ${id}`);
-        // Idempotent: re-publishing returns the existing broadcast id.
-        if (admin.publishedBroadcastId) {
-          return { notificationId: admin.publishedBroadcastId, deduplicated: true, publishedBroadcastId: admin.publishedBroadcastId } satisfies PublishBroadcastResponse as T;
-        }
-        const broadcastId = `ntfn_bc_${Date.now()}`;
-        admin.publishedBroadcastId = broadcastId;
-        // Fan out a single members broadcast into the inbox (every member reads the same one).
-        const item: InboxItem = {
-          id: broadcastId,
-          type: "system.announcement",
-          title: admin.title,
-          body: admin.body,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-          resourceType: "notification",
-          resourceId: admin.id,
-          audience: "members",
-        };
-        store.items.unshift(item);
-        return { notificationId: broadcastId, deduplicated: false, publishedBroadcastId: broadcastId } satisfies PublishBroadcastResponse as T;
+        return publishOne(id) satisfies PublishBroadcastResponse as T;
       }
       if (path === `${BASE}/inbox/read-all`) {
         const req = (body ?? {}) as ReadAllRequest;

@@ -15,6 +15,7 @@ import {
 } from "../src/repo";
 import {
   publishBroadcastFromNotification,
+  publishBroadcastBatch,
   buildBroadcastInput,
 } from "../src/broadcast";
 import { makeTestEnv, ctx, fakeIdentity, type TestEnvHandle } from "./helpers";
@@ -168,6 +169,55 @@ describe("publishBroadcastFromNotification", () => {
   });
 });
 
+describe("publishBroadcastBatch (bulk publish)", () => {
+  function depsFor(h: TestEnvHandle, allUsers: string[]) {
+    return buildIngestDeps(h.env, ctx("req_batch"), { identity: fakeIdentity({ allUsers }) });
+  }
+
+  it("publishes many admin notifications in one call; counts reflect the outcome", async () => {
+    const h = makeTestEnv();
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "d:a" }));
+    const b = await insertNotification(h.db, adminInput({ dedupKey: "d:b" }));
+    const res = await publishBroadcastBatch(depsFor(h, ["u1", "u2"]), ctx(), [a, b], "usr_admin");
+    expect(res.publishedCount).toBe(2);
+    expect(res.deduplicatedCount).toBe(0);
+    expect(res.failedCount).toBe(0);
+    expect(res.results.every((r) => r.ok && r.publishedBroadcastId)).toBe(true);
+    expect(await unreadCount(h.db, "u1")).toBe(2);
+  });
+
+  it("is idempotent — a second batch reports every id as deduplicated (skipped)", async () => {
+    const h = makeTestEnv();
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "d:a" }));
+    await publishBroadcastBatch(depsFor(h, ["u1"]), ctx(), [a], "usr_admin");
+    const again = await publishBroadcastBatch(depsFor(h, ["u1"]), ctx(), [a], "usr_admin");
+    expect(again.deduplicatedCount).toBe(1);
+    expect(again.publishedCount).toBe(0);
+    expect(await unreadCount(h.db, "u1")).toBe(1); // no duplicate broadcast
+  });
+
+  it("reports per-item failures without aborting the batch (partial success)", async () => {
+    const h = makeTestEnv();
+    const ok = await insertNotification(h.db, adminInput({ dedupKey: "d:ok" }));
+    const members = await insertNotification(h.db, adminInput({ audience: "members", dedupKey: "d:m" }));
+    const res = await publishBroadcastBatch(depsFor(h, ["u1"]), ctx(), [ok, members, "ntfn_missing"], "usr_admin");
+    expect(res.publishedCount).toBe(1);
+    expect(res.failedCount).toBe(2);
+    const byId = new Map(res.results.map((r) => [r.id, r]));
+    expect(byId.get(ok)!.ok).toBe(true);
+    expect(byId.get(members)!.code).toBe("NOTIF_NOT_ADMIN_AUDIENCE");
+    expect(byId.get("ntfn_missing")!.code).toBe("NOTIF_NOTIFICATION_NOT_FOUND");
+  });
+
+  it("collapses duplicate ids in the request (publishes once)", async () => {
+    const h = makeTestEnv();
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "d:a" }));
+    const res = await publishBroadcastBatch(depsFor(h, ["u1"]), ctx(), [a, a, a], "usr_admin");
+    expect(res.results).toHaveLength(1);
+    expect(res.publishedCount).toBe(1);
+  });
+});
+
 describe("listAdminNotifications (published badge)", () => {
   it("lists audience='admin' items; publishedBroadcastId flips null -> broadcast id after publish", async () => {
     const h = makeTestEnv();
@@ -228,6 +278,50 @@ describe("HTTP — Notification management gate + end-to-end publish", () => {
     const app = createApp();
     const res = await reqOf(app, h)("/manage", { headers: { "x-dub-user-id": "usr_member" } });
     expect(res.status).toBe(403);
+  });
+
+  it("POST /manage/publish-batch: admin publishes a selection in one call (202 + counts)", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins(["usr_admin"]) });
+    const app = createApp({ identity: fakeIdentity({ allUsers: ["usr_admin", "usr_member"] }) });
+    const req = reqOf(app, h);
+    const a = await insertNotification(h.db, adminInput({ dedupKey: "http:a" }));
+    const b = await insertNotification(h.db, adminInput({ dedupKey: "http:b" }));
+
+    const res = await req("/manage/publish-batch", {
+      method: "POST",
+      headers: { "x-dub-user-id": "usr_admin", "content-type": "application/json" },
+      body: JSON.stringify({ ids: [a, b] }),
+    });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as notification.PublishBroadcastBatchResponse;
+    expect(body.publishedCount).toBe(2);
+    expect(body.results).toHaveLength(2);
+
+    // Member now sees both broadcasts.
+    const memberInbox = (await (await req("/inbox", { headers: { "x-dub-user-id": "usr_member" } })).json()) as notification.ListInboxResponse;
+    expect(memberInbox.items).toHaveLength(2);
+  });
+
+  it("POST /manage/publish-batch without permission -> 403", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins([]) });
+    const app = createApp();
+    const res = await reqOf(app, h)("/manage/publish-batch", {
+      method: "POST",
+      headers: { "x-dub-user-id": "usr_member", "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["x"] }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /manage/publish-batch with an empty ids array -> 400", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins(["usr_admin"]) });
+    const app = createApp();
+    const res = await reqOf(app, h)("/manage/publish-batch", {
+      method: "POST",
+      headers: { "x-dub-user-id": "usr_admin", "content-type": "application/json" },
+      body: JSON.stringify({ ids: [] }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it("a bare CI-written admin row surfaces to an admin via GET /inbox, never to a member", async () => {

@@ -113,3 +113,24 @@ export interface PublishBroadcastResponse {
   deduplicated: boolean;
   publishedBroadcastId: NotificationId; // == notificationId (stable badge target)
 }
+
+// POST /notifications/manage/publish-batch — publish MANY admin notifications to members
+// in one round trip (bulk "メンバーへ一括公開"). Each id is published idempotently and
+// INDEPENDENTLY: one bad/duplicate id never fails the others; the per-item outcome tells
+// the UI which rows flipped to 公開済み, which were already published, and which failed.
+export interface PublishBroadcastBatchRequest {
+  ids: NotificationId[]; // 1..N source (audience='admin') notification ids
+}
+export interface PublishBroadcastBatchItem {
+  id: NotificationId; // the source admin notification id
+  ok: boolean; // true when published or already-published (deduplicated); false on error
+  deduplicated?: boolean; // true when it was already published (skipped)
+  publishedBroadcastId?: NotificationId; // present when ok
+  code?: string; // error code when ok=false (e.g. NOTIF_NOTIFICATION_NOT_FOUND)
+}
+export interface PublishBroadcastBatchResponse {
+  results: PublishBroadcastBatchItem[];
+  publishedCount: number; // newly published
+  deduplicatedCount: number; // already published (skipped)
+  failedCount: number;
+}

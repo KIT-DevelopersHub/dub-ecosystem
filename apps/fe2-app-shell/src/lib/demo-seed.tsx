@@ -158,6 +158,37 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
 ];
 
+// audience='admin' notifications powering the Notification管理 screen
+// (/notifications/manage, gated on notif:broadcast_publish). Mutable in-session so
+// the "メンバーへ公開" action persists (row stays 公開済み on reload) and the
+// optimistic UI is confirmed by the (demo) server. Mirrors the three auto-admin
+// notification kinds: deploy done / feature published / feedback.
+const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
+  { id: "ntfn_adm_0001", type: "deploy.deployment.status_changed", title: "デプロイ完了: dub-ecosystem", body: "本番へのデプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T03:00:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0002", type: "release", title: "🎉 ガントチャートをメンバー公開しました", body: "タスクの期間・進捗・依存をタイムラインで確認できます。", audience: "admin", createdAt: "2026-08-02T02:30:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0003", type: "feedback", title: "新しいフィードバック: 検索が遅い", body: "カテゴリ: idea\n送信ユーザー: usr_alice\n\n検索ページが重いです", audience: "admin", createdAt: "2026-08-02T02:00:00Z", publishedBroadcastId: null },
+  // Extra rows so the genre filter (新機能 / システム) and bulk select-all are demonstrable.
+  { id: "ntfn_adm_0004", type: "release", title: "🎉 メール添付ファイルに対応しました", body: "メールの送受信で添付ファイルを扱えるようになりました。", audience: "admin", createdAt: "2026-08-02T01:45:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0005", type: "release", title: "🎉 使用量ダッシュボードを公開しました", body: "各サービスの無料枠の使用状況を確認できます。", audience: "admin", createdAt: "2026-08-02T01:30:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0006", type: "deploy.deployment.status_changed", title: "デプロイ完了: fe2-app-shell", body: "SPA シェルの本番デプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T01:15:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0007", type: "feedback", title: "新しいフィードバック: 通知の一括操作がほしい", body: "カテゴリ: idea\n送信ユーザー: usr_bob\n\n大量に公開する時に一括操作がほしいです", audience: "admin", createdAt: "2026-08-02T01:00:00Z", publishedBroadcastId: null },
+];
+
+// Publish one admin notification to members (idempotent). Flips the source row to 公開済み
+// in-session and fans a single members broadcast into the inbox. Returns null on an unknown
+// id. Shared by the single + bulk (publish-batch) demo endpoints.
+function publishAdminNotificationDemo(id: string): notification.PublishBroadcastResponse | null {
+  const adminItem = ADMIN_NOTIFICATIONS.find((a) => a.id === id);
+  if (!adminItem) return null;
+  if (adminItem.publishedBroadcastId) {
+    return { notificationId: adminItem.publishedBroadcastId, deduplicated: true, publishedBroadcastId: adminItem.publishedBroadcastId };
+  }
+  const broadcastId = `ntf_bcast_${Math.random().toString(36).slice(2, 8)}`;
+  adminItem.publishedBroadcastId = broadcastId;
+  NOTIFICATIONS.unshift({ id: broadcastId, type: adminItem.type, title: adminItem.title, body: adminItem.body, readAt: null, createdAt: new Date().toISOString(), resourceType: "notification", resourceId: adminItem.id });
+  return { notificationId: broadcastId, deduplicated: false, publishedBroadcastId: broadcastId };
+}
+
 // ── mail ────────────────────────────────────────────────────────────────────
 // Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
 const DEMO_MAIL_BLOBS = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
@@ -826,7 +857,7 @@ function page<T>(items: T[]): { items: T[]; nextCursor: string | null } {
 }
 
 /** Match a demo feature route; return a Response or null to fall through to boot. */
-function matchDemoRoute(method: string, pathname: string, url: URL): Response | null {
+function matchDemoRoute(method: string, pathname: string, url: URL, body?: unknown): Response | null {
   const seg = (re: RegExp): string | null => {
     const m = re.exec(pathname);
     return m ? decodeURIComponent(m[1]!) : null;
@@ -869,6 +900,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
     if (pathname === "/api/v1/notifications/inbox/unread-count") {
       return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
     }
+    // admin: Notification管理 list (audience='admin' notifications to publish).
+    if (pathname === "/api/v1/notifications/manage") {
+      return json(page(ADMIN_NOTIFICATIONS.map((a) => ({ ...a }))));
+    }
     // mail: received list / detail + the Sent folder are served by the stateful mail
     // store (createMailStore) so read-state and sends persist in-session; only the
     // static thread view stays here.
@@ -887,6 +922,32 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
   if (method === "POST") {
     // mail read + send are served by the stateful mail store (createMailStore).
     if (pathname === "/api/v1/notifications/inbox/read-all") return json(null, 204);
+    // admin: bulk publish a selection in one request (idempotent, per-item outcomes).
+    if (pathname === "/api/v1/notifications/manage/publish-batch") {
+      const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
+      const seen = new Set<string>();
+      const results: notification.PublishBroadcastBatchItem[] = [];
+      let publishedCount = 0, deduplicatedCount = 0, failedCount = 0;
+      for (const id of ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const r = publishAdminNotificationDemo(id);
+        if (!r) { results.push({ id, ok: false, code: "NOTIF_NOTIFICATION_NOT_FOUND" }); failedCount++; continue; }
+        results.push({ id, ok: true, deduplicated: r.deduplicated, publishedBroadcastId: r.publishedBroadcastId });
+        if (r.deduplicated) deduplicatedCount++; else publishedCount++;
+      }
+      return json({ results, publishedCount, deduplicatedCount, failedCount });
+    }
+    // admin: publish one admin notification to all members (idempotent). Flips the
+    // source row to 公開済み in-session and fans a single members broadcast into the
+    // inbox, so the optimistic UI is confirmed and a reload keeps the published state.
+    {
+      const id = seg(/^\/api\/v1\/notifications\/manage\/([^/]+)\/publish$/);
+      if (id) {
+        const r = publishAdminNotificationDemo(id);
+        return r ? json(r) : notFound(`POST ${pathname}`);
+      }
+    }
   }
 
   if (method === "PATCH") {
@@ -1526,7 +1587,7 @@ export function createDemoFetch(): typeof fetch {
       mailStore.handle(method, url.pathname, url, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
-      matchDemoRoute(method, url.pathname, url);
+      matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.
     return boot(input, init);

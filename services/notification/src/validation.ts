@@ -322,4 +322,20 @@ export function parseListManageQuery(
   return out;
 }
 
+/** Validate POST /manage/publish-batch body ({ ids: string[] }, 1..MAX_DIRECT_RECIPIENTS). */
+export function parsePublishBatch(body: unknown): notification.PublishBroadcastBatchRequest {
+  if (!isPlainObject(body)) throw notifValidationFailed([{ field: "(root)", reason: "invalid_type" }]);
+  const ids = body.ids;
+  if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string" && i.length > 0)) {
+    throw notifValidationFailed([{ field: "ids", reason: "invalid_type", message: "non-empty string array" }]);
+  }
+  if (ids.length === 0) {
+    throw notifValidationFailed([{ field: "ids", reason: "required", message: "at least one id" }]);
+  }
+  if (ids.length > MAX_DIRECT_RECIPIENTS) {
+    throw notifValidationFailed([{ field: "ids", reason: "too_long", message: `<= ${MAX_DIRECT_RECIPIENTS}` }]);
+  }
+  return { ids: ids as string[] };
+}
+
 export { notifValidationFailed };

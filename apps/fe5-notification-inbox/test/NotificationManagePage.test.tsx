@@ -50,4 +50,53 @@ describe("NotificationManagePage", () => {
     renderWithDeps(<NotificationManagePage />, deps);
     await waitFor(() => expect(screen.getByTestId("fe5-manage-error")).toBeTruthy());
   });
+
+  it("select-all → bulk publish flips every row to 公開済み in one action", async () => {
+    const { deps, harness } = makeDeps();
+    renderWithDeps(<NotificationManagePage />, deps);
+    await waitFor(() => expect(screen.getAllByTestId("fe5-publish-btn").length).toBe(3));
+
+    fireEvent.click(screen.getByLabelText("すべて選択"));
+    expect(screen.getByTestId("fe5-selected-count").textContent).toBe("3件選択中");
+
+    fireEvent.click(screen.getByTestId("fe5-bulk-publish-btn"));
+
+    await waitFor(() => expect(screen.getAllByTestId("fe5-published-badge").length).toBe(3));
+    expect(screen.queryByTestId("fe5-publish-btn")).toBeNull();
+    expect(screen.getByTestId("fe5-selected-count").textContent).toBe("0件選択中");
+    await waitFor(() => expect(harness.toast.show).toHaveBeenCalledWith("success", expect.stringContaining("3件を公開")));
+    // 3 members broadcasts fanned into the inbox store (broadcasts carry resourceType="notification").
+    expect(harness.store.items.items.filter((i) => i.resourceType === "notification").length).toBe(3);
+  });
+
+  it("genre filter narrows the list; selection resets on filter change", async () => {
+    const { deps } = makeDeps();
+    renderWithDeps(<NotificationManagePage />, deps);
+    await waitFor(() => expect(screen.getAllByTestId("fe5-manage-item").length).toBe(3));
+
+    fireEvent.click(screen.getByLabelText("すべて選択"));
+    expect(screen.getByTestId("fe5-selected-count").textContent).toBe("3件選択中");
+
+    // Switch to the 新機能 (release) tab → only the release notification remains.
+    fireEvent.click(screen.getByRole("tab", { name: /新機能/ }));
+    await waitFor(() => expect(screen.getAllByTestId("fe5-manage-item").length).toBe(1));
+    // Filter change reset the selection.
+    expect(screen.getByTestId("fe5-selected-count").textContent).toBe("0件選択中");
+  });
+
+  it("bulk publishes only the filtered category when select-all is used after filtering", async () => {
+    const { deps, harness } = makeDeps();
+    renderWithDeps(<NotificationManagePage />, deps);
+    await waitFor(() => expect(screen.getAllByTestId("fe5-manage-item").length).toBe(3));
+
+    fireEvent.click(screen.getByRole("tab", { name: /新機能/ }));
+    await waitFor(() => expect(screen.getAllByTestId("fe5-manage-item").length).toBe(1));
+    fireEvent.click(screen.getByLabelText("すべて選択"));
+    expect(screen.getByTestId("fe5-selected-count").textContent).toBe("1件選択中");
+    fireEvent.click(screen.getByTestId("fe5-bulk-publish-btn"));
+
+    await waitFor(() => expect(screen.getAllByTestId("fe5-published-badge").length).toBe(1));
+    // Only 1 broadcast created (the release), not all 3.
+    expect(harness.store.items.items.filter((i) => i.resourceType === "notification").length).toBe(1);
+  });
 });

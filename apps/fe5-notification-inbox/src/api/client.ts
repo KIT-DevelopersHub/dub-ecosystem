@@ -11,6 +11,7 @@ import type {
   ListAdminNotificationsParams,
   ListAdminNotificationsResponse,
   PublishBroadcastResponse,
+  PublishBroadcastBatchResponse,
   PublishReleaseRequest,
   PublishReleaseResponse,
   ReadAllRequest,
@@ -34,6 +35,8 @@ export interface NotificationApi {
   listAdminNotifications(params?: ListAdminNotificationsParams): Promise<ListAdminNotificationsResponse>;
   /** Admin: publish one admin notification to all members as a broadcast. */
   publishBroadcast(id: string): Promise<PublishBroadcastResponse>;
+  /** Admin: publish MANY admin notifications to members in one round trip (bulk). */
+  publishBroadcastBatch(ids: string[]): Promise<PublishBroadcastBatchResponse>;
 }
 
 export function createNotificationApi(client: ApiClient): NotificationApi {
@@ -64,6 +67,9 @@ export function createNotificationApi(client: ApiClient): NotificationApi {
     },
     publishBroadcast(id) {
       return client.post<PublishBroadcastResponse>(`${BASE}/manage/${encodeURIComponent(id)}/publish`);
+    },
+    publishBroadcastBatch(ids) {
+      return client.post<PublishBroadcastBatchResponse>(`${BASE}/manage/publish-batch`, { ids });
     },
   };
 }
