@@ -45,6 +45,40 @@ export function deleteTask(client: ApiClient, id: common.TaskId): Promise<void> 
   return client.request<void>({ method: "DELETE", path: `${P}/tasks/${id}` as ApiPath });
 }
 
+// ---- task attachments (task-service; task_attachments) ----
+export function listTaskAttachments(
+  client: ApiClient,
+  taskId: common.TaskId,
+): Promise<task.ListTaskAttachmentsResponse> {
+  return client.request<task.ListTaskAttachmentsResponse>({
+    method: "GET",
+    path: `${P}/tasks/${taskId}/attachments` as ApiPath,
+  });
+}
+
+export function createTaskAttachment(
+  client: ApiClient,
+  taskId: common.TaskId,
+  body: task.CreateTaskAttachmentRequest,
+): Promise<task.TaskAttachment> {
+  return client.request<task.TaskAttachment>({
+    method: "POST",
+    path: `${P}/tasks/${taskId}/attachments` as ApiPath,
+    body,
+  });
+}
+
+export function deleteTaskAttachment(
+  client: ApiClient,
+  taskId: common.TaskId,
+  attachmentId: string,
+): Promise<void> {
+  return client.request<void>({
+    method: "DELETE",
+    path: `${P}/tasks/${taskId}/attachments/${attachmentId}` as ApiPath,
+  });
+}
+
 export function replaceDependencies(
   client: ApiClient,
   id: common.TaskId,

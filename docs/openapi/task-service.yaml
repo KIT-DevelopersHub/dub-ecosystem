@@ -277,8 +277,171 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /tasks/{id}/attachments:
+    get:
+      operationId: listTaskAttachments
+      summary: List a task's attachments (files + URLs)
+      tags:
+        - tasks
+      description: Requires task:read. Returns the task's live (non-archived) attachments.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The task's attachments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTaskAttachmentsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createTaskAttachment
+      summary: Attach a file's meta or an external URL to a task
+      tags:
+        - tasks
+      description: >-
+        Requires task:write. The file blob lives in file-meta/R2 (client uploads
+        it there first); this records only the task↔attachment index + display
+        meta. `url` is the file-meta download path (kind=file) or the external
+        URL (kind=url).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskAttachmentRequest'
+      responses:
+        '201':
+          description: The created attachment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskAttachment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /tasks/{id}/attachments/{attachmentId}:
+    delete:
+      operationId: deleteTaskAttachment
+      summary: Soft-remove a task attachment
+      tags:
+        - tasks
+      description: Requires task:write.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Removed
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   schemas:
+    TaskAttachment:
+      type: object
+      required:
+        - id
+        - taskId
+        - kind
+        - name
+        - url
+        - fileId
+        - mimeType
+        - sizeBytes
+        - createdBy
+        - createdAt
+      properties:
+        id:
+          type: string
+        taskId:
+          type: string
+        kind:
+          type: string
+          enum:
+            - file
+            - url
+        name:
+          type: string
+        url:
+          type: string
+          description: file-meta download path (kind=file) or the external URL (kind=url).
+        fileId:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          nullable: true
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CreateTaskAttachmentRequest:
+      type: object
+      required:
+        - kind
+        - name
+        - url
+      properties:
+        kind:
+          type: string
+          enum:
+            - file
+            - url
+        name:
+          type: string
+        url:
+          type: string
+        fileId:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+    ListTaskAttachmentsResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskAttachment'
     Error:
       type: object
       description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.

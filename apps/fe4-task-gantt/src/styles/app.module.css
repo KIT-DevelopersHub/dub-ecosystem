@@ -1188,3 +1188,80 @@
   .partyName { display: none; }
   .myTable thead { display: none; }
 }
+
+/* ── task attachments (create modal draft + detail view) ─────────────────── */
+.attachRow { margin-bottom: var(--dub-space-2); }
+.attachFileInput {
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-text-secondary);
+}
+.attachUrlRow {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: var(--dub-space-2);
+  align-items: start;
+}
+.attachError {
+  margin-top: var(--dub-space-2);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-danger-600, #b42318);
+}
+.attachDraftList {
+  list-style: none;
+  margin: var(--dub-space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.attachDraftItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default, #e4e4e7);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-surface-sunken, #f8f8fa);
+}
+.attachDraftName { font-size: var(--dub-font-size-sm, 0.85rem); color: var(--dub-color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachDraftRemove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--dub-color-text-secondary);
+  padding: 0 var(--dub-space-1);
+}
+.attachDraftRemove:hover { color: var(--dub-color-danger-600, #b42318); }
+
+.attachViewList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.attachViewItem { min-width: 0; }
+.attachViewImage {
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: var(--dub-radius-md, 8px);
+  border: 1px solid var(--dub-color-border-default, #e4e4e7);
+}
+.attachViewLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default, #e4e4e7);
+  border-radius: var(--dub-radius-md, 8px);
+  text-decoration: none;
+  color: var(--dub-color-accent, #2246d6);
+  background: var(--dub-color-surface-base);
+}
+.attachViewLink:hover { background: var(--dub-color-surface-sunken, #f8f8fa); }
+.attachViewName { font-size: var(--dub-font-size-sm, 0.9rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachViewSize { font-size: var(--dub-font-size-xs, 0.75rem); color: var(--dub-color-text-secondary); }

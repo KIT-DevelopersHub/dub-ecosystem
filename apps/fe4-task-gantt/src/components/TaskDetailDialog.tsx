@@ -1,11 +1,86 @@
+import { useEffect, useState } from "react";
 import type { task, common } from "@dub/types";
-import { Modal, Badge, Button, type BadgeTone } from "@dub/ui";
+import { Modal, Badge, Button, SkeletonList, type BadgeTone } from "@dub/ui";
 import type { UserCache } from "../domain/user-cache";
+import { useApiClient } from "../api/client-context";
+import { listTaskAttachments } from "../api/endpoints";
 import { isOverdue } from "../domain/my-tasks";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { FromToCell } from "./FromToCell";
 import { TaskStatusBadge } from "./TaskStatusBadge";
 import styles from "../styles/app.module.css";
+
+function humanSize(bytes: number | null): string {
+  if (bytes === null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentsSection({ taskId }: { taskId: common.TaskId }) {
+  const client = useApiClient();
+  const [items, setItems] = useState<task.TaskAttachment[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setItems(null);
+    setFailed(false);
+    listTaskAttachments(client, taskId)
+      .then((res) => {
+        if (live) setItems(res.items);
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, taskId]);
+
+  return (
+    <section className={styles.detailSection} data-testid="fe4-mytask-detail-attachments">
+      <h3 className={styles.detailHeading}>添付</h3>
+      {items === null && !failed ? (
+        <SkeletonList rows={2} />
+      ) : failed ? (
+        <p className={styles.detailEmpty}>添付を読み込めませんでした。</p>
+      ) : items && items.length > 0 ? (
+        <ul className={styles.attachViewList}>
+          {items.map((a) => {
+            const isImage = (a.mimeType ?? "").startsWith("image/");
+            return (
+              <li key={a.id} className={styles.attachViewItem}>
+                {a.kind === "file" && isImage ? (
+                  <a href={a.url} target="_blank" rel="noreferrer" title={a.name}>
+                    <img src={a.url} alt={a.name} className={styles.attachViewImage} />
+                  </a>
+                ) : (
+                  <a
+                    href={a.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    {...(a.kind === "file" ? { download: a.name } : {})}
+                    className={styles.attachViewLink}
+                    data-testid={`fe4-mytask-detail-attach-${a.kind}`}
+                  >
+                    <span aria-hidden>{a.kind === "file" ? "📎" : "🔗"}</span>
+                    <span className={styles.attachViewName}>{a.name}</span>
+                    {a.sizeBytes !== null && <span className={styles.attachViewSize}>{humanSize(a.sizeBytes)}</span>}
+                  </a>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className={styles.detailEmpty} data-testid="fe4-mytask-detail-attachments-empty">
+          添付はありません。
+        </p>
+      )}
+    </section>
+  );
+}
 
 const PRIORITY_TONE: Record<task.TaskPriority, BadgeTone> = {
   urgent: "danger",
@@ -111,6 +186,8 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
               </dd>
             </div>
           </dl>
+
+          <AttachmentsSection taskId={t.id} />
         </div>
       )}
     </Modal>
