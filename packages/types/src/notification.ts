@@ -4,6 +4,16 @@ import type { NotificationId, UserId, ISODateTime, Paginated, CursorQuery } from
 export type NotificationChannel = "in_app" | "email" | "chat" | "push"; // 4 closed (theme4)
 export type NotificationType = string; // open vocabulary
 
+// Audience gating for org-wide update notifications (Notification management, 2026-08).
+//   - "admin":   the notification is admin-facing first (deploy done / feedback / ops
+//                alerts). Only admins/maintainers see it; members never do.
+//   - "members": member-visible (direct-to-user notifications AND admin-published
+//                broadcasts). This is the default for every pre-existing notification so
+//                a user always sees notifications addressed to them.
+// Admins see BOTH audiences; members see only "members". An admin turns an "admin"
+// notification into a "members" broadcast via the management screen.
+export type NotificationAudience = "admin" | "members";
+
 export interface NotifyRequest {
   type: NotificationType;
   recipientIds: UserId[];
@@ -28,6 +38,9 @@ export interface InboxItem {
   createdAt: ISODateTime;
   resourceType: string | null;
   resourceId: string | null;
+  /** Additive: audience of the underlying notification (defaults to "members" for rows
+   *  produced before the field existed). Members only ever receive "members" rows. */
+  audience?: NotificationAudience;
 }
 export interface ListInboxQuery extends CursorQuery {
   unreadOnly?: boolean;
@@ -74,3 +87,29 @@ export interface ListFeedbackQuery extends CursorQuery {
   unreadOnly?: boolean;
 }
 export type ListFeedbackResponse = Paginated<FeedbackItem>;
+
+// ---- Notification management (admin) ----
+// The admin screen lists audience="admin" notifications and can publish any of them to
+// members as a broadcast. `publishedBroadcastId` is the id of the members broadcast
+// derived from this notification (null until an admin publishes it) — drives the
+// "公開済み" badge and the disabled state of the publish button.
+export interface AdminNotificationItem {
+  id: NotificationId;
+  type: NotificationType;
+  title: string;
+  body: string;
+  audience: NotificationAudience; // always "admin" on this list
+  createdAt: ISODateTime;
+  publishedBroadcastId: NotificationId | null;
+}
+export interface ListAdminNotificationsQuery extends CursorQuery {}
+export type ListAdminNotificationsResponse = Paginated<AdminNotificationItem>;
+
+// POST /notifications/manage/:id/publish — publish an admin notification to all members.
+// Idempotent: re-publishing the same source returns the existing broadcast id with
+// deduplicated=true.
+export interface PublishBroadcastResponse {
+  notificationId: NotificationId; // the members broadcast id
+  deduplicated: boolean;
+  publishedBroadcastId: NotificationId; // == notificationId (stable badge target)
+}

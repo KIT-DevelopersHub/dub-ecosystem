@@ -17,11 +17,11 @@ describe("@dub/types", () => {
     expect(common.MOBILE_API_PREFIX).toBe("/m/v1");
   });
 
-  it("PERMISSION_CATALOG is 33 closed keys, lowercase, unique", () => {
+  it("PERMISSION_CATALOG is 34 closed keys, lowercase, unique", () => {
     const cat = identity.PERMISSION_CATALOG;
-    expect(cat.length).toBe(33);
+    expect(cat.length).toBe(34);
     const keys = cat.map((e) => e.key);
-    expect(new Set(keys).size).toBe(33); // unique
+    expect(new Set(keys).size).toBe(34); // unique
     for (const key of keys) {
       const segs = key.split(":");
       // <domain>:<action>, plus an optional :self scope segment (self-service keys)

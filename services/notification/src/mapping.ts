@@ -150,6 +150,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     type: "public.inquiry.received",
     channels: ["in_app", "email"],
     priority: "urgent", // staff should see inquiries promptly (enables email default)
+    audience: "admin", // staff-facing; not shown to general members
     buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN, ROLE_ORGANIZER] }),
     buildContent: (p) => {
       const i = p as PublicInquiryReceivedPayload;
@@ -158,10 +159,14 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
   },
 
   // ---- operational alerts (admin only) ----
+  // All admin-audience: only admins/maintainers see them until an admin publishes to
+  // members via the Notification management screen. "deploy完了" is the auto-admin
+  // notification B-set member is expected to publish (Notification管理 §5).
   "github.sync_failed": {
     type: "github.sync_failed",
     channels: ["in_app"],
     priority: "normal",
+    audience: "admin",
     buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
     buildContent: (p) => {
       const g = p as GithubSyncFailedPayload;
@@ -172,6 +177,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     type: "github.conflict_detected",
     channels: ["in_app"],
     priority: "normal",
+    audience: "admin",
     buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
     buildContent: (p) => ({ title: "GitHub conflict detected", resourceType: "task", resourceId: (p as GithubConflictDetectedPayload).taskId }),
   },
@@ -179,6 +185,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     type: "deploy.deployment.status_changed",
     channels: ["in_app"],
     priority: "normal",
+    audience: "admin", // "デプロイ完了" (auto-admin notification #1) — admin publishes to members
     buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
     buildContent: (p) => {
       const d = p as DeployDeploymentStatusChangedPayload;
@@ -189,6 +196,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     type: "deploy.dns.record_changed",
     channels: ["in_app"],
     priority: "normal",
+    audience: "admin",
     buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
     buildContent: (p) => {
       const d = p as DeployDnsRecordChangedPayload;

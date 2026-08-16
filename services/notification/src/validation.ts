@@ -302,4 +302,24 @@ export function parseListFeedbackQuery(q: Record<string, string | undefined>): n
   return out;
 }
 
+/** Validate GET /manage query params (admin notification list; CursorQuery only). */
+export function parseListManageQuery(
+  q: Record<string, string | undefined>,
+): notification.ListAdminNotificationsQuery & { limit: number } {
+  const fe: FieldError[] = [];
+  const out: notification.ListAdminNotificationsQuery & { limit: number } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
+
+  if (q.limit !== undefined && q.limit !== "") {
+    const n = Number(q.limit);
+    if (!Number.isInteger(n) || n < 1) fe.push({ field: "limit", reason: "invalid_range" });
+    else if (n > MAX_QUERY_LIMIT) fe.push({ field: "limit", reason: "too_large", message: `<= ${MAX_QUERY_LIMIT}` });
+    else out.limit = n;
+  }
+
+  if (fe.length > 0) throw notifValidationFailed(fe);
+  return out;
+}
+
 export { notifValidationFailed };

@@ -20,7 +20,7 @@ const MAINTAINER_KEYS: identity.PermissionKey[] = [
   "event:read", "event:write", "event:admin",
   "task:read", "task:write", "task:delete",
   "file:read", "file:write",
-  "notif:send", "notif:admin",
+  "notif:send", "notif:admin", "notif:broadcast_publish",
   "mail:send", "mail:read",
   "chat:create", "chat:moderate",
   "infra:read", "infra:deploy",

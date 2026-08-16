@@ -43,6 +43,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "file:read",
   "notif:inbox:self",
   "notif:prefs:self",
+  "notif:broadcast_publish",
   "mail:read",
   "mail:send",
   "mail:admin",

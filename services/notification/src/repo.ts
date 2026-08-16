@@ -3,7 +3,8 @@
 import { type DbClient, newId, nowIso } from "@dub/db";
 import { errors } from "@dub/errors";
 import type { notification } from "@dub/types";
-import { BROADCAST_IN_APP_TYPES } from "./config";
+import { BROADCAST_IN_APP_TYPES, DEFAULT_AUDIENCE, AUDIENCE_ADMIN, BROADCAST_FROM_PREFIX } from "./config";
+import type { NotificationAudience } from "./types";
 import type {
   DeliveryOutcome,
   IngestInput,
@@ -39,6 +40,7 @@ interface InboxRow {
   body: string | null;
   resource_type: string | null;
   resource_id: string | null;
+  audience: string;
 }
 
 interface PreferenceRow {
@@ -77,14 +79,15 @@ export async function insertNotification(db: DbClient, input: IngestInput): Prom
   const id = newId("ntfn");
   await db.run(
     `INSERT INTO notif_notifications
-       (id, type, title, body, priority, dedup_key, source, source_event, actor_id,
+       (id, type, title, body, priority, audience, dedup_key, source, source_event, actor_id,
         request_id, resource_type, resource_id, meta_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     input.type,
     input.title,
     input.body,
     input.priority,
+    input.audience ?? DEFAULT_AUDIENCE,
     input.dedupKey ?? null,
     input.source,
     input.sourceEvent ?? null,
@@ -148,23 +151,35 @@ function rowToInboxItem(r: InboxRow): notification.InboxItem {
     createdAt: r.created_at,
     resourceType: r.resource_type,
     resourceId: r.resource_id,
+    audience: (r.audience as NotificationAudience) ?? DEFAULT_AUDIENCE,
   };
 }
 
+/**
+ * List a user's inbox. `includeAdminAudience` is true only for admin/maintainer viewers;
+ * members pass false and never see audience='admin' rows (defense-in-depth on top of
+ * fan-out, which already scopes admin notifications to admin roles). Members always keep
+ * their own direct notifications, which are audience='members'.
+ */
 export async function listInbox(
   db: DbClient,
   userId: string,
   q: notification.ListInboxQuery & { limit: number },
+  includeAdminAudience = false,
 ): Promise<notification.ListInboxResponse> {
   const where: string[] = ["i.user_id = ?"];
   const binds: unknown[] = [userId];
+  if (!includeAdminAudience) {
+    where.push("n.audience <> ?");
+    binds.push(AUDIENCE_ADMIN);
+  }
   if (q.unreadOnly) where.push("i.read_at IS NULL");
   if (q.cursor !== undefined) {
     where.push("i.id < ?");
     binds.push(decodeCursor(q.cursor));
   }
   const sql = `SELECT i.id, i.notification_id, i.user_id, i.read_at, i.created_at,
-                      n.type, n.title, n.body, n.resource_type, n.resource_id
+                      n.type, n.title, n.body, n.resource_type, n.resource_id, n.audience
                FROM notif_inbox i
                JOIN notif_notifications n ON n.id = i.notification_id
                WHERE ${where.join(" AND ")}
@@ -180,10 +195,26 @@ export async function listInbox(
   };
 }
 
-export async function unreadCount(db: DbClient, userId: string): Promise<number> {
+export async function unreadCount(
+  db: DbClient,
+  userId: string,
+  includeAdminAudience = false,
+): Promise<number> {
+  // Member unread counts exclude audience='admin' rows for parity with listInbox. The
+  // JOIN is only needed for the audience filter; admin viewers keep the cheap COUNT.
+  if (includeAdminAudience) {
+    const row = await db.first<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM notif_inbox WHERE user_id = ? AND read_at IS NULL`,
+      userId,
+    );
+    return row?.c ?? 0;
+  }
   const row = await db.first<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM notif_inbox WHERE user_id = ? AND read_at IS NULL`,
+    `SELECT COUNT(*) AS c FROM notif_inbox i
+       JOIN notif_notifications n ON n.id = i.notification_id
+      WHERE i.user_id = ? AND i.read_at IS NULL AND n.audience <> ?`,
     userId,
+    AUDIENCE_ADMIN,
   );
   return row?.c ?? 0;
 }
@@ -233,6 +264,79 @@ export async function markAllRead(db: DbClient, userId: string, typePrefix?: str
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, "\\$&");
+}
+
+// ---- admin notification management (audience='admin' list + publish-to-members) ----
+
+interface AdminNotifRow {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  audience: string;
+  created_at: string;
+  published_broadcast_id: string | null;
+}
+
+function rowToAdminItem(r: AdminNotifRow): notification.AdminNotificationItem {
+  return {
+    id: r.id,
+    type: r.type,
+    title: r.title,
+    body: r.body ?? "",
+    audience: (r.audience as NotificationAudience) ?? AUDIENCE_ADMIN,
+    createdAt: r.created_at,
+    publishedBroadcastId: r.published_broadcast_id,
+  };
+}
+
+/**
+ * Admin list: audience='admin' notifications newest-first (opaque id cursor). Each row is
+ * LEFT-JOINed to the members broadcast derived from it (dedup_key = 'broadcast:from:'||id)
+ * so `publishedBroadcastId` drives the "公開済み" badge without a second query.
+ */
+export async function listAdminNotifications(
+  db: DbClient,
+  q: notification.ListAdminNotificationsQuery & { limit: number },
+): Promise<notification.ListAdminNotificationsResponse> {
+  const where: string[] = ["n.audience = ?"];
+  const binds: unknown[] = [AUDIENCE_ADMIN];
+  if (q.cursor !== undefined) {
+    where.push("n.id < ?");
+    binds.push(decodeCursor(q.cursor));
+  }
+  const sql = `SELECT n.id, n.type, n.title, n.body, n.audience, n.created_at,
+                      b.id AS published_broadcast_id
+               FROM notif_notifications n
+               LEFT JOIN notif_notifications b
+                 ON b.dedup_key = ? || n.id
+               WHERE ${where.join(" AND ")}
+               ORDER BY n.id DESC
+               LIMIT ?`;
+  const rows = await db.all<AdminNotifRow>(sql, BROADCAST_FROM_PREFIX, ...binds, q.limit + 1);
+  const hasMore = rows.length > q.limit;
+  const page = hasMore ? rows.slice(0, q.limit) : rows;
+  const last = page[page.length - 1];
+  return {
+    items: page.map(rowToAdminItem),
+    nextCursor: hasMore && last ? encodeCursor(last.id) : null,
+  };
+}
+
+export interface SourceNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  audience: string;
+}
+
+/** Load a notification's publishable fields (title/body/audience) for member broadcast. */
+export async function getNotificationById(db: DbClient, id: string): Promise<SourceNotification | null> {
+  return db.first<SourceNotification>(
+    `SELECT id, type, title, body, audience FROM notif_notifications WHERE id = ?`,
+    id,
+  );
 }
 
 // ---- deliveries ----

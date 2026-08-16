@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (33 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (34 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -32,6 +32,7 @@ export const PERMISSION_CATALOG = [
   { key: "notif:admin", name: "Administer notifications", description: "Search delivery records", domain: "notif", dangerous: false },
   { key: "notif:inbox:self", name: "Read own inbox", description: "View and manage one's own notification inbox", domain: "notif", dangerous: false },
   { key: "notif:prefs:self", name: "Manage own notification preferences", description: "View and update one's own notification preferences", domain: "notif", dangerous: false },
+  { key: "notif:broadcast_publish", name: "Publish member broadcasts", description: "Publish an admin notification to all members from the Notification management screen", domain: "notif", dangerous: false },
   { key: "mail:send", name: "Send mail", description: "Send email", domain: "mail", dangerous: true },
   { key: "mail:read", name: "Read mail", description: "View messages/threads/rules", domain: "mail", dangerous: false },
   { key: "mail:read_all", name: "Read all mail", description: "View every user's mail (oversight/archive)", domain: "mail", dangerous: true },
@@ -52,7 +53,7 @@ export const PERMISSION_CATALOG = [
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 33 keys (open `${string}:${string}` template retired).
+// Closed union of the 34 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

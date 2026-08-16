@@ -8,6 +8,9 @@ import type { ApiClient } from "../contracts/fe2";
 import type {
   GetPreferencesResponse,
   ListInboxResponse,
+  ListAdminNotificationsParams,
+  ListAdminNotificationsResponse,
+  PublishBroadcastResponse,
   PublishReleaseRequest,
   PublishReleaseResponse,
   ReadAllRequest,
@@ -27,6 +30,10 @@ export interface NotificationApi {
   updatePreferences(req: UpdatePreferencesRequest): Promise<void>;
   /** Admin: publish a release note broadcast to every user's inbox. */
   publishRelease(req: PublishReleaseRequest): Promise<PublishReleaseResponse>;
+  /** Admin (notif:broadcast_publish): list audience='admin' notifications to manage. */
+  listAdminNotifications(params?: ListAdminNotificationsParams): Promise<ListAdminNotificationsResponse>;
+  /** Admin: publish one admin notification to all members as a broadcast. */
+  publishBroadcast(id: string): Promise<PublishBroadcastResponse>;
 }
 
 export function createNotificationApi(client: ApiClient): NotificationApi {
@@ -51,6 +58,12 @@ export function createNotificationApi(client: ApiClient): NotificationApi {
     },
     publishRelease(req) {
       return client.post<PublishReleaseResponse>(`${BASE}/release`, req);
+    },
+    listAdminNotifications(params) {
+      return client.get<ListAdminNotificationsResponse>(`${BASE}/manage`, params as Record<string, unknown> | undefined);
+    },
+    publishBroadcast(id) {
+      return client.post<PublishBroadcastResponse>(`${BASE}/manage/${encodeURIComponent(id)}/publish`);
     },
   };
 }
