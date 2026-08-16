@@ -5,7 +5,11 @@ import { migratedD1 } from "./d1";
 import {
   buildDeployNotifyRow,
   buildDeployNotifySql,
+  buildBackfillRows,
+  buildBackfillSql,
+  mergedPrToMeta,
   deployDedupKey,
+  type MergedPr,
 } from "../src/adminNotify";
 
 function rowFor(raw: ReturnType<typeof migratedD1> extends Promise<infer T> ? (T extends { raw: infer R } ? R : never) : never, sha: string) {
@@ -62,5 +66,35 @@ describe("buildDeployNotifySql — applied to dub-core", () => {
     raw.exec(buildDeployNotifySql({ sha: "sha_b", title: "B" }));
     const cnt = raw.prepare("SELECT COUNT(*) AS c FROM notif_notifications WHERE audience = 'admin'").get() as { c: number };
     expect(Number(cnt.c)).toBe(2);
+  });
+});
+
+describe("backfill — merged PRs → Admin rows", () => {
+  const prs: MergedPr[] = [
+    { number: 200, title: "usage 刷新", url: "u200", mergedAt: "2026-08-15T10:00:00Z", mergeCommit: { oid: "sha200" } },
+    { number: 199, title: "全メトリクス取得の根治", mergedAt: "2026-08-15T09:00:00Z", mergeCommit: { oid: "sha199" } },
+    { number: 1, title: "no merge commit (skip)", mergeCommit: null },
+  ];
+
+  it("maps a merged PR to SHA-keyed meta; skips PRs without a merge commit", () => {
+    expect(deployDedupKey(mergedPrToMeta(prs[0]!)!.sha)).toBe("deploy:sha200");
+    expect(mergedPrToMeta(prs[2]!)).toBeNull();
+  });
+
+  it("builds one row per mergeable PR and excludes already-recorded keys", () => {
+    const all = buildBackfillRows(prs);
+    expect(all.map((r) => r.row.dedupKey)).toEqual(["deploy:sha200", "deploy:sha199"]);
+    const partial = buildBackfillRows(prs, new Set(["deploy:sha200"]));
+    expect(partial.map((r) => r.row.dedupKey)).toEqual(["deploy:sha199"]);
+    expect(buildBackfillRows(prs, new Set(["deploy:sha200", "deploy:sha199"]))).toHaveLength(0);
+  });
+
+  it("backfill SQL applied to dub-core is idempotent across a re-run", async () => {
+    const { raw } = await migratedD1();
+    const sql = buildBackfillSql(buildBackfillRows(prs));
+    raw.exec(sql);
+    raw.exec(sql);
+    const cnt = raw.prepare("SELECT COUNT(*) AS c FROM notif_notifications WHERE audience='admin'").get() as { c: number };
+    expect(Number(cnt.c)).toBe(2); // 2 mergeable PRs, no duplicates
   });
 });

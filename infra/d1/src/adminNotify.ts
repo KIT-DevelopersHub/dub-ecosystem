@@ -156,3 +156,59 @@ export function buildInsertNotificationSql(row: NotifNotificationRow): string {
 export function buildDeployNotifySql(meta: DeployNotifyMeta): string {
   return buildInsertNotificationSql(buildDeployNotifyRow(meta));
 }
+
+// ---- backfill (one-time): past merged PRs that never produced an Admin notification ----
+
+/** Shape of a `gh pr list --json number,title,url,mergedAt,mergeCommit` item. */
+export interface MergedPr {
+  number: number;
+  title: string;
+  url?: string;
+  mergedAt?: string;
+  mergeCommit?: { oid?: string } | null;
+}
+
+/**
+ * Map a merged PR to deploy-notify meta, keyed by its merge/squash commit SHA — the SAME
+ * key space as the forward CI step (GITHUB_SHA on main), so backfilling a PR and a later
+ * CI run for the same commit never double-insert (dedupKey=deploy:<sha>). Returns null
+ * when the PR has no merge commit (not actually merged / unknown), so it is skipped.
+ */
+export function mergedPrToMeta(pr: MergedPr): DeployNotifyMeta | null {
+  const sha = pr.mergeCommit?.oid;
+  if (!sha) return null;
+  return {
+    sha,
+    title: pr.title,
+    prNumber: pr.number,
+    ...(pr.url ? { url: pr.url } : {}),
+    ...(pr.mergedAt ? { timestamp: pr.mergedAt } : {}),
+    services: "backfill (過去のマージ/デプロイ取り込み)",
+  };
+}
+
+export interface BackfillRow {
+  meta: DeployNotifyMeta;
+  row: NotifNotificationRow;
+}
+
+/** Build idempotent rows for every merged PR that maps to a commit. `existingDedupKeys`
+ *  (already present in D1) are filtered out so the preview/apply count is the true delta. */
+export function buildBackfillRows(prs: MergedPr[], existingDedupKeys: ReadonlySet<string> = new Set()): BackfillRow[] {
+  const out: BackfillRow[] = [];
+  const seen = new Set<string>();
+  for (const pr of prs) {
+    const meta = mergedPrToMeta(pr);
+    if (!meta) continue;
+    const key = deployDedupKey(meta.sha);
+    if (existingDedupKeys.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ meta, row: buildDeployNotifyRow(meta) });
+  }
+  return out;
+}
+
+/** Concatenate the idempotent INSERTs for a backfill set into one .sql payload. */
+export function buildBackfillSql(rows: BackfillRow[]): string {
+  return rows.map((r) => buildInsertNotificationSql(r.row)).join("\n");
+}
