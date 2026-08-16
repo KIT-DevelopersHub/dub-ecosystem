@@ -121,6 +121,12 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
   inline で組まない**——それは CSS Modules か②に出す。
 - **Tailwind / ランタイム CSS-in-JS は不採用**（凍結）。
 - **ライト/ダーク両対応**: 色は必ずトークン経由。生 hex を置くと片テーマで破綻する。
+- **排他選択（segment / tab strip）UI はコアで組む**: 「同格の少数択一を1つ選ぶ」UI
+  （ビュー切替・粒度・スコープ・モード切替など）は `@dub/ui` の **`SegmentedControl`**
+  を使う。`role="tablist"` + アクティブ class の手組みや、スライドするインジケータの再実装を
+  しない（a11y・`prefers-reduced-motion`・折返し追従がブレる）。画面の主セクション切替（下線
+  タブ）は既存 `Tabs`。既存の手組み箇所と寄せ替え順は
+  [選択UIの統一プラン](./segmented-control-unification.md) を参照。
 
 ## 5. 状態の扱い (loading / empty / error)
 

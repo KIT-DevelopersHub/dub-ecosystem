@@ -39,7 +39,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
   it("expands a role in place and shows its permission matrix on the SAME screen", async () => {
     const user = userEvent.setup();
     const { navigate } = renderWithProviders(<RoleListPage />);
-    await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_organizer")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
 
     // collapsed: no inline editor yet
     expect(screen.queryByTestId("fe7-role-inline-role_organizer")).not.toBeInTheDocument();
@@ -57,7 +57,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
   it("opens one role at a time (accordion)", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
-    await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_admin")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_admin")).toBeInTheDocument());
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
     await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_organizer")).toBeInTheDocument());
@@ -70,7 +70,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
   it("edits a permission inline and saves via confirm", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
-    await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_organizer")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
     const toggle = await screen.findByTestId("fe7-role-role_organizer-matrix-key-task:read");
@@ -79,7 +79,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect((toggle as HTMLInputElement).checked).toBe(true);
 
     // role_organizer starts with 2 permissions (event:read, event:write)
-    const row = screen.getByTestId("fe7-roles-row-role_organizer");
+    const row = screen.getByTestId("fe7-roles-open-role_organizer");
     expect(within(row).getByText("2 権限")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("fe7-role-role_organizer-save"));
@@ -95,7 +95,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
   it("admin can edit a system role inline; admin role pins identity:admin", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
-    await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_admin")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_admin")).toBeInTheDocument());
 
     // admin role: identity:admin is locked (self-lockout guard) but the role is still
     // editable — the Save button is present and other keys are toggleable.
@@ -136,7 +136,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
   it("renders each permission domain's keys in a 2-column grid", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
-    await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_organizer")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
     const grid = await screen.findByTestId("fe7-role-role_organizer-matrix-grid-event");
@@ -149,7 +149,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
   it("editor reseeds per tab: switching from admin to organizer then saving edits ONLY organizer", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
-    await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_admin")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_admin")).toBeInTheDocument());
 
     // View admin first (5 perms), then switch to organizer (2 perms) via the tabs.
     await user.click(screen.getByTestId("fe7-roles-open-role_admin"));
@@ -166,15 +166,15 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     await user.click(within(confirm).getByRole("button", { name: "確認" }));
 
     // organizer -> 3 (2 + task:read), and admin stays 5 (untouched by the leak).
-    const orgTab = screen.getByTestId("fe7-roles-row-role_organizer");
+    const orgTab = screen.getByTestId("fe7-roles-open-role_organizer");
     await waitFor(() => expect(within(orgTab).getByText("3 権限")).toBeInTheDocument());
-    expect(within(screen.getByTestId("fe7-roles-row-role_admin")).getByText("5 権限")).toBeInTheDocument();
+    expect(within(screen.getByTestId("fe7-roles-open-role_admin")).getByText("5 権限")).toBeInTheDocument();
   });
 
   it("read-only user can view permissions inline but cannot edit or create", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />, { me: makeMe(["identity:read"]) });
-    await waitFor(() => expect(screen.getByTestId("fe7-roles-row-role_organizer")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
 
     expect(screen.queryByTestId("fe7-roles-new")).not.toBeInTheDocument();
     expect(screen.queryByTestId("fe7-roles-delete-role_organizer")).not.toBeInTheDocument();

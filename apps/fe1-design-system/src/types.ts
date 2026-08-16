@@ -401,6 +401,36 @@ export interface TabsProps extends TestableProps {
   onChange: (id: string) => void;
 }
 
+// SegmentedControl — a row of mutually-exclusive options (segmented / pill / tab
+// strip) with a highlight that slides under the selected one. Use this instead of
+// hand-rolling `role="tablist"` + active-class button strips (FRONTEND_GUIDE §4).
+// `V` is the value union, so `value` / `onChange` stay type-safe per call site.
+export interface SegmentedOption<V extends string = string> {
+  value: V;
+  label: ReactNode;
+  icon?: IconName; // optional leading icon (decorative)
+  disabled?: boolean;
+  testId?: string; // data-testid on this segment's button
+  // When set, the segment declares it controls a disclosure/panel element: the
+  // button gets `aria-controls={controls}` and reflects `aria-expanded`. Omit for
+  // pure tab semantics (aria-selected only).
+  controls?: string;
+}
+export interface SegmentedControlProps<V extends string = string> extends TestableProps {
+  options: SegmentedOption<V>[];
+  // Controlled selection. Provide `value` + `onChange` to control; otherwise the
+  // control is uncontrolled and seeds from `defaultValue` (or the first enabled
+  // option, so the strip is never blank on mount).
+  value?: V | null;
+  defaultValue?: V;
+  onChange?: (value: V) => void;
+  caption?: ReactNode; // label rendered above the strip
+  captionTestId?: string; // data-testid on the caption element
+  size?: Size; // default "md"
+  "aria-label"?: string; // labels the tablist (recommended when no caption)
+  className?: string; // extra class on the tablist (composition escape hatch)
+}
+
 export interface DividerProps extends TestableProps {
   orientation?: "horizontal" | "vertical";
 }
