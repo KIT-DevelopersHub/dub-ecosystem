@@ -902,13 +902,14 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         return t ? json(t) : notFound(`GET ${pathname}`);
       }
     }
-    // gantt
+    // gantt — the real gantt-service reads `?eventId=`; accept the legacy `?event=`
+    // too so a stale caller still resolves in the demo transport.
     if (pathname === "/api/v1/gantt") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
       return json(GANTT[ev] ?? { eventId: ev, rows: [], dependencies: [] });
     }
     if (pathname === "/api/v1/gantt/dependencies") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
       return json(GANTT[ev]?.dependencies ?? []);
     }
     // notifications

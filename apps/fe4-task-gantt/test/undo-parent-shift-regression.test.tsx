@@ -43,7 +43,7 @@ describe("Parent bar drag undo is 1 step per drag (subtree shift)", () => {
       hierarchy: { c: { parentTaskId: "p", depth: 1 } },
     });
     const coordOf = async (taskId: string): Promise<number> => {
-      const dto = await client.request<gantt.GanttChartDTO>({ method: "GET", path: "/api/v1/gantt", query: { event: EVENT } });
+      const dto = await client.request<gantt.GanttChartDTO>({ method: "GET", path: "/api/v1/gantt", query: { eventId: EVENT } });
       const row = dto.rows.find((r) => r.taskId === taskId)!;
       return (Date.parse(row.startsAt!) - Date.parse(ORIGIN)) / DAY;
     };

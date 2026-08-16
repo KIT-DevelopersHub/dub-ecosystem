@@ -18,6 +18,18 @@ describe("releaseGate", () => {
     expect(isAppPublished("admin")).toBe(false);
   });
 
+  it("keeps ガント (gantt) admin-only: unpublished, so members are greyed and admins bypass", () => {
+    // The task Gantt is an admin/dev-only app for now (社長方針「一旦adminだけ」). Being
+    // absent from PUBLISHED_APPS is exactly what greys it for general members while
+    // privileged viewers (admins/maintainers) bypass the gate — the release-gating
+    // "app on/off" mechanism. Do NOT add "gantt" here without an explicit publish call.
+    expect(isAppPublished("gantt")).toBe(false);
+    expect(PUBLISHED_APPS.has("gantt")).toBe(false);
+    // admin bypasses; a read-only member does not (tile greyed + route 403).
+    expect(isPrivilegedViewer(canFrom(["identity:admin"]))).toBe(true);
+    expect(isPrivilegedViewer(canFrom(["task:read", "event:read"]))).toBe(false);
+  });
+
   it("treats an unknown/undefined appId as published (never greys test fixtures)", () => {
     expect(isAppPublished(undefined)).toBe(true);
   });

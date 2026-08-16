@@ -39,7 +39,7 @@ describe("createDemoFetch", () => {
     expect(thread.messages.length).toBeGreaterThan(0);
     const read = await a.request<{ read: boolean }>({ method: "POST", path: "/api/v1/mail/messages/msg_1/read", body: {} });
     expect(read.read).toBe(true);
-    const gantt = await a.request<{ rows: unknown[] }>({ method: "GET", path: "/api/v1/gantt", query: { event: "evt_1" } });
+    const gantt = await a.request<{ rows: unknown[] }>({ method: "GET", path: "/api/v1/gantt", query: { eventId: "evt_1" } });
     expect(gantt.rows.length).toBeGreaterThan(0);
   });
 
