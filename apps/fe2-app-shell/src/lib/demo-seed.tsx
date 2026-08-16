@@ -855,6 +855,9 @@ interface DemoDriveFile {
   ownerName: string;
   modifiedTime: string;
   webViewLink: string;
+  /** Parent folder id (null at the shared-drive root). Drives the lazy tree: a
+   *  GET /driveshare/files?folderId=X returns exactly the direct children of X. */
+  parentId: string | null;
   permissions: DemoDrivePermission[];
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
@@ -870,29 +873,66 @@ function createDriveShareStore() {
   });
   const link = (id: string) => `https://drive.google.com/file/d/${id}/view`;
   const files: DemoDriveFile[] = [
+    // ── root (parentId=null): the pre-existing five, unchanged (existing E2E depends on
+    //    予算管理 / チラシ being at the top level). ─────────────────────────────────
     {
       id: "fld_root", name: "Hackit 2026 共有", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-10T09:00:00Z", webViewLink: link("fld_root"),
+      modifiedTime: "2026-08-10T09:00:00Z", webViewLink: link("fld_root"), parentId: null,
       permissions: [owner("perm_1"), { id: "perm_2", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null }],
     },
     {
       id: "fld_designs", name: "デザイン素材", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-11T02:30:00Z", webViewLink: link("fld_designs"), permissions: [owner("perm_3")],
+      modifiedTime: "2026-08-11T02:30:00Z", webViewLink: link("fld_designs"), parentId: null, permissions: [owner("perm_3")],
     },
     {
       id: "fil_budget", name: "予算管理.xlsx", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-11T23:10:00Z", webViewLink: link("fil_budget"),
+      modifiedTime: "2026-08-11T23:10:00Z", webViewLink: link("fil_budget"), parentId: null,
       permissions: [owner("perm_4"), { id: "perm_5", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null }],
     },
     {
       id: "fil_flyer", name: "当日チラシ.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-12T01:00:00Z", webViewLink: link("fil_flyer"),
+      modifiedTime: "2026-08-12T01:00:00Z", webViewLink: link("fil_flyer"), parentId: null,
       permissions: [owner("perm_6"), { id: "perm_anyone_flyer", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null }],
     },
     {
       id: "fil_runsheet", name: "進行台本.gdoc", mimeType: "application/vnd.google-apps.document", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-12T03:45:00Z", webViewLink: link("fil_runsheet"),
+      modifiedTime: "2026-08-12T03:45:00Z", webViewLink: link("fil_runsheet"), parentId: null,
       permissions: [owner("perm_7"), { id: "perm_8", type: "user", role: "commenter", emailAddress: "mc@example.com", displayName: "司会", domain: null }],
+    },
+
+    // ── children of fld_root (depth 1) ────────────────────────────────────────────
+    {
+      id: "fld_sponsors", name: "スポンサー資料", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T05:00:00Z", webViewLink: link("fld_sponsors"), parentId: "fld_root", permissions: [owner("perm_10")],
+    },
+    {
+      id: "fil_schedule", name: "全体スケジュール.gsheet", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T06:00:00Z", webViewLink: link("fil_schedule"), parentId: "fld_root",
+      permissions: [owner("perm_11"), { id: "perm_12", type: "user", role: "reader", emailAddress: "ops@example.com", displayName: "運営", domain: null }],
+    },
+    // ── children of fld_sponsors (depth 2 — proves nesting beyond one level) ───────
+    {
+      id: "fil_contract", name: "協賛契約書.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T07:00:00Z", webViewLink: link("fil_contract"), parentId: "fld_sponsors", permissions: [owner("perm_13")],
+    },
+    {
+      id: "fil_sponsor_deck", name: "協賛メニュー.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T07:30:00Z", webViewLink: link("fil_sponsor_deck"), parentId: "fld_sponsors", permissions: [owner("perm_14")],
+    },
+
+    // ── children of fld_designs (depth 1) ─────────────────────────────────────────
+    {
+      id: "fld_banners", name: "バナー", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T03:00:00Z", webViewLink: link("fld_banners"), parentId: "fld_designs", permissions: [owner("perm_15")],
+    },
+    {
+      id: "fil_poster", name: "ポスター.png", mimeType: "image/png", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T03:30:00Z", webViewLink: link("fil_poster"), parentId: "fld_designs", permissions: [owner("perm_16")],
+    },
+    // ── children of fld_banners (depth 2) ─────────────────────────────────────────
+    {
+      id: "fil_web_banner", name: "Webバナー.png", mimeType: "image/png", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T04:00:00Z", webViewLink: link("fil_web_banner"), parentId: "fld_banners", permissions: [owner("perm_17")],
     },
   ];
   const byId = new Map(files.map((f) => [f.id, f]));
@@ -996,8 +1036,15 @@ function createDriveShareStore() {
     }
     if (method === "GET" && pathname === "/api/v1/driveshare/files") {
       const needle = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-      const matched = files
-        .filter((f) => (needle ? f.name.toLowerCase().includes(needle) : true))
+      const folderId = url.searchParams.get("folderId");
+      // search (q) → GLOBAL flat match (parent ignored); else folderId → direct
+      // children; else the root level (parentId === null). Mirrors mock-client.ts.
+      const scope = needle
+        ? files.filter((f) => f.name.toLowerCase().includes(needle))
+        : folderId
+          ? files.filter((f) => f.parentId === folderId)
+          : files.filter((f) => f.parentId === null);
+      const matched = scope
         .slice()
         .sort((a, b) => {
           const af = a.mimeType === DRIVE_FOLDER_MIME_DEMO ? 0 : 1;

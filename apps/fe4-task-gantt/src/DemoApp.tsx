@@ -4,15 +4,8 @@ import { ToastProvider } from "@dub/ui";
 import type { ApiClient } from "./contracts/spa-shell";
 import { ApiClientProvider } from "./api/client-context";
 import { TaskWorkspacePage } from "./components/TaskWorkspacePage";
-import { MyTasksPage } from "./components/MyTasksPage";
-import {
-  DEMO_EVENT_ID,
-  DEMO_PERMISSIONS,
-  DEMO_CURRENT_USER,
-  DEMO_PEOPLE,
-  DEMO_TEAMS,
-  DEMO_EVENTS,
-} from "./dev-seed";
+import { MeTasksRoute, TaskRouteProvider } from "./routes/taskRoutes";
+import { DEMO_EVENT_ID, DEMO_PERMISSIONS, DEMO_CURRENT_USER } from "./dev-seed";
 import styles from "./styles/app.module.css";
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -56,12 +49,13 @@ export function DemoApp({ client }: DemoAppProps) {
             </nav>
             <main className={styles.demoMain}>
               {view === "mytasks" ? (
-                <MyTasksPage
-                  currentUserId={DEMO_CURRENT_USER}
-                  people={DEMO_PEOPLE}
-                  teams={DEMO_TEAMS}
-                  events={DEMO_EVENTS}
-                />
+                // Render the real shell route so the demo exercises the actual
+                // wiring (MeTasksRoute fetches teams + events from the mock).
+                <TaskRouteProvider
+                  value={{ currentUserId: DEMO_CURRENT_USER, permissions: DEMO_PERMISSIONS }}
+                >
+                  <MeTasksRoute />
+                </TaskRouteProvider>
               ) : (
                 <TaskWorkspacePage eventId={DEMO_EVENT_ID} permissions={DEMO_PERMISSIONS} />
               )}

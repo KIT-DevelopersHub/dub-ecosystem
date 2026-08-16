@@ -2,7 +2,7 @@
 // board/gantt without a backend. Not used by tests (they build their own seed).
 // The rowDates mirror what gantt-service derives (bar = [dueAt - duration, dueAt];
 // dueAt-less tasks fall onto the CPM schedule) so the standalone demo is faithful.
-import type { task, identity, gantt, common, team } from "@dub/types";
+import type { task, identity, gantt, common, team, event } from "@dub/types";
 import { MockApiClient } from "./api/mock-client";
 
 export const DEMO_EVENT_ID = "evt_demo";
@@ -26,6 +26,13 @@ export const DEMO_PEOPLE: identity.UserSummary[] = users;
 export const DEMO_EVENTS = [
   { id: DEMO_EVENT_ID, name: "北陸ITカンファレンス2026" },
   { id: DEMO_OPS_EVENT_ID, name: "運営タスク" },
+];
+
+/** event-service list the shell route (MeTasksRoute) fetches to fill the 対象イベント
+ *  picker — the demo runs the real route path, so GET /events must return these. */
+export const DEMO_EVENT_SUMMARIES: event.EventSummary[] = [
+  { id: DEMO_EVENT_ID, title: "北陸ITカンファレンス2026", phase: "preparing", startsAt: "2026-09-05T00:00:00Z" },
+  { id: DEMO_OPS_EVENT_ID, title: "運営タスク", phase: "open", startsAt: null },
 ];
 
 // canonical Team seed (member-service will own this list in the future).
@@ -132,6 +139,7 @@ export function createDevClient(): MockApiClient {
     currentUserId: DEMO_CURRENT_USER,
     users,
     teams,
+    events: DEMO_EVENT_SUMMARIES,
     tasks: [
       mk("task_1", "会場予約", "done", "high", "usr_alice", "2026-08-07T00:00:00Z", "team_ops", "usr_me"),
       mk("task_2", "スポンサー募集", "in_progress", "high", "usr_bob", "2026-08-14T00:00:00Z", "team_sponsor", "usr_me"),

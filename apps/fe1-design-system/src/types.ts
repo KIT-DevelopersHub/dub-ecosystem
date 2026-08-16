@@ -64,7 +64,9 @@ export type IconName =
   | "check"
   | "check-all"
   | "bell-off"
-  | "archive";
+  | "archive"
+  | "folder"
+  | "folder-open";
 
 export interface IconProps extends TestableProps {
   name: IconName;
