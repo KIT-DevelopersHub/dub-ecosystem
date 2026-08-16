@@ -9,6 +9,10 @@ import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { common } from "@dub/types";
 import { cssText } from "@dub/tokens/css";
+// Load the @dub/ui design-system component stylesheet (same sheet the FE2 shell
+// imports in its main.tsx) so the standalone dev harness renders with ecosystem
+// design (tokens → component rules) instead of unstyled native HTML.
+import "@dub/ui/style.css";
 import { createNotificationApi } from "../api/client";
 import { createMockApiClient } from "../api/mock-client";
 import { createHttpApiClient } from "../api/http-client";

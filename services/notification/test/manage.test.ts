@@ -11,6 +11,7 @@ import {
   listInbox,
   unreadCount,
   listAdminNotifications,
+  backfillAdminAudienceInbox,
 } from "../src/repo";
 import {
   publishBroadcastFromNotification,
@@ -187,12 +188,60 @@ describe("listAdminNotifications (published badge)", () => {
   });
 });
 
+describe("admin-audience lazy backfill (CI single-INSERT model)", () => {
+  it("materializes a bare audience='admin' row for an admin; a member never sees it", async () => {
+    const h = makeTestEnv();
+    // A CI deploy-notify writes ONE notification row and NO inbox rows.
+    const id = await insertNotification(
+      h.db,
+      adminInput({ type: "deploy.completed", title: "デプロイ完了: #199 usage 刷新", dedupKey: "deploy:abc123" }),
+    );
+    void id;
+
+    // Admin read path: backfill materializes it, then it is visible.
+    const created = await backfillAdminAudienceInbox(h.db, "usr_admin");
+    expect(created).toBe(1);
+    const adminInbox = await listInbox(h.db, "usr_admin", { limit: 10 }, true);
+    expect(adminInbox.items).toHaveLength(1);
+    expect(adminInbox.items[0]!.type).toBe("deploy.completed");
+    expect(adminInbox.items[0]!.audience).toBe("admin");
+
+    // Member never gets an admin-audience row (backfill is admin-gated by the caller) and
+    // the audience filter also excludes it even if one existed.
+    const memberInbox = await listInbox(h.db, "usr_member", { limit: 10 });
+    expect(memberInbox.items).toHaveLength(0);
+    expect(await unreadCount(h.db, "usr_member")).toBe(0);
+  });
+
+  it("is idempotent — re-running the backfill adds no duplicate inbox rows", async () => {
+    const h = makeTestEnv();
+    await insertNotification(h.db, adminInput({ dedupKey: "deploy:dup" }));
+    expect(await backfillAdminAudienceInbox(h.db, "usr_admin")).toBe(1);
+    expect(await backfillAdminAudienceInbox(h.db, "usr_admin")).toBe(0);
+    expect(await unreadCount(h.db, "usr_admin", true)).toBe(1);
+  });
+});
+
 describe("HTTP — Notification management gate + end-to-end publish", () => {
   it("GET /manage without notif:broadcast_publish -> 403", async () => {
     const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins([]) });
     const app = createApp();
     const res = await reqOf(app, h)("/manage", { headers: { "x-dub-user-id": "usr_member" } });
     expect(res.status).toBe(403);
+  });
+
+  it("a bare CI-written admin row surfaces to an admin via GET /inbox, never to a member", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: authzIdentityForAdmins(["usr_admin"]) });
+    const app = createApp();
+    const req = reqOf(app, h);
+    // Simulate the CI deploy-notify: a single audience='admin' notification row, no fan-out.
+    await insertNotification(h.db, adminInput({ type: "deploy.completed", title: "デプロイ完了: #203", dedupKey: "deploy:sha203" }));
+
+    const adminInbox = (await (await req("/inbox", { headers: { "x-dub-user-id": "usr_admin" } })).json()) as notification.ListInboxResponse;
+    expect(adminInbox.items.map((i) => i.type)).toContain("deploy.completed");
+
+    const memberInbox = (await (await req("/inbox", { headers: { "x-dub-user-id": "usr_member" } })).json()) as notification.ListInboxResponse;
+    expect(memberInbox.items).toHaveLength(0);
   });
 
   it("admin publishes; member then sees the broadcast (and not before)", async () => {
