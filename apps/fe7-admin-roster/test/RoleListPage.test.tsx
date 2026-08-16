@@ -16,6 +16,26 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect(screen.queryByTestId("fe7-roles-skeleton")).not.toBeInTheDocument();
   });
 
+  it("selects the first role by default so the screen is never empty (clarity)", async () => {
+    renderWithProviders(<RoleListPage />);
+    // A caption labels the strip as a selector, and the first role (admin) is
+    // pre-selected with its matrix already visible — no empty "pick a role" state.
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-caption")).toBeInTheDocument());
+    expect(screen.getByTestId("fe7-roles-open-role_admin")).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_admin")).toBeInTheDocument());
+    expect(screen.getByTestId("fe7-role-role_admin-permission-matrix")).toBeInTheDocument();
+  });
+
+  it("clicking the already-selected tab keeps it selected (no deselect to empty)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RoleListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_admin")).toBeInTheDocument());
+    // admin is selected by default; clicking it again must NOT collapse to empty.
+    await user.click(screen.getByTestId("fe7-roles-open-role_admin"));
+    expect(screen.getByTestId("fe7-roles-open-role_admin")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("fe7-role-inline-role_admin")).toBeInTheDocument();
+  });
+
   it("expands a role in place and shows its permission matrix on the SAME screen", async () => {
     const user = userEvent.setup();
     const { navigate } = renderWithProviders(<RoleListPage />);

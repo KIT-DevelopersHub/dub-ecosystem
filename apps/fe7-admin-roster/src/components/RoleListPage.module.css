@@ -1,0 +1,59 @@
+/* Role management: sliding tab indicator + panel enter animation.
+   Motion values come from @dub/tokens (--dub-motion-*); geometry (position/size)
+   of the indicator is a runtime value and stays inline on the element. */
+
+.strip {
+  position: relative;
+}
+
+.tab {
+  /* smooth the active/inactive text-color swap as selection slides across */
+  transition: color var(--dub-motion-fast, 120ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+/* The pill that slides under the selected tab. Its transform/width/height are
+   set inline from the active button's measured box; here we only style the look
+   and the easing so the move reads as one smooth glide. */
+.indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  border-radius: var(--dub-radius-md, 7px);
+  background: var(--dub-color-surface-base, #ffffff);
+  border: 1px solid var(--dub-color-brand-500, #3358e8);
+  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(16, 24, 40, 0.06));
+  pointer-events: none;
+  transition:
+    transform var(--dub-motion-normal, 200ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1)),
+    width var(--dub-motion-normal, 200ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1)),
+    height var(--dub-motion-normal, 200ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1)),
+    opacity var(--dub-motion-fast, 120ms) linear;
+}
+
+/* The permission panel eases in each time a different role becomes active
+   (it is remounted via key={role.id}), so the content swap is felt, not jarring. */
+.panel {
+  animation: fe7RolePanelIn var(--dub-motion-normal, 200ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+@keyframes fe7RolePanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Respect users who ask the OS to reduce motion: keep the highlight, drop the glide. */
+@media (prefers-reduced-motion: reduce) {
+  .indicator {
+    transition: opacity var(--dub-motion-fast, 120ms) linear;
+  }
+  .panel {
+    animation: none;
+  }
+}
