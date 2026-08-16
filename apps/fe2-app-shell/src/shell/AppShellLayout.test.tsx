@@ -205,4 +205,73 @@ describe("AppShellLayout", () => {
     expect(screen.getByTestId("fe2-app-launcher-item-mail")).toBeEnabled();
     expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeEnabled();
   });
+
+  // Permission gate: an app whose requiredPermissions the viewer lacks is greyed for
+  // EVERYONE (privileged included), matching the route's requiredPermissions guard
+  // (router.tsx RequirePermission → 403). All GATED apps are published here so the
+  // release gate is out of the way and the permission gate is what's under test.
+  const PERM_NAV: NavEntry[] = [
+    { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50, appId: "mail", requiredPermissions: ["identity:admin"] },
+    { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
+  ];
+
+  it("greys an app whose requiredPermissions a privileged viewer still lacks", async () => {
+    // Privileged (holds mail:admin, a dangerous perm → bypasses the release gate) but
+    // does NOT hold identity:admin, so ロール管理 must grey — same as its route 403ing.
+    const me: gateway.MeResponse = { ...ME, permissions: ["mail:admin", "mail:read"] };
+    const maintApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const onNavigate = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={maintApi}>
+          <AppShellLayout navEntries={PERM_NAV} onNavigate={onNavigate}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-app-launcher-trigger"));
+    const roles = screen.getByTestId("fe2-app-launcher-item-admin-roles");
+    expect(roles).toBeDisabled();
+    expect(roles).toHaveAttribute("title", "権限がありません（アクセス不可）");
+    expect(screen.getByTestId("fe2-app-launcher-item-mail")).toBeEnabled();
+    // Greyed permission-gated tile does not navigate.
+    await userEvent.click(roles);
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("sorts usable apps first and greyed apps last, preserving order within each group", async () => {
+    // member: only メール is published + within perms; イベント (unpublished, order 10) and
+    // 管理 (needs identity:admin, order 50) both grey and sink below メール (order 45).
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "mail:read"] };
+    const memberApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events" },
+      { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
+      { label: "管理", path: "/admin/roles", icon: "shield", order: 50, appId: "mail", requiredPermissions: ["identity:admin"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={memberApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-app-launcher-trigger"));
+    const tiles = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
+    // メール (usable) first; then the two greyed apps in their original order (events<admin).
+    expect(tiles).toEqual([
+      "fe2-app-launcher-item-mail",
+      "fe2-app-launcher-item-events",
+      "fe2-app-launcher-item-admin-roles",
+    ]);
+    // The two trailing tiles are the greyed ones.
+    expect(screen.getByTestId("fe2-app-launcher-item-mail")).toBeEnabled();
+    expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeDisabled();
+    expect(screen.getByTestId("fe2-app-launcher-item-admin-roles")).toBeDisabled();
+  });
 });
