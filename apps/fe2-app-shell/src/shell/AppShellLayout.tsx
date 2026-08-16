@@ -15,7 +15,12 @@ import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
-import { isAppPublished, isPrivilegedViewer, UNPUBLISHED_TILE_REASON } from "../lib/releaseGate.ts";
+import {
+  isAppPublished,
+  isPrivilegedViewer,
+  UNPUBLISHED_TILE_REASON,
+  UNAUTHORIZED_TILE_REASON,
+} from "../lib/releaseGate.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -52,17 +57,27 @@ export interface AppShellLayoutProps {
 }
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
-// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal), sorted by
-// order. Member release-gating (社長決定 2026-08-14, see lib/releaseGate): every tile
-// is ALWAYS rendered (消さない — apps are never removed from the launcher, per
-// [[dub-never-hide-or-reduce-apps]]); an app the current viewer may not open yet is
-// greyed-out + disabled instead. Admins/maintainers (isPrivilegedViewer) bypass the
-// gate and see every app active for testing/development; a general member sees only
-// member-published apps active (メールのみ as of 2026-08-14) and the rest greyed with
-// a "準備中" tooltip. Route guards (router.tsx) enforce the same on direct navigation.
+// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal). Every tile is
+// ALWAYS rendered (消さない — apps are never removed from the launcher, per
+// [[dub-never-hide-or-reduce-apps]]); an app the current viewer cannot open is
+// greyed-out + disabled + tooltip instead, and greyed apps are SORTED to the bottom.
+//
+// "Cannot open" mirrors the route access gate (router.tsx) so the launcher and a
+// deep-link stay consistent — an app greyed here 403s on direct navigation, and vice
+// versa. Two gates decide it:
+//   1. Member release gate (社長決定 2026-08-14, see lib/releaseGate / RequirePublished):
+//      an app not member-published is greyed for general members; admins/maintainers
+//      (isPrivilegedViewer) bypass it. メールのみ published as of 2026-08-14.
+//   2. Permission gate (RequirePermission): an app whose requiredPermissions the viewer
+//      does not hold is greyed for EVERYONE — admins included — exactly matching the
+//      route's own requiredPermissions guard (e.g. a maintainer without identity:admin
+//      can't open a role-admin tool, so its tile greys). No privileged bypass here, so
+//      the launcher never shows an app that would 403.
+// Sort order: usable apps first, greyed apps last; the existing order-based sequence is
+// preserved within each group (a stable partition), and nothing is removed.
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
   const privileged = isPrivilegedViewer(can);
-  return [...navEntries]
+  const items = [...navEntries]
     .sort((a, b) => a.order - b.order)
     .map((entry) => {
       const badge = entry.badgeSource?.();
@@ -73,13 +88,22 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
-      // Greyed for a general member when the owning app is not member-published.
-      if (!privileged && !isAppPublished(entry.appId)) {
+      const releaseGated = !privileged && !isAppPublished(entry.appId);
+      const lacksPermission =
+        entry.requiredPermissions !== undefined &&
+        entry.requiredPermissions.length > 0 &&
+        !entry.requiredPermissions.every((p) => can(p));
+      if (releaseGated || lacksPermission) {
         item.disabled = true;
-        item.disabledReason = UNPUBLISHED_TILE_REASON;
+        // Release gate wins the tooltip, matching router.tsx where RequirePublished
+        // wraps the permission gate (an unpublished app denies first, regardless of perms).
+        item.disabledReason = releaseGated ? UNPUBLISHED_TILE_REASON : UNAUTHORIZED_TILE_REASON;
       }
       return item;
     });
+  // Usable first, greyed last. filter() is a stable partition, so each group keeps its
+  // order-sorted sequence; no tile is dropped (消さない — greyed apps only move down).
+  return [...items.filter((i) => !i.disabled), ...items.filter((i) => i.disabled)];
 }
 
 export function AppShellLayout({
