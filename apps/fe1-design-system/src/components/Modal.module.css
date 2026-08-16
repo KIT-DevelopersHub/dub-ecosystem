@@ -19,7 +19,10 @@
   box-shadow: var(--dub-shadow-overlay);
   width: 100%;
   max-height: 90vh;
-  overflow: auto;
+  /* The BODY scrolls, not the whole dialog — so the header and footer (which
+   * carry the primary actions) stay pinned and visible however long the body
+   * grows, instead of scrolling off the bottom. */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   animation: dub-modal-dialog-in 0.18s ease-out;
@@ -80,6 +83,10 @@
 .body {
   padding: var(--dub-space-4);
   flex: 1;
+  /* Own the scroll so a long body scrolls while header/footer stay fixed.
+   * min-height:0 lets this flex child actually shrink and become scrollable. */
+  min-height: 0;
+  overflow-y: auto;
 }
 .footer {
   padding: var(--dub-space-4);

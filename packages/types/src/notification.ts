@@ -44,6 +44,9 @@ export interface InboxItem {
 }
 export interface ListInboxQuery extends CursorQuery {
   unreadOnly?: boolean;
+  /** Additive: chronological ordering. "newest" (default) = created desc, "oldest" = asc.
+   *  Absent behaves as "newest" so existing callers are unchanged. */
+  sort?: "newest" | "oldest";
 }
 export type ListInboxResponse = Paginated<InboxItem>;
 export interface UnreadCountResponse {

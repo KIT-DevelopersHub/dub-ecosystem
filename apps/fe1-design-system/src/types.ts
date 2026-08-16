@@ -154,6 +154,26 @@ export interface TextFieldProps extends TestableProps {
   "aria-describedby"?: string;
 }
 
+/**
+ * SearchInput — a reusable search box (leading magnifier, clearable, a11y-labelled,
+ * optional debounce). Shared so every surface that needs "type to filter" (inbox,
+ * member roster, chat, …) uses one control instead of hand-rolling an <input>.
+ * Controlled: `value` is the committed query; `onChange` fires with the new query
+ * (debounced by `debounceMs` when set, immediately on clear).
+ */
+export interface SearchInputProps extends TestableProps {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  size?: Size;
+  disabled?: boolean;
+  /** Debounce (ms) before `onChange` fires while typing. 0/undefined = immediate. */
+  debounceMs?: number;
+  /** Accessible name for the search field (defaults to "検索"). */
+  "aria-label"?: string;
+  id?: string;
+}
+
 export interface TextareaProps extends TestableProps {
   id: string;
   value: string;

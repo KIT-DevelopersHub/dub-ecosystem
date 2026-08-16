@@ -21,6 +21,7 @@ export type {
   FormProps,
   FormFieldProps,
   TextFieldProps,
+  SearchInputProps,
   TextareaProps,
   SelectOption,
   SelectProps,
@@ -91,6 +92,7 @@ export {
   Switch,
   DatePicker,
 } from "./components/Inputs";
+export { SearchInput } from "./components/SearchInput";
 export { DataTable } from "./components/DataTable";
 export { Pagination, LoadMore } from "./components/Pagination";
 export { Modal, ConfirmDialog, Drawer } from "./components/Modal";

@@ -20,6 +20,8 @@ export interface NotificationListProps {
   onActivate: (item: InboxItem) => void;
   onLoadMore: () => void;
   onRetry: () => void;
+  /** Optional per-item "未読にする" (restore to unread). Passed through to each row. */
+  onMarkUnread?: (item: InboxItem) => void;
 }
 
 export function NotificationList(props: NotificationListProps): ReactNode {
@@ -75,7 +77,11 @@ export function NotificationList(props: NotificationListProps): ReactNode {
           </div>
           {g.items.map((item) => (
             <div role="listitem" key={item.id}>
-              <NotificationListItem item={item} onActivate={props.onActivate} />
+              <NotificationListItem
+                item={item}
+                onActivate={props.onActivate}
+                {...(props.onMarkUnread ? { onMarkUnread: props.onMarkUnread } : {})}
+              />
             </div>
           ))}
         </section>

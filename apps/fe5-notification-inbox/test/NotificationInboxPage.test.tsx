@@ -16,7 +16,7 @@ describe("NotificationInboxPage", () => {
     expect(screen.getAllByTestId("fe5-inbox-unread-dot")).toHaveLength(3);
   });
 
-  it("LoadMore appends the next page and stops at the end (test 2)", async () => {
+  it("paginates Gmail-style: next page shows the following page, not an appended list (test 2)", async () => {
     const { deps } = makeDeps();
     renderWithDeps(
       <NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} pageSize={2} />,
@@ -25,12 +25,45 @@ describe("NotificationInboxPage", () => {
     await screen.findByTestId("fe5-inbox-list");
     let rows = within(screen.getByTestId("fe5-inbox-list")).getAllByRole("listitem");
     expect(rows).toHaveLength(2);
+    const firstIdPage1 = rows[0]!.querySelector("[data-testid^='fe5-inbox-item-']")?.getAttribute("data-testid");
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("fe5-inbox-loadmore"));
+    // Gmail-style pager (prev/next), not an infinite "load more".
+    expect(screen.queryByTestId("fe5-inbox-loadmore")).not.toBeInTheDocument();
+    await user.click(within(screen.getByTestId("fe5-inbox-pagination")).getByLabelText("次のページ"));
     await waitFor(() => {
       rows = within(screen.getByTestId("fe5-inbox-list")).getAllByRole("listitem");
-      expect(rows).toHaveLength(4);
+      // still a single page's worth (window replaced, not appended)
+      expect(rows).toHaveLength(2);
+      const firstIdPage2 = rows[0]!.querySelector("[data-testid^='fe5-inbox-item-']")?.getAttribute("data-testid");
+      expect(firstIdPage2).not.toBe(firstIdPage1);
     });
+  });
+
+  it("client-side search filters the loaded list by title/body", async () => {
+    const { deps } = makeDeps();
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    await screen.findByTestId("fe5-inbox-list");
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("fe5-inbox-search-input"), "Design review");
+    await waitFor(() => {
+      const rows = within(screen.getByTestId("fe5-inbox-list")).getAllByRole("listitem");
+      expect(rows).toHaveLength(1);
+      expect(screen.getByTestId("fe5-inbox-item-notif_0002")).toBeInTheDocument();
+    });
+  });
+
+  it("restores a read notification to unread (optimistic, per-item action)", async () => {
+    const { deps } = makeDeps();
+    useUnreadStore.setState({ count: 3, initialized: true });
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    await screen.findByTestId("fe5-inbox-list");
+    const user = userEvent.setup();
+    // notif_0004 is seeded as read -> exposes the "未読にする" action.
+    await user.click(screen.getByTestId("fe5-inbox-markunread-notif_0004"));
+    await waitFor(() => {
+      expect(screen.getByTestId("fe5-inbox-item-notif_0004")).toHaveAttribute("data-unread", "true");
+    });
+    expect(useUnreadStore.getState().count).toBe(4); // optimistic increment
   });
 
   it("unread-only filter refetches and syncs the URL (test 3)", async () => {

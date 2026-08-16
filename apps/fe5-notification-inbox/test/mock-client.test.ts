@@ -31,6 +31,35 @@ describe("mock notification api (contract adherence)", () => {
     expect((await api.getUnreadCount()).count).toBe(before - 1);
   });
 
+  it("markUnread restores a read item and bumps unread-count back up", async () => {
+    const client = createMockApiClient();
+    const api = createNotificationApi(client);
+    const firstUnread = client.__store.items.find((i) => i.readAt === null)!;
+    await api.markRead(firstUnread.id);
+    const afterRead = (await api.getUnreadCount()).count;
+    await api.markUnread(firstUnread.id);
+    expect((await api.getUnreadCount()).count).toBe(afterRead + 1);
+    expect(client.__store.items.find((i) => i.id === firstUnread.id)!.readAt).toBeNull();
+  });
+
+  it("markUnread on an unknown id throws a 404 ApiError", async () => {
+    const api = createNotificationApi(createMockApiClient());
+    await expect(api.markUnread("notif_does_not_exist")).rejects.toSatisfy((e: unknown) => {
+      return isApiError(e) && e.status === 404 && e.code === "NOTIF_INBOX_ITEM_NOT_FOUND";
+    });
+  });
+
+  it("sort=oldest returns the same set ordered by createdAt ascending", async () => {
+    const api = createNotificationApi(createMockApiClient());
+    const newest = await api.listInbox({ limit: 50 });
+    const oldest = await api.listInbox({ limit: 50, sort: "oldest" });
+    // same set of ids
+    expect(new Set(oldest.items.map((i) => i.id))).toEqual(new Set(newest.items.map((i) => i.id)));
+    // createdAt is non-decreasing (oldest first)
+    const times = oldest.items.map((i) => i.createdAt);
+    expect(times).toEqual([...times].sort());
+  });
+
   it("markRead on an unknown id throws a 404 ApiError with the notif code", async () => {
     const api = createNotificationApi(createMockApiClient());
     await expect(api.markRead("notif_does_not_exist")).rejects.toSatisfy((e: unknown) => {

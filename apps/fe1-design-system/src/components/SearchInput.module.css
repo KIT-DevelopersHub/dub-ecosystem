@@ -1,0 +1,71 @@
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+}
+
+.leadingIcon {
+  position: absolute;
+  left: var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+  pointer-events: none;
+}
+
+.input {
+  width: 100%;
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-md);
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  /* room for the leading icon (left) and the clear button (right) */
+  padding: var(--dub-space-2) var(--dub-space-6) var(--dub-space-2) var(--dub-space-6);
+}
+.input::-webkit-search-cancel-button {
+  /* our own clear button replaces the native one */
+  appearance: none;
+}
+.input:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+  border-color: var(--dub-color-border-focus);
+}
+.input:disabled {
+  background: var(--dub-color-surface-sunken);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.root[data-size="sm"] .input {
+  font-size: var(--dub-font-size-sm);
+  padding: var(--dub-space-1) var(--dub-space-6) var(--dub-space-1) var(--dub-space-6);
+}
+.root[data-size="lg"] .input {
+  font-size: var(--dub-font-size-lg);
+  padding: var(--dub-space-3) var(--dub-space-8) var(--dub-space-3) var(--dub-space-8);
+}
+
+.clear {
+  position: absolute;
+  right: var(--dub-space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--dub-space-1);
+  border-radius: var(--dub-radius-full);
+  color: var(--dub-color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--dub-motion-fast) var(--dub-motion-easing),
+    color var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.clear:hover {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
+}
+.clear:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+}

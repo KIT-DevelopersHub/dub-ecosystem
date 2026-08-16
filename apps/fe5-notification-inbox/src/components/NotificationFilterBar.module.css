@@ -1,0 +1,22 @@
+/* Vertical rhythm from tokens: the tabs row and the controls row are separated by
+ * a real gap so "Unread only" no longer sits flush against the tabs. */
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+  /* breathing room above the controls (in addition to the .bar gap) so the
+   * unread toggle / search sit clearly below the tab strip. */
+  padding-top: var(--dub-space-1);
+}
+
+.search {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+}

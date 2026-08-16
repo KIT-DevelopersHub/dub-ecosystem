@@ -202,8 +202,12 @@ export async function listInbox(
     binds.push(AUDIENCE_ADMIN);
   }
   if (q.unreadOnly) where.push("i.read_at IS NULL");
+  // Ordering: ids are monotonic in creation order, so id DESC = newest-first (default),
+  // id ASC = oldest-first. The cursor comparison must follow the sort direction so paging
+  // walks the same way it reads.
+  const oldestFirst = q.sort === "oldest";
   if (q.cursor !== undefined) {
-    where.push("i.id < ?");
+    where.push(oldestFirst ? "i.id > ?" : "i.id < ?");
     binds.push(decodeCursor(q.cursor));
   }
   const sql = `SELECT i.id, i.notification_id, i.user_id, i.read_at, i.created_at,
@@ -211,7 +215,7 @@ export async function listInbox(
                FROM notif_inbox i
                JOIN notif_notifications n ON n.id = i.notification_id
                WHERE ${where.join(" AND ")}
-               ORDER BY i.id DESC
+               ORDER BY i.id ${oldestFirst ? "ASC" : "DESC"}
                LIMIT ?`;
   const rows = await db.all<InboxRow>(sql, ...binds, q.limit + 1);
   const hasMore = rows.length > q.limit;
@@ -261,6 +265,26 @@ export async function markRead(db: DbClient, userId: string, inboxId: string): P
   await db.run(
     `UPDATE notif_inbox SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL`,
     nowIso(),
+    inboxId,
+    userId,
+  );
+  return true;
+}
+
+/**
+ * Mark a single inbox row UNREAD again (read_at -> NULL). Additive inverse of markRead
+ * so a user can restore a notification to unread. Returns false when the row does not
+ * exist or belongs to another user.
+ */
+export async function markUnread(db: DbClient, userId: string, inboxId: string): Promise<boolean> {
+  const row = await db.first<{ id: string }>(
+    `SELECT id FROM notif_inbox WHERE id = ? AND user_id = ?`,
+    inboxId,
+    userId,
+  );
+  if (!row) return false;
+  await db.run(
+    `UPDATE notif_inbox SET read_at = NULL WHERE id = ? AND user_id = ?`,
     inboxId,
     userId,
   );

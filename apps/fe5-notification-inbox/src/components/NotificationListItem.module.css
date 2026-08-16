@@ -1,13 +1,23 @@
+/* Compact, Gmail-dense rows: tight vertical rhythm, single-line snippet, the
+ * per-item action revealed on hover/focus. All spacing from @dub/tokens. */
+.row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+
 .item {
   display: flex;
-  gap: var(--dub-space-3);
+  gap: var(--dub-space-2);
   align-items: flex-start;
-  padding: var(--dub-space-3) var(--dub-space-4);
-  border-bottom: 1px solid var(--dub-color-border-default);
+  flex: 1;
+  min-width: 0;
+  /* denser than before (was space-3/space-4) to cut row height */
+  padding: var(--dub-space-2) var(--dub-space-3);
   background: var(--dub-color-surface-base);
   color: var(--dub-color-text-primary);
   cursor: pointer;
-  width: 100%;
   text-align: left;
   border-left: 3px solid transparent;
 }
@@ -26,38 +36,6 @@
   background: var(--dub-color-surface-raised);
 }
 
-/* Unread rows read as unread at a glance: heavier title + primary (not secondary) body. */
-.unread .title {
-  font-weight: var(--dub-font-weight-bold);
-}
-
-.unread .snippet {
-  color: var(--dub-color-text-primary);
-}
-
-.body {
-  flex: 1;
-  min-width: 0;
-}
-
-.title {
-  font-weight: var(--dub-font-weight-medium);
-  font-size: var(--dub-font-size-sm);
-}
-
-.snippet {
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm);
-}
-
-.meta {
-  display: flex;
-  gap: var(--dub-space-2);
-  align-items: center;
-  color: var(--dub-color-text-muted);
-  font-size: var(--dub-font-size-xs);
-}
-
 .dot {
   width: 8px;
   height: 8px;
@@ -65,4 +43,85 @@
   background: var(--dub-color-brand-500);
   flex: none;
   margin-top: 6px;
+}
+/* Keep read rows aligned with unread rows (reserve the dot's column). */
+.dotSpacer {
+  width: 8px;
+  flex: none;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.topline {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  min-width: 0;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--dub-font-weight-medium);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-line-height-tight, 1.3);
+  /* one line, ellipsis — keeps the row to two lines total */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.time {
+  flex: none;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+.snippet {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+  line-height: var(--dub-line-height-tight, 1.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Per-item "未読にする" action: quiet until the row is hovered/focused. */
+.action {
+  flex: none;
+  align-self: center;
+  margin-right: var(--dub-space-2);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border-radius: var(--dub-radius-md);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--dub-motion-fast) var(--dub-motion-easing),
+    background-color var(--dub-motion-fast) var(--dub-motion-easing),
+    color var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.row:hover .action,
+.action:focus-visible {
+  opacity: 1;
+}
+.action:hover {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
+}
+.action:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: -2px;
+}
+
+/* Touch / no-hover devices: never hide the action behind hover. */
+@media (hover: none) {
+  .action {
+    opacity: 1;
+  }
 }

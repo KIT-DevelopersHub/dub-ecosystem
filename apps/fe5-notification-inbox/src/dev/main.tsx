@@ -27,6 +27,7 @@ import { NotificationManagePage } from "../components/NotificationManagePage";
 import { NotificationBell } from "../components/NotificationBell";
 import { ReleasePublishForm } from "../components/ReleasePublishForm";
 import type { MockViewer } from "../api/mock-client";
+import type { InboxItem } from "../contracts/notification-api";
 import { ROUTE_PREFERENCES } from "../lib/routes";
 
 const style = document.createElement("style");
@@ -52,9 +53,46 @@ function createMockUnreadConnector(getUnread: () => number): LiveConnector {
   };
 }
 
+// A larger demo inbox so the harness exercises pagination (multiple pages), the
+// compact rows, sort, search and mark-unread. Mix of read/unread across app types.
+function demoInboxSeed(): InboxItem[] {
+  const now = Date.now();
+  const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
+  const types = [
+    { type: "task.assigned", title: "You were assigned", resource: { type: "task", id: "task_" } },
+    { type: "task.due_soon", title: "Task is due soon", resource: { type: "task", id: "task_" } },
+    { type: "event.invited", title: "Invited to an event", resource: { type: "event", id: "event_" } },
+    { type: "event.reminder", title: "Event reminder", resource: { type: "event", id: "event_" } },
+    { type: "system.announcement", title: "Scheduled maintenance", resource: undefined },
+    { type: "task.completed", title: "Task was completed", resource: { type: "task", id: "task_" } },
+  ];
+  const items: InboxItem[] = [
+    {
+      id: "notif_rel_0007", type: "release", title: "🎉 ガントチャート（Notion風）を追加しました",
+      body: "プロジェクトの予定をタイムラインで見られるようになりました。",
+      readAt: iso(3600_000), createdAt: iso(30_000), resourceType: "release", resourceId: null, audience: "members",
+    },
+  ];
+  for (let n = 1; n <= 30; n++) {
+    const t = types[n % types.length]!;
+    items.push({
+      id: `notif_${String(n).padStart(4, "0")}`,
+      type: t.type,
+      title: `${t.title} #${n}`,
+      body: `通知 ${n} の詳細本文です。ここに要約が入ります。`,
+      readAt: n % 3 === 0 ? iso(n * 3600_000) : null, // ~1/3 read so mark-unread is visible
+      createdAt: iso(n * 60_000),
+      resourceType: t.resource?.type ?? null,
+      resourceId: t.resource ? `${t.resource.id}${n}` : null,
+      audience: "members",
+    });
+  }
+  return items;
+}
+
 // The mock instance is hoisted (mock mode only) so the dev harness can flip the viewer
 // role (admin/member) — used by the E2E to prove audience separation in the inbox.
-const mock = useReal ? null : createMockApiClient();
+const mock = useReal ? null : createMockApiClient({ items: demoInboxSeed() });
 
 function buildDeps(): NotificationDeps {
   const navigate = (path: string): void => window.history.pushState(null, "", path);

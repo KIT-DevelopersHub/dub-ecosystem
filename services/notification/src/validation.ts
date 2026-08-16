@@ -171,6 +171,10 @@ export function parseListInboxQuery(q: Record<string, string | undefined>): noti
     if (q.unreadOnly !== "true" && q.unreadOnly !== "false") fe.push({ field: "unreadOnly", reason: "invalid_bool" });
     else out.unreadOnly = q.unreadOnly === "true";
   }
+  if (q.sort !== undefined && q.sort !== "") {
+    if (q.sort !== "newest" && q.sort !== "oldest") fe.push({ field: "sort", reason: "invalid_enum" });
+    else out.sort = q.sort;
+  }
   if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
 
   if (q.limit !== undefined && q.limit !== "") {

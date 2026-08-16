@@ -6,6 +6,7 @@ import {
   hasMore,
   markAllReadLocally,
   markReadLocally,
+  markUnreadLocally,
   removeItem,
   replaceFirstPage,
   unreadCount,
@@ -55,6 +56,18 @@ describe("inbox reducer", () => {
     const [next] = markAllReadLocally(s, "2026-08-09T01:00:00Z", "task.");
     expect(next.items.find((i) => i.id === "a")!.readAt).not.toBeNull();
     expect(next.items.find((i) => i.id === "b")!.readAt).toBeNull();
+  });
+
+  it("markUnreadLocally clears readAt for a read item and returns a rollback snapshot", () => {
+    const s = replaceFirstPage(EMPTY_INBOX, {
+      items: [item("a", "task.x", true), item("b", "task.y")],
+      nextCursor: null,
+    });
+    expect(unreadCount(s)).toBe(1);
+    const [next, prev] = markUnreadLocally(s, "a");
+    expect(next.items.find((i) => i.id === "a")!.readAt).toBeNull();
+    expect(unreadCount(next)).toBe(2);
+    expect(prev).toBe(s); // snapshot for rollback
   });
 
   it("removeItem drops a row and unreadCount counts remaining unread", () => {

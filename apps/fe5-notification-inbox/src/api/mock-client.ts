@@ -214,6 +214,11 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
           const prefix = query.type;
           items = items.filter((i) => i.type.startsWith(prefix));
         }
+        // Sort is applied to a copy so the store's canonical (newest-first) order is
+        // untouched; "oldest" reverses to created-ascending.
+        if (query?.sort === "oldest") {
+          items = [...items].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+        }
         const cursor = typeof query?.cursor === "string" ? query.cursor : undefined;
         const limit = typeof query?.limit === "number" ? query.limit : undefined;
         return paginate(items, cursor, limit) as T;
@@ -325,6 +330,16 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
           throw new MockApiError("NOTIF_INBOX_ITEM_NOT_FOUND", 404, `Inbox item not found: ${id}`);
         }
         if (item.readAt === null) item.readAt = new Date().toISOString();
+        return undefined as T;
+      }
+      const unreadMatch = path.match(new RegExp(`^${BASE}/inbox/([^/]+)/unread$`));
+      if (unreadMatch) {
+        const id = decodeURIComponent(unreadMatch[1]!);
+        const item = store.items.find((i) => i.id === id);
+        if (!item) {
+          throw new MockApiError("NOTIF_INBOX_ITEM_NOT_FOUND", 404, `Inbox item not found: ${id}`);
+        }
+        item.readAt = null;
         return undefined as T;
       }
       if (path === `${BASE}/preferences`) {

@@ -13,6 +13,7 @@ import {
   hasMore as hasMoreOf,
   markAllReadLocally,
   markReadLocally,
+  markUnreadLocally,
   removeItem,
   replaceFirstPage,
   type InboxState,
@@ -32,6 +33,7 @@ export interface UseInboxResult {
   error: ApiError | null;
   loadMore(): Promise<void>;
   markRead(id: string): Promise<void>;
+  markUnread(id: string): Promise<void>;
   markAllRead(): Promise<void>;
   reload(): Promise<void>;
 }
@@ -42,7 +44,7 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
   const [state, setState] = useState<InboxState>(EMPTY_INBOX);
   const [error, setError] = useState<ApiError | null>(null);
   const pageSize = options.pageSize ?? 50;
-  const { unreadOnly, type } = options.filter;
+  const { unreadOnly, type, sort } = options.filter;
 
   // Load first page whenever the filter changes.
   const reload = useCallback(async () => {
@@ -50,14 +52,14 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
     setError(null);
     try {
       const page = await api.listInbox(
-        toInboxQuery({ unreadOnly, type }, { limit: pageSize }),
+        toInboxQuery({ unreadOnly, type, sort }, { limit: pageSize }),
       );
       setState((s) => replaceFirstPage(s, page));
     } catch (err) {
       if (isApiError(err)) setError(err);
       setState((s) => ({ ...s, loading: false }));
     }
-  }, [api, unreadOnly, type, pageSize]);
+  }, [api, unreadOnly, type, sort, pageSize]);
 
   useEffect(() => {
     void reload();
@@ -71,7 +73,7 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
     setState((s) => ({ ...s, loading: true }));
     try {
       const page = await api.listInbox(
-        toInboxQuery({ unreadOnly, type }, { cursor: state.nextCursor, limit: pageSize }),
+        toInboxQuery({ unreadOnly, type, sort }, { cursor: state.nextCursor, limit: pageSize }),
       );
       setState((s) => appendPage(s, page));
     } catch (err) {
@@ -80,7 +82,7 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
     } finally {
       loadingMoreRef.current = false;
     }
-  }, [api, state.nextCursor, unreadOnly, type, pageSize]);
+  }, [api, state.nextCursor, unreadOnly, type, sort, pageSize]);
 
   const markRead = useCallback(
     async (id: string) => {
@@ -111,6 +113,42 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
       ).catch((err) => {
         if (isApiError(err) && err.status !== 404 && !err.code.endsWith("_NOT_FOUND")) {
           toast.show("error", "Could not mark as read. Please try again.");
+        }
+      });
+    },
+    [api, state, decrement, toast],
+  );
+
+  const markUnread = useCallback(
+    async (id: string) => {
+      const wasRead = state.items.some((i) => i.id === id && i.readAt !== null);
+      await runOptimistic<string>(
+        {
+          optimistic: (targetId) => {
+            let prev: InboxState = state;
+            setState((s) => {
+              const [next, snapshot] = markUnreadLocally(s, targetId);
+              prev = snapshot;
+              return next;
+            });
+            // Restoring to unread bumps the shared badge back up.
+            if (wasRead) useUnreadStore.getState().setCount(useUnreadStore.getState().count + 1);
+            return () => {
+              setState(prev);
+              if (wasRead) decrement(1);
+            };
+          },
+          commit: (targetId) => api.markUnread(targetId),
+          onError: (err, rollback) =>
+            keepOnNotFound(err, rollback, () => {
+              setState((s) => removeItem(s, id)); // 404 -> drop the row
+              toast.show("info", "This notification is no longer available.");
+            }),
+        },
+        id,
+      ).catch((err) => {
+        if (isApiError(err) && err.status !== 404 && !err.code.endsWith("_NOT_FOUND")) {
+          toast.show("error", "Could not mark as unread. Please try again.");
         }
       });
     },
@@ -155,6 +193,7 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
     error,
     loadMore,
     markRead,
+    markUnread,
     markAllRead,
     reload,
   };
