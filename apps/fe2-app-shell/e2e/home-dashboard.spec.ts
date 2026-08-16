@@ -11,7 +11,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SHOTS = join(homedir(), "DubVault", "docs", "home-header-refine");
+const SHOTS = join(homedir(), "DubVault", "docs", "home-applaunch-refine");
 mkdirSync(SHOTS, { recursive: true });
 const shot = (name: string): string => join(SHOTS, name);
 
@@ -30,6 +30,15 @@ async function pageVerticalOverflow(page: Page): Promise<number> {
     const el = document.scrollingElement ?? document.documentElement;
     return Math.max(0, el.scrollHeight - el.clientHeight);
   });
+}
+
+/** Vertical overflow of a testid element in px (0 = it does not scroll internally). */
+async function elementVerticalOverflow(page: Page, testId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) return -1;
+    return Math.max(0, el.scrollHeight - el.clientHeight);
+  }, testId);
 }
 
 test("home dashboard: brand-first header, home导线, and zero page scroll at every resolution", async ({
@@ -51,18 +60,29 @@ test("home dashboard: brand-first header, home导线, and zero page scroll at ev
   for (const vp of VIEWPORTS) {
     await page.setViewportSize({ width: vp.width, height: vp.height });
     await expect(page.getByTestId("fe2-home")).toBeVisible();
+    await expect(page.getByTestId("fe2-home-apps-grid")).toBeVisible();
+    // (a) page never scrolls; (b) the app launcher never scrolls INTERNALLY.
     await expect
       .poll(() => pageVerticalOverflow(page), {
         message: `page must not scroll vertically at ${vp.name}`,
         timeout: 5000,
       })
       .toBeLessThanOrEqual(1); // allow 1px sub-pixel rounding
+    await expect
+      .poll(() => elementVerticalOverflow(page, "fe2-home-apps-grid"), {
+        message: `the app launcher grid must not scroll internally at ${vp.name}`,
+        timeout: 5000,
+      })
+      .toBeLessThanOrEqual(1);
 
     if (vp.name === "desktop-1440x900") {
       await page.screenshot({ path: shot("01-dashboard-desktop.png") });
     }
+    if (vp.name === "small-laptop-1280x720") {
+      await page.screenshot({ path: shot("02-dashboard-1280x720.png") });
+    }
     if (vp.name === "mobile-390x844") {
-      await page.screenshot({ path: shot("02-dashboard-mobile.png") });
+      await page.screenshot({ path: shot("03-dashboard-mobile.png") });
     }
   }
 

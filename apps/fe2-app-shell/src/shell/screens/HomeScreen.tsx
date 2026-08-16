@@ -78,6 +78,7 @@ function NavTile({
       href={tile.path}
       className="fe2-home-tile"
       data-testid={`fe2-home-tile-${tile.id}`}
+      title={tile.desc}
       aria-label={hasBadge ? `${tile.label}（${badge}）へ移動` : `${tile.label}へ移動`}
       onClick={(e) => {
         if (onNavigate) {
@@ -89,18 +90,12 @@ function NavTile({
       <span className="fe2-home-tile-icon" aria-hidden="true">
         <Icon name={tile.icon} />
       </span>
-      <span className="fe2-home-tile-main">
-        <span className="fe2-home-tile-label">{tile.label}</span>
-        <span className="fe2-home-tile-desc">{tile.desc}</span>
-      </span>
+      <span className="fe2-home-tile-label">{tile.label}</span>
       {hasBadge ? (
         <span className="fe2-home-tile-badge" data-testid={`fe2-home-tile-${tile.id}-badge`}>
           {badge}
         </span>
       ) : null}
-      <span className="fe2-home-tile-arrow" aria-hidden="true">
-        <Icon name="chevron-right" />
-      </span>
     </a>
   );
 }
@@ -342,7 +337,7 @@ export function HomeScreen({
 
           <section className="fe2-home-apps" aria-label="機能へ移動">
             <h2 className="fe2-dash-section-title">アプリ</h2>
-            <div className="fe2-home-apps-grid">
+            <div className="fe2-home-apps-grid" data-testid="fe2-home-apps-grid">
               {APP_TILES.map((tile) => (
                 <NavTile
                   key={tile.id}

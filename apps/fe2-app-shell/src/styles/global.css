@@ -352,19 +352,23 @@ svg {
 .fe2-home > [data-testid="fe2-home-header"] {
   padding-bottom: 0;
 }
-/* Dashboard body fills the remaining height below the KPI row; min-height:0 lets
- * its children own their overflow instead of pushing the page. */
+/* Dashboard body fills the remaining height below the KPI row. Every inner region
+ * (app launcher, cards, rail) renders at its natural, comfortable size — NONE of
+ * them get their own scrollbar. If the sum can't fit a short viewport, the body is
+ * the SINGLE, tidy scroll fallback (never a nested scrollbar), and the page itself
+ * still never scrolls (the dashboard stays clamped with overflow:hidden). */
 .fe2-dash-body {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: minmax(0, 2.1fr) minmax(280px, 1fr);
   gap: var(--dub-space-4);
-  align-items: stretch;
+  align-items: start;
+  align-content: start;
 }
 .fe2-dash-main {
   min-width: 0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--dub-space-4);
@@ -384,10 +388,6 @@ svg {
 @media (max-width: 860px) {
   .fe2-dash-body {
     grid-template-columns: 1fr;
-    /* On a single column the body is allowed to scroll internally (still no page
-     * scroll — the dashboard itself stays clamped with overflow hidden). */
-    overflow-y: auto;
-    grid-auto-rows: min-content;
   }
   .fe2-dash-cards {
     grid-template-columns: 1fr;
@@ -544,12 +544,12 @@ svg {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--dub-space-3);
+  gap: var(--dub-space-2);
 }
 .fe2-usage-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 .fe2-usage-top {
   display: flex;
@@ -620,31 +620,30 @@ svg {
   font-variant-numeric: tabular-nums;
 }
 
-/* Left: clickable app tiles. The section fills the remaining height of the main
- * column and its grid scrolls internally — the safety valve that keeps the page
- * itself from ever scrolling when many tiles + cards exceed one viewport. */
+/* Left: the app launcher. Tiles render at a fixed, comfortable size in a fluid
+ * grid (auto-fill) so they reflow to the width — the grid takes its NATURAL height
+ * and therefore NEVER shows its own scrollbar. When space is tight the parent body
+ * is the single scroll fallback, so the launcher itself always reads cleanly. */
 .fe2-home-apps {
-  flex: 1;
   min-width: 0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 .fe2-home-apps-grid {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(166px, 1fr));
-  grid-auto-rows: min-content;
-  gap: var(--dub-space-2);
-  align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: 1fr;
+  gap: var(--dub-space-3);
 }
 .fe2-home-tile {
+  position: relative;
+  min-height: 68px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--dub-space-2);
-  padding: var(--dub-space-2) var(--dub-space-3);
+  justify-content: center;
+  gap: 6px;
+  padding: var(--dub-space-2) var(--dub-space-2);
   background: var(--dub-color-surface-raised);
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg);
@@ -652,6 +651,8 @@ svg {
   text-decoration: none;
   color: inherit;
   cursor: pointer;
+  overflow: hidden;
+  text-align: center;
   transition:
     border-color var(--dub-motion-fast) var(--dub-motion-easing),
     box-shadow var(--dub-motion-fast) var(--dub-motion-easing),
@@ -671,20 +672,18 @@ svg {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--dub-radius-md);
   background: var(--dub-color-brand-100);
   color: var(--dub-color-brand-700);
+  transition: background var(--dub-motion-fast) var(--dub-motion-easing);
 }
-.fe2-home-tile-main {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  flex: 1;
+.fe2-home-tile:hover .fe2-home-tile-icon {
+  background: var(--dub-color-brand-200);
 }
 .fe2-home-tile-label {
+  max-width: 100%;
   font-size: var(--dub-font-size-sm);
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-primary);
@@ -693,18 +692,13 @@ svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fe2-home-tile-desc {
-  font-size: var(--dub-font-size-xs);
-  color: var(--dub-color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .fe2-home-tile-badge {
-  flex: 0 0 auto;
-  min-width: 20px;
-  padding: 0 var(--dub-space-2);
-  height: 20px;
+  position: absolute;
+  top: var(--dub-space-2);
+  right: var(--dub-space-2);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -713,21 +707,7 @@ svg {
   color: #fff;
   font-size: var(--dub-font-size-xs);
   font-weight: var(--dub-font-weight-bold);
-}
-.fe2-home-tile-arrow {
-  flex: 0 0 auto;
-  display: inline-flex;
-  color: var(--dub-color-text-muted);
-  opacity: 0;
-  transform: translateX(-2px);
-  transition:
-    opacity var(--dub-motion-fast) var(--dub-motion-easing),
-    transform var(--dub-motion-fast) var(--dub-motion-easing);
-}
-.fe2-home-tile:hover .fe2-home-tile-arrow,
-.fe2-home-tile:focus-visible .fe2-home-tile-arrow {
-  opacity: 1;
-  transform: translateX(0);
+  box-shadow: 0 0 0 2px var(--dub-color-surface-raised);
 }
 
 /* Right: live BFF panels. The column fills the body height and scrolls internally
