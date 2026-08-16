@@ -11,7 +11,7 @@ export async function runDueSoonScan(deps: Deps, nowMs: number = Date.now()): Pr
   if (due.length === 0) return 0;
   const specs: EventSpec[] = due.map((d) => ({
     name: "task.due_soon",
-    payload: { taskId: d.taskId, eventId: d.eventId, dueAt: d.dueAt },
+    payload: { taskId: d.taskId, ...(d.eventId ? { eventId: d.eventId } : {}), dueAt: d.dueAt },
   }));
   await emit(deps.events, { requestId: newRequestId(), actorId: null }, specs);
   return due.length;

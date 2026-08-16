@@ -130,7 +130,9 @@ export interface IssueSnapshot {
 // status only (status:* markers); the task carries no label list.
 export interface TaskSnapshot {
   id: common.TaskId;
-  eventId: common.EventId;
+  // Optional: task→event link is optional now (判断44). github-origin tasks are always
+  // repo-linked (hence event-linked), but the snapshot mirrors task.Task's optional shape.
+  eventId?: common.EventId | null;
   title: string;
   description: string | null;
   status: task.TaskStatus;

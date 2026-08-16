@@ -67,7 +67,9 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const effectiveEvents = useMemo<readonly EventOption[]>(() => {
     if (events.length > 0) return events;
     const seen = new Map<common.EventId, EventOption>();
-    for (const t of tasks) if (!seen.has(t.eventId)) seen.set(t.eventId, { id: t.eventId, name: t.eventId });
+    for (const t of tasks) {
+      if (t.eventId && !seen.has(t.eventId)) seen.set(t.eventId, { id: t.eventId, name: t.eventId });
+    }
     return [...seen.values()];
   }, [events, tasks]);
   const currentUserName = useMemo(
@@ -115,7 +117,12 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   // the row click itself now opens the dialog (feedback #2), so this no longer
   // fires on every click and the two behaviors don't conflict.
   const openWorkspace = (t: task.Task) => {
-    if (typeof window !== "undefined") window.location.assign(`/events/${t.eventId}/tasks/${t.id}`);
+    // The ガント workspace is event-scoped (FE3 owns /events/:eventId). An unlinked
+    // task (判断44) has no event workspace, so this escape hatch only applies when the
+    // task is linked; the detail dialog already shows everything for unlinked tasks.
+    if (t.eventId && typeof window !== "undefined") {
+      window.location.assign(`/events/${t.eventId}/tasks/${t.id}`);
+    }
   };
 
   const onCreate = async (draft: MyTaskDraft) => {
@@ -144,7 +151,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     if (belongs) setTasks((prev) => [optimistic, ...prev]);
     try {
       const created = await createTask(client, {
-        eventId: draft.eventId,
+        ...(draft.eventId ? { eventId: draft.eventId } : {}),
         title: draft.title,
         ...(draft.description !== null ? { description: draft.description } : {}),
         priority: draft.priority,
@@ -172,7 +179,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           <h1 className={styles.myTitle}>マイタスク</h1>
           <p className={styles.mySubtitle}>自分に関わるタスクを、誰から誰へかが分かる一覧で管理できます。</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open" disabled={effectiveEvents.length === 0}>
+        <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open">
           ＋ タスクを発行
         </Button>
       </header>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
 import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
@@ -6,7 +6,8 @@ import { DateField } from "./DateField";
 import styles from "../styles/app.module.css";
 
 export interface MyTaskDraft {
-  eventId: common.EventId;
+  /** Optional event link (判断44). null = issue the task unlinked to any event. */
+  eventId: common.EventId | null;
   title: string;
   description: string | null;
   priority: task.TaskPriority;
@@ -35,12 +36,15 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
 /**
  * "タスクを発行" — anyone can add and issue a task (design ask (a)). The modal
- * captures 誰に(担当者)・内容・期限, plus the 対象イベント the task belongs to
- * (task-service requires a live eventId). The requester (from) is the current
- * user, stamped server-side as created_by — so no field is needed for it.
+ * captures 誰に(担当者)・内容・期限. Linking the task to an 対象イベント is now
+ * OPTIONAL (判断44): leave it as「紐付けない」to issue a standalone task. The
+ * requester (from) is the current user, stamped server-side as created_by — so no
+ * field is needed for it.
  */
+const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
+
 export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName }: MyTaskCreateModalProps) {
-  const [eventId, setEventId] = useState<common.EventId | "">(events[0]?.id ?? "");
+  const [eventId, setEventId] = useState<common.EventId | "">(NO_EVENT);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
@@ -49,11 +53,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (open) setEventId((prev) => prev || events[0]?.id || "");
-  }, [open, events]);
-
   const reset = () => {
+    setEventId(NO_EVENT);
     setTitle("");
     setAssigneeId(null);
     setPriority("medium");
@@ -68,14 +69,15 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     onClose();
   };
 
-  const canSubmit = title.trim().length > 0 && eventId !== "" && !saving;
+  // Event link is optional now — only the title gates submission.
+  const canSubmit = title.trim().length > 0 && !saving;
 
   const submit = async () => {
     if (!canSubmit) return;
     setSaving(true);
     try {
       await onCreate({
-        eventId: eventId as common.EventId,
+        eventId: eventId === NO_EVENT ? null : (eventId as common.EventId),
         title: title.trim(),
         description: description.trim() ? description.trim() : null,
         priority,
@@ -128,14 +130,16 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-mytask-event">
-            対象イベント<span className={styles.req}>*</span>
+            対象イベント（任意）
           </label>
           <Select
             id="fe4-mytask-event"
             value={eventId}
-            onChange={(v) => setEventId(v as common.EventId)}
-            options={events.map((e) => ({ value: e.id, label: e.name }))}
-            placeholder="イベントを選択"
+            onChange={(v) => setEventId(v as common.EventId | "")}
+            options={[
+              { value: NO_EVENT, label: "紐付けない" },
+              ...events.map((e) => ({ value: e.id, label: e.name })),
+            ]}
             testId="fe4-mytask-create-event"
           />
         </div>

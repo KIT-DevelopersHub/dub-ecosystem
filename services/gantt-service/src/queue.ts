@@ -21,15 +21,19 @@ export function ganttEventHandlers(env: Env, deps: AppDeps = defaultDeps): DubEv
   const cache = deps.cache(env);
   const views = deps.views(env);
   const purge = (eventId: common.EventId): Promise<void> => cache.purge(eventId);
+  // task.* eventId is optional now (判断44): an unlinked task belongs to no event-scoped
+  // gantt, so there is nothing to purge — no-op instead of purging a bogus key.
+  const purgeIf = (eventId?: common.EventId): Promise<void> =>
+    eventId ? cache.purge(eventId) : Promise.resolve();
 
   return {
-    // task.* (all carry eventId; status/assignee are in the DTO -> must purge)
-    "task.created": (e) => purge(e.payload.eventId),
-    "task.updated": (e) => purge(e.payload.eventId),
-    "task.assigned": (e) => purge(e.payload.eventId),
-    "task.status_changed": (e) => purge(e.payload.eventId),
-    "task.archived": (e) => purge(e.payload.eventId),
-    "task.dependency_changed": (e) => purge(e.payload.eventId),
+    // task.* (carry an OPTIONAL eventId; status/assignee are in the DTO -> must purge)
+    "task.created": (e) => purgeIf(e.payload.eventId),
+    "task.updated": (e) => purgeIf(e.payload.eventId),
+    "task.assigned": (e) => purgeIf(e.payload.eventId),
+    "task.status_changed": (e) => purgeIf(e.payload.eventId),
+    "task.archived": (e) => purgeIf(e.payload.eventId),
+    "task.dependency_changed": (e) => purgeIf(e.payload.eventId),
     // action.*
     "action.created": (e) => purge(e.payload.eventId),
     "action.updated": (e) => purge(e.payload.eventId),
