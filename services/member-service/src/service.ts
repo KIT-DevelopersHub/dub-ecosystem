@@ -5,10 +5,12 @@ import { DubError, errors } from "@dub/errors";
 import type { common, member } from "@dub/types";
 import type { AppDeps, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
+  composeName,
   isDesiredActivity,
   isEmail,
   isGrade,
   isMemberStatus,
+  isPhone,
   MAX_NAME_LEN,
   normalizeName,
   SORT_ORDER_GAP,
@@ -163,6 +165,11 @@ export class MemberService {
       contact: optText(body.contact, "contact"),
       schoolEmail: null,
       gmail: null,
+      lastName: null,
+      firstName: null,
+      lastNameKana: null,
+      firstNameKana: null,
+      phone: null,
       note: optText(body.note, "note"),
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
@@ -284,17 +291,29 @@ export class MemberService {
   ): Promise<member.SubmitParticipationResponse> {
     const orgId = this.deps.orgId;
     const now = this.deps.now();
-    const displayName = name(body.name);
+    // 氏名: 姓/名 の分割入力を優先し、"姓 名" を合成する。旧クライアントの単一 `name` も
+    // 後方互換で受ける (どちらかが揃えば OK)。合成結果が空なら name() が 400 を投げる。
+    const lastName = optText(body.lastName, "lastName");
+    const firstName = optText(body.firstName, "firstName");
+    const composed = composeName(lastName, firstName);
+    const displayName = name(composed.length > 0 ? composed : body.name);
     const normalized = normalizeName(displayName);
     if (normalized.length === 0) throw errors.validationFailed([{ field: "name", reason: "required" }]);
 
     const grade = body.grade == null ? null : isGrade(body.grade) ? body.grade : invalid("grade");
     const desiredActivity =
       body.desiredActivity == null ? null : isDesiredActivity(body.desiredActivity) ? body.desiredActivity : invalid("desiredActivity");
-    const nameKana = optText(body.nameKana, "nameKana");
+    // 振り仮名: せい/めい の分割を優先し合成、無ければ旧単一 nameKana。
+    const lastNameKana = optText(body.lastNameKana, "lastNameKana");
+    const firstNameKana = optText(body.firstNameKana, "firstNameKana");
+    const composedKana = composeName(lastNameKana, firstNameKana);
+    const nameKana = composedKana.length > 0 ? composedKana : optText(body.nameKana, "nameKana");
     const department = optText(body.department, "department");
     const contact = optText(body.contact, "contact");
     const note = optText(body.note, "note");
+    // 電話番号は任意。渡された時だけ緩い形式チェック。
+    const phone = optText(body.phone, "phone");
+    if (phone !== null && !isPhone(phone)) throw errors.validationFailed([{ field: "phone", reason: "invalid" }]);
     // 学校メール + Gmail は必須 & メール形式.
     if (!isEmail(body.schoolEmail)) throw errors.validationFailed([{ field: "schoolEmail", reason: "invalid" }]);
     if (!isEmail(body.gmail)) throw errors.validationFailed([{ field: "gmail", reason: "invalid" }]);
@@ -305,6 +324,11 @@ export class MemberService {
     const { member: resolved, matchKind } = await this.resolveMemberForParticipation(ctx, {
       displayName,
       normalized,
+      lastName,
+      firstName,
+      lastNameKana,
+      firstNameKana,
+      phone,
       department,
       grade,
       contact,
@@ -321,10 +345,15 @@ export class MemberService {
       memberId: resolved.id,
       name: displayName,
       normalizedName: normalized,
+      lastName,
+      firstName,
       nameKana,
+      lastNameKana,
+      firstNameKana,
       grade,
       department,
       contact,
+      phone,
       schoolEmail,
       gmail,
       desiredTeamId,
@@ -347,6 +376,11 @@ export class MemberService {
     input: {
       displayName: string;
       normalized: string;
+      lastName: string | null;
+      firstName: string | null;
+      lastNameKana: string | null;
+      firstNameKana: string | null;
+      phone: string | null;
       department: string | null;
       grade: member.Grade | null;
       contact: string | null;
@@ -377,6 +411,11 @@ export class MemberService {
         contact: match.contact ?? input.schoolEmail,
         schoolEmail: match.schoolEmail ?? input.schoolEmail,
         gmail: match.gmail ?? input.gmail,
+        lastName: match.lastName ?? input.lastName,
+        firstName: match.firstName ?? input.firstName,
+        lastNameKana: match.lastNameKana ?? input.lastNameKana,
+        firstNameKana: match.firstNameKana ?? input.firstNameKana,
+        phone: match.phone ?? input.phone,
         note: match.note ?? input.note,
         version: match.version + 1,
         updatedAt: this.deps.now(),
@@ -401,6 +440,11 @@ export class MemberService {
       contact: input.contact ?? input.schoolEmail,
       schoolEmail: input.schoolEmail,
       gmail: input.gmail,
+      lastName: input.lastName,
+      firstName: input.firstName,
+      lastNameKana: input.lastNameKana,
+      firstNameKana: input.firstNameKana,
+      phone: input.phone,
       note: input.note,
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,

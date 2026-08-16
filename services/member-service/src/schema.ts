@@ -118,6 +118,28 @@ ALTER TABLE member_people ADD COLUMN gmail TEXT;
 `.trim(),
 };
 
+// 参加届: 氏名/振り仮名を 姓(last)/名(first) に分割 + 電話番号. Additive ALTER (non-
+// destructive): the legacy single `name` / `name_kana` columns are retained and kept
+// in sync by the app ("姓 名" composed into `name`), so every existing reader keeps
+// working. 姓/名 required at the app layer; 振り仮名/電話 optional. Nullable in DDL
+// (SQLite ADD COLUMN can't be NOT NULL without a default). Retained on member_people.
+export const MEMBER_PARTICIPATION_NAME_SPLIT_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0006_participation_name_split_phone",
+  up: `
+ALTER TABLE member_participations ADD COLUMN last_name TEXT;
+ALTER TABLE member_participations ADD COLUMN first_name TEXT;
+ALTER TABLE member_participations ADD COLUMN last_name_kana TEXT;
+ALTER TABLE member_participations ADD COLUMN first_name_kana TEXT;
+ALTER TABLE member_participations ADD COLUMN phone TEXT;
+ALTER TABLE member_people ADD COLUMN last_name TEXT;
+ALTER TABLE member_people ADD COLUMN first_name TEXT;
+ALTER TABLE member_people ADD COLUMN last_name_kana TEXT;
+ALTER TABLE member_people ADD COLUMN first_name_kana TEXT;
+ALTER TABLE member_people ADD COLUMN phone TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -125,4 +147,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PERSON_COLS_MIGRATION,
   MEMBER_PARTICIPATION_MIGRATION,
   MEMBER_PARTICIPATION_EMAILS_MIGRATION,
+  MEMBER_PARTICIPATION_NAME_SPLIT_MIGRATION,
 ];

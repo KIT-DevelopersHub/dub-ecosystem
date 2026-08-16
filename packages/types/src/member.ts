@@ -49,6 +49,16 @@ export interface Member {
   schoolEmail?: string | null;
   /** Gmail アドレス — retained on the roster from a 参加届 (任意 / additive). */
   gmail?: string | null;
+  /** 苗字(姓) — structured name retained from a 参加届 (任意 / additive). `name` stays the composed "姓 名". */
+  lastName?: string | null;
+  /** 名前(名) — structured name retained from a 参加届 (任意 / additive). */
+  firstName?: string | null;
+  /** 振り仮名(せい) — retained from a 参加届 (任意 / additive). */
+  lastNameKana?: string | null;
+  /** 振り仮名(めい) — retained from a 参加届 (任意 / additive). */
+  firstNameKana?: string | null;
+  /** 電話番号 — retained from a 参加届 (任意 / additive). */
+  phone?: string | null;
   note: string | null;
   sortOrder: number;
   /** Optimistic-concurrency version; PATCH must echo the last seen value. */
@@ -131,12 +141,24 @@ export interface Participation {
   id: string;
   orgId: OrgId;
   memberId: string | null;
+  /** 氏名 (フルネーム表示用の合成値 "姓 名"). 後方互換で常に埋まる。 */
   name: string;
+  /** 苗字(姓). 分割入力の新フィールド (additive). */
+  lastName: string | null;
+  /** 名前(名). 分割入力の新フィールド (additive). */
+  firstName: string | null;
+  /** 振り仮名 (合成値 "せい めい"). */
   nameKana: string | null;
+  /** 振り仮名(せい). 分割入力の新フィールド (additive). */
+  lastNameKana: string | null;
+  /** 振り仮名(めい). 分割入力の新フィールド (additive). */
+  firstNameKana: string | null;
   grade: Grade | null;
   department: string | null;
   /** 連絡先 (email など). */
   contact: string | null;
+  /** 電話番号 (任意). */
+  phone: string | null;
   /** 学校メールアドレス (必須). */
   schoolEmail: string;
   /** Gmail アドレス (必須). */
@@ -154,16 +176,31 @@ export interface Participation {
   updatedAt: ISODateTime;
 }
 
-/** Submit a 参加届. `name`, `schoolEmail`, `gmail` are required; the rest optional.
+/** Submit a 参加届. 姓/名 (`lastName`+`firstName`, or the legacy single `name`) and
+ *  `schoolEmail`, `gmail` are required; the rest optional. The server composes
+ *  `name` = "姓 名" (and `nameKana` = "せい めい") for backward compatibility when the
+ *  split fields are supplied, so both new (split) and legacy (single `name`) callers work.
  *  Reaches member-service either via the authenticated POST /api/v1/members/participation
  *  or the public POST /api/v1/public/participation (gateway-owned, unauthenticated). */
 export interface SubmitParticipationRequest {
-  name: string;
+  /** 苗字(姓) — 必須 (分割入力). */
+  lastName?: string | null;
+  /** 名前(名) — 必須 (分割入力). */
+  firstName?: string | null;
+  /** 氏名 (合成値). 分割入力を送らない旧クライアント向けの後方互換。姓/名 が来た時はサーバが合成する。 */
+  name?: string;
   /** 学校メールアドレス (必須・メール形式). */
   schoolEmail: string;
   /** Gmail アドレス (必須・メール形式). */
   gmail: string;
+  /** 振り仮名 (合成値・後方互換). 分割 (せい/めい) が来た時はサーバが合成する。 */
   nameKana?: string | null;
+  /** 振り仮名(せい) (任意). */
+  lastNameKana?: string | null;
+  /** 振り仮名(めい) (任意). */
+  firstNameKana?: string | null;
+  /** 電話番号 (任意・数字/ハイフン等). */
+  phone?: string | null;
   grade?: Grade | null;
   department?: string | null;
   contact?: string | null;

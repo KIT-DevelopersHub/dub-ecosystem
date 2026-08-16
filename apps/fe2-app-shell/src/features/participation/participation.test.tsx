@@ -46,9 +46,10 @@ function wrap(ui: ReactNode, api: ParticipationApi): JSX.Element {
   );
 }
 
-/** Fill the three required fields (氏名 + 学校メール + Gmail) with valid values. */
-async function fillRequired(name = "新規 太郎"): Promise<void> {
-  await userEvent.type(screen.getByTestId("participation-name"), name);
+/** Fill the required fields (氏名[姓/名] + 学校メール + Gmail) with valid values. */
+async function fillRequired(last = "新規", first = "太郎"): Promise<void> {
+  await userEvent.type(screen.getByTestId("participation-last-name"), last);
+  await userEvent.type(screen.getByTestId("participation-first-name"), first);
   await userEvent.type(screen.getByTestId("participation-school-email"), "taro@school.ac.jp");
   await userEvent.type(screen.getByTestId("participation-gmail"), "taro@gmail.com");
 }
@@ -74,18 +75,20 @@ describe("createParticipationApi", () => {
 });
 
 describe("ParticipationPage", () => {
-  it("blocks submit with an empty name", async () => {
+  it("blocks submit with an empty 姓/名", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
     await userEvent.click(screen.getByTestId("participation-submit"));
-    expect(screen.getByText("氏名を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("苗字を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("名前を入力してください")).toBeInTheDocument();
     expect(api.submit).not.toHaveBeenCalled();
   });
 
   it("requires both the school email and the Gmail address", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
-    await userEvent.type(screen.getByTestId("participation-name"), "太郎");
+    await userEvent.type(screen.getByTestId("participation-last-name"), "山田");
+    await userEvent.type(screen.getByTestId("participation-first-name"), "太郎");
     await userEvent.click(screen.getByTestId("participation-submit"));
     expect(screen.getByText("学校のメールアドレスを入力してください")).toBeInTheDocument();
     expect(screen.getByText("Gmail アドレスを入力してください")).toBeInTheDocument();
@@ -95,7 +98,8 @@ describe("ParticipationPage", () => {
   it("rejects a malformed email", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
-    await userEvent.type(screen.getByTestId("participation-name"), "太郎");
+    await userEvent.type(screen.getByTestId("participation-last-name"), "山田");
+    await userEvent.type(screen.getByTestId("participation-first-name"), "太郎");
     await userEvent.type(screen.getByTestId("participation-school-email"), "not-an-email");
     await userEvent.type(screen.getByTestId("participation-gmail"), "taro@gmail.com");
     await userEvent.click(screen.getByTestId("participation-submit"));
@@ -103,14 +107,28 @@ describe("ParticipationPage", () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
-  it("submits both emails and shows the サンクス outcome", async () => {
+  it("rejects a malformed phone number", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
-    await fillRequired("新規 太郎");
+    await fillRequired();
+    await userEvent.type(screen.getByTestId("participation-phone"), "not-a-phone");
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    expect(screen.getByText("電話番号の形式が正しくありません")).toBeInTheDocument();
+    expect(api.submit).not.toHaveBeenCalled();
+  });
+
+  it("submits split 姓/名 + both emails and shows the サンクス outcome", async () => {
+    const api = makeApi();
+    render(wrap(<ParticipationPage />, api));
+    await fillRequired("新規", "太郎");
+    await userEvent.type(screen.getByTestId("participation-phone"), "090-1234-5678");
     await userEvent.click(screen.getByTestId("participation-submit"));
     await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
     expect((api.submit as any).mock.calls[0][0]).toMatchObject({
+      lastName: "新規",
+      firstName: "太郎",
       name: "新規 太郎",
+      phone: "090-1234-5678",
       schoolEmail: "taro@school.ac.jp",
       gmail: "taro@gmail.com",
     });
@@ -122,7 +140,7 @@ describe("ParticipationPage", () => {
     const linked: PublicParticipationResponse = { accepted: true, matchKind: "linked_existing" };
     const api = makeApi({ submit: vi.fn(() => Promise.resolve(linked)) });
     render(wrap(<ParticipationPage />, api));
-    await fillRequired("既存 花子");
+    await fillRequired("既存", "花子");
     await userEvent.click(screen.getByTestId("participation-submit"));
     expect(await screen.findByText(/登録済みの情報を更新しました/)).toBeInTheDocument();
   });
@@ -135,8 +153,9 @@ describe("ParticipationPage", () => {
 });
 
 const SUBMISSION: Participation = {
-  id: "p_1", orgId: "org", memberId: "m_1", name: "黒川", nameKana: "くろかわ", grade: "3",
-  department: "情報工学科", contact: "kurokawa@school.ac.jp", schoolEmail: "kurokawa@school.ac.jp",
+  id: "p_1", orgId: "org", memberId: "m_1", name: "黒川", lastName: "黒川", firstName: null,
+  nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null, grade: "3",
+  department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
   gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
   status: "submitted", matchKind: "linked_existing", submittedBy: "u_1",
   submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",

@@ -33,6 +33,11 @@ export interface PersonRow {
   contact: string | null;
   schoolEmail: string | null;
   gmail: string | null;
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  phone: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
@@ -50,10 +55,15 @@ export interface ParticipationRow {
   memberId: string | null;
   name: string;
   normalizedName: string;
+  lastName: string | null;
+  firstName: string | null;
   nameKana: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
   grade: member.Grade | null;
   department: string | null;
   contact: string | null;
+  phone: string | null;
   schoolEmail: string;
   gmail: string;
   desiredTeamId: string | null;

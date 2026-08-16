@@ -26,22 +26,30 @@ const ACTIVITY_OPTIONS: SelectOption<DesiredActivity>[] = DESIRED_ACTIVITIES.map
 }));
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const PHONE_RE = /^[0-9+\-()\s]{6,20}$/;
 const trimOrNull = (v: string): string | null => (v.trim().length > 0 ? v.trim() : null);
+const compose = (last: string, first: string): string => [last.trim(), first.trim()].filter((x) => x.length > 0).join(" ");
+
+type FormErrors = { lastName?: string; firstName?: string; schoolEmail?: string; gmail?: string; phone?: string };
 
 export function ParticipationForm(): JSX.Element {
   const teamsQuery = useParticipationTeams();
   const submit = useSubmitParticipation();
 
-  const [name, setName] = useState("");
+  // 氏名・振り仮名は 姓(last)/名(first) に分割入力する。
+  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastNameKana, setLastNameKana] = useState("");
+  const [firstNameKana, setFirstNameKana] = useState("");
   const [schoolEmail, setSchoolEmail] = useState("");
   const [gmail, setGmail] = useState("");
-  const [nameKana, setNameKana] = useState("");
+  const [phone, setPhone] = useState("");
   const [grade, setGrade] = useState<Grade | null>(null);
   const [department, setDepartment] = useState("");
   const [desiredTeamId, setDesiredTeamId] = useState<string | null>(null);
   const [desiredActivity, setDesiredActivity] = useState<DesiredActivity | null>(null);
   const [note, setNote] = useState("");
-  const [errors, setErrors] = useState<{ name?: string; schoolEmail?: string; gmail?: string }>({});
+  const [errors, setErrors] = useState<FormErrors>({});
   const [done, setDone] = useState<PublicParticipationResponse | null>(null);
 
   const teams = teamsQuery.data?.teams ?? [];
@@ -51,21 +59,29 @@ export function ParticipationForm(): JSX.Element {
   );
 
   const onSubmit = () => {
-    const next: { name?: string; schoolEmail?: string; gmail?: string } = {};
-    if (name.trim().length === 0) next.name = "氏名を入力してください";
+    const next: FormErrors = {};
+    if (lastName.trim().length === 0) next.lastName = "苗字を入力してください";
+    if (firstName.trim().length === 0) next.firstName = "名前を入力してください";
     if (schoolEmail.trim().length === 0) next.schoolEmail = "学校のメールアドレスを入力してください";
     else if (!EMAIL_RE.test(schoolEmail.trim())) next.schoolEmail = "メールアドレスの形式が正しくありません";
     if (gmail.trim().length === 0) next.gmail = "Gmail アドレスを入力してください";
     else if (!EMAIL_RE.test(gmail.trim())) next.gmail = "メールアドレスの形式が正しくありません";
+    if (phone.trim().length > 0 && !PHONE_RE.test(phone.trim())) next.phone = "電話番号の形式が正しくありません";
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
     submit.mutate(
       {
-        name: name.trim(),
+        lastName: lastName.trim(),
+        firstName: firstName.trim(),
+        // 後方互換: 合成した "姓 名" も同送する (旧受け口・デモtrans が name を参照)。
+        name: compose(lastName, firstName),
         schoolEmail: schoolEmail.trim(),
         gmail: gmail.trim(),
-        nameKana: trimOrNull(nameKana),
+        lastNameKana: trimOrNull(lastNameKana),
+        firstNameKana: trimOrNull(firstNameKana),
+        nameKana: trimOrNull(compose(lastNameKana, firstNameKana)),
+        phone: trimOrNull(phone),
         grade,
         department: trimOrNull(department),
         desiredTeamId,
@@ -82,9 +98,22 @@ export function ParticipationForm(): JSX.Element {
     <Card>
       <Form onSubmit={onSubmit}>
         <div className={styles.formStack}>
-          <FormField label="氏名" htmlFor="p-name" required {...(errors.name ? { error: errors.name } : {})}>
-            <TextField id="p-name" value={name} onChange={setName} testId="participation-name" placeholder="山田 太郎" />
-          </FormField>
+          <div className={styles.formRow}>
+            <FormField label="氏名（苗字）" htmlFor="p-last-name" required {...(errors.lastName ? { error: errors.lastName } : {})}>
+              <TextField id="p-last-name" value={lastName} onChange={setLastName} testId="participation-last-name" placeholder="山田" />
+            </FormField>
+            <FormField label="氏名（名前）" htmlFor="p-first-name" required {...(errors.firstName ? { error: errors.firstName } : {})}>
+              <TextField id="p-first-name" value={firstName} onChange={setFirstName} testId="participation-first-name" placeholder="太郎" />
+            </FormField>
+          </div>
+          <div className={styles.formRow}>
+            <FormField label="ふりがな（せい）" htmlFor="p-last-kana" help="全角かな / カナ">
+              <TextField id="p-last-kana" value={lastNameKana} onChange={setLastNameKana} testId="participation-last-name-kana" placeholder="やまだ" />
+            </FormField>
+            <FormField label="ふりがな（めい）" htmlFor="p-first-kana" help="全角かな / カナ">
+              <TextField id="p-first-kana" value={firstNameKana} onChange={setFirstNameKana} testId="participation-first-name-kana" placeholder="たろう" />
+            </FormField>
+          </div>
           <div className={styles.formRow}>
             <FormField
               label="学校のメールアドレス"
@@ -119,8 +148,13 @@ export function ParticipationForm(): JSX.Element {
               />
             </FormField>
           </div>
-          <FormField label="ふりがな" htmlFor="p-kana" help="全角かな / カナ">
-            <TextField id="p-kana" value={nameKana} onChange={setNameKana} placeholder="やまだ たろう" />
+          <FormField
+            label="電話番号"
+            htmlFor="p-phone"
+            help="緊急連絡用 (任意)"
+            {...(errors.phone ? { error: errors.phone } : {})}
+          >
+            <TextField id="p-phone" type="text" value={phone} onChange={setPhone} testId="participation-phone" placeholder="090-1234-5678" />
           </FormField>
           <div className={styles.formRow}>
             <FormField label="学年" htmlFor="p-grade">

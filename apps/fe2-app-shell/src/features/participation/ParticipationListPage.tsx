@@ -38,8 +38,10 @@ export function ParticipationListPage(): JSX.Element {
 
   const columns: ColumnDef<Participation>[] = [
     { key: "name", header: "氏名", cell: (p) => p.name },
+    { key: "nameKana", header: "ふりがな", cell: (p) => p.nameKana ?? "—" },
     { key: "schoolEmail", header: "学校メール", cell: (p) => p.schoolEmail },
     { key: "gmail", header: "Gmail", cell: (p) => p.gmail },
+    { key: "phone", header: "電話番号", cell: (p) => p.phone ?? "—" },
     { key: "grade", header: "学年", cell: (p) => (p.grade ? GRADE_LABEL[p.grade] : "—") },
     { key: "department", header: "学科", cell: (p) => p.department ?? "—" },
     { key: "team", header: "希望チーム", cell: (p) => teamName(p.desiredTeamId) },
@@ -99,6 +101,7 @@ function DetailBody({ p, teamName }: { p: Participation; teamName: (id: string |
     { label: "ふりがな", value: p.nameKana ?? "—" },
     { label: "学校メールアドレス", value: p.schoolEmail },
     { label: "Gmail アドレス", value: p.gmail },
+    { label: "電話番号", value: p.phone ?? "—" },
     { label: "学年", value: p.grade ? GRADE_LABEL[p.grade] : "—" },
     { label: "学科", value: p.department ?? "—" },
     { label: "希望チーム", value: teamName(p.desiredTeamId) },
