@@ -19,19 +19,39 @@ function rowFor(raw: ReturnType<typeof migratedD1> extends Promise<infer T> ? (T
 }
 
 describe("buildDeployNotifyRow", () => {
-  it("produces an audience='admin' deploy row keyed by SHA", () => {
+  it("produces an audience='admin' deploy row keyed by SHA (humanized, genre-tagged copy)", () => {
     const row = buildDeployNotifyRow({ sha: "abc123def456", title: "usage 刷新", prNumber: 200, services: "全Worker" });
     expect(row.audience).toBe("admin");
     expect(row.type).toBe("deploy.completed");
     expect(row.dedupKey).toBe("deploy:abc123def456");
-    expect(row.title).toBe("デプロイ完了: usage 刷新 (#200)");
+    // Reader-facing title: genre tag + humanized headline (no "デプロイ完了:" dev framing,
+    // no raw "(#200)" — the PR number rides in meta_json instead).
+    expect(row.title).toBe("🔄 更新: usage 刷新");
+    expect(row.title).not.toContain("#200");
     expect(row.resourceId).toBe("abc123def456");
-    expect(JSON.parse(row.metaJson)).toMatchObject({ sha: "abc123def456", prNumber: 200 });
+    // Raw title + genre + PR number preserved in meta for admin traceability.
+    expect(JSON.parse(row.metaJson)).toMatchObject({ sha: "abc123def456", prNumber: 200, rawTitle: "usage 刷新", kind: "update" });
+  });
+
+  it("classifies a conventional-commit prefix and strips it + code noise from the copy", () => {
+    const row = buildDeployNotifyRow({
+      sha: "sha_224",
+      title: "fix(db): don't mis-parse `DO UPDATE SET` \"SET\" as a table in the namespace guard (#224)",
+      prNumber: 224,
+    });
+    // English/dev clause is NOT presentable → generic per-kind headline; genre = 修正.
+    expect(row.title).toBe("🔧 修正: 不具合を修正しました");
+    // The raw developer string must never appear in the reader-facing title/body.
+    expect(row.title).not.toContain("fix(db)");
+    expect(row.body).not.toContain("fix(db)");
+    expect(row.body).not.toContain("DO UPDATE SET");
+    // …but it is retained in meta_json for admins who want the technical detail.
+    expect(JSON.parse(row.metaJson).rawTitle).toContain("fix(db):");
   });
 
   it("falls back to a generic title when none is supplied", () => {
     const row = buildDeployNotifyRow({ sha: "deadbeef" });
-    expect(row.title).toBe("デプロイ完了: 本番デプロイ");
+    expect(row.title).toBe("🔄 更新: アプリを更新しました");
   });
 });
 
@@ -47,7 +67,9 @@ describe("buildDeployNotifySql — applied to dub-core", () => {
     const row = rowFor(raw, "sha_199")!;
     expect(row.audience).toBe("admin");
     expect(row.type).toBe("deploy.completed");
-    expect(String(row.title)).toContain("#199");
+    // Humanized headline (Japanese PR title is presentable → used as-is); PR# is in meta.
+    expect(String(row.title)).toContain("全メトリクス取得の根治");
+    expect(JSON.parse(String(row.meta_json))).toMatchObject({ prNumber: 199 });
     // No inbox rows are written by CI — admins get them lazily on read (service side).
     const inbox = raw.prepare("SELECT COUNT(*) AS c FROM notif_inbox").get() as { c: number };
     expect(Number(inbox.c)).toBe(0);
