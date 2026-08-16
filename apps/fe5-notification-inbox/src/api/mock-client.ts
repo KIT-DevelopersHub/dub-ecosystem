@@ -5,14 +5,19 @@
 import { common } from "@dub/types";
 import type { ApiClient, ApiError } from "../contracts/fe2";
 import type {
+  AdminNotificationItem,
   GetPreferencesResponse,
   InboxItem,
+  ListAdminNotificationsResponse,
   ListInboxResponse,
   PreferenceEntry,
+  PublishBroadcastResponse,
   ReadAllRequest,
   UnreadCountResponse,
   UpdatePreferencesRequest,
 } from "../contracts/notification-api";
+
+export type MockViewer = "admin" | "member";
 
 const BASE = `${common.API_PREFIX}/notifications`;
 
@@ -47,9 +52,34 @@ export class MockApiError extends Error implements ApiError {
 export interface MockSeed {
   items?: InboxItem[];
   overrides?: PreferenceEntry[];
+  adminItems?: AdminNotificationItem[];
+  // Which audience the signed-in viewer represents (admin sees both audiences; a
+  // member is filtered to audience='members'). Default "admin".
+  viewer?: MockViewer;
   pageSize?: number;
   // Force the next matching call to fail (for testing rollback paths).
   failNext?: { pathIncludes: string; error: MockApiError };
+}
+
+// Admin notifications seed (audience='admin') powering the management screen. Mirrors the
+// three auto-admin notification kinds (deploy done / feature published / feedback).
+function seedAdminItems(): AdminNotificationItem[] {
+  const now = Date.now();
+  const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
+  const mk = (n: number, type: string, title: string, body: string): AdminNotificationItem => ({
+    id: `ntfn_adm_${String(n).padStart(4, "0")}`,
+    type,
+    title,
+    body,
+    audience: "admin",
+    createdAt: iso(n * 60_000),
+    publishedBroadcastId: null,
+  });
+  return [
+    mk(1, "deploy.deployment.status_changed", "デプロイ完了: dub-ecosystem", "本番へのデプロイが完了しました。"),
+    mk(2, "release", "🎉 ガントチャートをメンバー公開しました", "タスクの期間・進捗・依存をタイムラインで確認できます。"),
+    mk(3, "feedback", "新しいフィードバック: 検索が遅い", "カテゴリ: idea\n送信ユーザー: usr_alice\n\n検索ページが重いです"),
+  ];
 }
 
 function seedItems(): InboxItem[] {
@@ -70,6 +100,7 @@ function seedItems(): InboxItem[] {
     createdAt: iso(n * 60_000),
     resourceType: resource?.type ?? null,
     resourceId: resource?.id ?? null,
+    audience: "members",
   });
   return [
     // Release notes surface at the top of the inbox so the "🎉 新機能" badge is visible.
@@ -89,14 +120,26 @@ function seedItems(): InboxItem[] {
 // Create a mock ApiClient. Mutations mutate the in-memory store so polling /
 // re-fetch reflect changes.
 export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
-  __store: { items: InboxItem[]; overrides: PreferenceEntry[] };
+  __store: {
+    items: InboxItem[];
+    overrides: PreferenceEntry[];
+    adminItems: AdminNotificationItem[];
+    viewer: MockViewer;
+  };
+  __setViewer(v: MockViewer): void;
 } {
   const store = {
     items: seed.items ? [...seed.items] : seedItems(),
     overrides: seed.overrides ? [...seed.overrides] : [],
+    adminItems: seed.adminItems ? [...seed.adminItems] : seedAdminItems(),
+    viewer: seed.viewer ?? ("admin" as MockViewer),
   };
   const pageSize = seed.pageSize ?? 50;
   let failNext = seed.failNext;
+
+  // A member viewer is filtered to audience='members'; an admin sees everything.
+  const visibleItems = (): InboxItem[] =>
+    store.viewer === "admin" ? store.items : store.items.filter((i) => i.audience !== "admin");
 
   const maybeFail = (path: string): void => {
     if (failNext && path.includes(failNext.pathIncludes)) {
@@ -116,10 +159,13 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
 
   return {
     __store: store,
+    __setViewer(v: MockViewer) {
+      store.viewer = v;
+    },
     async get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
       maybeFail(path);
       if (path === `${BASE}/inbox`) {
-        let items = store.items;
+        let items = visibleItems();
         if (query?.unreadOnly) items = items.filter((i) => i.readAt === null);
         if (typeof query?.type === "string" && query.type) {
           const prefix = query.type;
@@ -130,7 +176,7 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
         return paginate(items, cursor, limit) as T;
       }
       if (path === `${BASE}/inbox/unread-count`) {
-        const count = store.items.filter((i) => i.readAt === null).length;
+        const count = visibleItems().filter((i) => i.readAt === null).length;
         return { count } satisfies UnreadCountResponse as T;
       }
       if (path === `${BASE}/preferences`) {
@@ -138,6 +184,9 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
           defaults: DEFAULT_PREFERENCES,
           overrides: store.overrides,
         } satisfies GetPreferencesResponse as T;
+      }
+      if (path === `${BASE}/manage`) {
+        return { items: [...store.adminItems], nextCursor: null } satisfies ListAdminNotificationsResponse as T;
       }
       throw new MockApiError("NOT_FOUND", 404, `No mock GET for ${path}`);
     },
@@ -161,6 +210,32 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
         };
         store.items.unshift(item);
         return { notificationId: item.id, deduplicated: false } as T;
+      }
+      const publishMatch = path.match(new RegExp(`^${BASE}/manage/([^/]+)/publish$`));
+      if (publishMatch) {
+        const id = decodeURIComponent(publishMatch[1]!);
+        const admin = store.adminItems.find((a) => a.id === id);
+        if (!admin) throw new MockApiError("NOTIF_NOTIFICATION_NOT_FOUND", 404, `notification not found: ${id}`);
+        // Idempotent: re-publishing returns the existing broadcast id.
+        if (admin.publishedBroadcastId) {
+          return { notificationId: admin.publishedBroadcastId, deduplicated: true, publishedBroadcastId: admin.publishedBroadcastId } satisfies PublishBroadcastResponse as T;
+        }
+        const broadcastId = `ntfn_bc_${Date.now()}`;
+        admin.publishedBroadcastId = broadcastId;
+        // Fan out a single members broadcast into the inbox (every member reads the same one).
+        const item: InboxItem = {
+          id: broadcastId,
+          type: "system.announcement",
+          title: admin.title,
+          body: admin.body,
+          readAt: null,
+          createdAt: new Date().toISOString(),
+          resourceType: "notification",
+          resourceId: admin.id,
+          audience: "members",
+        };
+        store.items.unshift(item);
+        return { notificationId: broadcastId, deduplicated: false, publishedBroadcastId: broadcastId } satisfies PublishBroadcastResponse as T;
       }
       if (path === `${BASE}/inbox/read-all`) {
         const req = (body ?? {}) as ReadAllRequest;

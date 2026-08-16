@@ -6,7 +6,7 @@ import { dubContext } from "@dub/http";
 import type { RequestContext } from "@dub/http";
 import { createAuthClient, getUserId } from "@dub/auth-client";
 import { HEADERS } from "@dub/observability";
-import type { notification } from "@dub/types";
+import { common, type notification } from "@dub/types";
 import type { AppBindings } from "./env";
 import { SERVICE_NAME, CHANNELS } from "./config";
 import { buildDb, buildIngestDeps } from "./deps";
@@ -23,6 +23,7 @@ import {
   insertFeedback,
   listFeedback,
   markFeedbackRead,
+  listAdminNotifications,
 } from "./repo";
 import { mergedView, defaultEnabled } from "./preferences";
 import {
@@ -32,12 +33,19 @@ import {
   parsePreferencesUpdate,
   parseCreateFeedback,
   parseListFeedbackQuery,
+  parseListManageQuery,
   parseReleaseRequest,
 } from "./validation";
 import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
 import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
 import { publishRelease, seedInitialReleases } from "./release";
-import { FEEDBACK_ADMIN_PERMISSION, RELEASE_ADMIN_PERMISSION } from "./config";
+import { publishBroadcastFromNotification } from "./broadcast";
+import {
+  FEEDBACK_ADMIN_PERMISSION,
+  RELEASE_ADMIN_PERMISSION,
+  BROADCAST_PUBLISH_PERMISSION,
+  ADMIN_VIEWER_PERMISSION,
+} from "./config";
 import type { IngestInput } from "./types";
 
 interface GetPreferencesResponse {
@@ -70,6 +78,21 @@ export function createApp(options: CreateAppOptions = {}) {
     options.mail ?? (c.env.SVC_MAIL_GATEWAY ? makeMailPort(c.env.SVC_MAIL_GATEWAY) : null);
   const ingestDepsOf = (c: Context<AppBindings>, ctx: RequestContext) =>
     buildIngestDeps(c.env, ctx, options.identity ? { identity: options.identity } : {});
+
+  // Is the signed-in user an admin viewer (sees BOTH audiences)? Backed by the per-request
+  // auth client set by authOnly (notif:admin => admin/maintainer). Fail-closed: any error
+  // (identity unreachable) is treated as a member, so admin-audience rows stay hidden.
+  const isAdminViewer = async (c: Context<AppBindings>, userId: string): Promise<boolean> => {
+    try {
+      const client = c.get("authClient");
+      if (!client) return false;
+      return await client.hasPermission(userId, common.DUB_DEFAULT_ORG_ID, {
+        permission: ADMIN_VIEWER_PERMISSION,
+      });
+    } catch {
+      return false;
+    }
+  };
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
@@ -141,6 +164,32 @@ export function createApp(options: CreateAppOptions = {}) {
       return c.json(result, 202);
     });
 
+    // ---- Notification management (admin). GET /manage lists audience='admin'
+    // notifications (deploy done / feedback / ops alerts) with their published-broadcast
+    // state; POST /manage/:id/publish republishes one to ALL members as a single
+    // broadcast. Both gated by notif:broadcast_publish (admin + maintainer). External
+    // surface (proxied verbatim by the gateway).
+    app.use(`${p}/manage`, authOnly);
+    app.use(`${p}/manage/*`, authOnly);
+
+    app.get(`${p}/manage`, requireBroadcastPublish, async (c) => {
+      const q = parseListManageQuery(c.req.query());
+      const page = await listAdminNotifications(dbOf(c), q);
+      return c.json(page satisfies notification.ListAdminNotificationsResponse);
+    });
+
+    app.post(`${p}/manage/:id/publish`, requireBroadcastPublish, async (c) => {
+      const ctx = ctxOf(c);
+      const actorId = c.req.header(HEADERS.userId) ?? null;
+      const result = await publishBroadcastFromNotification(
+        ingestDepsOf(c, ctx),
+        ctx,
+        c.req.param("id"),
+        actorId,
+      );
+      return c.json(result satisfies notification.PublishBroadcastResponse, 202);
+    });
+
     // ---- self-scoped routes: requireAuth (trusted header -> x-dub-user-id = 本人).
     // No requirePermission: notif:inbox:self / notif:prefs:self are not in the frozen
     // PERMISSION_CATALOG; self-access is enforced by scoping every query to userId.
@@ -155,7 +204,8 @@ export function createApp(options: CreateAppOptions = {}) {
       // release notes always appear regardless of when the user was created (bugfix).
       await backfillBroadcastInbox(db, userId);
       const q = parseListInboxQuery(c.req.query());
-      const page = await listInbox(db, userId, q);
+      const admin = await isAdminViewer(c, userId);
+      const page = await listInbox(db, userId, q, admin);
       return c.json(page satisfies notification.ListInboxResponse);
     });
 
@@ -165,7 +215,8 @@ export function createApp(options: CreateAppOptions = {}) {
       // Same backfill as GET /inbox so the header unread badge counts broadcasts a late-join
       // user never received a fan-out row for.
       await backfillBroadcastInbox(db, userId);
-      const count = await unreadCount(db, userId);
+      const admin = await isAdminViewer(c, userId);
+      const count = await unreadCount(db, userId, admin);
       return c.json({ count } satisfies notification.UnreadCountResponse);
     });
 
@@ -280,4 +331,12 @@ const requireFeedbackAdmin: MiddlewareHandler<AppBindings> = async (c, next) => 
 const requireReleaseAdmin: MiddlewareHandler<AppBindings> = async (c, next) => {
   const client = c.get("authClient");
   return client.requirePermission(RELEASE_ADMIN_PERMISSION)(c, next);
+};
+
+// Gate for the Notification management surface (GET /manage, POST /manage/:id/publish).
+// Runs AFTER authOnly, reusing its per-request auth client to check
+// notif:broadcast_publish (admin + maintainer hold it).
+const requireBroadcastPublish: MiddlewareHandler<AppBindings> = async (c, next) => {
+  const client = c.get("authClient");
+  return client.requirePermission(BROADCAST_PUBLISH_PERMISSION)(c, next);
 };

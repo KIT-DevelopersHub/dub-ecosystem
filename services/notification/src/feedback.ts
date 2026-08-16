@@ -92,6 +92,7 @@ export function buildFeedbackNotifyInput(item: notification.FeedbackItem, reques
     title: `新しいフィードバック: ${excerpt(item.message)}`,
     body,
     priority: "normal",
+    audience: "admin", // "フィードバック受信" (auto-admin notification #3) — admin publishes to members
     channels: ["in_app"],
     dedupKey: `feedback:${item.id}`,
     resourceType: "feedback",
