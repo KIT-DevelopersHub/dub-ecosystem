@@ -1,0 +1,71 @@
+// Locks in the real LMB-derived demo seed: the 41 conference sections flow into
+// the gantt DTO with real teams, dependency lines, and a critical governance spine.
+import { describe, expect, it } from "vitest";
+import { createDevClient, DEMO_EVENT_ID } from "../src/dev-seed";
+import type { gantt, task, team } from "@dub/types";
+
+async function getDto(): Promise<gantt.GanttChartDTO> {
+  const client = createDevClient();
+  return client.request<gantt.GanttChartDTO>({ method: "GET", path: "/api/v1/gantt", query: { event: DEMO_EVENT_ID } });
+}
+
+describe("dev-seed (real LMB conference data)", () => {
+  it("exposes the 7 real conference teams with colours", async () => {
+    const client = createDevClient();
+    const res = await client.request<team.ListTeamsResponse>({ method: "GET", path: "/api/v1/teams" });
+    const names = res.items.map((t) => t.name).sort();
+    expect(names).toEqual(["会場", "会計", "全体進行", "集客告知", "スポンサー", "開発", "本部"].sort());
+    expect(res.items.every((t) => typeof t.color === "string")).toBe(true);
+  });
+
+  it("renders the 41 work-packages + 128 WBS leaves as a two-level tree, each with a bar", async () => {
+    const dto = await getDto();
+    const parents = dto.rows.filter((r) => (r.depth ?? 0) === 0);
+    const leaves = dto.rows.filter((r) => (r.depth ?? 0) === 1);
+    expect(parents).toHaveLength(41); // LMB's 41 section work-packages
+    expect(leaves).toHaveLength(128); // 129 config leaves − the 3.3 self-leaf
+    expect(dto.rows).toHaveLength(169);
+    expect(dto.rows.every((r) => r.startsAt !== null && r.endsAt !== null)).toBe(true);
+    expect(dto.rows.every((r) => r.teamId !== null)).toBe(true);
+    // every leaf points at a real parent row that advertises children
+    const byId = new Map(dto.rows.map((r) => [r.taskId, r]));
+    expect(leaves.every((l) => byId.get(l.parentTaskId!)?.hasChildren === true)).toBe(true);
+  });
+
+  it("hangs the WBS leaves under their work-package parent (togglable drill-down)", async () => {
+    const dto = await getDto();
+    const sponsor = dto.rows.find((r) => r.taskId === "task_4_1"); // スポンサー: 打診・契約
+    expect(sponsor?.hasChildren).toBe(true);
+    const leaf = dto.rows.find((r) => r.taskId === "task_4_1_1");
+    expect(leaf?.parentTaskId).toBe("task_4_1");
+    expect(leaf?.depth).toBe(1);
+    expect(leaf?.wbs).toBe("4.1.1");
+    // the 開発 work-package (3.3) has no distinct leaves ⇒ no toggle
+    expect(dto.rows.find((r) => r.taskId === "task_3_3")?.hasChildren).toBe(false);
+  });
+
+  it("keeps the two real in-repo dates for WBS 3.4 (2026-08-16 → 2026-09-15)", async () => {
+    const dto = await getDto();
+    const row = dto.rows.find((r) => r.taskId === "task_3_4");
+    expect(row?.startsAt).toBe("2026-08-16T00:00:00.000Z");
+    expect(row?.endsAt).toBe("2026-09-15T00:00:00.000Z");
+  });
+
+  it("wires the real phase-spine dependencies + critical path", async () => {
+    const dto = await getDto();
+    const edge = (from: string, to: string) => dto.dependencies.some((d) => d.fromTaskId === from && d.toTaskId === to);
+    expect(edge("task_1_1", "task_3_1")).toBe(true); // F1→F3
+    expect(edge("task_6_1", "task_7_3")).toBe(true); // F6→F7 本番
+    expect(dto.criticalTaskIds).toContain("task_7_3");
+    expect(dto.criticalTaskIds).toContain("task_1_1");
+  });
+
+  it("lists tasks under the conference event with real assignee owners", async () => {
+    const client = createDevClient();
+    const res = await client.request<task.ListTasksResponse>({ method: "GET", path: "/api/v1/tasks", query: { eventId: DEMO_EVENT_ID, limit: 200 } });
+    expect(res.items.length).toBe(169); // 41 work-packages + 128 WBS leaves
+    const kickoff = res.items.find((t) => t.id === "task_3_1");
+    expect(kickoff?.assigneeId).toBe("usr_takaoka"); // 本部 owner = 高岡 己太朗
+    expect(kickoff?.status).toBe("done");
+  });
+});

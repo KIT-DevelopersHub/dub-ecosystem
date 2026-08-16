@@ -40,6 +40,10 @@ export interface MockSeed {
   rowDates?: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }>;
   /** critical-path task ids the gantt DTO reports (bar colouring). */
   criticalTaskIds?: common.TaskId[];
+  /** WBS hierarchy overlay: taskId -> {parent, depth, wbs}. The task model has no
+   *  parent column (server keeps it in gantt-service), so the mock carries it here
+   *  and projects it onto each GanttRow. `hasChildren` is derived, not stored. */
+  hierarchy?: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }>;
   /** "current user" the mock stamps as createdBy on POST /tasks (from→to "from"). */
   currentUserId?: common.UserId;
 }
@@ -54,6 +58,7 @@ export class MockApiClient implements ApiClient {
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
   private criticalTaskIds: common.TaskId[] = [];
+  private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
 
   /** force the next matching call to throw (test 11 / error branches). */
@@ -75,7 +80,29 @@ export class MockApiClient implements ApiClient {
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
+    this.hierarchy = seed.hierarchy ?? {};
     this.currentUserId = seed.currentUserId ?? "usr_me";
+  }
+
+  /** Set of task ids that appear as some row's parent (⇒ they render a toggle). */
+  private parentIdsWithChildren(): Set<common.TaskId> {
+    const set = new Set<common.TaskId>();
+    for (const h of Object.values(this.hierarchy)) if (h.parentTaskId) set.add(h.parentTaskId);
+    return set;
+  }
+
+  /** Re-parent a row in the hierarchy overlay (create/update parentTaskId). Depth
+   *  is derived from the parent's own depth so nested WBS levels read correctly;
+   *  null detaches the row to top-level (depth 0). The task model has no parent
+   *  column — the server keeps it in gantt-service, so the mock mirrors that here. */
+  private setParent(id: common.TaskId, parentTaskId: common.TaskId | null): void {
+    const prev = this.hierarchy[id];
+    if (parentTaskId === null) {
+      this.hierarchy[id] = { ...(prev ?? {}), parentTaskId: null, depth: 0 };
+      return;
+    }
+    const parentDepth = this.hierarchy[parentTaskId]?.depth ?? 0;
+    this.hierarchy[id] = { ...(prev ?? {}), parentTaskId, depth: parentDepth + 1 };
   }
 
   async request<T, TBody = unknown>(req: RequestInput<TBody>): Promise<T> {
@@ -206,6 +233,7 @@ export class MockApiClient implements ApiClient {
       version: 1,
     };
     this.taskById.set(t.id, t);
+    if (body.parentTaskId !== undefined) this.setParent(t.id, body.parentTaskId ?? null);
     return t;
   }
 
@@ -232,6 +260,8 @@ export class MockApiClient implements ApiClient {
       updatedAt: new Date().toISOString(),
     };
     this.taskById.set(id, next);
+    // re-parent (親子関係の変更) lives in the hierarchy overlay, not on the task row.
+    if (body.parentTaskId !== undefined) this.setParent(id, body.parentTaskId ?? null);
     return next;
   }
 
@@ -245,6 +275,19 @@ export class MockApiClient implements ApiClient {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     if (body.version !== cur.version) throw err(409, "TASK_VERSION_CONFLICT", "version conflict");
+    // scope rule (判断10): a dependency may only connect same-direct-parent siblings.
+    // parent↔child and cross-scope edges are rejected; parent↔parent (both top-level
+    // or both under the same grandparent) is allowed by the same test.
+    const myParent = this.hierarchy[id]?.parentTaskId ?? null;
+    for (const dep of body.dependsOnIds) {
+      if (dep === id) throw err(409, "TASK_DEPENDENCY_CYCLE", "self dependency", { taskId: id });
+      const depParent = this.hierarchy[dep]?.parentTaskId ?? null;
+      if (depParent !== myParent)
+        throw err(409, "TASK_DEPENDENCY_SCOPE", "dependency must stay within the same parent scope", {
+          taskId: id,
+          dependsOnId: dep,
+        });
+    }
     // cycle check over the proposed graph
     const proposed = new Map(this.deps);
     proposed.set(id, body.dependsOnIds);
@@ -257,10 +300,12 @@ export class MockApiClient implements ApiClient {
 
   // ---- gantt handlers ----
   private ganttRows(eventId: string): gantt.GanttRow[] {
+    const parents = this.parentIdsWithChildren();
     return [...this.taskById.values()]
       .filter((t) => t.eventId === eventId && t.archivedAt === null)
       .map((t): gantt.GanttRow => {
         const schedule = deriveSchedule(t, this.rowDates[t.id]);
+        const h = this.hierarchy[t.id];
         return {
           taskId: t.id,
           title: t.title,
@@ -269,6 +314,10 @@ export class MockApiClient implements ApiClient {
           progressPercent: progressForStatus(t.status),
           assigneeId: t.assigneeId,
           teamId: t.teamId ?? null,
+          parentTaskId: h?.parentTaskId ?? null,
+          depth: h?.depth ?? 0,
+          hasChildren: parents.has(t.id),
+          ...(h?.wbs ? { wbs: h.wbs } : {}),
         };
       });
   }
@@ -297,6 +346,7 @@ export class MockApiClient implements ApiClient {
     if (!t) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
     this.rowDates[taskId] = { startsAt: body.startsAt, endsAt: body.endsAt };
     if (body.endsAt) this.taskById.set(taskId, { ...t, dueAt: body.endsAt, updatedAt: new Date().toISOString() });
+    const h = this.hierarchy[taskId];
     return {
       taskId,
       title: t.title,
@@ -305,6 +355,10 @@ export class MockApiClient implements ApiClient {
       progressPercent: progressForStatus(t.status),
       assigneeId: t.assigneeId,
       teamId: t.teamId ?? null,
+      parentTaskId: h?.parentTaskId ?? null,
+      depth: h?.depth ?? 0,
+      hasChildren: this.parentIdsWithChildren().has(taskId),
+      ...(h?.wbs ? { wbs: h.wbs } : {}),
     };
   }
 

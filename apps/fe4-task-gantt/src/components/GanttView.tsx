@@ -11,6 +11,7 @@ import {
   extendWindow,
   initialWindow,
   pxToDays,
+  rollupRowDates,
   shiftBar,
   timelineBars,
   todayX,
@@ -37,6 +38,9 @@ export interface GanttViewProps {
   truncated?: boolean;
   /** Commit a bar move/resize: whole-day start/end after the drag. */
   onSchedule?: (taskId: common.TaskId, startsAt: common.ISODateTime, endsAt: common.ISODateTime) => void;
+  /** Shift a work-package (parent) AND its whole subtree by whole days (parent
+   *  drag-move: children follow). Falls back to onSchedule when absent. */
+  onScheduleShift?: (taskId: common.TaskId, deltaDays: number) => void;
   /** Click a bar or row to open the detail panel. */
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
@@ -45,6 +49,10 @@ export interface GanttViewProps {
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
   /** taskId -> assignee display name, shown as a left-pane property. */
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
+  /** taskId -> team accent colour, for the row stripe + bar cap (team grouping). */
+  teamColorById?: ReadonlyMap<common.TaskId, string>;
+  /** ordered [teamId,{name,color}] for the legend under the toolbar. */
+  teamLegend?: ReadonlyArray<{ id: string; name: string; color: string }>;
   canWrite?: boolean;
 }
 
@@ -77,10 +85,13 @@ export function GanttView({
   onZoomChange,
   truncated,
   onSchedule,
+  onScheduleShift,
   onSelect,
   onCreateOnDate,
   statusById,
   assigneeNameById,
+  teamColorById,
+  teamLegend,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -88,6 +99,41 @@ export function GanttView({
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
   const [collapsed, setCollapsed] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // WBS drill-down: set of expanded work-package ids. Empty = all collapsed, so the
+  // view opens on the 41 work-packages and each toggle reveals its leaf children.
+  const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() => new Set());
+
+  const toggleParent = useCallback((id: common.TaskId) => {
+    setOpenParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Parent (work-package) bars always enclose their children: roll each parent's
+  // span up to the union of its descendants before any geometry runs, so widening
+  // a child auto-grows the parent bar (and, via the window effect, the axis).
+  const rolledRows = useMemo(() => rollupRowDates(dto.rows), [dto.rows]);
+
+  // Rows actually shown: a child (has a parent) is hidden unless its parent is open.
+  const rows = useMemo(
+    () => rolledRows.filter((r) => !(r.parentTaskId && !openParents.has(r.parentTaskId))),
+    [rolledRows, openParents],
+  );
+
+  // taskId -> true when the row is a WBS parent (its bar spans its children via
+  // rollup). Parents are now draggable too — a move shifts the whole subtree.
+  const parentIds = useMemo(() => {
+    const s = new Set<common.TaskId>();
+    for (const r of dto.rows) if (r.hasChildren) s.add(r.taskId);
+    return s;
+  }, [dto.rows]);
+
+  // taskId -> the ROLLED row (parent dates are the union of their children). Drag
+  // start/end must read these displayed dates, not the parent's pre-rollup seed.
+  const rolledById = useMemo(() => new Map(rolledRows.map((r) => [r.taskId, r])), [rolledRows]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
@@ -117,14 +163,14 @@ export function GanttView({
   }, [dto.rows]);
 
   const width = canvasWidth(win);
-  const bars = useMemo(() => timelineBars(dto.rows, win), [dto.rows, win]);
+  const bars = useMemo(() => timelineBars(rows, win), [rows, win]);
   const tops = useMemo(() => topSegments(win, zoom), [win, zoom]);
   const ticks = useMemo(() => bottomTicks(win, zoom), [win, zoom]);
   const weekends = useMemo(() => weekendBands(win, zoom), [win, zoom]);
   const tX = todayX(win);
-  const rowsH = Math.max(dto.rows.length * ROW_HEIGHT, ROW_HEIGHT);
+  const rowsH = Math.max(rows.length * ROW_HEIGHT, ROW_HEIGHT);
 
-  const titleById = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r.title])), [dto.rows]);
+  const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
   const segs = useMemo(() => {
@@ -139,10 +185,29 @@ export function GanttView({
           y1: from.y + ROW_HEIGHT / 2,
           x2: to.x,
           y2: to.y + ROW_HEIGHT / 2,
+          tip: `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
-  }, [dto.dependencies, barById]);
+  }, [dto.dependencies, barById, titleById]);
+
+  // Faint enclosing band drawn behind an open parent + its (contiguous) children,
+  // so the parent-child grouping reads as a container — distinct from the arrows,
+  // which mean dependency. Children render right after their parent, so the run
+  // is contiguous.
+  const groupBands = useMemo(() => {
+    const bands: { id: common.TaskId; top: number; height: number }[] = [];
+    rows.forEach((r, i) => {
+      if (!(r.hasChildren && openParents.has(r.taskId))) return;
+      let n = 0;
+      for (let j = i + 1; j < rows.length; j++) {
+        if (rows[j]!.parentTaskId === r.taskId) n += 1;
+        else break;
+      }
+      if (n > 0) bands.push({ id: r.taskId, top: i * ROW_HEIGHT, height: (n + 1) * ROW_HEIGHT });
+    });
+    return bands;
+  }, [rows, openParents]);
 
   // ---- centre on today (initial + on zoom change) ----
   const scrollToToday = useCallback(
@@ -188,7 +253,9 @@ export function GanttView({
       if (mode === "move") onSelect?.(bar.taskId);
       return;
     }
-    const row = dto.rows.find((r) => r.taskId === bar.taskId);
+    // Parents are draggable too now: read the ROLLED (displayed) span so a move
+    // starts from the bar the user actually sees; the drop shifts the subtree.
+    const row = rolledById.get(bar.taskId) ?? dto.rows.find((r) => r.taskId === bar.taskId);
     if (!row?.startsAt || !row?.endsAt) return;
     e.preventDefault();
     e.stopPropagation();
@@ -211,12 +278,22 @@ export function GanttView({
     if (!drag) return;
     const { taskId, mode, startsAt, endsAt, dxPx } = drag;
     if (!movedRef.current) {
+      // A click that didn't move opens detail — same affordance as leaf bars.
       if (mode === "move") onSelect?.(taskId);
     } else {
       const deltaDays = pxToDays(dxPx, win);
-      if (deltaDays !== 0 && onSchedule) {
-        const next = shiftBar(startsAt, endsAt, deltaDays, mode);
-        onSchedule(taskId, next.startsAt, next.endsAt);
+      if (deltaDays !== 0) {
+        // Parent MOVE: shift the whole subtree so children follow (keeps rollup
+        // consistent — the parent bar stays the union of its shifted children).
+        if (mode === "move" && parentIds.has(taskId) && onScheduleShift) {
+          onScheduleShift(taskId, deltaDays);
+        } else if (onSchedule) {
+          // Leaf move/resize, or a parent RESIZE: persist the row's own span. For a
+          // parent, rollup then unions it with the children — extending grows the
+          // bar, shrinking below the children is ignored (children never split).
+          const next = shiftBar(startsAt, endsAt, deltaDays, mode);
+          onSchedule(taskId, next.startsAt, next.endsAt);
+        }
       }
     }
     setDrag(null);
@@ -237,6 +314,11 @@ export function GanttView({
     const status = statusById?.get(taskId);
     const cls = status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
+    // Parent (work-package) rows keep the rollup behaviour (their span still auto-
+    // encloses their children) but render as an ordinary, legible task bar — the
+    // hollow "bracket summary" look was reverted per feedback #97 (見づらい). The
+    // parent/child vs dependency distinction is carried by indent + tree lines +
+    // the dashed dependency arrows + the legend, not by a special bar shape.
     return `${styles.bar} ${cls} ${dragging}`;
   };
 
@@ -276,7 +358,7 @@ export function GanttView({
       <div className={styles.tlToolbar}>
         <div className={styles.tlToolbarLeft}>
           <span className={styles.tlViewName}>タイムライン</span>
-          <span className={styles.tlCount}>{dto.rows.length} 件</span>
+          <span className={styles.tlCount}>{rows.length} 件</span>
         </div>
         <div className={styles.tlToolbarRight}>
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
@@ -297,6 +379,40 @@ export function GanttView({
             ))}
           </div>
         </div>
+      </div>
+
+      {teamLegend && teamLegend.length > 0 && (
+        <div className={styles.tlLegend} data-testid="fe4-gantt-legend" aria-label="チーム凡例">
+          {teamLegend.map((t) => (
+            <span key={t.id} className={styles.tlLegendItem}>
+              <span className={styles.tlLegendSwatch} style={{ background: t.color }} aria-hidden />
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* how to read the chart: parent-child (toggle/indent) vs dependency (arrow) */}
+      <div className={styles.tlGuide} data-testid="fe4-gantt-guide" aria-label="表記の凡例">
+        <span className={styles.tlGuideItem}>
+          <span className={styles.tlGuideTree} aria-hidden>▸</span>
+          親子（トグルで開閉・インデント）
+        </span>
+        <span className={styles.tlGuideItem}>
+          <span className={styles.tlGuideSummary} aria-hidden />
+          まとめバー（親＝子の期間を合算）
+        </span>
+        <span className={styles.tlGuideItem}>
+          <svg className={styles.tlGuideDepIcon} width="26" height="10" aria-hidden>
+            <defs>
+              <marker id="fe4-legend-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L5,3 L0,6 Z" className={styles.tlDepArrow} />
+              </marker>
+            </defs>
+            <path d="M1,5 H20" fill="none" className={styles.tlDep} markerEnd="url(#fe4-legend-arrow)" />
+          </svg>
+          依存（前工程 → 後工程）
+        </span>
       </div>
 
       {truncated && (
@@ -323,21 +439,57 @@ export function GanttView({
                     ‹
                   </button>
                 </div>
-                {dto.rows.map((r) => (
-                  <button
-                    key={r.taskId}
-                    type="button"
-                    className={styles.tlRow}
-                    style={{ height: ROW_HEIGHT }}
-                    title={r.title}
-                    onClick={() => onSelect?.(r.taskId)}
-                    data-testid={`fe4-gantt-row-${r.taskId}`}
-                  >
-                    <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
-                    <span className={styles.tlRowName}>{r.title}</span>
-                    {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
-                  </button>
-                ))}
+                {rows.map((r) => {
+                  const depth = r.depth ?? 0;
+                  const isOpen = openParents.has(r.taskId);
+                  return (
+                    <button
+                      key={r.taskId}
+                      type="button"
+                      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""}`}
+                      // Parent rows move the left indent INTO the toggle so the whole
+                      // left gutter (everything left of the team stripe) toggles — a
+                      // much bigger hit target than the chevron glyph (feedback #39).
+                      style={{ height: ROW_HEIGHT, paddingLeft: r.hasChildren ? 0 : 12 + depth * 18 }}
+                      title={r.title}
+                      onClick={() => onSelect?.(r.taskId)}
+                      data-testid={`fe4-gantt-row-${r.taskId}`}
+                    >
+                      {r.hasChildren ? (
+                        <span
+                          className={styles.tlToggleWide}
+                          style={{ paddingLeft: 12 + depth * 18 }}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={isOpen ? "子タスクを閉じる" : "子タスクを開く"}
+                          aria-expanded={isOpen}
+                          data-testid={`fe4-gantt-toggle-${r.taskId}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleParent(r.taskId);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleParent(r.taskId);
+                            }
+                          }}
+                        >
+                          <span className={styles.tlToggleGlyph} aria-hidden>{isOpen ? "▾" : "▸"}</span>
+                        </span>
+                      ) : (
+                        depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
+                      )}
+                      {teamColorById?.get(r.taskId) && (
+                        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
+                      )}
+                      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+                      <span className={styles.tlRowName}>{r.title}</span>
+                      {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
+                    </button>
+                  );
+                })}
                 {canWrite && onCreateOnDate && (
                   <button type="button" className={styles.tlAddRow} style={{ height: ROW_HEIGHT }} onClick={() => onCreateOnDate(null)} data-testid="fe4-gantt-addrow">
                     ＋ 新規タスク
@@ -379,12 +531,22 @@ export function GanttView({
                 style={{ width, height: rowsH }}
                 onClick={onCanvasBackgroundClick}
               >
+                {/* parent-child grouping: faint enclosure behind an open parent + its children */}
+                {groupBands.map((g) => (
+                  <div
+                    key={`grp-${g.id}`}
+                    className={styles.tlGroupBand}
+                    style={{ top: g.top, height: g.height, width }}
+                    data-testid={`fe4-gantt-group-${g.id}`}
+                    aria-hidden
+                  />
+                ))}
                 {/* weekend shading */}
                 {weekends.map((b) => (
                   <div key={b.key} className={styles.tlWeekend} style={{ left: b.x, width: b.width, height: rowsH }} aria-hidden />
                 ))}
                 {/* row lines / hover stripes */}
-                {dto.rows.map((_, i) => (
+                {rows.map((_, i) => (
                   <div key={i} className={styles.tlRowLine} style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }} aria-hidden />
                 ))}
 
@@ -400,7 +562,9 @@ export function GanttView({
                       const midX = Math.max(s.x1 + 10, s.x2 - 10);
                       const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
                       return (
-                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`} />
+                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`}>
+                          <title>{s.tip}</title>
+                        </path>
                       );
                     })}
                   </svg>
@@ -423,6 +587,9 @@ export function GanttView({
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
                     >
+                      {teamColorById?.get(b.taskId) && (
+                        <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
+                      )}
                       <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
                       {canWrite && onSchedule && (
                         <span

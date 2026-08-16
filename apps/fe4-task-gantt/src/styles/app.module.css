@@ -22,6 +22,41 @@
   flex-wrap: wrap;
 }
 .pageHeaderText { display: flex; flex-direction: column; gap: var(--dub-space-1); }
+.headerActions { display: flex; align-items: center; gap: var(--dub-space-3); }
+/* undo / redo controls (判断57). The keyboard shortcut is the primary path; these
+   buttons make it discoverable and give touch users an affordance. */
+.undoRedo { display: inline-flex; align-items: center; gap: 4px; }
+.undoBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--dub-radius-md, 8px);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+.undoBtn:hover:not(:disabled) { background: var(--dub-color-surface-sunken); border-color: var(--dub-color-border-strong, var(--dub-color-border-default)); }
+.undoBtn:disabled { opacity: 0.4; cursor: default; }
+.undoBtnLabel { font-size: var(--dub-font-size-xs, 0.75rem); }
+@media (max-width: 640px) { .undoBtnLabel { display: none; } }
+/* organizer edit affordance — placeholder role indicator (real perms wired later). */
+.roleBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-sunken);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 600;
+  color: var(--dub-color-text-secondary);
+  white-space: nowrap;
+}
 .pageTitle {
   margin: 0;
   font-size: var(--dub-font-size-2xl, 1.5rem);
@@ -309,7 +344,123 @@
   transition: background 0.1s ease;
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
+/* WBS leaf rows read a touch lighter than their work-package parent, and carry a
+   vertical tree guide so the parent-child nesting is legible at a glance (this is
+   the "親子" affordance — dependency is shown only by arrows on the timeline). */
+.tlRowChild { position: relative; color: var(--dub-color-text-secondary); font-size: var(--dub-font-size-xs, 0.78rem); }
+.tlRowChild::before {
+  content: "";
+  position: absolute;
+  left: 21px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--dub-color-border-strong, var(--dub-color-border-default));
+}
+.tlRowChild::after {
+  content: "";
+  position: absolute;
+  left: 21px;
+  top: 50%;
+  width: 7px;
+  height: 1px;
+  background: var(--dub-color-border-strong, var(--dub-color-border-default));
+}
+/* collapse/expand chevron for a work-package row (rendered as a span, not a nested
+   button, since the row itself is a button). */
+.tlToggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  border-radius: var(--dub-radius-sm, 4px);
+  color: var(--dub-color-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.tlToggle:hover { background: var(--dub-color-surface-base); color: var(--dub-color-text-primary); }
+/* Wide toggle hit area (feedback #39): the whole left gutter of a work-package row
+   — the indent + chevron, everything left of the team stripe — is clickable to
+   open/close, so it's a big, easy target instead of just the triangle glyph. Full
+   row height, and it swallows its own click so the label area still opens detail. */
+.tlToggleWide {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 30px;
+  padding-right: 6px;
+  margin-right: 2px;
+  cursor: pointer;
+}
+.tlToggleWide:hover { background: var(--dub-color-surface-base); }
+.tlToggleGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--dub-radius-sm, 4px);
+  color: var(--dub-color-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1;
+}
+.tlToggleWide:hover .tlToggleGlyph { color: var(--dub-color-text-primary); }
+/* keeps childless top-level rows' text aligned with rows that have a chevron. */
+.tlToggleSpacer { flex: 0 0 auto; width: 16px; margin-right: 2px; }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
+/* team accent stripe on a row (team-grouped rows are ordered by team; the stripe
+   makes each group's boundary legible without a heavyweight section header). */
+.tlTeamStripe { flex: 0 0 auto; width: 3px; align-self: stretch; border-radius: 2px; margin-right: 2px; background: var(--dub-color-gray-300); }
+/* team legend chips under the toolbar. */
+.tlLegend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px var(--dub-space-3); border-bottom: 1px solid var(--dub-color-border-default); }
+.tlLegendItem { display: inline-flex; align-items: center; gap: 5px; font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
+.tlLegendSwatch { width: 10px; height: 10px; border-radius: 3px; background: var(--dub-color-gray-300); }
+/* "how to read this chart" guide: parent-child vs dependency. Always shown so the
+   two relationships never get confused. */
+.tlGuide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 6px var(--dub-space-3);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-sunken);
+}
+.tlGuideItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-secondary);
+}
+.tlGuideTree {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-secondary);
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.tlGuideSummary {
+  width: 24px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--dub-color-brand-500);
+}
+.tlGuideDepIcon { display: inline-block; vertical-align: middle; }
+/* thin team-coloured cap at the left edge of each bar. */
+.barTeamCap { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-top-left-radius: inherit; border-bottom-left-radius: inherit; }
 .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tlRowMeta {
   flex: 0 0 auto;
@@ -347,7 +498,11 @@
 .tlResizer:hover { background: var(--dub-color-brand-200); }
 
 /* ---- right pane (timeline) ---- */
-.tlRight { flex: 0 0 auto; }
+/* `isolation` + a z-index make this pane its own stacking context, so its bars
+   (z-index up to 6 while dragging) stay trapped BELOW the sticky left pane
+   (`.tlLeft`, z-index 3) instead of tying it on z-index and painting over it as
+   the user scrolls horizontally. */
+.tlRight { flex: 0 0 auto; position: relative; z-index: 1; isolation: isolate; }
 .tlHeader {
   position: sticky;
   top: 0;
@@ -390,7 +545,25 @@
 }
 .tlTickToday { color: var(--dub-color-brand-600); font-weight: 700; }
 
-.tlBody { position: relative; }
+/* `isolation` traps every timeline artefact (bars go up to z-index 6 while
+   dragging) inside the body's own stacking context. The body as a whole then
+   sits at z-index 1, strictly below the sticky time-axis header (`.tlHeader`,
+   z-index 2) — so a bar scrolled up under the header can never paint over the
+   "8月 / 2026年" labels (vertical-overlay fix). Ordering is guaranteed at the
+   component level, not by tuning individual bar z-indexes. */
+.tlBody { position: relative; z-index: 1; isolation: isolate; }
+/* faint enclosure behind an open parent + its children — reads as "these rows
+   belong together" (parent-child), visually separate from dependency arrows. */
+.tlGroupBand {
+  position: absolute;
+  left: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 8px);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 5%, transparent);
+  z-index: 0;
+  pointer-events: none;
+}
 .tlWeekend { position: absolute; top: 0; background: var(--dub-color-gray-50); z-index: 0; }
 .tlRowLine {
   box-sizing: border-box;
@@ -401,8 +574,11 @@
   z-index: 0;
 }
 .tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
-.tlDep { stroke: var(--dub-color-gray-300); stroke-width: 1.5; stroke-dasharray: 3 3; }
-.tlDepArrow { fill: var(--dub-color-gray-300); }
+/* dependency connectors: a distinct indigo (not the gray gridline colour), so a
+   dependency arrow never reads as a border. Paired with the legend + a hover
+   tooltip so the meaning is unambiguous vs the parent-child grouping. */
+.tlDep { stroke: var(--dub-color-brand-500); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.85; }
+.tlDepArrow { fill: var(--dub-color-brand-500); }
 
 .tlToday {
   position: absolute;
@@ -443,6 +619,11 @@
 .barCancelled .barLabel, .barCancelled .barLabelOut { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
 .barDragging { cursor: grabbing; z-index: 6; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
+
+/* Parent (work-package) bars render like any other task bar — the hollow "bracket
+   summary" style was reverted per feedback #97 (見づらい). Rollup still applies, so
+   the bar spans its children; the parent/child vs dependency distinction is carried
+   by indent + tree lines + dashed dependency arrows + the legend. */
 
 .barProgress {
   position: absolute;
@@ -833,6 +1014,22 @@
 }
 .childCreateBtn:hover { background: var(--dub-color-brand-100); border-color: var(--dub-color-brand-400); }
 .childCreateHint { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); font-weight: 400; }
+/* the two "create related task" actions (子タスク / 先行タスク) side by side. */
+.relCreateRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--dub-space-2); }
+@media (max-width: 520px) { .relCreateRow { grid-template-columns: 1fr; } }
+/* "子タスク: N個" chip on a work-package's detail panel (feedback #39). */
+.detailChildCount {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--dub-color-brand-50, var(--dub-color-surface-sunken));
+  border: 1px solid var(--dub-color-brand-200, var(--dub-color-border-default));
+}
+.detailChildCountLabel { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
+.detailChildCountValue { font-size: var(--dub-font-size-sm, 0.82rem); font-weight: 700; color: var(--dub-color-brand-700); }
 
 /* ================= My Tasks hub ================= */
 .myPage {

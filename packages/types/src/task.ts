@@ -67,6 +67,9 @@ export interface CreateTaskRequest {
   teamId?: TeamId | null;
   dueAt?: ISODateTime;
   origin?: TaskOrigin; // default "internal"; service-role only, else 400
+  /** WBS parent (親タスク). Additive/optional; omit or null ⇒ a top-level row.
+   *  The gantt read model projects this onto GanttRow.parentTaskId. */
+  parentTaskId?: TaskId | null;
 }
 export interface UpdateTaskRequest extends Versioned {
   title?: string;
@@ -76,6 +79,9 @@ export interface UpdateTaskRequest extends Versioned {
   assigneeId?: UserId | null;
   teamId?: TeamId | null;
   dueAt?: ISODateTime | null;
+  /** Re-parent (親子関係の変更) — set to another task id, or null to detach to
+   *  top-level. Additive/optional; omit ⇒ parent unchanged. */
+  parentTaskId?: TaskId | null;
 }
 export interface ReplaceDependenciesRequest extends Versioned {
   dependsOnIds: TaskId[];
