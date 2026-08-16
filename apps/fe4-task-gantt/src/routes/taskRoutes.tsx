@@ -79,9 +79,10 @@ export function MeTasksRoute() {
       .catch(() => {
         /* teams are optional; the hub degrades gracefully without them */
       });
-    // Supply the real event list so 「タスクを発行」 is enabled and can target a
-    // live event. Without this the button stayed disabled for admins who had no
-    // existing tasks to derive an event from (issue: 発行ボタンが押せない).
+    // Supply the real event list so 「タスクを発行」 can target a live event. The
+    // button itself is always pressable now; when this yields nothing (no events
+    // in the org yet, or a failed/forbidden fetch) the modal shows an イベント作成
+    // 導線 instead of a dead-end — the earlier「発行ボタンが押せない」issue.
     void listEvents(client)
       .then((res) => {
         if (live) setEvents(res.items.map((e) => ({ id: e.id, name: e.title })));

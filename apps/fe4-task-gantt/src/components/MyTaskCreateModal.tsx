@@ -68,7 +68,15 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     onClose();
   };
 
+  // task-service requires a live eventId, so a task cannot be issued when the org
+  // has no events yet. Rather than a disabled dead-end, the modal switches to an
+  // empty state that explains why and links to イベント作成 (owned by FE3 /events).
+  const noEvents = events.length === 0;
   const canSubmit = title.trim().length > 0 && eventId !== "" && !saving;
+
+  const goCreateEvent = () => {
+    if (typeof window !== "undefined") window.location.assign("/events");
+  };
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -101,12 +109,31 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           <Button variant="ghost" onClick={close} testId="fe4-mytask-create-cancel">
             キャンセル
           </Button>
-          <Button onClick={submit} loading={saving} disabled={!canSubmit} testId="fe4-mytask-create-submit">
-            発行する
-          </Button>
+          {noEvents ? (
+            <Button onClick={goCreateEvent} testId="fe4-mytask-create-go-event">
+              イベントを作成
+            </Button>
+          ) : (
+            <Button onClick={submit} loading={saving} disabled={!canSubmit} testId="fe4-mytask-create-submit">
+              発行する
+            </Button>
+          )}
         </div>
       }
     >
+      {noEvents ? (
+        <div className={styles.createHint} data-testid="fe4-mytask-create-no-events">
+          <p>
+            タスクは必ず<strong>イベント</strong>に紐づきます。対象にできるイベントがまだ無いため、
+            先にイベントを作成してください。
+          </p>
+          <p>
+            「イベントを作成」を押すとイベント一覧へ移動します。作成後、ここに戻って
+            タスクを発行できます。
+          </p>
+        </div>
+      ) : (
+      <>
       {requesterName && (
         <p className={styles.createHint} data-testid="fe4-mytask-create-from">
           依頼主: <strong>{requesterName}</strong>
@@ -202,6 +229,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           />
         </div>
       </div>
+      </>
+      )}
     </Modal>
   );
 }

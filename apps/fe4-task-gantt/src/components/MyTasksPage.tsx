@@ -172,7 +172,16 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           <h1 className={styles.myTitle}>マイタスク</h1>
           <p className={styles.mySubtitle}>自分に関わるタスクを、誰から誰へかが分かる一覧で管理できます。</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open" disabled={effectiveEvents.length === 0}>
+        {/*
+          Always pressable. The button used to be disabled while effectiveEvents
+          was empty, but that made it a dead-end for a fresh admin in production
+          (no events created yet, no tasks to derive one from) — indistinguishable
+          from「権限が無い」. Enabling it always and moving the「イベントが無い」
+          handling into the modal (which offers an イベント作成 導線) keeps the
+          user moving forward instead of stuck. task-service still requires a real
+          eventId, so 発行 itself stays gated inside the modal.
+        */}
+        <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open">
           ＋ タスクを発行
         </Button>
       </header>

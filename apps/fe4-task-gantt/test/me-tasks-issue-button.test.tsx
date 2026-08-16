@@ -7,10 +7,12 @@ import { MockApiClient } from "../src/api/mock-client";
 import { MeTasksRoute, TaskRouteProvider } from "../src/routes/taskRoutes";
 
 // Regression for「adminなのに『タスクを発行』が押せない」: the button was disabled
-// because MeTasksRoute handed events={[]} to MyTasksPage, so effectiveEvents stayed
-// empty (no tasks to derive an event from either) and the button's
-// disabled={effectiveEvents.length === 0} never cleared. The fix wires the real
-// event list into the route.
+// whenever effectiveEvents was empty (no events in the org yet AND no tasks to
+// derive one from) — the production case for a fresh admin, indistinguishable
+// from「権限が無い」. The fix makes the button ALWAYS pressable and moves the
+// no-events handling into the modal, which shows an イベント作成 導線 instead of a
+// dead-end. The route still fetches the real event list so the 対象イベント select
+// is populated when events do exist.
 
 const ME = "usr_me" as common.UserId;
 
@@ -74,12 +76,28 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     expect(await screen.findByText("登壇者へ最終案内メールを送る")).toBeInTheDocument();
   });
 
-  it("regression: with no events and no tasks the button stays disabled (fallback path)", async () => {
+  it("regression: with no events and no tasks the button is STILL pressable (no dead-end)", async () => {
+    // Reproduces the production case: a fresh admin whose org has no events yet and
+    // who has issued no tasks. The button must not be a disabled dead-end (that read
+    // as「権限が無い」to the user); it opens a modal that offers an イベント作成 導線.
     const client = new MockApiClient({ currentUserId: ME });
     renderRoute(client);
     const btn = await screen.findByTestId("fe4-mytasks-create-open");
-    // give the (empty) fetches a tick to resolve before asserting it never enabled.
     await waitFor(() => expect(client.calls.some((c) => c.path === "/api/v1/events")).toBe(true));
-    expect(btn).toBeDisabled();
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("regression: with no events the modal shows an イベント作成 導線 instead of a submittable form", async () => {
+    const client = new MockApiClient({ currentUserId: ME });
+    renderRoute(client);
+
+    const openBtn = await screen.findByTestId("fe4-mytasks-create-open");
+    await waitFor(() => expect(client.calls.some((c) => c.path === "/api/v1/events")).toBe(true));
+    fireEvent.click(openBtn);
+
+    // empty state is shown; there is a 導線 to create an event, and NO 発行 submit.
+    expect(await screen.findByTestId("fe4-mytask-create-no-events")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-mytask-create-go-event")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-mytask-create-submit")).not.toBeInTheDocument();
   });
 });
