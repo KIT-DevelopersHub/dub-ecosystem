@@ -50,14 +50,23 @@ function renderShell(onNavigate?: (p: string) => void, onLogout?: () => void) {
 describe("AppShellLayout", () => {
   beforeEach(() => useUiStore.setState({ sidebarOpen: true, theme: "system" }));
 
-  it("shows the signed-in user's email as the shell header title once /me resolves", async () => {
+  it("shows DevHub as the primary brand with the signed-in email small beside it", async () => {
     renderShell();
-    // Header title starts on the brand fallback while /me is pending, then swaps
-    // to the resolved email (never a blank title in between).
-    const header = screen.getByTestId("fe2-shell-header");
-    expect(header).toHaveTextContent("DevHub");
-    expect(await screen.findByText("kota@developershub.jp")).toBeInTheDocument();
-    expect(screen.queryByText("DevHub")).not.toBeInTheDocument();
+    // Brand-first header: "DevHub" is the primary label (and the home导线) and is
+    // ALWAYS present; the account email rides alongside as the secondary label once
+    // /me resolves — both are shown (the email no longer replaces the brand).
+    const brand = screen.getByTestId("fe2-brand-home");
+    expect(brand).toHaveTextContent("DevHub");
+    const account = await screen.findByTestId("fe2-header-account");
+    expect(account).toHaveTextContent("kota@developershub.jp");
+    expect(screen.getByTestId("fe2-brand-home")).toHaveTextContent("DevHub");
+  });
+
+  it("navigates home when the DevHub brand is clicked (logo = home导线)", async () => {
+    const onNavigate = vi.fn();
+    renderShell(onNavigate);
+    await userEvent.click(screen.getByTestId("fe2-brand-home"));
+    expect(onNavigate).toHaveBeenCalledWith("/");
   });
 
   it("keeps the brand title when unauthenticated (no /me user)", async () => {

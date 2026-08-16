@@ -359,7 +359,10 @@ export interface SidebarProps extends TestableProps {
 }
 
 export interface PageHeaderProps extends TestableProps {
-  title: string;
+  // ReactNode (not just string) so composers can supply a rich title — e.g. FE2's
+  // brand lockup (bold "DevHub" home link + a small muted account email). Still
+  // rendered inside the <h1>, so plain strings keep working unchanged.
+  title: ReactNode;
   description?: string;
   actions?: ReactNode;
   breadcrumbs?: ReactNode;
