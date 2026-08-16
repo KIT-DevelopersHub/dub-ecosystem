@@ -13,6 +13,8 @@
 // need to know admin user ids at write time. Idempotency is the dedup_key unique index:
 // re-running the same deploy (dedupKey=deploy:<sha>) is INSERT OR IGNORE → a no-op.
 
+import { buildDeployCopy } from "./deployCopy";
+
 export interface DeployNotifyMeta {
   /** Commit SHA of the deployed tree (required; drives the dedup key + row id). */
   sha: string;
@@ -61,24 +63,19 @@ function shortSha(sha: string): string {
 }
 
 /** Build the canonical audience='admin' notification row for a deploy. Pure + deterministic
- *  (same meta → same id/dedup), so re-runs are idempotent at the DB layer. */
+ *  (same meta → same id/dedup), so re-runs are idempotent at the DB layer.
+ *
+ *  The reader-facing title/body are produced by buildDeployCopy (deployCopy.ts): the raw PR
+ *  title / commit subject is classified (新機能 / 改善 / 修正 / 更新) and humanized, so a
+ *  developer string like "fix(db): don't mis-parse `DO UPDATE SET` ... (#224)" never lands
+ *  verbatim in a notification. The raw title + technical fields (sha/ref/services) are still
+ *  persisted in meta_json for admin traceability. */
 export function buildDeployNotifyRow(meta: DeployNotifyMeta): NotifNotificationRow {
   if (!meta.sha) throw new Error("buildDeployNotifyRow: sha is required");
   const createdAt = meta.timestamp ?? new Date().toISOString();
-  const what = (meta.title ?? "").trim() || "本番デプロイ";
-  const prSuffix = meta.prNumber ? ` (#${meta.prNumber})` : "";
-  const title = `デプロイ完了: ${what}${prSuffix}`;
-  const bodyLines = [
-    `本番デプロイが完了しました。`,
-    ``,
-    `変更: ${what}${prSuffix}`,
-    `コミット: ${shortSha(meta.sha)}`,
-    ...(meta.services ? [`対象: ${meta.services}`] : []),
-    ...(meta.ref ? [`ref: ${meta.ref}`] : []),
-    `日時: ${createdAt}`,
-    ...(meta.url ? [``, meta.url] : []),
-  ];
-  const metaObj: Record<string, string | number> = { sha: meta.sha };
+  const copy = buildDeployCopy({ createdAt, ...(meta.title ? { title: meta.title } : {}), ...(meta.url ? { url: meta.url } : {}) });
+  const metaObj: Record<string, string | number> = { sha: meta.sha, kind: copy.change.kind };
+  if (meta.title) metaObj.rawTitle = meta.title; // keep the developer string for traceability
   if (meta.prNumber) metaObj.prNumber = meta.prNumber;
   if (meta.url) metaObj.url = meta.url;
   if (meta.services) metaObj.services = meta.services;
@@ -86,8 +83,8 @@ export function buildDeployNotifyRow(meta: DeployNotifyMeta): NotifNotificationR
   return {
     id: `ntfn_deploy_${shortSha(meta.sha)}`,
     type: DEPLOY_NOTIFY_TYPE,
-    title,
-    body: bodyLines.join("\n"),
+    title: copy.title,
+    body: copy.body,
     priority: "normal",
     audience: "admin",
     dedupKey: deployDedupKey(meta.sha),
