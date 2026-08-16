@@ -17,6 +17,7 @@ import {
   markRead,
   markAllRead,
   backfillBroadcastInbox,
+  backfillAdminAudienceInbox,
   listPreferenceOverrides,
   upsertPreference,
   deletePreference,
@@ -205,6 +206,10 @@ export function createApp(options: CreateAppOptions = {}) {
       await backfillBroadcastInbox(db, userId);
       const q = parseListInboxQuery(c.req.query());
       const admin = await isAdminViewer(c, userId);
+      // Admins additionally get every audience='admin' notification lazily materialized
+      // (feedback / deploy / ops / CI-written rows) so nothing addressed to admins is
+      // ever missed — the "Admin には例外なく全部届く" guarantee.
+      if (admin) await backfillAdminAudienceInbox(db, userId);
       const page = await listInbox(db, userId, q, admin);
       return c.json(page satisfies notification.ListInboxResponse);
     });
@@ -216,6 +221,7 @@ export function createApp(options: CreateAppOptions = {}) {
       // user never received a fan-out row for.
       await backfillBroadcastInbox(db, userId);
       const admin = await isAdminViewer(c, userId);
+      if (admin) await backfillAdminAudienceInbox(db, userId);
       const count = await unreadCount(db, userId, admin);
       return c.json({ count } satisfies notification.UnreadCountResponse);
     });
