@@ -176,8 +176,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   // Shift a parent + its whole subtree by whole days (children follow).
   const applyShiftRaw = (parentId: common.TaskId, deltaDays: number) => {
-    if (!gantt.data || deltaDays === 0) return Promise.resolve();
-    const rows = gantt.data.rows;
+    // Read the LIVE cache, not gantt.data (a render-snapshot). Undo/redo commands
+    // run long after they were recorded; a relative shift must apply to the bar's
+    // CURRENT position or it overshoots (e.g. undoing a 2nd move from a stale base).
+    const rows = gantt.currentRows();
+    if (rows.length === 0 || deltaDays === 0) return Promise.resolve();
     // BFS the subtree (parent + all descendants at any depth).
     const ids: common.TaskId[] = [parentId];
     for (let i = 0; i < ids.length; i++) {
