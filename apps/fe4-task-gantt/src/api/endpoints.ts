@@ -1,7 +1,9 @@
 // Typed thin wrappers over the FE2 ApiClient. Every call is expressed against
 // `@dub/types` and mounted under the frozen `/api/v1` prefix (common.API_PREFIX).
-// task uses `eventId`; gantt uses `event` (design §2-3 — kept per each owner's
-// contract,取り違え防止 is the client path/type surface).
+// Query-parameter names come from the @dub/types wire contract (e.g. gantt.GetGanttQuery,
+// task.ListTasksQuery) — NEVER hand-renamed here. gantt uses `eventId`, same as task:
+// the old `?event=` here silently disagreed with the server's `?eventId=` and shipped a
+// prod "Validation failed". A contract-conformance test now reconciles these keys in CI.
 import type { task, gantt, identity, event, common, team } from "@dub/types";
 import type { ApiClient, ApiPath } from "../contracts/spa-shell";
 
@@ -91,21 +93,25 @@ export function replaceDependencies(
   });
 }
 
-// ---- gantt-service (read-only; `?event=`) ----
+// ---- gantt-service (read-only; query key from gantt.GetGanttQuery = `eventId`) ----
+// Build the query object AS the typed contract so its keys are the SoT field names; a
+// renamed key (the old `event`) can no longer be introduced without a type error here.
 export function getGantt(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttChartDTO> {
   // edit直後の再取得はキャッシュをバイパス (design §2-2 / test 6)
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttChartDTO>({
     method: "GET",
     path: `${P}/gantt`,
-    query: { event: eventId },
+    query: { ...query },
   });
 }
 
 export function getGanttFresh(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttChartDTO> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttChartDTO>({
     method: "GET",
     path: `${P}/gantt`,
-    query: { event: eventId },
+    query: { ...query },
     headers: { "Cache-Control": "no-cache" },
   });
 }
@@ -127,18 +133,20 @@ export function getGanttDependencies(
   client: ApiClient,
   eventId: common.EventId,
 ): Promise<gantt.GanttDependencyLine[]> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttDependencyLine[]>({
     method: "GET",
     path: `${P}/gantt/dependencies`,
-    query: { event: eventId },
+    query: { ...query },
   });
 }
 
 export function getGanttView(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttViewState> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttViewState>({
     method: "GET",
     path: `${P}/gantt/views`,
-    query: { event: eventId },
+    query: { ...query },
   });
 }
 
@@ -147,10 +155,11 @@ export function putGanttView(
   eventId: common.EventId,
   body: gantt.PutGanttViewRequest,
 ): Promise<gantt.GanttViewState> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttViewState>({
     method: "PUT",
     path: `${P}/gantt/views`,
-    query: { event: eventId },
+    query: { ...query },
     body,
   });
 }
