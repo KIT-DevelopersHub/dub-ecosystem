@@ -187,32 +187,8 @@
 }
 .tlTodayBtn:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); border-color: var(--dub-color-border-strong); }
 
-.tlSeg {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  background: var(--dub-color-surface-sunken);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md, 8px);
-}
-.tlSegBtn {
-  min-width: 34px;
-  padding: 4px 10px;
-  border: none;
-  border-radius: var(--dub-radius-sm, 6px);
-  background: transparent;
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm, 0.82rem);
-  font-weight: var(--dub-font-weight-medium, 600);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.tlSegBtn:hover { color: var(--dub-color-text-primary); }
-.tlSegBtnOn {
-  background: var(--dub-color-surface-base);
-  color: var(--dub-color-text-primary);
-  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
-}
+/* Granularity chips (月/週/日) now use the shared @dub/ui SegmentedControl —
+   the hand-rolled .tlSeg/.tlSegBtn strip was removed in the unification pass. */
 
 /* ---- frame + single scroll surface (two-pane via sticky) ---- */
 .tlFrame {

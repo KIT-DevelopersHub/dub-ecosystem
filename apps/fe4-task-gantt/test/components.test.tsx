@@ -37,6 +37,16 @@ describe("GanttView render (design test 4/7)", () => {
     render(<GanttView dto={dto} zoom="week" truncated />);
     expect(screen.getByTestId("fe4-gantt-truncated")).toBeInTheDocument();
   });
+
+  it("zoom SegmentedControl fires onZoomChange and reflects the active granularity", () => {
+    const onZoomChange = vi.fn();
+    render(<GanttView dto={dto} zoom="month" onZoomChange={onZoomChange} />);
+    // the shared SegmentedControl keeps the fe4-gantt-zoom-* testids + tab semantics
+    expect(screen.getByTestId("fe4-gantt-zoom-month")).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByTestId("fe4-gantt-zoom-week"));
+    expect(onZoomChange).toHaveBeenCalledWith("week");
+    expect(screen.getByTestId("fe4-gantt-zoom-week")).toHaveAttribute("aria-selected", "true");
+  });
 });
 
 describe("ViewSwitcher", () => {

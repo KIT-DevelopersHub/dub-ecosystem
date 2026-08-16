@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { SegmentedControl } from "@dub/ui";
+import type { SegmentedOption } from "@dub/ui";
 import type { common, gantt, task } from "@dub/types";
 import {
   type AxisWindow,
@@ -48,10 +50,13 @@ export interface GanttViewProps {
   canWrite?: boolean;
 }
 
-const ZOOMS: { key: gantt.GanttZoom; label: string }[] = [
-  { key: "month", label: "月" },
-  { key: "week", label: "週" },
-  { key: "day", label: "日" },
+// Granularity chips (month/week/day), built on the shared @dub/ui SegmentedControl
+// so the sliding-pill selector matches ViewSwitcher and fe7 — see
+// docs/segmented-control-unification.md. testids/values are unchanged.
+const ZOOMS: SegmentedOption<gantt.GanttZoom>[] = [
+  { value: "month", label: "月", testId: "fe4-gantt-zoom-month" },
+  { value: "week", label: "週", testId: "fe4-gantt-zoom-week" },
+  { value: "day", label: "日", testId: "fe4-gantt-zoom-day" },
 ];
 
 const STATUS_BAR_CLASS: Record<task.TaskStatus, string> = {
@@ -282,20 +287,14 @@ export function GanttView({
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
             今日
           </button>
-          <div className={styles.tlSeg} role="tablist" aria-label="時間軸の単位">
-            {ZOOMS.map((z) => (
-              <button
-                key={z.key}
-                role="tab"
-                aria-selected={z.key === zoom}
-                className={`${styles.tlSegBtn} ${z.key === zoom ? styles.tlSegBtnOn : ""}`}
-                onClick={() => changeZoom(z.key)}
-                data-testid={`fe4-gantt-zoom-${z.key}`}
-              >
-                {z.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={ZOOMS}
+            value={zoom}
+            onChange={changeZoom}
+            size="sm"
+            aria-label="時間軸の単位"
+            testId="fe4-gantt-zoom"
+          />
         </div>
       </div>
 
