@@ -1126,6 +1126,8 @@ interface DemoMember {
   grade: string | null;
   identityUserId: string | null;
   contact: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
@@ -1157,7 +1159,7 @@ function createMembersStore() {
     grade: string | null = null,
     identityUserId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
@@ -1183,6 +1185,25 @@ function createMembersStore() {
     mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
     mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+  ];
+
+  // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
+  // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
+  const participations: any[] = [
+    {
+      id: "part_seed_1", orgId: ORG, memberId: "member_h2", name: "黒川", normalizedName: "黒川",
+      nameKana: "くろかわ", grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp",
+      schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
+      desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
+      matchKind: "linked_existing", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      id: "part_seed_2", orgId: ORG, memberId: "member_demo_new", name: "田中 実", normalizedName: "田中実",
+      nameKana: "たなか みのる", grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp",
+      schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "event", note: null, status: "submitted",
+      matchKind: "created_new", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
   ];
 
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
@@ -1226,7 +1247,8 @@ function createMembersStore() {
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
-        contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
+        contact: body?.contact ?? null, schoolEmail: null, gmail: null, note: body?.note ?? null,
+        sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
@@ -1285,6 +1307,83 @@ function createMembersStore() {
         members.splice(members.indexOf(mem), 1);
         return json({ ok: true });
       }
+    }
+
+    // 参加届 (participation): submit reflects onto the roster exactly like member-service
+    // — name match (space/width-folded) promotes 招待中/検討中 → 追加済 (merging the desired
+    // team, non-destructive contact + the two emails), else creates a new 追加済 member.
+    // Both endpoints share this reflect: the PUBLIC one (unauthenticated) returns a minimal
+    // { accepted, matchKind }; the authenticated one returns the full participation + member.
+    const reflectParticipation = (): { participation: unknown; member: DemoMember; matchKind: "linked_existing" | "created_new" } => {
+      const name = String(body?.name ?? "").trim();
+      const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+      const target = norm(name);
+      const desiredTeamId: string | null = body?.desiredTeamId ?? null;
+      const contact: string | null = body?.contact ?? null;
+      const schoolEmail: string = String(body?.schoolEmail ?? "");
+      const gmail: string = String(body?.gmail ?? "");
+      const note: string | null = body?.note ?? null;
+      const department: string | null = body?.department ?? null;
+      const grade: string | null = body?.grade ?? null;
+      const existing = members.find((mem) => norm(mem.name) === target);
+      let matchKind: "linked_existing" | "created_new";
+      let resolved: DemoMember;
+      if (existing) {
+        if (existing.status === "invited" || existing.status === "considering") existing.status = "added";
+        if (desiredTeamId && !existing.teamIds.includes(desiredTeamId)) existing.teamIds.push(desiredTeamId);
+        if (existing.contact === null) existing.contact = contact ?? schoolEmail;
+        if (existing.department === null && department) existing.department = department;
+        if (existing.grade === null && grade) existing.grade = grade;
+        if (existing.schoolEmail === null && schoolEmail) existing.schoolEmail = schoolEmail;
+        if (existing.gmail === null && gmail) existing.gmail = gmail;
+        if (existing.note === null && note) existing.note = note;
+        existing.version += 1;
+        existing.updatedAt = isoNow();
+        resolved = existing;
+        matchKind = "linked_existing";
+      } else {
+        resolved = {
+          id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added", identityUserId: null,
+          department, grade,
+          teamIds: desiredTeamId ? [desiredTeamId] : [], contact: contact ?? schoolEmail,
+          schoolEmail: schoolEmail || null, gmail: gmail || null, note,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(resolved);
+        matchKind = "created_new";
+      }
+      const participation = {
+        id: nid("part"), orgId: ORG, memberId: resolved.id, name, normalizedName: target,
+        nameKana: body?.nameKana ?? null, grade: body?.grade ?? null, department: body?.department ?? null,
+        contact, schoolEmail, gmail, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
+        status: "submitted", matchKind, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      };
+      participations.unshift(participation);
+      return { participation, member: resolved, matchKind };
+    };
+
+    // PUBLIC (unauthenticated) submit — the form posts here. Minimal response (no member echo).
+    if (method === "POST" && pathname === "/api/v1/public/participation") {
+      const school = String(body?.schoolEmail ?? "").trim();
+      const gm = String(body?.gmail ?? "").trim();
+      const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+      if (!String(body?.name ?? "").trim() || !emailRe.test(school) || !emailRe.test(gm)) {
+        const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
+        return json(err, 400);
+      }
+      const { matchKind } = reflectParticipation();
+      return json({ accepted: true, matchKind }, 200);
+    }
+
+    // Authenticated submit (back-compat): full participation + member echo.
+    if (method === "POST" && pathname === "/api/v1/members/participation") {
+      const { participation, member, matchKind } = reflectParticipation();
+      return json({ participation, member: { ...member, teamIds: [...member.teamIds] }, matchKind }, 201);
+    }
+
+    // 運営専用の回答一覧 (identity:read はデモでは全許可)。最新順で返す。
+    if (method === "GET" && pathname === "/api/v1/members/participation") {
+      return json({ participations: participations.map((p) => ({ ...p })) });
     }
 
     return null;

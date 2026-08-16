@@ -77,8 +77,10 @@ export const ROUTES: readonly GatewayRoute[] = [
   { segment: "usage", binding: "SVC_USAGE_METER", auth: "required" },
   // 運営メンバー管理 (member-service): teams + people CRUD + /members/overview. auth=required
   // forwards x-dub-user-id; member-service re-checks identity:read (read) / identity:admin
-  // (write). Plain proxied segment (no internal-only paths).
-  { segment: "members", binding: "SVC_MEMBER", auth: "required" },
+  // (write). /members/internal/* (the public 参加届 landing) is service-to-service only —
+  // 404 it at the edge (double-defense over member-service's own x-dub-internal guard);
+  // the public path reaches it via the gateway-owned POST /public/participation.
+  { segment: "members", binding: "SVC_MEMBER", auth: "required", internalOnlyPaths: ["/members/internal/"] },
 ] as const;
 
 const ROUTE_BY_SEGMENT = new Map<string, GatewayRoute>(ROUTES.map((r) => [r.segment, r]));

@@ -13,6 +13,11 @@ export interface GatewayServices {
   identity: ServiceClient;
   event: ServiceClient;
   notification: ServiceClient;
+  // member-service client for the gateway's OWN public 参加届 forward. Unlike the
+  // transparent proxy, this is a genuine gateway-originated s2s call: it attaches
+  // x-dub-internal (+ a system x-dub-user-id), which member-service's internal-only
+  // /members/internal/participation route requires.
+  member: ServiceClient;
   auth: AuthClient; // mode:"verify" — the entry one-shot verify
   // Service-to-service client to auth-service for the admin/self password composition
   // handlers (/api/v1/me/password, /api/v1/admin/users/:id/password). Unlike the
@@ -27,6 +32,7 @@ export function createServices(env: GatewayEnv): GatewayServices {
     identity: createServiceClient(env.SVC_IDENTITY, { service: "identity-roster", caller: CALLER }),
     event: createServiceClient(env.SVC_EVENT, { service: "event-service", caller: CALLER }),
     notification: createServiceClient(env.SVC_NOTIFICATION, { service: "notification-service", caller: CALLER }),
+    member: createServiceClient(env.SVC_MEMBER, { service: "member-service", caller: CALLER }),
     authSvc: createServiceClient(env.SVC_AUTH, { service: "auth-service", caller: CALLER }),
     auth: createAuthClient({
       identityBinding: env.SVC_IDENTITY,

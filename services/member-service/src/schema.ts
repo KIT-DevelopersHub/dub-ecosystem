@@ -72,9 +72,57 @@ ALTER TABLE member_people ADD COLUMN grade TEXT;
 `.trim(),
 };
 
-/** All member-namespace migrations in apply order (infra collects the .sql正本). */
+// 参加届 (participation submissions). Additive: a person's self-submitted intent to
+// join, resolved to a member_people row on submit (invited -> added, or new added).
+export const MEMBER_PARTICIPATION_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0004_participation",
+  up: `
+CREATE TABLE member_participations (
+  id               TEXT PRIMARY KEY,
+  org_id           TEXT NOT NULL,
+  member_id        TEXT REFERENCES member_people(id),
+  name             TEXT NOT NULL,
+  normalized_name  TEXT NOT NULL,
+  name_kana        TEXT,
+  grade            TEXT,
+  department       TEXT,
+  contact          TEXT,
+  desired_team_id  TEXT REFERENCES member_teams(id),
+  desired_activity TEXT,
+  note             TEXT,
+  status           TEXT NOT NULL,
+  match_kind       TEXT NOT NULL,
+  submitted_by     TEXT NOT NULL,
+  submitted_at     TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_member_participations_org_norm ON member_participations(org_id, normalized_name);
+CREATE INDEX idx_member_participations_org ON member_participations(org_id, submitted_at);
+CREATE INDEX idx_member_participations_member ON member_participations(member_id);
+`.trim(),
+};
+
+// 参加届: 学校メール + Gmail の2アドレス. Additive ALTER (non-destructive): both are
+// required at the app layer but nullable in DDL (SQLite ADD COLUMN can't be NOT NULL
+// without a default). Retained on member_people too so the roster keeps both channels.
+export const MEMBER_PARTICIPATION_EMAILS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0005_participation_emails",
+  up: `
+ALTER TABLE member_participations ADD COLUMN school_email TEXT;
+ALTER TABLE member_participations ADD COLUMN gmail TEXT;
+ALTER TABLE member_people ADD COLUMN school_email TEXT;
+ALTER TABLE member_people ADD COLUMN gmail TEXT;
+`.trim(),
+};
+
+// All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
   MEMBER_IDENTITY_LINK_MIGRATION,
   MEMBER_PERSON_COLS_MIGRATION,
+  MEMBER_PARTICIPATION_MIGRATION,
+  MEMBER_PARTICIPATION_EMAILS_MIGRATION,
 ];
