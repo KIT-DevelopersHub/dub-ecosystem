@@ -95,11 +95,35 @@ function createMailMock() {
       receivedAt: "2026-08-02T01:30:00.000Z",
       read: false,
       textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。資料を添付します。",
-      attachments: [seedBlob("登壇資料.txt", "text/plain", "登壇内容の概要とスケジュール")],
+      attachments: [
+        seedBlob("登壇資料.txt", "text/plain", "登壇内容の概要とスケジュール"),
+        // 改善#2: an attachment too large to store shows as a disabled chip with a reason,
+        // instead of silently vanishing. No blob is stored (download would 409 on the server).
+        { id: "mailatt_seed_big", filename: "登壇動画.mp4", contentType: "video/mp4", sizeBytes: 41943040, status: "dropped_too_large" },
+      ],
     },
   ];
   const sent: mail.MailSentDetail[] = [];
   let seq = 0;
+
+  // 改善#8: thread flags persisted in localStorage so they survive a demo reload (the real
+  // gateway persists them server-side). Best-effort — a storage failure just resets flags.
+  const FLAGS_KEY = "dub-demo-mail-flags";
+  const loadFlags = (): mail.MailThreadFlags[] => {
+    try {
+      const raw = globalThis.localStorage?.getItem(FLAGS_KEY);
+      return raw ? (JSON.parse(raw) as mail.MailThreadFlags[]) : [];
+    } catch {
+      return [];
+    }
+  };
+  const saveFlags = (flags: mail.MailThreadFlags[]): void => {
+    try {
+      globalThis.localStorage?.setItem(FLAGS_KEY, JSON.stringify(flags));
+    } catch {
+      /* ignore */
+    }
+  };
 
   /** Decode base64 to bytes (demo download parity with the gateway). */
   const b64ToBytes = (b64: string): Uint8Array => {
@@ -202,6 +226,28 @@ function createMailMock() {
       if (m && method === "GET") {
         const found = sent.find((s) => s.id === decodeURIComponent(m[1]!));
         return found ? json(found) : errorEnvelope("NOT_FOUND", "sent message not found", 404);
+      }
+    }
+    // 改善#8: per-user thread flags. Backed by localStorage so star/archive/trash SURVIVE a
+    // reload in the demo (mirrors the real gateway persisting them server-side).
+    if (method === "GET" && pathname === "/api/v1/mail/flags") {
+      return json({ items: loadFlags() });
+    }
+    {
+      const m = /^\/api\/v1\/mail\/flags\/([^/]+)$/.exec(pathname);
+      if (m && method === "POST") {
+        const threadId = decodeURIComponent(m[1]!);
+        const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
+        const flags = loadFlags();
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false };
+        const next: mail.MailThreadFlags = {
+          threadId,
+          starred: patch.starred ?? prev.starred,
+          archived: patch.archived ?? prev.archived,
+          trashed: patch.trashed ?? prev.trashed,
+        };
+        saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
+        return json(next);
       }
     }
     return null;

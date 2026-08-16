@@ -200,6 +200,7 @@ export interface RawInbound {
   rawText: string; // raw RFC822 prefix (headers + body); used only for snippet/body
   rawSize: number;
   rawFull?: string; // full (capped) RFC822 buffer for attachment extraction (R2-bound only)
+  truncated?: boolean; // true when rawSize exceeded the buffer cap (tail attachments lost, #2)
 }
 
 function stripAngle(id: string): string {
@@ -403,6 +404,18 @@ export interface ExtractLimits {
   maxBytesPerFile: number;
   maxTotalBytes: number;
 }
+/** An attachment part we SAW but could not store (over the per-file / per-message ceiling).
+ *  Reported so the gateway can record a visible stub instead of dropping it silently (#2). */
+export interface DroppedAttachment {
+  filename: string;
+  contentType: string;
+  sizeBytes: number; // decoded byte size we measured
+  reason: "dropped_too_large";
+}
+export interface ExtractResult {
+  attachments: ExtractedAttachment[];
+  dropped: DroppedAttachment[];
+}
 
 /** Extract a parameter value from a structured header (boundary / filename / name).
  *  Handles quoted and bare forms; decodes RFC2047 words in the value. */
@@ -445,7 +458,7 @@ function decodePartBytes(body: string, cte: string): Uint8Array {
 
 /** Recursively walk a MIME entity, collecting attachment leaves (Content-Disposition:
  *  attachment, or any non-text leaf carrying a filename). Bounded by ExtractLimits. */
-function walkForAttachments(block: string, out: ExtractedAttachment[], limits: ExtractLimits, state: { total: number }, depth: number): void {
+function walkForAttachments(block: string, out: ExtractedAttachment[], dropped: DroppedAttachment[], limits: ExtractLimits, state: { total: number }, depth: number): void {
   if (depth > 12 || out.length >= limits.maxCount) return;
   const { headers, body } = splitHeadersBody(block);
   const ctype = headers["content-type"];
@@ -456,7 +469,7 @@ function walkForAttachments(block: string, out: ExtractedAttachment[], limits: E
     if (!boundary) return;
     for (const p of splitMultipart(body, boundary)) {
       if (out.length >= limits.maxCount) break;
-      walkForAttachments(p, out, limits, state, depth + 1);
+      walkForAttachments(p, out, dropped, limits, state, depth + 1);
     }
     return;
   }
@@ -467,20 +480,33 @@ function walkForAttachments(block: string, out: ExtractedAttachment[], limits: E
   if (!isAttachment || !filename) return;
 
   const bytes = decodePartBytes(body.trim(), headers["content-transfer-encoding"] ?? "7bit");
-  if (bytes.byteLength === 0 || bytes.byteLength > limits.maxBytesPerFile) return;
-  if (state.total + bytes.byteLength > limits.maxTotalBytes) return;
+  if (bytes.byteLength === 0) return; // empty part: not a real attachment
+  const contentType = media || "application/octet-stream";
+  // Over the per-file OR the per-message ceiling: record it as DROPPED (visible stub) rather
+  // than skipping silently (改善#2). Still enforce the ceilings — we never store the bytes.
+  if (bytes.byteLength > limits.maxBytesPerFile || state.total + bytes.byteLength > limits.maxTotalBytes) {
+    dropped.push({ filename, contentType, sizeBytes: bytes.byteLength, reason: "dropped_too_large" });
+    return;
+  }
   state.total += bytes.byteLength;
-  out.push({ filename, contentType: media || "application/octet-stream", bytes });
+  out.push({ filename, contentType, bytes });
 }
 
-/** Extract attachment parts from a full RFC822 message. Returns [] for a non-multipart or
- *  attachment-free message. Pure/synchronous (unit-testable without the Worker runtime). */
-export function extractAttachments(rawFull: string, limits: ExtractLimits): ExtractedAttachment[] {
+/** Extract attachment parts + the ones dropped for size from a full RFC822 message. Pure/
+ *  synchronous (unit-testable without the Worker runtime). A non-multipart or attachment-
+ *  free message yields empty arrays. */
+export function extractAttachmentsDetailed(rawFull: string, limits: ExtractLimits): ExtractResult {
   const out: ExtractedAttachment[] = [];
+  const dropped: DroppedAttachment[] = [];
   try {
-    walkForAttachments(rawFull, out, limits, { total: 0 }, 0);
+    walkForAttachments(rawFull, out, dropped, limits, { total: 0 }, 0);
   } catch {
-    return out; // best-effort: a malformed MIME never breaks ingest
+    /* best-effort: a malformed MIME never breaks ingest */
   }
-  return out;
+  return { attachments: out, dropped };
+}
+
+/** Back-compat thin wrapper: just the stored attachments (frozen callers/tests). */
+export function extractAttachments(rawFull: string, limits: ExtractLimits): ExtractedAttachment[] {
+  return extractAttachmentsDetailed(rawFull, limits).attachments;
 }

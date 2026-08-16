@@ -165,6 +165,18 @@ function seedMailBlob(id: string, filename: string, contentType: string, text: s
   DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
   return { id, filename, contentType, sizeBytes: bytes.byteLength };
 }
+// Seed an image attachment from base64 bytes so the reading pane can show a real inline
+// thumbnail (Gmail-style) in the demo/E2E — images render inline, other files download.
+function seedMailImageBlob(id: string, filename: string, contentType: string, base64: string): mail.MailAttachment {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
+  return { id, filename, contentType, sizeBytes: bytes.byteLength };
+}
+// A tiny (8x8) solid-blue PNG — enough to render a visible inline thumbnail in the demo.
+const DEMO_PNG_8x8 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR4nGNkYPhfz0AEYBpVSF+FAP7pAv4prsMnAAAAAElFTkSuQmCC";
 
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
@@ -185,11 +197,20 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
 ];
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
-  msg_1: { ...MAIL_LIST[0]!, textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。\n\nよろしくお願いいたします。" },
+  msg_1: {
+    ...MAIL_LIST[0]!,
+    textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。登壇資料のイメージ画像を添付します。\n\nよろしくお願いいたします。",
+    attachments: [seedMailImageBlob("mailatt_demo_slide", "登壇イメージ.png", "image/png", DEMO_PNG_8x8)],
+  },
   msg_2: {
     ...MAIL_LIST[1]!,
-    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。",
-    attachments: [seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…")],
+    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。動画も添付しましたが容量が大きすぎたようです。",
+    attachments: [
+      seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…"),
+      // 改善#2: an over-ceiling attachment surfaces as a disabled chip with a reason,
+      // instead of silently disappearing (no bytes stored; download would 409).
+      { id: "mailatt_demo_big", filename: "会場紹介動画.mp4", contentType: "video/mp4", sizeBytes: 41943040, status: "dropped_too_large" },
+    ],
   },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
 };
@@ -452,10 +473,50 @@ function createMailStore() {
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
+    // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
+    // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
+    if (method === "GET" && pathname === "/api/v1/mail/flags") {
+      return json({ items: loadFlags() });
+    }
+    if (method === "POST") {
+      const m = /^\/api\/v1\/mail\/flags\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const threadId = decodeURIComponent(m[1]!);
+        const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
+        const flags = loadFlags();
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false };
+        const next: mail.MailThreadFlags = {
+          threadId,
+          starred: patch.starred ?? prev.starred,
+          archived: patch.archived ?? prev.archived,
+          trashed: patch.trashed ?? prev.trashed,
+        };
+        saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
+        return json(next);
+      }
+    }
     return null;
   }
 
   return { handle };
+}
+
+// Thread-flags persistence for the demo (localStorage; survives reload).
+const FLAGS_KEY = "dub-demo-mail-flags";
+function loadFlags(): mail.MailThreadFlags[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(FLAGS_KEY);
+    return raw ? (JSON.parse(raw) as mail.MailThreadFlags[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveFlags(flags: mail.MailThreadFlags[]): void {
+  try {
+    globalThis.localStorage?.setItem(FLAGS_KEY, JSON.stringify(flags));
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── identity / roster (admin RBAC console) ────────────────────────────────────

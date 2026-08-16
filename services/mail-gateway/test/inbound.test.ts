@@ -100,4 +100,21 @@ describe("handleInbound", () => {
     const thread = await listInbound(h.db, { ownerUserId: "usr_info", threadId: "root@x.com", limit: 10 });
     expect(thread.items).toHaveLength(2);
   });
+
+  it("normalizes a trimmed References chain onto the known root thread (改善#3, 3通以上)", async () => {
+    const h = makeHarness();
+    const deps = inboundDeps(h);
+    // 1) root inbound A opens thread A.
+    await handleInbound(deps, rawMessage({}, { "message-id": "<A@x.com>" }));
+    // 2) reply B references A (full chain) -> thread A.
+    await handleInbound(deps, rawMessage({}, { "message-id": "<B@x.com>", references: "<A@x.com>" }));
+    // 3) reply C references ONLY its immediate parent B (client trimmed the chain). Naive
+    //    firstRef would fork a new thread "B"; normalization must resolve B -> its thread A.
+    await handleInbound(deps, rawMessage({}, { "message-id": "<C@x.com>", "in-reply-to": "<B@x.com>", references: "<B@x.com>" }));
+    const thread = await listInbound(h.db, { ownerUserId: "usr_info", threadId: "A@x.com", limit: 10 });
+    expect(thread.items.map((m) => m.messageId).sort()).toEqual(["A@x.com", "B@x.com", "C@x.com"]);
+    // No stray thread got created under the parent id.
+    const stray = await listInbound(h.db, { ownerUserId: "usr_info", threadId: "B@x.com", limit: 10 });
+    expect(stray.items).toHaveLength(0);
+  });
 });

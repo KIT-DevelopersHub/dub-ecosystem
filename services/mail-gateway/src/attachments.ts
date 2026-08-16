@@ -119,5 +119,48 @@ export async function attachmentsFor(db: DbClient, kind: AttachmentKind, message
 }
 
 export function rowToMeta(r: AttachmentRow): mail.MailAttachment {
-  return { id: r.id, filename: r.filename, contentType: r.mime_type, sizeBytes: r.size_bytes };
+  const meta: mail.MailAttachment = { id: r.id, filename: r.filename, contentType: r.mime_type, sizeBytes: r.size_bytes };
+  // Only surface a status when the attachment is NOT the normal stored case, so a stored
+  // attachment's DTO stays byte-identical to the pre-#2 shape (後方互換). A 'dropped_*'
+  // status tells the UI to render a disabled chip + reason instead of a download link.
+  if (r.status && r.status !== "stored") meta.status = r.status;
+  return meta;
 }
+
+/** Record metadata-only STUB rows for attachments the gateway could not persist (too large
+ *  for the ceiling, or the inbound MIME was truncated before their bytes arrived). No R2
+ *  write — r2_key='' — so nothing is fetchable, but the file is VISIBLE in the message
+ *  detail as a dropped attachment rather than silently missing (改善#2). Best-effort. */
+export async function persistDroppedAttachments(
+  deps: Pick<PersistDeps, "db" | "ctx">,
+  kind: AttachmentKind,
+  messageId: string,
+  items: { filename: string; contentType: string; sizeBytes: number; reason: DroppedReason }[],
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const item of items) {
+    try {
+      await insertAttachment(deps.db, {
+        id: newAttachmentId(),
+        messageKind: kind,
+        messageId,
+        filename: item.filename,
+        mimeType: item.contentType || "application/octet-stream",
+        sizeBytes: item.sizeBytes,
+        r2Key: "",
+        createdAt: now,
+        status: item.reason,
+      });
+    } catch (err) {
+      consoleSink({
+        level: "error",
+        message: "mail-gateway: failed to record dropped attachment stub",
+        service: SERVICE_NAME,
+        requestId: deps.ctx.requestId,
+        fields: { kind, messageId, filename: item.filename, error: err instanceof Error ? err.message : String(err) },
+      });
+    }
+  }
+}
+
+export type DroppedReason = "dropped_too_large" | "dropped_truncated";

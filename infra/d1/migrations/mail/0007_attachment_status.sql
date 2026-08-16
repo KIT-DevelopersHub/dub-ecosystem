@@ -1,0 +1,15 @@
+-- mail-gateway (改善#2) — attachment persistence status. Additive, forward-only.
+-- Large / truncated inbound attachments used to be DROPPED SILENTLY: a part over the
+-- per-file (20MB) or per-message (25MB) ceiling was skipped inside the MIME walk, and an
+-- inbound message larger than the buffered prefix (34MB) was cut off before its bytes ever
+-- arrived — the user saw a mail with no sign an attachment had vanished.
+-- This column lets the gateway record a metadata-only STUB row for such an attachment so
+-- the UI can surface it (disabled chip + reason) instead of losing it. Values:
+--   'stored'            : bytes are in R2 at r2_key and downloadable (the frozen behaviour).
+--   'dropped_too_large' : declared size exceeded the per-file / per-message ceiling; no bytes.
+--   'dropped_truncated' : the inbound MIME was truncated before this part's bytes arrived.
+-- Default 'stored' backfills every existing row to the unchanged, downloadable meaning
+-- (no rewrite, no data loss). A stub row carries r2_key = '' and is never fetched (the
+-- download route rejects a non-'stored' id before touching R2). ADD COLUMN only (0002 /
+-- 0004 / 0006 style; no timestamp DEFAULT — theme3 D2).
+ALTER TABLE mail_attachments ADD COLUMN status TEXT NOT NULL DEFAULT 'stored';

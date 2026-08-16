@@ -61,10 +61,12 @@ export const ROUTES: Readonly<Record<string, Route>> = {
   "evt.file-meta": { kind: "deliver", binding: "SVC_FILE_META", path: EVENTS_ASYNC_PATH, origin: "https://file-meta" },
   "evt.github-sync": { kind: "deliver", binding: "SVC_GITHUB_SYNC", path: EVENTS_ASYNC_PATH, origin: "https://github-sync" },
   "evt.mobile-bff": { kind: "deliver", binding: "SVC_MOBILE_BFF", path: EVENTS_ASYNC_PATH, origin: "https://mobile-bff" },
+  // 改善#5: mail-automation now exposes /internal/events-async, so mail.message.received
+  // is DELIVERED (auto-reply fires) instead of sitting pending forever on the free tier.
+  "evt.mail-automation": { kind: "deliver", binding: "SVC_MAIL_AUTOMATION", path: EVENTS_ASYNC_PATH, origin: "https://mail-automation" },
 
   // No live consumer route yet -> DEFER (durable/pending; follow-ups when routes land):
   "evt.notification": DEFER, // notification has no /internal/events-async route
-  "evt.mail-automation": DEFER, // mail-automation has no /internal/events-async route
   "deploy.job": DEFER, // processed in-process inside deploy-service only; no HTTP route
 };
 

@@ -32,6 +32,10 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     listSent: vi.fn().mockResolvedValue({ items: DEMO_SENT_ITEMS, nextCursor: null }),
     getSent: vi.fn().mockResolvedValue(DEMO_SENT_DETAIL),
     downloadAttachment: vi.fn().mockResolvedValue(new Blob(["x"])),
+    listFlags: vi.fn().mockResolvedValue([]),
+    setFlags: vi.fn().mockImplementation((threadId: string, patch: Record<string, boolean>) =>
+      Promise.resolve({ threadId, starred: false, archived: false, trashed: false, ...patch }),
+    ),
     ...over,
   };
 }
@@ -63,6 +67,21 @@ describe("mail store reducer", () => {
     const before = s.threads[0]!.starred;
     const next = reducer(s, { type: "TOGGLE_STAR", id });
     expect(next.threads.find((t) => t.id === id)!.starred).toBe(!before);
+  });
+
+  it("APPLY_FLAGS restores server-persisted star/archive/trash (改善#8)", () => {
+    const s = base();
+    const inbox = s.threads.find((t) => t.folder === "inbox")!;
+    const other = s.threads.find((t) => t.folder === "inbox" && t.id !== inbox.id) ?? s.threads[0]!;
+    const next = reducer(s, {
+      type: "APPLY_FLAGS",
+      flags: [
+        { threadId: inbox.id, starred: true, archived: false, trashed: false },
+        { threadId: other.id, starred: false, archived: true, trashed: false },
+      ],
+    });
+    expect(next.threads.find((t) => t.id === inbox.id)!.starred).toBe(true);
+    expect(next.threads.find((t) => t.id === other.id)!.folder).toBe("archive");
   });
 
   it("marks every message read when a thread is opened", () => {
@@ -280,5 +299,57 @@ describe("GmailApp (hydrates from the gateway)", () => {
     const firstStar = (await screen.findAllByTestId("fe2-mail-star"))[0]!;
     await userEvent.click(firstStar);
     expect(screen.getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0);
+  });
+
+  it("persists a star to the server so it survives a reload (改善#8)", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    // Flags are loaded on hydrate (arming the persist baseline).
+    await waitFor(() => expect(api.listFlags).toHaveBeenCalled());
+    const firstStar = (await screen.findAllByTestId("fe2-mail-star"))[0]!;
+    await userEvent.click(firstStar);
+    // The optimistic star change is POSTed to the gateway (server-backed, reload-safe).
+    await waitFor(() => expect(api.setFlags).toHaveBeenCalled());
+    const call = (api.setFlags as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[1]).toMatchObject({ starred: true });
+  });
+
+  it("restores a persisted star from GET /mail/flags on load (改善#8)", async () => {
+    // The gateway reports the first inbox thread as starred; the UI must reflect it.
+    const api = fakeApi({
+      listFlags: vi.fn().mockResolvedValue([{ threadId: "thr_in_1", starred: true, archived: false, trashed: false }]),
+    });
+    render(wrap(<GmailApp />, api));
+    await userEvent.click(await screen.findByTestId("fe2-mail-folder-starred"));
+    const list = screen.getByTestId("fe2-mail-inbox");
+    await waitFor(() => expect(within(list).getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0));
+  });
+
+  it("shows attachments in the 3-pane reading view and downloads a stored one (改善#1)", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    // getThread fills the full detail, which now carries attachment metadata.
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-attachments")).toBeInTheDocument());
+    const chips = screen.getAllByTestId("fe2-mail-attachment");
+    expect(chips).toHaveLength(2);
+    // The stored file downloads via the session-authorized MailApi (kind=messages, inbound).
+    const stored = screen.getByRole("button", { name: /資料\.pdf をダウンロード/ });
+    await userEvent.click(stored);
+    await waitFor(() => expect(api.downloadAttachment).toHaveBeenCalledWith("messages", "mailin_1", "att_ok"));
+  });
+
+  it("surfaces an oversize attachment as a disabled chip instead of dropping it silently (改善#2)", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-attachments")).toBeInTheDocument());
+    const dropped = screen.getByRole("button", { name: /動画\.mp4/ });
+    expect(dropped).toBeDisabled();
+    expect(dropped).toHaveTextContent(/サイズ超過/);
+    await userEvent.click(dropped).catch(() => undefined);
+    expect(api.downloadAttachment).not.toHaveBeenCalled();
   });
 });

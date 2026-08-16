@@ -5,6 +5,7 @@ import type { D1Database, Fetcher, Queue, MessageBatch, ExecutionContext } from 
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { common } from "@dub/types";
 import { createServiceClient, type RequestContext } from "@dub/http";
+import { HEADERS } from "@dub/observability";
 import {
   createQueueHandler,
   type DubEventEnvelope,
@@ -14,7 +15,8 @@ import { createApp } from "./app";
 import { createMailGatewayClient } from "./gateway";
 import { createEventPublisher, createAuditSink } from "./publisher";
 import { createD1Repo, type MailAutoRepo } from "./repo";
-import { processInbound, type EventInfoClient, type PipelineDeps } from "./pipeline";
+import { type EventInfoClient, type PipelineDeps } from "./pipeline";
+import { eventHandlers, handleEventsAsync } from "./events-async";
 import { createAuthClient } from "@dub/auth-client";
 
 export interface Env {
@@ -65,6 +67,17 @@ function repoOf(env: Env): MailAutoRepo {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // 改善#5: system-origin freeq delivery lands here (x-dub-internal, no user), so it lives
+    // at the Worker entry BEFORE createApp's blanket requireAuth (mirrors audit-log's
+    // /internal/audit-async). Everything else goes through the user-gated Hono app.
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/internal/events-async") {
+      if (!request.headers.get(HEADERS.internal)) {
+        return new Response(JSON.stringify({ error: { code: "NOT_FOUND", message: "route not found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      const repo = repoOf(env);
+      return handleEventsAsync(request, { repo, pipeline: buildPipeline(env, repo) });
+    }
     const repo = repoOf(env);
     const authClient = createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "mail-automation" });
     const app = createApp({ pipeline: buildPipeline(env, repo), authClient });
@@ -78,17 +91,7 @@ export default {
       wasProcessed: (id) => repo.wasEventProcessed(id),
       markProcessed: (id) => repo.markEventProcessed(id),
     };
-    const handler = createQueueHandler(
-      {
-        "mail.message.received": async (event, { requestId }) => {
-          const { messageId } = event.payload;
-          const ctx: RequestContext = { requestId };
-          const full = await pipeline.gateway.getMessage(ctx, messageId);
-          await processInbound(pipeline, full, {}, { requestId, actorId: event.actorId });
-        },
-      },
-      { idempotency },
-    );
+    const handler = createQueueHandler(eventHandlers(pipeline), { idempotency });
     await handler(batch, env);
   },
 };
