@@ -32,11 +32,12 @@ export function truncateEmail(email: string, maxLen = 30): string {
   return `${email.slice(0, Math.max(1, maxLen - 1))}…`;
 }
 
-// Header brand label: the signed-in user's email once /me resolves, else the
-// fallback brand (shown while loading or unauthenticated — never a blank title).
-function headerLabel(auth: ReturnType<typeof useAuth>, fallback: string): string {
+// The signed-in account's email once /me resolves, else null. Shown small & muted
+// beside the DevHub brand — enough to confirm which account is active without
+// dominating the header (the brand, not the address, is the primary label now).
+function accountEmail(auth: ReturnType<typeof useAuth>): string | null {
   if (auth.status === "authenticated" && auth.me.user.email) return truncateEmail(auth.me.user.email);
-  return fallback;
+  return null;
 }
 
 export interface AppShellLayoutProps {
@@ -98,10 +99,37 @@ export function AppShellLayout({
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
 
+  const email = accountEmail(auth);
+  // Brand-first header: "DevHub" (bold, primary) is the app label AND the home导线
+  // — clicking it navigates back to "/" (the ubiquitous logo=home pattern). The
+  // account email rides alongside, small & muted, so it never overshadows the brand.
+  const brand = (
+    <span className="fe2-brandline">
+      <a
+        href="/"
+        className="fe2-brandline-home"
+        data-testid="fe2-brand-home"
+        onClick={(e) => {
+          if (onNavigate) {
+            e.preventDefault();
+            onNavigate("/");
+          }
+        }}
+      >
+        {title}
+      </a>
+      {email ? (
+        <span className="fe2-brandline-account" data-testid="fe2-header-account" title={email}>
+          {email}
+        </span>
+      ) : null}
+    </span>
+  );
+
   const header = (
     <PageHeader
       testId="fe2-shell-header"
-      title={headerLabel(auth, title)}
+      title={brand}
       actions={
         <>
           <AppLauncher

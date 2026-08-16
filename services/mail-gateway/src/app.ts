@@ -23,7 +23,7 @@ import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, markInboundRead, upsertMailbox, type MailScope } from "./repo";
+import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -211,6 +211,11 @@ export function createApp() {
     const attId = c.req.param("attId") ?? "";
     const row = await getAttachment(dbOf(c), kind, messageId, attId);
     if (!row) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `attachment not found: ${attId}`, { status: 404 });
+    // A 'dropped_*' stub (改善#2: too large / truncated) has no R2 body — never fetch it.
+    // 409 (not 404) so the UI can distinguish "unstorable" from "unknown id".
+    if (row.status && row.status !== "stored") {
+      throw new DubError("MAIL_ATTACHMENT_NOT_STORED", `attachment not stored (${row.status}): ${attId}`, { status: 409 });
+    }
     const obj = await blobs.get(row.r2_key);
     if (!obj) throw new DubError("MAIL_MESSAGE_NOT_FOUND", "attachment body missing", { status: 404 });
     return new Response(obj.body, {
@@ -224,6 +229,26 @@ export function createApp() {
   };
   ext.get("/messages/:id/attachments/:attId", downloadAttachment("inbound"));
   ext.get("/sent/:id/attachments/:attId", downloadAttachment("sent"));
+
+  // ---- per-user thread flags (改善#8): star/archive/trash persisted server-side so they
+  // survive a reload. PERSONAL to the signed-in user (never read_all): an admin's stars are
+  // their own. mail:read is sufficient (organizing mail you can see). GET returns every
+  // stored flag row for the user; POST upserts one thread's flags (PATCH: only sent flags
+  // change). A missing thread row means all-false (default), so the client seeds from GET.
+  ext.use("/flags", withAuth("mail:read"));
+  ext.use("/flags/*", withAuth("mail:read"));
+
+  ext.get("/flags", async (c) => {
+    const items = await listUserFlags(dbOf(c), ownerOf(c));
+    return c.json({ items } satisfies { items: mail.MailThreadFlags[] });
+  });
+
+  ext.post("/flags/:threadId", async (c) => {
+    const threadId = c.req.param("threadId");
+    const patch = parseFlagsPatch(await c.req.json().catch(() => null));
+    const flags = await upsertUserFlags(dbOf(c), ownerOf(c), threadId, patch);
+    return c.json(flags satisfies mail.MailThreadFlags);
+  });
 
   // ---- mailbox admin: mail:admin.
   ext.use("/mailboxes", withAuth("mail:admin"));
@@ -281,6 +306,26 @@ function assertAttachmentsSupported(c: Context<AppBindings>, req: mail.SendMailR
   if (req.attachments && req.attachments.length > 0 && !c.env.R2_MAIL) {
     throw new DubError("MAIL_ATTACHMENTS_UNCONFIGURED", "attachment storage not configured", { status: 503 });
   }
+}
+
+/** Validate a thread-flags PATCH body: an object with any of starred/archived/trashed as
+ *  booleans. Rejects a non-object or a non-boolean flag (400). An empty {} is allowed (a
+ *  no-op upsert that just returns the current state). */
+function parseFlagsPatch(body: unknown): mail.MailThreadFlagsPatch {
+  if (body === null || typeof body !== "object") {
+    throw new DubError("MAIL_INVALID_REQUEST", "flags patch must be an object", { status: 400 });
+  }
+  const src = body as Record<string, unknown>;
+  const out: mail.MailThreadFlagsPatch = {};
+  for (const key of ["starred", "archived", "trashed"] as const) {
+    if (src[key] !== undefined) {
+      if (typeof src[key] !== "boolean") {
+        throw new DubError("MAIL_INVALID_REQUEST", `flag "${key}" must be a boolean`, { status: 400 });
+      }
+      out[key] = src[key] as boolean;
+    }
+  }
+  return out;
 }
 
 /** requireAuth (trusted header) + requirePermission chained on one per-request client. */

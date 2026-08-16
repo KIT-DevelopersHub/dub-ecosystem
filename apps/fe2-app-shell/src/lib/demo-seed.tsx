@@ -197,6 +197,18 @@ function seedMailBlob(id: string, filename: string, contentType: string, text: s
   DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
   return { id, filename, contentType, sizeBytes: bytes.byteLength };
 }
+// Seed an image attachment from base64 bytes so the reading pane can show a real inline
+// thumbnail (Gmail-style) in the demo/E2E — images render inline, other files download.
+function seedMailImageBlob(id: string, filename: string, contentType: string, base64: string): mail.MailAttachment {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
+  return { id, filename, contentType, sizeBytes: bytes.byteLength };
+}
+// A tiny (8x8) solid-blue PNG — enough to render a visible inline thumbnail in the demo.
+const DEMO_PNG_8x8 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR4nGNkYPhfz0AEYBpVSF+FAP7pAv4prsMnAAAAAElFTkSuQmCC";
 
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
@@ -217,11 +229,20 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
 ];
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
-  msg_1: { ...MAIL_LIST[0]!, textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。\n\nよろしくお願いいたします。" },
+  msg_1: {
+    ...MAIL_LIST[0]!,
+    textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。登壇資料のイメージ画像を添付します。\n\nよろしくお願いいたします。",
+    attachments: [seedMailImageBlob("mailatt_demo_slide", "登壇イメージ.png", "image/png", DEMO_PNG_8x8)],
+  },
   msg_2: {
     ...MAIL_LIST[1]!,
-    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。",
-    attachments: [seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…")],
+    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。動画も添付しましたが容量が大きすぎたようです。",
+    attachments: [
+      seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…"),
+      // 改善#2: an over-ceiling attachment surfaces as a disabled chip with a reason,
+      // instead of silently disappearing (no bytes stored; download would 409).
+      { id: "mailatt_demo_big", filename: "会場紹介動画.mp4", contentType: "video/mp4", sizeBytes: 41943040, status: "dropped_too_large" },
+    ],
   },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
 };
@@ -484,10 +505,50 @@ function createMailStore() {
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
+    // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
+    // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
+    if (method === "GET" && pathname === "/api/v1/mail/flags") {
+      return json({ items: loadFlags() });
+    }
+    if (method === "POST") {
+      const m = /^\/api\/v1\/mail\/flags\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const threadId = decodeURIComponent(m[1]!);
+        const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
+        const flags = loadFlags();
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false };
+        const next: mail.MailThreadFlags = {
+          threadId,
+          starred: patch.starred ?? prev.starred,
+          archived: patch.archived ?? prev.archived,
+          trashed: patch.trashed ?? prev.trashed,
+        };
+        saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
+        return json(next);
+      }
+    }
     return null;
   }
 
   return { handle };
+}
+
+// Thread-flags persistence for the demo (localStorage; survives reload).
+const FLAGS_KEY = "dub-demo-mail-flags";
+function loadFlags(): mail.MailThreadFlags[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(FLAGS_KEY);
+    return raw ? (JSON.parse(raw) as mail.MailThreadFlags[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveFlags(flags: mail.MailThreadFlags[]): void {
+  try {
+    globalThis.localStorage?.setItem(FLAGS_KEY, JSON.stringify(flags));
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── identity / roster (admin RBAC console) ────────────────────────────────────
@@ -917,6 +978,9 @@ interface DemoDriveFile {
   ownerName: string;
   modifiedTime: string;
   webViewLink: string;
+  /** Parent folder id (null at the shared-drive root). Drives the lazy tree: a
+   *  GET /driveshare/files?folderId=X returns exactly the direct children of X. */
+  parentId: string | null;
   permissions: DemoDrivePermission[];
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
@@ -932,29 +996,66 @@ function createDriveShareStore() {
   });
   const link = (id: string) => `https://drive.google.com/file/d/${id}/view`;
   const files: DemoDriveFile[] = [
+    // ── root (parentId=null): the pre-existing five, unchanged (existing E2E depends on
+    //    予算管理 / チラシ being at the top level). ─────────────────────────────────
     {
       id: "fld_root", name: "Hackit 2026 共有", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-10T09:00:00Z", webViewLink: link("fld_root"),
+      modifiedTime: "2026-08-10T09:00:00Z", webViewLink: link("fld_root"), parentId: null,
       permissions: [owner("perm_1"), { id: "perm_2", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null }],
     },
     {
       id: "fld_designs", name: "デザイン素材", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-11T02:30:00Z", webViewLink: link("fld_designs"), permissions: [owner("perm_3")],
+      modifiedTime: "2026-08-11T02:30:00Z", webViewLink: link("fld_designs"), parentId: null, permissions: [owner("perm_3")],
     },
     {
       id: "fil_budget", name: "予算管理.xlsx", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-11T23:10:00Z", webViewLink: link("fil_budget"),
+      modifiedTime: "2026-08-11T23:10:00Z", webViewLink: link("fil_budget"), parentId: null,
       permissions: [owner("perm_4"), { id: "perm_5", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null }],
     },
     {
       id: "fil_flyer", name: "当日チラシ.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-12T01:00:00Z", webViewLink: link("fil_flyer"),
+      modifiedTime: "2026-08-12T01:00:00Z", webViewLink: link("fil_flyer"), parentId: null,
       permissions: [owner("perm_6"), { id: "perm_anyone_flyer", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null }],
     },
     {
       id: "fil_runsheet", name: "進行台本.gdoc", mimeType: "application/vnd.google-apps.document", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-12T03:45:00Z", webViewLink: link("fil_runsheet"),
+      modifiedTime: "2026-08-12T03:45:00Z", webViewLink: link("fil_runsheet"), parentId: null,
       permissions: [owner("perm_7"), { id: "perm_8", type: "user", role: "commenter", emailAddress: "mc@example.com", displayName: "司会", domain: null }],
+    },
+
+    // ── children of fld_root (depth 1) ────────────────────────────────────────────
+    {
+      id: "fld_sponsors", name: "スポンサー資料", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T05:00:00Z", webViewLink: link("fld_sponsors"), parentId: "fld_root", permissions: [owner("perm_10")],
+    },
+    {
+      id: "fil_schedule", name: "全体スケジュール.gsheet", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T06:00:00Z", webViewLink: link("fil_schedule"), parentId: "fld_root",
+      permissions: [owner("perm_11"), { id: "perm_12", type: "user", role: "reader", emailAddress: "ops@example.com", displayName: "運営", domain: null }],
+    },
+    // ── children of fld_sponsors (depth 2 — proves nesting beyond one level) ───────
+    {
+      id: "fil_contract", name: "協賛契約書.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T07:00:00Z", webViewLink: link("fil_contract"), parentId: "fld_sponsors", permissions: [owner("perm_13")],
+    },
+    {
+      id: "fil_sponsor_deck", name: "協賛メニュー.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T07:30:00Z", webViewLink: link("fil_sponsor_deck"), parentId: "fld_sponsors", permissions: [owner("perm_14")],
+    },
+
+    // ── children of fld_designs (depth 1) ─────────────────────────────────────────
+    {
+      id: "fld_banners", name: "バナー", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T03:00:00Z", webViewLink: link("fld_banners"), parentId: "fld_designs", permissions: [owner("perm_15")],
+    },
+    {
+      id: "fil_poster", name: "ポスター.png", mimeType: "image/png", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T03:30:00Z", webViewLink: link("fil_poster"), parentId: "fld_designs", permissions: [owner("perm_16")],
+    },
+    // ── children of fld_banners (depth 2) ─────────────────────────────────────────
+    {
+      id: "fil_web_banner", name: "Webバナー.png", mimeType: "image/png", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T04:00:00Z", webViewLink: link("fil_web_banner"), parentId: "fld_banners", permissions: [owner("perm_17")],
     },
   ];
   const byId = new Map(files.map((f) => [f.id, f]));
@@ -1058,8 +1159,15 @@ function createDriveShareStore() {
     }
     if (method === "GET" && pathname === "/api/v1/driveshare/files") {
       const needle = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-      const matched = files
-        .filter((f) => (needle ? f.name.toLowerCase().includes(needle) : true))
+      const folderId = url.searchParams.get("folderId");
+      // search (q) → GLOBAL flat match (parent ignored); else folderId → direct
+      // children; else the root level (parentId === null). Mirrors mock-client.ts.
+      const scope = needle
+        ? files.filter((f) => f.name.toLowerCase().includes(needle))
+        : folderId
+          ? files.filter((f) => f.parentId === folderId)
+          : files.filter((f) => f.parentId === null);
+      const matched = scope
         .slice()
         .sort((a, b) => {
           const af = a.mimeType === DRIVE_FOLDER_MIME_DEMO ? 0 : 1;
@@ -1141,6 +1249,13 @@ interface DemoMember {
   grade: string | null;
   identityUserId: string | null;
   contact: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  phone: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
@@ -1172,7 +1287,7 @@ function createMembersStore() {
     grade: string | null = null,
     identityUserId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
@@ -1198,6 +1313,27 @@ function createMembersStore() {
     mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
     mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+  ];
+
+  // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
+  // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
+  const participations: any[] = [
+    {
+      id: "part_seed_1", orgId: ORG, memberId: "member_h2", name: "黒川", normalizedName: "黒川",
+      lastName: "黒川", firstName: null, nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
+      grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
+      schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
+      desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
+      matchKind: "linked_existing", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      id: "part_seed_2", orgId: ORG, memberId: "member_demo_new", name: "田中 実", normalizedName: "田中実",
+      lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
+      grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "event", note: null, status: "submitted",
+      matchKind: "created_new", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
   ];
 
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
@@ -1241,7 +1377,9 @@ function createMembersStore() {
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
-        contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
+        contact: body?.contact ?? null, schoolEmail: null, gmail: null,
+        lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, phone: null, note: body?.note ?? null,
+        sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
@@ -1300,6 +1438,105 @@ function createMembersStore() {
         members.splice(members.indexOf(mem), 1);
         return json({ ok: true });
       }
+    }
+
+    // 参加届 (participation): submit reflects onto the roster exactly like member-service
+    // — name match (space/width-folded) promotes 招待中/検討中 → 追加済 (merging the desired
+    // team, non-destructive contact + the two emails), else creates a new 追加済 member.
+    // Both endpoints share this reflect: the PUBLIC one (unauthenticated) returns a minimal
+    // { accepted, matchKind }; the authenticated one returns the full participation + member.
+    const reflectParticipation = (): { participation: unknown; member: DemoMember; matchKind: "linked_existing" | "created_new" } => {
+      const compose = (a: unknown, b: unknown): string =>
+        [a, b].map((x) => (typeof x === "string" ? x.trim() : "")).filter((x) => x.length > 0).join(" ");
+      const lastName: string | null = body?.lastName ?? null;
+      const firstName: string | null = body?.firstName ?? null;
+      const lastNameKana: string | null = body?.lastNameKana ?? null;
+      const firstNameKana: string | null = body?.firstNameKana ?? null;
+      // 分割入力を優先し "姓 名" を合成。旧単一 name も後方互換で受ける。
+      const name = (compose(lastName, firstName) || String(body?.name ?? "")).trim();
+      const nameKana: string | null = compose(lastNameKana, firstNameKana) || body?.nameKana || null;
+      const phone: string | null = body?.phone ?? null;
+      const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+      const target = norm(name);
+      const desiredTeamId: string | null = body?.desiredTeamId ?? null;
+      const contact: string | null = body?.contact ?? null;
+      const schoolEmail: string = String(body?.schoolEmail ?? "");
+      const gmail: string = String(body?.gmail ?? "");
+      const note: string | null = body?.note ?? null;
+      const department: string | null = body?.department ?? null;
+      const grade: string | null = body?.grade ?? null;
+      const existing = members.find((mem) => norm(mem.name) === target);
+      let matchKind: "linked_existing" | "created_new";
+      let resolved: DemoMember;
+      if (existing) {
+        if (existing.status === "invited" || existing.status === "considering") existing.status = "added";
+        if (desiredTeamId && !existing.teamIds.includes(desiredTeamId)) existing.teamIds.push(desiredTeamId);
+        if (existing.contact === null) existing.contact = contact ?? schoolEmail;
+        if (existing.department === null && department) existing.department = department;
+        if (existing.grade === null && grade) existing.grade = grade;
+        if (existing.schoolEmail === null && schoolEmail) existing.schoolEmail = schoolEmail;
+        if (existing.gmail === null && gmail) existing.gmail = gmail;
+        if (existing.lastName === null && lastName) existing.lastName = lastName;
+        if (existing.firstName === null && firstName) existing.firstName = firstName;
+        if (existing.lastNameKana === null && lastNameKana) existing.lastNameKana = lastNameKana;
+        if (existing.firstNameKana === null && firstNameKana) existing.firstNameKana = firstNameKana;
+        if (existing.phone === null && phone) existing.phone = phone;
+        if (existing.note === null && note) existing.note = note;
+        existing.version += 1;
+        existing.updatedAt = isoNow();
+        resolved = existing;
+        matchKind = "linked_existing";
+      } else {
+        resolved = {
+          id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added", identityUserId: null,
+          department, grade,
+          teamIds: desiredTeamId ? [desiredTeamId] : [], contact: contact ?? schoolEmail,
+          schoolEmail: schoolEmail || null, gmail: gmail || null,
+          lastName, firstName, lastNameKana, firstNameKana, phone, note,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(resolved);
+        matchKind = "created_new";
+      }
+      const participation = {
+        id: nid("part"), orgId: ORG, memberId: resolved.id, name, normalizedName: target,
+        lastName, firstName, nameKana, lastNameKana, firstNameKana,
+        grade: body?.grade ?? null, department: body?.department ?? null,
+        contact, phone, schoolEmail, gmail, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
+        status: "submitted", matchKind, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      };
+      participations.unshift(participation);
+      return { participation, member: resolved, matchKind };
+    };
+
+    // PUBLIC (unauthenticated) submit — the form posts here. Minimal response (no member echo).
+    if (method === "POST" && pathname === "/api/v1/public/participation") {
+      const school = String(body?.schoolEmail ?? "").trim();
+      const gm = String(body?.gmail ?? "").trim();
+      const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+      // 姓/名 の分割入力 or 旧単一 name のどちらかで氏名が揃えば OK。
+      const composedName = [body?.lastName, body?.firstName]
+        .map((x) => (typeof x === "string" ? x.trim() : ""))
+        .filter((x) => x.length > 0)
+        .join(" ");
+      const hasName = composedName.length > 0 || String(body?.name ?? "").trim().length > 0;
+      if (!hasName || !emailRe.test(school) || !emailRe.test(gm)) {
+        const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
+        return json(err, 400);
+      }
+      const { matchKind } = reflectParticipation();
+      return json({ accepted: true, matchKind }, 200);
+    }
+
+    // Authenticated submit (back-compat): full participation + member echo.
+    if (method === "POST" && pathname === "/api/v1/members/participation") {
+      const { participation, member, matchKind } = reflectParticipation();
+      return json({ participation, member: { ...member, teamIds: [...member.teamIds] }, matchKind }, 201);
+    }
+
+    // 運営専用の回答一覧 (identity:read はデモでは全許可)。最新順で返す。
+    if (method === "GET" && pathname === "/api/v1/members/participation") {
+      return json({ participations: participations.map((p) => ({ ...p })) });
     }
 
     return null;

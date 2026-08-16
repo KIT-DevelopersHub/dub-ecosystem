@@ -3,7 +3,9 @@ import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
 import { hashRequest, sendMail } from "../src/send";
 import { findSendByKey } from "../src/repo";
-import { makeHarness, sendDeps } from "./helpers";
+import { handleInbound } from "../src/inbound";
+import type { RawInbound } from "../src/mime";
+import { makeHarness, sendDeps, inboundDeps } from "./helpers";
 
 const baseReq: mail.SendMailRequest = {
   to: [{ email: "alice@example.com" }],
@@ -45,6 +47,33 @@ describe("sendMail — idempotency", () => {
     expect(second.response.messageId).toBe(first.response.messageId);
     expect(h.provider.sent).toHaveLength(1); // 二重送信ゼロ
     expect(h.notif.sends).toHaveLength(1); // event not re-published
+  });
+
+  it("threads a reply onto the ROOT thread of the message it answers, not the parent id (改善#4)", async () => {
+    const h = makeHarness();
+    // Seed a 2-message inbound thread rooted at A: A opens it, B is a reply that references A.
+    const inRaw = (id: string, refs?: string): RawInbound => ({
+      from: "ext@outside.com",
+      to: "info@developershub.jp",
+      headers: {
+        "message-id": `<${id}@outside.com>`,
+        from: "Ext <ext@outside.com>",
+        to: "info@developershub.jp",
+        subject: "Re: topic",
+        date: "Sat, 09 Aug 2026 05:00:00 +0000",
+        ...(refs ? { references: refs } : {}),
+      },
+      rawText: `Message-ID: <${id}@outside.com>\r\n\r\nbody`,
+      rawSize: 200,
+    });
+    await handleInbound(inboundDeps(h), inRaw("A"));
+    await handleInbound(inboundDeps(h), inRaw("B", "<A@outside.com>"));
+
+    // We reply to the DEEPER message B. The stored thread_id must be the root A, so the
+    // reply folds into the same conversation (not orphaned under "B@outside.com").
+    await sendMail(sendDeps(h), { ...baseReq, inReplyTo: "B@outside.com" }, "idem-reply", "usr_info");
+    const row = await findSendByKey(h.db, "idem-reply");
+    expect(row?.thread_id).toBe("A@outside.com");
   });
 
   it("409s when the same key is reused with a different body", async () => {

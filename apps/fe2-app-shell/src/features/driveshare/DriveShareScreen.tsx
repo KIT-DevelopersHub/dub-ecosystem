@@ -28,6 +28,7 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { createOptimisticMutation } from "../../lib/optimistic.tsx";
 import { useDriveShareApi } from "./DriveShareProvider.tsx";
+import { DriveTree } from "./DriveTree.tsx";
 import {
   driveRoleLabel,
   driveRoleTone,
@@ -105,7 +106,7 @@ function FileRow({
       <Card>
         <Stack gap={1}>
           <Stack direction="row" gap={2} align="center">
-            <Icon name={file.isFolder ? "list" : "file"} />
+            <Icon name={file.isFolder ? "folder" : "file"} />
             <strong style={{ fontWeight: active ? 700 : 500 }}>{file.name}</strong>
             {file.linkShared ? (
               <Badge tone="info" testId="fe2-driveshare-linkbadge">
@@ -598,11 +599,15 @@ function PermissionsPanel({ file }: { file: DriveFile }): JSX.Element {
 export function DriveShareScreen(): JSX.Element {
   const driveApi = useDriveShareApi();
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The selected node's full DriveFile (not just an id): a nested child lives in a
+  // per-folder cache, not the root list, so the panel must hold the object itself.
+  const [selected, setSelected] = useState<DriveFile | null>(null);
+  const trimmed = search.trim();
+  const searching = trimmed.length > 0;
   const filesKey = queryKeys.feature("driveshare", "files", search);
   const query = useQuery({
     queryKey: filesKey,
-    queryFn: () => driveApi.listFiles(search.trim() ? { q: search.trim(), limit: 50 } : { limit: 50 }),
+    queryFn: () => driveApi.listFiles(searching ? { q: trimmed, limit: 50 } : { limit: 50 }),
   });
 
   // Fetch every role grant once and index by fileId so each row can show its chips.
@@ -616,9 +621,10 @@ export function DriveShareScreen(): JSX.Element {
     if (list) list.push(g);
     else grantsByFile.set(g.fileId, [g]);
   }
+  const grantsFor = (fileId: string): RoleFileGrant[] => grantsByFile.get(fileId) ?? [];
 
   const files = query.data?.files ?? [];
-  const selected = files.find((f) => f.id === selectedId) ?? null;
+  const selectedId = selected?.id ?? null;
 
   let list: JSX.Element;
   if (query.isPending) {
@@ -637,20 +643,19 @@ export function DriveShareScreen(): JSX.Element {
         icon="file"
       />
     );
-  } else {
+  } else if (searching) {
+    // While searching we show a FLAT substring result across every depth (folders are
+    // not expandable here). Auto-expanding the tree to each hit is a future improvement.
     list = (
       <Stack gap={2}>
         {files.map((f) => (
-          <FileRow
-            key={f.id}
-            file={f}
-            active={f.id === selectedId}
-            grants={grantsByFile.get(f.id) ?? []}
-            onSelect={() => setSelectedId(f.id)}
-          />
+          <FileRow key={f.id} file={f} active={f.id === selectedId} grants={grantsFor(f.id)} onSelect={() => setSelected(f)} />
         ))}
       </Stack>
     );
+  } else {
+    // Default view: the lazy, expandable hierarchy.
+    list = <DriveTree files={files} selectedId={selectedId} onSelect={setSelected} grantsFor={grantsFor} />;
   }
 
   return (

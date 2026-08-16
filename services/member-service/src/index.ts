@@ -31,6 +31,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     now: nowIso,
     newTeamId: () => newId("team"),
     newMemberId: () => newId("member"),
+    newParticipationId: () => newId("part"),
   };
 }
 
@@ -50,6 +51,8 @@ export {
   MEMBER_SCHEMA_MIGRATION,
   MEMBER_IDENTITY_LINK_MIGRATION,
   MEMBER_PERSON_COLS_MIGRATION,
+  MEMBER_PARTICIPATION_MIGRATION,
+  MEMBER_PARTICIPATION_EMAILS_MIGRATION,
   MEMBER_MIGRATIONS,
 } from "./schema";
 export type { AppDeps } from "./types";

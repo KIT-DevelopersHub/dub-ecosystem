@@ -69,6 +69,11 @@ export interface ParsedInbound {
   mailbox: string | null; // destination mailbox id (best-effort local-part)
   bodyText: string; // full plain-text body (persisted alongside; powers the detail view)
   htmlBody: string | null; // HTML part when present (sanitized before render); NULL otherwise
+  // Ordered ancestral Message-Ids this message references (all References tokens, then
+  // In-Reply-To; most-ancestral first). Used to NORMALIZE thread_id against known messages
+  // so a trimmed References chain still joins the root conversation (改善#3). Empty for a
+  // brand-new (unreferenced) message.
+  references: string[];
 }
 
 // ---- reconciled cross-service inbound DTO (統合波 reconcile, 2026-08) ----

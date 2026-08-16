@@ -16,7 +16,13 @@ export const TASK_STATUS_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> 
 
 export interface Task extends Versioned {
   id: TaskId;
-  eventId: EventId;
+  /**
+   * Optional event linkage. A task MAY belong to an event (e.g. 北陸ITカンファレンス)
+   * but is not required to — `null`/absent means an unlinked, standalone task. The
+   * Event entity itself still exists (event-service / FE3); only the task→event
+   * coupling is optional now. (判断44: keep the concept, make the link optional.)
+   */
+  eventId?: EventId | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -52,7 +58,8 @@ export interface TaskDependency {
 }
 
 export interface CreateTaskRequest {
-  eventId: EventId;
+  /** Optional event linkage (see Task.eventId). Omit to issue an unlinked task. */
+  eventId?: EventId;
   title: string;
   description?: string;
   priority?: TaskPriority; // default "medium"

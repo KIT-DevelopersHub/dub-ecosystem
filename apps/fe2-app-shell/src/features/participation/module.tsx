@@ -1,0 +1,53 @@
+// 参加届 FeatureModule source (authored against FE2's canonical contract, like mail /
+// members). The shell's composition (featureModules.tsx) wraps these routes in
+// ParticipationProvider fed by the one api-client and merges the nav ordering.
+//
+// The submit endpoint is open to any authenticated 運営 (they file their own 届), so
+// the route carries auth:"required" with NO requiredPermissions — the launcher tile
+// shows for every signed-in user. Write reflection onto the roster is re-authorized
+// server-side by member-service.
+import type { ComponentType } from "react";
+import type { identity } from "@dub/types";
+import type { IconName } from "@dub/ui";
+import { ParticipationPage } from "./ParticipationPage.tsx";
+import { ParticipationListPage } from "./ParticipationListPage.tsx";
+
+type PermissionKey = identity.PermissionKey;
+
+export interface ParticipationSourceRoute {
+  path: string;
+  lazy: () => Promise<{ Component: ComponentType }>;
+  auth: "required" | "public";
+  requiredPermissions?: PermissionKey[];
+}
+export interface ParticipationNavEntry {
+  label: string;
+  path: string;
+  icon: IconName;
+  requiredPermissions?: PermissionKey[];
+}
+
+export const participationRoutes: ParticipationSourceRoute[] = [
+  {
+    path: "/participation",
+    lazy: () => Promise.resolve({ Component: ParticipationPage }),
+    auth: "required",
+  },
+  {
+    // 回答一覧 (運営専用). identity:read = member-service の list ゲートと一致。
+    path: "/participation/list",
+    lazy: () => Promise.resolve({ Component: ParticipationListPage }),
+    auth: "required",
+    requiredPermissions: ["identity:read"],
+  },
+];
+
+export const participationNav: ParticipationNavEntry[] = [
+  { label: "参加届", path: "/participation", icon: "check-square" },
+  { label: "参加届の回答一覧", path: "/participation/list", icon: "users", requiredPermissions: ["identity:read"] },
+];
+
+// PUBLIC standalone route (unauthenticated). Mounted by the shell router OUTSIDE the
+// authenticated shell (sibling of /login) so participants can submit without signing in.
+// Kept distinct from the in-shell "/participation" tile (which 運営 use while signed in).
+export const PUBLIC_PARTICIPATION_PATH = "/participate";

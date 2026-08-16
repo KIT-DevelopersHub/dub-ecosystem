@@ -6,7 +6,7 @@ import type { task, common } from "@dub/types";
 // snake-cased D1 row for task_tasks.
 export interface TaskRow {
   id: string;
-  event_id: string;
+  event_id: string | null;
   title: string;
   description: string | null;
   status: task.TaskStatus;
@@ -43,7 +43,7 @@ export function rowToTask(r: TaskRow): task.Task {
 
 export interface InsertTaskInput {
   id: common.TaskId;
-  eventId: common.EventId;
+  eventId: common.EventId | null;
   title: string;
   description: string | null;
   status: task.TaskStatus;
@@ -78,7 +78,7 @@ export interface ListFilter {
 
 export interface DueSoonRow {
   taskId: common.TaskId;
-  eventId: common.EventId;
+  eventId: common.EventId | null;
   dueAt: common.ISODateTime;
 }
 
@@ -93,9 +93,15 @@ export interface TaskRepo {
   /** Bulk-archive every live task of an event (event.archived compensation). */
   archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]>;
   getDependsOn(taskId: string): Promise<common.TaskId[]>;
-  listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]>;
-  /** Ids of every live (non-archived) task in an event — the valid dependsOn target set. */
-  listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]>;
+  /**
+   * Dependencies scoped to a single "bucket": either an event (eventId) or the
+   * unlinked bucket (eventId === null → tasks with event_id IS NULL). Dependencies
+   * are only valid within the same bucket, so an unlinked task can only depend on
+   * other unlinked tasks (and vice-versa).
+   */
+  listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]>;
+  /** Ids of every live (non-archived) task in a bucket — the valid dependsOn target set. */
+  listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]>;
   /** Version-checked full replace of a task's dependsOn edges. */
   replaceDependencies(
     taskId: string,
@@ -249,21 +255,33 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       return rows.map((r) => r.depends_on_id);
     },
 
-    async listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]> {
-      const rows = await db.all<{ task_id: string; depends_on_id: string }>(
-        `SELECT d.task_id, d.depends_on_id FROM task_dependencies d
-         JOIN task_tasks t ON d.task_id = t.id
-         WHERE t.event_id = ?`,
-        eventId,
-      );
+    async listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]> {
+      const rows =
+        eventId === null
+          ? await db.all<{ task_id: string; depends_on_id: string }>(
+              `SELECT d.task_id, d.depends_on_id FROM task_dependencies d
+               JOIN task_tasks t ON d.task_id = t.id
+               WHERE t.event_id IS NULL`,
+            )
+          : await db.all<{ task_id: string; depends_on_id: string }>(
+              `SELECT d.task_id, d.depends_on_id FROM task_dependencies d
+               JOIN task_tasks t ON d.task_id = t.id
+               WHERE t.event_id = ?`,
+              eventId,
+            );
       return rows.map((r) => ({ taskId: r.task_id, dependsOnId: r.depends_on_id }));
     },
 
-    async listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]> {
-      const rows = await db.all<{ id: string }>(
-        `SELECT id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
-        eventId,
-      );
+    async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
+      const rows =
+        eventId === null
+          ? await db.all<{ id: string }>(
+              `SELECT id FROM task_tasks WHERE event_id IS NULL AND archived_at IS NULL`,
+            )
+          : await db.all<{ id: string }>(
+              `SELECT id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
+              eventId,
+            );
       return rows.map((r) => r.id);
     },
 
@@ -301,7 +319,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
     async scanDueSoon(nowMs: number, windowMs: number, now: string): Promise<DueSoonRow[]> {
       const windowEnd = new Date(nowMs + windowMs).toISOString();
       const nowIsoStr = new Date(nowMs).toISOString();
-      const rows = await db.all<{ id: string; event_id: string; due_at: string }>(
+      const rows = await db.all<{ id: string; event_id: string | null; due_at: string }>(
         `SELECT id, event_id, due_at FROM task_tasks
          WHERE archived_at IS NULL AND due_at IS NOT NULL AND due_soon_notified_at IS NULL
            AND status NOT IN ('done','cancelled')

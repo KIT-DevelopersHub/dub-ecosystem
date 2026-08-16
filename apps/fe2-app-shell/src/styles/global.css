@@ -112,71 +112,33 @@ svg {
 
 /* ---- shell chrome (FE2 wiring around @dub/ui AppShell) --------------------- */
 
-/* Brand lockup pinned to the top of the sidebar. */
-.fe2-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  padding: var(--dub-space-4) var(--dub-space-4) var(--dub-space-3);
-  min-width: 0;
-}
-.fe2-brand-mark {
+/* Header brand lockup: "DevHub" (bold, primary) is the app label AND the home导线;
+ * the account email rides alongside — small, muted, secondary. Rendered inside the
+ * @dub/ui PageHeader <h1>, so the anchor inherits the bold title weight/size. */
+.fe2-brandline {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  border-radius: var(--dub-radius-md);
-  background: linear-gradient(135deg, var(--dub-color-brand-400), var(--dub-color-brand-600));
-  color: #fff;
-  font-weight: var(--dub-font-weight-bold);
-  font-size: var(--dub-font-size-md);
-  box-shadow: var(--dub-shadow-sm);
-}
-.fe2-brand-text {
-  display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: var(--dub-space-2);
   min-width: 0;
-  overflow: hidden;
 }
-.fe2-brand-title {
-  font-size: var(--dub-font-size-sm);
-  font-weight: var(--dub-font-weight-bold);
+.fe2-brandline-home {
   color: var(--dub-color-text-primary);
-  line-height: var(--dub-font-line-height-tight);
-  white-space: nowrap;
+  text-decoration: none;
+  border-radius: var(--dub-radius-sm);
+  transition: color var(--dub-motion-fast) var(--dub-motion-easing);
 }
-.fe2-brand-sub {
+.fe2-brandline-home:hover {
+  color: var(--dub-color-text-link);
+}
+.fe2-brandline-account {
+  min-width: 0;
   font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-regular);
+  line-height: var(--dub-font-line-height-tight);
   color: var(--dub-color-text-muted);
   white-space: nowrap;
-}
-
-/* Header user cluster. */
-.fe2-header-user {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  padding-left: var(--dub-space-2);
-  margin-left: var(--dub-space-1);
-  border-left: 1px solid var(--dub-color-border-default);
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm);
-  white-space: nowrap;
-}
-.fe2-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--dub-radius-full);
-  background: var(--dub-color-brand-100);
-  color: var(--dub-color-brand-700);
-  font-size: var(--dub-font-size-xs);
-  font-weight: var(--dub-font-weight-bold);
-  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Content max width so wide screens keep comfortable line lengths. */
@@ -369,6 +331,436 @@ svg {
 }
 .fe2-list-meta {
   font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+
+/* ---- home dashboard (revamp) ---------------------------------------------- */
+/* The dashboard is clamped to exactly one viewport — its height is set inline by
+ * useViewportFit (window height minus the chrome measured above it) and overflow
+ * is hidden, so the PAGE never scrolls. Any surplus is absorbed by the internal
+ * scroll regions (app grid / event list), never by the body. A centered max-width
+ * keeps the grid comfortable on ultra-wide screens. */
+.fe2-home.fe2-dashboard {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  overflow: hidden;
+}
+.fe2-home > [data-testid="fe2-home-header"] {
+  padding-bottom: 0;
+}
+/* Dashboard body fills the remaining height below the KPI row. Every inner region
+ * (app launcher, cards, rail) renders at its natural, comfortable size — NONE of
+ * them get their own scrollbar. If the sum can't fit a short viewport, the body is
+ * the SINGLE, tidy scroll fallback (never a nested scrollbar), and the page itself
+ * still never scrolls (the dashboard stays clamped with overflow:hidden). */
+.fe2-dash-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 2.1fr) minmax(280px, 1fr);
+  gap: var(--dub-space-4);
+  align-items: start;
+  align-content: start;
+}
+.fe2-dash-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+/* The two visualization cards sit side by side to save vertical space. */
+.fe2-dash-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--dub-space-4);
+}
+.fe2-dash-section-title {
+  margin: 0 0 var(--dub-space-2);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-secondary);
+}
+@media (max-width: 860px) {
+  .fe2-dash-body {
+    grid-template-columns: 1fr;
+  }
+  .fe2-dash-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- KPI row (at-a-glance overview) --------------------------------------- */
+/* Six tiles on one row at desktop widths (auto-fit keeps them from wrapping into
+ * a tall block); they reflow to 3/2 columns as the viewport narrows. */
+.fe2-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--dub-space-3);
+}
+@media (max-width: 1100px) {
+  .fe2-kpi-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 560px) {
+  .fe2-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.fe2-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-3);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  box-shadow: var(--dub-shadow-sm);
+  min-height: 96px;
+  transition:
+    border-color var(--dub-motion-fast) var(--dub-motion-easing),
+    box-shadow var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.fe2-kpi:hover {
+  border-color: var(--dub-color-border-strong);
+  box-shadow: var(--dub-shadow-md);
+}
+.fe2-kpi-skeleton {
+  justify-content: center;
+}
+.fe2-kpi-top {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+.fe2-kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--dub-radius-md);
+}
+.fe2-kpi-icon > svg {
+  width: 16px;
+  height: 16px;
+}
+.fe2-kpi-label {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe2-kpi-demo {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px var(--dub-space-2);
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-muted);
+  font-size: 10px;
+  font-weight: var(--dub-font-weight-medium);
+  letter-spacing: 0.02em;
+}
+.fe2-kpi-mid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+}
+.fe2-kpi-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.fe2-kpi-value {
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--dub-color-text-primary);
+}
+.fe2-kpi-unit {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+}
+.fe2-kpi-hint {
+  margin: 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- charts: ring / meter / segment bar ----------------------------------- */
+.fe2-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.fe2-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.fe2-meter {
+  width: 100%;
+  height: var(--dub-space-2);
+  background: var(--dub-color-border-default);
+  border-radius: var(--dub-radius-full);
+  overflow: hidden;
+}
+.fe2-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--dub-radius-full);
+  transition: width var(--dub-motion-normal) var(--dub-motion-easing);
+}
+
+/* free-tier usage list inside the dashboard card */
+.fe2-usage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.fe2-usage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.fe2-usage-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+}
+.fe2-usage-label {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe2-usage-pct {
+  flex: 0 0 auto;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* segmented stacked bar (task breakdown) + legend */
+.fe2-segbar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.fe2-segbar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: var(--dub-radius-full);
+  overflow: hidden;
+  background: var(--dub-color-border-default);
+}
+.fe2-segbar-seg {
+  height: 100%;
+  transition: width var(--dub-motion-normal) var(--dub-motion-easing);
+}
+.fe2-segbar-seg + .fe2-segbar-seg {
+  box-shadow: inset 1px 0 0 var(--dub-color-surface-raised);
+}
+.fe2-seglegend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-2) var(--dub-space-4);
+}
+.fe2-seglegend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-secondary);
+}
+.fe2-seglegend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--dub-radius-full);
+  flex: 0 0 auto;
+}
+.fe2-seglegend-count {
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Left: the app launcher. Tiles render at a fixed, comfortable size in a fluid
+ * grid (auto-fill) so they reflow to the width — the grid takes its NATURAL height
+ * and therefore NEVER shows its own scrollbar. When space is tight the parent body
+ * is the single scroll fallback, so the launcher itself always reads cleanly. */
+.fe2-home-apps {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fe2-home-apps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: 1fr;
+  gap: var(--dub-space-3);
+}
+.fe2-home-tile {
+  position: relative;
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--dub-space-2) var(--dub-space-2);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  box-shadow: var(--dub-shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: center;
+  transition:
+    border-color var(--dub-motion-fast) var(--dub-motion-easing),
+    box-shadow var(--dub-motion-fast) var(--dub-motion-easing),
+    transform var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.fe2-home-tile:hover {
+  border-color: var(--dub-color-border-strong);
+  box-shadow: var(--dub-shadow-md);
+  transform: translateY(-1px);
+}
+.fe2-home-tile:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+.fe2-home-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-brand-100);
+  color: var(--dub-color-brand-700);
+  transition: background var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.fe2-home-tile:hover .fe2-home-tile-icon {
+  background: var(--dub-color-brand-200);
+}
+.fe2-home-tile-label {
+  max-width: 100%;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  line-height: var(--dub-font-line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe2-home-tile-badge {
+  position: absolute;
+  top: var(--dub-space-2);
+  right: var(--dub-space-2);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-brand-500);
+  color: #fff;
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-bold);
+  box-shadow: 0 0 0 2px var(--dub-color-surface-raised);
+}
+
+/* Right: live BFF panels. The column fills the body height and scrolls internally
+ * (its own safety valve) so it never pushes the page — the dashboard stays clamped. */
+.fe2-home-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+.fe2-home-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+}
+.fe2-home-cardlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-link);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.fe2-home-cardlink:hover {
+  text-decoration: underline;
+}
+.fe2-home-events-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+}
+/* Turn an events row into a full-width clickable link (keeps fe2-list-row look). */
+.fe2-list-link {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  width: 100%;
+  text-decoration: none;
+  color: inherit;
+  padding: var(--dub-space-1) var(--dub-space-2);
+  margin: 0 calc(-1 * var(--dub-space-2));
+  border-radius: var(--dub-radius-md);
+  transition: background-color var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.fe2-list-link:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.fe2-list-link > svg {
+  flex: 0 0 auto;
   color: var(--dub-color-text-muted);
 }
 

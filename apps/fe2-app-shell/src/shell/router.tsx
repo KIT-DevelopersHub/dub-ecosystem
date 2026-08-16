@@ -19,6 +19,7 @@ import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { HomeScreen } from "./screens/HomeScreen.tsx";
+import { PublicParticipationPage, PUBLIC_PARTICIPATION_PATH } from "../features/participation/index.tsx";
 import { openNotificationDialog } from "@dub/fe5-notification-inbox";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
@@ -75,6 +76,15 @@ export function createShellRouter(
     component: () => <LoginScreen api={api} />,
   });
 
+  // PUBLIC 参加届 form — a sibling of /login, deliberately OUTSIDE the shellRoute (which
+  // wraps everything in RequireAuth). Anonymous participants can reach and submit it
+  // without a session; only the form submit is opened (management stays 運営-only).
+  const publicParticipationRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: PUBLIC_PARTICIPATION_PATH,
+    component: () => <PublicParticipationPage api={api} />,
+  });
+
   // Authenticated shell layout wraps the home screen and all feature routes.
   const shellRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -100,7 +110,12 @@ export function createShellRouter(
     getParentRoute: () => shellRoute,
     path: "/",
     component: () => (
-      <HomeScreen api={api} homeWidgets={registry.homeWidgets} onOpenNotifications={openNotificationDialog} />
+      <HomeScreen
+        api={api}
+        homeWidgets={registry.homeWidgets}
+        onOpenNotifications={openNotificationDialog}
+        {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
+      />
     ),
   });
 
@@ -116,6 +131,7 @@ export function createShellRouter(
 
   const routeTree = rootRoute.addChildren([
     loginRoute,
+    publicParticipationRoute,
     shellRoute.addChildren([homeRoute, ...featureRoutes]),
   ]);
 

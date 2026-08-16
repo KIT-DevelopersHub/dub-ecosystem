@@ -117,13 +117,15 @@ export class InMemoryTaskRepo implements TaskRepo {
     return this.deps.filter((d) => d.taskId === taskId).map((d) => d.dependsOnId);
   }
 
-  async listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]> {
-    return this.deps.filter((d) => this.rows.get(d.taskId)?.eventId === eventId).map((d) => ({ ...d }));
+  async listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]> {
+    return this.deps
+      .filter((d) => (this.rows.get(d.taskId)?.eventId ?? null) === eventId)
+      .map((d) => ({ ...d }));
   }
 
-  async listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]> {
+  async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
     return [...this.rows.values()]
-      .filter((r) => r.eventId === eventId && r.archivedAt === null)
+      .filter((r) => (r.eventId ?? null) === eventId && r.archivedAt === null)
       .map((r) => r.id);
   }
 
@@ -163,7 +165,7 @@ export class InMemoryTaskRepo implements TaskRepo {
         r.dueAt <= end
       ) {
         r.dueSoonNotifiedAt = now;
-        out.push({ taskId: r.id, eventId: r.eventId, dueAt: r.dueAt });
+        out.push({ taskId: r.id, eventId: r.eventId ?? null, dueAt: r.dueAt });
       }
     }
     return out;

@@ -192,6 +192,12 @@ export const DEMO_INBOX_THREAD: mail.MailThread = {
     {
       ...DEMO_INBOX_ITEMS[0]!,
       textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。",
+      // 改善#1: attachment metadata surfaced in the 3-pane reading view. One stored
+      // (downloadable) + one dropped (改善#2: oversize, disabled with a reason).
+      attachments: [
+        { id: "att_ok", filename: "資料.pdf", contentType: "application/pdf", sizeBytes: 204800, status: "stored" },
+        { id: "att_big", filename: "動画.mp4", contentType: "video/mp4", sizeBytes: 41943040, status: "dropped_too_large" },
+      ],
     },
   ],
 };

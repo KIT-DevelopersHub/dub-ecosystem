@@ -34,6 +34,8 @@ import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.ts
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
+import { participationRoutes, participationNav } from "../features/participation/index.tsx";
+import { ParticipationProvider } from "../features/participation/ParticipationProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -256,6 +258,27 @@ function adaptMembers(api: ApiClient): FeatureModule {
   return { id: "members", routes, nav };
 }
 
+// ── participation (FE2-local feature module) ──────────────────────────────────
+// 参加届: a signed-in 運営 files their own 参加届, which member-service reflects onto
+// the roster (招待中→追加済, or a new 追加済 member). Like mail/members it lives in the
+// shell (features/participation) and rides the one api-client. Nav sits after members
+// (order 49), before admin. No requiredPermissions — the submit endpoint is open to any
+// authenticated user, so the launcher tile shows for everyone signed in; the roster
+// write is re-authorized server-side by member-service.
+function adaptParticipation(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(ParticipationProvider, api);
+  const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = participationNav.map((n, i) => {
+    // 参加届(提出)は全員に、回答一覧は identity:read を持つ運営だけにランチャー表示。
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 49 + i };
+    if (n.requiredPermissions && n.requiredPermissions.length > 0) {
+      e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
+    }
+    return e;
+  });
+  return { id: "participation", routes, nav };
+}
+
 // ── driveshare (FE2-local feature module) ─────────────────────────────────────
 // Like mail/usage, the Hackit Drive sharing manager lives in the shell
 // (apps/fe2-app-shell/src/features/driveshare) rather than a separate FE package. Its
@@ -299,7 +322,7 @@ function withNavAppId(module: FeatureModule): FeatureModule {
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, mail, usage, members, driveshare, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, usage, members, participation, driveshare, admin]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
@@ -313,9 +336,10 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptMail(api),
     adaptUsage(api),
     adaptMembers(api),
+    adaptParticipation(api),
     adaptDriveShare(api),
     adaptAdmin(api),
   ].map(withNavAppId);
 }
 
-export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptDriveShare, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptAdmin, toIcon };

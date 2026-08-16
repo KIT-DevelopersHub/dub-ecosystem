@@ -23,7 +23,10 @@ export interface ActionStatusChangedPayload { actionId: ActionId; eventId: Event
 export interface ActionArchivedPayload { actionId: ActionId; eventId: EventId }
 
 // ---- task ----
-export interface TaskEventContext { taskId: TaskId; eventId: EventId }
+// eventId is optional: a task may be unlinked to any event (判断44). Consumers that
+// fan out by event (notification recipients, gantt cache purge) must treat an absent
+// eventId as "no event scope" rather than assume it is always present.
+export interface TaskEventContext { taskId: TaskId; eventId?: EventId }
 export interface TaskCreatedPayload extends TaskEventContext {}
 export interface TaskUpdatedPayload extends TaskEventContext { changed: string[] }
 export interface TaskAssignedPayload extends TaskEventContext { assigneeId: UserId | null }

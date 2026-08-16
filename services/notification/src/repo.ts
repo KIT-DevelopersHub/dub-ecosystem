@@ -141,6 +141,34 @@ export async function backfillBroadcastInbox(db: DbClient, userId: string): Prom
   return missing.length;
 }
 
+/**
+ * Lazily materialize inbox rows for audience='admin' notifications this ADMIN user is
+ * missing. The admin analogue of backfillBroadcastInbox: any notification created with
+ * audience='admin' — feedback, deploy, ops alerts, OR a bare row written directly by CI
+ * (deploy hook) that never fanned out to individual admins — becomes visible to every
+ * admin/maintainer on their next inbox read, WITHOUT the producer needing to know admin
+ * user ids. This is what lets the CI deploy-notify be a single idempotent INSERT of one
+ * notification row. Callers MUST gate on isAdminViewer (only admins get admin-audience
+ * rows). Idempotent (NOT EXISTS + INSERT OR IGNORE); cheap for the same reasons as the
+ * broadcast backfill (retention purge bounds the admin-audience row count). Returns rows
+ * newly created. notif_* tables only (@dub/db guard).
+ */
+export async function backfillAdminAudienceInbox(db: DbClient, userId: string): Promise<number> {
+  const missing = await db.all<{ id: string }>(
+    `SELECT n.id FROM notif_notifications n
+      WHERE n.audience = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM notif_inbox i WHERE i.notification_id = n.id AND i.user_id = ?
+        )`,
+    AUDIENCE_ADMIN,
+    userId,
+  );
+  for (const r of missing) {
+    await insertInbox(db, r.id, userId);
+  }
+  return missing.length;
+}
+
 function rowToInboxItem(r: InboxRow): notification.InboxItem {
   return {
     id: r.id,

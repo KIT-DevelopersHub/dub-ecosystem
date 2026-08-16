@@ -29,7 +29,10 @@ import type { EventMappingRule, NotifyRecipients } from "./types";
 const ROLE_ADMIN = "admin";
 const ROLE_ORGANIZER = "organizer";
 
-const byEvent = (eventId: string): NotifyRecipients => ({ eventId });
+// eventId is optional on task.* payloads now (判断44). An unlinked task has no event
+// audience, so recipients resolve to none by event scope (assignee-scoped rules, where
+// present, still apply). recipients.ts already guards `if (recipients.eventId)`.
+const byEvent = (eventId: string | undefined): NotifyRecipients => (eventId ? { eventId } : {});
 
 export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
   // ---- task ----
