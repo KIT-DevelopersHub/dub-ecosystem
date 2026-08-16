@@ -11,17 +11,22 @@
 import { test, expect } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 
-const SHOTS = "/Users/kota/DubVault/docs/participation-single-and-list";
+const SHOTS = "/Users/kota/DubVault/docs/participation-fields";
 mkdirSync(SHOTS, { recursive: true });
 const shot = (name: string): string => `${SHOTS}/${name}`;
 
-test("(a) public /participate accepts the two emails and confirms", async ({ page }) => {
+test("(a) public /participate accepts split 姓/名 + emails + phone and confirms", async ({ page }) => {
   await page.goto("/participate");
   await expect(page.getByTestId("participation-public-page")).toBeVisible();
 
-  await page.getByTestId("participation-name").fill("公開 太郎");
+  // 新レイアウト: 氏名[姓/名] → 振り仮名[せい/めい] → メール → 電話
+  await page.getByTestId("participation-last-name").fill("公開");
+  await page.getByTestId("participation-first-name").fill("太郎");
+  await page.getByTestId("participation-last-name-kana").fill("こうかい");
+  await page.getByTestId("participation-first-name-kana").fill("たろう");
   await page.getByTestId("participation-school-email").fill("koukai@school.ac.jp");
   await page.getByTestId("participation-gmail").fill("koukai.taro@gmail.com");
+  await page.getByTestId("participation-phone").fill("090-1234-5678");
   await page.screenshot({ path: shot("01-public-form.png"), fullPage: true });
 
   await page.getByTestId("participation-submit").click();

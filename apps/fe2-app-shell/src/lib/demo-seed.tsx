@@ -1190,6 +1190,11 @@ interface DemoMember {
   contact: string | null;
   schoolEmail: string | null;
   gmail: string | null;
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  phone: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
@@ -1221,7 +1226,7 @@ function createMembersStore() {
     grade: string | null = null,
     identityUserId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
@@ -1254,14 +1259,16 @@ function createMembersStore() {
   const participations: any[] = [
     {
       id: "part_seed_1", orgId: ORG, memberId: "member_h2", name: "黒川", normalizedName: "黒川",
-      nameKana: "くろかわ", grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp",
+      lastName: "黒川", firstName: null, nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
+      grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
       schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
       desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
       matchKind: "linked_existing", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
     {
       id: "part_seed_2", orgId: ORG, memberId: "member_demo_new", name: "田中 実", normalizedName: "田中実",
-      nameKana: "たなか みのる", grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp",
+      lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
+      grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -1309,7 +1316,8 @@ function createMembersStore() {
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
-        contact: body?.contact ?? null, schoolEmail: null, gmail: null, note: body?.note ?? null,
+        contact: body?.contact ?? null, schoolEmail: null, gmail: null,
+        lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, phone: null, note: body?.note ?? null,
         sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
@@ -1377,7 +1385,16 @@ function createMembersStore() {
     // Both endpoints share this reflect: the PUBLIC one (unauthenticated) returns a minimal
     // { accepted, matchKind }; the authenticated one returns the full participation + member.
     const reflectParticipation = (): { participation: unknown; member: DemoMember; matchKind: "linked_existing" | "created_new" } => {
-      const name = String(body?.name ?? "").trim();
+      const compose = (a: unknown, b: unknown): string =>
+        [a, b].map((x) => (typeof x === "string" ? x.trim() : "")).filter((x) => x.length > 0).join(" ");
+      const lastName: string | null = body?.lastName ?? null;
+      const firstName: string | null = body?.firstName ?? null;
+      const lastNameKana: string | null = body?.lastNameKana ?? null;
+      const firstNameKana: string | null = body?.firstNameKana ?? null;
+      // 分割入力を優先し "姓 名" を合成。旧単一 name も後方互換で受ける。
+      const name = (compose(lastName, firstName) || String(body?.name ?? "")).trim();
+      const nameKana: string | null = compose(lastNameKana, firstNameKana) || body?.nameKana || null;
+      const phone: string | null = body?.phone ?? null;
       const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
       const target = norm(name);
       const desiredTeamId: string | null = body?.desiredTeamId ?? null;
@@ -1398,6 +1415,11 @@ function createMembersStore() {
         if (existing.grade === null && grade) existing.grade = grade;
         if (existing.schoolEmail === null && schoolEmail) existing.schoolEmail = schoolEmail;
         if (existing.gmail === null && gmail) existing.gmail = gmail;
+        if (existing.lastName === null && lastName) existing.lastName = lastName;
+        if (existing.firstName === null && firstName) existing.firstName = firstName;
+        if (existing.lastNameKana === null && lastNameKana) existing.lastNameKana = lastNameKana;
+        if (existing.firstNameKana === null && firstNameKana) existing.firstNameKana = firstNameKana;
+        if (existing.phone === null && phone) existing.phone = phone;
         if (existing.note === null && note) existing.note = note;
         existing.version += 1;
         existing.updatedAt = isoNow();
@@ -1408,7 +1430,8 @@ function createMembersStore() {
           id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added", identityUserId: null,
           department, grade,
           teamIds: desiredTeamId ? [desiredTeamId] : [], contact: contact ?? schoolEmail,
-          schoolEmail: schoolEmail || null, gmail: gmail || null, note,
+          schoolEmail: schoolEmail || null, gmail: gmail || null,
+          lastName, firstName, lastNameKana, firstNameKana, phone, note,
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(resolved);
@@ -1416,8 +1439,9 @@ function createMembersStore() {
       }
       const participation = {
         id: nid("part"), orgId: ORG, memberId: resolved.id, name, normalizedName: target,
-        nameKana: body?.nameKana ?? null, grade: body?.grade ?? null, department: body?.department ?? null,
-        contact, schoolEmail, gmail, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
+        lastName, firstName, nameKana, lastNameKana, firstNameKana,
+        grade: body?.grade ?? null, department: body?.department ?? null,
+        contact, phone, schoolEmail, gmail, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
         status: "submitted", matchKind, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
       };
       participations.unshift(participation);
@@ -1429,7 +1453,13 @@ function createMembersStore() {
       const school = String(body?.schoolEmail ?? "").trim();
       const gm = String(body?.gmail ?? "").trim();
       const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-      if (!String(body?.name ?? "").trim() || !emailRe.test(school) || !emailRe.test(gm)) {
+      // 姓/名 の分割入力 or 旧単一 name のどちらかで氏名が揃えば OK。
+      const composedName = [body?.lastName, body?.firstName]
+        .map((x) => (typeof x === "string" ? x.trim() : ""))
+        .filter((x) => x.length > 0)
+        .join(" ");
+      const hasName = composedName.length > 0 || String(body?.name ?? "").trim().length > 0;
+      if (!hasName || !emailRe.test(school) || !emailRe.test(gm)) {
         const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
         return json(err, 400);
       }

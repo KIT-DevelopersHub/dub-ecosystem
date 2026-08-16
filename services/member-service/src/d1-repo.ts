@@ -27,6 +27,11 @@ interface PersonDbRow {
   contact: string | null;
   school_email: string | null;
   gmail: string | null;
+  last_name: string | null;
+  first_name: string | null;
+  last_name_kana: string | null;
+  first_name_kana: string | null;
+  phone: string | null;
   note: string | null;
   sort_order: number;
   version: number;
@@ -55,10 +60,15 @@ interface ParticipationDbRow {
   member_id: string | null;
   name: string;
   normalized_name: string;
+  last_name: string | null;
+  first_name: string | null;
   name_kana: string | null;
+  last_name_kana: string | null;
+  first_name_kana: string | null;
   grade: string | null;
   department: string | null;
   contact: string | null;
+  phone: string | null;
   school_email: string | null;
   gmail: string | null;
   desired_team_id: string | null;
@@ -79,10 +89,15 @@ function toParticipationRow(r: ParticipationDbRow): ParticipationRow {
     memberId: r.member_id,
     name: r.name,
     normalizedName: r.normalized_name,
+    lastName: r.last_name,
+    firstName: r.first_name,
     nameKana: r.name_kana,
+    lastNameKana: r.last_name_kana,
+    firstNameKana: r.first_name_kana,
     grade: r.grade as member.Grade | null,
     department: r.department,
     contact: r.contact,
+    phone: r.phone,
     schoolEmail: r.school_email ?? "",
     gmail: r.gmail ?? "",
     desiredTeamId: r.desired_team_id,
@@ -110,6 +125,11 @@ function toPersonRow(r: PersonDbRow): PersonRow {
     contact: r.contact,
     schoolEmail: r.school_email,
     gmail: r.gmail,
+    lastName: r.last_name,
+    firstName: r.first_name,
+    lastNameKana: r.last_name_kana,
+    firstNameKana: r.first_name_kana,
+    phone: r.phone,
     note: r.note,
     sortOrder: r.sort_order,
     version: r.version,
@@ -179,9 +199,10 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async createPerson(row: PersonRow, teamIds: string[]): Promise<void> {
       await db.run(
         `INSERT INTO member_people
-          (id, org_id, name, role_title, status, department, grade, identity_user_id, contact, school_email, gmail, note, sort_order, version, archived_at, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        row.id, row.orgId, row.name, row.roleTitle, row.status, row.department, row.grade, row.identityUserId, row.contact, row.schoolEmail, row.gmail, row.note,
+          (id, org_id, name, role_title, status, department, grade, identity_user_id, contact, school_email, gmail, last_name, first_name, last_name_kana, first_name_kana, phone, note, sort_order, version, archived_at, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        row.id, row.orgId, row.name, row.roleTitle, row.status, row.department, row.grade, row.identityUserId, row.contact, row.schoolEmail, row.gmail,
+        row.lastName, row.firstName, row.lastNameKana, row.firstNameKana, row.phone, row.note,
         row.sortOrder, row.version, row.archivedAt, row.createdBy, row.createdAt, row.updatedAt,
       );
       await replaceLinks(row.id, teamIds, row.createdAt);
@@ -210,9 +231,10 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean> {
       const res = await db.run(
         `UPDATE member_people SET
-           name = ?, role_title = ?, status = ?, department = ?, grade = ?, identity_user_id = ?, contact = ?, school_email = ?, gmail = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
+           name = ?, role_title = ?, status = ?, department = ?, grade = ?, identity_user_id = ?, contact = ?, school_email = ?, gmail = ?, last_name = ?, first_name = ?, last_name_kana = ?, first_name_kana = ?, phone = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
          WHERE id = ? AND version = ? AND archived_at IS NULL`,
-        next.name, next.roleTitle, next.status, next.department, next.grade, next.identityUserId, next.contact, next.schoolEmail, next.gmail, next.note, next.sortOrder,
+        next.name, next.roleTitle, next.status, next.department, next.grade, next.identityUserId, next.contact, next.schoolEmail, next.gmail,
+        next.lastName, next.firstName, next.lastNameKana, next.firstNameKana, next.phone, next.note, next.sortOrder,
         next.version, next.updatedAt, next.id, expectedVersion,
       );
       if (res.meta.changes === 0) return false;
@@ -247,17 +269,23 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
       // row in place (created_at is carried by the service from the existing row).
       await db.run(
         `INSERT INTO member_participations
-          (id, org_id, member_id, name, normalized_name, name_kana, grade, department, contact,
+          (id, org_id, member_id, name, normalized_name, last_name, first_name, name_kana,
+           last_name_kana, first_name_kana, grade, department, contact, phone,
            school_email, gmail, desired_team_id, desired_activity, note, status, match_kind,
            submitted_by, submitted_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(org_id, normalized_name) DO UPDATE SET
            member_id = excluded.member_id,
            name = excluded.name,
+           last_name = excluded.last_name,
+           first_name = excluded.first_name,
            name_kana = excluded.name_kana,
+           last_name_kana = excluded.last_name_kana,
+           first_name_kana = excluded.first_name_kana,
            grade = excluded.grade,
            department = excluded.department,
            contact = excluded.contact,
+           phone = excluded.phone,
            school_email = excluded.school_email,
            gmail = excluded.gmail,
            desired_team_id = excluded.desired_team_id,
@@ -268,8 +296,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
            submitted_by = excluded.submitted_by,
            submitted_at = excluded.submitted_at,
            updated_at = excluded.updated_at`,
-        row.id, row.orgId, row.memberId, row.name, row.normalizedName, row.nameKana, row.grade,
-        row.department, row.contact, row.schoolEmail, row.gmail, row.desiredTeamId, row.desiredActivity,
+        row.id, row.orgId, row.memberId, row.name, row.normalizedName, row.lastName, row.firstName, row.nameKana,
+        row.lastNameKana, row.firstNameKana, row.grade, row.department, row.contact, row.phone,
+        row.schoolEmail, row.gmail, row.desiredTeamId, row.desiredActivity,
         row.note, row.status, row.matchKind, row.submittedBy, row.submittedAt, row.createdAt, row.updatedAt,
       );
     },
