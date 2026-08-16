@@ -51,32 +51,20 @@ function roleNewRoute(): Promise<{ Component: ComponentType }> {
   }));
 }
 
-function historyRoute(): Promise<{ Component: ComponentType }> {
-  return import("./components/AuditHistoryPage").then(({ AuditHistoryPage }) => ({
-    Component: AuditHistoryPage,
-  }));
-}
-
-function emailRoutingRoute(): Promise<{ Component: ComponentType }> {
-  return import("./components/EmailRoutingPage").then(({ EmailRoutingPage }) => ({
-    Component: EmailRoutingPage,
-  }));
-}
+// メールアドレス管理 (/admin/email-routing) と 変更履歴 (/admin/history) は
+// ユーザー明示承認で launcher/ナビから外した。route/nav を登録解除して非表示にするだけで、
+// コンポーネント（EmailRoutingPage / AuditHistoryPage）は将来戻せるよう残置している。
 
 export const routes: FeatureRoute[] = [
   { path: "/admin/users", lazy: usersRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/users/:userId", lazy: userDetailRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles", lazy: rolesRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles/new", lazy: roleNewRoute, auth: "required", requiredPermissions: ["identity:admin"] },
-  { path: "/admin/email-routing", lazy: emailRoutingRoute, auth: "required", requiredPermissions: ["mail:admin"] },
-  { path: "/admin/history", lazy: historyRoute, auth: "required", requiredPermissions: ["audit:read"] },
 ];
 
 export const nav: NavEntry[] = [
   { label: "ユーザー名簿", path: "/admin/users", icon: "users", order: 10 },
   { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 20 },
-  { label: "メールアドレス管理", path: "/admin/email-routing", icon: "inbox", order: 25 },
-  { label: "変更履歴", path: "/admin/history", icon: "history", order: 30 },
 ];
 
 // headerWidget: mounted by the FE2 shell above the module surface (same slot as FE5's
