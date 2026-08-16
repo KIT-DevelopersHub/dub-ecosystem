@@ -117,13 +117,20 @@ export function buildApp(deps: Deps): Hono {
 
     const eventId = c.req.query("eventId");
     const assigneeId = c.req.query("assigneeId");
+    const createdById = c.req.query("createdById");
     const includeArchived = c.req.query("includeArchived") === "true";
     if (includeArchived) await deps.authz.require(ctx, principal, "task:delete");
 
-    // /me rule: eventId may be omitted only when listing the caller's own tasks.
-    if (!eventId) {
-      const isSelf = principal.kind === "user" && assigneeId === principal.userId;
-      if (!isSelf) throw errors.validationFailed([{ field: "eventId", reason: "required" }]);
+    // eventId may be omitted by: (a) a service-role caller (e.g. gantt-service building
+    // a global chart, github-sync) — trusted internal reads; or (b) a user listing their
+    // OWN tasks — assigned to them (担当) or issued by them (依頼), which scope to self so
+    // the "My Tasks" hub never leaks other people's lists. Since tasks may be unlinked to
+    // any event (判断44), a bare `GET /tasks` from a user for someone else is still gated.
+    if (!eventId && !isServiceRole(principal)) {
+      const isSelf =
+        principal.kind === "user" &&
+        (assigneeId === principal.userId || createdById === principal.userId);
+      if (!isSelf) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
     }
 
     const statusRaw = (c.req.queries("status") ?? []).flatMap((s) => s.split(",")).filter(Boolean);
@@ -137,6 +144,7 @@ export function buildApp(deps: Deps): Hono {
       limit: normalizeLimit(c.req.query("limit")),
       ...(eventId ? { eventId } : {}),
       ...(assigneeId ? { assigneeId } : {}),
+      ...(createdById ? { createdById } : {}),
       ...(statusRaw.length > 0 ? { statuses: statusRaw as task.TaskStatus[] } : {}),
       ...(cursorRaw ? { cursorId: decodeCursor(cursorRaw) } : {}),
     };
@@ -162,17 +170,23 @@ export function buildApp(deps: Deps): Hono {
     if (body.assigneeId !== undefined && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
-    if (!body.eventId || typeof body.eventId !== "string") fe.push({ field: "eventId", reason: "required" });
+    // eventId is now OPTIONAL (判断44). If present it must be a string; when omitted the
+    // task is issued unlinked to any event. Only validate against event-service when set.
+    if (body.eventId !== undefined && body.eventId !== null && typeof body.eventId !== "string") {
+      fe.push({ field: "eventId", reason: "invalid_type" });
+    }
     // origin is service-role only; a normal client specifying it is a 400.
     if (body.origin !== undefined && !isServiceRole(principal)) {
       fe.push({ field: "origin", reason: "not_allowed", message: "origin is service-role only" });
     }
     assertValid(fe);
 
-    const eventId = body.eventId!;
-    const ref = await deps.eventClient.getEvent(ctx, eventId);
-    if (!ref) throw taskErrors.eventNotFound(eventId);
-    if (ref.archivedAt) throw taskErrors.eventArchived(eventId);
+    const eventId: common.EventId | null = body.eventId ?? null;
+    if (eventId) {
+      const ref = await deps.eventClient.getEvent(ctx, eventId);
+      if (!ref) throw taskErrors.eventNotFound(eventId);
+      if (ref.archivedAt) throw taskErrors.eventArchived(eventId);
+    }
 
     if (body.assigneeId) {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
@@ -196,9 +210,10 @@ export function buildApp(deps: Deps): Hono {
       now,
     });
 
-    const specs: EventSpec[] = [{ name: "task.created", payload: { taskId: id, eventId } }];
+    const evt = eventId ? { eventId } : {};
+    const specs: EventSpec[] = [{ name: "task.created", payload: { taskId: id, ...evt } }];
     if (created.assigneeId) {
-      specs.push({ name: "task.assigned", payload: { taskId: id, eventId, assigneeId: created.assigneeId } });
+      specs.push({ name: "task.assigned", payload: { taskId: id, ...evt, assigneeId: created.assigneeId } });
     }
     await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);
 
@@ -296,24 +311,25 @@ export function buildApp(deps: Deps): Hono {
 
     // events (a single PATCH can raise several).
     const actorId = actorIdOf(principal);
+    const evt = current.eventId ? { eventId: current.eventId } : {};
     const specs: EventSpec[] = [];
     const changed: string[] = [];
     for (const f of ["title", "description", "priority", "dueAt"] as const) {
       if (patch[f] !== undefined && current[f] !== updated[f]) changed.push(f);
     }
     if (changed.length > 0) {
-      specs.push({ name: "task.updated", payload: { taskId: id, eventId: current.eventId, changed } });
+      specs.push({ name: "task.updated", payload: { taskId: id, ...evt, changed } });
     }
     if (statusChanged) {
       specs.push({
         name: "task.status_changed",
-        payload: { taskId: id, eventId: current.eventId, previousStatus: current.status, status: updated.status },
+        payload: { taskId: id, ...evt, previousStatus: current.status, status: updated.status },
       });
     }
     if (assigneeChanged) {
       specs.push({
         name: "task.assigned",
-        payload: { taskId: id, eventId: current.eventId, assigneeId: updated.assigneeId },
+        payload: { taskId: id, ...evt, assigneeId: updated.assigneeId },
       });
     }
     await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);
@@ -337,11 +353,12 @@ export function buildApp(deps: Deps): Hono {
     if (!ok) throw taskErrors.notFound(id);
 
     const actorId = actorIdOf(principal);
+    const evt = current.eventId ? { eventId: current.eventId } : {};
     await emit(deps.events, { requestId: ctx.requestId, actorId }, [
-      { name: "task.archived", payload: { taskId: id, eventId: current.eventId } },
+      { name: "task.archived", payload: { taskId: id, ...evt } },
     ]);
     await deps.audit.record(
-      auditRecord("task.task.archived", actorId, config.orgId, ctx.requestId, id, { eventId: current.eventId }),
+      auditRecord("task.task.archived", actorId, config.orgId, ctx.requestId, id, { eventId: current.eventId ?? null }),
     );
 
     const archived = await deps.repo.getById(id, true);
@@ -373,12 +390,15 @@ export function buildApp(deps: Deps): Hono {
     if (body.version !== current.version) throw taskErrors.versionConflict();
 
     // Single-engine dependency validation via @dub/gantt-calc. taskIds = the live
-    // tasks of this event (existence + same-event + non-archived in one set):
-    // any dependsOnId outside it surfaces as unknownTaskIds (4xx). The graph is
-    // the event's edges with this task's swapped for the requested ones (409 on cycle).
-    const liveIds = await deps.repo.listLiveTaskIdsByEvent(current.eventId);
+    // tasks of this bucket (existence + same-bucket + non-archived in one set): any
+    // dependsOnId outside it surfaces as unknownTaskIds (4xx). The bucket is the task's
+    // event, or the unlinked bucket (event_id IS NULL) when the task has no event. The
+    // graph is the bucket's edges with this task's swapped for the requested ones (409
+    // on cycle).
+    const bucket = current.eventId ?? null;
+    const liveIds = await deps.repo.listLiveTaskIdsByEvent(bucket);
     const liveSet = new Set(liveIds);
-    const dependencies: task.TaskDependency[] = (await deps.repo.listDependenciesByEvent(current.eventId))
+    const dependencies: task.TaskDependency[] = (await deps.repo.listDependenciesByEvent(bucket))
       .filter((e) => e.taskId !== id && liveSet.has(e.taskId) && liveSet.has(e.dependsOnId))
       .concat(dependsOnIds.map((dep) => ({ taskId: id, dependsOnId: dep })));
     const verdict = validateDependencies({ taskIds: liveIds, dependencies });
@@ -398,15 +418,16 @@ export function buildApp(deps: Deps): Hono {
     if (!result.ok) throw taskErrors.versionConflict();
 
     const actorId = actorIdOf(principal);
+    const evt = current.eventId ? { eventId: current.eventId } : {};
     await emit(deps.events, { requestId: ctx.requestId, actorId }, [
       {
         name: "task.dependency_changed",
-        payload: { taskId: id, eventId: current.eventId, added: result.added, removed: result.removed },
+        payload: { taskId: id, ...evt, added: result.added, removed: result.removed },
       },
     ]);
     await deps.audit.record(
       auditRecord("task.dependency.replaced", actorId, config.orgId, ctx.requestId, id, {
-        eventId: current.eventId,
+        eventId: current.eventId ?? null,
         added: result.added,
         removed: result.removed,
       }),

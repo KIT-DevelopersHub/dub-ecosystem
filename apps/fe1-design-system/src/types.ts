@@ -64,7 +64,9 @@ export type IconName =
   | "check"
   | "check-all"
   | "bell-off"
-  | "archive";
+  | "archive"
+  | "folder"
+  | "folder-open";
 
 export interface IconProps extends TestableProps {
   name: IconName;
@@ -327,6 +329,12 @@ export interface AppLauncherItem {
   icon?: IconName; // resolved via FE1 Icon
   href?: string; // consumer's renderLink/onSelect maps this to router navigation
   badgeCount?: number;
+  // Release-gating: a tile the current viewer may NOT open yet is kept in the grid
+  // (never removed — 消さない) but rendered greyed-out, non-clickable and with a
+  // tooltip. Visibility/eligibility is decided upstream by whoever builds `items`;
+  // this component only renders the disabled state and suppresses onSelect.
+  disabled?: boolean;
+  disabledReason?: string; // tooltip text shown on the greyed tile (e.g. 準備中)
 }
 export interface AppLauncherProps extends TestableProps {
   items: AppLauncherItem[];
@@ -351,7 +359,10 @@ export interface SidebarProps extends TestableProps {
 }
 
 export interface PageHeaderProps extends TestableProps {
-  title: string;
+  // ReactNode (not just string) so composers can supply a rich title — e.g. FE2's
+  // brand lockup (bold "DevHub" home link + a small muted account email). Still
+  // rendered inside the <h1>, so plain strings keep working unchanged.
+  title: ReactNode;
   description?: string;
   actions?: ReactNode;
   breadcrumbs?: ReactNode;

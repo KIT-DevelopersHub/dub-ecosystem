@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { DbClient } from "@dub/db";
 import { createApp } from "../src/app";
+import { parseNotifyRequest } from "../src/validation";
 import { ingest, type IngestDeps } from "../src/ingest";
 import { consumeEventQueue } from "../src/queue";
 import { mappingToIngest } from "../src/queue";
@@ -348,6 +349,36 @@ describe("queue consumer (lanes A/B + idempotency)", () => {
 
 // ---------------------------------------------------------------------------
 
+describe("parseNotifyRequest — recipientRoles", () => {
+  const base = { type: "usage.threshold_breached", title: "t", body: "b" };
+
+  it("accepts recipientRoles and keeps recipientIds (union)", () => {
+    const out = parseNotifyRequest({ ...base, recipientIds: ["u1"], recipientRoles: ["role_sys_admin"] });
+    expect(out.recipientIds).toEqual(["u1"]);
+    expect(out.recipientRoles).toEqual(["role_sys_admin"]);
+  });
+
+  it("allows empty recipientIds when recipientRoles is non-empty", () => {
+    const out = parseNotifyRequest({ ...base, recipientIds: [], recipientRoles: ["role_sys_admin"] });
+    expect(out.recipientIds).toEqual([]);
+    expect(out.recipientRoles).toEqual(["role_sys_admin"]);
+  });
+
+  it("omits recipientRoles from output when absent", () => {
+    const out = parseNotifyRequest({ ...base, recipientIds: ["u1"] });
+    expect(out.recipientRoles).toBeUndefined();
+  });
+
+  it("rejects when both recipientIds and recipientRoles are empty", () => {
+    expect(() => parseNotifyRequest({ ...base, recipientIds: [], recipientRoles: [] })).toThrow();
+    expect(() => parseNotifyRequest({ ...base, recipientIds: [] })).toThrow();
+  });
+
+  it("rejects a non-string-array recipientRoles", () => {
+    expect(() => parseNotifyRequest({ ...base, recipientIds: ["u1"], recipientRoles: [1, 2] })).toThrow();
+  });
+});
+
 describe("HTTP app", () => {
   const app = createApp();
 
@@ -374,6 +405,77 @@ describe("HTTP app", () => {
 
     const uc = await req("/inbox/unread-count", { headers: { "x-dub-user-id": "u1" } }, h);
     expect((await uc.json()) as { count: number }).toEqual({ count: 1 });
+  });
+
+  // A fake SVC_IDENTITY that answers GET /internal/users?roleKey= with fixed members,
+  // so the /notify role fan-out expands to real inbox rows end-to-end.
+  function roleIdentity(byRole: Record<string, string[]>) {
+    return {
+      async fetch(req: Request): Promise<Response> {
+        const url = new URL(req.url);
+        if (url.pathname.endsWith("/internal/users")) {
+          const roleKey = url.searchParams.get("roleKey") ?? "";
+          const items = (byRole[roleKey] ?? []).map((id) => ({ id }));
+          return new Response(JSON.stringify({ items, nextCursor: null }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    } as unknown as import("@cloudflare/workers-types").Fetcher;
+  }
+
+  it("POST /notify with recipientRoles fans out to role members' inboxes (union with ids)", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: roleIdentity({ role_sys_admin: ["u_admin"], role_sys_maintainer: ["u_maint"] }) });
+    const res = await req(
+      "/notify",
+      internalPost({ type: "usage.threshold_breached", recipientIds: ["u_direct"], recipientRoles: ["role_sys_admin", "role_sys_maintainer"], title: "枠超過", body: "warn", channels: ["in_app"] }),
+      h,
+    );
+    expect(res.status).toBe(202);
+    expect(await unreadCount(h.db, "u_admin")).toBe(1);
+    expect(await unreadCount(h.db, "u_maint")).toBe(1);
+    expect(await unreadCount(h.db, "u_direct")).toBe(1); // ids union with roles
+  });
+
+  it("POST /notify with only recipientRoles (empty ids) still delivers", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: roleIdentity({ role_sys_admin: ["u_admin"] }) });
+    const res = await req(
+      "/notify",
+      internalPost({ type: "usage.threshold_breached", recipientIds: [], recipientRoles: ["role_sys_admin"], title: "枠超過", body: "warn", channels: ["in_app"] }),
+      h,
+    );
+    expect(res.status).toBe(202);
+    expect(await unreadCount(h.db, "u_admin")).toBe(1);
+  });
+
+  it("POST /notify with empty ids AND no roles -> 400 NOTIF_VALIDATION_FAILED", async () => {
+    const h = makeTestEnv();
+    const res = await req("/notify", internalPost({ type: "x.y", recipientIds: [], title: "t", body: "b" }), h);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("NOTIF_VALIDATION_FAILED");
+  });
+
+  it("GAP-2: routes are also served under the '/notifications' gateway segment", async () => {
+    // The api-gateway forwards its "/notifications/*" segment verbatim (transparent proxy,
+    // no strip), so the real service must answer that prefix — not only bare "/inbox".
+    // Regression guard for the prod 通知ダイアログ "Couldn't load" (external
+    // /api/v1/notifications/inbox 404'd because the service only mounted at /inbox).
+    const h = makeTestEnv();
+    const res = await req("/notifications/notify", internalPost({ type: "system.announcement", recipientIds: ["u1"], title: "Hi", body: "there", channels: ["in_app"] }), h);
+    expect(res.status).toBe(202);
+
+    const inbox = await req("/notifications/inbox", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(inbox.status).toBe(200);
+    const page = (await inbox.json()) as { items: { id: string }[] };
+    expect(page.items).toHaveLength(1);
+
+    const uc = await req("/notifications/inbox/unread-count", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect((await uc.json()) as { count: number }).toEqual({ count: 1 });
+
+    const prefs = await req("/notifications/preferences", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(prefs.status).toBe(200);
   });
 
   it("#15 POST /notify without x-dub-internal -> 403 FORBIDDEN", async () => {

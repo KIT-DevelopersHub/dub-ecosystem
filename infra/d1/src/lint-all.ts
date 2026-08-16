@@ -39,6 +39,20 @@ export function lintAll(migrations: readonly Migration[] = collectMigrations()):
   }));
 }
 
+/**
+ * Documented, narrowly-scoped exemptions from the `forbidden-statement` rule
+ * (DROP / ATTACH / PRAGMA). The frozen namespaces normally forbid these because a
+ * plain forward migration never needs them — but relaxing a column constraint in
+ * SQLite (no `ALTER COLUMN`) requires the standard data-preserving table-rebuild,
+ * which legitimately uses PRAGMA (foreign_keys / legacy_alter_table) + DROP of the
+ * renamed-aside table. Each entry is keyed by exact "<namespace>/<id>" and only the
+ * `forbidden-statement` rule is waived — all other lint rules still gate the file.
+ * Approved: 判断61 (task→event optional; see PR #214).
+ */
+const FORBIDDEN_STATEMENT_EXEMPTIONS: ReadonlySet<string> = new Set([
+  "task/0003_event_id_nullable", // NOT NULL removal via FK-safe table rebuild
+]);
+
 /** Error-level issues that gate CI — draft namespaces excluded (theme-12). */
 export function lintAllErrors(
   migrations: readonly Migration[] = collectMigrations(),
@@ -46,6 +60,15 @@ export function lintAllErrors(
 ): LintReport[] {
   return lintAll(migrations)
     .filter((r) => !draftNamespaces.includes(r.namespace))
-    .map((r) => ({ ...r, issues: r.issues.filter((i) => i.level === "error") }))
+    .map((r) => {
+      const key = `${r.namespace}/${r.migrationId}`;
+      const exempt = FORBIDDEN_STATEMENT_EXEMPTIONS.has(key);
+      return {
+        ...r,
+        issues: r.issues.filter(
+          (i) => i.level === "error" && !(exempt && i.rule === "forbidden-statement"),
+        ),
+      };
+    })
     .filter((r) => r.issues.length > 0);
 }

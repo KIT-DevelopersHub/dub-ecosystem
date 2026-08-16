@@ -3,16 +3,25 @@
 # unmatched path, falls back to index.html so TanStack Router client-side routes
 # (e.g. /login) resolve. Deployed under the DevHub account's workers.dev subdomain.
 #
-# Deploy:
+# CANONICAL WORKER NAME: `dub-fe2-app-shell`. This config, `wrangler.free.toml`, and
+# CI (`infra/deploy/deploy-prod.sh`) all target that one worker. The gateway CORS
+# allowlist (`ALLOWED_ORIGINS`) only trusts `dub-fe2-app-shell.…workers.dev`.
+# HISTORY: this file once used `name = "fe2-app-shell"` (no `dub-` prefix). Deploying
+# it created a SECOND, CI-unmanaged worker serving a stale bundle whose API calls were
+# CORS-rejected (a "split brain" / blank-screen prod incident). The name is now aligned
+# so no config can ever recreate that orphan. See PR that fixed the split brain.
+#
+# Prod deploys go through CI on merge to main. For a manual deploy, prefer the free
+# config so names can never drift:
 #   pnpm --filter @dub/fe2-app-shell build
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
-#   npx wrangler deploy --config apps/fe2-app-shell/wrangler.toml
+#   npx wrangler deploy --config apps/fe2-app-shell/wrangler.free.toml
 #
 # API wiring: the SPA calls VITE_API_BASE_URL (default the live free-tier gateway
 # https://dub-api-gateway.developershub-site.workers.dev) for /api/v1/*. The custom
 # domain api.developershub.jp is NOT DNS-configured, so it must never be the default.
 # To point at another gateway, rebuild with VITE_API_BASE_URL set.
-name = "fe2-app-shell"
+name = "dub-fe2-app-shell"
 compatibility_date = "2026-08-01"
 
 [assets]

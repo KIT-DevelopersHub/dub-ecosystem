@@ -57,6 +57,20 @@ describe("combineThreads", () => {
     // the standalone send is still its own Sent thread.
     expect(threads.find((x) => x.id === "s9")?.folder).toBe("sent");
   });
+
+  it("folds MULTIPLE sent replies into one 3+ message conversation once the gateway normalizes threadId (改善#4)", () => {
+    // With the backend storing the ROOT thread id on every reply, several of our sends
+    // share threadId "T" and all fold into the single conversation, interleaved by date —
+    // no reply is orphaned as its own Sent thread.
+    const sent: mail.MailSentListItem[] = [
+      { id: "r1", from: { email: "info@developershub.jp" }, to: [{ email: "a@x.jp" }], subject: "Re: Hello", snippet: "reply 1", sentAt: "2026-08-01T12:00:00.000Z", provider: "resend", status: "sent", threadId: "T" },
+      { id: "r2", from: { email: "info@developershub.jp" }, to: [{ email: "b@x.jp" }], subject: "Re: Hello", snippet: "reply 2", sentAt: "2026-08-02T12:00:00.000Z", provider: "resend", status: "sent", threadId: "T" },
+    ];
+    const threads = combineThreads(inbox, sent, SELF);
+    const t = threads.find((x) => x.id === "T")!;
+    expect(t.messages.map((m) => m.id)).toEqual(["a1", "r1", "a2", "r2"]); // date-interleaved
+    expect(threads.filter((x) => x.folder === "sent")).toHaveLength(0); // neither reply orphaned
+  });
 });
 
 describe("full-body mappers", () => {
@@ -68,5 +82,22 @@ describe("full-body mappers", () => {
   it("sentDetailToMessage uses textBody", () => {
     const detail: mail.MailSentDetail = { id: "s1", from: { email: "a@b.jp" }, to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent", textBody: "full sent body" };
     expect(sentDetailToMessage(detail, SELF).body).toBe("full sent body");
+  });
+
+  it("threadDetailToMessages carries attachment metadata (改善#1: 3-pane list/download)", () => {
+    const att: mail.MailAttachment[] = [{ id: "att1", filename: "spec.pdf", contentType: "application/pdf", sizeBytes: 2048 }];
+    const thread: mail.MailThread = { id: "T", messages: [{ ...inbox[0]!, textBody: "b", attachments: att }] };
+    expect(threadDetailToMessages(thread)[0]!.attachments).toEqual(att);
+  });
+
+  it("threadDetailToMessages omits attachments when none (byte-identical to prior shape)", () => {
+    const thread: mail.MailThread = { id: "T", messages: [{ ...inbox[0]!, textBody: "b" }] };
+    expect("attachments" in threadDetailToMessages(thread)[0]!).toBe(false);
+  });
+
+  it("sentDetailToMessage carries attachment metadata", () => {
+    const att: mail.MailAttachment[] = [{ id: "a9", filename: "img.png", contentType: "image/png", sizeBytes: 500 }];
+    const detail: mail.MailSentDetail = { id: "s1", to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent", textBody: "b", attachments: att };
+    expect(sentDetailToMessage(detail, SELF).attachments).toEqual(att);
   });
 });

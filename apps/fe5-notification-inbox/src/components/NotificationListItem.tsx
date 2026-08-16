@@ -2,8 +2,10 @@
 // resolved linkUrl (FE5 §2-2, test 8). Unread rows carry a dot + aria state.
 
 import type { KeyboardEvent, ReactNode } from "react";
+import { Badge } from "@dub/ui";
 import type { InboxItem } from "../contracts/notification-api";
 import { NotificationTypeLabel } from "./NotificationTypeLabel";
+import { resolveTypeDisplay } from "../lib/type-dictionary";
 import { formatRelativeTime } from "../lib/relative-time";
 import styles from "./NotificationListItem.module.css";
 
@@ -30,6 +32,7 @@ export function itemLinkUrl(item: InboxItem): string | null {
 export function NotificationListItem(props: NotificationListItemProps): ReactNode {
   const { item, onActivate } = props;
   const unread = item.readAt === null;
+  const isRelease = resolveTypeDisplay(item.type).group === "release";
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -51,7 +54,13 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
         <div className={styles.title}>{item.title}</div>
         <div className={styles.snippet}>{item.body}</div>
         <div className={styles.meta}>
-          <NotificationTypeLabel type={item.type} />
+          {isRelease ? (
+            <Badge tone="brand" testId="fe5-inbox-release-badge">
+              🎉 新機能
+            </Badge>
+          ) : (
+            <NotificationTypeLabel type={item.type} />
+          )}
           <span>{formatRelativeTime(item.createdAt)}</span>
         </div>
       </div>

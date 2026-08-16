@@ -75,6 +75,10 @@ service = "dub-github-sync"        # POST /internal/events-async (evt.github-syn
 binding = "SVC_MOBILE_BFF"
 service = "mo3-mobile-bff"         # POST /internal/events-async (evt.mobile-bff) — live worker has NO dub- prefix
 
+[[services]]
+binding = "SVC_MAIL_AUTOMATION"
+service = "dub-mail-automation"    # POST /internal/events-async (evt.mail-automation, 改善#5)
+
 # --- NO cron trigger. The drain is driven by the FreeqDrainDO alarm (above), which does not
 #     consume a slot on the Workers FREE plan's 5-cron account cap. ---
 

@@ -33,6 +33,7 @@ export interface MockSeed {
   dependencies?: gantt.GanttDependencyLine[];
   users?: identity.UserSummary[];
   teams?: team.Team[];
+  events?: event.EventSummary[];
   actions?: event.ActionSummary[];
   view?: gantt.GanttViewState;
   /** row date overrides (task has only dueAt; gantt startsAt/endsAt live here). */
@@ -43,6 +44,8 @@ export interface MockSeed {
    *  parent column (server keeps it in gantt-service), so the mock carries it here
    *  and projects it onto each GanttRow. `hasChildren` is derived, not stored. */
   hierarchy?: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }>;
+  /** "current user" the mock stamps as createdBy on POST /tasks (from→to "from"). */
+  currentUserId?: common.UserId;
 }
 
 export class MockApiClient implements ApiClient {
@@ -50,11 +53,13 @@ export class MockApiClient implements ApiClient {
   private deps = new Map<common.TaskId, common.TaskId[]>(); // taskId -> dependsOnIds
   private users = new Map<common.UserId, identity.UserSummary>();
   private teams: team.Team[] = [];
+  private eventSummaries: event.EventSummary[] = [];
   private actions: event.ActionSummary[] = [];
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
   private criticalTaskIds: common.TaskId[] = [];
   private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
+  private currentUserId: common.UserId;
 
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
@@ -70,11 +75,13 @@ export class MockApiClient implements ApiClient {
     }
     for (const u of seed.users ?? []) this.users.set(u.id, u);
     this.teams = seed.teams ?? [];
+    this.eventSummaries = seed.events ?? [];
     this.actions = seed.actions ?? [];
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
     this.hierarchy = seed.hierarchy ?? {};
+    this.currentUserId = seed.currentUserId ?? "usr_me";
   }
 
   /** Set of task ids that appear as some row's parent (⇒ they render a toggle). */
@@ -132,6 +139,8 @@ export class MockApiClient implements ApiClient {
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(String(req.query?.ids ?? "")) as T;
     // --- events ---
+    if (path === "/api/v1/events" && req.method === "GET")
+      return ({ items: this.eventSummaries } as event.ListEventsResponse) as T;
     const evActions = path.match(/^\/api\/v1\/events\/([^/]+)\/actions$/);
     if (evActions && req.method === "GET") return this.actions as T;
 
@@ -182,6 +191,7 @@ export class MockApiClient implements ApiClient {
     let items = [...this.taskById.values()];
     if (q.eventId) items = items.filter((t) => t.eventId === q.eventId);
     if (q.assigneeId) items = items.filter((t) => t.assigneeId === q.assigneeId);
+    if (q.createdById) items = items.filter((t) => t.createdBy === q.createdById);
     if (q.teamId) items = items.filter((t) => t.teamId === q.teamId);
     if (q.status) {
       const statuses = String(q.status).split(",");
@@ -214,6 +224,7 @@ export class MockApiClient implements ApiClient {
       priority: body.priority ?? "medium",
       assigneeId: body.assigneeId ?? null,
       teamId: body.teamId ?? null,
+      createdBy: this.currentUserId, // server stamps created_by from the principal
       dueAt: body.dueAt ?? null,
       origin: body.origin ?? "internal",
       archivedAt: null,

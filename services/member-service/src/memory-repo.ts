@@ -1,7 +1,7 @@
 // In-memory MemberRepo: backs unit/HTTP tests without D1. Team membership is a
 // nested Map (personId -> Set<teamId>) so there is no fragile string-join key.
 import type { common } from "@dub/types";
-import type { MemberRepo, PersonRow, TeamRow } from "./types";
+import type { MemberRepo, ParticipationRow, PersonRow, TeamRow } from "./types";
 
 function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -11,6 +11,7 @@ export class InMemoryMemberRepo implements MemberRepo {
   private teams = new Map<string, TeamRow>();
   private people = new Map<string, PersonRow>();
   private links = new Map<string, Set<string>>(); // personId -> Set<teamId>
+  private participations = new Map<string, ParticipationRow>(); // id -> row
 
   private setLinks(personId: string, teamIds: string[]): void {
     this.links.set(personId, new Set(teamIds));
@@ -58,6 +59,12 @@ export class InMemoryMemberRepo implements MemberRepo {
     const r = this.people.get(id);
     return r && r.archivedAt === null ? { ...r } : null;
   }
+  async getPersonByIdentityUserId(orgId: common.OrgId, identityUserId: string): Promise<PersonRow | null> {
+    for (const p of this.people.values()) {
+      if (p.orgId === orgId && p.archivedAt === null && p.identityUserId === identityUserId) return { ...p };
+    }
+    return null;
+  }
   async listPeople(orgId: common.OrgId): Promise<PersonRow[]> {
     return [...this.people.values()]
       .filter((p) => p.orgId === orgId && p.archivedAt === null)
@@ -90,5 +97,22 @@ export class InMemoryMemberRepo implements MemberRepo {
       for (const teamId of teamIds) out.push({ personId, teamId });
     }
     return out;
+  }
+
+  // ---- participations (参加届) ----
+  async upsertParticipation(row: ParticipationRow): Promise<void> {
+    this.participations.set(row.id, { ...row });
+  }
+  async getParticipationByNormalizedName(orgId: common.OrgId, normalizedName: string): Promise<ParticipationRow | null> {
+    for (const p of this.participations.values()) {
+      if (p.orgId === orgId && p.normalizedName === normalizedName) return { ...p };
+    }
+    return null;
+  }
+  async listParticipations(orgId: common.OrgId): Promise<ParticipationRow[]> {
+    return [...this.participations.values()]
+      .filter((p) => p.orgId === orgId)
+      .sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : a.submittedAt > b.submittedAt ? -1 : cmp(a.id, b.id)))
+      .map((p) => ({ ...p }));
   }
 }

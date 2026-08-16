@@ -33,6 +33,7 @@ export function mappingToIngest(rule: EventMappingRule, env: DubEventEnvelope): 
     title: content.title,
     body: content.body ?? null,
     priority: rule.priority,
+    ...(rule.audience ? { audience: rule.audience } : {}),
     channels: rule.channels,
     dedupKey: rule.buildDedupKey?.(env.payload),
     resourceType: content.resourceType ?? null,

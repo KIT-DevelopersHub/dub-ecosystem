@@ -7,7 +7,7 @@ import type { IconName } from "@dub/ui";
 
 type PermissionKey = identity.PermissionKey;
 
-export type FeatureModuleId = "events" | "tasks" | "gantt" | "notifications" | "chat" | "mail" | "usage" | "members" | "driveshare" | "admin";
+export type FeatureModuleId = "events" | "tasks" | "gantt" | "notifications" | "chat" | "mail" | "usage" | "members" | "participation" | "driveshare" | "admin";
 
 export interface FeatureRoute {
   path: `/${string}`;
@@ -22,6 +22,11 @@ export interface NavEntry {
   path: string;
   icon: IconName;
   order: number;
+  // Owning feature module id. Set by composition so the launcher can look up the
+  // app's member-release status (see lib/releaseGate). Optional so unit tests may
+  // build bare nav entries; when omitted the release gate treats the tile as
+  // published (never accidentally greys a test fixture).
+  appId?: FeatureModuleId;
   badgeSource?: () => number; // hook injection: FE5 useUnreadCount / FE6 useChatUnreadTotal
   // Permissions the viewer must hold for this launcher item to be shown (AND
   // semantics; omitted = visible to any authed user). The shell filters the

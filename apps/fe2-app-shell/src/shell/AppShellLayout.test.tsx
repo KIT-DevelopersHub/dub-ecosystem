@@ -50,14 +50,23 @@ function renderShell(onNavigate?: (p: string) => void, onLogout?: () => void) {
 describe("AppShellLayout", () => {
   beforeEach(() => useUiStore.setState({ sidebarOpen: true, theme: "system" }));
 
-  it("shows the signed-in user's email as the shell header title once /me resolves", async () => {
+  it("shows DevHub as the primary brand with the signed-in email small beside it", async () => {
     renderShell();
-    // Header title starts on the brand fallback while /me is pending, then swaps
-    // to the resolved email (never a blank title in between).
-    const header = screen.getByTestId("fe2-shell-header");
-    expect(header).toHaveTextContent("DevHub");
-    expect(await screen.findByText("kota@developershub.jp")).toBeInTheDocument();
-    expect(screen.queryByText("DevHub")).not.toBeInTheDocument();
+    // Brand-first header: "DevHub" is the primary label (and the home导线) and is
+    // ALWAYS present; the account email rides alongside as the secondary label once
+    // /me resolves — both are shown (the email no longer replaces the brand).
+    const brand = screen.getByTestId("fe2-brand-home");
+    expect(brand).toHaveTextContent("DevHub");
+    const account = await screen.findByTestId("fe2-header-account");
+    expect(account).toHaveTextContent("kota@developershub.jp");
+    expect(screen.getByTestId("fe2-brand-home")).toHaveTextContent("DevHub");
+  });
+
+  it("navigates home when the DevHub brand is clicked (logo = home导线)", async () => {
+    const onNavigate = vi.fn();
+    renderShell(onNavigate);
+    await userEvent.click(screen.getByTestId("fe2-brand-home"));
+    expect(onNavigate).toHaveBeenCalledWith("/");
   });
 
   it("keeps the brand title when unauthenticated (no /me user)", async () => {
@@ -121,42 +130,71 @@ describe("AppShellLayout", () => {
     expect(screen.queryByText("Events")).not.toBeInTheDocument();
   });
 
-  it("hides launcher items whose requiredPermissions the viewer lacks (admin-only tools)", async () => {
-    const me: gateway.MeResponse = { ...ME, permissions: ["event:read"] };
-    const gatedApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
-    const nav: NavEntry[] = [
-      { label: "Events", path: "/events", icon: "calendar", order: 10 },
-      { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50, requiredPermissions: ["identity:read"] },
-    ];
+  // Member release-gating (社長決定 2026-08-14, lib/releaseGate). Apps are NEVER removed
+  // from the launcher (消さない); an unpublished app is greyed + disabled for general
+  // members, while admins/maintainers bypass the gate and see every app active.
+  const GATED_NAV: NavEntry[] = [
+    { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
+    { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events" },
+  ];
+
+  it("greys out unpublished apps for a general member but keeps the tile (消さない)", async () => {
+    // member perms: identity:read only -> no dangerous permission -> not privileged.
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "mail:read"] };
+    const memberApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
-        <AuthProvider api={gatedApi}>
-          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+        <AuthProvider api={memberApi}>
+          <AppShellLayout navEntries={GATED_NAV} onNavigate={vi.fn()}>
             <div data-testid="outlet">content</div>
           </AppShellLayout>
         </AuthProvider>
       </QueryClientProvider>,
     );
-    // /me resolves async; wait for the launcher trigger then open it.
     const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
     await userEvent.click(trigger);
-    expect(screen.getByText("Events")).toBeInTheDocument();
-    // Viewer lacks identity:read -> the admin tool is filtered out.
-    expect(screen.queryByText("ロール管理")).not.toBeInTheDocument();
+    // Both tiles are still present — nothing is removed.
+    const mail = screen.getByTestId("fe2-app-launcher-item-mail");
+    const events = screen.getByTestId("fe2-app-launcher-item-events");
+    // メール is member-published -> active; イベント is not -> greyed + disabled + tooltip.
+    expect(mail).toBeEnabled();
+    expect(events).toBeDisabled();
+    expect(events).toHaveAttribute("title", "準備中（メンバー未公開）");
   });
 
-  it("shows admin launcher items once the viewer holds the required permission", async () => {
-    const me: gateway.MeResponse = { ...ME, permissions: ["event:read", "identity:read"] };
+  it("does not navigate when a member clicks a greyed (unpublished) tile", async () => {
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "mail:read"] };
+    const memberApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const onNavigate = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={memberApi}>
+          <AppShellLayout navEntries={GATED_NAV} onNavigate={onNavigate}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByTestId("fe2-app-launcher-item-events"));
+    expect(onNavigate).not.toHaveBeenCalled();
+    // The published tile still navigates.
+    await userEvent.click(screen.getByTestId("fe2-app-launcher-item-mail"));
+    expect(onNavigate).toHaveBeenCalledWith("/mail");
+  });
+
+  it("admins/maintainers bypass the gate: every app is active", async () => {
+    // holds identity:admin (a dangerous permission) -> privileged -> no greying.
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:admin"] };
     const adminApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
-    const nav: NavEntry[] = [
-      { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50, requiredPermissions: ["identity:read"] },
-    ];
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
         <AuthProvider api={adminApi}>
-          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+          <AppShellLayout navEntries={GATED_NAV} onNavigate={vi.fn()}>
             <div data-testid="outlet">content</div>
           </AppShellLayout>
         </AuthProvider>
@@ -164,6 +202,7 @@ describe("AppShellLayout", () => {
     );
     const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
     await userEvent.click(trigger);
-    expect(await screen.findByText("ロール管理")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-app-launcher-item-mail")).toBeEnabled();
+    expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeEnabled();
   });
 });

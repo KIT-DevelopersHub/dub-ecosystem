@@ -44,6 +44,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     now: () => "2026-08-12T00:00:00.000Z",
     newTeamId: () => `team_${String(seq++).padStart(6, "0")}`,
     newMemberId: () => `member_${String(seq++).padStart(6, "0")}`,
+    newParticipationId: () => `part_${String(seq++).padStart(6, "0")}`,
     ...overrides,
   };
   return Object.assign(deps, { repo });
@@ -52,6 +53,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
 export interface CallInit {
   userId?: string | null; // null = omit header (unauthenticated)
   body?: unknown;
+  internal?: boolean; // set x-dub-internal (genuine s2s call, e.g. /members/internal/*)
 }
 
 export async function call(
@@ -62,6 +64,7 @@ export async function call(
 ): Promise<{ status: number; json: any }> {
   const headers: Record<string, string> = { "x-dub-request-id": "req_test" };
   if (init.userId !== null) headers["x-dub-user-id"] = init.userId ?? "user_caller";
+  if (init.internal) headers["x-dub-internal"] = "1";
   const reqInit: RequestInit = { method, headers };
   if (init.body !== undefined) {
     headers["content-type"] = "application/json";

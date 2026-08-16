@@ -43,10 +43,9 @@ export class InMemoryTaskRepo implements TaskRepo {
   }
 
   private toTask(r: Rec): task.Task {
-    const { createdBy: _c, dueSoonNotifiedAt: _d, ...t } = r;
-    void _c;
+    const { dueSoonNotifiedAt: _d, ...t } = r;
     void _d;
-    return { ...t };
+    return { ...t }; // createdBy kept — the real repo exposes it (from→to "from").
   }
 
   async getById(id: string, includeArchived = false): Promise<task.Task | null> {
@@ -61,6 +60,7 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (!filter.includeArchived) recs = recs.filter((r) => r.archivedAt === null);
     if (filter.eventId) recs = recs.filter((r) => r.eventId === filter.eventId);
     if (filter.assigneeId) recs = recs.filter((r) => r.assigneeId === filter.assigneeId);
+    if (filter.createdById) recs = recs.filter((r) => r.createdBy === filter.createdById);
     if (filter.statuses && filter.statuses.length > 0) {
       const set = new Set(filter.statuses);
       recs = recs.filter((r) => set.has(r.status));
@@ -117,13 +117,15 @@ export class InMemoryTaskRepo implements TaskRepo {
     return this.deps.filter((d) => d.taskId === taskId).map((d) => d.dependsOnId);
   }
 
-  async listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]> {
-    return this.deps.filter((d) => this.rows.get(d.taskId)?.eventId === eventId).map((d) => ({ ...d }));
+  async listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]> {
+    return this.deps
+      .filter((d) => (this.rows.get(d.taskId)?.eventId ?? null) === eventId)
+      .map((d) => ({ ...d }));
   }
 
-  async listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]> {
+  async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
     return [...this.rows.values()]
-      .filter((r) => r.eventId === eventId && r.archivedAt === null)
+      .filter((r) => (r.eventId ?? null) === eventId && r.archivedAt === null)
       .map((r) => r.id);
   }
 
@@ -163,7 +165,7 @@ export class InMemoryTaskRepo implements TaskRepo {
         r.dueAt <= end
       ) {
         r.dueSoonNotifiedAt = now;
-        out.push({ taskId: r.id, eventId: r.eventId, dueAt: r.dueAt });
+        out.push({ taskId: r.id, eventId: r.eventId ?? null, dueAt: r.dueAt });
       }
     }
     return out;

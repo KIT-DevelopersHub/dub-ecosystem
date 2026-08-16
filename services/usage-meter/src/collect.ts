@@ -1,36 +1,29 @@
-// Collection orchestration: gather raw usage (Cloudflare GraphQL + Resend send-log COUNT),
-// then turn each master metric into a SnapshotRow (used/limit/pct/status). Pure aside from
-// the two data fetches; never throws (each source degrades to unknown).
+// Collection orchestration: run every registered Collector (Cloudflare GraphQL, Resend
+// send-log COUNT, …), merge their metricKey -> number maps, then turn each master metric
+// into a SnapshotRow (used/limit/pct/status). Never throws — each collector degrades to a
+// partial/empty map so affected metrics render "unknown". Adding a source = one registry
+// entry (see collectors/index.ts).
 import type { DbClient } from "@dub/db";
-import { cfToken, type Env } from "./env";
-import { fetchCloudflareUsage } from "./cloudflare-graphql";
-import { countResendSends } from "./resend-usage";
+import type { Env } from "./env";
+import { COLLECTORS } from "./collectors";
 import { MASTER } from "./limits";
 import { computePct, statusForPct } from "./thresholds";
 import type { SnapshotRow } from "./types";
 
-/** Build the used-value map keyed by metricKey from all data sources. */
+/** Build the used-value map keyed by metricKey by running + merging all collectors. */
 export async function collectUsedByKey(
   env: Env,
   mailDb: DbClient,
   now: Date,
   log?: (msg: string, fields?: Record<string, unknown>) => void,
 ): Promise<Partial<Record<string, number>>> {
-  const token = cfToken(env);
-  const accountId = env.CF_ACCOUNT_ID;
-
-  const cfPromise =
-    token && accountId
-      ? fetchCloudflareUsage({ token, accountId }, now, log)
-      : Promise.resolve<Partial<Record<string, number>>>({});
-  if (!token || !accountId) log?.("cf usage skipped: missing token or account id");
-
-  const [cf, resend] = await Promise.all([cfPromise, countResendSends(mailDb, now)]);
-
+  const results = await Promise.all(COLLECTORS.map((c) => c.collect(env, mailDb, now, log)));
   const used: Record<string, number> = {};
-  for (const [k, v] of Object.entries(cf)) if (typeof v === "number" && Number.isFinite(v)) used[k] = v;
-  if (resend.day !== null) used.resend_emails_day = resend.day;
-  if (resend.month !== null) used.resend_emails_month = resend.month;
+  for (const map of results) {
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof v === "number" && Number.isFinite(v)) used[k] = v;
+    }
+  }
   return used;
 }
 

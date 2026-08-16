@@ -16,7 +16,13 @@ export const TASK_STATUS_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> 
 
 export interface Task extends Versioned {
   id: TaskId;
-  eventId: EventId;
+  /**
+   * Optional event linkage. A task MAY belong to an event (e.g. 北陸ITカンファレンス)
+   * but is not required to — `null`/absent means an unlinked, standalone task. The
+   * Event entity itself still exists (event-service / FE3); only the task→event
+   * coupling is optional now. (判断44: keep the concept, make the link optional.)
+   */
+  eventId?: EventId | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -24,6 +30,13 @@ export interface Task extends Versioned {
   assigneeId: UserId | null;
   /** Owning team (canonical team.Team). Additive; null = unassigned to a team. */
   teamId?: TeamId | null;
+  /**
+   * Requester — the user who issued (created) the task. This is the "from" in the
+   * from→to relationship the My Tasks hub renders (createdBy → assigneeId). Server
+   * always populates it (task_tasks.created_by, NOT NULL); typed optional so the
+   * many existing Task literals across the monorepo need not be touched (additive).
+   */
+  createdBy?: UserId;
   dueAt: ISODateTime | null;
   origin: TaskOrigin;
   archivedAt: ISODateTime | null;
@@ -45,7 +58,8 @@ export interface TaskDependency {
 }
 
 export interface CreateTaskRequest {
-  eventId: EventId;
+  /** Optional event linkage (see Task.eventId). Omit to issue an unlinked task. */
+  eventId?: EventId;
   title: string;
   description?: string;
   priority?: TaskPriority; // default "medium"
@@ -76,6 +90,8 @@ export interface ListTasksQuery extends CursorQuery {
   eventId?: EventId;
   status?: TaskStatus[];
   assigneeId?: UserId;
+  /** Requester filter — tasks issued (created) by this user. Powers the "依頼" lens. */
+  createdById?: UserId;
   teamId?: TeamId;
   includeArchived?: boolean;
 }

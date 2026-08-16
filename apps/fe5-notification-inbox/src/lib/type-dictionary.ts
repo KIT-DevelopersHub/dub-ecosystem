@@ -29,6 +29,11 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   { pattern: "event.reminder", label: "Event reminder", icon: "calendar", group: "event" },
   { pattern: "system.*", label: "System", icon: "info", group: "system" },
   { pattern: "system.announcement", label: "Announcement", icon: "megaphone", group: "system" },
+  // Admin-facing operational types (Notification管理). Grouped under システム so the genre
+  // filter classifies them without a new group; explicit patterns give a readable label
+  // instead of the raw machine name.
+  { pattern: "deploy.*", label: "デプロイ", icon: "info", group: "system" },
+  { pattern: "feedback", label: "フィードバック", icon: "alert", group: "system" },
   // Release notes (new-feature announcements). Its own group so it gets a dedicated
   // "新機能" filter chip and a distinct 🎉 badge in the inbox.
   { pattern: "release", label: "🎉 新機能", icon: "megaphone", group: "release" },
@@ -74,3 +79,15 @@ export const NOTIFICATION_GROUP_PREFIXES: { group: NotificationGroup; prefix: st
   { group: "event", prefix: "event.", label: "Events" },
   { group: "system", prefix: "system.", label: "System" },
 ];
+
+// Display order + section metadata for the grouped inbox. Notifications keep their
+// per-app separation (one section per group) so the list never flattens into an
+// undifferentiated stream. 新機能 (release) leads because it is the highest-signal.
+export const NOTIFICATION_GROUP_ORDER: NotificationGroup[] = ["release", "task", "event", "system"];
+
+export const NOTIFICATION_GROUP_META: Record<NotificationGroup, { label: string; icon: IconName }> = {
+  release: { label: "新機能", icon: "megaphone" },
+  task: { label: "タスク", icon: "task" },
+  event: { label: "イベント", icon: "calendar" },
+  system: { label: "システム", icon: "info" },
+};

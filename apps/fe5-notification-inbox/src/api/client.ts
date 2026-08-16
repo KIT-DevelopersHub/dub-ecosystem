@@ -8,6 +8,12 @@ import type { ApiClient } from "../contracts/fe2";
 import type {
   GetPreferencesResponse,
   ListInboxResponse,
+  ListAdminNotificationsParams,
+  ListAdminNotificationsResponse,
+  PublishBroadcastResponse,
+  PublishBroadcastBatchResponse,
+  UnpublishBroadcastResponse,
+  UnpublishBroadcastBatchResponse,
   PublishReleaseRequest,
   PublishReleaseResponse,
   ReadAllRequest,
@@ -27,6 +33,16 @@ export interface NotificationApi {
   updatePreferences(req: UpdatePreferencesRequest): Promise<void>;
   /** Admin: publish a release note broadcast to every user's inbox. */
   publishRelease(req: PublishReleaseRequest): Promise<PublishReleaseResponse>;
+  /** Admin (notif:broadcast_publish): list audience='admin' notifications to manage. */
+  listAdminNotifications(params?: ListAdminNotificationsParams): Promise<ListAdminNotificationsResponse>;
+  /** Admin: publish one admin notification to all members as a broadcast. */
+  publishBroadcast(id: string): Promise<PublishBroadcastResponse>;
+  /** Admin: publish MANY admin notifications to members in one round trip (bulk). */
+  publishBroadcastBatch(ids: string[]): Promise<PublishBroadcastBatchResponse>;
+  /** Admin: unpublish (retract) one broadcast so members no longer see it. Idempotent. */
+  unpublishBroadcast(id: string): Promise<UnpublishBroadcastResponse>;
+  /** Admin: unpublish MANY broadcasts in one round trip (bulk retract). */
+  unpublishBroadcastBatch(ids: string[]): Promise<UnpublishBroadcastBatchResponse>;
 }
 
 export function createNotificationApi(client: ApiClient): NotificationApi {
@@ -51,6 +67,21 @@ export function createNotificationApi(client: ApiClient): NotificationApi {
     },
     publishRelease(req) {
       return client.post<PublishReleaseResponse>(`${BASE}/release`, req);
+    },
+    listAdminNotifications(params) {
+      return client.get<ListAdminNotificationsResponse>(`${BASE}/manage`, params as Record<string, unknown> | undefined);
+    },
+    publishBroadcast(id) {
+      return client.post<PublishBroadcastResponse>(`${BASE}/manage/${encodeURIComponent(id)}/publish`);
+    },
+    publishBroadcastBatch(ids) {
+      return client.post<PublishBroadcastBatchResponse>(`${BASE}/manage/publish-batch`, { ids });
+    },
+    unpublishBroadcast(id) {
+      return client.post<UnpublishBroadcastResponse>(`${BASE}/manage/${encodeURIComponent(id)}/unpublish`);
+    },
+    unpublishBroadcastBatch(ids) {
+      return client.post<UnpublishBroadcastBatchResponse>(`${BASE}/manage/unpublish-batch`, { ids });
     },
   };
 }

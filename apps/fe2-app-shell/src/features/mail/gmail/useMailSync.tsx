@@ -21,16 +21,35 @@ export function useMailSync(): void {
   // would appear to vanish from the conversation.
   const loaded = useRef<Set<string>>(new Set());
 
+  // 改善#8: server-persisted star/archive/trash. `flagBaseline` is the last flag-state we
+  // KNOW the server holds per thread; the persist effect below POSTs only the deltas. It is
+  // seeded from GET /mail/flags right after a hydrate, and `flagsReady` gates persistence so
+  // the reload itself (which momentarily shows un-flagged threads) never POSTs a spurious
+  // "unstar" back to the server.
+  const flagBaseline = useRef<Map<string, { starred: boolean; archived: boolean; trashed: boolean }>>(new Map());
+  const flagsReady = useRef(false);
+
   // Load inbox + sent on mount and on every requested sync (post-send). A failure leaves
   // the current threads in place (empty on first load) rather than blowing up the pane.
   useEffect(() => {
     let alive = true;
+    flagsReady.current = false; // pause flag persistence while we (re)load
     void (async () => {
       try {
         const [inbox, sent] = await Promise.all([api.listInbox({ limit: 50 }), api.listSent({ limit: 50 })]);
         if (!alive) return;
         dispatch({ type: "HYDRATE", threads: combineThreads(inbox.items, sent.items, me) });
         loaded.current.clear(); // force the open thread to re-fetch its full body (+ any new reply)
+        // Restore persisted flags on top of the freshly hydrated threads, then arm the
+        // persist effect with the server's flag-state as the baseline (so applying them is
+        // not itself seen as a change to push back).
+        const flags = await api.listFlags().catch(() => []);
+        if (!alive) return;
+        dispatch({ type: "APPLY_FLAGS", flags });
+        const base = new Map<string, { starred: boolean; archived: boolean; trashed: boolean }>();
+        for (const f of flags) base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed });
+        flagBaseline.current = base;
+        flagsReady.current = true;
       } catch {
         /* keep existing state; the list simply stays as-is */
       }
@@ -39,6 +58,22 @@ export function useMailSync(): void {
       alive = false;
     };
   }, [api, dispatch, syncNonce, me]);
+
+  // Persist flag changes (optimistic): whenever a thread's derived star/archive/trash state
+  // diverges from what the server last knew, POST the new state and advance the baseline.
+  // Covers EVERY mutation path uniformly (row/toolbar/reading-pane/keyboard/undo) with no
+  // change to the dispatch sites. Best-effort — a failed POST leaves the optimistic UI as-is.
+  useEffect(() => {
+    if (!flagsReady.current) return;
+    for (const t of threads) {
+      const cur = { starred: t.starred, archived: t.folder === "archive", trashed: t.folder === "trash" };
+      const prev = flagBaseline.current.get(t.id) ?? { starred: false, archived: false, trashed: false };
+      if (cur.starred !== prev.starred || cur.archived !== prev.archived || cur.trashed !== prev.trashed) {
+        flagBaseline.current.set(t.id, cur);
+        void api.setFlags(t.id, cur).catch(() => undefined);
+      }
+    }
+  }, [threads, api]);
 
   // Lazily fill the full body when a thread is opened (list APIs carry only a snippet).
   useEffect(() => {

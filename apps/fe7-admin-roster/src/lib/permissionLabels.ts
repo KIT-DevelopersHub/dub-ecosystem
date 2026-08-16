@@ -43,6 +43,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "notif:admin": { label: "通知の管理", description: "通知の配信履歴を検索・確認できるようになります。" },
   "notif:inbox:self": { label: "自分の受信箱", description: "自分あての通知を受信箱で閲覧・既読管理できるようになります。" },
   "notif:prefs:self": { label: "自分の通知設定", description: "自分の通知の受け取り方（設定）を確認・変更できるようになります。" },
+  "notif:broadcast_publish": { label: "メンバーへの通知公開", description: "管理者向けの通知を「Notification管理」画面からメンバー全体へ公開（配信）できるようになります。" },
   "mail:send": { label: "メールの送信", description: "組織のメールアドレスからメールを送信できるようになります。" },
   "mail:read": { label: "メールの閲覧", description: "メールのメッセージ・スレッド・振り分けルールを閲覧できるようになります。" },
   "mail:read_all": { label: "全メールの閲覧（監督）", description: "オンにすると全ユーザーの送受信メールを閲覧できます。" },

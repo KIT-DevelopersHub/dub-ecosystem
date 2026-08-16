@@ -23,6 +23,10 @@ import type { task, identity, gantt, common, team } from "@dub/types";
 import { MockApiClient } from "./api/mock-client";
 
 export const DEMO_EVENT_ID = "evt_hokuriku_conf_2027";
+/** signed-in user for the standalone My Tasks demo (createdBy stamp + /me scope).
+ *  Points at a real conference owner (高岡/本部) so the マイタスク tab is populated
+ *  with real roadmap tasks rather than empty. Prod uses the real /me user, not this. */
+export const DEMO_CURRENT_USER = "usr_takaoka";
 
 const MS_DAY = 86_400_000;
 const iso = (d: string): common.ISODateTime => `${d}T00:00:00.000Z`;
@@ -331,6 +335,7 @@ type MockSeedRowDates = Record<
 export function createDevClient(): MockApiClient {
   const { tasks, rowDates, deps, hierarchy } = build();
   return new MockApiClient({
+    currentUserId: DEMO_CURRENT_USER,
     users,
     teams,
     tasks,

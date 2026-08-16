@@ -1,6 +1,6 @@
-// 一覧ビュー: every member in one DataTable, with status badge + team chips + row
-// actions. Search filters by name / role.
-import { DataTable, Tag, IconButton, EmptyState } from "@dub/ui";
+// 一覧ビュー: every member in one DataTable, with status badge + team chips + linked
+// account + row actions. Search filters by name / role.
+import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
@@ -8,18 +8,42 @@ import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
 export function ListView({
   members,
   teamsById,
+  accountLabels,
   onEdit,
   onDelete,
+  onLink,
+  onUnlink,
 }: {
   members: OrgMember[];
   teamsById: Map<string, MemberTeam>;
+  /** identity userId -> display label (email/name) for the linked-account column. */
+  accountLabels: Map<string, string>;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
+  onLink: (m: OrgMember) => void;
+  onUnlink: (m: OrgMember) => void;
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", cell: (m) => m.name },
+    { key: "department", header: "学科", cell: (m) => m.department ?? "—" },
+    { key: "grade", header: "学年", cell: (m) => m.grade ?? "—" },
     { key: "role", header: "担当・役割", cell: (m) => m.roleTitle ?? "—" },
     { key: "status", header: "ステータス", cell: (m) => <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> },
+    {
+      key: "account",
+      header: "アカウント",
+      cell: (m) =>
+        m.identityUserId ? (
+          <span style={{ display: "inline-flex", gap: "var(--dub-space-1)", alignItems: "center" }} data-testid={`members-account-${m.id}`}>
+            <Tag tone="success">{accountLabels.get(m.identityUserId) ?? m.identityUserId}</Tag>
+            <IconButton name="x" aria-label={`${m.name} のアカウント紐付けを解除`} onClick={() => onUnlink(m)} testId={`members-unlink-${m.id}`} />
+          </span>
+        ) : (
+          <Button variant="ghost" onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
+            未リンク・紐付け
+          </Button>
+        ),
+    },
     {
       key: "teams",
       header: "所属チーム",
@@ -37,6 +61,8 @@ export function ListView({
         ),
     },
     { key: "contact", header: "連絡先", cell: (m) => m.contact ?? "—" },
+    { key: "schoolEmail", header: "学校メール", cell: (m) => m.schoolEmail ?? "—" },
+    { key: "gmail", header: "Gmail", cell: (m) => m.gmail ?? "—" },
     {
       key: "actions",
       header: "操作",

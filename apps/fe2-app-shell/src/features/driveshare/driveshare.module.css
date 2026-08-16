@@ -1,0 +1,163 @@
+/* Drive 共有管理 — ツリー表示の feature-local styles.
+   @dub/tokens の CSS 変数のみ使用（ハードコード色なし）で light/dark 両対応。
+   狙い: 隣り合うファイル/フォルダの境界を明確にする（外枠カード + 行間ハ
+   イラインの区切り線 + hover/選択ハイライト）。階層はインデントのガイド線
+   で親子を可視化する。 */
+
+/* 木全体を 1 枚のカードに（外枠 + 角丸 + うっすら影）。行はこの中で区切る。 */
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  box-shadow: var(--dub-shadow-sm);
+  overflow: hidden;
+}
+
+.treeitem {
+  list-style: none;
+  outline: none;
+}
+
+/* 1 行。隣接行との境界は上罫線で明示。hover / 選択でハイライト。 */
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  padding-block: var(--dub-space-2);
+  padding-inline: var(--dub-space-3);
+  border-top: 1px solid var(--dub-color-border-default);
+  transition: background-color 120ms ease;
+}
+
+/* 最上段の行はカード上端に接するので、二重線を避けて罫線を消す。 */
+.tree > .treeitem:first-child > .row {
+  border-top: none;
+}
+
+.row:hover {
+  background: var(--dub-color-surface-sunken);
+}
+
+/* 選択中: 背景 + 左端のブランドアクセントバー。 */
+.row[data-active="true"] {
+  background: var(--dub-color-brand-50);
+  box-shadow: inset 3px 0 0 var(--dub-color-brand-500);
+}
+.row[data-active="true"]:hover {
+  background: var(--dub-color-brand-100);
+}
+
+/* キーボードフォーカスのリング（選択アクセントと共存）。 */
+.treeitem:focus-visible > .row {
+  box-shadow: inset 0 0 0 2px var(--dub-color-border-focus);
+}
+.treeitem:focus-visible > .row[data-active="true"] {
+  box-shadow:
+    inset 0 0 0 2px var(--dub-color-border-focus),
+    inset 3px 0 0 var(--dub-color-brand-500);
+}
+
+/* 子グループ: 一段インデント + 親子をつなぐ縦のガイド線。 */
+.group {
+  list-style: none;
+  margin: 0 0 0 var(--dub-space-4);
+  padding: 0;
+  border-inline-start: 1px solid var(--dub-color-border-default);
+}
+
+/* 子の読み込み/空/エラー表示も同じインデントとガイド線に揃える。 */
+.childState {
+  margin-inline-start: var(--dub-space-4);
+  border-inline-start: 1px solid var(--dub-color-border-default);
+  padding: var(--dub-space-2) var(--dub-space-3);
+}
+
+/* 開閉トグル（フォルダのみ）。 */
+.toggle {
+  all: unset;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--dub-radius-sm);
+  color: var(--dub-color-text-muted);
+  cursor: pointer;
+}
+.toggle:hover {
+  background: var(--dub-color-brand-100);
+  color: var(--dub-color-text-primary);
+}
+/* ファイル行はトグルを持たないが、兄弟フォルダと頭を揃える。 */
+.togglePlaceholder {
+  flex: none;
+  display: inline-block;
+  width: 1.25rem;
+}
+
+/* 行本体（選択のためのクリック領域）。 */
+.rowMain {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  cursor: pointer;
+}
+.rowTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  min-width: 0;
+}
+
+/* フォルダ/ファイルの視覚的区別: アイコン色 + 名前の太さ。 */
+.folderIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dub-color-brand-500);
+}
+.fileIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dub-color-text-muted);
+}
+.name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-medium);
+}
+.row[data-folder="true"] .name {
+  font-weight: var(--dub-font-weight-bold);
+}
+.rowMeta {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+.chips {
+  display: inline-flex;
+  gap: var(--dub-space-1);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.retryLink {
+  all: unset;
+  cursor: pointer;
+  color: var(--dub-color-brand-600);
+  text-decoration: underline;
+}
+.errorText {
+  color: var(--dub-color-danger-500, #b00);
+}
+.mutedText {
+  color: var(--dub-color-text-muted);
+}

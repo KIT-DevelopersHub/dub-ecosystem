@@ -36,6 +36,7 @@ export function buildReleaseInput(input: ReleaseInput, requestId: string, actorI
     title: input.title,
     body: input.body,
     priority: "normal",
+    audience: "members", // release notes are member-facing (everyone sees them)
     channels: ["in_app"], // release notes live in the inbox; forced on regardless of prefs
     dedupKey,
     resourceType: "release",

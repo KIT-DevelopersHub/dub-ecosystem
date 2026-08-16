@@ -4,10 +4,14 @@
 
 export const ROUTE_INBOX = "/notifications";
 export const ROUTE_PREFERENCES = "/settings/notifications";
+export const ROUTE_MANAGE = "/notifications/manage";
 
 // Permission keys guarding each route (FE5 §6).
 export const PERM_INBOX = "notif:inbox:self";
 export const PERM_PREFS = "notif:prefs:self";
+// Admin-only: gates the Notification management screen (list admin notifications +
+// publish to members). Held by admin + maintainer.
+export const PERM_BROADCAST_PUBLISH = "notif:broadcast_publish";
 
 // Route prefixes considered "known" for linkUrl navigation. A linkUrl is a
 // concrete in-app path (e.g. "/tasks/task_123"); we accept any absolute in-app

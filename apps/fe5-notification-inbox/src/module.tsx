@@ -7,8 +7,10 @@ import type { FeatureModule } from "./contracts/fe2";
 import {
   PERM_INBOX,
   PERM_PREFS,
+  PERM_BROADCAST_PUBLISH,
   ROUTE_INBOX,
   ROUTE_PREFERENCES,
+  ROUTE_MANAGE,
 } from "./lib/routes";
 import { getUnreadCount } from "./store/unread-store";
 import NotificationBell from "./components/NotificationBell";
@@ -34,6 +36,18 @@ export const notificationsModule: FeatureModule = {
         })),
       auth: "required",
       requiredPermissions: [PERM_PREFS],
+    },
+    {
+      // Admin-only Notification management (list admin notifications + publish to
+      // members). The shell ANDs the module perm (notif:inbox:self) with this route perm,
+      // so only admins/maintainers (holding notif:broadcast_publish) can open it.
+      path: ROUTE_MANAGE,
+      lazy: () =>
+        import("./components/NotificationManagePage").then((m) => ({
+          Component: m.default as ComponentType,
+        })),
+      auth: "required",
+      requiredPermissions: [PERM_BROADCAST_PUBLISH],
     },
   ],
   nav: [

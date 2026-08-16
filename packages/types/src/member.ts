@@ -33,8 +33,32 @@ export interface Member {
   roleTitle: string | null;
   status: MemberStatus;
   teamIds: string[];
+  /** 学科 (任意). かつてメモ欄に混在していたのを専用フィールドへ分離。 */
+  department: string | null;
+  /** 学年 (任意, 自由記述: 例 "3年" / "M1"). メモ欄から専用フィールドへ分離。 */
+  grade: string | null;
+  /**
+   * The linked identity-roster login account (identity userId), or null when this
+   * 運営メンバー is not yet tied to an account. The bridge between the 組織図 (this
+   * record) and RBAC/認証 (identity_users). Set/cleared via PATCH (human-confirmed).
+   */
+  identityUserId: string | null;
   /** 連絡先 (任意). */
   contact: string | null;
+  /** 学校メールアドレス — retained on the roster from a 参加届 (任意 / additive). */
+  schoolEmail?: string | null;
+  /** Gmail アドレス — retained on the roster from a 参加届 (任意 / additive). */
+  gmail?: string | null;
+  /** 苗字(姓) — structured name retained from a 参加届 (任意 / additive). `name` stays the composed "姓 名". */
+  lastName?: string | null;
+  /** 名前(名) — structured name retained from a 参加届 (任意 / additive). */
+  firstName?: string | null;
+  /** 振り仮名(せい) — retained from a 参加届 (任意 / additive). */
+  lastNameKana?: string | null;
+  /** 振り仮名(めい) — retained from a 参加届 (任意 / additive). */
+  firstNameKana?: string | null;
+  /** 電話番号 — retained from a 参加届 (任意 / additive). */
+  phone?: string | null;
   note: string | null;
   sortOrder: number;
   /** Optimistic-concurrency version; PATCH must echo the last seen value. */
@@ -74,6 +98,8 @@ export interface CreateMemberRequest {
   roleTitle?: string | null;
   status: MemberStatus;
   teamIds: string[];
+  department?: string | null;
+  grade?: string | null;
   contact?: string | null;
   note?: string | null;
 }
@@ -82,6 +108,10 @@ export interface UpdateMemberRequest {
   roleTitle?: string | null;
   status?: MemberStatus;
   teamIds?: string[];
+  department?: string | null;
+  grade?: string | null;
+  /** Set (link) or null (unlink) the identity-roster account. Omit = leave unchanged. */
+  identityUserId?: string | null;
   contact?: string | null;
   note?: string | null;
   sortOrder?: number;
@@ -89,9 +119,119 @@ export interface UpdateMemberRequest {
   version: number;
 }
 
+// ---- 参加届 (participation submissions) --------------------------------------------
+// A 参加届 is a person's self-submitted intent to join. On submit, member-service
+// resolves it to a member_people row (invited -> added, or a new added person) so the
+// roster reflects reality without a manual import. Fields traced from leaders-meetup-
+// bot's participation_forms, mapped onto the DevHub member model.
+
+/** 希望する活動 (activity preference). Optional free-choice; null when unspecified. */
+export type DesiredActivity = "event" | "dev" | "both";
+export const DESIRED_ACTIVITIES: readonly DesiredActivity[] = ["event", "dev", "both"];
+
+/** 学年. Loose union: DevHub keeps lmb's set (1〜4 + 院生). Optional on the form. */
+export type Grade = "1" | "2" | "3" | "4" | "graduate";
+export const GRADES: readonly Grade[] = ["1", "2", "3", "4", "graduate"];
+
+/** How a submitted 参加届 resolved against the existing roster. */
+export type ParticipationMatchKind = "linked_existing" | "created_new";
+
+/** A stored 参加届 submission (admin-visible). `memberId` is the resolved 運営メンバー. */
+export interface Participation {
+  id: string;
+  orgId: OrgId;
+  memberId: string | null;
+  /** 氏名 (フルネーム表示用の合成値 "姓 名"). 後方互換で常に埋まる。 */
+  name: string;
+  /** 苗字(姓). 分割入力の新フィールド (additive). */
+  lastName: string | null;
+  /** 名前(名). 分割入力の新フィールド (additive). */
+  firstName: string | null;
+  /** 振り仮名 (合成値 "せい めい"). */
+  nameKana: string | null;
+  /** 振り仮名(せい). 分割入力の新フィールド (additive). */
+  lastNameKana: string | null;
+  /** 振り仮名(めい). 分割入力の新フィールド (additive). */
+  firstNameKana: string | null;
+  grade: Grade | null;
+  department: string | null;
+  /** 連絡先 (email など). */
+  contact: string | null;
+  /** 電話番号 (任意). */
+  phone: string | null;
+  /** 学校メールアドレス (必須). */
+  schoolEmail: string;
+  /** Gmail アドレス (必須). */
+  gmail: string;
+  /** 希望チーム — references Team.id (canonical member_teams). */
+  desiredTeamId: string | null;
+  desiredActivity: DesiredActivity | null;
+  /** その他 (自由記述). */
+  note: string | null;
+  status: "submitted";
+  matchKind: ParticipationMatchKind;
+  submittedBy: UserId;
+  submittedAt: ISODateTime;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+/** Submit a 参加届. 姓/名 (`lastName`+`firstName`, or the legacy single `name`) and
+ *  `schoolEmail`, `gmail` are required; the rest optional. The server composes
+ *  `name` = "姓 名" (and `nameKana` = "せい めい") for backward compatibility when the
+ *  split fields are supplied, so both new (split) and legacy (single `name`) callers work.
+ *  Reaches member-service either via the authenticated POST /api/v1/members/participation
+ *  or the public POST /api/v1/public/participation (gateway-owned, unauthenticated). */
+export interface SubmitParticipationRequest {
+  /** 苗字(姓) — 必須 (分割入力). */
+  lastName?: string | null;
+  /** 名前(名) — 必須 (分割入力). */
+  firstName?: string | null;
+  /** 氏名 (合成値). 分割入力を送らない旧クライアント向けの後方互換。姓/名 が来た時はサーバが合成する。 */
+  name?: string;
+  /** 学校メールアドレス (必須・メール形式). */
+  schoolEmail: string;
+  /** Gmail アドレス (必須・メール形式). */
+  gmail: string;
+  /** 振り仮名 (合成値・後方互換). 分割 (せい/めい) が来た時はサーバが合成する。 */
+  nameKana?: string | null;
+  /** 振り仮名(せい) (任意). */
+  lastNameKana?: string | null;
+  /** 振り仮名(めい) (任意). */
+  firstNameKana?: string | null;
+  /** 電話番号 (任意・数字/ハイフン等). */
+  phone?: string | null;
+  grade?: Grade | null;
+  department?: string | null;
+  contact?: string | null;
+  desiredTeamId?: string | null;
+  desiredActivity?: DesiredActivity | null;
+  note?: string | null;
+}
+
+/** Response of a submit: the stored 参加届 + the resolved member + how it matched. */
+export interface SubmitParticipationResponse {
+  participation: Participation;
+  member: Member;
+  matchKind: ParticipationMatchKind;
+}
+
+/** GET /api/v1/members/participation — admin list of submissions. */
+export interface ListParticipationsResponse {
+  participations: Participation[];
+}
+
+/** Create/set a link in one call (POST /members/people/:id/identity-link). The member's
+ *  version is checked for optimistic concurrency, mirroring UpdateMemberRequest. */
+export interface LinkIdentityRequest {
+  identityUserId: string;
+  version: number;
+}
+
 /** Internal id alias (plain string, like the other common ids). */
 export type MemberId = string;
 export type TeamId = string;
+export type ParticipationId = string;
 
 /** Owner reference for audit/trace (created_by is internal, not on the wire Member). */
 export type MemberActor = UserId;

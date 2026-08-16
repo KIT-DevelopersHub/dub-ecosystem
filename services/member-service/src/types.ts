@@ -26,12 +26,53 @@ export interface PersonRow {
   name: string;
   roleTitle: string | null;
   status: MemberStatus;
+  department: string | null;
+  grade: string | null;
+  /** Linked identity-roster account (identity userId), or null when unlinked. */
+  identityUserId: string | null;
   contact: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  phone: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
   archivedAt: common.ISODateTime | null;
   createdBy: common.UserId;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+}
+
+// 参加届 persistence row (superset of the wire `Participation`). `normalizedName` is
+// the space/width-folded matching key (unique per org for dedupe).
+export interface ParticipationRow {
+  id: string;
+  orgId: common.OrgId;
+  memberId: string | null;
+  name: string;
+  normalizedName: string;
+  lastName: string | null;
+  firstName: string | null;
+  nameKana: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  grade: member.Grade | null;
+  department: string | null;
+  contact: string | null;
+  phone: string | null;
+  schoolEmail: string;
+  gmail: string;
+  desiredTeamId: string | null;
+  desiredActivity: member.DesiredActivity | null;
+  note: string | null;
+  status: "submitted";
+  matchKind: member.ParticipationMatchKind;
+  submittedBy: common.UserId;
+  submittedAt: common.ISODateTime;
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
 }
@@ -59,6 +100,8 @@ export interface MemberRepo {
   // people
   createPerson(row: PersonRow, teamIds: string[]): Promise<void>;
   getPerson(id: string): Promise<PersonRow | null>;
+  /** Reverse lookup: the (non-archived) person linked to an identity user, or null. */
+  getPersonByIdentityUserId(orgId: common.OrgId, identityUserId: string): Promise<PersonRow | null>;
   listPeople(orgId: common.OrgId): Promise<PersonRow[]>;
   updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean>;
   archivePerson(id: string): Promise<void>;
@@ -66,6 +109,11 @@ export interface MemberRepo {
 
   // team membership (person_id -> team_ids) for the whole org in one read.
   teamLinksForOrg(orgId: common.OrgId): Promise<Array<{ personId: string; teamId: string }>>;
+
+  // participations (参加届)
+  upsertParticipation(row: ParticipationRow): Promise<void>;
+  getParticipationByNormalizedName(orgId: common.OrgId, normalizedName: string): Promise<ParticipationRow | null>;
+  listParticipations(orgId: common.OrgId): Promise<ParticipationRow[]>;
 }
 
 export interface AppDeps {
@@ -75,4 +123,5 @@ export interface AppDeps {
   now: () => string;
   newTeamId: () => string;
   newMemberId: () => string;
+  newParticipationId: () => string;
 }
