@@ -14,6 +14,9 @@ import type {
   PublishBroadcastResponse,
   PublishBroadcastBatchItem,
   PublishBroadcastBatchResponse,
+  UnpublishBroadcastResponse,
+  UnpublishBroadcastBatchItem,
+  UnpublishBroadcastBatchResponse,
   ReadAllRequest,
   UnreadCountResponse,
   UpdatePreferencesRequest,
@@ -167,6 +170,20 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
     return { notificationId: broadcastId, deduplicated: false, publishedBroadcastId: broadcastId };
   };
 
+  // Unpublish one admin notification (idempotent). Throws MockApiError on an unknown id.
+  // Removes the members broadcast fanned into the inbox store so a member view no longer
+  // shows it, and flips the admin row back to publishable. Shared by single + batch.
+  const unpublishOne = (id: string): UnpublishBroadcastResponse => {
+    const admin = store.adminItems.find((a) => a.id === id);
+    if (!admin) throw new MockApiError("NOTIF_NOTIFICATION_NOT_FOUND", 404, `notification not found: ${id}`);
+    const broadcastId = admin.publishedBroadcastId;
+    if (!broadcastId) return { notificationId: id, retracted: false, removedBroadcastId: null };
+    admin.publishedBroadcastId = null;
+    // Drop the broadcast row (matched by its resource link back to the source) from the inbox.
+    store.items = store.items.filter((i) => !(i.id === broadcastId || (i.resourceType === "notification" && i.resourceId === admin.id)));
+    return { notificationId: id, retracted: true, removedBroadcastId: broadcastId };
+  };
+
   const maybeFail = (path: string): void => {
     if (failNext && path.includes(failNext.pathIncludes)) {
       const err = failNext.error;
@@ -255,6 +272,32 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
           }
         }
         return { results, publishedCount, deduplicatedCount, failedCount } satisfies PublishBroadcastBatchResponse as T;
+      }
+      if (path === `${BASE}/manage/unpublish-batch`) {
+        const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
+        const seen = new Set<string>();
+        const results: UnpublishBroadcastBatchItem[] = [];
+        let retractedCount = 0, noopCount = 0, failedCount = 0;
+        for (const id of ids) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          try {
+            const r = unpublishOne(id);
+            const item: UnpublishBroadcastBatchItem = { id, ok: true, retracted: r.retracted };
+            if (r.removedBroadcastId) item.removedBroadcastId = r.removedBroadcastId;
+            results.push(item);
+            if (r.retracted) retractedCount++; else noopCount++;
+          } catch (e) {
+            results.push({ id, ok: false, code: e instanceof MockApiError ? e.code : "NOTIF_UNPUBLISH_FAILED" });
+            failedCount++;
+          }
+        }
+        return { results, retractedCount, noopCount, failedCount } satisfies UnpublishBroadcastBatchResponse as T;
+      }
+      const unpublishMatch = path.match(new RegExp(`^${BASE}/manage/([^/]+)/unpublish$`));
+      if (unpublishMatch) {
+        const id = decodeURIComponent(unpublishMatch[1]!);
+        return unpublishOne(id) satisfies UnpublishBroadcastResponse as T;
       }
       const publishMatch = path.match(new RegExp(`^${BASE}/manage/([^/]+)/publish$`));
       if (publishMatch) {

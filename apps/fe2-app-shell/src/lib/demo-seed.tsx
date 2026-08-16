@@ -189,6 +189,25 @@ function publishAdminNotificationDemo(id: string): notification.PublishBroadcast
   return { notificationId: broadcastId, deduplicated: false, publishedBroadcastId: broadcastId };
 }
 
+// Unpublish (retract) one admin notification's members broadcast (idempotent — the inverse
+// of publishAdminNotificationDemo). Flips the source row back to unpublished in-session and
+// removes the broadcast from the member inbox. Returns null on an unknown id; retracted=false
+// when it was never published (no-op). Shared by the single + bulk (unpublish-batch) endpoints.
+function unpublishAdminNotificationDemo(id: string): notification.UnpublishBroadcastResponse | null {
+  const adminItem = ADMIN_NOTIFICATIONS.find((a) => a.id === id);
+  if (!adminItem) return null;
+  const broadcastId = adminItem.publishedBroadcastId;
+  if (!broadcastId) return { notificationId: id, retracted: false, removedBroadcastId: null };
+  adminItem.publishedBroadcastId = null;
+  for (let i = NOTIFICATIONS.length - 1; i >= 0; i--) {
+    const n = NOTIFICATIONS[i]!;
+    if (n.id === broadcastId || (n.resourceType === "notification" && n.resourceId === adminItem.id)) {
+      NOTIFICATIONS.splice(i, 1);
+    }
+  }
+  return { notificationId: id, retracted: true, removedBroadcastId: broadcastId };
+}
+
 // ── mail ────────────────────────────────────────────────────────────────────
 // Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
 const DEMO_MAIL_BLOBS = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
@@ -876,6 +895,34 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         if (r.deduplicated) deduplicatedCount++; else publishedCount++;
       }
       return json({ results, publishedCount, deduplicatedCount, failedCount });
+    }
+    // admin: bulk unpublish a selection in one request (idempotent, per-item outcomes).
+    if (pathname === "/api/v1/notifications/manage/unpublish-batch") {
+      const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
+      const seen = new Set<string>();
+      const results: notification.UnpublishBroadcastBatchItem[] = [];
+      let retractedCount = 0, noopCount = 0, failedCount = 0;
+      for (const id of ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const r = unpublishAdminNotificationDemo(id);
+        if (!r) { results.push({ id, ok: false, code: "NOTIF_NOTIFICATION_NOT_FOUND" }); failedCount++; continue; }
+        const item: notification.UnpublishBroadcastBatchItem = { id, ok: true, retracted: r.retracted };
+        if (r.removedBroadcastId) item.removedBroadcastId = r.removedBroadcastId;
+        results.push(item);
+        if (r.retracted) retractedCount++; else noopCount++;
+      }
+      return json({ results, retractedCount, noopCount, failedCount });
+    }
+    // admin: unpublish (retract) one admin notification's broadcast (idempotent). Flips the
+    // source row back to unpublished in-session and removes the broadcast from the member
+    // inbox, so the optimistic UI is confirmed and a reload keeps the unpublished state.
+    {
+      const uid = seg(/^\/api\/v1\/notifications\/manage\/([^/]+)\/unpublish$/);
+      if (uid) {
+        const r = unpublishAdminNotificationDemo(uid);
+        return r ? json(r) : notFound(`POST ${pathname}`);
+      }
     }
     // admin: publish one admin notification to all members (idempotent). Flips the
     // source row to 公開済み in-session and fans a single members broadcast into the

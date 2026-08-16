@@ -35,12 +35,18 @@ import {
   parseListFeedbackQuery,
   parseListManageQuery,
   parsePublishBatch,
+  parseUnpublishBatch,
   parseReleaseRequest,
 } from "./validation";
 import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
 import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
 import { publishRelease, seedInitialReleases } from "./release";
-import { publishBroadcastFromNotification, publishBroadcastBatch } from "./broadcast";
+import {
+  publishBroadcastFromNotification,
+  publishBroadcastBatch,
+  unpublishBroadcastFromNotification,
+  unpublishBroadcastBatch,
+} from "./broadcast";
 import {
   FEEDBACK_ADMIN_PERMISSION,
   RELEASE_ADMIN_PERMISSION,
@@ -199,6 +205,21 @@ export function createApp(options: CreateAppOptions = {}) {
       const actorId = c.req.header(HEADERS.userId) ?? null;
       const result = await publishBroadcastBatch(ingestDepsOf(c, ctx), ctx, ids, actorId);
       return c.json(result satisfies notification.PublishBroadcastBatchResponse, 202);
+    });
+
+    // Unpublish (retract): removes the members broadcast derived from an admin notification
+    // so members no longer see it. Idempotent (no-op when not published). Inverse of publish.
+    app.post(`${p}/manage/:id/unpublish`, requireBroadcastPublish, async (c) => {
+      const result = await unpublishBroadcastFromNotification(dbOf(c), c.req.param("id"));
+      return c.json(result satisfies notification.UnpublishBroadcastResponse, 202);
+    });
+
+    // Bulk unpublish: retract a whole selection in one round trip. Each id is independent +
+    // idempotent (see unpublishBroadcastBatch); partial failures are reported per item.
+    app.post(`${p}/manage/unpublish-batch`, requireBroadcastPublish, async (c) => {
+      const { ids } = parseUnpublishBatch(await c.req.json().catch(() => null));
+      const result = await unpublishBroadcastBatch(dbOf(c), ids);
+      return c.json(result satisfies notification.UnpublishBroadcastBatchResponse, 202);
     });
 
     // ---- self-scoped routes: requireAuth (trusted header -> x-dub-user-id = 本人).

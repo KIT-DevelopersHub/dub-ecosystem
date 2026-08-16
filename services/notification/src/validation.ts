@@ -338,4 +338,9 @@ export function parsePublishBatch(body: unknown): notification.PublishBroadcastB
   return { ids: ids as string[] };
 }
 
+/** Validate POST /manage/unpublish-batch body ({ ids: string[] }, same shape as publish). */
+export function parseUnpublishBatch(body: unknown): notification.UnpublishBroadcastBatchRequest {
+  return parsePublishBatch(body) as notification.UnpublishBroadcastBatchRequest;
+}
+
 export { notifValidationFailed };

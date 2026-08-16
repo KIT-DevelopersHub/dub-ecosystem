@@ -9,6 +9,7 @@
 // single broadcast while keeping their OWN read state (one notif_inbox row per user).
 // Idempotent: the dedup key links the broadcast back to its source, so re-publishing
 // returns the existing broadcast id with deduplicated=true.
+import type { DbClient } from "@dub/db";
 import { DubError } from "@dub/errors";
 import type { RequestContext } from "@dub/http";
 import type { notification } from "@dub/types";
@@ -20,7 +21,7 @@ import {
   BROADCAST_FROM_PREFIX,
   MEMBER_BROADCAST_TYPE,
 } from "./config";
-import { getNotificationById } from "./repo";
+import { deleteBroadcastCascade, findByDedupKey, getNotificationById } from "./repo";
 
 /** Build the members-broadcast IngestInput derived from a source admin notification. */
 export function buildBroadcastInput(
@@ -110,4 +111,75 @@ export async function publishBroadcastBatch(
     }
   }
   return { results, publishedCount, deduplicatedCount, failedCount };
+}
+
+/**
+ * Unpublish (retract) the members broadcast derived from the given admin notification — the
+ * inverse of publishBroadcastFromNotification. The broadcast row and every per-user inbox
+ * row it fanned out are hard-deleted, so the notification disappears from all member inboxes
+ * (each user's read state simply goes away with the row). The source admin notification is
+ * untouched, so the management row flips back to publishable and can be re-published later.
+ *
+ * Idempotent: unpublishing a notification that was never published (or already retracted) is
+ * a no-op with retracted=false. Validates the source like publish does — throws
+ * NOTIF_NOTIFICATION_NOT_FOUND (404) for an unknown id and NOTIF_NOT_ADMIN_AUDIENCE (409)
+ * when the source is not an audience='admin' notification (only those are ever published).
+ */
+export async function unpublishBroadcastFromNotification(
+  db: DbClient,
+  sourceId: string,
+): Promise<notification.UnpublishBroadcastResponse> {
+  const source = await getNotificationById(db, sourceId);
+  if (!source) {
+    throw new DubError("NOTIF_NOTIFICATION_NOT_FOUND", `notification not found: ${sourceId}`, { status: 404 });
+  }
+  if (source.audience !== AUDIENCE_ADMIN) {
+    throw new DubError(
+      "NOTIF_NOT_ADMIN_AUDIENCE",
+      "only admin-audience notifications can be unpublished from members",
+      { status: 409 },
+    );
+  }
+  const broadcastId = await findByDedupKey(db, `${BROADCAST_FROM_PREFIX}${sourceId}`);
+  if (!broadcastId) {
+    // Never published (or already retracted) — nothing to remove.
+    return { notificationId: sourceId, retracted: false, removedBroadcastId: null };
+  }
+  await deleteBroadcastCascade(db, broadcastId);
+  return { notificationId: sourceId, retracted: true, removedBroadcastId: broadcastId };
+}
+
+/**
+ * Unpublish MANY admin notifications in one call. Each id is retracted idempotently and
+ * INDEPENDENTLY (an unknown / non-admin id becomes a per-item failure, never aborting the
+ * batch; an already-unpublished id is a no-op success). Sequential over the shared D1
+ * connection. Duplicate ids in the request are collapsed so each source is retracted once.
+ */
+export async function unpublishBroadcastBatch(
+  db: DbClient,
+  ids: string[],
+): Promise<notification.UnpublishBroadcastBatchResponse> {
+  const seen = new Set<string>();
+  const results: notification.UnpublishBroadcastBatchItem[] = [];
+  let retractedCount = 0;
+  let noopCount = 0;
+  let failedCount = 0;
+
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    try {
+      const res = await unpublishBroadcastFromNotification(db, id);
+      const item: notification.UnpublishBroadcastBatchItem = { id, ok: true, retracted: res.retracted };
+      if (res.removedBroadcastId) item.removedBroadcastId = res.removedBroadcastId;
+      results.push(item);
+      if (res.retracted) retractedCount++;
+      else noopCount++;
+    } catch (err) {
+      const code = err instanceof DubError ? err.code : "NOTIF_UNPUBLISH_FAILED";
+      results.push({ id, ok: false, code });
+      failedCount++;
+    }
+  }
+  return { results, retractedCount, noopCount, failedCount };
 }

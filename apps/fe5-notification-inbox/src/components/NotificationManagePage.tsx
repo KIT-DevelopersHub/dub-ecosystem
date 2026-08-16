@@ -27,7 +27,9 @@ import {
   categoryOf,
   filterByCategory,
   publishableIds,
-  allPublishableSelected,
+  unpublishableIds,
+  selectableIds,
+  allSelected,
   type ManageFilter,
 } from "../lib/manage-filter";
 
@@ -42,10 +44,12 @@ function ManageRow(props: {
   item: AdminNotificationItem;
   selected: boolean;
   publishing: boolean;
+  unpublishing: boolean;
   onToggle: (id: string) => void;
   onPublish: (id: string) => void;
+  onUnpublish: (id: string) => void;
 }): ReactNode {
-  const { item, selected, publishing, onToggle, onPublish } = props;
+  const { item, selected, publishing, unpublishing, onToggle, onPublish, onUnpublish } = props;
   const published = item.publishedBroadcastId !== null;
   return (
     <Card padded testId="fe5-manage-item">
@@ -54,7 +58,6 @@ function ManageRow(props: {
           <Checkbox
             id={`fe5-sel-${item.id}`}
             checked={selected}
-            disabled={published}
             onChange={() => onToggle(item.id)}
             label={
               <span>
@@ -70,9 +73,20 @@ function ManageRow(props: {
         </Stack>
         <div style={{ flexShrink: 0 }}>
           {published ? (
-            <Badge tone="success" testId="fe5-published-badge">
-              公開済み
-            </Badge>
+            <Stack direction="row" align="center" gap={2}>
+              <Badge tone="success" testId="fe5-published-badge">
+                公開済み
+              </Badge>
+              <Button
+                variant="ghost"
+                loading={unpublishing}
+                disabled={unpublishing}
+                onClick={() => onUnpublish(item.id)}
+                testId="fe5-unpublish-btn"
+              >
+                公開解除
+              </Button>
+            </Stack>
           ) : (
             <Button
               variant="secondary"
@@ -91,15 +105,26 @@ function ManageRow(props: {
 }
 
 export function NotificationManagePage(): ReactNode {
-  const { items, loading, error, publishing, publish, publishMany, reload } = useAdminNotifications();
+  const { items, loading, error, publishing, unpublishing, publish, publishMany, unpublish, unpublishMany, reload } =
+    useAdminNotifications();
   const [filter, setFilter] = useState<ManageFilter>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkUnpublishBusy, setBulkUnpublishBusy] = useState(false);
 
   const categories = useMemo(() => availableCategories(items), [items]);
   const filtered = useMemo(() => filterByCategory(items, filter), [items, filter]);
-  const selectAllChecked = allPublishableSelected(filtered, selected);
+  const selectAllChecked = allSelected(filtered, selected);
   const selectedCount = selected.size;
+  // Selection spans both states; each bulk button acts only on its applicable subset.
+  const selectedPublishableCount = useMemo(
+    () => publishableIds(filtered).filter((id) => selected.has(id)).length,
+    [filtered, selected],
+  );
+  const selectedUnpublishableCount = useMemo(
+    () => unpublishableIds(filtered).filter((id) => selected.has(id)).length,
+    [filtered, selected],
+  );
 
   // Changing the filter resets the selection (selection always reflects the visible set).
   const onFilterChange = useCallback((tabId: string) => {
@@ -117,7 +142,7 @@ export function NotificationManagePage(): ReactNode {
   }, []);
 
   const toggleSelectAll = useCallback(() => {
-    const ids = publishableIds(filtered);
+    const ids = selectableIds(filtered);
     setSelected((prev) => {
       const everySelected = ids.length > 0 && ids.every((id) => prev.has(id));
       const next = new Set(prev);
@@ -128,7 +153,7 @@ export function NotificationManagePage(): ReactNode {
   }, [filtered]);
 
   const onBulkPublish = useCallback(async () => {
-    if (selected.size === 0 || bulkBusy) return;
+    if (selectedPublishableCount === 0 || bulkBusy) return;
     setBulkBusy(true);
     try {
       await publishMany([...selected]);
@@ -136,7 +161,18 @@ export function NotificationManagePage(): ReactNode {
     } finally {
       setBulkBusy(false);
     }
-  }, [selected, bulkBusy, publishMany]);
+  }, [selected, selectedPublishableCount, bulkBusy, publishMany]);
+
+  const onBulkUnpublish = useCallback(async () => {
+    if (selectedUnpublishableCount === 0 || bulkUnpublishBusy) return;
+    setBulkUnpublishBusy(true);
+    try {
+      await unpublishMany([...selected]);
+      setSelected(new Set()); // retracted rows are no longer unpublishable
+    } finally {
+      setBulkUnpublishBusy(false);
+    }
+  }, [selected, selectedUnpublishableCount, bulkUnpublishBusy, unpublishMany]);
 
   const displayError: DisplayableError | null = useMemo(
     () =>
@@ -158,7 +194,7 @@ export function NotificationManagePage(): ReactNode {
     <Stack gap={4} testId="fe5-manage-page">
       <PageHeader
         title="Notification管理"
-        description="管理者向けの通知を確認し、選択して「メンバーへ一括公開」でメンバー全体に配信します。"
+        description="管理者向けの通知を確認し、「メンバーへ公開」でメンバー全体に配信します。公開済みの通知は「公開解除」でメンバーから取り下げられます。"
         testId="fe5-manage-header"
       />
 
@@ -171,7 +207,7 @@ export function NotificationManagePage(): ReactNode {
                 <Checkbox
                   id="fe5-select-all"
                   checked={selectAllChecked}
-                  disabled={publishableIds(filtered).length === 0}
+                  disabled={selectableIds(filtered).length === 0}
                   onChange={toggleSelectAll}
                   label="すべて選択"
                   testId="fe5-select-all"
@@ -180,15 +216,26 @@ export function NotificationManagePage(): ReactNode {
                   {selectedCount}件選択中
                 </span>
               </Stack>
-              <Button
-                variant="primary"
-                loading={bulkBusy}
-                disabled={selectedCount === 0 || bulkBusy}
-                onClick={() => void onBulkPublish()}
-                testId="fe5-bulk-publish-btn"
-              >
-                メンバーへ一括公開
-              </Button>
+              <Stack direction="row" align="center" gap={2}>
+                <Button
+                  variant="secondary"
+                  loading={bulkUnpublishBusy}
+                  disabled={selectedUnpublishableCount === 0 || bulkUnpublishBusy}
+                  onClick={() => void onBulkUnpublish()}
+                  testId="fe5-bulk-unpublish-btn"
+                >
+                  選択したものを公開解除
+                </Button>
+                <Button
+                  variant="primary"
+                  loading={bulkBusy}
+                  disabled={selectedPublishableCount === 0 || bulkBusy}
+                  onClick={() => void onBulkPublish()}
+                  testId="fe5-bulk-publish-btn"
+                >
+                  メンバーへ一括公開
+                </Button>
+              </Stack>
             </Stack>
           </Card>
         </Stack>
@@ -214,8 +261,10 @@ export function NotificationManagePage(): ReactNode {
               item={item}
               selected={selected.has(item.id)}
               publishing={publishing.has(item.id)}
+              unpublishing={unpublishing.has(item.id)}
               onToggle={toggleOne}
               onPublish={publish}
+              onUnpublish={unpublish}
             />
           ))}
         </Stack>
