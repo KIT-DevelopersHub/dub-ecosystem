@@ -34,12 +34,13 @@ import {
   parseCreateFeedback,
   parseListFeedbackQuery,
   parseListManageQuery,
+  parsePublishBatch,
   parseReleaseRequest,
 } from "./validation";
 import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
 import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
 import { publishRelease, seedInitialReleases } from "./release";
-import { publishBroadcastFromNotification } from "./broadcast";
+import { publishBroadcastFromNotification, publishBroadcastBatch } from "./broadcast";
 import {
   FEEDBACK_ADMIN_PERMISSION,
   RELEASE_ADMIN_PERMISSION,
@@ -188,6 +189,16 @@ export function createApp(options: CreateAppOptions = {}) {
         actorId,
       );
       return c.json(result satisfies notification.PublishBroadcastResponse, 202);
+    });
+
+    // Bulk publish: one round trip for a whole selection. Each id is independent +
+    // idempotent (see publishBroadcastBatch); partial failures are reported per item.
+    app.post(`${p}/manage/publish-batch`, requireBroadcastPublish, async (c) => {
+      const { ids } = parsePublishBatch(await c.req.json().catch(() => null));
+      const ctx = ctxOf(c);
+      const actorId = c.req.header(HEADERS.userId) ?? null;
+      const result = await publishBroadcastBatch(ingestDepsOf(c, ctx), ctx, ids, actorId);
+      return c.json(result satisfies notification.PublishBroadcastBatchResponse, 202);
     });
 
     // ---- self-scoped routes: requireAuth (trusted header -> x-dub-user-id = 本人).

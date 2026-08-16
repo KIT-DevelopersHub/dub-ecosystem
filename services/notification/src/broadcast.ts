@@ -75,3 +75,39 @@ export async function publishBroadcastFromNotification(
     publishedBroadcastId: result.notificationId,
   };
 }
+
+/**
+ * Publish MANY admin notifications to members in one call. Each id is published
+ * idempotently and INDEPENDENTLY (a not-found / non-admin id becomes a per-item failure,
+ * never aborting the batch). Sequential over the shared D1 connection (no fan-out amplify)
+ * — one HTTP round trip for the whole selection. Duplicate ids in the request are collapsed
+ * so the same source is published at most once per call.
+ */
+export async function publishBroadcastBatch(
+  deps: IngestDeps,
+  ctx: RequestContext,
+  ids: string[],
+  actorId: string | null,
+): Promise<notification.PublishBroadcastBatchResponse> {
+  const seen = new Set<string>();
+  const results: notification.PublishBroadcastBatchItem[] = [];
+  let publishedCount = 0;
+  let deduplicatedCount = 0;
+  let failedCount = 0;
+
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    try {
+      const res = await publishBroadcastFromNotification(deps, ctx, id, actorId);
+      results.push({ id, ok: true, deduplicated: res.deduplicated, publishedBroadcastId: res.publishedBroadcastId });
+      if (res.deduplicated) deduplicatedCount++;
+      else publishedCount++;
+    } catch (err) {
+      const code = err instanceof DubError ? err.code : "NOTIF_PUBLISH_FAILED";
+      results.push({ id, ok: false, code });
+      failedCount++;
+    }
+  }
+  return { results, publishedCount, deduplicatedCount, failedCount };
+}
