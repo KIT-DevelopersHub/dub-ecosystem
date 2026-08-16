@@ -80,6 +80,11 @@ export function TaskDetailPanel({
     () => dependencyScopeOptions(scopeTasks, parentId, t.id),
     [scopeTasks, parentId, t.id],
   );
+  // How many tasks hang directly under this one (親タスクなら子の数を明示・feedback #39).
+  const childCount = useMemo(
+    () => scopeTasks.filter((s) => s.parentTaskId === t.id).length,
+    [scopeTasks, t.id],
+  );
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
@@ -199,6 +204,14 @@ export function TaskDetailPanel({
               options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
               testId="fe4-detail-team"
             />
+          </div>
+        )}
+
+        {/* 子タスク数: shown when this task is itself a work-package (親). */}
+        {childCount > 0 && (
+          <div className={styles.detailChildCount} data-testid="fe4-detail-child-count">
+            <span className={styles.detailChildCountLabel}>子タスク</span>
+            <span className={styles.detailChildCountValue}>{childCount}個</span>
           </div>
         )}
 

@@ -38,6 +38,9 @@ export interface GanttViewProps {
   truncated?: boolean;
   /** Commit a bar move/resize: whole-day start/end after the drag. */
   onSchedule?: (taskId: common.TaskId, startsAt: common.ISODateTime, endsAt: common.ISODateTime) => void;
+  /** Shift a work-package (parent) AND its whole subtree by whole days (parent
+   *  drag-move: children follow). Falls back to onSchedule when absent. */
+  onScheduleShift?: (taskId: common.TaskId, deltaDays: number) => void;
   /** Click a bar or row to open the detail panel. */
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
@@ -82,6 +85,7 @@ export function GanttView({
   onZoomChange,
   truncated,
   onSchedule,
+  onScheduleShift,
   onSelect,
   onCreateOnDate,
   statusById,
@@ -119,13 +123,17 @@ export function GanttView({
     [rolledRows, openParents],
   );
 
-  // taskId -> true when the row is a WBS parent (its bar is a rolled-up summary,
-  // not a directly-editable task bar).
+  // taskId -> true when the row is a WBS parent (its bar spans its children via
+  // rollup). Parents are now draggable too — a move shifts the whole subtree.
   const parentIds = useMemo(() => {
     const s = new Set<common.TaskId>();
     for (const r of dto.rows) if (r.hasChildren) s.add(r.taskId);
     return s;
   }, [dto.rows]);
+
+  // taskId -> the ROLLED row (parent dates are the union of their children). Drag
+  // start/end must read these displayed dates, not the parent's pre-rollup seed.
+  const rolledById = useMemo(() => new Map(rolledRows.map((r) => [r.taskId, r])), [rolledRows]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
@@ -240,18 +248,14 @@ export function GanttView({
 
   // ---- bar pointer session (move + resize + click-to-open) ----
   const beginDrag = (e: React.PointerEvent, bar: TimelineBar, mode: DragMode) => {
-    // Parent bars are rolled-up summaries of their children — they are not
-    // directly schedulable, so a tap only opens the row (edit the leaves instead).
-    if (parentIds.has(bar.taskId)) {
-      if (mode === "move") onSelect?.(bar.taskId);
-      return;
-    }
     if (!canWrite || !onSchedule) {
       // read-only: a tap still opens detail
       if (mode === "move") onSelect?.(bar.taskId);
       return;
     }
-    const row = dto.rows.find((r) => r.taskId === bar.taskId);
+    // Parents are draggable too now: read the ROLLED (displayed) span so a move
+    // starts from the bar the user actually sees; the drop shifts the subtree.
+    const row = rolledById.get(bar.taskId) ?? dto.rows.find((r) => r.taskId === bar.taskId);
     if (!row?.startsAt || !row?.endsAt) return;
     e.preventDefault();
     e.stopPropagation();
@@ -274,12 +278,22 @@ export function GanttView({
     if (!drag) return;
     const { taskId, mode, startsAt, endsAt, dxPx } = drag;
     if (!movedRef.current) {
+      // A click that didn't move opens detail — same affordance as leaf bars.
       if (mode === "move") onSelect?.(taskId);
     } else {
       const deltaDays = pxToDays(dxPx, win);
-      if (deltaDays !== 0 && onSchedule) {
-        const next = shiftBar(startsAt, endsAt, deltaDays, mode);
-        onSchedule(taskId, next.startsAt, next.endsAt);
+      if (deltaDays !== 0) {
+        // Parent MOVE: shift the whole subtree so children follow (keeps rollup
+        // consistent — the parent bar stays the union of its shifted children).
+        if (mode === "move" && parentIds.has(taskId) && onScheduleShift) {
+          onScheduleShift(taskId, deltaDays);
+        } else if (onSchedule) {
+          // Leaf move/resize, or a parent RESIZE: persist the row's own span. For a
+          // parent, rollup then unions it with the children — extending grows the
+          // bar, shrinking below the children is ignored (children never split).
+          const next = shiftBar(startsAt, endsAt, deltaDays, mode);
+          onSchedule(taskId, next.startsAt, next.endsAt);
+        }
       }
     }
     setDrag(null);
@@ -433,14 +447,18 @@ export function GanttView({
                       key={r.taskId}
                       type="button"
                       className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""}`}
-                      style={{ height: ROW_HEIGHT, paddingLeft: 12 + depth * 18 }}
+                      // Parent rows move the left indent INTO the toggle so the whole
+                      // left gutter (everything left of the team stripe) toggles — a
+                      // much bigger hit target than the chevron glyph (feedback #39).
+                      style={{ height: ROW_HEIGHT, paddingLeft: r.hasChildren ? 0 : 12 + depth * 18 }}
                       title={r.title}
                       onClick={() => onSelect?.(r.taskId)}
                       data-testid={`fe4-gantt-row-${r.taskId}`}
                     >
                       {r.hasChildren ? (
                         <span
-                          className={styles.tlToggle}
+                          className={styles.tlToggleWide}
+                          style={{ paddingLeft: 12 + depth * 18 }}
                           role="button"
                           tabIndex={0}
                           aria-label={isOpen ? "子タスクを閉じる" : "子タスクを開く"}
@@ -458,7 +476,7 @@ export function GanttView({
                             }
                           }}
                         >
-                          {isOpen ? "▾" : "▸"}
+                          <span className={styles.tlToggleGlyph} aria-hidden>{isOpen ? "▾" : "▸"}</span>
                         </span>
                       ) : (
                         depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
@@ -573,7 +591,7 @@ export function GanttView({
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
                       )}
                       <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
-                      {canWrite && onSchedule && !parentIds.has(b.taskId) && (
+                      {canWrite && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleL}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-l`}
@@ -582,7 +600,7 @@ export function GanttView({
                         />
                       )}
                       {showInside && <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>}
-                      {canWrite && onSchedule && !parentIds.has(b.taskId) && (
+                      {canWrite && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleR}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-r`}

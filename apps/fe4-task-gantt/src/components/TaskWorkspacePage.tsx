@@ -164,6 +164,34 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const MS_PER_DAY = 86_400_000;
 
+  // Parent (work-package) drag-move: shift the parent AND its whole subtree by the
+  // same number of days so the children follow. Rollup keeps the parent bar as the
+  // union of its (now shifted) children, so the parent stays visually consistent.
+  const onScheduleShift = (parentId: common.TaskId, deltaDays: number) => {
+    if (!gantt.data || deltaDays === 0) return;
+    const rows = gantt.data.rows;
+    // BFS the subtree (parent + all descendants at any depth).
+    const ids: common.TaskId[] = [parentId];
+    for (let i = 0; i < ids.length; i++) {
+      for (const r of rows) if (r.parentTaskId === ids[i]) ids.push(r.taskId);
+    }
+    const shifts = ids
+      .map((id) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r && !!r.startsAt && !!r.endsAt)
+      .map((r) => ({
+        id: r.taskId,
+        startsAt: new Date(Date.parse(r.startsAt!) + deltaDays * MS_PER_DAY).toISOString() as common.ISODateTime,
+        endsAt: new Date(Date.parse(r.endsAt!) + deltaDays * MS_PER_DAY).toISOString() as common.ISODateTime,
+      }));
+    for (const s of shifts) gantt.setRowScheduleOptimistic(s.id, s.startsAt, s.endsAt);
+    void Promise.all(shifts.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
+      .then(() => gantt.refetchFresh())
+      .then(() => store.load(client, query))
+      .catch(() => {
+        void gantt.refetchFresh();
+      });
+  };
+
   const openCreate = (opts: { due?: string | null; parent?: common.TaskId | null; deps?: common.TaskId[]; predecessorFor?: common.TaskId | null }) => {
     setCreatePresetDue(opts.due ?? null);
     setCreatePresetParent(opts.parent ?? null);
@@ -354,6 +382,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           zoom="week"
           truncated={filteredDto.rows.length >= 2000}
           onSchedule={caps.canWrite ? onSchedule : undefined}
+          onScheduleShift={caps.canWrite ? onScheduleShift : undefined}
           onSelect={setSelected}
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}

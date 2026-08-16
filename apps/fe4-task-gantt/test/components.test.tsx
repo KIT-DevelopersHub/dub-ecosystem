@@ -67,13 +67,13 @@ describe("GanttView render (design test 4/7)", () => {
     expect(screen.getByTestId("fe4-gantt-group-p")).toBeInTheDocument();
   });
 
-  it("parent bar is a summary that has no resize handles (rolled-up, not editable)", () => {
+  it("parent bar is now draggable/resizable too (feedback #39: exposes resize handles)", () => {
     const onSchedule = vi.fn();
     render(<GanttView dto={wbsDto} zoom="week" onSchedule={onSchedule} canWrite />);
-    // parent bar exists but exposes no drag handles (children carry the edits)
+    // parent bar exists AND carries drag handles (a move shifts the subtree)
     expect(screen.getByTestId("fe4-gantt-bar-p")).toBeInTheDocument();
-    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-l")).toBeNull();
-    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-r")).toBeNull();
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-l")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-r")).toBeInTheDocument();
   });
 });
 
