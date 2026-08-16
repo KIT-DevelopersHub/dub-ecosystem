@@ -300,9 +300,12 @@ export function GanttView({
     const status = statusById?.get(taskId);
     const cls = status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
-    // parent = rolled-up summary bar (bracket style), visually distinct from leaf bars.
-    const summary = parentIds.has(taskId) ? styles.barSummary : "";
-    return `${styles.bar} ${cls} ${summary} ${dragging}`;
+    // Parent (work-package) rows keep the rollup behaviour (their span still auto-
+    // encloses their children) but render as an ordinary, legible task bar — the
+    // hollow "bracket summary" look was reverted per feedback #97 (見づらい). The
+    // parent/child vs dependency distinction is carried by indent + tree lines +
+    // the dashed dependency arrows + the legend, not by a special bar shape.
+    return `${styles.bar} ${cls} ${dragging}`;
   };
 
   // ---- left-pane resize ----

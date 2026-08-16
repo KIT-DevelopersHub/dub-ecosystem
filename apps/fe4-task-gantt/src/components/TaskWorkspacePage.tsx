@@ -3,7 +3,7 @@ import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
 import { Button } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { patchGanttRow, replaceDependencies, resolveUsers } from "../api/endpoints";
+import { patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
 import { useTeams } from "../api/useTeams";
 import { useTaskStore } from "../store/useTaskStore";
@@ -11,10 +11,11 @@ import { emptyFilter, toListTasksQuery, type TaskFilterState } from "../domain/t
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap } from "../domain/error-mapping";
+import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
-import { TaskDetailPanel } from "./TaskDetailPanel";
+import { TaskDetailPanel, type RelationEdit } from "./TaskDetailPanel";
 import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
 import styles from "../styles/app.module.css";
 
@@ -37,7 +38,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const [selected, setSelected] = useState<common.TaskId | null>(null);
   const [creating, setCreating] = useState(false);
   const [createPresetDue, setCreatePresetDue] = useState<string | null>(null);
+  const [createPresetParent, setCreatePresetParent] = useState<common.TaskId | null>(null);
   const [createPresetDeps, setCreatePresetDeps] = useState<common.TaskId[]>([]);
+  // When set, a task created from the modal is linked as this task's predecessor
+  // ("先行タスクを作成" from the detail panel).
+  const [createPredecessorFor, setCreatePredecessorFor] = useState<common.TaskId | null>(null);
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
@@ -116,6 +121,30 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   }, [gantt.data, tasks]);
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
+
+  // Hierarchy/scope model over ALL rows (unfiltered by status) so parents and
+  // same-scope siblings stay selectable even when a status filter hides some rows.
+  const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
+  const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
+  const allTaskOptions = useMemo(
+    () => allRows.map((r) => ({ id: r.taskId, title: r.title })),
+    [allRows],
+  );
+  // predecessors currently on the selected task (先行タスク＝依存元 where to===selected).
+  const selectedDependsOn = useMemo(() => {
+    if (!selected || !gantt.data) return [] as common.TaskId[];
+    return gantt.data.dependencies.filter((d) => d.toTaskId === selected).map((d) => d.fromTaskId);
+  }, [selected, gantt.data]);
+  const selectedParentId = useMemo(
+    () => (selected ? directParentOf(scopeTasks, selected) : null),
+    [selected, scopeTasks],
+  );
+  // parent options for the detail panel exclude the task itself.
+  const detailParentOptions = useMemo(
+    () => (selected ? allTaskOptions.filter((o) => o.id !== selected) : allTaskOptions),
+    [allTaskOptions, selected],
+  );
+
   const fieldErrors =
     store.lastError?.action === "field_errors"
       ? fieldErrorMap((store.lastError as unknown as { details?: unknown }).details)
@@ -133,28 +162,54 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       });
   };
 
-  const onCreateOnDate = (dueAt: common.ISODateTime | null) => {
-    setCreatePresetDue(dueAt ? dueAt.slice(0, 10) : null);
-    setCreatePresetDeps([]);
+  const MS_PER_DAY = 86_400_000;
+
+  const openCreate = (opts: { due?: string | null; parent?: common.TaskId | null; deps?: common.TaskId[]; predecessorFor?: common.TaskId | null }) => {
+    setCreatePresetDue(opts.due ?? null);
+    setCreatePresetParent(opts.parent ?? null);
+    setCreatePresetDeps(opts.deps ?? []);
+    setCreatePredecessorFor(opts.predecessorFor ?? null);
     setCreating(true);
   };
 
-  // "＋ ここから子タスクを作成": open the create modal with this task preset as the
-  // predecessor (parent). We also preset the child's due a few days after the
-  // parent finishes, so it gets a bar and the parent->child dependency line is
-  // actually drawn on the gantt (a bar-less row would hide the connector).
+  const closeCreate = () => {
+    setCreating(false);
+    setCreatePresetDue(null);
+    setCreatePresetParent(null);
+    setCreatePresetDeps([]);
+    setCreatePredecessorFor(null);
+  };
+
+  const onCreateOnDate = (dueAt: common.ISODateTime | null) => {
+    openCreate({ due: dueAt ? dueAt.slice(0, 10) : null });
+  };
+
+  // "＋ 子タスクを作成": open the create modal with this task preset as the PARENT
+  // (真の親子関係). The child's due is a few days after the parent's end so it gets
+  // a bar and the rollup visibly extends the parent.
   const onCreateChild = (parentId: common.TaskId) => {
-    const MS_PER_DAY = 86_400_000;
     const row = gantt.data?.rows.find((r) => r.taskId === parentId);
     const anchor = row?.endsAt ?? tasks.find((t) => t.id === parentId)?.dueAt ?? null;
     const childDue = anchor ? new Date(Date.parse(anchor) + 3 * MS_PER_DAY).toISOString().slice(0, 10) : null;
     setSelected(null);
-    setCreatePresetDue(childDue);
-    setCreatePresetDeps([parentId]);
-    setCreating(true);
+    openCreate({ due: childDue, parent: parentId });
+  };
+
+  // "＋ 先行タスクを作成": create a new task in the SAME SCOPE as this one (same
+  // direct parent → sibling, so the dependency is in-scope per 判断10), then link
+  // it as this task's predecessor. Preset the new task's due before this task's
+  // start so the connector reads left→right.
+  const onCreatePredecessor = (taskId: common.TaskId) => {
+    const row = gantt.data?.rows.find((r) => r.taskId === taskId);
+    const start = row?.startsAt ?? tasks.find((t) => t.id === taskId)?.dueAt ?? null;
+    const predDue = start ? new Date(Date.parse(start) - 2 * MS_PER_DAY).toISOString().slice(0, 10) : null;
+    const parent = directParentOf(scopeTasks, taskId);
+    setSelected(null);
+    openCreate({ due: predDue, parent, predecessorFor: taskId });
   };
 
   const onCreate = async (draft: TaskDraft) => {
+    const linkPredecessorFor = createPredecessorFor;
     const created = await store.create(client, {
       eventId,
       title: draft.title,
@@ -162,6 +217,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
       ...(draft.teamId ? { teamId: draft.teamId } : {}),
       ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+      ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
     });
     if (!created) return;
     let version = created.version;
@@ -180,20 +236,60 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         const withDeps = await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
         version = withDeps.version;
       } catch {
-        /* dependency cycle etc. — task is still created; surfaced separately */
+        /* dependency cycle / out-of-scope etc. — task is still created; surfaced separately */
+      }
+    }
+    // "先行タスクを作成": add the new task as a predecessor of the source task.
+    if (linkPredecessorFor) {
+      const target = tasks.find((t) => t.id === linkPredecessorFor);
+      if (target) {
+        const curDeps = gantt.data?.dependencies.filter((d) => d.toTaskId === linkPredecessorFor).map((d) => d.fromTaskId) ?? [];
+        try {
+          await replaceDependencies(client, linkPredecessorFor, {
+            version: target.version,
+            dependsOnIds: [...curDeps, created.id],
+          });
+        } catch {
+          /* out-of-scope / cycle — surfaced separately; the new task still exists */
+        }
       }
     }
     await store.load(client, query);
     await gantt.refetchFresh();
   };
 
-  const onSaveDetail = (patch: task.UpdateTaskRequest) => {
+  const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
     if (!selectedTask) return;
-    void store
-      .patchOptimistic(client, selectedTask.id, patch, selectedTask.version, patch)
-      .then((ok) => {
-        if (ok) void gantt.refetchFresh();
-      });
+    const needsRelations = relations.parentChanged || relations.depsChanged;
+    if (!needsRelations) {
+      void store
+        .patchOptimistic(client, selectedTask.id, patch, selectedTask.version, patch)
+        .then((ok) => {
+          if (ok) void gantt.refetchFresh();
+        });
+      return;
+    }
+    // Combined edit (fields + re-parent + dependencies). Re-parent rides in the
+    // same updateTask (parentTaskId is on UpdateTaskRequest); dependencies follow
+    // with the bumped version, then we resync the store + gantt.
+    const id = selectedTask.id;
+    void (async () => {
+      try {
+        let version = selectedTask.version;
+        const hasFieldPatch = Object.keys(patch).some((k) => k !== "version");
+        if (hasFieldPatch) {
+          const server = await updateTask(client, id, patch);
+          version = server.version;
+        }
+        if (relations.depsChanged) {
+          const withDeps = await replaceDependencies(client, id, { version, dependsOnIds: relations.dependsOnIds });
+          version = withDeps.version;
+        }
+      } finally {
+        await store.load(client, query);
+        await gantt.refetchFresh();
+      }
+    })();
   };
 
   const onDeleteDetail = () => {
@@ -271,29 +367,33 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       <TaskCreateModal
         open={creating}
         initialDue={createPresetDue}
+        initialParentId={createPresetParent}
         initialDependsOn={createPresetDeps}
-        onClose={() => {
-          setCreating(false);
-          setCreatePresetDue(null);
-          setCreatePresetDeps([]);
-        }}
+        onClose={closeCreate}
         users={userList}
         teams={teams}
-        dependencyOptions={tasks.map((t) => ({ id: t.id, title: t.title }))}
+        parentOptions={allTaskOptions}
+        scopeTasks={scopeTasks}
         onCreate={onCreate}
       />
 
       {selectedTask && (
         <TaskDetailPanel
+          key={selectedTask.id}
           task={selectedTask}
           users={userList}
           teams={teams}
           canWrite={caps.canWrite}
           canDelete={caps.canDelete}
+          parentOptions={detailParentOptions}
+          parentTaskId={selectedParentId}
+          scopeTasks={scopeTasks}
+          dependsOnIds={selectedDependsOn}
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}
           onCreateChild={onCreateChild}
+          onCreatePredecessor={onCreatePredecessor}
           onClose={() => setSelected(null)}
         />
       )}

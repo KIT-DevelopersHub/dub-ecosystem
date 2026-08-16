@@ -84,6 +84,20 @@ export class MockApiClient implements ApiClient {
     return set;
   }
 
+  /** Re-parent a row in the hierarchy overlay (create/update parentTaskId). Depth
+   *  is derived from the parent's own depth so nested WBS levels read correctly;
+   *  null detaches the row to top-level (depth 0). The task model has no parent
+   *  column — the server keeps it in gantt-service, so the mock mirrors that here. */
+  private setParent(id: common.TaskId, parentTaskId: common.TaskId | null): void {
+    const prev = this.hierarchy[id];
+    if (parentTaskId === null) {
+      this.hierarchy[id] = { ...(prev ?? {}), parentTaskId: null, depth: 0 };
+      return;
+    }
+    const parentDepth = this.hierarchy[parentTaskId]?.depth ?? 0;
+    this.hierarchy[id] = { ...(prev ?? {}), parentTaskId, depth: parentDepth + 1 };
+  }
+
   async request<T, TBody = unknown>(req: RequestInput<TBody>): Promise<T> {
     this.calls.push(req);
     if (this.failNext) {
@@ -208,6 +222,7 @@ export class MockApiClient implements ApiClient {
       version: 1,
     };
     this.taskById.set(t.id, t);
+    if (body.parentTaskId !== undefined) this.setParent(t.id, body.parentTaskId ?? null);
     return t;
   }
 
@@ -234,6 +249,8 @@ export class MockApiClient implements ApiClient {
       updatedAt: new Date().toISOString(),
     };
     this.taskById.set(id, next);
+    // re-parent (親子関係の変更) lives in the hierarchy overlay, not on the task row.
+    if (body.parentTaskId !== undefined) this.setParent(id, body.parentTaskId ?? null);
     return next;
   }
 
@@ -247,6 +264,19 @@ export class MockApiClient implements ApiClient {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     if (body.version !== cur.version) throw err(409, "TASK_VERSION_CONFLICT", "version conflict");
+    // scope rule (判断10): a dependency may only connect same-direct-parent siblings.
+    // parent↔child and cross-scope edges are rejected; parent↔parent (both top-level
+    // or both under the same grandparent) is allowed by the same test.
+    const myParent = this.hierarchy[id]?.parentTaskId ?? null;
+    for (const dep of body.dependsOnIds) {
+      if (dep === id) throw err(409, "TASK_DEPENDENCY_CYCLE", "self dependency", { taskId: id });
+      const depParent = this.hierarchy[dep]?.parentTaskId ?? null;
+      if (depParent !== myParent)
+        throw err(409, "TASK_DEPENDENCY_SCOPE", "dependency must stay within the same parent scope", {
+          taskId: id,
+          dependsOnId: dep,
+        });
+    }
     // cycle check over the proposed graph
     const proposed = new Map(this.deps);
     proposed.set(id, body.dependsOnIds);
