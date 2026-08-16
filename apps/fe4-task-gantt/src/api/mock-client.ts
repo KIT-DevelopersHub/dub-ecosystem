@@ -33,6 +33,7 @@ export interface MockSeed {
   dependencies?: gantt.GanttDependencyLine[];
   users?: identity.UserSummary[];
   teams?: team.Team[];
+  events?: event.EventSummary[];
   actions?: event.ActionSummary[];
   view?: gantt.GanttViewState;
   /** row date overrides (task has only dueAt; gantt startsAt/endsAt live here). */
@@ -48,6 +49,7 @@ export class MockApiClient implements ApiClient {
   private deps = new Map<common.TaskId, common.TaskId[]>(); // taskId -> dependsOnIds
   private users = new Map<common.UserId, identity.UserSummary>();
   private teams: team.Team[] = [];
+  private eventSummaries: event.EventSummary[] = [];
   private actions: event.ActionSummary[] = [];
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
@@ -68,6 +70,7 @@ export class MockApiClient implements ApiClient {
     }
     for (const u of seed.users ?? []) this.users.set(u.id, u);
     this.teams = seed.teams ?? [];
+    this.eventSummaries = seed.events ?? [];
     this.actions = seed.actions ?? [];
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
@@ -109,6 +112,8 @@ export class MockApiClient implements ApiClient {
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(String(req.query?.ids ?? "")) as T;
     // --- events ---
+    if (path === "/api/v1/events" && req.method === "GET")
+      return ({ items: this.eventSummaries } as event.ListEventsResponse) as T;
     const evActions = path.match(/^\/api\/v1\/events\/([^/]+)\/actions$/);
     if (evActions && req.method === "GET") return this.actions as T;
 

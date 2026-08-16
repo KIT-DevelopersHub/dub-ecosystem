@@ -141,7 +141,14 @@ export function resolveUsers(
   });
 }
 
-// ---- event-service (create/edit form action选择肢) ----
+// ---- event-service (event picker for タスク発行 + create/edit form choices) ----
+// The マイタスク hub needs the live event list so 「タスクを発行」 can pick a 対象
+// イベント (task-service requires a real eventId on POST /tasks). Default page is
+// enough to populate the picker; the shell falls back to task-derived events.
+export function listEvents(client: ApiClient): Promise<event.ListEventsResponse> {
+  return client.request<event.ListEventsResponse>({ method: "GET", path: `${P}/events` });
+}
+
 export function listEventActions(
   client: ApiClient,
   eventId: common.EventId,
