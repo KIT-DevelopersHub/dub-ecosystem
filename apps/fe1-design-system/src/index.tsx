@@ -51,6 +51,8 @@ export type {
   CardProps,
   TabItem,
   TabsProps,
+  SegmentedOption,
+  SegmentedControlProps,
   DividerProps,
   EmptyStateProps,
   DisplayableError,
@@ -98,6 +100,7 @@ export { AppShell, PageHeader, Stack, Grid, Card, Divider } from "./components/L
 export { AppLauncher } from "./components/AppLauncher";
 export { Sidebar } from "./components/Sidebar";
 export { Tabs } from "./components/Tabs";
+export { SegmentedControl } from "./components/SegmentedControl";
 export { EmptyState, ErrorState, SkeletonLoader } from "./components/States";
 export { Skeleton, SkeletonList, SkeletonTable, SkeletonCard } from "./components/Skeleton";
 export { RateLimitNotice, formatRecoveryText } from "./components/RateLimitNotice";

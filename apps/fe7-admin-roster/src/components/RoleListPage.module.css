@@ -1,0 +1,28 @@
+/* Role management: permission-panel enter animation.
+   The role selector's sliding pill now lives in the shared @dub/ui
+   SegmentedControl; only the panel transition is page-local. Motion values come
+   from @dub/tokens (--dub-motion-*). */
+
+/* The permission panel eases in each time a different role becomes active
+   (it is remounted via key={role.id}), so the content swap is felt, not jarring. */
+.panel {
+  animation: fe7RolePanelIn var(--dub-motion-normal, 200ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+@keyframes fe7RolePanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Respect users who ask the OS to reduce motion: drop the panel animation. */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+}

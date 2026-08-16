@@ -1,0 +1,104 @@
+/* SegmentedControl — sliding-pill segmented selector.
+   All colours/spacing/radii/motion come from @dub/tokens; the only runtime values
+   are the indicator's transform/size, which stay inline on the element. */
+
+.root {
+  display: flex;
+  flex-direction: column;
+}
+
+.caption {
+  margin-bottom: var(--dub-space-2);
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+}
+
+.strip {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-self: flex-start; /* hug content; don't stretch the strip full-width */
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-1);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+}
+
+.segment {
+  position: relative;
+  z-index: 1; /* sit above the sliding indicator (z-index: 0) */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--dub-radius-md);
+  background: transparent;
+  font-family: var(--dub-font-family-sans);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+  cursor: pointer;
+  /* smooth the active/inactive text-colour swap as the pill slides across */
+  transition: color var(--dub-motion-fast) var(--dub-motion-easing);
+}
+
+/* Size variants — only padding + font-size change; the pill tracks the box. */
+.root[data-size="sm"] .segment {
+  padding: var(--dub-space-1) var(--dub-space-2);
+  font-size: var(--dub-font-size-xs);
+}
+.root[data-size="md"] .segment {
+  padding: var(--dub-space-2) var(--dub-space-3);
+  font-size: var(--dub-font-size-sm);
+}
+.root[data-size="lg"] .segment {
+  padding: var(--dub-space-3) var(--dub-space-4);
+  font-size: var(--dub-font-size-md);
+}
+
+.segment:hover:not(:disabled):not([aria-selected="true"]) {
+  color: var(--dub-color-text-primary);
+}
+
+/* Active segment only recolours its text — the sliding pill supplies the
+   surface/border/shadow, so highlight and motion stay in one place. */
+.segment[aria-selected="true"] {
+  color: var(--dub-color-brand-600);
+}
+
+.segment:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The pill that slides under the selected segment. Its transform/width/height are
+   set inline from the active button's measured box; here we style only the look
+   and the easing so the move reads as one smooth glide. */
+.indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-brand-500);
+  box-shadow: var(--dub-shadow-sm);
+  pointer-events: none;
+  transition:
+    transform var(--dub-motion-normal) var(--dub-motion-easing),
+    width var(--dub-motion-normal) var(--dub-motion-easing),
+    height var(--dub-motion-normal) var(--dub-motion-easing),
+    opacity var(--dub-motion-fast) linear;
+}
+
+/* Respect users who ask the OS to reduce motion: keep the highlight, drop the glide. */
+@media (prefers-reduced-motion: reduce) {
+  .indicator {
+    transition: opacity var(--dub-motion-fast) linear;
+  }
+  .segment {
+    transition: none;
+  }
+}
