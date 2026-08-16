@@ -12,6 +12,7 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, formatBytes, parseRecipients } from "./mailApi.tsx";
 import { AttachmentErrors, AttachmentTray } from "./AttachmentTray.tsx";
+import { AttachmentPreview } from "./AttachmentPreview.tsx";
 import { useComposeAttachments } from "./useComposeAttachments.tsx";
 
 interface Fields {
@@ -38,6 +39,7 @@ export function ComposeScreen(): JSX.Element {
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<Fields>({ to: "", subject: "", body: "" });
   const att = useComposeAttachments();
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   const send = useMutation({
@@ -120,7 +122,8 @@ export function ComposeScreen(): JSX.Element {
               />
             </FormField>
             <AttachmentErrors errors={att.errors} onDismiss={att.dismissErrors} />
-            <AttachmentTray items={att.items} onRemove={att.remove} testId="fe2-mail-compose-attach-list" />
+            <AttachmentTray items={att.items} onRemove={att.remove} onOpen={setPreviewId} testId="fe2-mail-compose-attach-list" />
+            <AttachmentPreview items={att.items} openId={previewId} onClose={() => setPreviewId(null)} />
             <div>
               <Button testId="fe2-mail-compose-send" type="submit" loading={send.isPending} disabled={att.hasPending}>
                 送信

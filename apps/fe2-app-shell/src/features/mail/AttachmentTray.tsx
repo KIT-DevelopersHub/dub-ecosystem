@@ -2,7 +2,7 @@
 // thumbnail, the filename, a size line that becomes a progress bar while the file is being
 // read, and a remove (×) button. Purely presentational — fed by useComposeAttachments —
 // so ComposeWindow and ComposeScreen render an identical tray. Built from @dub/tokens vars.
-import type { CSSProperties } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { MailIcon } from "./gmail/icons.tsx";
 import { formatBytes } from "./mailApi.tsx";
 import type { ComposeAttachmentItem } from "./useComposeAttachments.tsx";
@@ -11,14 +11,41 @@ function iconFor(contentType: string): "image" | "file" {
   return contentType.startsWith("image/") ? "image" : "file";
 }
 
-function AttachmentCard({ item, onRemove }: { item: ComposeAttachmentItem; onRemove: (id: string) => void }): JSX.Element {
+function AttachmentCard({
+  item,
+  onRemove,
+  onOpen,
+}: {
+  item: ComposeAttachmentItem;
+  onRemove: (id: string) => void;
+  onOpen?: (id: string) => void;
+}): JSX.Element {
   const reading = item.status === "reading";
   const errored = item.status === "error";
+  const clickable = Boolean(onOpen) && !errored;
+  // The card itself opens the preview (role=button + keyboard); the × is a nested <button>
+  // with stopPropagation so removing never opens the preview (no invalid nested buttons).
+  const open = (): void => {
+    if (clickable) onOpen!(item.id);
+  };
   return (
     <div
       data-testid="fe2-mail-attach-chip"
       data-status={item.status}
-      title={item.filename}
+      title={clickable ? `${item.filename}（クリックでプレビュー）` : item.filename}
+      {...(clickable
+        ? {
+            role: "button",
+            tabIndex: 0,
+            onClick: open,
+            onKeyDown: (e: ReactKeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                open();
+              }
+            },
+          }
+        : {})}
       style={{
         display: "flex",
         alignItems: "center",
@@ -29,6 +56,7 @@ function AttachmentCard({ item, onRemove }: { item: ComposeAttachmentItem; onRem
         borderRadius: "var(--dub-radius-md)",
         border: `1px solid ${errored ? "var(--dub-color-danger-500, #d33)" : "var(--dub-color-border-default)"}`,
         background: "var(--dub-color-surface-base)",
+        cursor: clickable ? "pointer" : "default",
       }}
     >
       <span
@@ -91,7 +119,10 @@ function AttachmentCard({ item, onRemove }: { item: ComposeAttachmentItem; onRem
         type="button"
         data-testid="fe2-mail-attach-remove"
         aria-label={`${item.filename} を削除`}
-        onClick={() => onRemove(item.id)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(item.id);
+        }}
         style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 4, flexShrink: 0 }}
       >
         <MailIcon name="x" size={14} />
@@ -103,17 +134,20 @@ function AttachmentCard({ item, onRemove }: { item: ComposeAttachmentItem; onRem
 export function AttachmentTray({
   items,
   onRemove,
+  onOpen,
   testId = "fe2-mail-attach-tray",
 }: {
   items: ComposeAttachmentItem[];
   onRemove: (id: string) => void;
+  /** When provided, clicking a (non-errored) chip opens the in-place preview. */
+  onOpen?: (id: string) => void;
   testId?: string;
 }): JSX.Element | null {
   if (items.length === 0) return null;
   return (
     <div data-testid={testId} style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {items.map((it) => (
-        <AttachmentCard key={it.id} item={it} onRemove={onRemove} />
+        <AttachmentCard key={it.id} item={it} onRemove={onRemove} {...(onOpen ? { onOpen } : {})} />
       ))}
     </div>
   );

@@ -36,6 +36,34 @@ export function isImageType(contentType: string): boolean {
   return contentType.startsWith("image/");
 }
 
+// Text/code extensions we preview as plain text when the MIME is generic (octet-stream).
+const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
+  "txt", "md", "markdown", "csv", "tsv", "log", "json", "xml", "yaml", "yml", "toml", "ini",
+  "conf", "css", "html", "htm", "ts", "tsx", "jsx", "py", "java", "c", "cc", "cpp", "h", "hpp",
+  "go", "rs", "rb", "php", "sql", "kt", "swift", "sh", "csv",
+]);
+const TEXT_MIME_PREFIXES = ["text/"];
+const TEXT_MIME_EXACT: ReadonlySet<string> = new Set([
+  "application/json", "application/xml", "application/javascript", "application/xhtml+xml",
+  "application/x-yaml", "application/x-sh", "application/x-httpd-php",
+]);
+
+/** How a compose attachment can be previewed in-place (before send, no server round-trip):
+ *  image → inline <img>; pdf → embedded viewer; text → text panel; unsupported → DL fallback. */
+export type PreviewKind = "image" | "pdf" | "text" | "unsupported";
+export function previewKind(contentType: string, filename: string): PreviewKind {
+  const ct = contentType.toLowerCase();
+  if (ct.startsWith("image/")) return "image";
+  if (ct === "application/pdf" || fileExtension(filename) === "pdf") return "pdf";
+  if (TEXT_MIME_PREFIXES.some((p) => ct.startsWith(p)) || TEXT_MIME_EXACT.has(ct)) return "text";
+  // Generic MIME (octet-stream / empty) but a texty extension → text.
+  if ((ct === "" || ct === "application/octet-stream") && TEXT_EXTENSIONS.has(fileExtension(filename))) return "text";
+  return "unsupported";
+}
+
+/** Ceiling for reading a file into an in-browser text preview (bigger → DL fallback). */
+export const TEXT_PREVIEW_MAX_BYTES = 1024 * 1024;
+
 /** A picked file the compose rules refused, with a human reason for the error banner. */
 export interface AttachReject {
   filename: string;

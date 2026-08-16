@@ -14,6 +14,9 @@ export interface ComposeAttachmentItem {
   contentType: string;
   sizeBytes: number;
   isImage: boolean;
+  /** The picked File itself, kept so the attachment can be PREVIEWED in-place before send
+   *  (image/pdf via an object URL, text via FileReader) with no server round-trip. */
+  file: File;
   /** Object URL for the inline image thumbnail (images only; revoked on remove/unmount). */
   previewUrl?: string;
   /** reading = bytes are being read to base64; ready = input filled; error = read failed. */
@@ -95,6 +98,7 @@ export function useComposeAttachments(): UseComposeAttachments {
           contentType: file.type || "application/octet-stream",
           sizeBytes: file.size,
           isImage,
+          file,
           status: "reading",
           progress: 0,
         };

@@ -9,6 +9,7 @@ import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken } from "@dub/app-ui";
 import { parseRecipients } from "../mailApi.tsx";
 import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
+import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { MailIcon } from "./icons.tsx";
@@ -43,6 +44,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const att = useComposeAttachments();
   const [dragOver, setDragOver] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const dragDepth = useRef(0);
 
   const onDragEnter = (e: DragEvent): void => {
@@ -215,9 +217,10 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
           {att.errors.length > 0 || att.items.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 12px", borderTop: "1px solid var(--dub-color-border-default)", maxHeight: 160, overflowY: "auto", flexShrink: 0 }}>
               <AttachmentErrors errors={att.errors} onDismiss={att.dismissErrors} />
-              <AttachmentTray items={att.items} onRemove={att.remove} />
+              <AttachmentTray items={att.items} onRemove={att.remove} onOpen={setPreviewId} />
             </div>
           ) : null}
+          <AttachmentPreview items={att.items} openId={previewId} onClose={() => setPreviewId(null)} />
           <div style={{ display: "flex", alignItems: "center", gap: 8, height: 56, padding: "0 12px", borderTop: "1px solid var(--dub-color-border-default)", flexShrink: 0 }}>
             <button
               type="button"
