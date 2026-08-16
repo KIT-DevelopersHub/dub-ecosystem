@@ -41,6 +41,8 @@ import {
   CheckCheck,
   BellOff,
   Archive,
+  Folder,
+  FolderOpen,
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "./types";
@@ -90,6 +92,8 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   "check-all": CheckCheck,
   "bell-off": BellOff,
   archive: Archive,
+  folder: Folder,
+  "folder-open": FolderOpen,
 };
 
 // Direct re-export of Lucide for advanced callers (still tree-shakable).
