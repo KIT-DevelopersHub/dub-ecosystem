@@ -65,7 +65,7 @@ describe("member-service 参加届 (participation)", () => {
     expect(ov.json.members[0].gmail).toBe("shinki@gmail.com");
   });
 
-  it("composes 姓/名 into name + nameKana, retains the split fields and phone", async () => {
+  it("composes 姓/名 into name + nameKana + nameRomaji, retains the split fields and phone", async () => {
     const app = createApp(makeDeps());
     const res = await call(app, "POST", "/members/participation", {
       body: {
@@ -73,6 +73,8 @@ describe("member-service 参加届 (participation)", () => {
         firstName: "太郎",
         lastNameKana: "やまだ",
         firstNameKana: "たろう",
+        lastNameRomaji: "Yamada",
+        firstNameRomaji: "Taro",
         phone: "090-1234-5678",
         ...EMAILS,
       },
@@ -81,16 +83,31 @@ describe("member-service 参加届 (participation)", () => {
     // legacy composed fields kept in sync ("姓 名") for backward-compatible readers
     expect(res.json.participation.name).toBe("山田 太郎");
     expect(res.json.participation.nameKana).toBe("やまだ たろう");
+    // ローマ字 also composed "Last First" for the alphabet email 発行 candidate
+    expect(res.json.participation.nameRomaji).toBe("Yamada Taro");
     // structured split fields + phone are retained on both the 参加届 and the roster member
     expect(res.json.participation.lastName).toBe("山田");
     expect(res.json.participation.firstName).toBe("太郎");
     expect(res.json.participation.lastNameKana).toBe("やまだ");
     expect(res.json.participation.firstNameKana).toBe("たろう");
+    expect(res.json.participation.lastNameRomaji).toBe("Yamada");
+    expect(res.json.participation.firstNameRomaji).toBe("Taro");
     expect(res.json.participation.phone).toBe("090-1234-5678");
     expect(res.json.member.name).toBe("山田 太郎");
     expect(res.json.member.lastName).toBe("山田");
     expect(res.json.member.firstName).toBe("太郎");
+    expect(res.json.member.lastNameRomaji).toBe("Yamada");
+    expect(res.json.member.firstNameRomaji).toBe("Taro");
     expect(res.json.member.phone).toBe("090-1234-5678");
+  });
+
+  it("rejects a non-alphabet ローマ字 (英字のみ)", async () => {
+    const app = createApp(makeDeps());
+    const res = await call(app, "POST", "/members/participation", {
+      body: { lastName: "山田", firstName: "太郎", lastNameRomaji: "やまだ", ...EMAILS },
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.error.code).toBe("VALIDATION_FAILED");
   });
 
   it("rejects a malformed phone number", async () => {

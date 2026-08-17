@@ -62,6 +62,12 @@ export interface PublicParticipationRequest {
   lastNameKana?: string | null;
   /** 振り仮名(めい) (任意). */
   firstNameKana?: string | null;
+  /** 氏名ローマ字 (合成値・後方互換). */
+  nameRomaji?: string | null;
+  /** 苗字(姓) ローマ字 (任意・英字). アルファベットのメール発行に使う。 */
+  lastNameRomaji?: string | null;
+  /** 名前(名) ローマ字 (任意・英字). アルファベットのメール発行に使う。 */
+  firstNameRomaji?: string | null;
   /** 電話番号 (任意). */
   phone?: string | null;
   grade?: string | null;
