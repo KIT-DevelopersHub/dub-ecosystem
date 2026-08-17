@@ -376,18 +376,6 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       s.members[idx] = updated;
       return updated as unknown as T;
     }
-    const emailMatch = path.match(/\/admin\/email-routing\/addresses\/([^/]+)$/);
-    if (emailMatch) {
-      const addr = s.emailAddresses.find((a) => a.id === emailMatch[1]!);
-      if (!addr) throw err("NOT_FOUND", "address not found");
-      const req = body as { enabled?: boolean; destination?: string };
-      if (req.destination !== undefined) {
-        if (!EMAIL_RE.test(req.destination)) throw err("VALIDATION_FAILED", "invalid destination", [{ field: "destination", reason: "format" }]);
-        addr.destination = req.destination;
-      }
-      if (req.enabled !== undefined) addr.enabled = req.enabled;
-      return addr as unknown as T;
-    }
     throw err("NOT_FOUND", `unhandled PATCH ${path}`);
   }
 

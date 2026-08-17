@@ -125,18 +125,20 @@ describe("assembleFeatureModules", () => {
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("shows every admin tool (ロール管理 / ユーザー名簿 / メールアドレス管理 / 変更履歴) in nav", () => {
-    // 社長要望（#171 撤回）: 「アプリは絶対に減らすな」。ロール管理(/admin/roles)・
-    // ユーザー名簿(/admin/users) を含む全 admin ツールをランチャー/ナビに表示する。
+  it("shows the admin tools (ロール管理 / ユーザー名簿 / 変更履歴) in nav; メールアドレス管理 は撤去済み", () => {
+    // ロール管理(/admin/roles)・ユーザー名簿(/admin/users)・変更履歴(/admin/history) は表示する。
+    // メールアドレス管理(/admin/email-routing) はユーザー明示承認で launcher/ナビ/route から撤去した。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
     expect(navPaths).toEqual(
-      expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/email-routing", "/admin/history"]),
+      expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/history"]),
     );
-    // ルートも当然残る（deep-link 生存）
+    expect(navPaths).not.toContain("/admin/email-routing");
+    // ルートも当然残る（deep-link 生存）。ただし email-routing は route ごと撤去。
     const routePaths = registry.routes.map((r) => r.path);
     expect(routePaths).toEqual(expect.arrayContaining(["/admin/users", "/admin/roles"]));
+    expect(routePaths).not.toContain("/admin/email-routing");
   });
 
   it("carries badge sources through for notifications and chat", () => {
