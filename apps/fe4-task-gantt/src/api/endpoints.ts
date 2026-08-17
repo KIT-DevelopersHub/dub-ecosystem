@@ -184,6 +184,24 @@ export function resolveUsers(
   });
 }
 
+/** List the org roster (member names) so an assignee can be picked from real
+ *  members — not only users already assigned to some task. Same endpoint as
+ *  resolveUsers but WITHOUT `ids` (list mode); scoped to active members. */
+export function listRosterUsers(
+  client: ApiClient,
+  opts: { status?: identity.UserStatus; limit?: number; q?: string } = {},
+): Promise<common.Paginated<identity.UserSummary>> {
+  return client.request<common.Paginated<identity.UserSummary>>({
+    method: "GET",
+    path: `${P}/identity/users`,
+    query: {
+      status: opts.status ?? "active",
+      limit: opts.limit ?? 200,
+      ...(opts.q ? { q: opts.q } : {}),
+    },
+  });
+}
+
 // ---- event-service (event picker for タスク発行 + create/edit form choices) ----
 // The マイタスク hub needs the live event list so 「タスクを発行」 can pick a 対象
 // イベント (task-service requires a real eventId on POST /tasks). Default page is

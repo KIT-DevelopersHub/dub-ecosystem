@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
-import { Button } from "@dub/ui";
+import { Button, ErrorDialog } from "@dub/ui";
+import type { ErrorDialogDetail } from "@dub/ui";
 import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
 import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
 import { useTeams } from "../api/useTeams";
+import { useRoster } from "../api/useRoster";
 import { useTaskStore } from "../store/useTaskStore";
 import { emptyFilter, toListTasksQuery, type TaskFilterState } from "../domain/task-query";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import { taskCapabilities } from "../domain/permissions";
-import { fieldErrorMap } from "../domain/error-mapping";
+import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
+import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
@@ -25,6 +28,21 @@ export interface TaskWorkspacePageProps {
   /** effectivePermissions from GET /api/v1/me (null = still loading -> deny). */
   permissions: readonly identity.PermissionKey[] | null;
 }
+
+/** Human labels for validation `field` keys shown in the ErrorDialog breakdown. */
+const FIELD_LABEL: Record<string, string> = {
+  title: "タイトル",
+  dueAt: "期日",
+  startsAt: "開始日",
+  endsAt: "終了日",
+  status: "ステータス",
+  priority: "優先度",
+  assigneeId: "担当",
+  teamId: "チーム",
+  parentTaskId: "親タスク",
+  dependsOnIds: "先行タスク",
+  period: "期間",
+};
 
 /**
  * Gantt-only task workspace: a single self-drawn timeline with day/week/month
@@ -48,6 +66,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
   const teams = useTeams().data ?? [];
+  // Org member roster — the source for the assignee dropdown. Without it the only
+  // options were users ALREADY assigned to a task, so a fresh event showed just
+  // "未割当" (bug 1b). Best-effort: an organizer lacking identity:read falls back
+  // to the resolved-from-tasks list.
+  const roster = useRoster().data ?? [];
 
   // Undo/redo (判断57). A reusable command stack (@dub/app-ui) — every state-
   // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
@@ -83,6 +106,15 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   }, [tasks.length]);
 
   const userList = useMemo(() => [...users.values()], [users]);
+  // Assignee options = the org roster ∪ users resolved from existing assignments
+  // (so an assignee no longer on the active roster still renders by name). Deduped
+  // by id, roster first. This is what the create/detail 担当 dropdowns receive.
+  const assignableUsers = useMemo<identity.UserSummary[]>(() => {
+    const byId = new Map<common.UserId, identity.UserSummary>();
+    for (const u of roster) byId.set(u.id, u);
+    for (const u of userList) if (!byId.has(u.id)) byId.set(u.id, u);
+    return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "ja"));
+  }, [roster, userList]);
   const statusById = useMemo(() => new Map(tasks.map((t) => [t.id, t.status] as const)), [tasks]);
   // team accent colour per task (team-grouped rows), and a legend of the teams
   // actually present on the board — drives the row stripe / bar cap / legend chips.
@@ -156,10 +188,30 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     [allTaskOptions, selected],
   );
 
+  // Inline field errors read from the RAW error detail (lastErrorDetail carries the
+  // 400 `details`; the UX-routed lastError does not — the old cast always yielded
+  // undefined, so inline field errors never rendered).
   const fieldErrors =
     store.lastError?.action === "field_errors"
-      ? fieldErrorMap((store.lastError as unknown as { details?: unknown }).details)
+      ? fieldErrorMap(store.lastErrorDetail?.details)
       : undefined;
+
+  // Blocking ErrorDialog: shown for any failure whose reason the user cannot see
+  // otherwise (save silently dropped, permission, dependency cycle, validation,
+  // server/network). Auto-recovered cases (conflict-refetch, rate-limit) stay as a
+  // quiet banner. This is what makes "なぜか保存されない" impossible again.
+  const showErrorDialog = !!store.lastError && !!store.lastErrorDetail && errorSurface(store.lastError.action) === "dialog";
+  const errorDialogDetails = useMemo<ErrorDialogDetail[]>(() => {
+    const details = store.lastErrorDetail?.details;
+    if (!Array.isArray(details)) return [];
+    return details
+      .filter((d): d is { field?: string; reason?: string; message?: string } => !!d && typeof d === "object")
+      .map((d) => ({
+        ...(d.field ? { label: FIELD_LABEL[d.field] ?? d.field } : {}),
+        message: d.message ?? d.reason ?? "入力を確認してください",
+      }));
+  }, [store.lastErrorDetail]);
+  const errorIsRetryable = store.lastError?.action === "retry_button";
 
   // ---- raw appliers (no history push) — the reversible primitives the undo
   //      commands re-issue. Each is an idempotent "set", so undo = apply the
@@ -224,6 +276,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       if (dependsOnIds !== undefined) {
         await replaceDependencies(client, id, { version, dependsOnIds });
       }
+    } catch (e) {
+      // Previously this ran inside a `void (async …)()` with no catch, so a failed
+      // parent/dependency save vanished silently ("保存を押しても無反応"). Surface it.
+      store.reportError(e);
     } finally {
       await store.load(client, query);
       await gantt.refetchFresh();
@@ -303,16 +359,48 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const onCreate = async (draft: TaskDraft) => {
     const linkPredecessorFor = createPredecessorFor;
-    const created = await store.create(client, {
+    // Optimistic create: show a provisional task + its bar on the timeline the same
+    // tick, then reconcile with the server row (rolled back + surfaced on failure).
+    const tempId = provisionalTaskId();
+    const now = new Date().toISOString() as common.ISODateTime;
+    const provisional = buildProvisionalTask(
+      tempId,
+      {
+        title: draft.title,
+        status: draft.status,
+        priority: draft.priority,
+        assigneeId: draft.assigneeId,
+        teamId: draft.teamId,
+        dueAt: draft.dueAt,
+        parentTaskId: draft.parentTaskId,
+      },
       eventId,
-      title: draft.title,
-      ...(draft.priority ? { priority: draft.priority } : {}),
-      ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
-      ...(draft.teamId ? { teamId: draft.teamId } : {}),
-      ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
-      ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
-    });
-    if (!created) return;
+      now,
+    );
+    gantt.upsertRowOptimistic(provisionalGanttRow(provisional, draft.parentTaskId));
+
+    const created = await store.create(
+      client,
+      {
+        eventId,
+        title: draft.title,
+        ...(draft.priority ? { priority: draft.priority } : {}),
+        ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
+        ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+        ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
+      },
+      provisional,
+    );
+    if (!created) {
+      gantt.removeRowOptimistic(tempId); // create failed (reason already surfaced) — drop the provisional bar
+      return;
+    }
+    // Swap the provisional bar onto the real id so it stays visible (no flicker)
+    // through the follow-up calls until the authoritative refetch replaces it.
+    gantt.removeRowOptimistic(tempId);
+    gantt.upsertRowOptimistic(provisionalGanttRow({ ...created }, draft.parentTaskId));
+
     let version = created.version;
     if (draft.status !== "todo") {
       const patched = await store.patchOptimistic(
@@ -328,8 +416,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       try {
         const withDeps = await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
         version = withDeps.version;
-      } catch {
-        /* dependency cycle / out-of-scope etc. — task is still created; surfaced separately */
+      } catch (e) {
+        // dependency cycle / out-of-scope — the task IS created; tell the user why
+        // the dependency didn't take instead of dropping it on the floor.
+        store.reportError(e);
       }
     }
     // "先行タスクを作成": add the new task as a predecessor of the source task.
@@ -342,8 +432,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
             version: target.version,
             dependsOnIds: [...curDeps, created.id],
           });
-        } catch {
-          /* out-of-scope / cycle — surfaced separately; the new task still exists */
+        } catch (e) {
+          store.reportError(e); // out-of-scope / cycle — surfaced; the new task still exists
         }
       }
     }
@@ -389,11 +479,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const onDeleteDetail = () => {
     if (!selectedTask) return;
-    void store.removeTask(client, selectedTask.id).then(async (ok) => {
+    const id = selectedTask.id;
+    // Optimistic: close the panel + drop the bar instantly; the store removes the
+    // row immediately and restores it on failure (with the reason surfaced).
+    setSelected(null);
+    gantt.removeRowOptimistic(id);
+    void store.removeTask(client, id).then(async (ok) => {
       if (ok) {
-        setSelected(null);
         await store.load(client, query);
         await gantt.refetchFresh();
+      } else {
+        void gantt.refetchFresh(); // delete failed — restore the bar from the server
       }
     });
   };
@@ -461,7 +557,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         />
       </div>
 
-      {store.lastError && (
+      {store.lastError && !showErrorDialog && (
         <div className={styles.banner} data-testid="fe4-error-banner">
           {store.lastError.message}
         </div>
@@ -490,7 +586,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         initialParentId={createPresetParent}
         initialDependsOn={createPresetDeps}
         onClose={closeCreate}
-        users={userList}
+        users={assignableUsers}
         teams={teams}
         parentOptions={allTaskOptions}
         scopeTasks={scopeTasks}
@@ -501,7 +597,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         <TaskDetailPanel
           key={selectedTask.id}
           task={selectedTask}
-          users={userList}
+          users={assignableUsers}
           teams={teams}
           canWrite={caps.canWrite}
           canDelete={caps.canDelete}
@@ -515,6 +611,30 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onCreateChild={onCreateChild}
           onCreatePredecessor={onCreatePredecessor}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {/* Blocking failure surface — the reason is always shown, never swallowed. */}
+      {store.lastErrorDetail && (
+        <ErrorDialog
+          open={showErrorDialog}
+          error={{
+            code: store.lastErrorDetail.code,
+            message: store.lastError?.message ?? store.lastErrorDetail.message,
+            ...(store.lastErrorDetail.requestId ? { correlationId: store.lastErrorDetail.requestId } : {}),
+          }}
+          details={errorDialogDetails}
+          onClose={() => store.clearError()}
+          {...(errorIsRetryable
+            ? {
+                onRetry: () => {
+                  store.clearError();
+                  void store.load(client, query);
+                  void gantt.refetchFresh();
+                },
+              }
+            : {})}
+          testId="fe4-error-dialog"
         />
       )}
     </div>

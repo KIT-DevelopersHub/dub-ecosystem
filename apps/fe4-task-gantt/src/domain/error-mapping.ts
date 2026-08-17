@@ -57,6 +57,22 @@ export function mapError(e: DisplayableError): ErrorUx {
   }
 }
 
+/** Where an error is shown. `dialog` = blocking ErrorDialog (the reason must be
+ *  seen — save dropped, permission, dependency cycle, validation, generic/5xx).
+ *  `banner` = quiet inline notice for auto-recovered cases (a conflict we already
+ *  refetched, a read-only fallback, a rate-limit backoff) where a modal would nag. */
+export function errorSurface(action: ErrorUxAction): "dialog" | "banner" {
+  switch (action) {
+    case "rollback_refetch":
+    case "rollback_transition":
+    case "readonly_fallback":
+    case "toast_retry_backoff":
+      return "banner";
+    default:
+      return "dialog";
+  }
+}
+
 /** validation FieldError[] -> {field: message} map for inline form rendering. */
 export function fieldErrorMap(details: unknown): Record<string, string> {
   const out: Record<string, string> = {};
