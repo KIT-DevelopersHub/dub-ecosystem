@@ -30,6 +30,11 @@ export interface Task extends Versioned {
   assigneeId: UserId | null;
   /** Owning team (canonical team.Team). Additive; null = unassigned to a team. */
   teamId?: TeamId | null;
+  /** WBS parent (親タスク). Additive/optional; null/absent ⇒ a top-level row. The
+   *  gantt read model projects this onto GanttRow.parentTaskId to build the tree. */
+  parentTaskId?: TaskId | null;
+  /** WBS code (e.g. "4.9.3") — stable ordering + a legible label. Additive/optional. */
+  wbs?: string | null;
   /**
    * Requester — the user who issued (created) the task. This is the "from" in the
    * from→to relationship the My Tasks hub renders (createdBy → assigneeId). Server
@@ -70,6 +75,8 @@ export interface CreateTaskRequest {
   /** WBS parent (親タスク). Additive/optional; omit or null ⇒ a top-level row.
    *  The gantt read model projects this onto GanttRow.parentTaskId. */
   parentTaskId?: TaskId | null;
+  /** WBS code (e.g. "4.9.3"). Additive/optional. */
+  wbs?: string | null;
 }
 export interface UpdateTaskRequest extends Versioned {
   title?: string;
@@ -82,6 +89,8 @@ export interface UpdateTaskRequest extends Versioned {
   /** Re-parent (親子関係の変更) — set to another task id, or null to detach to
    *  top-level. Additive/optional; omit ⇒ parent unchanged. */
   parentTaskId?: TaskId | null;
+  /** WBS code (e.g. "4.9.3"). Additive/optional; omit ⇒ unchanged. */
+  wbs?: string | null;
 }
 export interface ReplaceDependenciesRequest extends Versioned {
   dependsOnIds: TaskId[];

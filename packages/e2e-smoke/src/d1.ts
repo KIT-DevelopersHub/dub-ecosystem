@@ -23,6 +23,12 @@ export function allSchemas(): string[] {
   return [
     EVENT_SCHEMA_MIGRATION.up,
     ...TASK_MIGRATIONS.map((m) => m.up),
+    // #260: the gantt WBS/team columns (team_id/parent_id/wbs) live in a physical
+    // migration that is intentionally NOT mirrored into TASK_MIGRATIONS (pinned to
+    // 0001_init by the drift test). The real task repo now INSERT/SELECTs them, so
+    // the seeded smoke D1 must apply that migration too — matching production, where
+    // every physical task migration runs.
+    sqlFile("../../../infra/d1/migrations/task/0004_gantt_hierarchy.sql"),
     sqlFile("../../../services/notification/db/0001_notif.sql"),
     sqlFile("../../../services/notification/db/0002_feedback.sql"),
     sqlFile("../../../services/notification/db/0003_freeq_outbox.sql"),

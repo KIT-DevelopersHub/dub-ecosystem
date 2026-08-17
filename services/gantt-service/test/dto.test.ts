@@ -11,6 +11,9 @@ function mkTask(over: Partial<task.Task> & { id: string }): task.Task {
     status: over.status ?? "todo",
     priority: over.priority ?? "medium",
     assigneeId: over.assigneeId ?? null,
+    teamId: over.teamId ?? null,
+    parentTaskId: over.parentTaskId ?? null,
+    wbs: over.wbs ?? null,
     dueAt: over.dueAt ?? null,
     origin: "internal",
     archivedAt: over.archivedAt ?? null,
@@ -53,6 +56,11 @@ describe("buildGanttChartDTO", () => {
         endsAt: "2026-08-10T00:00:00Z",
         progressPercent: 100,
         assigneeId: "user_x",
+        // additive WBS/team projection (flat task ⇒ no team, top-level, no children).
+        teamId: null,
+        parentTaskId: null,
+        depth: 0,
+        hasChildren: false,
       },
     ]);
     expect(dto.criticalTaskIds).toEqual(["task_a"]); // single zero-slack task
@@ -119,5 +127,35 @@ describe("buildGanttChartDTO", () => {
       dependencies: [],
       criticalTaskIds: [],
     });
+  });
+
+  it("projects the WBS tree: team, parent/child, depth, pre-order, parent rolls up", () => {
+    // Two work-packages (no dueAt) each with leaves; supplied out of order to prove
+    // the DTO re-orders into pre-order (parent immediately followed by its leaves).
+    const dto = buildGanttChartDTO(
+      "event_1",
+      [
+        mkTask({ id: "leaf_b2", parentTaskId: "wp_b", teamId: "team_ops", wbs: "2.2", dueAt: "2026-08-20T00:00:00Z" }),
+        mkTask({ id: "wp_a", teamId: "team_fin", wbs: "1.0" }),
+        mkTask({ id: "leaf_a2", parentTaskId: "wp_a", teamId: "team_fin", wbs: "1.2", dueAt: "2026-08-12T00:00:00Z" }),
+        mkTask({ id: "wp_b", teamId: "team_ops", wbs: "2.0" }),
+        mkTask({ id: "leaf_a1", parentTaskId: "wp_a", teamId: "team_fin", wbs: "1.1", dueAt: "2026-08-10T00:00:00Z" }),
+      ],
+      [],
+    );
+    // pre-order by WBS: wp_a, its leaves (1.1,1.2), then wp_b, its leaf (2.2).
+    expect(dto.rows.map((r) => r.taskId)).toEqual(["wp_a", "leaf_a1", "leaf_a2", "wp_b", "leaf_b2"]);
+
+    const byId = Object.fromEntries(dto.rows.map((r) => [r.taskId, r]));
+    // parent: has children, depth 0, team projected, and NO own dates (client rolls up).
+    expect(byId.wp_a).toMatchObject({ hasChildren: true, depth: 0, teamId: "team_fin", parentTaskId: null, startsAt: null, endsAt: null });
+    // leaf: depth 1, points at its parent, deadline-anchored bar, team projected.
+    expect(byId.leaf_a1).toMatchObject({ hasChildren: false, depth: 1, parentTaskId: "wp_a", teamId: "team_fin", endsAt: "2026-08-10T00:00:00Z" });
+    expect(byId.wp_b).toMatchObject({ hasChildren: true, teamId: "team_ops" });
+  });
+
+  it("ignores a parentTaskId pointing outside the live set (flat top-level row)", () => {
+    const dto = buildGanttChartDTO("event_1", [mkTask({ id: "orphan", parentTaskId: "ghost", teamId: "team_x" })], []);
+    expect(dto.rows[0]).toMatchObject({ parentTaskId: null, depth: 0, hasChildren: false, teamId: "team_x" });
   });
 });
