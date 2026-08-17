@@ -33,13 +33,17 @@ interface SectionTab {
 
 // 順序 = 表示順。active 判定は「pathname が path で始まる最長一致」なので、より深い
 // パス（例: /admin/users/:id）は親タブ（名簿）にハイライトが乗る。
+// 各タブの requiredPermissions は、対応ルートが registry.flatten で AND される実効権限と
+// 一致させる = ドメイン権限（identity:read / audit:read）＋ per-app view キー
+// （app:members:view / app:admin:view, withAppAccessGate 由来）。これでタブの表示可否が
+// ルートガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
 // NOTE: アドレス発行(/admin/email-routing) は現状 FE7 の routes/nav から登録解除されている
 // （main で撤去済み）。ルートが復活した時点でここに 1 行足せば統合ナビにも自動で出る。
 const SECTIONS: SectionTab[] = [
-  { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["identity:read"] },
-  { id: "roster", label: "名簿", path: "/admin/users", requiredPermissions: ["identity:read"] },
-  { id: "roles", label: "ロール", path: "/admin/roles", requiredPermissions: ["identity:read"] },
-  { id: "history", label: "変更履歴", path: "/admin/history", requiredPermissions: ["audit:read"] },
+  { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["identity:read", "app:members:view"] },
+  { id: "roster", label: "名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
+  { id: "roles", label: "ロール", path: "/admin/roles", requiredPermissions: ["identity:read", "app:admin:view"] },
+  { id: "history", label: "変更履歴", path: "/admin/history", requiredPermissions: ["audit:read", "app:admin:view"] },
 ];
 
 /** pathname に最も長く前方一致するセクションの id（統合アプリ外なら null）。 */
