@@ -112,6 +112,16 @@ describe("ChatRoom DO — Origin allow-listing", () => {
     res.webSocket!.close();
   });
 
+  it("accepts the fe2 app-shell workers.dev delivery origin", async () => {
+    const ch = "chan_origin_wd";
+    const res = await connect(ch, await ticketFor(ch, "user_a"), {
+      Origin: "https://dub-fe2-app-shell.developershub-site.workers.dev",
+    });
+    expect(res.status).toBe(101);
+    res.webSocket!.accept();
+    res.webSocket!.close();
+  });
+
   it("rejects a disallowed browser origin (403)", async () => {
     const ch = "chan_origin_bad";
     const res = await connect(ch, await ticketFor(ch, "user_a"), { Origin: "https://evil.example.com" });
@@ -124,6 +134,27 @@ describe("ChatRoom DO — Origin allow-listing", () => {
     expect(res.status).toBe(101);
     res.webSocket!.accept();
     res.webSocket!.close();
+  });
+});
+
+describe("public-exposure guard (workers.dev subdomain = WS-only)", () => {
+  const PUBLIC = "https://dub-chat-service.developershub-site.workers.dev";
+  const SVC = "https://svc";
+
+  it("blocks the header-trusting HTTP API from a public (non-svc) host -> 404", async () => {
+    // A public caller must NOT be able to reach /chat/* and spoof x-dub-user-id.
+    const res = await SELF.fetch(`${PUBLIC}/chat/channels`, { headers: { "x-dub-user-id": "user_attacker" } });
+    expect(res.status).toBe(404);
+  });
+
+  it("allows /health publicly (uptime probe)", async () => {
+    const res = await SELF.fetch(`${PUBLIC}/health`);
+    expect(res.status).toBe(200);
+  });
+
+  it("lets the api-gateway service binding (host \"svc\") through to the app", async () => {
+    const res = await SELF.fetch(`${SVC}/health`);
+    expect(res.status).toBe(200);
   });
 });
 
