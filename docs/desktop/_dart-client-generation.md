@@ -74,13 +74,35 @@ built_value model** decodes it via `MeRepository`. `flutter build macos`
 compiles the desktop binary. Together: web-spec → Dart client → desktop UI is
 wired end to end.
 
-## Deferred (P0 tail — after contract-SoT stack lands)
+## P1–P3 (landed on top of P0)
 
-1. **Wire-contract 4th face.** Fold the Dart client's query keys into the
-   `<SVC>_WIRE` descriptor check (PR#234/#236) so a `?event=`-class regression
-   turns the Dart face red too. Deferred to avoid colliding with the in-flight
-   contract-SoT PRs that own `packages/types` + `@dub/e2e-smoke`.
-2. **Per-service typed clients.** Extend generation beyond the gateway boundary
-   to gantt/event specs as those `<SVC>_WIRE` descriptors stabilize.
-3. **Design tokens → Flutter theme (P1).** Generate `AppTheme` values from
-   `@dub/tokens` DTCG instead of the hand-set seed.
+1. **Auth wiring (P1).** `lib/src/auth/*` — an interactive email+password login
+   (`POST /api/v1/auth/password/login`) captures the session token and forwards
+   it as `Authorization: Bearer` on every gateway call (the frozen extraction
+   order is Bearer→cookie). `AuthController` gates the app between the login
+   screen and the shell; `/me` composes identity + effective permissions.
+2. **Design tokens → Flutter theme (P1).** `tool/gen_theme.dart` reads
+   `packages/tokens/tokens.json` (DTCG) and emits `lib/src/theme/tokens.g.dart`;
+   `AppTheme` builds light+dark from it. Committed, `--check` in CI.
+3. **Real apps (P1/P2).** A launcher shell (mirrors `APP_MANIFEST`, per-app RBAC
+   grey-out) with data-backed screens: Home (`/bff/home`), Profile (`/me`) — both
+   the generated typed client — plus Notifications, My Tasks, Events and Gantt via
+   the gateway's transparent proxy. Proxy query keys come from the desktop wire
+   descriptor (`lib/src/api/wire.dart`), never hand-written literals.
+4. **Wire-contract 4th face (P3).** `packages/e2e-smoke/test/desktop-wire.test.ts`
+   reconciles the exported desktop wire keys (`apps/dt1-desktop/contract/
+   desktop_wire.g.json`) against the `<SVC>_WIRE` SoT (gantt/notification/event).
+   A `?event=`-class regression on the Dart side turns this red.
+5. **App-parity CI (P3).** `packages/e2e-smoke/test/desktop-parity.test.ts`
+   reconciles the desktop app registry against `APP_MANIFEST`, so a web app added
+   without a desktop entry (at least a `skeleton`) fails CI.
+
+## Still deferred
+
+- **Per-service typed clients.** Extend generation beyond the gateway boundary to
+  gantt/event/notification/task specs (generated models instead of the current
+  hand-written proxy models). The proxy repositories are the seam this slots into.
+- **Response-shape conformance.** The 4th face guards query keys; add the fe6 zod
+  pattern for request/response *shapes* on the Dart side too.
+- **Skeleton→live.** chat / mail / usage / members / participation / driveshare /
+  admin are registered skeletons; bring each to a data-backed screen.

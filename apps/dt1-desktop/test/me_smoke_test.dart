@@ -21,7 +21,7 @@ void main() {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     baseUrl = 'http://127.0.0.1:${server.port}';
     unawaited(_serve(server, (req) => lastRequestHeaders = {
-          for (final h in ['accept', 'cookie'])
+          for (final h in ['accept', 'authorization'])
             if (req.headers.value(h) != null) h: req.headers.value(h)!,
         }));
   });
@@ -31,11 +31,11 @@ void main() {
   });
 
   test('generated client fetches and decodes /me', () async {
-    final repo = MeRepository(
-      GatewayClientFactory(AppConfig(apiBaseUrl: baseUrl)).create(),
+    final gateway = Gateway.create(
+      AppConfig(apiBaseUrl: baseUrl),
+      tokenProvider: () => null,
     );
-
-    final me = await repo.fetchMe();
+    final me = await MeRepository(gateway.api).fetchMe();
 
     expect(me.user.id, 'usr_123');
     expect(me.user.displayName, 'Kotaro Takaoka');
@@ -44,15 +44,14 @@ void main() {
     expect(me.sessionExpiresAt, 1893456000000);
   });
 
-  test('session credential is forwarded as a cookie header', () async {
-    final repo = MeRepository(
-      GatewayClientFactory(AppConfig(apiBaseUrl: baseUrl))
-          .create(sessionCredential: 'dub_session=abc'),
+  test('session token is forwarded as an Authorization: Bearer header', () async {
+    final gateway = Gateway.create(
+      AppConfig(apiBaseUrl: baseUrl),
+      tokenProvider: () => 'sess_tok_abc',
     );
+    await MeRepository(gateway.api).fetchMe();
 
-    await repo.fetchMe();
-
-    expect(lastRequestHeaders?['cookie'], 'dub_session=abc');
+    expect(lastRequestHeaders?['authorization'], 'Bearer sess_tok_abc');
   });
 }
 

@@ -9,6 +9,8 @@ on:
     paths:
       - 'apps/dt1-desktop/**'
       - 'packages/api-client-dart/**'
+      - 'packages/tokens/tokens.json'
+      - 'packages/types/src/app-registry.ts'
       - 'docs/openapi/api-gateway.yaml'
       - 'scripts/gen-dart-client.sh'
       - '.github/workflows/flutter-ci.yml'
@@ -16,6 +18,8 @@ on:
     paths:
       - 'apps/dt1-desktop/**'
       - 'packages/api-client-dart/**'
+      - 'packages/tokens/tokens.json'
+      - 'packages/types/src/app-registry.ts'
       - 'docs/openapi/api-gateway.yaml'
       - 'scripts/gen-dart-client.sh'
       - '.github/workflows/flutter-ci.yml'
@@ -64,10 +68,19 @@ jobs:
         working-directory: apps/dt1-desktop
         run: flutter pub get
 
+      # --- Generated theme + contract exports are fresh ("diff = red") ---
+      - name: Check theme tokens are fresh (vs @dub/tokens)
+        working-directory: apps/dt1-desktop
+        run: dart run tool/gen_theme.dart --check
+
+      - name: Check desktop contract exports are fresh (wire + app registry)
+        working-directory: apps/dt1-desktop
+        run: dart run tool/gen_contract_json.dart --check
+
       - name: Analyze
         working-directory: apps/dt1-desktop
         run: flutter analyze
 
-      - name: Test (incl. /me vertical smoke)
+      - name: Test (vertical smoke + proxy apps + full E2E journey)
         working-directory: apps/dt1-desktop
         run: flutter test

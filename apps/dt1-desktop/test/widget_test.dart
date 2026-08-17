@@ -1,10 +1,11 @@
-import 'package:dt1_desktop/src/features/me/home_screen.dart';
 import 'package:dt1_desktop/src/features/me/me_repository.dart';
+import 'package:dt1_desktop/src/features/me/profile_screen.dart';
+import 'package:dt1_desktop/src/theme/app_theme.dart';
 import 'package:dub_api_client/dub_api_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Home screen renders the identity view once `/me` resolves. Uses a fake
+/// Profile screen renders the identity view once `/me` resolves. Uses a fake
 /// repository so the widget layer is verified without any transport.
 class _FakeMeRepository implements MeRepository {
   @override
@@ -18,9 +19,12 @@ class _FakeMeRepository implements MeRepository {
 }
 
 void main() {
-  testWidgets('home shows user, org and permissions from /me', (tester) async {
+  testWidgets('profile shows user, org and permissions from /me', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(home: HomeScreen(meRepository: _FakeMeRepository())),
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(body: ProfileScreen(meRepository: _FakeMeRepository())),
+      ),
     );
     await tester.pumpAndSettle();
 
