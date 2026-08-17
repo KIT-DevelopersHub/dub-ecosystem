@@ -348,6 +348,29 @@ function LinkSharingToggle({
   );
 }
 
+/** Report a role apply/reapply outcome. A partial success (some members Drive refused —
+ *  no Google account / invalid email) is a WARNING that names the skipped members with a
+ *  reason, so nothing fails silently and the operator knows exactly who to fix. */
+function showRoleGrantOutcome(
+  toast: ReturnType<typeof useToast>,
+  grant: RoleFileGrant,
+  okTitle: string,
+  opts: { silentOnSuccess?: boolean } = {},
+): void {
+  const skipped = grant.skipped ?? [];
+  if (skipped.length === 0) {
+    if (!opts.silentOnSuccess) toast.show({ kind: "success", title: okTitle });
+    return;
+  }
+  const shown = skipped.slice(0, 4).map((s) => `${s.email}（${s.reason}）`).join(" / ");
+  const more = skipped.length > 4 ? ` 他${skipped.length - 4}件` : "";
+  toast.show({
+    kind: "warning",
+    title: `${okTitle}（${skipped.length}人はスキップ）`,
+    description: `付与 ${grant.appliedCount}人・スキップ ${skipped.length}人: ${shown}${more}`,
+  });
+}
+
 function RoleGrantRow({
   fileId,
   grant,
@@ -392,7 +415,11 @@ function RoleGrantRow({
   });
 
   const reapplyThenSyncChips = (): void => {
-    reapply.mutate(undefined, { onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }) });
+    reapply.mutate(undefined, {
+      // Silent on a clean reapply (it was already optimistic); warn only if Drive refused some members.
+      onSuccess: (result) => showRoleGrantOutcome(toast, result, "再適用しました", { silentOnSuccess: true }),
+      onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }),
+    });
   };
 
   return (
@@ -494,8 +521,8 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
     grantRole.mutate(
       { roleId, driveRole },
       {
-        onSuccess: () => {
-          toast.show({ kind: "success", title: "ロールに振りました", description: `${roleName} を${driveRoleLabel(driveRole)}に設定` });
+        onSuccess: (result) => {
+          showRoleGrantOutcome(toast, result, `${roleName} を${driveRoleLabel(driveRole)}に設定`);
           setRoleId("");
           setDriveRole("reader");
         },

@@ -72,7 +72,14 @@ export interface ListRolesResult {
   nextCursor: string | null;
 }
 
-/** One role→file Drive grant; memberCount = members the role expands to. */
+/** A role member the fan-out could not apply (no Google account / invalid email). */
+export interface SkippedMember {
+  email: string;
+  reason: string;
+}
+
+/** One role→file Drive grant; memberCount = members the role expands to. `skipped`
+ *  (only on the apply/reapply response) lists members Drive refused, with a reason. */
 export interface RoleFileGrant {
   id: string;
   fileId: string;
@@ -83,6 +90,7 @@ export interface RoleFileGrant {
   appliedCount: number;
   grantedBy: string;
   grantedAt: string;
+  skipped?: SkippedMember[];
 }
 
 export interface ListRoleGrantsResult {
