@@ -6,7 +6,7 @@ import type { gantt, task, team } from "@dub/types";
 
 async function getDto(): Promise<gantt.GanttChartDTO> {
   const client = createDevClient();
-  return client.request<gantt.GanttChartDTO>({ method: "GET", path: "/api/v1/gantt", query: { event: DEMO_EVENT_ID } });
+  return client.request<gantt.GanttChartDTO>({ method: "GET", path: "/api/v1/gantt", query: { eventId: DEMO_EVENT_ID } });
 }
 
 describe("dev-seed (real LMB conference data)", () => {
