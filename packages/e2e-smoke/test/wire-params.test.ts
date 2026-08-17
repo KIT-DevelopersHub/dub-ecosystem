@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { gantt, event, fileMeta, webhook, githubSync, deploy, identity, mailAutomation } from "@dub/types";
+import { gantt, event, fileMeta, webhook, githubSync, deploy, identity, mailAutomation, drive } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
 
@@ -244,5 +244,30 @@ describe("mail-automation wire-contract: query keys agree across SoT ⟷ OpenAPI
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by mail-automation`).toBe(true);
     }
+  });
+});
+
+describe("drive-proxy wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("drive-proxy").file);
+  const serverKeys = serverQueryKeys("drive-proxy");
+
+  const sotKeys = new Set<string>(Object.values(drive.DRIVE_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(drive.DRIVE_WIRE)) {
+    it(`${op}: OpenAPI query params == DRIVE_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (canonical folderId; parentId no longer a wire key)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `drive-proxy reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by drive-proxy`).toBe(true);
+    }
+    // the resolved drift: parentId is gone from the contract, folderId is canonical
+    expect(sotKeys.has("parentId")).toBe(false);
+    expect(sotKeys.has("folderId")).toBe(true);
   });
 });
