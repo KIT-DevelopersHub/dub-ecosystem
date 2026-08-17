@@ -14,7 +14,7 @@
 //      flatten() ANDs them onto every route (fail-closed authz).
 // The result is the array FE2's registerFeatureModules() consumes (main.tsx).
 import { createElement, type ComponentType, type ReactNode } from "react";
-import type { identity } from "@dub/types";
+import { appRegistry, type identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { eventFeatureModule, routePaths } from "@dub/fe3-event-action";
 import { notificationsModule } from "@dub/fe5-notification-inbox";
@@ -323,6 +323,24 @@ function withNavAppId(module: FeatureModule): FeatureModule {
   return module;
 }
 
+/** AND the app's per-app `app:<id>:view` access key onto the module (so registry.flatten
+ *  gates every route — the deep-link 403) AND onto each nav entry (so the launcher greys
+ *  the tile for a role without it). This is the ACTUAL per-app gate: turning app:<id>:view
+ *  off for a role now hides+blocks exactly that one app (gantt/参加届 included), independent
+ *  of the shared domain permission it historically rode. Non-breaking: an additive backfill
+ *  (identity-roster) grants the key to every role that can reach the app today, so no one
+ *  loses access on rollout. Fail-closed: while /me loads, can() is false → gated. */
+function withAppAccessGate(module: FeatureModule): FeatureModule {
+  const viewKey = appRegistry.appViewKey(module.id);
+  if (!viewKey) return module; // unreachable: every module id is a canonical app
+  const add = (perms: readonly PermissionKey[] | undefined): PermissionKey[] => [
+    ...new Set([...(perms ?? []), viewKey]),
+  ];
+  module.requiredPermissions = add(module.requiredPermissions);
+  module.nav = module.nav.map((n) => ({ ...n, requiredPermissions: add(n.requiredPermissions) }));
+  return module;
+}
+
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
  * notifications, chat, mail, usage, members, participation, driveshare, admin]. Each module's routes are wrapped in its runtime
@@ -342,7 +360,7 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptParticipation(api),
     adaptDriveShare(api),
     adaptAdmin(api),
-  ].map(withNavAppId);
+  ].map(withNavAppId).map(withAppAccessGate);
 }
 
 export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptAdmin, toIcon };
