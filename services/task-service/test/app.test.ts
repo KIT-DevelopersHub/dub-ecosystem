@@ -571,3 +571,38 @@ describe("task attachments", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory repo dropped them)", () => {
+  async function get(app: Hono, id: string) {
+    const res = await app.request(`/tasks/${id}`, userInit("GET"));
+    return { status: res.status, body: (await res.json()) as task.Task & { parentTaskId?: string | null; teamId?: string | null; wbs?: string | null } };
+  }
+
+  it("persists parentTaskId/teamId/wbs on create and echoes them on read", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親" });
+    const child = await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev", wbs: "1.2.3" } as Partial<task.CreateTaskRequest>);
+    const read = await get(app, child.id);
+    expect(read.status).toBe(200);
+    expect(read.body.parentTaskId).toBe(parent.id);
+    expect(read.body.teamId).toBe("team_dev");
+    expect(read.body.wbs).toBe("1.2.3");
+  });
+
+  it("re-parents and detaches via PATCH parentTaskId", async () => {
+    const { app } = setup();
+    const a = await create(app, { title: "A" });
+    const b = await create(app, { title: "B" });
+    const c = await create(app, { title: "C" });
+    // attach C under A
+    let res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version, parentTaskId: a.id }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(a.id);
+    // move C under B
+    res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version + 1, parentTaskId: b.id }));
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(b.id);
+    // detach to top-level
+    res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version + 2, parentTaskId: null }));
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBeNull();
+  });
+});
