@@ -26,6 +26,17 @@ function fmtDateTime(iso: string): string {
   return d.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+/** アルファベットのメールアドレス素案 (first.last@…) を romaji から作る (表示専用)。
+ *  実際の発行フローには繋がず、運営が候補として確認できるようにするだけ。 */
+function emailCandidate(p: Participation): string | null {
+  const clean = (v: string | null): string => (v ?? "").trim().toLowerCase().replace(/[^a-z]/g, "");
+  const first = clean(p.firstNameRomaji);
+  const last = clean(p.lastNameRomaji);
+  if (first && last) return `${first}.${last}`;
+  const single = first || last;
+  return single ? single : null;
+}
+
 export function ParticipationListPage(): JSX.Element {
   const list = useParticipationList();
   const teamsQuery = useParticipationTeams();
@@ -39,6 +50,7 @@ export function ParticipationListPage(): JSX.Element {
   const columns: ColumnDef<Participation>[] = [
     { key: "name", header: "氏名", cell: (p) => p.name },
     { key: "nameKana", header: "ふりがな", cell: (p) => p.nameKana ?? "—" },
+    { key: "nameRomaji", header: "ローマ字", cell: (p) => p.nameRomaji ?? "—" },
     { key: "schoolEmail", header: "学校メール", cell: (p) => p.schoolEmail },
     { key: "gmail", header: "Gmail", cell: (p) => p.gmail },
     { key: "phone", header: "電話番号", cell: (p) => p.phone ?? "—" },
@@ -99,6 +111,8 @@ function DetailBody({ p, teamName }: { p: Participation; teamName: (id: string |
   const rows: { label: string; value: string }[] = [
     { label: "氏名", value: p.name },
     { label: "ふりがな", value: p.nameKana ?? "—" },
+    { label: "氏名（ローマ字）", value: p.nameRomaji ?? "—" },
+    { label: "メールアドレス素案", value: (() => { const c = emailCandidate(p); return c ? `${c}@…` : "—"; })() },
     { label: "学校メールアドレス", value: p.schoolEmail },
     { label: "Gmail アドレス", value: p.gmail },
     { label: "電話番号", value: p.phone ?? "—" },

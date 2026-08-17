@@ -37,6 +37,8 @@ export interface PersonRow {
   firstName: string | null;
   lastNameKana: string | null;
   firstNameKana: string | null;
+  lastNameRomaji: string | null;
+  firstNameRomaji: string | null;
   phone: string | null;
   note: string | null;
   sortOrder: number;
@@ -60,6 +62,9 @@ export interface ParticipationRow {
   nameKana: string | null;
   lastNameKana: string | null;
   firstNameKana: string | null;
+  nameRomaji: string | null;
+  lastNameRomaji: string | null;
+  firstNameRomaji: string | null;
   grade: member.Grade | null;
   department: string | null;
   contact: string | null;
