@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { gantt, event, fileMeta, webhook, githubSync, deploy, identity } from "@dub/types";
+import { gantt, event, fileMeta, webhook, githubSync, deploy, identity, mailAutomation } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
 
@@ -221,6 +221,28 @@ describe("identity-roster wire-contract: query keys agree across SoT ⟷ OpenAPI
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by identity-roster`).toBe(true);
+    }
+  });
+});
+
+describe("mail-automation wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("mail-automation").file);
+  const serverKeys = serverQueryKeys("mail-automation");
+
+  const sotKeys = new Set<string>(Object.values(mailAutomation.MAIL_AUTOMATION_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(mailAutomation.MAIL_AUTOMATION_WIRE)) {
+    it(`${op}: OpenAPI query params == MAIL_AUTOMATION_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (no drifted alias, no undocumented read)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `mail-automation reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by mail-automation`).toBe(true);
     }
   });
 });
