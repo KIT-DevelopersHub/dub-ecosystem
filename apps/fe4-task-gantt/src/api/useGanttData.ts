@@ -40,5 +40,20 @@ export function useGanttData(eventId: common.EventId) {
         : old,
     );
   };
-  return { ...query, currentRows, refetchFresh, setRowScheduleOptimistic };
+  /** Optimistically insert/replace a bar (used for optimistic create so a new task
+   *  appears on the timeline the same tick, before the POST resolves). */
+  const upsertRowOptimistic = (row: gantt.GanttRow) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
+      old
+        ? { ...old, rows: [...old.rows.filter((r) => r.taskId !== row.taskId), row] }
+        : old,
+    );
+  };
+  /** Optimistically drop a bar (optimistic delete, or discarding a provisional bar). */
+  const removeRowOptimistic = (taskId: common.TaskId) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
+      old ? { ...old, rows: old.rows.filter((r) => r.taskId !== taskId) } : old,
+    );
+  };
+  return { ...query, currentRows, refetchFresh, setRowScheduleOptimistic, upsertRowOptimistic, removeRowOptimistic };
 }

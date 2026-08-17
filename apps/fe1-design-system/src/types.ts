@@ -279,6 +279,36 @@ export interface ConfirmDialogProps extends TestableProps {
   onCancel: () => void;
 }
 
+/** One line of a validation breakdown shown inside an ErrorDialog (400 details). */
+export interface ErrorDialogDetail {
+  /** field / cause key (e.g. "dueAt"). Optional — a bare message line is fine. */
+  label?: string;
+  message: string;
+}
+
+/**
+ * Blocking error surface: a modal that makes a failed action's REASON impossible
+ * to miss (the counterpart to the quiet inline field error). Reusable across apps
+ * — feed it any `DisplayableError`; optionally list the validation `details` and a
+ * `retry`. Use for failures the user cannot otherwise see (save silently dropped,
+ * permission denied, dependency cycle, "期間未入力", server/network errors).
+ */
+export interface ErrorDialogProps extends TestableProps {
+  open: boolean;
+  /** Short dialog heading (default "処理できませんでした"). */
+  title?: string;
+  error: DisplayableError;
+  /** Optional per-field / per-cause breakdown (from a 400 validation response). */
+  details?: readonly ErrorDialogDetail[];
+  /** Optional guidance line under the message (how to fix it). */
+  hint?: ReactNode;
+  onClose: () => void;
+  closeLabel?: string; // default "閉じる"
+  /** When provided, shows a 再試行 button that re-runs the failed action. */
+  onRetry?: () => void;
+  retryLabel?: string; // default "再試行"
+}
+
 export interface DrawerProps extends TestableProps {
   open: boolean;
   onClose: () => void;

@@ -35,6 +35,8 @@ export type {
   LoadMoreProps,
   ModalProps,
   ConfirmDialogProps,
+  ErrorDialogDetail,
+  ErrorDialogProps,
   DrawerProps,
   ToastKind,
   ToastOptions,
@@ -93,7 +95,7 @@ export {
 } from "./components/Inputs";
 export { DataTable } from "./components/DataTable";
 export { Pagination, LoadMore } from "./components/Pagination";
-export { Modal, ConfirmDialog, Drawer } from "./components/Modal";
+export { Modal, ConfirmDialog, Drawer, ErrorDialog } from "./components/Modal";
 export { ToastProvider, useToast } from "./components/Toast";
 export { ThemeProvider } from "./components/ThemeProvider";
 export { AppShell, PageHeader, Stack, Grid, Card, Divider } from "./components/Layout";

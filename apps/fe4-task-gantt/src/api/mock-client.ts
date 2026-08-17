@@ -149,7 +149,7 @@ export class MockApiClient implements ApiClient {
     if ((path === "/api/v1/members/teams" || path === "/api/v1/teams") && req.method === "GET")
       return ({ items: this.teams } as team.ListTeamsResponse) as T;
     // --- identity ---
-    if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(String(req.query?.ids ?? "")) as T;
+    if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(req.query ?? {}) as T;
     // --- events ---
     if (path === "/api/v1/events" && req.method === "GET")
       return ({ items: this.eventSummaries } as event.ListEventsResponse) as T;
@@ -429,10 +429,25 @@ export class MockApiClient implements ApiClient {
   }
 
   // ---- identity ----
-  private listUsers(idsCsv: string): common.Paginated<identity.UserSummary> {
-    const ids = idsCsv ? idsCsv.split(",") : [];
-    const items = ids.map((id) => this.users.get(id)).filter((u): u is identity.UserSummary => u !== undefined);
-    return { items, nextCursor: null };
+  // Two modes, mirroring the real GET /identity/users:
+  //   - `?ids=a,b`  → resolve exactly those users (name-batch resolve).
+  //   - no ids      → roster list (all members), honouring `q` search + `limit`.
+  // The old ids-only version returned [] for a roster query, so the assignee
+  // dropdown could only ever show "未割当" on a fresh event (bug 1b).
+  private listUsers(query: Record<string, string | number | boolean | undefined>): common.Paginated<identity.UserSummary> {
+    const idsCsv = query.ids !== undefined ? String(query.ids) : undefined;
+    if (idsCsv !== undefined) {
+      const ids = idsCsv ? idsCsv.split(",") : [];
+      const items = ids.map((id) => this.users.get(id)).filter((u): u is identity.UserSummary => u !== undefined);
+      return { items, nextCursor: null };
+    }
+    let items = [...this.users.values()];
+    if (query.q) {
+      const needle = String(query.q).toLowerCase();
+      items = items.filter((u) => u.displayName.toLowerCase().includes(needle));
+    }
+    const limit = query.limit ? Number(query.limit) : 200;
+    return { items: items.slice(0, limit), nextCursor: null };
   }
 }
 
