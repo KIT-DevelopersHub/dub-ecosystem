@@ -9,7 +9,7 @@
 // docs/api-contracts/_wire-contract-enforcement.md documents extending this per service.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { gantt, event, fileMeta, webhook } from "@dub/types";
+import { gantt, event, fileMeta, webhook, githubSync } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
 
@@ -22,8 +22,8 @@ import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
 function serverQueryKeys(service: ServiceName): Set<string> {
   const src = readFileSync(appPathFor(service), "utf8");
   const keys = new Set<string>();
-  // (a) keyed reads.
-  const keyed = /\.req\.query\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
+  // (a) keyed reads — single `c.req.query("x")` and repeatable `c.req.queries("x")`.
+  const keyed = /\.req\.quer(?:y|ies)\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
   for (let m; (m = keyed.exec(src)); ) keys.add(m[1]!);
   // (b) whole-object reads: find each var bound to a no-arg `c.req.query()`, then its `.prop` reads.
   const bind = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[A-Za-z_$][\w$.]*\.req\.query\(\s*\)/g;
@@ -132,6 +132,28 @@ describe("webhook-ingest wire-contract: query keys agree across SoT ⟷ OpenAPI 
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by webhook-ingest`).toBe(true);
+    }
+  });
+});
+
+describe("github-sync wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("github-sync").file);
+  const serverKeys = serverQueryKeys("github-sync");
+
+  const sotKeys = new Set<string>(Object.values(githubSync.GITHUB_SYNC_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(githubSync.GITHUB_SYNC_WIRE)) {
+    it(`${op}: OpenAPI query params == GITHUB_SYNC_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (incl. repeatable syncState via c.req.queries)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `github-sync reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by github-sync`).toBe(true);
     }
   });
 });
