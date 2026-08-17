@@ -9,7 +9,7 @@
 // docs/api-contracts/_wire-contract-enforcement.md documents extending this per service.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { gantt, event, fileMeta } from "@dub/types";
+import { gantt, event, fileMeta, webhook } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
 
@@ -110,6 +110,28 @@ describe("file-meta wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ s
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by file-meta`).toBe(true);
+    }
+  });
+});
+
+describe("webhook-ingest wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("webhook-ingest").file);
+  const serverKeys = serverQueryKeys("webhook-ingest");
+
+  const sotKeys = new Set<string>(Object.values(webhook.WEBHOOK_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(webhook.WEBHOOK_WIRE)) {
+    it(`${op}: OpenAPI query params == WEBHOOK_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (no drifted alias, no undocumented read)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `webhook-ingest reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by webhook-ingest`).toBe(true);
     }
   });
 });
