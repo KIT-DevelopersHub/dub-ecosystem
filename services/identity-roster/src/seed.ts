@@ -23,6 +23,7 @@ const MAINTAINER_KEYS: identity.PermissionKey[] = [
   "notif:send", "notif:admin", "notif:broadcast_publish",
   "mail:send", "mail:read",
   "chat:create", "chat:moderate",
+  "usage:view",
   "infra:read", "infra:deploy",
   "audit:read",
   "github:read", "github:write", "github:sync",
@@ -38,11 +39,11 @@ const SYSTEM_ROLES: { name: string; permissions: identity.PermissionKey[] }[] = 
   },
   {
     name: "organizer",
-    permissions: ["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "infra:read", "audit:read"],
+    permissions: ["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "usage:view", "infra:read", "audit:read"],
   },
   {
     name: "member",
-    permissions: ["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create"],
+    permissions: ["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create", "usage:view"],
   },
 ];
 
