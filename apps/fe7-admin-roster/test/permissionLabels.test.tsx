@@ -6,6 +6,11 @@ import { PermissionMatrix } from "../src/components/PermissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../src/lib/permissionLabels";
 
 const catalog = [...identity.PERMISSION_CATALOG];
+// The per-app access tier (domain "app") renders via its own AppAccessSection (2-tier
+// accordion), NOT the flat per-key grid — covered by appAccessMatrix/AppAccessSection
+// tests. The generic-grid assertions below scope to the non-app domains so a per-app
+// row label (e.g. "メール" the app) never collides with a domain heading ("メール").
+const gridCatalog = catalog.filter((e) => e.domain !== "app");
 
 describe("permissionLabels — localization map", () => {
   it("maps every catalog domain to a Japanese group heading", () => {
@@ -33,7 +38,7 @@ describe("permissionLabels — localization map", () => {
 
 describe("PermissionMatrix — Japanese, grouped, on/off legible", () => {
   it("renders Japanese group headings and per-key labels with the raw key as a hint", () => {
-    render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} onChange={() => {}} />);
+    render(<PermissionMatrix catalog={gridCatalog} selected={["mail:read"]} onChange={() => {}} />);
     // group heading localized (メール)
     expect(screen.getByText("メール")).toBeInTheDocument();
     // key label localized, raw key still visible as a hint
@@ -67,13 +72,13 @@ describe("PermissionMatrix — Japanese, grouped, on/off legible", () => {
   });
 
   it("shows an always-visible plain-Japanese description under every permission", () => {
-    render(<PermissionMatrix catalog={catalog} selected={[]} onChange={() => {}} />);
+    render(<PermissionMatrix catalog={gridCatalog} selected={[]} onChange={() => {}} />);
     // description is rendered inline (not only a hover tooltip), one per key
     const desc = screen.getByTestId("fe7-matrix-desc-mail:send");
     expect(desc).toBeInTheDocument();
     expect(desc.textContent).toMatch(/メールを送信できる/);
-    // every catalog key has its own inline description node
-    for (const e of catalog) {
+    // every grid (non-app) catalog key has its own inline description node
+    for (const e of gridCatalog) {
       expect(screen.getByTestId(`fe7-matrix-desc-${e.key}`).textContent?.length ?? 0).toBeGreaterThan(0);
     }
   });

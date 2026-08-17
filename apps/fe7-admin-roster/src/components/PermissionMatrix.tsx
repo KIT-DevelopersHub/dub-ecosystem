@@ -2,6 +2,7 @@ import type { identity } from "@dub/types";
 import { Badge, Switch } from "@dub/ui";
 import { groupByDomain, toggleDomain, togglePermission, domainSelectionState, type CatalogEntry } from "../lib/permissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../lib/permissionLabels";
+import { AppAccessSection } from "./AppAccessSection";
 
 // Design-system tokens (@dub/tokens) with literal fallbacks so the matrix still
 // reads correctly if a token is ever absent. Each permission is an on/off toggle
@@ -75,6 +76,21 @@ export function PermissionMatrix({
   return (
     <div data-testid={`${idPrefix}-permission-matrix`}>
       {groups.map((g) => {
+        // The per-app access tier (domain "app") renders as a 2-tier accordion (有効化
+        // トグル → ネストした 閲覧/編集作成 セレクタ) instead of the flat per-key grid, so every
+        // app gets one clean on/off row. All other domains keep the standard grid.
+        if (g.domain === "app") {
+          return (
+            <AppAccessSection
+              key={g.domain}
+              selected={selected}
+              disabled={disabled}
+              onChange={onChange}
+              idPrefix={idPrefix}
+              lockedKeys={lockedKeys}
+            />
+          );
+        }
         const state = domainSelectionState(selected, g.entries);
         const onCount = g.entries.reduce((n, e) => n + (selected.includes(e.key as identity.PermissionKey) ? 1 : 0), 0);
         return (
