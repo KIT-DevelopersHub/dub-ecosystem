@@ -8,10 +8,28 @@
 // dimension it is blind to. gantt is the proof endpoint (the one that actually broke);
 // docs/api-contracts/_wire-contract-enforcement.md documents extending this per service.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { gantt, event, fileMeta, webhook, githubSync } from "@dub/types";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { gantt, event, fileMeta, webhook, githubSync, deploy } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
+
+/** Every `.ts` under a service's src/ — some services read query params in sub-route
+ *  files (e.g. deploy-service routes/deployments.ts), not just app.ts. `.req.query(` only
+ *  appears in server-side handler code, so scanning the whole tree stays precise. */
+function serviceSrcFiles(service: ServiceName): string[] {
+  const srcDir = dirname(appPathFor(service));
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".ts") && !e.name.endsWith(".d.ts")) out.push(p);
+    }
+  };
+  walk(srcDir);
+  return out;
+}
 
 /** Every query-parameter name a service's app source actually consumes. Handles both
  *  read styles Dub services use:
@@ -20,18 +38,21 @@ import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
  *  so the "server reads == SoT" reconciliation works whether a handler pulls one key or
  *  destructures the whole query object. */
 function serverQueryKeys(service: ServiceName): Set<string> {
-  const src = readFileSync(appPathFor(service), "utf8");
   const keys = new Set<string>();
-  // (a) keyed reads — single `c.req.query("x")` and repeatable `c.req.queries("x")`.
-  const keyed = /\.req\.quer(?:y|ies)\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
-  for (let m; (m = keyed.exec(src)); ) keys.add(m[1]!);
-  // (b) whole-object reads: find each var bound to a no-arg `c.req.query()`, then its `.prop` reads.
-  const bind = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[A-Za-z_$][\w$.]*\.req\.query\(\s*\)/g;
-  const vars = new Set<string>();
-  for (let m; (m = bind.exec(src)); ) vars.add(m[1]!);
-  for (const v of vars) {
-    const prop = new RegExp(`\\b${v}\\.([A-Za-z_$][\\w$]*)`, "g");
-    for (let m; (m = prop.exec(src)); ) keys.add(m[1]!);
+  for (const file of serviceSrcFiles(service)) {
+    const src = readFileSync(file, "utf8");
+    // (a) keyed reads — single `c.req.query("x")` and repeatable `c.req.queries("x")`.
+    const keyed = /\.req\.quer(?:y|ies)\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
+    for (let m; (m = keyed.exec(src)); ) keys.add(m[1]!);
+    // (b) whole-object reads: each var bound to a no-arg `c.req.query()` in THIS file,
+    //     then its `.prop` reads (kept per-file so bindings don't cross module boundaries).
+    const bind = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[A-Za-z_$][\w$.]*\.req\.query\(\s*\)/g;
+    const vars = new Set<string>();
+    for (let m; (m = bind.exec(src)); ) vars.add(m[1]!);
+    for (const v of vars) {
+      const prop = new RegExp(`\\b${v}\\.([A-Za-z_$][\\w$]*)`, "g");
+      for (let m; (m = prop.exec(src)); ) keys.add(m[1]!);
+    }
   }
   return keys;
 }
@@ -154,6 +175,28 @@ describe("github-sync wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by github-sync`).toBe(true);
+    }
+  });
+});
+
+describe("deploy-service wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("deploy-service").file);
+  const serverKeys = serverQueryKeys("deploy-service"); // reads routes/deployments.ts via the src-tree scan
+
+  const sotKeys = new Set<string>(Object.values(deploy.DEPLOY_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(deploy.DEPLOY_WIRE)) {
+    it(`${op}: OpenAPI query params == DEPLOY_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (no drifted alias, no undocumented read)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `deploy-service reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by deploy-service`).toBe(true);
     }
   });
 });
