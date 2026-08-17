@@ -11,7 +11,7 @@
 import { test, expect } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 
-const SHOTS = "/Users/kota/DubVault/docs/participation-fields";
+const SHOTS = process.env.PARTICIPATION_SHOTS ?? "/Users/kota/DubVault/docs/form-romaji";
 mkdirSync(SHOTS, { recursive: true });
 const shot = (name: string): string => `${SHOTS}/${name}`;
 
@@ -24,6 +24,9 @@ test("(a) public /participate accepts split 姓/名 + emails + phone and confirm
   await page.getByTestId("participation-first-name").fill("太郎");
   await page.getByTestId("participation-last-name-kana").fill("こうかい");
   await page.getByTestId("participation-first-name-kana").fill("たろう");
+  // ローマ字はふりがなから自動プリフィルされる (メール発行用). 値が入っていることを確認。
+  await expect(page.getByTestId("participation-last-name-romaji")).toHaveValue("Koukai");
+  await expect(page.getByTestId("participation-first-name-romaji")).toHaveValue("Tarou");
   await page.getByTestId("participation-school-email").fill("koukai@school.ac.jp");
   await page.getByTestId("participation-gmail").fill("koukai.taro@gmail.com");
   await page.getByTestId("participation-phone").fill("090-1234-5678");
@@ -62,6 +65,9 @@ test("(c) 運営 回答一覧 lists submitted 参加届 and opens a detail drawe
   await expect(detail).toBeVisible();
   await expect(detail.getByText("tanaka@school.ac.jp")).toBeVisible();
   await expect(detail.getByText("電気電子工学科")).toBeVisible();
+  // ローマ字氏名 + アルファベットのメール素案が表示される (メール発行用).
+  await expect(detail.getByText("Tanaka Minoru")).toBeVisible();
+  await expect(detail.getByText("minoru.tanaka@…")).toBeVisible();
   await page.waitForTimeout(500); // let the drawer slide-in settle before the shot
   await page.screenshot({ path: shot("05-detail.png"), fullPage: true });
 });

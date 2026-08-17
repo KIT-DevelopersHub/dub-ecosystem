@@ -57,6 +57,10 @@ export interface Member {
   lastNameKana?: string | null;
   /** 振り仮名(めい) — retained from a 参加届 (任意 / additive). */
   firstNameKana?: string | null;
+  /** 苗字(姓) ローマ字 — retained from a 参加届 (任意 / additive). アルファベットのメール発行に使う。 */
+  lastNameRomaji?: string | null;
+  /** 名前(名) ローマ字 — retained from a 参加届 (任意 / additive). アルファベットのメール発行に使う。 */
+  firstNameRomaji?: string | null;
   /** 電話番号 — retained from a 参加届 (任意 / additive). */
   phone?: string | null;
   note: string | null;
@@ -153,6 +157,12 @@ export interface Participation {
   lastNameKana: string | null;
   /** 振り仮名(めい). 分割入力の新フィールド (additive). */
   firstNameKana: string | null;
+  /** 氏名ローマ字 (合成値 "Last First"). アルファベットのメール発行に使う (additive). */
+  nameRomaji: string | null;
+  /** 苗字(姓) ローマ字. 分割入力の新フィールド (additive). */
+  lastNameRomaji: string | null;
+  /** 名前(名) ローマ字. 分割入力の新フィールド (additive). */
+  firstNameRomaji: string | null;
   grade: Grade | null;
   department: string | null;
   /** 連絡先 (email など). */
@@ -199,6 +209,12 @@ export interface SubmitParticipationRequest {
   lastNameKana?: string | null;
   /** 振り仮名(めい) (任意). */
   firstNameKana?: string | null;
+  /** 氏名ローマ字 (合成値・後方互換). 分割 (姓/名) が来た時はサーバが合成する。 */
+  nameRomaji?: string | null;
+  /** 苗字(姓) ローマ字 (任意・英字). アルファベットのメール発行に使う。 */
+  lastNameRomaji?: string | null;
+  /** 名前(名) ローマ字 (任意・英字). アルファベットのメール発行に使う。 */
+  firstNameRomaji?: string | null;
   /** 電話番号 (任意・数字/ハイフン等). */
   phone?: string | null;
   grade?: Grade | null;

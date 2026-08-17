@@ -24,5 +24,6 @@ export * as mailAutomation from "./mail-automation"; // #16 mail-automation
 export * as chat from "./chat"; // #17 chat-service (RT frozen, rest STUB)
 export * as mobile from "./mobile"; // MO3 mobile-bff (D14)
 export * as member from "./member"; // member-service (運営メンバー管理; canonical shared Team)
+export * as appRegistry from "./app-registry"; // canonical launcher app set ↔ per-app RBAC keys (SoT)
 
 export const CONTRACT_VERSION = "1.0.0";

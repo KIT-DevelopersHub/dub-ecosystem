@@ -5,6 +5,12 @@ import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
 
+/** 氏名ローマ字を "Last First" で合成 (アルファベットのメール発行の確認用). */
+function romajiName(m: OrgMember): string {
+  const parts = [m.lastNameRomaji, m.firstNameRomaji].filter((x): x is string => !!x && x.trim().length > 0);
+  return parts.length > 0 ? parts.join(" ") : "—";
+}
+
 export function ListView({
   members,
   teamsById,
@@ -25,6 +31,7 @@ export function ListView({
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", cell: (m) => m.name },
+    { key: "nameRomaji", header: "氏名（ローマ字）", cell: (m) => romajiName(m) },
     { key: "department", header: "学科", cell: (m) => m.department ?? "—" },
     { key: "grade", header: "学年", cell: (m) => m.grade ?? "—" },
     { key: "role", header: "担当・役割", cell: (m) => m.roleTitle ?? "—" },
