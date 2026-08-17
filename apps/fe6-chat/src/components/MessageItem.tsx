@@ -306,7 +306,7 @@ export function MessageItem({
         {!isDeleted && !editing && message.replyCount > 0 && (
           <button type="button" className={styles.threadSummary} onClick={() => onOpenThread?.(message)}>
             <span className={styles.threadFaces} aria-hidden>
-              <span className={styles.threadFace} style={{ background: "#4a154b" }}>
+              <span className={styles.threadFace} style={{ background: "var(--dub-color-brand-600)" }}>
                 {initials(authorName)}
               </span>
             </span>
