@@ -128,7 +128,11 @@ export function putGanttView(
 // ---- teams (canonical team.Team). Single fetch source: swap this to the
 //      member-service team list API later without touching consumers. ----
 export function listTeams(client: ApiClient): Promise<team.ListTeamsResponse> {
-  return client.request<team.ListTeamsResponse>({ method: "GET", path: `${P}/teams` });
+  // Canonical team list is owned by member-service and exposed at the gateway
+  // "members" segment (GET /api/v1/members/teams). The api-gateway has NO bare
+  // "teams" segment, so `${P}/teams` 404s in prod — which silently emptied the
+  // gantt team switcher/legend. Route through /members/teams (the real source).
+  return client.request<team.ListTeamsResponse>({ method: "GET", path: `${P}/members/teams` });
 }
 
 // ---- identity-roster (batch user resolve; ?ids=, max 50) ----

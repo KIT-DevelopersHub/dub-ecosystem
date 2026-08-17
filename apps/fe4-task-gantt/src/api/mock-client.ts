@@ -135,7 +135,8 @@ export class MockApiClient implements ApiClient {
     if (path === "/api/v1/gantt/views" && req.method === "PUT")
       return this.putView(String(req.query?.eventId), req.body as gantt.PutGanttViewRequest) as T;
     // --- teams (canonical team.Team; future: member-service) ---
-    if (path === "/api/v1/teams" && req.method === "GET") return ({ items: this.teams } as team.ListTeamsResponse) as T;
+    if ((path === "/api/v1/members/teams" || path === "/api/v1/teams") && req.method === "GET")
+      return ({ items: this.teams } as team.ListTeamsResponse) as T;
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(String(req.query?.ids ?? "")) as T;
     // --- events ---

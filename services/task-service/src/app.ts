@@ -21,6 +21,7 @@ import {
   checkIso,
   checkPriority,
   checkStatusValue,
+  checkOptString,
   normalizeLimit,
   assertValid,
   PROTECTED_ORIGIN_FIELDS,
@@ -117,6 +118,7 @@ export function buildApp(deps: Deps): Hono {
 
     const eventId = c.req.query("eventId");
     const assigneeId = c.req.query("assigneeId");
+    const teamId = c.req.query("teamId");
     const createdById = c.req.query("createdById");
     const includeArchived = c.req.query("includeArchived") === "true";
     if (includeArchived) await deps.authz.require(ctx, principal, "task:delete");
@@ -144,6 +146,7 @@ export function buildApp(deps: Deps): Hono {
       limit: normalizeLimit(c.req.query("limit")),
       ...(eventId ? { eventId } : {}),
       ...(assigneeId ? { assigneeId } : {}),
+      ...(teamId ? { teamId } : {}),
       ...(createdById ? { createdById } : {}),
       ...(statusRaw.length > 0 ? { statuses: statusRaw as task.TaskStatus[] } : {}),
       ...(cursorRaw ? { cursorId: decodeCursor(cursorRaw) } : {}),
@@ -170,6 +173,9 @@ export function buildApp(deps: Deps): Hono {
     if (body.assigneeId !== undefined && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    checkOptString(body.teamId, "teamId", fe);
+    checkOptString(body.parentTaskId, "parentTaskId", fe);
+    checkOptString(body.wbs, "wbs", fe);
     // eventId is now OPTIONAL (判断44). If present it must be a string; when omitted the
     // task is issued unlinked to any event. Only validate against event-service when set.
     if (body.eventId !== undefined && body.eventId !== null && typeof body.eventId !== "string") {
@@ -204,6 +210,9 @@ export function buildApp(deps: Deps): Hono {
       status: "todo",
       priority: body.priority ?? "medium",
       assigneeId: body.assigneeId ?? null,
+      teamId: body.teamId ?? null,
+      parentId: body.parentTaskId ?? null,
+      wbs: body.wbs ?? null,
       dueAt: body.dueAt ?? null,
       origin: (isServiceRole(principal) ? body.origin : undefined) ?? "internal",
       createdBy: actorId,
@@ -255,6 +264,9 @@ export function buildApp(deps: Deps): Hono {
     if (body.assigneeId !== undefined && body.assigneeId !== null && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    checkOptString(body.teamId, "teamId", fe);
+    checkOptString(body.parentTaskId, "parentTaskId", fe);
+    checkOptString(body.wbs, "wbs", fe);
     assertValid(fe);
 
     const current = await deps.repo.getById(id);
@@ -292,6 +304,9 @@ export function buildApp(deps: Deps): Hono {
       status?: task.TaskStatus;
       priority?: task.TaskPriority;
       assigneeId?: common.UserId | null;
+      teamId?: common.TeamId | null;
+      parentId?: common.TaskId | null;
+      wbs?: string | null;
       dueAt?: common.ISODateTime | null;
     } = {};
     if (body.title !== undefined) patch.title = body.title;
@@ -299,6 +314,9 @@ export function buildApp(deps: Deps): Hono {
     if (body.status !== undefined) patch.status = body.status;
     if (body.priority !== undefined) patch.priority = body.priority;
     if (body.assigneeId !== undefined) patch.assigneeId = body.assigneeId;
+    if (body.teamId !== undefined) patch.teamId = body.teamId;
+    if (body.parentTaskId !== undefined) patch.parentId = body.parentTaskId;
+    if (body.wbs !== undefined) patch.wbs = body.wbs;
     if (body.dueAt !== undefined) patch.dueAt = body.dueAt;
 
     if (Object.keys(patch).length === 0) return c.json(current); // version-only no-op
