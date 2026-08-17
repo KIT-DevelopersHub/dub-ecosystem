@@ -42,6 +42,6 @@ export { createApp } from "./app";
 export { IdentityService } from "./service";
 export { MemIdentityRepo } from "./repo/mem-repo";
 export { D1IdentityRepo } from "./repo/d1-repo";
-export { seedReferenceData, seedDemoUsers, DEMO_USERS, seedOversightUsers, OVERSIGHT_USERS } from "./seed";
+export { seedReferenceData, seedDemoUsers, DEMO_USERS, seedOversightUsers, OVERSIGHT_USERS, backfillAppAccessKeys, computeAppAccessKeys } from "./seed";
 export { IDENTITY_MIGRATIONS, IDENTITY_SCHEMA_SQL } from "./schema";
 export type { Env } from "./env";
