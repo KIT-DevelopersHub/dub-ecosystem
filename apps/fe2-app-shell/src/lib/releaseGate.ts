@@ -14,7 +14,7 @@
 // a server-backed per-app flag (e.g. an `apps.memberPublished` column surfaced on
 // /me) without touching the launcher/route call-sites: keep isAppPublished() as the
 // single lookup and swap its body for the fetched flag.
-import type { identity } from "@dub/types";
+import { appRegistry, type identity } from "@dub/types";
 import type { FeatureModuleId } from "../modules/types.tsx";
 
 type PermissionKey = identity.PermissionKey;
@@ -53,4 +53,38 @@ const ADMIN_PERMISSION: PermissionKey = "identity:admin";
  *  loading/unauthenticated viewer is treated as a non-privileged member. */
 export function isPrivilegedViewer(can: (p: PermissionKey) => boolean): boolean {
   return can(ADMIN_PERMISSION);
+}
+
+/**
+ * True when the viewer holds the app's EXPLICIT per-app access grant (app:<id>:view,
+ * #270). Granting a role an app in ロール管理 IS the decision to release that app to that
+ * role, so an explicit grant must override the coarse member-publish gate below.
+ * Fail-closed: false for an unknown app id or while /me loads (can() returns false).
+ */
+export function hasExplicitAppAccess(
+  appId: FeatureModuleId | undefined,
+  can: (p: PermissionKey) => boolean,
+): boolean {
+  if (!appId) return false;
+  const viewKey = appRegistry.appViewKey(appId);
+  return viewKey ? can(viewKey as PermissionKey) : false;
+}
+
+/**
+ * True when the member-publish release gate should GREY this app for the viewer.
+ *
+ * BUGFIX (#270 follow-up): the launcher/route used to grey any app that was not in
+ * PUBLISHED_APPS for every non-admin — even after ロール管理 granted the role app:<id>:view.
+ * That double-gated the per-app RBAC: a granted organizer still saw the tile disabled.
+ * The per-app grant is now authoritative — an app is RELEASED to a viewer who is (a) a
+ * full admin, (b) explicitly granted the app (hasExplicitAppAccess), or (c) globally
+ * member-published (PUBLISHED_APPS). Only an app with NONE of these (unannounced AND
+ * ungranted) stays greyed for general members, preserving the "don't surface unreleased
+ * apps by accident" intent for roles that were never granted them.
+ */
+export function isReleaseGatedFor(
+  appId: FeatureModuleId | undefined,
+  can: (p: PermissionKey) => boolean,
+): boolean {
+  return !isPrivilegedViewer(can) && !isAppPublished(appId) && !hasExplicitAppAccess(appId, can);
 }

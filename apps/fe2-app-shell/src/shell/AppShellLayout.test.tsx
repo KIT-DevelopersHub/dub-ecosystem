@@ -164,6 +164,55 @@ describe("AppShellLayout", () => {
     expect(events).toHaveAttribute("title", "準備中（メンバー未公開）");
   });
 
+  it("ENABLES an unpublished app for a non-admin once ロール管理 grants app:<id>:view (#270 fix)", async () => {
+    // organizer-like: not admin, holds event:read AND the per-app grant app:events:view.
+    // Before the fix the release gate greyed events (not member-published) despite the
+    // grant; now the grant releases it. requiredPermissions mirror the real nav (domain +
+    // per-app) so the tile only enables when BOTH are held.
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "event:read", "app:events:view"] };
+    const grantedApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
+      { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events", requiredPermissions: ["event:read", "app:events:view"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={grantedApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
+    await userEvent.click(trigger);
+    // granted -> active + clickable (the reported bug: was disabled).
+    expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeEnabled();
+  });
+
+  it("re-greys the app when the per-app grant is revoked (OFF)", async () => {
+    // same viewer WITHOUT app:events:view -> release-gated again.
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "event:read"] };
+    const revokedApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events", requiredPermissions: ["event:read", "app:events:view"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={revokedApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
+    await userEvent.click(trigger);
+    expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeDisabled();
+  });
+
   it("does not navigate when a member clicks a greyed (unpublished) tile", async () => {
     const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "mail:read"] };
     const memberApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
