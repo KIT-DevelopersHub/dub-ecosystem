@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { task, identity } from "@dub/types";
 import { MockApiClient } from "../src/api/mock-client";
 import { useTaskStore } from "../src/store/useTaskStore";
-import { listRosterUsers, resolveUsers } from "../src/api/endpoints";
+import { getTask, listRosterUsers, replaceDependencies, resolveUsers } from "../src/api/endpoints";
 import { errorSurface } from "../src/domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../src/domain/provisional";
 import { ApiError } from "../src/contracts/spa-shell";
@@ -129,5 +129,27 @@ describe("provisional gantt row", () => {
     expect(row.endsAt).toBe("2026-09-10T00:00:00.000Z");
     // high priority = 2-day bar
     expect(row.startsAt).toBe("2026-09-08T00:00:00.000Z");
+  });
+});
+
+describe("F3: loadAll pages through the whole event (>200 tasks)", () => {
+  it("loads all 216 tasks, not just the first page", async () => {
+    const many = Array.from({ length: 216 }, (_, i) => seedTask(`t${String(i).padStart(3, "0")}`));
+    const c = new MockApiClient({ tasks: many });
+    await useTaskStore.getState().loadAll(c, { eventId: "evt_1", limit: 200 });
+    expect(useTaskStore.getState().list()).toHaveLength(216);
+    expect(useTaskStore.getState().nextCursor).toBeNull();
+  });
+});
+
+describe("F1: dependency op returns the wire shape { taskId, dependsOnIds }, not a Task", () => {
+  it("carries no version (callers must not read one off it)", async () => {
+    const c = new MockApiClient({ tasks: [seedTask("t1"), seedTask("t2")] });
+    const res = await replaceDependencies(c, "t1", { version: 1, dependsOnIds: ["t2"] });
+    expect(res).toEqual({ taskId: "t1", dependsOnIds: ["t2"] });
+    expect((res as { version?: number }).version).toBeUndefined();
+    // the task's version WAS bumped server-side (visible via a fresh read)
+    const fresh = await getTask(c, "t1");
+    expect(fresh.version).toBe(2);
   });
 });

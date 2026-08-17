@@ -320,7 +320,12 @@ export class MockApiClient implements ApiClient {
     this.taskById.set(id, { ...cur, archivedAt: new Date().toISOString(), version: cur.version + 1 });
   }
 
-  private replaceDeps(id: string, body: task.ReplaceDependenciesRequest): task.Task {
+  // Returns the SERVER wire shape { taskId, dependsOnIds } — NOT a task.Task. The
+  // real task-service replies with exactly this (it bumps the task version in the
+  // DB but does not echo the task back). The old mock returned a full Task with a
+  // `version`, which hid a real FE bug: callers read `.version` off this response
+  // (undefined in prod) and corrupted the optimistic version chain. Mirror prod.
+  private replaceDeps(id: string, body: task.ReplaceDependenciesRequest): { taskId: string; dependsOnIds: string[] } {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     if (body.version !== cur.version) throw err(409, "TASK_VERSION_CONFLICT", "version conflict");
@@ -342,9 +347,10 @@ export class MockApiClient implements ApiClient {
     proposed.set(id, body.dependsOnIds);
     if (hasCycle(proposed)) throw err(409, "TASK_DEPENDENCY_CYCLE", "dependency cycle", { taskId: id });
     this.deps.set(id, body.dependsOnIds);
-    const next: task.Task = { ...cur, version: cur.version + 1, updatedAt: new Date().toISOString() };
-    this.taskById.set(id, next);
-    return next;
+    // Bump the task version in the store (the real DB does the same) but reply with
+    // only the wire shape { taskId, dependsOnIds }.
+    this.taskById.set(id, { ...cur, version: cur.version + 1, updatedAt: new Date().toISOString() });
+    return { taskId: id, dependsOnIds: [...body.dependsOnIds] };
   }
 
   // ---- gantt handlers ----

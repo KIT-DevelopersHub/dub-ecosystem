@@ -35,6 +35,12 @@ export interface TaskStoreState {
   column: (status: task.TaskStatus) => task.Task[];
   // loads
   load: (client: ApiClient, q: task.ListTasksQuery) => Promise<void>;
+  /** Load EVERY page for the query (cursor-paginated) into the cache. The gantt
+   *  workspace must hold all tasks — a single page caps at 200 (server max), so an
+   *  event with >200 tasks (e.g. the 216-task conference) silently dropped the tail
+   *  from the store, hiding those rows from the timeline and making their edits
+   *  impossible. This walks nextCursor to completion. */
+  loadAll: (client: ApiClient, q: task.ListTasksQuery) => Promise<void>;
   loadMore: (client: ApiClient, q: task.ListTasksQuery) => Promise<void>;
   // optimistic mutation (board D&D / gantt bar D&D / inline edit)
   patchOptimistic: (
@@ -75,6 +81,23 @@ export const useTaskStore = create<TaskStoreState>((set, get) => ({
     try {
       const res = await api.listTasks(client, q);
       set({ tasks: indexTasks(res.items), nextCursor: res.nextCursor, lastError: null, lastErrorDetail: null });
+    } catch (e) {
+      set(errState(e));
+    }
+  },
+
+  async loadAll(client, q) {
+    try {
+      const MAX_PAGES = 50; // safety bound (>=200*50 tasks); avoids an infinite loop on a bad cursor
+      const first = await api.listTasks(client, q);
+      const all = [...first.items];
+      let cursor = first.nextCursor;
+      for (let page = 0; page < MAX_PAGES && cursor; page++) {
+        const res = await api.listTasks(client, { ...q, cursor });
+        all.push(...res.items);
+        cursor = res.nextCursor;
+      }
+      set({ tasks: indexTasks(all), nextCursor: null, lastError: null, lastErrorDetail: null });
     } catch (e) {
       set(errState(e));
     }
