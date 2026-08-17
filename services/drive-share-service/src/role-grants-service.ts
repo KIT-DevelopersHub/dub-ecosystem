@@ -20,7 +20,7 @@ import { DubError, errors } from "@dub/errors";
 import type { DriveShareClient } from "./drive-client";
 import type { GrantMemberRow, GrantRow, RoleGrantStore } from "./role-grants-store";
 import type { RoleMembership } from "./role-membership";
-import type { AssignableDriveRole, RoleFileGrant, SharePermission, SkippedMember } from "./types";
+import type { AssignableDriveRole, InvitedMember, RoleFileGrant, SharePermission, SkippedMember } from "./types";
 
 const ASSIGNABLE: ReadonlySet<string> = new Set(["reader", "commenter", "writer"]);
 
@@ -73,7 +73,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     grant: GrantRow,
     driveRole: AssignableDriveRole,
     opts: { removeDeparted: boolean },
-  ): Promise<{ members: GrantMemberRow[]; skipped: SkippedMember[] }> {
+  ): Promise<{ members: GrantMemberRow[]; skipped: SkippedMember[]; invited: InvitedMember[] }> {
     const prev = await store.listMembers(grant.id);
     const prevByEmail = new Map(prev.map((m) => [m.email, m]));
 
@@ -85,10 +85,16 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
 
     const next: GrantMemberRow[] = [];
     const skipped: SkippedMember[] = [];
+    const invited: InvitedMember[] = [];
     // Per-member isolation: a member Drive refuses (bad/non-Google email) is recorded in
     // `skipped` and the loop continues, so the rest of the role is still applied.
     const reasonFor = (err: unknown): string =>
       err instanceof DubError ? err.message : "共有できませんでした。";
+    // A create that only went through via the invite fallback (no Google account) is
+    // recorded so the operator learns the access is pending.
+    const noteInvited = (email: string, perm: SharePermission): void => {
+      if (perm.invited) invited.push({ email });
+    };
 
     for (const email of emails) {
       const previous = prevByEmail.get(email);
@@ -107,6 +113,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
           } else {
             // Externally deleted — recreate ours.
             const created = await drive.createPermission(grant.fileId, { type: "user", role: driveRole, emailAddress: email });
+            noteInvited(email, created);
             next.push({ grantId: grant.id, email, permissionId: created.id, createdByUs: 1 });
           }
         } else if (live) {
@@ -116,6 +123,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
         } else {
           // New member with no permission — create ours.
           const created = await drive.createPermission(grant.fileId, { type: "user", role: driveRole, emailAddress: email });
+          noteInvited(email, created);
           next.push({ grantId: grant.id, email, permissionId: created.id, createdByUs: 1 });
         }
       } catch (err) {
@@ -136,10 +144,10 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     }
 
     await store.replaceMembers(grant.id, next);
-    return { members: next, skipped };
+    return { members: next, skipped, invited };
   }
 
-  async function toRoleFileGrant(grant: GrantRow, skipped?: SkippedMember[]): Promise<RoleFileGrant> {
+  async function toRoleFileGrant(grant: GrantRow, extra?: { skipped?: SkippedMember[]; invited?: InvitedMember[] }): Promise<RoleFileGrant> {
     const [emails, members, roleName] = await Promise.all([
       roster.listActiveEmails(grant.roleId),
       store.listMembers(grant.id),
@@ -155,7 +163,8 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       appliedCount: members.length,
       grantedBy: grant.grantedBy,
       grantedAt: grant.grantedAt,
-      ...(skipped && skipped.length > 0 ? { skipped } : {}),
+      ...(extra?.skipped && extra.skipped.length > 0 ? { skipped: extra.skipped } : {}),
+      ...(extra?.invited && extra.invited.length > 0 ? { invited: extra.invited } : {}),
     };
   }
 
@@ -185,8 +194,8 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
         grantedAt: existing?.grantedAt ?? ts,
         updatedAt: ts,
       });
-      const { skipped } = await reconcile(grant, driveRole, { removeDeparted: false });
-      return toRoleFileGrant(grant, skipped);
+      const { skipped, invited } = await reconcile(grant, driveRole, { removeDeparted: false });
+      return toRoleFileGrant(grant, { skipped, invited });
     },
 
     async revoke(fileId, roleId): Promise<void> {
@@ -208,8 +217,8 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       if (!grant) throw errors.notFound("driveRoleGrant", `${fileId}:${roleId}`);
       const ts = now();
       const updated = await store.upsertGrant({ ...grant, updatedAt: ts });
-      const { skipped } = await reconcile(updated, updated.driveRole, { removeDeparted: true });
-      return toRoleFileGrant(updated, skipped);
+      const { skipped, invited } = await reconcile(updated, updated.driveRole, { removeDeparted: true });
+      return toRoleFileGrant(updated, { skipped, invited });
     },
   };
 }

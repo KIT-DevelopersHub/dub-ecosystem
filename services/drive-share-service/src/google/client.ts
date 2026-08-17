@@ -134,11 +134,18 @@ export function createGoogleDriveShareClient(deps: {
       };
 
       let res = await post(false);
+      let invited = false;
       if (res.status === 400 && p.emailAddress && (p.type === "user" || p.type === "group")) {
         const peeked = await res.clone().json().catch(() => null);
-        if (extractReason(peeked) === "invalidSharingRequest") res = await post(true);
+        if (extractReason(peeked) === "invalidSharingRequest") {
+          // No Google account for this address → only shareable with an invite. The
+          // resulting permission is pending until the address gets a Google account.
+          res = await post(true);
+          invited = true;
+        }
       }
-      return mapPermission(await readJson(res));
+      const perm = mapPermission(await readJson(res));
+      return invited ? { ...perm, invited: true } : perm;
     },
 
     async updatePermission(fileId: string, permissionId: string, role: ShareRole): Promise<SharePermission> {
