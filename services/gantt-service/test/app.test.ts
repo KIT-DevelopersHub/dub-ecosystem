@@ -47,6 +47,14 @@ describe("gantt-service HTTP", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /gantt accepts the legacy ?event= key as an eventId fallback", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a" })] });
+    const res = await createApp(deps({ upstream: up })).request("/gantt?event=event_1", { headers: AUTHED }, ENV);
+    expect(res.status).toBe(200);
+    const dto = (await res.json()) as gantt.GanttChartDTO;
+    expect(dto.eventId).toBe("event_1");
+  });
+
   it("GET /gantt for an unknown event -> 404 GANTT_EVENT_NOT_FOUND", async () => {
     const up = fakeUpstream({ eventExists: false });
     const res = await createApp(deps({ upstream: up })).request("/gantt?eventId=missing", { headers: AUTHED }, ENV);

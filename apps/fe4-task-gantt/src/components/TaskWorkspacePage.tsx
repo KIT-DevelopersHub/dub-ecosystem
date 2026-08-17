@@ -58,7 +58,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // Load the whole event in one page: the gantt intersects its rows with this
   // store set (see `filteredDto`), so a short default page would silently drop
   // work-packages/leaves from the timeline. The WBS tree is ~170 rows.
-  const WORKSPACE_PAGE_LIMIT = 500;
+  // NOTE: task-service caps `limit` at 200 (services/task-service/src/validate.ts —
+  // throws VALIDATION_FAILED on >200). 500 made every task-list load 400 with a
+  // "Validation failed" banner (and an empty timeline). 200 is the contract max and
+  // still covers the current tree; events beyond 200 tasks need cursor pagination.
+  const WORKSPACE_PAGE_LIMIT = 200;
   const query = useMemo(
     () => toListTasksQuery({ ...filter, limit: filter.limit ?? WORKSPACE_PAGE_LIMIT }),
     [filter],

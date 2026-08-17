@@ -22,9 +22,7 @@ import type {
   RosterUser,
   SyncEmailRoutingResult,
   EmailRoutingSyncPreview,
-  EmailRoutingAddress,
   CreateEmailAddressRequest,
-  UpdateEmailAddressRequest,
 } from "../contracts/pending";
 
 /** The mail-gateway proxy answers 503 with this code when the CF token is unset.
@@ -384,52 +382,15 @@ export function useSyncEmailRouting() {
   });
 }
 
-// ---- Email Routing (@developershub.jp address management) ----
+// ---- Email Routing (@developershub.jp address issuance, used by the roster) ----
 
-export function useEmailAddresses(): UseQueryResult<common.Paginated<EmailRoutingAddress>> {
-  const { api } = useRosterContext();
-  return useQuery({ queryKey: queryKeys.emailAddresses(), queryFn: () => api.listEmailAddresses() });
-}
-
-/** NON-optimistic: issue a new @developershub.jp address (create Email Routing rule). */
+/** NON-optimistic: issue a new @developershub.jp address (create Email Routing rule).
+ *  Used by the roster's NewEmailAddressDialog (name-book), which re-syncs after issue. */
 export function useCreateEmailAddress() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (req: CreateEmailAddressRequest) => api.createEmailAddress(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
-  });
-}
-
-/** NON-optimistic: enable/disable or re-point an address (patch the rule). */
-export function useUpdateEmailAddress() {
-  const { api } = useRosterContext();
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (input: { id: string; req: UpdateEmailAddressRequest }) => api.updateEmailAddress(input.id, input.req),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
-    onError: (err) => {
-      const p = presentError(err);
-      toast({ kind: "error", title: "更新に失敗しました", description: "message" in p ? p.message : undefined });
-    },
-  });
-}
-
-/** NON-optimistic: delete an address (destructive; called after ConfirmDialog). */
-export function useDeleteEmailAddress() {
-  const { api } = useRosterContext();
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (id: string) => api.deleteEmailAddress(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() });
-      toast({ kind: "success", title: "アドレスを削除しました" });
-    },
-    onError: (err) => {
-      const p = presentError(err);
-      toast({ kind: "error", title: "削除に失敗しました", description: "message" in p ? p.message : undefined });
-    },
   });
 }

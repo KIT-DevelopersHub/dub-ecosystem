@@ -104,11 +104,6 @@ export interface EmailRoutingSyncPreview {
   projected: SyncEmailRoutingResult;
 }
 
-// PATCH sends only the changed fields (enable/disable toggle, or new destination).
-export interface UpdateEmailAddressRequest {
-  enabled?: boolean;
-  destination?: string;
-}
 
 // ---- Offboarding (退任) one-shot (#2) ----
 // The identity-LOCAL result returned by POST /identity/users/:id/offboard (owned by

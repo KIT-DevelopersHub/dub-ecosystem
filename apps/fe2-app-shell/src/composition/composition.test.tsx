@@ -115,46 +115,30 @@ describe("assembleFeatureModules", () => {
     expect(paths.filter((p) => p === "/events/:eventId/tasks")).toHaveLength(1);
   });
 
-  it("builds nav sorted by shell-owned order (tasks first, admin last)", () => {
+  it("builds nav sorted by shell-owned order (events first, admin last)", () => {
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const labels = registry.nav.map((n) => n.path);
-    // イベントアプリはユーザー明示承認で nav から外したので、先頭は マイタスク(/me/tasks)。
-    expect(labels[0]).toBe("/me/tasks");
-    expect(labels.at(-1)).toBe("/admin/roles");
+    expect(labels[0]).toBe("/events");
+    expect(labels.at(-1)).toBe("/admin/history");
     // every nav icon resolved to a valid IconName (no crash-on-unknown)
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("removes only the 3 user-approved apps from nav; keeps every other app", () => {
-    // ユーザー明示承認で launcher/ナビから外した3つ: イベント(/events)・
-    // メールアドレス管理(/admin/email-routing)・変更履歴(/admin/history)。
-    // 他アプリは絶対に減らさない。
+  it("shows the admin tools (ロール管理 / ユーザー名簿 / 変更履歴) in nav; メールアドレス管理 は撤去済み", () => {
+    // ロール管理(/admin/roles)・ユーザー名簿(/admin/users)・変更履歴(/admin/history) は表示する。
+    // メールアドレス管理(/admin/email-routing) はユーザー明示承認で launcher/ナビ/route から撤去した。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
-    // 外した3つは nav に無い
-    expect(navPaths).not.toContain("/events");
-    expect(navPaths).not.toContain("/admin/email-routing");
-    expect(navPaths).not.toContain("/admin/history");
-    // 残す他アプリは全て nav にある
     expect(navPaths).toEqual(
-      expect.arrayContaining([
-        "/me/tasks",
-        "/gantt",
-        "/notifications",
-        "/chat",
-        "/mail",
-        "/usage",
-        "/members",
-        "/driveshare",
-        "/admin/users",
-        "/admin/roles",
-      ]),
+      expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/history"]),
     );
-    // イベント routes は保持（ガント/タスクの event-scoped 動線が依存 + deep-link 生存）
+    expect(navPaths).not.toContain("/admin/email-routing");
+    // ルートも当然残る（deep-link 生存）。ただし email-routing は route ごと撤去。
     const routePaths = registry.routes.map((r) => r.path);
-    expect(routePaths).toEqual(expect.arrayContaining(["/admin/users", "/admin/roles", "/events", "/events/:eventId/tasks/gantt"]));
+    expect(routePaths).toEqual(expect.arrayContaining(["/admin/users", "/admin/roles"]));
+    expect(routePaths).not.toContain("/admin/email-routing");
   });
 
   it("carries badge sources through for notifications and chat", () => {

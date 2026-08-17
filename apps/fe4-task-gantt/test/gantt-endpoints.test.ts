@@ -23,6 +23,14 @@ describe("gantt endpoints (design tests 4/6/8/12)", () => {
     expect(dto.dependencies[0]!.type).toBe("FS");
   });
 
+  it("getGantt sends the event as ?eventId= (regression: gantt-service reads eventId, not event)", async () => {
+    const c = new MockApiClient({ tasks: [seedTask("t1")] });
+    await api.getGantt(c, "evt_1");
+    const call = c.calls.find((r) => r.path === "/api/v1/gantt");
+    expect(call?.query?.eventId).toBe("evt_1");
+    expect(call?.query?.event).toBeUndefined(); // never the stale ?event= key
+  });
+
   it("getGanttFresh adds Cache-Control: no-cache (test 6)", async () => {
     const c = new MockApiClient({ tasks: [seedTask("t1")] });
     await api.getGanttFresh(c, "evt_1");
