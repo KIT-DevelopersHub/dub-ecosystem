@@ -89,18 +89,27 @@
   text-overflow: ellipsis;
 }
 
-/* Per-item "未読にする" action: quiet until the row is hovered/focused. */
+/* Gmail-style read/unread toggle: an overlay chip pinned to the row's right edge.
+ * It is taken OUT of the row flow (position:absolute) so it reserves NO space and
+ * never shows as an always-there button — it fades in over the timestamp only while
+ * the row is hovered or the action itself is focused. */
 .action {
-  flex: none;
-  align-self: center;
-  margin-right: var(--dub-space-2);
+  position: absolute;
+  top: 50%;
+  right: var(--dub-space-3);
+  transform: translateY(-50%);
   padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-md);
-  background: transparent;
+  background: var(--dub-color-surface-base);
+  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
   color: var(--dub-color-text-secondary);
   font-size: var(--dub-font-size-xs);
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   transition:
     opacity var(--dub-motion-fast) var(--dub-motion-easing),
     background-color var(--dub-motion-fast) var(--dub-motion-easing),
@@ -109,6 +118,7 @@
 .row:hover .action,
 .action:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 .action:hover {
   background: var(--dub-color-surface-sunken);
@@ -116,12 +126,13 @@
 }
 .action:focus-visible {
   outline: 2px solid var(--dub-color-border-focus);
-  outline-offset: -2px;
+  outline-offset: 1px;
 }
 
-/* Touch / no-hover devices: never hide the action behind hover. */
+/* Touch / no-hover devices: no hover to reveal, so keep the action reachable. */
 @media (hover: none) {
   .action {
     opacity: 1;
+    pointer-events: auto;
   }
 }

@@ -8,6 +8,7 @@
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { common } from "@dub/types";
+import { Button, SegmentedControl } from "@dub/ui";
 import { cssText } from "@dub/tokens/css";
 // Load the @dub/ui design-system component stylesheet (same sheet the FE2 shell
 // imports in its main.tsx) so the standalone dev harness renders with ecosystem
@@ -137,25 +138,55 @@ function DevApp(): React.ReactNode {
     mock?.__setViewer(v);
   };
 
+  const routes: { id: typeof route; label: string }[] = [
+    { id: "inbox", label: "Inbox" },
+    { id: "prefs", label: "Settings" },
+    { id: "manage", label: "Notification管理" },
+    { id: "publish", label: "Publish (admin)" },
+  ];
+
   return (
     <NotificationProvider deps={deps}>
-      <header style={{ display: "flex", justifyContent: "space-between", padding: 16 }}>
-        <nav style={{ display: "flex", gap: 12 }}>
-          <button onClick={() => setRoute("inbox")}>Inbox</button>
-          <button onClick={() => setRoute("prefs")}>Settings</button>
-          <button onClick={() => setRoute("manage")}>Notification管理</button>
-          <button onClick={() => setRoute("publish")}>Publish (admin)</button>
+      {/* Harness top bar — uses the @dub/ui design system (Button + SegmentedControl)
+       * so the standalone preview renders with ecosystem chrome, not bare native
+       * <button>s (which read as an unstyled/broken header). tokens provide spacing. */}
+      <header
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "var(--dub-space-4)",
+          flexWrap: "wrap",
+          padding: "var(--dub-space-3) var(--dub-space-4)",
+          borderBottom: "1px solid var(--dub-color-border-default)",
+          background: "var(--dub-color-surface-base)",
+        }}
+      >
+        <nav style={{ display: "flex", gap: "var(--dub-space-2)", flexWrap: "wrap" }}>
+          {routes.map((r) => (
+            <Button
+              key={r.id}
+              variant={route === r.id ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setRoute(r.id)}
+            >
+              {r.label}
+            </Button>
+          ))}
         </nav>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "var(--dub-space-3)", alignItems: "center" }}>
           {mock ? (
-            <span data-testid="dev-viewer-toggle" style={{ display: "flex", gap: 6 }}>
-              <button data-testid="dev-view-admin" aria-pressed={viewer === "admin"} onClick={() => switchViewer("admin")}>
-                Admin view
-              </button>
-              <button data-testid="dev-view-member" aria-pressed={viewer === "member"} onClick={() => switchViewer("member")}>
-                Member view
-              </button>
-            </span>
+            <SegmentedControl<MockViewer>
+              size="sm"
+              aria-label="表示ビュー"
+              value={viewer}
+              onChange={switchViewer}
+              options={[
+                { value: "admin", label: "Admin view", testId: "dev-view-admin" },
+                { value: "member", label: "Member view", testId: "dev-view-member" },
+              ]}
+              testId="dev-viewer-toggle"
+            />
           ) : null}
           <NotificationBell />
         </div>

@@ -109,6 +109,7 @@ function NotificationDialogBody({ onClose }: { onClose: () => void }): ReactNode
         onLoadMore={goToInbox}
         onRetry={() => void inbox.reload()}
         onMarkUnread={(item) => void inbox.markUnread(item.id)}
+        onMarkRead={(item) => void inbox.markRead(item.id)}
       />
       {hasMoreThanPreview ? (
         <div style={{ marginTop: "0.5rem", textAlign: "center" }}>

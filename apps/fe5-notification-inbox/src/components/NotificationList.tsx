@@ -22,6 +22,8 @@ export interface NotificationListProps {
   onRetry: () => void;
   /** Optional per-item "未読にする" (restore to unread). Passed through to each row. */
   onMarkUnread?: (item: InboxItem) => void;
+  /** Optional per-item "既読にする" (mark read in place). Passed through to each row. */
+  onMarkRead?: (item: InboxItem) => void;
 }
 
 export function NotificationList(props: NotificationListProps): ReactNode {
@@ -81,6 +83,7 @@ export function NotificationList(props: NotificationListProps): ReactNode {
                 item={item}
                 onActivate={props.onActivate}
                 {...(props.onMarkUnread ? { onMarkUnread: props.onMarkUnread } : {})}
+                {...(props.onMarkRead ? { onMarkRead: props.onMarkRead } : {})}
               />
             </div>
           ))}

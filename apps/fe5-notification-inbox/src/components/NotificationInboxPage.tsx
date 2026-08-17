@@ -139,6 +139,7 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
         onLoadMore={() => void inbox.loadMore()}
         onRetry={() => void inbox.reload()}
         onMarkUnread={(item) => void inbox.markUnread(item.id)}
+        onMarkRead={(item) => void inbox.markRead(item.id)}
       />
       {showPager ? (
         <Pagination
