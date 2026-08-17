@@ -14,7 +14,9 @@ const LABELS: Record<ChannelType, string> = { topic: "チャンネル", event: "
 export function groupChannels(channels: Channel[]): ChannelGroup[] {
   const byType = new Map<ChannelType, Channel[]>();
   for (const t of ORDER) byType.set(t, []);
-  for (const c of channels) {
+  // Guard against a non-array slipping through (e.g. a Paginated envelope) so the
+  // sidebar never throws "not iterable" and takes the whole app down (chat error-fix).
+  for (const c of Array.isArray(channels) ? channels : []) {
     const bucket = byType.get(c.type);
     if (bucket) bucket.push(c);
   }
