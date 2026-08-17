@@ -1,0 +1,73 @@
+name: Flutter Desktop CI
+
+# Separate job from the Node/turbo `ci.yml` so the Dart/Flutter toolchain never
+# cross-contaminates the pnpm workspace verify (roadmap §6). Runs only when the
+# desktop app, the generated client, the OpenAPI SoT, or this workflow changes.
+on:
+  push:
+    branches: [main, epic/dub-features]
+    paths:
+      - 'apps/dt1-desktop/**'
+      - 'packages/api-client-dart/**'
+      - 'docs/openapi/api-gateway.yaml'
+      - 'scripts/gen-dart-client.sh'
+      - '.github/workflows/flutter-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/dt1-desktop/**'
+      - 'packages/api-client-dart/**'
+      - 'docs/openapi/api-gateway.yaml'
+      - 'scripts/gen-dart-client.sh'
+      - '.github/workflows/flutter-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: analyze · test · client-freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.29.3
+          cache: true
+
+      # --- Generated client is fresh vs the OpenAPI SoT ("diff = red") ---
+      - name: Setup Java (for openapi-generator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install openapi-generator
+        run: |
+          curl -sSL https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.24.0/openapi-generator-cli-7.24.0.jar \
+            -o /tmp/openapi-generator-cli.jar
+          printf '#!/usr/bin/env bash\nexec java -jar /tmp/openapi-generator-cli.jar "$@"\n' | sudo tee /usr/local/bin/openapi-generator >/dev/null
+          sudo chmod +x /usr/local/bin/openapi-generator
+
+      - name: Check generated Dart client is fresh
+        run: bash scripts/gen-dart-client.sh --check
+
+      # --- App analyze + test ---
+      - name: Client deps
+        working-directory: packages/api-client-dart
+        run: dart pub get
+
+      - name: App deps
+        working-directory: apps/dt1-desktop
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: apps/dt1-desktop
+        run: flutter analyze
+
+      - name: Test (incl. /me vertical smoke)
+        working-directory: apps/dt1-desktop
+        run: flutter test
