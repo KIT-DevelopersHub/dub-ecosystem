@@ -217,6 +217,17 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: kind
+          in: query
+          schema:
+            type: string
+          description: Filter actions by kind (open registry).
+        - name: includeArchived
+          in: query
+          schema:
+            type: boolean
       responses:
         '200':
           description: Actions

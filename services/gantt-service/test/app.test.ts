@@ -47,12 +47,14 @@ describe("gantt-service HTTP", () => {
     expect(res.status).toBe(400);
   });
 
-  it("GET /gantt accepts the legacy ?event= key as an eventId fallback", async () => {
+  it("GET /gantt reads ONLY the SoT key `eventId`; the drifted `?event=` alias is rejected", async () => {
+    // The wire contract (gantt.GetGanttQuery) makes `eventId` the single query key. The
+    // server must not read the old `?event=` alias — doing so is the exact drift the
+    // wire-params contract test forbids. `?event=` therefore reads as "no eventId" -> 400.
     const up = fakeUpstream({ tasks: [mkTask({ id: "task_a" })] });
     const res = await createApp(deps({ upstream: up })).request("/gantt?event=event_1", { headers: AUTHED }, ENV);
-    expect(res.status).toBe(200);
-    const dto = (await res.json()) as gantt.GanttChartDTO;
-    expect(dto.eventId).toBe("event_1");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
 
   it("GET /gantt for an unknown event -> 404 GANTT_EVENT_NOT_FOUND", async () => {
