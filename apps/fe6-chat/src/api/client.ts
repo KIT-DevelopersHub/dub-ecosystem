@@ -5,6 +5,7 @@
 // an in-memory mock (mock-client.ts) so the unit is complete without chat-service.
 import type { common, identity } from "@dub/types";
 import { isErrorResponse, type ErrorResponse } from "@dub/errors";
+import { reactionsFromWire } from "../store/timeline";
 import type {
   Channel,
   ChannelMember,
@@ -17,6 +18,8 @@ import type {
   PostMessageRequest,
   PostMessageResponse,
   ReactionToggleRequest,
+  ReactionToggleResponse,
+  Reaction,
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
@@ -40,7 +43,7 @@ export interface ChatApiClient {
   postMessage(req: PostMessageRequest): Promise<PostMessageResponse>;
   editMessage(id: common.MessageId, req: EditMessageRequest): Promise<Message>;
   deleteMessage(id: common.MessageId): Promise<Message>;
-  toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<Message>;
+  toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<ReactionToggleResponse>;
   updateReadState(req: ReadStateUpdateRequest): Promise<void>;
   listUnread(): Promise<UnreadSummary[]>; // subject from auth header — no ?userId= (chat review #10/#13)
   getWsTicket(id: common.ChannelId): Promise<WsTicketResponse>;
@@ -184,8 +187,14 @@ export class HttpChatClient implements ChatApiClient {
   deleteMessage(id: common.MessageId): Promise<Message> {
     return this.request<Message>("DELETE", `${CHAT}/messages/${id}`);
   }
-  toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<Message> {
-    return this.request<Message>("POST", `${CHAT}/messages/${id}/reactions`, req);
+  toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<ReactionToggleResponse> {
+    // Server returns { messageId, reactions } with reactions as a Record<emoji,userIds>;
+    // normalize to the client's Reaction[] so the reconcile can apply it directly.
+    return this.request<{ messageId: common.MessageId; reactions: Reaction[] | Record<string, common.UserId[]> }>(
+      "POST",
+      `${CHAT}/messages/${id}/reactions`,
+      req,
+    ).then((r) => ({ messageId: r.messageId, reactions: reactionsFromWire(r.reactions) }));
   }
   updateReadState(req: ReadStateUpdateRequest): Promise<void> {
     return this.request<void>("POST", `${CHAT}/channels/${req.channelId}/read`, req);

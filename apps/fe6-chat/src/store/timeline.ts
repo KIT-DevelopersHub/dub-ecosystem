@@ -14,6 +14,16 @@ import type { ChannelViewState, PendingMessage } from "../types";
  * covers list/post/edit/react/pin + RT. Idempotent: an already-client-shaped message
  * (mock, RT-constructed, tests) passes through unchanged.
  */
+/**
+ * Coerce a wire reaction value into the client Reaction[] contract. chat-service sends
+ * reactions as a `Record<emoji, userIds>` (on messages and in ReactionToggleResponse),
+ * whereas the client renders `Reaction[]` = { emoji, userIds }[]. Accepts either shape.
+ */
+export function reactionsFromWire(value: Reaction[] | Record<string, common.UserId[]> | undefined): Reaction[] {
+  if (Array.isArray(value)) return value;
+  return Object.entries(value ?? {}).map(([emoji, userIds]) => ({ emoji, userIds: userIds as common.UserId[] }));
+}
+
 export function normalizeMessage(m: Message): Message {
   const wire = m as unknown as {
     attachments?: Attachment[];
@@ -31,12 +41,7 @@ export function normalizeMessage(m: Message): Message {
         size: 0,
         url: null,
       }));
-  const reactions: Reaction[] = Array.isArray(wire.reactions)
-    ? wire.reactions
-    : Object.entries(wire.reactions ?? {}).map(([emoji, userIds]) => ({
-        emoji,
-        userIds: userIds as common.UserId[],
-      }));
+  const reactions: Reaction[] = reactionsFromWire(wire.reactions);
   return {
     ...m,
     threadRootId: wire.threadRootId ?? null,
@@ -171,6 +176,21 @@ export function applyRealtimeEvent(
 }
 
 /** Toggle a reaction locally for optimistic UI (author-agnostic). */
+/**
+ * Replace a message's reactions with the server's authoritative set (from a reaction
+ * toggle's ReactionToggleResponse). Keeps the message otherwise intact — unlike
+ * upsertMessage, which expects a full Message and would corrupt the timeline with a
+ * partial `{ messageId, reactions }` payload. No-op if the message isn't loaded.
+ */
+export function applyReactions(messages: Message[], messageId: common.MessageId, reactions: Reaction[]): Message[] {
+  const idx = lowerBound(messages, messageId);
+  const m = messages[idx];
+  if (!m || m.id !== messageId) return messages;
+  const next = messages.slice();
+  next[idx] = { ...m, reactions };
+  return next;
+}
+
 export function toggleReactionLocal(
   messages: Message[],
   id: common.MessageId,

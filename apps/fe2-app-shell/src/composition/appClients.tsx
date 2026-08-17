@@ -16,6 +16,7 @@ import { createHttpEventApi } from "@dub/fe3-event-action";
 import type { NotificationApi } from "@dub/fe5-notification-inbox";
 import { createNotificationApi } from "@dub/fe5-notification-inbox";
 import { createRosterApi } from "@dub/admin-roster";
+import { reactionsFromWire } from "@dub/fe6-chat/src/store/timeline";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import type {
   Fe4ApiClient,
@@ -30,7 +31,9 @@ import type {
   Message,
   PostMessageRequest,
   PostMessageResponse,
+  Reaction,
   ReactionToggleRequest,
+  ReactionToggleResponse,
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
@@ -204,8 +207,16 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       api.request<Message>({ method: "PATCH", path: `${CHAT}/messages/${id}` as ApiPath, body: req }),
     deleteMessage: (id: common.MessageId) =>
       api.request<Message>({ method: "DELETE", path: `${CHAT}/messages/${id}` as ApiPath }),
+    // Server returns { messageId, reactions } (reactions as a Record); normalize to the
+    // client's Reaction[] so the optimistic reconcile can apply it (see applyReactions).
     toggleReaction: (id: common.MessageId, req: ReactionToggleRequest) =>
-      api.request<Message>({ method: "POST", path: `${CHAT}/messages/${id}/reactions` as ApiPath, body: req }),
+      api
+        .request<{ messageId: common.MessageId; reactions: Reaction[] | Record<string, common.UserId[]> }>({
+          method: "POST",
+          path: `${CHAT}/messages/${id}/reactions` as ApiPath,
+          body: req,
+        })
+        .then((r): ReactionToggleResponse => ({ messageId: r.messageId, reactions: reactionsFromWire(r.reactions) })),
     updateReadState: (req: ReadStateUpdateRequest) =>
       api.request<void>({ method: "POST", path: `${CHAT}/channels/${req.channelId}/read` as ApiPath, body: req }),
     listUnread: () =>

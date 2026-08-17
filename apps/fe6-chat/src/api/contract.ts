@@ -122,6 +122,13 @@ export interface EditMessageRequest {
 export interface ReactionToggleRequest {
   emoji: string;
 }
+// A reaction toggle returns only the affected message's authoritative reaction set
+// (not the whole message) — chat-service's ReactionToggleResponse. The client applies
+// these onto the existing timeline message (see store/timeline applyReactions).
+export interface ReactionToggleResponse {
+  messageId: common.MessageId;
+  reactions: Reaction[];
+}
 
 export interface ReadStateUpdateRequest {
   channelId: common.ChannelId;

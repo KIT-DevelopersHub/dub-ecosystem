@@ -260,6 +260,18 @@ describe("app client adapters feed ApiClient.request", () => {
     expect(users).toHaveLength(2);
   });
 
+  it("toggleReaction normalizes the server's { messageId, reactions: Record } to Reaction[]", async () => {
+    const api = {
+      request: (<TRes,>(_input: RequestInput): Promise<TRes> =>
+        Promise.resolve({ messageId: "m1", reactions: { "\u{1F389}": ["u1", "u2"] } } as TRes)),
+    } as unknown as ApiClient;
+    const chat = createChatApiClient(api);
+    const res = await chat.toggleReaction("m1" as never, { emoji: "\u{1F389}" });
+    expect(res.messageId).toBe("m1");
+    expect(Array.isArray(res.reactions)).toBe(true);
+    expect(res.reactions).toEqual([{ emoji: "\u{1F389}", userIds: ["u1", "u2"] }]);
+  });
+
   it("postMessage composes { message, clientTempId } from the server's bare Message", async () => {
     // Regression: the server returns the created Message (bare). FE6's optimistic layer
     // reconciles by { message, clientTempId } — if the adapter passes the bare Message
