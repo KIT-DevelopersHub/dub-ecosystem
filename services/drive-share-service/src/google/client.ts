@@ -16,7 +16,10 @@ import type { TokenProvider } from "./token";
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
 // list() projection: owner + link-share hint (permissions type) computed in mapFile.
 const LIST_FIELDS = "nextPageToken,files(id,name,mimeType,owners(displayName),modifiedTime,webViewLink,permissions(id,type))";
-const PERMISSION_FIELDS = "id,type,role,emailAddress,displayName,domain";
+// permissionDetails.inherited tells us whether a grant comes from an ancestor folder /
+// shared drive (→ not deletable/editable on this item); the manager needs it to disable
+// the revoke/role controls instead of letting Drive reject the call with 403.
+const PERMISSION_FIELDS = "id,type,role,emailAddress,displayName,domain,permissionDetails(inherited)";
 
 interface GoogleListResponse {
   files?: Parameters<typeof mapFile>[0][];
@@ -80,6 +83,12 @@ export function createGoogleDriveShareClient(deps: {
       url.searchParams.set("pageSize", String(p.pageSize));
       url.searchParams.set("orderBy", "folder,name");
       url.searchParams.set("fields", LIST_FIELDS);
+      // Include items owned by others / on shared drives, and let the call operate on
+      // shared-drive resources. Harmless for My Drive; required if the Hackit tree ever
+      // moves to (or links) a shared drive.
+      url.searchParams.set("supportsAllDrives", "true");
+      url.searchParams.set("includeItemsFromAllDrives", "true");
+      url.searchParams.set("corpora", "allDrives");
       if (p.pageToken) url.searchParams.set("pageToken", p.pageToken);
       const data = await readJson<GoogleListResponse>(await call(url.toString(), { method: "GET" }));
       return { files: (data.files ?? []).map(mapFile), nextCursor: data.nextPageToken ?? null };
@@ -89,6 +98,7 @@ export function createGoogleDriveShareClient(deps: {
       const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}/permissions`);
       url.searchParams.set("fields", `permissions(${PERMISSION_FIELDS})`);
       url.searchParams.set("pageSize", "100");
+      url.searchParams.set("supportsAllDrives", "true");
       const data = await readJson<GooglePermissionsListResponse>(await call(url.toString(), { method: "GET" }));
       return { fileId, permissions: (data.permissions ?? []).map(mapPermission) };
     },
@@ -96,6 +106,7 @@ export function createGoogleDriveShareClient(deps: {
     async createPermission(fileId: string, p: CreatePermissionParams): Promise<SharePermission> {
       const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}/permissions`);
       url.searchParams.set("fields", PERMISSION_FIELDS);
+      url.searchParams.set("supportsAllDrives", "true");
       // Never email-blast the grantee on every change; the manager is the UI of record.
       url.searchParams.set("sendNotificationEmail", "false");
       const body: Record<string, unknown> = { role: p.role, type: p.type };
@@ -111,6 +122,7 @@ export function createGoogleDriveShareClient(deps: {
     async updatePermission(fileId: string, permissionId: string, role: ShareRole): Promise<SharePermission> {
       const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permissionId)}`);
       url.searchParams.set("fields", PERMISSION_FIELDS);
+      url.searchParams.set("supportsAllDrives", "true");
       const res = await call(url.toString(), {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -120,8 +132,9 @@ export function createGoogleDriveShareClient(deps: {
     },
 
     async deletePermission(fileId: string, permissionId: string): Promise<void> {
-      const url = `${DRIVE_BASE}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permissionId)}`;
-      await expectOkOr404(await call(url, { method: "DELETE" }));
+      const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permissionId)}`);
+      url.searchParams.set("supportsAllDrives", "true");
+      await expectOkOr404(await call(url.toString(), { method: "DELETE" }));
     },
   };
 }

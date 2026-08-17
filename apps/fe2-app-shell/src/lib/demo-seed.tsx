@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues } from "@dub/types";
+import { identity as identityValues, appRegistry } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 
 const ORG = "org_demo";
@@ -49,6 +49,11 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:admin",
   "chat:create",
   "audit:read",
+  // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
+  // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
+  // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
+  // covered automatically.
+  ...appRegistry.allAppAccessKeys(),
 ];
 
 const DEMO_ME: gateway.MeResponse = {
@@ -1017,6 +1022,10 @@ interface DemoDrivePermission {
   emailAddress: string | null;
   displayName: string | null;
   domain: string | null;
+  /** Inherited from an ancestor folder → Drive refuses to change/remove it on this
+   *  item (403 cannotDeletePermission); the manager shows it read-only. Optional in the
+   *  seed literals (defaults to false in permsView). */
+  inherited?: boolean;
 }
 interface DemoDriveFile {
   id: string;
@@ -1078,7 +1087,15 @@ function createDriveShareStore() {
     {
       id: "fil_schedule", name: "全体スケジュール.gsheet", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
       modifiedTime: "2026-08-11T06:00:00Z", webViewLink: link("fil_schedule"), parentId: "fld_root",
-      permissions: [owner("perm_11"), { id: "perm_12", type: "user", role: "reader", emailAddress: "ops@example.com", displayName: "運営", domain: null }],
+      permissions: [
+        owner("perm_11"),
+        { id: "perm_12", type: "user", role: "reader", emailAddress: "ops@example.com", displayName: "運営", domain: null },
+        // Inherited from the parent folder (fld_root): the manager must show these as
+        // read-only (継承) and refuse revoke/role-change / link-off, mirroring Drive's
+        // real cannotDeletePermission. Drives the drive-revoke-fix E2E.
+        { id: "perm_inh_staffa", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null, inherited: true },
+        { id: "perm_inh_anyone", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null, inherited: true },
+      ],
     },
     // ── children of fld_sponsors (depth 2 — proves nesting beyond one level) ───────
     {
@@ -1156,7 +1173,7 @@ function createDriveShareStore() {
     ownerName: f.ownerName, modifiedTime: f.modifiedTime, webViewLink: f.webViewLink,
     linkShared: f.permissions.some((p) => p.type === "anyone"),
   });
-  const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p })) });
+  const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p, inherited: p.inherited ?? false })) });
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
     // ── role-based grants (matched before the generic file routes) ─────────────
@@ -1245,10 +1262,17 @@ function createDriveShareStore() {
       const perm = f.permissions.find((p) => p.id === permMatch[2]!);
       if (method === "PATCH") {
         if (!perm) return notFound(`${method} ${pathname}`);
+        if (perm.inherited)
+          return problem("FORBIDDEN", "この権限は親フォルダから継承されているため、このファイル単体では変更できません。親フォルダの共有設定で操作してください。", 403);
         perm.role = (body as { role?: DemoDrivePermission["role"] }).role ?? perm.role;
         return json({ permission: { ...perm } });
       }
       if (method === "DELETE") {
+        // Mirror Drive's 403 cannotDeletePermission: an inherited permission cannot be
+        // removed on this item. (The manager hides the revoke for these rows, so this
+        // is defence-in-depth / fidelity for anything that hits the endpoint directly.)
+        if (perm?.inherited)
+          return problem("FORBIDDEN", "この権限は親フォルダから継承されているため、このファイル単体では剥奪できません。親フォルダの共有設定で操作してください。", 403);
         if (perm) f.permissions = f.permissions.filter((p) => p.id !== perm.id);
         return json({ revoked: true });
       }
@@ -1259,6 +1283,9 @@ function createDriveShareStore() {
       if (!f) return notFound(`${method} ${pathname}`);
       const req = body as { enabled?: boolean; role?: DemoDrivePermission["role"] };
       const existing = f.permissions.find((p) => p.type === "anyone");
+      // An inherited anyone (link) permission can't be toggled off on this item.
+      if (!req.enabled && existing?.inherited)
+        return problem("FORBIDDEN", "リンク共有は親フォルダから継承されているため、このファイル単体ではオフにできません。親フォルダの共有設定で操作してください。", 403);
       if (req.enabled) {
         if (existing) existing.role = req.role ?? "reader";
         else f.permissions.push({ id: `perm_anyone_${seq++}`, type: "anyone", role: req.role ?? "reader", emailAddress: null, displayName: null, domain: null });

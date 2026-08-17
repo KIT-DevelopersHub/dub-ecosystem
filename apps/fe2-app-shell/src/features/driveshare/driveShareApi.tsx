@@ -30,6 +30,10 @@ export interface SharePermission {
   emailAddress: string | null;
   displayName: string | null;
   domain: string | null;
+  /** True when the grant is inherited from an ancestor folder (or shared drive): Drive
+   *  refuses to change/remove it on this item (403 cannotDeletePermission), so the UI
+   *  shows it read-only with a reason instead of an actionable revoke/role control. */
+  inherited: boolean;
 }
 
 export interface ListFilesResult {

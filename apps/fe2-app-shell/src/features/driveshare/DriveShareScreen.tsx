@@ -21,6 +21,7 @@ import {
   Stack,
   Switch,
   TextField,
+  Tooltip,
   useToast,
 } from "@dub/ui";
 import { RolePicker } from "@dub/app-ui";
@@ -139,6 +140,7 @@ function PermissionRow({
   const toast = useToast();
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const isOwner = permission.role === "owner";
+  const isInherited = !isOwner && permission.inherited;
   const grantee = permission.type === "anyone" ? "リンクを知っている全員" : permission.emailAddress ?? permission.displayName ?? "(不明)";
 
   // Optimistic role change: patch the cached permissions list immediately.
@@ -174,10 +176,24 @@ function PermissionRow({
         <Stack gap={1}>
           <strong>{grantee}</strong>
           {permission.displayName && permission.type !== "anyone" ? <small>{permission.displayName}</small> : null}
+          {isInherited ? (
+            <small data-testid="fe2-driveshare-inherited-reason" style={{ color: "var(--dub-color-fg-muted, #667)" }}>
+              親フォルダから継承された権限のため、このファイル単体では変更・剥奪できません。親フォルダの共有設定で操作してください。
+            </small>
+          ) : null}
         </Stack>
         <Stack direction="row" gap={2} align="center">
           {isOwner ? (
             <Badge tone="neutral">{roleLabel(permission.role)}</Badge>
+          ) : isInherited ? (
+            <Stack direction="row" gap={2} align="center">
+              <Badge tone="neutral">{roleLabel(permission.role)}</Badge>
+              <Tooltip content="親フォルダから継承された権限です。このファイル単体では変更・剥奪できません。親フォルダの共有設定で操作してください。">
+                <Badge tone="warning" testId="fe2-driveshare-inherited-badge">
+                  継承
+                </Badge>
+              </Tooltip>
+            </Stack>
           ) : (
             <>
               <Select<AssignableRole>
@@ -278,10 +294,14 @@ function LinkSharingToggle({
   file,
   permsKey,
   linkShared,
+  linkInherited,
 }: {
   file: DriveFile;
   permsKey: readonly unknown[];
   linkShared: boolean;
+  /** The existing `anyone` permission is inherited from a parent folder → it cannot be
+   *  removed on this item, so the toggle is locked on with an explanation. */
+  linkInherited: boolean;
 }): JSX.Element {
   const driveApi = useDriveShareApi();
   const queryClient = useQueryClient();
@@ -309,12 +329,17 @@ function LinkSharingToggle({
         <Stack gap={1}>
           <strong>リンクを知っている全員</strong>
           <small>{linkShared ? "オン（閲覧者としてリンク共有中）" : "オフ"}</small>
+          {linkInherited ? (
+            <small data-testid="fe2-driveshare-link-inherited-reason" style={{ color: "var(--dub-color-fg-muted, #667)" }}>
+              リンク共有は親フォルダから継承されています。このファイル単体ではオフにできません。親フォルダの共有設定で操作してください。
+            </small>
+          ) : null}
         </Stack>
         <Switch
           id={`fe2-driveshare-link-${file.id}`}
           testId="fe2-driveshare-link-switch"
           checked={linkShared}
-          disabled={toggle.isPending}
+          disabled={toggle.isPending || linkInherited}
           label="リンク共有"
           onChange={(enabled) => toggle.mutate(enabled)}
         />
@@ -573,12 +598,14 @@ function PermissionsPanel({ file }: { file: DriveFile }): JSX.Element {
       : { code: "INTERNAL", message: "権限を読み込めませんでした。" };
     body = <ErrorState testId="fe2-driveshare-perms-error" error={display} onRetry={() => void query.refetch()} />;
   } else {
-    const linkShared = query.data.permissions.some((p) => p.type === "anyone");
+    const anyonePerm = query.data.permissions.find((p) => p.type === "anyone");
+    const linkShared = anyonePerm !== undefined;
+    const linkInherited = anyonePerm?.inherited ?? false;
     body = (
       <Stack gap={3}>
         <GrantForm fileId={file.id} permsKey={permsKey} />
         <RolePermissionPanel file={file} grantsKey={roleGrantsKey(file.id)} />
-        <LinkSharingToggle file={file} permsKey={permsKey} linkShared={linkShared} />
+        <LinkSharingToggle file={file} permsKey={permsKey} linkShared={linkShared} linkInherited={linkInherited} />
         <Stack gap={2}>
           {query.data.permissions.map((p) => (
             <PermissionRow key={p.id} fileId={file.id} permission={p} permsKey={permsKey} />
