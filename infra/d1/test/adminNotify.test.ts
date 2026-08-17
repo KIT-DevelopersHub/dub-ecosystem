@@ -8,6 +8,7 @@ import {
   buildBackfillRows,
   buildBackfillSql,
   mergedPrToMeta,
+  shouldNotifyDeploy,
   deployDedupKey,
   type MergedPr,
 } from "../src/adminNotify";
@@ -19,19 +20,39 @@ function rowFor(raw: ReturnType<typeof migratedD1> extends Promise<infer T> ? (T
 }
 
 describe("buildDeployNotifyRow", () => {
-  it("produces an audience='admin' deploy row keyed by SHA", () => {
+  it("produces an audience='admin' deploy row keyed by SHA (humanized, genre-tagged copy)", () => {
     const row = buildDeployNotifyRow({ sha: "abc123def456", title: "usage 刷新", prNumber: 200, services: "全Worker" });
     expect(row.audience).toBe("admin");
     expect(row.type).toBe("deploy.completed");
     expect(row.dedupKey).toBe("deploy:abc123def456");
-    expect(row.title).toBe("デプロイ完了: usage 刷新 (#200)");
+    // Reader-facing title: genre tag + humanized headline (no "デプロイ完了:" dev framing,
+    // no raw "(#200)" — the PR number rides in meta_json instead).
+    expect(row.title).toBe("🔄 更新: usage 刷新");
+    expect(row.title).not.toContain("#200");
     expect(row.resourceId).toBe("abc123def456");
-    expect(JSON.parse(row.metaJson)).toMatchObject({ sha: "abc123def456", prNumber: 200 });
+    // Raw title + genre + PR number preserved in meta for admin traceability.
+    expect(JSON.parse(row.metaJson)).toMatchObject({ sha: "abc123def456", prNumber: 200, rawTitle: "usage 刷新", kind: "update" });
+  });
+
+  it("classifies a conventional-commit prefix and strips it + code noise from the copy", () => {
+    const row = buildDeployNotifyRow({
+      sha: "sha_224",
+      title: "fix(db): don't mis-parse `DO UPDATE SET` \"SET\" as a table in the namespace guard (#224)",
+      prNumber: 224,
+    });
+    // English/dev clause is NOT presentable → generic per-kind headline; genre = 修正.
+    expect(row.title).toBe("🔧 修正: 不具合を修正しました");
+    // The raw developer string must never appear in the reader-facing title/body.
+    expect(row.title).not.toContain("fix(db)");
+    expect(row.body).not.toContain("fix(db)");
+    expect(row.body).not.toContain("DO UPDATE SET");
+    // …but it is retained in meta_json for admins who want the technical detail.
+    expect(JSON.parse(row.metaJson).rawTitle).toContain("fix(db):");
   });
 
   it("falls back to a generic title when none is supplied", () => {
     const row = buildDeployNotifyRow({ sha: "deadbeef" });
-    expect(row.title).toBe("デプロイ完了: 本番デプロイ");
+    expect(row.title).toBe("🔄 更新: アプリを更新しました");
   });
 });
 
@@ -47,7 +68,9 @@ describe("buildDeployNotifySql — applied to dub-core", () => {
     const row = rowFor(raw, "sha_199")!;
     expect(row.audience).toBe("admin");
     expect(row.type).toBe("deploy.completed");
-    expect(String(row.title)).toContain("#199");
+    // Humanized headline (Japanese PR title is presentable → used as-is); PR# is in meta.
+    expect(String(row.title)).toContain("全メトリクス取得の根治");
+    expect(JSON.parse(String(row.meta_json))).toMatchObject({ prNumber: 199 });
     // No inbox rows are written by CI — admins get them lazily on read (service side).
     const inbox = raw.prepare("SELECT COUNT(*) AS c FROM notif_inbox").get() as { c: number };
     expect(Number(inbox.c)).toBe(0);
@@ -96,5 +119,60 @@ describe("backfill — merged PRs → Admin rows", () => {
     raw.exec(sql);
     const cnt = raw.prepare("SELECT COUNT(*) AS c FROM notif_notifications WHERE audience='admin'").get() as { c: number };
     expect(Number(cnt.c)).toBe(2); // 2 mergeable PRs, no duplicates
+  });
+});
+
+describe("notify line + skip — PR body 1st line drives the copy", () => {
+  it("buildDeployNotifyRow prefers the human notify line and keeps rawTitle in meta", () => {
+    const row = buildDeployNotifyRow({
+      sha: "shaNL",
+      title: "feat(usage): add usage dashboard route", // English → would be generic
+      notifyLine: "使用量ダッシュボードを全メンバーに開放しました",
+      prNumber: 180,
+    });
+    expect(row.title).toBe("🎉 新機能: 使用量ダッシュボードを全メンバーに開放しました");
+    expect(row.body).toContain("使用量ダッシュボードを全メンバーに開放しました");
+    expect(row.body).not.toContain("usage dashboard");
+    const meta = JSON.parse(row.metaJson);
+    expect(meta.rawTitle).toBe("feat(usage): add usage dashboard route"); // dev string preserved
+    expect(meta.notifyLine).toBe("使用量ダッシュボードを全メンバーに開放しました");
+  });
+
+  it("shouldNotifyDeploy skips user-irrelevant types with no notify line, but a line opts back in", () => {
+    expect(shouldNotifyDeploy({ sha: "a", title: "docs: update README" })).toBe(false);
+    expect(shouldNotifyDeploy({ sha: "a", title: "chore(deps): bump wrangler" })).toBe(false);
+    expect(shouldNotifyDeploy({ sha: "a", title: "feat: メンバー管理" })).toBe(true);
+    expect(shouldNotifyDeploy({ sha: "a", title: "内部整理" })).toBe(true); // unknown type → notify
+    // a human notify line forces a notification even for a docs-typed change
+    expect(shouldNotifyDeploy({ sha: "a", title: "docs: x", notifyLine: "使い方ガイドを追加しました" })).toBe(true);
+  });
+
+  it("mergedPrToMeta extracts the notify line from PR body and skips docs/chore without one", () => {
+    const withLine = mergedPrToMeta({
+      number: 180,
+      title: "feat(usage): add usage dashboard",
+      body: "## 通知文言\n\n使用量ダッシュボードを全メンバーに開放しました\n",
+      mergeCommit: { oid: "sha180" },
+    });
+    expect(withLine?.notifyLine).toBe("使用量ダッシュボードを全メンバーに開放しました");
+
+    // docs-typed PR with only a placeholder body → skipped (null)
+    const skipped = mergedPrToMeta({
+      number: 186,
+      title: "docs: internal notes",
+      body: "## 通知文言\n\n（ここに1行で書く）\n",
+      mergeCommit: { oid: "sha186" },
+    });
+    expect(skipped).toBeNull();
+  });
+
+  it("buildBackfillRows drops the skipped user-irrelevant PRs", () => {
+    const prs: MergedPr[] = [
+      { number: 180, title: "feat(usage): add usage dashboard", body: "## 通知文言\n\n使用量ダッシュボードを開放しました\n", mergeCommit: { oid: "s180" } },
+      { number: 186, title: "docs: internal notes", body: "（ここに1行で書く）", mergeCommit: { oid: "s186" } },
+    ];
+    const rows = buildBackfillRows(prs);
+    expect(rows.map((r) => r.meta.prNumber)).toEqual([180]);
+    expect(rows[0]!.row.title).toBe("🎉 新機能: 使用量ダッシュボードを開放しました");
   });
 });

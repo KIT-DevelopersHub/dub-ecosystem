@@ -11,7 +11,6 @@ import type {
   RoleAssignment,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
-  UpdateEmailAddressRequest,
   EmailRoutingSyncPreview,
   OffboardUserResult,
   RosterUser,
@@ -76,7 +75,6 @@ export interface RosterApi {
   // ---- Email Routing (@developershub.jp address management) ----
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
-  updateEmailAddress(id: string, req: UpdateEmailAddressRequest): Promise<EmailRoutingAddress>;
   deleteEmailAddress(id: string): Promise<void>;
 }
 
@@ -124,7 +122,6 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     mailStatus: () => client.get<MailStatusResponse>(`${BASE}/mail/status`),
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses`, req),
-    updateEmailAddress: (id, req) => client.patch<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses/${id}`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/addresses/${id}`),
   };
 }

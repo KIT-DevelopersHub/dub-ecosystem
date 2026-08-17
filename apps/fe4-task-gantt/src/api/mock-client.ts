@@ -137,11 +137,11 @@ export class MockApiClient implements ApiClient {
     const ganttRow = path.match(/^\/api\/v1\/gantt\/rows\/([^/]+)$/);
     if (ganttRow && req.method === "PATCH")
       return this.patchRowSchedule(ganttRow[1]!, req.body as { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }) as T;
-    if (path === "/api/v1/gantt" && req.method === "GET") return this.ganttDto(String(req.query?.event)) as T;
-    if (path === "/api/v1/gantt/dependencies" && req.method === "GET") return this.ganttDeps(String(req.query?.event)) as T;
-    if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.event)) as T;
+    if (path === "/api/v1/gantt" && req.method === "GET") return this.ganttDto(String(req.query?.eventId)) as T;
+    if (path === "/api/v1/gantt/dependencies" && req.method === "GET") return this.ganttDeps(String(req.query?.eventId)) as T;
+    if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.eventId)) as T;
     if (path === "/api/v1/gantt/views" && req.method === "PUT")
-      return this.putView(String(req.query?.event), req.body as gantt.PutGanttViewRequest) as T;
+      return this.putView(String(req.query?.eventId), req.body as gantt.PutGanttViewRequest) as T;
     // --- teams (canonical team.Team; future: member-service) ---
     if (path === "/api/v1/teams" && req.method === "GET") return ({ items: this.teams } as team.ListTeamsResponse) as T;
     // --- identity ---

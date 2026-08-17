@@ -20,8 +20,15 @@ type App = Hono<{ Bindings: Env; Variables: Vars }>;
 
 export const GANTT_EVENT_NOT_FOUND = "GANTT_EVENT_NOT_FOUND";
 
+/** Read the event id query param. Canonical key is `eventId`; the legacy `event`
+ *  key is accepted as a fallback so an older client (which sent `?event=`) is never
+ *  rejected with a spurious "eventId is required" validation error. */
+function readEventId(c: { req: { query: (k: string) => string | undefined } }): common.EventId | undefined {
+  return c.req.query("eventId") ?? c.req.query("event");
+}
+
 function requireEventId(c: { req: { query: (k: string) => string | undefined } }): common.EventId {
-  const eventId = c.req.query("eventId");
+  const eventId = readEventId(c);
   if (!eventId) {
     throw new DubError(CommonErrorCodes.VALIDATION_FAILED, "eventId is required", {
       status: 400,
@@ -35,7 +42,7 @@ function requireEventId(c: { req: { query: (k: string) => string | undefined } }
 function guard(client: AuthClient): MiddlewareHandler {
   const requireAuth = client.requireAuth();
   const requirePerm = client.requirePermission("event:read", (c) => {
-    const eventId = c.req.query("eventId");
+    const eventId = readEventId(c);
     return eventId ? { resourceType: "event", resourceId: eventId } : {};
   });
   return async (c, next) => {
