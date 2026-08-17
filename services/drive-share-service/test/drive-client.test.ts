@@ -115,3 +115,63 @@ describe("real Google client — request shape", () => {
     expect(url).toContain("corpora=allDrives");
   });
 });
+
+describe("mapGoogleError — 400 reason translation", () => {
+  const body = (reason: string) => ({ error: { errors: [{ reason }], message: `raw ${reason}` } });
+
+  it("translates invalidSharingRequest (no Google account) into Japanese", () => {
+    const err = mapGoogleError(400, body("invalidSharingRequest")) as DubError;
+    expect(err.code).toBe("VALIDATION_FAILED");
+    expect(err.message).toContain("Googleアカウント");
+    expect(err.message).not.toContain("invalidSharingRequest");
+  });
+
+  it("translates invalid (malformed email) into Japanese", () => {
+    const err = mapGoogleError(400, body("invalid")) as DubError;
+    expect(err.message).toContain("メールアドレスの形式");
+  });
+});
+
+describe("real client createPermission — notification fallback", () => {
+  function scriptedFetch(responses: Response[]): { impl: typeof fetch; notify: (string | null)[] } {
+    const notify: (string | null)[] = [];
+    let i = 0;
+    const impl = (async (input: string | URL | Request) => {
+      notify.push(new URL(String(input)).searchParams.get("sendNotificationEmail"));
+      return responses[i++]!.clone();
+    }) as unknown as typeof fetch;
+    return { impl, notify };
+  }
+
+  it("retries WITH a notification when Drive says invalidSharingRequest (no Google account)", async () => {
+    const { impl, notify } = scriptedFetch([
+      new Response(JSON.stringify({ error: { errors: [{ reason: "invalidSharingRequest" }] } }), { status: 400 }),
+      new Response(JSON.stringify({ id: "p1", type: "user", role: "writer", emailAddress: "x@school.ac.jp" }), { status: 200 }),
+    ]);
+    const client = createGoogleDriveShareClient({ token: staticToken, fetchImpl: impl });
+    const perm = await client.createPermission("f1", { type: "user", role: "writer", emailAddress: "x@school.ac.jp" });
+    expect(perm.emailAddress).toBe("x@school.ac.jp");
+    // first silent, then retried with a notification
+    expect(notify).toEqual(["false", "true"]);
+  });
+
+  it("does NOT retry when the first attempt succeeds (Google-account grantee, no email)", async () => {
+    const { impl, notify } = scriptedFetch([
+      new Response(JSON.stringify({ id: "p1", type: "user", role: "writer", emailAddress: "x@gmail.com" }), { status: 200 }),
+    ]);
+    const client = createGoogleDriveShareClient({ token: staticToken, fetchImpl: impl });
+    await client.createPermission("f1", { type: "user", role: "writer", emailAddress: "x@gmail.com" });
+    expect(notify).toEqual(["false"]); // exactly one call, no email-blast
+  });
+
+  it("does NOT retry for a malformed-email 400 (reason=invalid) and surfaces it", async () => {
+    const { impl, notify } = scriptedFetch([
+      new Response(JSON.stringify({ error: { errors: [{ reason: "invalid" }] } }), { status: 400 }),
+    ]);
+    const client = createGoogleDriveShareClient({ token: staticToken, fetchImpl: impl });
+    await expect(client.createPermission("f1", { type: "user", role: "writer", emailAddress: "bogus" })).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+    });
+    expect(notify).toEqual(["false"]); // no retry for a non-sharing 400
+  });
+});

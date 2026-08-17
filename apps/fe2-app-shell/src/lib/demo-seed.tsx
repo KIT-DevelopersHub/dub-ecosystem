@@ -1134,7 +1134,9 @@ function createDriveShareStore() {
   const roleMembers: Record<string, string[]> = {
     role_admin: ["demo@developershub.jp", "kota@developershub.jp", "kurokawa@developershub.jp", "kanai@developershub.jp"],
     role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp"],
-    role_member: ["ichiro@developershub.jp", "jiro@developershub.jp"],
+    // The last address has no Google account (mirrors the real bug): the fan-out applies
+    // the others and reports this one as skipped, instead of failing the whole role.
+    role_member: ["ichiro@developershub.jp", "jiro@developershub.jp", "ghost-no-account@example.invalid"],
   };
   interface DemoRoleGrant {
     id: string;
@@ -1149,19 +1151,30 @@ function createDriveShareStore() {
     permIds: string[]; // internal: the fanned-out Drive permission ids on the file
   }
   const roleGrants: DemoRoleGrant[] = [];
-  const grantView = (g: DemoRoleGrant) => ({
+  const grantView = (g: DemoRoleGrant, skipped: { email: string; reason: string }[] = []) => ({
     id: g.id, fileId: g.fileId, roleId: g.roleId, roleName: g.roleName, driveRole: g.driveRole,
     memberCount: g.memberCount, appliedCount: g.appliedCount, grantedBy: g.grantedBy, grantedAt: g.grantedAt,
+    ...(skipped.length > 0 ? { skipped } : {}),
   });
-  // Fan a role's members out onto a file as individual Drive permissions.
-  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant): void => {
+  // Fan a role's members out onto a file as individual Drive permissions. Mirrors the
+  // real service: an un-shareable email (no Google account / malformed) is skipped with a
+  // reason and the rest still applied — a partial success, never an all-or-nothing failure.
+  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant): { email: string; reason: string }[] => {
     const emails = roleMembers[g.roleId] ?? [];
+    const skipped: { email: string; reason: string }[] = [];
+    let applied = 0;
     for (const email of emails) {
+      if (!EMAIL_RE.test(email) || email.endsWith(".invalid")) {
+        skipped.push({ email, reason: "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。" });
+        continue;
+      }
       const id = `perm_role_${seq++}`;
       g.permIds.push(id);
       f.permissions.push({ id, type: "user", role: g.driveRole, emailAddress: email, displayName: email.split("@")[0]!, domain: null });
+      applied++;
     }
-    g.appliedCount = emails.length;
+    g.appliedCount = applied;
+    return skipped;
   };
   const clearFan = (f: DemoDriveFile, g: DemoRoleGrant): void => {
     f.permissions = f.permissions.filter((p) => !g.permIds.includes(p.id));
@@ -1178,7 +1191,7 @@ function createDriveShareStore() {
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
     // ── role-based grants (matched before the generic file routes) ─────────────
     if (method === "GET" && pathname === "/api/v1/driveshare/role-grants") {
-      return json({ items: roleGrants.map(grantView) });
+      return json({ items: roleGrants.map((g) => grantView(g)) });
     }
     const reapplyMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)\/reapply$/.exec(pathname);
     if (reapplyMatch && method === "POST") {
@@ -1186,8 +1199,8 @@ function createDriveShareStore() {
       const g = roleGrants.find((x) => x.fileId === reapplyMatch[1]! && x.roleId === decodeURIComponent(reapplyMatch[2]!));
       if (!f || !g) return notFound(`${method} ${pathname}`);
       clearFan(f, g);
-      fanOut(f, g);
-      return json(grantView(g));
+      const skipped = fanOut(f, g);
+      return json(grantView(g, skipped));
     }
     const roleGrantItemMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)$/.exec(pathname);
     if (roleGrantItemMatch && method === "DELETE") {
@@ -1203,7 +1216,7 @@ function createDriveShareStore() {
     if (roleGrantsMatch) {
       const f = byId.get(roleGrantsMatch[1]!);
       if (!f) return notFound(`${method} ${pathname}`);
-      if (method === "GET") return json({ items: roleGrants.filter((g) => g.fileId === f.id).map(grantView) });
+      if (method === "GET") return json({ items: roleGrants.filter((g) => g.fileId === f.id).map((g) => grantView(g)) });
       if (method === "POST") {
         const req = body as { roleId?: string; driveRole?: DemoRoleGrant["driveRole"] };
         const roleId = req.roleId ?? "";
@@ -1216,9 +1229,9 @@ function createDriveShareStore() {
           id: `rg_${seq++}`, fileId: f.id, roleId, roleName: ROLE_NAME[roleId]!, driveRole: req.driveRole ?? "reader",
           memberCount: emails.length, appliedCount: 0, grantedBy: "demo@developershub.jp", grantedAt: new Date().toISOString(), permIds: [],
         };
-        fanOut(f, g);
+        const skipped = fanOut(f, g);
         roleGrants.push(g);
-        return json(grantView(g), 201);
+        return json(grantView(g, skipped), 201);
       }
     }
     if (method === "GET" && pathname === "/api/v1/driveshare/files") {

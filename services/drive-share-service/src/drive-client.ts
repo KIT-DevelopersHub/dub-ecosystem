@@ -124,12 +124,28 @@ const FORBIDDEN_REASON_JA: Record<string, string> = {
   cannotModifyOwnerPermission: "オーナー権限は変更できません。",
 };
 
+// Well-known Drive 400 `reason` strings → user-facing Japanese. `invalidSharingRequest`
+// is what Drive returns for an email that has no Google account or is otherwise
+// un-shareable; `invalid` for a malformed address.
+const BAD_REQUEST_REASON_JA: Record<string, string> = {
+  invalidSharingRequest:
+    "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。",
+  invalid: "メールアドレスの形式が正しくないため共有できませんでした。",
+};
+
+/** The user-facing Japanese for a bad-request reason (falls back to a generic line). */
+export function badRequestReasonJa(reason: string | undefined): string {
+  return (reason && BAD_REQUEST_REASON_JA[reason]) ?? "Drive にリクエストが拒否されました。";
+}
+
 /** Convert a non-2xx Google Drive response into a DubError (no raw Google leak). */
 export function mapGoogleError(status: number, body: unknown, retryAfterSec?: number): DubError {
   const reason = extractGoogleReason(body);
   switch (status) {
     case 400:
-      return errors.validationFailed([{ field: "request", reason: reason ?? "invalid_request" }], "Drive rejected the request");
+      // Surface a clear Japanese cause (esp. invalidSharingRequest = no Google account)
+      // instead of the opaque "Drive rejected the request".
+      return errors.validationFailed([{ field: "request", reason: reason ?? "invalid_request" }], badRequestReasonJa(reason));
     case 401:
       return errors.upstreamUnavailable("google:auth");
     case 403: {

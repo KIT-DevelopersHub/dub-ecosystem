@@ -21,6 +21,15 @@ const LIST_FIELDS = "nextPageToken,files(id,name,mimeType,owners(displayName),mo
 // the revoke/role controls instead of letting Drive reject the call with 403.
 const PERMISSION_FIELDS = "id,type,role,emailAddress,displayName,domain,permissionDetails(inherited)";
 
+/** First Google error `reason` (e.g. "invalidSharingRequest"), or undefined. */
+function extractReason(body: unknown): string | undefined {
+  if (body && typeof body === "object" && "error" in body) {
+    const e = (body as { error?: { errors?: { reason?: string }[] } }).error;
+    return e?.errors?.[0]?.reason;
+  }
+  return undefined;
+}
+
 interface GoogleListResponse {
   files?: Parameters<typeof mapFile>[0][];
   nextPageToken?: string;
@@ -104,18 +113,31 @@ export function createGoogleDriveShareClient(deps: {
     },
 
     async createPermission(fileId: string, p: CreatePermissionParams): Promise<SharePermission> {
-      const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}/permissions`);
-      url.searchParams.set("fields", PERMISSION_FIELDS);
-      url.searchParams.set("supportsAllDrives", "true");
-      // Never email-blast the grantee on every change; the manager is the UI of record.
-      url.searchParams.set("sendNotificationEmail", "false");
       const body: Record<string, unknown> = { role: p.role, type: p.type };
       if (p.emailAddress) body.emailAddress = p.emailAddress;
-      const res = await call(url.toString(), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+
+      // Grantees WITHOUT a Google account (school / Cloudflare-routing addresses, etc.)
+      // can only be added WITH a notification email — Drive rejects sendNotificationEmail=false
+      // for them with 400 `invalidSharingRequest`. So we try silent first (no email-blast for
+      // the common Google-account case), and only if Drive refuses with that specific reason do
+      // we retry once WITH a notification (a one-time invite). anyone/domain never hit this.
+      const post = (notify: boolean): Promise<Response> => {
+        const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}/permissions`);
+        url.searchParams.set("fields", PERMISSION_FIELDS);
+        url.searchParams.set("supportsAllDrives", "true");
+        url.searchParams.set("sendNotificationEmail", String(notify));
+        return call(url.toString(), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      };
+
+      let res = await post(false);
+      if (res.status === 400 && p.emailAddress && (p.type === "user" || p.type === "group")) {
+        const peeked = await res.clone().json().catch(() => null);
+        if (extractReason(peeked) === "invalidSharingRequest") res = await post(true);
+      }
       return mapPermission(await readJson(res));
     },
 

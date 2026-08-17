@@ -89,6 +89,21 @@ export type AssignableDriveRole = "reader" | "commenter" | "writer";
  *  those members now have a Drive permission in place (created by us OR a recorded
  *  pre-existing individual share). They diverge when role membership changes after the
  *  last apply — the SPA renders that drift and offers "re-apply". */
+/** A role member the fan-out could NOT apply to Drive (e.g. the email has no Google
+ *  account and even a notified invite failed, or the address is malformed). The apply /
+ *  reapply is a PARTIAL success: the other members are granted, and these are reported
+ *  with a reason so the manager can show "M人はスキップ（理由）" instead of failing wholesale. */
+export interface SkippedMember {
+  email: string;
+  reason: string;
+}
+
+/** A role→file grant as shown by the file-list chips + the detail panel. `memberCount`
+ *  is the number of active emails currently in the role; `appliedCount` is how many of
+ *  those members now have a Drive permission in place (created by us OR a recorded
+ *  pre-existing individual share). They diverge when role membership changes after the
+ *  last apply — the SPA renders that drift and offers "re-apply". `skipped` (present only
+ *  on the apply/reapply response) lists members Drive refused, with a reason each. */
 export interface RoleFileGrant {
   id: string;
   fileId: string;
@@ -99,6 +114,7 @@ export interface RoleFileGrant {
   appliedCount: number;
   grantedBy: string;
   grantedAt: string;
+  skipped?: SkippedMember[];
 }
 
 /** POST /driveshare/files/:id/role-grants body. */
