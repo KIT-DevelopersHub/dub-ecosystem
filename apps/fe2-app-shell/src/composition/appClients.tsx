@@ -136,10 +136,27 @@ const CHAT = "/api/v1/chat";
 const IDENTITY = "/api/v1/identity";
 const IDENTITY_BATCH_MAX = 50;
 
+// chat-service (and identity /users) return the frozen `common.Paginated<T>` envelope
+// `{ items, nextCursor }` for channels / unread / user-resolution, whereas a few other
+// endpoints return a bare array. FE6's own HttpChatClient unwraps these via the same
+// helper — this shell mirror MUST too, or a list result arrives as a non-array envelope
+// object and silently renders EMPTY (groupChannels drops a non-array via its guard),
+// e.g. the channel sidebar shows nothing even though /chat/channels returns 200 with
+// items. Accept either shape (+ null/undefined) and always hand back an array.
+function unwrapItems<T>(res: unknown): T[] {
+  if (Array.isArray(res)) return res as T[];
+  if (res && typeof res === "object" && Array.isArray((res as { items?: unknown }).items)) {
+    return (res as { items: T[] }).items;
+  }
+  return [];
+}
+
 export function createChatApiClient(api: ApiClient): ChatApiClient {
   return {
     listChannels: (eventId?: common.EventId) =>
-      api.request<Channel[]>({ method: "GET", path: `${CHAT}/channels`, ...(eventId ? { query: { eventId } } : {}) }),
+      api
+        .request<unknown>({ method: "GET", path: `${CHAT}/channels`, ...(eventId ? { query: { eventId } } : {}) })
+        .then((r) => unwrapItems<Channel>(r)),
     createChannel: (req: CreateChannelRequest) =>
       api.request<Channel>({ method: "POST", path: `${CHAT}/channels`, body: req }),
     getChannel: (id: common.ChannelId) =>
@@ -184,17 +201,20 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       api.request<Message>({ method: "POST", path: `${CHAT}/messages/${id}/reactions` as ApiPath, body: req }),
     updateReadState: (req: ReadStateUpdateRequest) =>
       api.request<void>({ method: "POST", path: `${CHAT}/channels/${req.channelId}/read` as ApiPath, body: req }),
-    listUnread: () => api.request<UnreadSummary[]>({ method: "GET", path: `${CHAT}/unread` }),
+    listUnread: () =>
+      api.request<unknown>({ method: "GET", path: `${CHAT}/unread` }).then((r) => unwrapItems<UnreadSummary>(r)),
     getWsTicket: (id: common.ChannelId) =>
       api.request<WsTicketResponse>({ method: "GET", path: `${CHAT}/channels/${id}/ws-ticket` as ApiPath }),
     resolveUsers: (ids: common.UserId[]) => {
       if (ids.length === 0) return Promise.resolve([]);
       const batch = ids.slice(0, IDENTITY_BATCH_MAX);
-      return api.request<identity.UserSummary[]>({
-        method: "GET",
-        path: `${IDENTITY}/users`,
-        query: { ids: batch.join(",") },
-      });
+      return api
+        .request<unknown>({
+          method: "GET",
+          path: `${IDENTITY}/users`,
+          query: { ids: batch.join(",") },
+        })
+        .then((r) => unwrapItems<identity.UserSummary>(r));
     },
   };
 }
