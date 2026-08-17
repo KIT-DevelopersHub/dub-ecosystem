@@ -10,7 +10,18 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { gantt, event, fileMeta, webhook, githubSync, deploy, identity, mailAutomation, drive } from "@dub/types";
+import {
+  gantt,
+  event,
+  fileMeta,
+  webhook,
+  githubSync,
+  deploy,
+  identity,
+  mailAutomation,
+  drive,
+  auditLog,
+} from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
 
@@ -37,10 +48,24 @@ function serviceSrcFiles(service: ServiceName): string[] {
  *    (b) destructured: const q = c.req.query(); q.X -> "X"
  *  so the "server reads == SoT" reconciliation works whether a handler pulls one key or
  *  destructures the whole query object. */
+/** Brace-balanced body of the function whose header starts at/near `fromIdx` (the text
+ *  from its opening `{` to the matching `}`). Good enough for the validation parsers here
+ *  (no braces buried in strings/regex within their signatures). */
+function functionBody(src: string, fromIdx: number): string {
+  const open = src.indexOf("{", fromIdx);
+  if (open < 0) return "";
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+  }
+  return src.slice(open);
+}
+
 function serverQueryKeys(service: ServiceName): Set<string> {
   const keys = new Set<string>();
-  for (const file of serviceSrcFiles(service)) {
-    const src = readFileSync(file, "utf8");
+  const sources = serviceSrcFiles(service).map((f) => readFileSync(f, "utf8"));
+  for (const src of sources) {
     // (a) keyed reads — single `c.req.query("x")` and repeatable `c.req.queries("x")`.
     const keyed = /\.req\.quer(?:y|ies)\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
     for (let m; (m = keyed.exec(src)); ) keys.add(m[1]!);
@@ -53,6 +78,25 @@ function serverQueryKeys(service: ServiceName): Set<string> {
       const prop = new RegExp(`\\b${v}\\.([A-Za-z_$][\\w$]*)`, "g");
       for (let m; (m = prop.exec(src)); ) keys.add(m[1]!);
     }
+  }
+  // (c) parser reads: services that pass the whole query object to a validation parser
+  //     (`parseX(c.req.query())`, parser in validation.ts) read the keys as `param.prop`
+  //     inside the parser body. Resolve each parser called with the raw query, find its
+  //     definition + param name across the tree, and collect that param's property reads.
+  const all = sources.join("\n\n");
+  const parsers = new Set<string>();
+  const callRe = /([A-Za-z_$][\w$]*)\s*\(\s*[A-Za-z_$][\w$.]*\.req\.query\(\s*\)/g;
+  for (let m; (m = callRe.exec(all)); ) parsers.add(m[1]!);
+  for (const name of parsers) {
+    const defRe = new RegExp(
+      `(?:function\\s+${name}\\s*\\(|(?:const|let|var)\\s+${name}\\s*=\\s*(?:async\\s*)?\\()\\s*([A-Za-z_$][\\w$]*)`,
+    );
+    const dm = defRe.exec(all);
+    if (!dm) continue;
+    const param = dm[1]!;
+    const body = functionBody(all, dm.index);
+    const prop = new RegExp(`\\b${param}\\.([A-Za-z_$][\\w$]*)`, "g");
+    for (let m; (m = prop.exec(body)); ) keys.add(m[1]!);
   }
   return keys;
 }
@@ -269,5 +313,27 @@ describe("drive-proxy wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷
     // the resolved drift: parentId is gone from the contract, folderId is canonical
     expect(sotKeys.has("parentId")).toBe(false);
     expect(sotKeys.has("folderId")).toBe(true);
+  });
+});
+
+describe("audit-log wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("audit-log").file);
+  const serverKeys = serverQueryKeys("audit-log"); // reads keys via parseAuditLogQuery in validation.ts
+
+  const sotKeys = new Set<string>(Object.values(auditLog.AUDIT_LOG_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(auditLog.AUDIT_LOG_WIRE)) {
+    it(`${op}: OpenAPI query params == AUDIT_LOG_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (via the validation.ts parser)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `audit-log reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by audit-log`).toBe(true);
+    }
   });
 });
