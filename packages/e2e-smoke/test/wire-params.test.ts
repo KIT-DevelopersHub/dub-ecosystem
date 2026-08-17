@@ -23,6 +23,7 @@ import {
   auditLog,
   notification,
   mail,
+  chat,
 } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
@@ -373,6 +374,29 @@ describe("mail-gateway wire-contract: query keys agree across SoT ⟷ OpenAPI �
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by mail-gateway`).toBe(true);
+    }
+  });
+});
+
+describe("chat-service wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("chat-service").file);
+  const serverKeys = serverQueryKeys("chat-service"); // in-handler `const q = c.req.query()` reads
+
+  // Union across the read endpoints. /chat/unread takes no query params.
+  const sotKeys = new Set<string>(Object.values(chat.CHAT_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(chat.CHAT_WIRE)) {
+    it(`${op}: OpenAPI query params == CHAT_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (listChannels/listMessages/searchMessages)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `chat-service reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by chat-service`).toBe(true);
     }
   });
 });
