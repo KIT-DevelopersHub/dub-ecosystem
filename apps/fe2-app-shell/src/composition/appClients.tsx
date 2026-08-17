@@ -191,8 +191,15 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       });
       return api.request<ListMessagesResponse>({ method: "GET", path: `${CHAT}/messages`, ...(query ? { query } : {}) });
     },
+    // The server returns the created Message (bare), but FE6's optimistic layer
+    // reconciles by PostMessageResponse = { message, clientTempId }. The client already
+    // knows the clientTempId it sent, so compose the envelope here — otherwise
+    // res.clientTempId/res.message are undefined and the optimistic entry can never be
+    // acked, surfacing as "送信に失敗しました" even though the POST returned 201.
     postMessage: (req: PostMessageRequest) =>
-      api.request<PostMessageResponse>({ method: "POST", path: `${CHAT}/messages`, body: req }),
+      api
+        .request<Message>({ method: "POST", path: `${CHAT}/messages`, body: req })
+        .then((message) => ({ message, clientTempId: req.clientTempId })),
     editMessage: (id: common.MessageId, req: EditMessageRequest) =>
       api.request<Message>({ method: "PATCH", path: `${CHAT}/messages/${id}` as ApiPath, body: req }),
     deleteMessage: (id: common.MessageId) =>

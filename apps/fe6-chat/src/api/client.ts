@@ -172,7 +172,11 @@ export class HttpChatClient implements ChatApiClient {
     );
   }
   postMessage(req: PostMessageRequest): Promise<PostMessageResponse> {
-    return this.request<PostMessageResponse>("POST", `${CHAT}/messages`, req);
+    // Server returns the created Message (bare); the optimistic layer wants
+    // { message, clientTempId }. We already hold the clientTempId we sent, so compose
+    // the envelope here (mirror the shell adapter) — otherwise the optimistic entry
+    // is never acked and shows "送信に失敗しました" despite a 201.
+    return this.request<Message>("POST", `${CHAT}/messages`, req).then((message) => ({ message, clientTempId: req.clientTempId }));
   }
   editMessage(id: common.MessageId, req: EditMessageRequest): Promise<Message> {
     return this.request<Message>("PATCH", `${CHAT}/messages/${id}`, req);

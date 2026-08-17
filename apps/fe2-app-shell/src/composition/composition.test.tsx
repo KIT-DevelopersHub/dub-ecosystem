@@ -259,6 +259,21 @@ describe("app client adapters feed ApiClient.request", () => {
     expect(Array.isArray(users)).toBe(true);
     expect(users).toHaveLength(2);
   });
+
+  it("postMessage composes { message, clientTempId } from the server's bare Message", async () => {
+    // Regression: the server returns the created Message (bare). FE6's optimistic layer
+    // reconciles by { message, clientTempId } — if the adapter passes the bare Message
+    // through, res.clientTempId/res.message are undefined and the send shows
+    // "送信に失敗しました" despite a 201. The adapter must re-attach the sent clientTempId.
+    const serverMessage = { id: "m1", channelId: "c1", body: "hi", authorId: "u1" };
+    const api = {
+      request: (<TRes,>(_input: RequestInput): Promise<TRes> => Promise.resolve(serverMessage as TRes)),
+    } as unknown as ApiClient;
+    const chat = createChatApiClient(api);
+    const res = await chat.postMessage({ channelId: "c1" as never, body: "hi", clientTempId: "tmp-123" });
+    expect(res.clientTempId).toBe("tmp-123");
+    expect(res.message).toMatchObject({ id: "m1", body: "hi" });
+  });
 });
 
 describe("runtime providers wrap their routes", () => {
