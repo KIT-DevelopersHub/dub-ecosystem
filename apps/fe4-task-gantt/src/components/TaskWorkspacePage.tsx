@@ -259,18 +259,38 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       });
   };
 
-  // Re-issue a task's WBS parent and/or predecessors as a plain "set" (undo-safe).
-  // `undefined` means "leave untouched"; `null` parent detaches to top-level.
+  // Re-issue a task's field patch (optional) + WBS parent and/or predecessors as a
+  // plain "set" (undo-safe). `undefined` parent/deps means "leave untouched"; `null`
+  // parent detaches to top-level.
+  //
+  // The WHOLE save threads ONE fresh version read here (getTask), so field + parent +
+  // dependency edits committed together can never send a stale, panel-cached version.
+  // That is the root cause of the reparent→依存 bug: after 親→なし bumped the version,
+  // a follow-up save carrying the panel's OLD version 409'd; re-reading here fixes it.
+  // Both detail-pane save sub-paths (with or without a field change) funnel through
+  // this single latest-version save.
   const applyRelationsRaw = async (
     id: common.TaskId,
     parentTaskId: common.TaskId | null | undefined,
     dependsOnIds: common.TaskId[] | undefined,
+    fieldPatch?: task.UpdateTaskRequest,
   ) => {
     try {
-      const cur = await getTask(client, id); // fresh version (undo runs much later)
+      const cur = await getTask(client, id); // fresh version — the single source for this save
       let version = cur.version;
-      if (parentTaskId !== undefined) {
-        const server = await updateTask(client, id, { version, parentTaskId });
+      // strip version/parentTaskId → the pure field changes (title/status/…); combine
+      // them with the parent into ONE update so they share the just-read fresh version.
+      const { version: _v, parentTaskId: _p, ...fields } = fieldPatch ?? ({} as task.UpdateTaskRequest);
+      void _v;
+      void _p;
+      const hasFields = Object.keys(fields).length > 0;
+      if (hasFields || parentTaskId !== undefined) {
+        const body: task.UpdateTaskRequest = {
+          version,
+          ...fields,
+          ...(parentTaskId !== undefined ? { parentTaskId } : {}),
+        };
+        const server = await updateTask(client, id, body);
         version = server.version;
       }
       if (dependsOnIds !== undefined) {
@@ -478,13 +498,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // set to 「なし」 leaves its parent immediately (was stuck in the toggle until the
     // server round-trip). applyRelationsRaw's refetch reconciles / restores on failure.
     if (relations.parentChanged) gantt.setRowParentOptimistic(id, relations.parentTaskId);
-    void (async () => {
-      if (hasFieldPatch) {
-        // apply the field changes first (own optimistic path), then the relations.
-        await store.patchOptimistic(client, id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch);
-      }
-      await applyRelationsRaw(id, nextParent, nextDeps);
-    })();
+    // Field + parent + deps go through ONE fresh-version save (applyRelationsRaw re-reads
+    // the version), so a field change committed alongside a relation edit can't 409 on a
+    // stale panel version — the reparent→依存 failure class. (Field-ONLY edits keep the
+    // fast optimistic path above.)
+    void applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined);
     history.push({
       label: relations.depsChanged ? "先行タスク（依存）の変更" : "親タスク（親子）の変更",
       undo: () => applyRelationsRaw(id, relations.parentChanged ? prevParent : undefined, relations.depsChanged ? prevDeps : undefined),

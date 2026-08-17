@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { task, identity } from "@dub/types";
 import { MockApiClient } from "../src/api/mock-client";
 import { useTaskStore } from "../src/store/useTaskStore";
-import { getTask, listRosterUsers, replaceDependencies, resolveUsers } from "../src/api/endpoints";
+import { getTask, listRosterUsers, replaceDependencies, resolveUsers, updateTask } from "../src/api/endpoints";
 import { errorSurface } from "../src/domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../src/domain/provisional";
 import { ApiError } from "../src/contracts/spa-shell";
@@ -151,5 +151,37 @@ describe("F1: dependency op returns the wire shape { taskId, dependsOnIds }, not
     // the task's version WAS bumped server-side (visible via a fresh read)
     const fresh = await getTask(c, "t1");
     expect(fresh.version).toBe(2);
+  });
+});
+
+describe("reparent → 先行(依存) save uses the LATEST version (reparent→dep bug)", () => {
+  // Repro: A, B(child of A). Detach B (parent→なし, version bumps). Then make B depend
+  // on A. A stale (pre-detach) version 409s; re-reading the fresh version registers it.
+  const mk = (id: string, over: Partial<task.Task> = {}): task.Task => ({
+    id, eventId: "evt_1", title: id, description: null, status: "todo",
+    priority: "medium", assigneeId: null, dueAt: null, origin: "internal",
+    archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1, ...over,
+  });
+
+  it("registers B→A when the deps save re-reads B's fresh version after the detach", async () => {
+    const c = new MockApiClient({
+      tasks: [mk("A"), mk("B")],
+      hierarchy: { B: { parentTaskId: "A", depth: 1 } },
+    });
+    // step 3: detach B (parent → なし) — bumps B's version 1 → 2
+    const before = await getTask(c, "B");
+    await updateTask(c, "B", { version: before.version, parentTaskId: null });
+
+    // step 4 with a STALE version (the panel's cached pre-detach version) → 409
+    await expect(
+      replaceDependencies(c, "B", { version: before.version, dependsOnIds: ["A"] }),
+    ).rejects.toSatisfy((e: unknown) => (e as { status?: number }).status === 409);
+
+    // step 4 the way applyRelationsRaw does it — re-read the fresh version first → OK
+    const fresh = await getTask(c, "B");
+    const res = await replaceDependencies(c, "B", { version: fresh.version, dependsOnIds: ["A"] });
+    expect(res).toEqual({ taskId: "B", dependsOnIds: ["A"] });
+    // A→B is a valid dependency (no cycle: B is no longer A's child)
+    expect(await getTask(c, "B").then((t) => t.version)).toBe(3);
   });
 });
