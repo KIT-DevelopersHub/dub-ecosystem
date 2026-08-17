@@ -34,7 +34,7 @@ export default defineWorkersConfig({
           d1Databases: { DB: "chat-test-db" },
           bindings: {
             WS_TICKET_SECRET: "test-secret",
-            CHAT_RT_ALLOWED_ORIGINS: "https://app.developershub.jp",
+            CHAT_RT_ALLOWED_ORIGINS: "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp",
           },
         },
       },
