@@ -322,10 +322,29 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
+// A non-admin MAINTAINER account: holds several `dangerous`-flagged operator perms
+// (event:admin / mail:send / chat:moderate / infra:deploy) but NOT identity:admin, so
+// it is NOT an org administrator. It proves the release-gate regression fix — before
+// the fix, any dangerous permission made isPrivilegedViewer() true and this account saw
+// EVERY app active; now only identity:admin bypasses, so a maintainer is release-gated
+// exactly like a member (only メール active, the rest greyed).
+const MAINTAINER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read", "event:write", "event:admin",
+  "task:read", "task:write", "task:delete",
+  "file:read", "file:write",
+  "notif:send", "notif:inbox:self", "notif:prefs:self",
+  "mail:read", "mail:send",
+  "chat:create", "chat:moderate",
+  "infra:read", "infra:deploy",
+  "audit:read",
+];
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+  { id: "usr_maintainer", displayName: "運営 次郎 (maintainer)", email: "jiro@developershub.jp", permissions: MAINTAINER_ACCOUNT_PERMISSIONS, inbox: [] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
 ];
 

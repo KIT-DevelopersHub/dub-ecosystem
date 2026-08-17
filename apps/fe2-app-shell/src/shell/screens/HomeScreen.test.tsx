@@ -10,15 +10,35 @@ import { describe, expect, it } from "vitest";
 import type { gateway } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
+import { AuthProvider } from "../../auth/AuthProvider.tsx";
 import { HomeScreen } from "./HomeScreen.tsx";
 
 function makeApi(home: gateway.BffHomeResponse): ApiClient {
   return { bff: { home: () => Promise.resolve(home) } } as unknown as ApiClient;
 }
 
+// Auth stub: an admin session (identity:admin) so the dashboard launchpad renders every
+// app tile active — the release gate (lib/releaseGate) greys tiles for non-admins, so an
+// admin context keeps these BFF-focused tests exercising the full, ungated dashboard.
+const AUTH_API = {
+  auth: {
+    me: () =>
+      Promise.resolve({
+        user: { id: "usr_admin", email: "admin@dub.jp", displayName: "Admin" },
+        orgId: "org_1",
+        permissions: ["identity:admin"],
+        sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+      }),
+  },
+} as unknown as ApiClient;
+
 function wrap(ui: ReactNode): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return <QueryClientProvider client={client}>{ui}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <AuthProvider api={AUTH_API}>{ui}</AuthProvider>
+    </QueryClientProvider>
+  );
 }
 
 const OK_HOME: gateway.BffHomeResponse = {
@@ -94,5 +114,55 @@ describe("HomeScreen", () => {
     // ...while the dashboard-owned cards still resolve and render normally.
     expect(await screen.findByText("Conf")).toBeInTheDocument();
     expect(await screen.findByTestId("fe2-home-unread-count")).toBeInTheDocument();
+  });
+
+  // ── Dashboard launchpad member release gate (second surface, mirrors AppLauncher) ──
+  function wrapAs(ui: ReactNode, permissions: string[]): JSX.Element {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const api = {
+      auth: {
+        me: () =>
+          Promise.resolve({
+            user: { id: "u", email: "u@dub.jp", displayName: "U" },
+            orgId: "org_1",
+            permissions,
+            sessionExpiresAt: Date.now() + 3_600_000,
+          }),
+      },
+    } as unknown as ApiClient;
+    return (
+      <QueryClientProvider client={client}>
+        <AuthProvider api={api}>{ui}</AuthProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  it("greys + disables non-published app tiles for a non-admin (only メール clickable)", async () => {
+    // A maintainer holds dangerous perms but NOT identity:admin — the exact account
+    // class that used to bypass the gate and see every app active (the reported bug).
+    const maintainer = ["identity:read", "event:admin", "mail:send", "chat:moderate", "infra:deploy"];
+    render(wrapAs(<HomeScreen api={makeApi(OK_HOME)} />, maintainer));
+    // Published app (mail) stays an active link.
+    const mail = await screen.findByTestId("fe2-home-tile-mail");
+    expect(mail.tagName).toBe("A");
+    expect(mail).not.toHaveAttribute("aria-disabled");
+    // Every other app is greyed + non-interactive (span, aria-disabled, no href).
+    for (const id of ["events", "tasks", "gantt", "notifications", "chat", "usage", "members", "driveshare"]) {
+      const tile = screen.getByTestId(`fe2-home-tile-${id}`);
+      expect(tile.tagName).toBe("SPAN");
+      expect(tile).toHaveAttribute("aria-disabled", "true");
+      expect(tile).not.toHaveAttribute("href");
+    }
+  });
+
+  it("keeps every dashboard app tile active for an admin (identity:admin)", async () => {
+    render(wrapAs(<HomeScreen api={makeApi(OK_HOME)} />, ["identity:admin"]));
+    // Wait for /me to resolve (tiles render gated during the loading fail-closed window).
+    await waitFor(() => expect(screen.getByTestId("fe2-home-tile-events").tagName).toBe("A"));
+    for (const id of ["events", "mail", "chat", "driveshare"]) {
+      const tile = screen.getByTestId(`fe2-home-tile-${id}`);
+      expect(tile.tagName).toBe("A");
+      expect(tile).not.toHaveAttribute("aria-disabled");
+    }
   });
 });

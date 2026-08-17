@@ -13,7 +13,7 @@
 // a server-backed per-app flag (e.g. an `apps.memberPublished` column surfaced on
 // /me) without touching the launcher/route call-sites: keep isAppPublished() as the
 // single lookup and swap its body for the fetched flag.
-import { identity } from "@dub/types";
+import type { identity } from "@dub/types";
 import type { FeatureModuleId } from "../modules/types.tsx";
 
 type PermissionKey = identity.PermissionKey;
@@ -38,19 +38,24 @@ export function isAppPublished(appId: FeatureModuleId | undefined): boolean {
   return appId === undefined || PUBLISHED_APPS.has(appId);
 }
 
-// Admin/maintainer bypass. There is no role field on MeResponse (only the resolved
-// permission set), so "privileged" (an operator/developer who may see every app) is
-// derived from the frozen RBAC catalog: holding ANY permission flagged `dangerous`
-// (identity:admin, *:admin, mail:send, infra:deploy, …) marks the admin & maintainer
-// tiers; the member tier (read-only perms) holds none. Self-maintaining: new catalog
-// keys are classified by their own `dangerous` flag.
-const PRIVILEGED_KEYS: readonly PermissionKey[] = identity.PERMISSION_CATALOG.filter(
-  (e) => e.dangerous,
-).map((e) => e.key);
+// Admin-only bypass of the member release gate. There is no role field on MeResponse
+// (only the resolved permission set), so "privileged" is derived from a single
+// authoritative marker: `identity:admin` — the org-administration permission that the
+// system `admin` role holds and NO other system role does (maintainer/organizer/member
+// each get only `identity:read`, never `identity:admin`; see identity-roster seed).
+//
+// Why not "holds any `dangerous` permission": `dangerous` is a per-ACTION risk flag,
+// not an admin marker. Ordinary non-admin operator roles hold dangerous perms
+// (organizer → event:admin; maintainer → mail:send / event:admin / chat:moderate /
+// infra:deploy), so keying the bypass off `dangerous` let every organizer/maintainer
+// skip the gate and see EVERY app active — the exact reported bug. Only true admins
+// (identity:admin) may bypass; everyone else is release-gated (spec: 非admン=グレー).
+const ADMIN_PERMISSION: PermissionKey = "identity:admin";
 
-/** True when the viewer is an admin/maintainer (bypasses the member release gate).
- *  `can` is the shell's fail-closed permission check (false while /me loads), so a
- *  loading/unauthenticated viewer is treated as a non-privileged member. */
+/** True when the viewer is an org administrator (the only tier that bypasses the
+ *  member release gate). `can` is the shell's fail-closed permission check (false while
+ *  /me loads), so a loading/unauthenticated viewer is treated as a non-privileged
+ *  member. Non-admin roles (maintainer / organizer / member) are always gated. */
 export function isPrivilegedViewer(can: (p: PermissionKey) => boolean): boolean {
-  return PRIVILEGED_KEYS.some((k) => can(k));
+  return can(ADMIN_PERMISSION);
 }

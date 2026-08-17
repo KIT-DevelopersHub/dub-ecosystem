@@ -67,8 +67,9 @@ export interface AppShellLayoutProps {
 // deep-link stay consistent — an app greyed here 403s on direct navigation, and vice
 // versa. Two gates decide it:
 //   1. Member release gate (社長決定 2026-08-14, see lib/releaseGate / RequirePublished):
-//      an app not member-published is greyed for general members; admins/maintainers
-//      (isPrivilegedViewer) bypass it. メールのみ published as of 2026-08-14.
+//      an app not member-published is greyed for general members; only admins
+//      (identity:admin, isPrivilegedViewer) bypass it — non-admin operator roles
+//      (maintainer/organizer) are gated too. メールのみ published as of 2026-08-14.
 //   2. Permission gate (RequirePermission): an app whose requiredPermissions the viewer
 //      does not hold is greyed for EVERYONE — admins included — exactly matching the
 //      route's own requiredPermissions guard (e.g. a maintainer without identity:admin

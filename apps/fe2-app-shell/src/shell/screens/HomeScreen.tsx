@@ -18,6 +18,9 @@ import { toCssVarName } from "@dub/tokens";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
+import { usePermissions } from "../../auth/AuthProvider.tsx";
+import { isAppPublished, isPrivilegedViewer, UNPUBLISHED_TILE_REASON } from "../../lib/releaseGate.ts";
+import type { FeatureModuleId } from "../../modules/types.tsx";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
@@ -38,7 +41,7 @@ import {
 type IconName = Parameters<typeof Icon>[0]["name"];
 
 interface AppTile {
-  id: string;
+  id: FeatureModuleId;
   label: string;
   desc: string;
   icon: IconName;
@@ -47,7 +50,9 @@ interface AppTile {
 
 // The primary app launchpad. Paths mirror the registered feature nav entries
 // (see composition.test.tsx) so a tile always lands on a real, populated route.
-// We never hide apps here — this is the full daily-workspace set.
+// We never hide apps here (消さない) — the full daily-workspace set is always shown;
+// an app not member-published is greyed + non-clickable for non-admins instead,
+// mirroring the header AppLauncher and the route guard (lib/releaseGate).
 const APP_TILES: AppTile[] = [
   { id: "events", label: "イベント", desc: "運営中のイベントと進行", icon: "calendar", path: "/events" },
   { id: "tasks", label: "マイタスク", desc: "自分の担当タスク", icon: "check-square", path: "/me/tasks" },
@@ -60,19 +65,40 @@ const APP_TILES: AppTile[] = [
   { id: "driveshare", label: "Drive共有", desc: "共有ファイルと権限", icon: "file", path: "/driveshare" },
 ];
 
-/** One clickable app tile. Renders as an anchor (real href for accessibility /
- *  hover-URL / cmd-click) but performs SPA navigation via onNavigate when wired;
- *  in unit tests (no onNavigate) it is an inert, present anchor. */
+/** One app tile. When usable it renders as an anchor (real href for accessibility /
+ *  hover-URL / cmd-click) performing SPA navigation via onNavigate when wired; in unit
+ *  tests (no onNavigate) it is an inert, present anchor. When `disabled` (an app not
+ *  member-published, viewer is a non-admin) it renders greyed + non-interactive with an
+ *  explanatory tooltip and no href — matching the header AppLauncher's greyed tile so a
+ *  member can neither click here nor deep-link past the route guard. */
 function NavTile({
   tile,
   badge,
   onNavigate,
+  disabled = false,
 }: {
   tile: AppTile;
   badge?: number;
   onNavigate?: (path: string) => void;
+  disabled?: boolean;
 }): JSX.Element {
   const hasBadge = typeof badge === "number" && badge > 0;
+  if (disabled) {
+    return (
+      <span
+        className="fe2-home-tile fe2-home-tile--disabled"
+        data-testid={`fe2-home-tile-${tile.id}`}
+        title={UNPUBLISHED_TILE_REASON}
+        aria-disabled="true"
+        aria-label={`${tile.label}（${UNPUBLISHED_TILE_REASON}）`}
+      >
+        <span className="fe2-home-tile-icon" aria-hidden="true">
+          <Icon name={tile.icon} />
+        </span>
+        <span className="fe2-home-tile-label">{tile.label}</span>
+      </span>
+    );
+  }
   return (
     <a
       href={tile.path}
@@ -158,6 +184,11 @@ export function HomeScreen({
   onNavigate?: (path: string) => void;
 }): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
+  // Member release gate for the dashboard launchpad (mirrors the header AppLauncher /
+  // route guard, lib/releaseGate): only admins (identity:admin) may open every app; a
+  // non-admin sees non-member-published apps greyed + non-clickable here too.
+  const { can } = usePermissions();
+  const privileged = isPrivilegedViewer(can);
   const eventsError = errorFor("event-service");
   // The gateway BFF (bff-home) reports the notification upstream as "notification-service"
   // (same "<svc>-service" convention as "event-service"). Matching it here restores the
@@ -338,14 +369,18 @@ export function HomeScreen({
           <section className="fe2-home-apps" aria-label="機能へ移動">
             <h2 className="fe2-dash-section-title">アプリ</h2>
             <div className="fe2-home-apps-grid" data-testid="fe2-home-apps-grid">
-              {APP_TILES.map((tile) => (
-                <NavTile
-                  key={tile.id}
-                  tile={tile}
-                  {...(badgeFor(tile.id) !== undefined ? { badge: badgeFor(tile.id) } : {})}
-                  {...(onNavigate ? { onNavigate } : {})}
-                />
-              ))}
+              {APP_TILES.map((tile) => {
+                const disabled = !privileged && !isAppPublished(tile.id);
+                return (
+                  <NavTile
+                    key={tile.id}
+                    tile={tile}
+                    disabled={disabled}
+                    {...(badgeFor(tile.id) !== undefined ? { badge: badgeFor(tile.id) } : {})}
+                    {...(onNavigate ? { onNavigate } : {})}
+                  />
+                );
+              })}
             </div>
           </section>
         </div>
