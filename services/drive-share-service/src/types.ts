@@ -49,6 +49,12 @@ export interface SharePermission {
    *  `permissionDetails[].inherited` (every detail entry inherited). The manager
    *  disables the role change / revoke for these rows and explains why. */
   inherited: boolean;
+  /** Only set (true) on a permission just created via the notification fallback: the
+   *  grantee had NO Google account, so Drive would not accept a silent share and an
+   *  invite email was sent instead. The permission exists but stays PENDING — it cannot
+   *  actually grant access until that address signs in to a Google account. Undefined for
+   *  listed/normal permissions. */
+  invited?: boolean;
 }
 
 export interface ListPermissionsResult {
@@ -98,6 +104,15 @@ export interface SkippedMember {
   reason: string;
 }
 
+/** A role member that WAS shared, but only via an invite because the address has no
+ *  Google account (e.g. a Cloudflare Email-Routing alias like info@developershub.jp).
+ *  The Drive permission exists yet stays pending — it won't grant real edit access until
+ *  that address is backed by a Google account. Surfaced so the operator can instead share
+ *  with the person's real Google account / the routing target. */
+export interface InvitedMember {
+  email: string;
+}
+
 /** A role→file grant as shown by the file-list chips + the detail panel. `memberCount`
  *  is the number of active emails currently in the role; `appliedCount` is how many of
  *  those members now have a Drive permission in place (created by us OR a recorded
@@ -115,6 +130,9 @@ export interface RoleFileGrant {
   grantedBy: string;
   grantedAt: string;
   skipped?: SkippedMember[];
+  /** Members shared only via an invite (no Google account yet) — present on the
+   *  apply/reapply response so the manager can warn that their access is pending. */
+  invited?: InvitedMember[];
 }
 
 /** POST /driveshare/files/:id/role-grants body. */

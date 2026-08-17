@@ -237,3 +237,44 @@ describe("partial success: Drive refuses a member (no Google account / invalid e
     expect(grant.skipped).toBeUndefined();
   });
 });
+
+describe("invited members: no Google account → shared via invite (pending)", () => {
+  const NOACCT = "info@developershub.jp";
+
+  /** A Drive client whose createPermission flags a given email as `invited` (mirrors the
+   *  real client's notify=true fallback for a grantee with no Google account). */
+  function invitingClient(inner: DriveShareClient, invitedEmail: string): DriveShareClient {
+    return {
+      listFiles: (p) => inner.listFiles(p),
+      listPermissions: (fileId) => inner.listPermissions(fileId),
+      async createPermission(fileId, p) {
+        const created = await inner.createPermission(fileId, p);
+        return p.emailAddress === invitedEmail ? { ...created, invited: true } : created;
+      },
+      updatePermission: (fileId, id, role) => inner.updatePermission(fileId, id, role),
+      deletePermission: (fileId, id) => inner.deletePermission(fileId, id),
+    };
+  }
+
+  it("applies the member AND reports it in `invited`", async () => {
+    const client = invitingClient(createMockDriveShareClient(), NOACCT);
+    const roster = fakeRoster({ role_a: ["volunteer@example.com", NOACCT] });
+    const { service } = buildRoleGrants({ drive: client, roster });
+
+    const grant = await service.apply("fld_designs", "usr_admin", "role_a", "writer");
+
+    expect(grant.memberCount).toBe(2);
+    expect(grant.appliedCount).toBe(2); // BOTH applied (invited is still applied)
+    expect(grant.skipped).toBeUndefined();
+    expect(grant.invited).toEqual([{ email: NOACCT }]);
+    // the invited member's permission really exists on the file
+    expect((await permOf(client, "fld_designs", NOACCT))!.role).toBe("writer");
+  });
+
+  it("omits `invited` when every member has a Google account", async () => {
+    const spy = spyClient(createMockDriveShareClient());
+    const { service } = buildRoleGrants({ drive: spy.client, roster: fakeRoster({ role_a: ["volunteer@example.com"] }) });
+    const grant = await service.apply("fld_designs", "usr_admin", "role_a", "writer");
+    expect(grant.invited).toBeUndefined();
+  });
+});

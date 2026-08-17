@@ -72,10 +72,17 @@ export interface ListRolesResult {
   nextCursor: string | null;
 }
 
-/** A role member the fan-out could not apply (no Google account / invalid email). */
+/** A role member the fan-out could not apply (invalid email / Drive refused). */
 export interface SkippedMember {
   email: string;
   reason: string;
+}
+
+/** A role member shared only via an invite because the address has no Google account
+ *  (e.g. a Cloudflare Email-Routing alias). The permission is pending until that address
+ *  is backed by a Google account. */
+export interface InvitedMember {
+  email: string;
 }
 
 /** One role→file Drive grant; memberCount = members the role expands to. `skipped`
@@ -91,6 +98,7 @@ export interface RoleFileGrant {
   grantedBy: string;
   grantedAt: string;
   skipped?: SkippedMember[];
+  invited?: InvitedMember[];
 }
 
 export interface ListRoleGrantsResult {

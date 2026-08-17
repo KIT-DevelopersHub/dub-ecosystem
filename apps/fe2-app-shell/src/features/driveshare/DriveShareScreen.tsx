@@ -348,9 +348,17 @@ function LinkSharingToggle({
   );
 }
 
-/** Report a role apply/reapply outcome. A partial success (some members Drive refused —
- *  no Google account / invalid email) is a WARNING that names the skipped members with a
- *  reason, so nothing fails silently and the operator knows exactly who to fix. */
+const joinEmails = (list: { email: string }[], n = 4): string => {
+  const shown = list.slice(0, n).map((m) => m.email).join(" / ");
+  return list.length > n ? `${shown} 他${list.length - n}件` : shown;
+};
+
+/** Report a role apply/reapply outcome as a single toast:
+ *  - skipped members (Drive refused: invalid email) → WARNING with per-member reason;
+ *  - invited members (no Google account → invite sent, access PENDING) → WARNING that
+ *    names them and suggests sharing with a real Google account instead;
+ *  - otherwise → success (or silent for a clean reapply).
+ *  Nothing ever fails silently, so the operator always knows who did / didn't get access. */
 function showRoleGrantOutcome(
   toast: ReturnType<typeof useToast>,
   grant: RoleFileGrant,
@@ -358,17 +366,30 @@ function showRoleGrantOutcome(
   opts: { silentOnSuccess?: boolean } = {},
 ): void {
   const skipped = grant.skipped ?? [];
-  if (skipped.length === 0) {
-    if (!opts.silentOnSuccess) toast.show({ kind: "success", title: okTitle });
+  const invited = grant.invited ?? [];
+
+  if (skipped.length > 0) {
+    const shown = skipped.slice(0, 4).map((s) => `${s.email}（${s.reason}）`).join(" / ");
+    const more = skipped.length > 4 ? ` 他${skipped.length - 4}件` : "";
+    const invitedNote = invited.length > 0 ? `。招待のみ ${invited.length}人: ${joinEmails(invited)}（Googleアカウント未連携）` : "";
+    toast.show({
+      kind: "warning",
+      title: `${okTitle}（${skipped.length}人はスキップ）`,
+      description: `付与 ${grant.appliedCount}人・スキップ ${skipped.length}人: ${shown}${more}${invitedNote}`,
+    });
     return;
   }
-  const shown = skipped.slice(0, 4).map((s) => `${s.email}（${s.reason}）`).join(" / ");
-  const more = skipped.length > 4 ? ` 他${skipped.length - 4}件` : "";
-  toast.show({
-    kind: "warning",
-    title: `${okTitle}（${skipped.length}人はスキップ）`,
-    description: `付与 ${grant.appliedCount}人・スキップ ${skipped.length}人: ${shown}${more}`,
-  });
+
+  if (invited.length > 0) {
+    toast.show({
+      kind: "warning",
+      title: `${okTitle}（${invited.length}人は招待のみ）`,
+      description: `${joinEmails(invited)} はGoogleアカウントが無いため招待メールを送信しました。本人がGoogleでサインインするまで編集できません。実際のGoogleアカウント（または転送先のアカウント）で共有してください。`,
+    });
+    return;
+  }
+
+  if (!opts.silentOnSuccess) toast.show({ kind: "success", title: okTitle });
 }
 
 function RoleGrantRow({
