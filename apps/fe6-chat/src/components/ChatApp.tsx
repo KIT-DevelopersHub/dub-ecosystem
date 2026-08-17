@@ -66,7 +66,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   );
 
   return (
-    <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-testid="fe6-chat-app">
+    <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-app-bleed data-testid="fe6-chat-app">
       {/* leftmost workspace / team rail */}
       <div className={styles.rail} aria-label="ワークスペース">
         <button type="button" className={`${styles.railTile} ${styles.active}`} aria-label="DevHub ワークスペース" title="DevHub">
