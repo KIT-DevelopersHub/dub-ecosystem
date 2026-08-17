@@ -7,7 +7,9 @@ export type UnreadMap = Record<common.ChannelId, UnreadSummary>;
 
 export function toUnreadMap(summaries: UnreadSummary[]): UnreadMap {
   const map: UnreadMap = {};
-  for (const s of summaries) map[s.channelId] = s;
+  // Guard against a non-array (e.g. a Paginated envelope) so unread aggregation
+  // never throws "not iterable" (chat error-fix).
+  for (const s of Array.isArray(summaries) ? summaries : []) map[s.channelId] = s;
   return map;
 }
 
