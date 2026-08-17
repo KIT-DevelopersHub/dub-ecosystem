@@ -110,11 +110,22 @@ export class ChatService {
     return { channel, membership };
   }
 
-  // Require WRITE membership (post / react / read / ws). Non-member -> 403.
-  private async requireMember(channel: ChannelRow, userId: common.UserId): Promise<MemberRow> {
-    const m = await this.deps.repo.getMember(channel.id, userId);
-    if (!m) throw new DubError(CommonErrorCodes.FORBIDDEN, "not a channel member", { status: 403 });
-    return m;
+  // Write access. Members can always write. On a PUBLIC channel a non-member is
+  // auto-joined on their first write (Slack-style "posting joins the channel"), so
+  // send / react / pin work without an explicit join step — the base channels
+  // (general/random/運営連絡) ship with no membership rows, so this is what makes
+  // sending work at all. PRIVATE channels stay members-only (callers run loadReadable
+  // first, which 404s private non-members before this point; the guard below is a
+  // belt-and-braces 403 for any direct write path).
+  private async ensureCanWrite(channel: ChannelRow, userId: common.UserId): Promise<MemberRow> {
+    const existing = await this.deps.repo.getMember(channel.id, userId);
+    if (existing) return existing;
+    if (channel.visibility !== "public") {
+      throw new DubError(CommonErrorCodes.FORBIDDEN, "not a channel member", { status: 403 });
+    }
+    const row: MemberRow = { channelId: channel.id, userId, role: "member", joinedAt: this.deps.now() };
+    await this.deps.repo.addMember(row); // INSERT OR IGNORE — idempotent auto-join
+    return row;
   }
 
   private async isChannelAdmin(ctx: ReqCtx, channel: ChannelRow, membership?: MemberRow | null): Promise<boolean> {
@@ -291,7 +302,7 @@ export class ChatService {
   async postMessage(ctx: ReqCtx, body: PostMessageRequest): Promise<Message> {
     const text = requireBody(body.body);
     const { channel } = await this.loadReadable(body.channelId, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    await this.ensureCanWrite(channel, ctx.userId);
     if (channel.archivedAt) throw errArchived(channel.id);
 
     if (body.threadRootId !== undefined) {
@@ -344,8 +355,10 @@ export class ChatService {
     if (q.cursor !== undefined && q.afterMessageId !== undefined) {
       throw errors.validationFailed([{ field: "cursor", reason: "exclusive_with_afterMessageId" }]);
     }
+    // Reading is open on public channels (no join needed) — loadReadable already
+    // blocks private channels for non-members (404, existence hidden). Membership is
+    // only required to WRITE (post/react/pin), never to read a public channel.
     const { channel } = await this.loadReadable(q.channelId, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
     const limit = requireLimit(q.limit);
 
     if (q.afterMessageId !== undefined) {
@@ -420,7 +433,7 @@ export class ChatService {
     const msg = await this.deps.repo.getMessage(id);
     if (!msg || msg.deletedAt) throw errors.notFound("message", id);
     const { channel } = await this.loadReadable(msg.channelId, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    await this.ensureCanWrite(channel, ctx.userId);
 
     const has = await this.deps.repo.hasReaction(id, clean, ctx.userId);
     if (has) await this.deps.repo.removeReaction(id, clean, ctx.userId);
@@ -468,7 +481,7 @@ export class ChatService {
   async togglePin(ctx: ReqCtx, id: common.ChannelId, messageId: common.MessageId): Promise<Message[]> {
     const cleanMessageId = nonEmptyString(messageId, "messageId");
     const { channel } = await this.loadReadable(id, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    await this.ensureCanWrite(channel, ctx.userId);
     if (channel.archivedAt) throw errArchived(channel.id);
 
     const msg = await this.deps.repo.getMessage(cleanMessageId);
@@ -486,8 +499,9 @@ export class ChatService {
   // ---- read state / unread ----
   async updateReadState(ctx: ReqCtx, id: common.ChannelId, body: ReadStateUpdateRequest): Promise<UnreadSummary> {
     const lastReadMessageId = nonEmptyString(body.lastReadMessageId, "lastReadMessageId");
-    const { channel } = await this.loadReadable(id, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    // Marking read is a read-side action: allowed on any readable channel (public
+    // without join; private members-only via loadReadable). No write membership gate.
+    await this.loadReadable(id, ctx.userId);
     await this.deps.repo.setReadState(id, ctx.userId, lastReadMessageId, this.deps.now());
     const unreadCount = await this.deps.repo.countUnread(id, ctx.userId, lastReadMessageId);
     return { channelId: id, unreadCount, lastReadMessageId };
@@ -507,8 +521,10 @@ export class ChatService {
 
   // ---- ws-ticket (RT connect; DO-direct) ----
   async issueWsTicket(ctx: ReqCtx, id: common.ChannelId): Promise<WsTicketResponse> {
-    const { channel } = await this.loadReadable(id, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    // Realtime subscribe follows read access: public channels are open to any
+    // authenticated user (loadReadable blocks private non-members). The ChatRoom DO
+    // still verifies the HMAC ticket + Origin, so this issuance is the read gate.
+    await this.loadReadable(id, ctx.userId);
     const expEpochMs = ticketExpiryMs(Date.now());
     const ticket = await signWsTicket(this.deps.wsTicketSecret, { channelId: id, userId: ctx.userId, expEpochMs });
     return { ticket, doUrl: buildDoUrl(this.deps.doUrlBase, id), expiresAt: new Date(expEpochMs).toISOString() };
