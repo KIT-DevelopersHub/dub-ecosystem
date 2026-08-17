@@ -43,6 +43,12 @@ export interface SharePermission {
   displayName: string | null;
   /** Present for `domain` grantees. */
   domain: string | null;
+  /** True when this permission is inherited from an ancestor folder (or shared drive)
+   *  and therefore CANNOT be changed or removed on this item directly — Google returns
+   *  403 `cannotDeletePermission` for such a delete. Derived from Drive
+   *  `permissionDetails[].inherited` (every detail entry inherited). The manager
+   *  disables the role change / revoke for these rows and explains why. */
+  inherited: boolean;
 }
 
 export interface ListPermissionsResult {
