@@ -3,13 +3,13 @@
 import { describe, expect, it } from "vitest";
 import {
   CRITICAL_PCT,
-  FREE_TIER,
-  TASK_SEGMENTS,
   WARN_PCT,
   clampPct,
   daysUntil,
+  freeTierFromMetrics,
   statusMeta,
   taskCompletionPct,
+  taskSegmentsFromCounts,
   taskTotal,
   usageStatusFromPct,
   worstFreeTier,
@@ -60,21 +60,42 @@ describe("daysUntil", () => {
   });
 });
 
-describe("task breakdown", () => {
-  it("totals the segments and derives the completion percentage from 完了", () => {
-    expect(taskTotal()).toBe(TASK_SEGMENTS.reduce((n, s) => n + s.count, 0));
-    const done = TASK_SEGMENTS.find((s) => s.key === "done")!.count;
-    expect(taskCompletionPct()).toBeCloseTo((done / taskTotal()) * 100, 5);
+describe("taskSegmentsFromCounts", () => {
+  it("builds the four visible segments in order and excludes cancelled from the total", () => {
+    const segments = taskSegmentsFromCounts({ done: 30, in_progress: 10, todo: 6, blocked: 2, cancelled: 9 });
+    expect(segments.map((s) => s.key)).toEqual(["done", "in_progress", "todo", "blocked"]);
+    // cancelled (9) is intentionally not part of the visible breakdown.
+    expect(taskTotal(segments)).toBe(48);
+    const done = segments.find((s) => s.key === "done")!.count;
+    expect(taskCompletionPct(segments)).toBeCloseTo((done / 48) * 100, 5);
   });
-  it("is 0% for an empty set", () => {
+  it("defaults missing statuses to 0 and is 0% for an empty set", () => {
+    const segments = taskSegmentsFromCounts({});
+    expect(taskTotal(segments)).toBe(0);
+    expect(taskCompletionPct(segments)).toBe(0);
     expect(taskCompletionPct([])).toBe(0);
     expect(taskTotal([])).toBe(0);
   });
 });
 
-describe("worstFreeTier", () => {
-  it("returns the single most-stressed metric", () => {
-    const worst = worstFreeTier();
-    for (const m of FREE_TIER) expect(worst.pct).toBeGreaterThanOrEqual(m.pct);
+describe("free-tier projection", () => {
+  it("maps null pct to 0 and sorts most-stressed first", () => {
+    const metrics = freeTierFromMetrics([
+      { key: "a", label: "A", pct: 12.3 },
+      { key: "b", label: "B", pct: null },
+      { key: "c", label: "C", pct: 88.0 },
+    ]);
+    expect(metrics.map((m) => m.key)).toEqual(["c", "a", "b"]);
+    expect(metrics.find((m) => m.key === "b")!.pct).toBe(0);
+  });
+  it("worstFreeTier returns the single most-stressed metric, or null when empty", () => {
+    const metrics = freeTierFromMetrics([
+      { key: "a", label: "A", pct: 12.3 },
+      { key: "c", label: "C", pct: 88.0 },
+    ]);
+    const worst = worstFreeTier(metrics);
+    expect(worst?.key).toBe("c");
+    for (const m of metrics) expect(worst!.pct).toBeGreaterThanOrEqual(m.pct);
+    expect(worstFreeTier([])).toBeNull();
   });
 });

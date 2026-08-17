@@ -46,6 +46,20 @@ const DEFAULT_SEED: MockSeed = {
       { id: "evt_demo_2", title: "運営定例ミーティング", phase: "planning", startsAt: "2026-08-12T09:00:00Z" },
     ],
     unreadCount: 2,
+    taskSummary: {
+      total: 21,
+      byStatus: { todo: 5, in_progress: 4, blocked: 1, done: 11, cancelled: 0 },
+    },
+    usageSummary: {
+      metrics: [
+        { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 62.4 },
+        { key: "d1_rows_read_day", label: "D1 行読み取り(日)", pct: 48.1 },
+        { key: "workers_requests_day", label: "Workers リクエスト(日)", pct: 12.3 },
+        { key: "emails_month", label: "メール送信(月)", pct: 30.0 },
+      ],
+      worst: { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 62.4 },
+    },
+    orgStats: { members: 12, teams: 4 },
     partialErrors: [],
   },
 };
