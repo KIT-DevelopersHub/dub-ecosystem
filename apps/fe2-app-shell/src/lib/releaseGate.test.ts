@@ -30,9 +30,9 @@ describe("releaseGate", () => {
     expect(isPrivilegedViewer(canFrom(["identity:admin"]))).toBe(true);
   });
 
-  it("maintainer (holds *:admin / dangerous perms, but not identity:admin) is privileged", () => {
+  it("maintainer/organizer (holds *:admin dangerous perms, but NOT identity:admin) is NOT privileged (#255 admin-only bypass)", () => {
     const maintainer: PermissionKey[] = ["identity:read", "event:admin", "mail:admin", "chat:moderate"];
-    expect(isPrivilegedViewer(canFrom(maintainer))).toBe(true);
+    expect(isPrivilegedViewer(canFrom(maintainer))).toBe(false);
   });
 
   it("a general member (read-only perms) is NOT privileged", () => {
