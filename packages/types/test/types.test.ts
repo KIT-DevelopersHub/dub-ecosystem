@@ -17,17 +17,21 @@ describe("@dub/types", () => {
     expect(common.MOBILE_API_PREFIX).toBe("/m/v1");
   });
 
-  it("PERMISSION_CATALOG is 35 closed keys, lowercase, unique", () => {
+  it("PERMISSION_CATALOG is 57 closed keys, lowercase, unique", () => {
     const cat = identity.PERMISSION_CATALOG;
-    expect(cat.length).toBe(35);
+    expect(cat.length).toBe(57);
     const keys = cat.map((e) => e.key);
-    expect(new Set(keys).size).toBe(35); // unique
+    expect(new Set(keys).size).toBe(57); // unique
     for (const key of keys) {
       const segs = key.split(":");
-      // <domain>:<action>, plus an optional :self scope segment (self-service keys)
+      // <domain>:<action>, plus an optional 3rd segment: `:self` scope (self-service
+      // keys) OR the per-app access tier `app:<id>:view|edit` (domain "app").
       expect(segs.length).toBeGreaterThanOrEqual(2);
       expect(segs.length).toBeLessThanOrEqual(3);
-      if (segs.length === 3) expect(segs[2]).toBe("self");
+      if (segs.length === 3) {
+        const ok = segs[2] === "self" || (segs[0] === "app" && (segs[2] === "view" || segs[2] === "edit"));
+        expect(ok, `3-segment key '${key}' must be :self or app:<id>:view|edit`).toBe(true);
+      }
       expect(key).toBe(key.toLowerCase());
       expect(key).not.toContain("*"); // no wildcard
     }
