@@ -132,7 +132,8 @@ describe("AppShellLayout", () => {
 
   // Member release-gating (社長決定 2026-08-14, lib/releaseGate). Apps are NEVER removed
   // from the launcher (消さない); an unpublished app is greyed + disabled for general
-  // members, while admins/maintainers bypass the gate and see every app active.
+  // members, while ONLY full admins (identity:admin) bypass the gate and see every app
+  // active — non-admin operator roles are gated like members (#255, 2026-08-17).
   const GATED_NAV: NavEntry[] = [
     { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
     { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events" },
@@ -186,8 +187,8 @@ describe("AppShellLayout", () => {
     expect(onNavigate).toHaveBeenCalledWith("/mail");
   });
 
-  it("admins/maintainers bypass the gate: every app is active", async () => {
-    // holds identity:admin (a dangerous permission) -> privileged -> no greying.
+  it("a full admin (identity:admin) bypasses the gate: every app is active", async () => {
+    // holds identity:admin -> privileged -> no greying (#255 admin-only bypass).
     const me: gateway.MeResponse = { ...ME, permissions: ["identity:admin"] };
     const adminApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -216,8 +217,9 @@ describe("AppShellLayout", () => {
   ];
 
   it("greys an app whose requiredPermissions a privileged viewer still lacks", async () => {
-    // Privileged (holds mail:admin, a dangerous perm → bypasses the release gate) but
-    // does NOT hold identity:admin, so ロール管理 must grey — same as its route 403ing.
+    // Holds mail:admin (both apps use the published appId "mail", so the release gate is
+    // out of the way) but NOT identity:admin, so the identity:admin-gated ロール管理 must
+    // grey via the permission gate — same as its route 403ing.
     const me: gateway.MeResponse = { ...ME, permissions: ["mail:admin", "mail:read"] };
     const maintApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
     const onNavigate = vi.fn();
