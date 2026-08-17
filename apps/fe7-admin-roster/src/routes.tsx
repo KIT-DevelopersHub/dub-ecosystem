@@ -57,25 +57,22 @@ function historyRoute(): Promise<{ Component: ComponentType }> {
   }));
 }
 
-function emailRoutingRoute(): Promise<{ Component: ComponentType }> {
-  return import("./components/EmailRoutingPage").then(({ EmailRoutingPage }) => ({
-    Component: EmailRoutingPage,
-  }));
-}
+// メールアドレス管理 (/admin/email-routing) はユーザー明示承認で launcher/ナビ/route から完全撤去。
+// EmailRoutingPage コンポーネントと専用フック/API/型も削除済み。名簿のアドレス発行
+// (NewEmailAddressDialog) と退任フロー(offboard)が使う createEmailAddress / list / delete は
+// 名簿機能なので残置している。
 
 export const routes: FeatureRoute[] = [
   { path: "/admin/users", lazy: usersRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/users/:userId", lazy: userDetailRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles", lazy: rolesRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles/new", lazy: roleNewRoute, auth: "required", requiredPermissions: ["identity:admin"] },
-  { path: "/admin/email-routing", lazy: emailRoutingRoute, auth: "required", requiredPermissions: ["mail:admin"] },
   { path: "/admin/history", lazy: historyRoute, auth: "required", requiredPermissions: ["audit:read"] },
 ];
 
 export const nav: NavEntry[] = [
   { label: "ユーザー名簿", path: "/admin/users", icon: "users", order: 10 },
   { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 20 },
-  { label: "メールアドレス管理", path: "/admin/email-routing", icon: "inbox", order: 25 },
   { label: "変更履歴", path: "/admin/history", icon: "history", order: 30 },
 ];
 
