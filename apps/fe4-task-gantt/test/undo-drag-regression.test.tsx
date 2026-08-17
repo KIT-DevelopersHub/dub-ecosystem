@@ -43,7 +43,7 @@ describe("Gantt bar drag undo is 1 step per drag (座標0→1→2, Ctrl-Z→1, C
 
     const readStart = async (): Promise<number> => {
       const dto = await client.request<gantt.GanttChartDTO>({
-        method: "GET", path: "/api/v1/gantt", query: { event: EVENT },
+        method: "GET", path: "/api/v1/gantt", query: { eventId: EVENT },
       });
       const row = dto.rows.find((r) => r.taskId === "t1")!;
       return Date.parse(row.startsAt!);

@@ -57,13 +57,17 @@ export function replaceDependencies(
   });
 }
 
-// ---- gantt-service (read-only; `?event=`) ----
+// ---- gantt-service (read-only; `?eventId=`) ----
+// gantt-service reads the event query param as `eventId` (requireEventId + the
+// event:read permission scope). The client formerly sent `?event=` which the live
+// gantt-service never read, so every prod gantt load 400'd "eventId is required"
+// (surfaced as a "Validation failed" banner). Unified on `eventId` here.
 export function getGantt(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttChartDTO> {
   // edit直後の再取得はキャッシュをバイパス (design §2-2 / test 6)
   return client.request<gantt.GanttChartDTO>({
     method: "GET",
     path: `${P}/gantt`,
-    query: { event: eventId },
+    query: { eventId },
   });
 }
 
@@ -71,7 +75,7 @@ export function getGanttFresh(client: ApiClient, eventId: common.EventId): Promi
   return client.request<gantt.GanttChartDTO>({
     method: "GET",
     path: `${P}/gantt`,
-    query: { event: eventId },
+    query: { eventId },
     headers: { "Cache-Control": "no-cache" },
   });
 }
@@ -96,7 +100,7 @@ export function getGanttDependencies(
   return client.request<gantt.GanttDependencyLine[]>({
     method: "GET",
     path: `${P}/gantt/dependencies`,
-    query: { event: eventId },
+    query: { eventId },
   });
 }
 
@@ -104,7 +108,7 @@ export function getGanttView(client: ApiClient, eventId: common.EventId): Promis
   return client.request<gantt.GanttViewState>({
     method: "GET",
     path: `${P}/gantt/views`,
-    query: { event: eventId },
+    query: { eventId },
   });
 }
 
@@ -116,7 +120,7 @@ export function putGanttView(
   return client.request<gantt.GanttViewState>({
     method: "PUT",
     path: `${P}/gantt/views`,
-    query: { event: eventId },
+    query: { eventId },
     body,
   });
 }
