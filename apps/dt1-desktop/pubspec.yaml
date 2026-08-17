@@ -1,0 +1,30 @@
+name: dt1_desktop
+description: "DevHub (Dub) desktop client — multi-client parity with web via generated Dart API client"
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# Application version. Keep in step with the web shell release train.
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # HTTP transport used by the generated client.
+  dio: ^5.7.0
+  # Generated-from-OpenAPI gateway client. NEVER hand-write gateway calls —
+  # regenerate via scripts/gen-dart-client.sh when docs/openapi/*.yaml changes.
+  dub_api_client:
+    path: ../../packages/api-client-dart
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
