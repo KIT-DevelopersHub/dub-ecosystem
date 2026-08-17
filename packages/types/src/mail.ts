@@ -3,7 +3,33 @@
 //   ② Mailbox/Watch types: STUB pending 9-B.
 // Mail policy (判断46/50): inbound = Cloudflare Email Routing -> Worker (self-built
 // app); outbound = managed provider (SES暫定). Header stubs only in foundation.
-import type { ISODateTime } from "./common";
+import type { ISODateTime, CursorQuery } from "./common";
+
+// ---- query contract (GET /messages, GET /sent — same shape) ----
+export interface ListMailMessagesQuery extends CursorQuery {
+  threadId?: string;
+}
+
+// ── Wire contract (query params) ─────────────────────────────────────────────
+// SINGLE source of truth for the query-parameter *names* mail-gateway's messages list
+// endpoint puts on the wire. The server (mail-gateway validation.ts parseListMessagesQuery)
+// and the OpenAPI spec (docs/openapi/mail-gateway.yaml) are reconciled against this map in
+// CI (see @dub/e2e-smoke wire-params.test.ts). The Sent-folder GET (/sent) uses the SAME
+// parser, so its cursor/limit/threadId keys are covered by this same entry (it is not
+// separately spec'd — documenting it is a noted follow-up). See
+// docs/api-contracts/_wire-contract-enforcement.md.
+export const MAIL_WIRE = {
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "limit", "threadId"] },
+} as const;
+
+// Compile-time tie: every query key the descriptor lists must be a real key of the typed
+// query interface, so the descriptor and the type can never silently drift.
+type _MailWireKeysAreTyped =
+  (typeof MAIL_WIRE)[keyof typeof MAIL_WIRE]["query"][number] extends keyof ListMailMessagesQuery
+    ? true
+    : never;
+const _mailWireKeyGuard: _MailWireKeysAreTyped = true;
+void _mailWireKeyGuard;
 
 // ---- ① frozen ----
 export interface MailAddress {

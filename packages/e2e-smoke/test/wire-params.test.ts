@@ -22,6 +22,7 @@ import {
   drive,
   auditLog,
   notification,
+  mail,
 } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
@@ -349,6 +350,29 @@ describe("notification wire-contract: query keys agree across SoT ⟷ OpenAPI �
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by notification`).toBe(true);
+    }
+  });
+});
+
+describe("mail-gateway wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("mail-gateway").file);
+  const serverKeys = serverQueryKeys("mail-gateway"); // reads via parseListMessagesQuery in validation.ts
+
+  // /messages and /sent share parseListMessagesQuery, so the union is that one parser's keys.
+  const sotKeys = new Set<string>(Object.values(mail.MAIL_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(mail.MAIL_WIRE)) {
+    it(`${op}: OpenAPI query params == MAIL_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (via the validation.ts parser; /messages + /sent share it)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `mail-gateway reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by mail-gateway`).toBe(true);
     }
   });
 });
