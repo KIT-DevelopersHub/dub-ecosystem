@@ -51,9 +51,14 @@ function roleNewRoute(): Promise<{ Component: ComponentType }> {
   }));
 }
 
-// メールアドレス管理 (/admin/email-routing) と 変更履歴 (/admin/history) は
-// ユーザー明示承認で launcher/ナビから外した。route/nav を登録解除して非表示にするだけで、
-// コンポーネント（EmailRoutingPage / AuditHistoryPage）は将来戻せるよう残置している。
+// 変更履歴 (/admin/history) は ユーザー明示承認で launcher/ナビから外した。route/nav を
+// 登録解除して非表示にするだけで、コンポーネント（AuditHistoryPage）は将来戻せるよう残置している。
+//
+// メールアドレス管理 (/admin/email-routing) は完全に削除した: route/nav の登録解除に加え、
+// EmailRoutingPage コンポーネントと専用フック/API/型(useEmailAddresses・useUpdateEmailAddress・
+// useDeleteEmailAddress・updateEmailAddress・UpdateEmailAddressRequest)を撤去。名簿のアドレス
+// 発行(NewEmailAddressDialog)と退任フロー(offboard)が使う createEmailAddress / list / delete
+// は名簿機能なので残置している。
 
 export const routes: FeatureRoute[] = [
   { path: "/admin/users", lazy: usersRoute, auth: "required", requiredPermissions: ["identity:read"] },
