@@ -233,15 +233,42 @@ export function TaskDetailPanel({
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
           />
+          {/* 関係タイプの変換: 親（親子）→ 先行（依存）。保存で親子/依存を一括反映。 */}
+          {canWrite && parentId && (
+            <button
+              type="button"
+              className={styles.relConvertBtn}
+              onClick={() => {
+                const p = parentId;
+                setParentId(null);
+                // detach to top-level, then keep p as a predecessor (same-scope only).
+                setDeps((d) => pruneToScope(scopeTasks, null, [...new Set([...d, p])]).filter((id) => id !== t.id));
+              }}
+              data-testid="fe4-detail-parent-to-dep"
+            >
+              ⇄ 先行タスク（依存）に変換
+            </button>
+          )}
         </div>
 
-        {/* 先行タスク（依存）: add/remove predecessors after the fact (same scope only). */}
+        {/* 先行タスク（依存）: add/remove predecessors after the fact (same scope only).
+            Each chip can be promoted to the 親タスク (依存→親子) via 「親に」. */}
         <div className={styles.formField}>
           <span className={styles.formLabel}>先行タスク（依存・同じ親のタスクのみ）</span>
           <PredecessorPicker
             options={canWrite ? depOptions : []}
             value={deps}
             onChange={(next) => canWrite && setDeps(next)}
+            {...(canWrite
+              ? {
+                  onPromoteToParent: (id: common.TaskId) => {
+                    // 依存 → 親子: this predecessor becomes the parent; drop it from deps,
+                    // and re-scope the rest to the new parent (保存で一括反映).
+                    setParentId(id);
+                    setDeps((d) => pruneToScope(scopeTasks, id, d.filter((x) => x !== id)).filter((x) => x !== t.id));
+                  },
+                }
+              : {})}
             testId="fe4-detail-deps"
           />
         </div>

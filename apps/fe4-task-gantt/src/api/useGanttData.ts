@@ -55,5 +55,30 @@ export function useGanttData(eventId: common.EventId) {
       old ? { ...old, rows: old.rows.filter((r) => r.taskId !== taskId) } : old,
     );
   };
-  return { ...query, currentRows, refetchFresh, setRowScheduleOptimistic, upsertRowOptimistic, removeRowOptimistic };
+  /** Optimistically re-parent (or detach with null) a row so the tree reflects the
+   *  change the same tick — the child leaves/joins a work-package immediately instead
+   *  of appearing stuck inside the old parent's toggle until the refetch lands. Depth
+   *  follows the new parent (null ⇒ top-level, depth 0); the old/new parents'
+   *  `hasChildren` is recomputed so an emptied parent loses its toggle at once. */
+  const setRowParentOptimistic = (taskId: common.TaskId, parentTaskId: common.TaskId | null) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) => {
+      if (!old) return old;
+      const parentDepth = parentTaskId ? old.rows.find((r) => r.taskId === parentTaskId)?.depth ?? 0 : -1;
+      const rows = old.rows.map((r) =>
+        r.taskId === taskId ? { ...r, parentTaskId, depth: parentDepth + 1 } : r,
+      );
+      // recompute hasChildren from the mutated parent links (an emptied parent drops its toggle)
+      const withKids = new Set(rows.map((r) => r.parentTaskId).filter((p): p is common.TaskId => !!p));
+      return { ...old, rows: rows.map((r) => ({ ...r, hasChildren: withKids.has(r.taskId) })) };
+    });
+  };
+  return {
+    ...query,
+    currentRows,
+    refetchFresh,
+    setRowScheduleOptimistic,
+    upsertRowOptimistic,
+    removeRowOptimistic,
+    setRowParentOptimistic,
+  };
 }

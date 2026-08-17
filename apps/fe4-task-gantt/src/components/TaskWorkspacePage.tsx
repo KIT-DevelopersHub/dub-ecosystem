@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
-import { Button, ErrorDialog } from "@dub/ui";
+import { Button, ErrorDialog, useToast } from "@dub/ui";
 import type { ErrorDialogDetail } from "@dub/ui";
 import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
@@ -52,6 +52,7 @@ const FIELD_LABEL: Record<string, string> = {
  */
 export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePageProps) {
   const client = useApiClient();
+  const toast = useToast();
   const store = useTaskStore();
   const [filter, setFilter] = useState<TaskFilterState>(() => emptyFilter(eventId));
   const [selected, setSelected] = useState<common.TaskId | null>(null);
@@ -393,7 +394,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     );
     if (!created) {
       gantt.removeRowOptimistic(tempId); // create failed (reason already surfaced) — drop the provisional bar
-      return;
+      return false;
     }
     // Swap the provisional bar onto the real id so it stays visible (no flicker)
     // through the follow-up calls until the authoritative refetch replaces it.
@@ -438,8 +439,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         store.reportError(e); // not-found / out-of-scope / cycle — surfaced; the new task still exists
       }
     }
-    await store.loadAll(client, query);
-    await gantt.refetchFresh();
+    // The task IS created — confirm it to the user (楽観的UIと整合: ダイアログを閉じ
+    // 成功トーストを出す). Reconciling reload/refetch runs after and must never turn a
+    // successful create into a thrown error that keeps the modal open.
+    toast.show({ kind: "success", title: "タスクを作成しました" });
+    try {
+      await store.loadAll(client, query);
+      await gantt.refetchFresh();
+    } catch {
+      /* reconcile hiccup — the task exists; the next load/refetch will catch up */
+    }
+    return true;
   };
 
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
@@ -464,6 +474,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     const prevDeps = selectedDependsOn;
     const nextParent = relations.parentChanged ? relations.parentTaskId : undefined;
     const nextDeps = relations.depsChanged ? relations.dependsOnIds : undefined;
+    // Optimistic re-parent/detach: reflect the tree change the SAME tick so a child
+    // set to 「なし」 leaves its parent immediately (was stuck in the toggle until the
+    // server round-trip). applyRelationsRaw's refetch reconciles / restores on failure.
+    if (relations.parentChanged) gantt.setRowParentOptimistic(id, relations.parentTaskId);
     void (async () => {
       if (hasFieldPatch) {
         // apply the field changes first (own optimistic path), then the relations.
