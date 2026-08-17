@@ -87,6 +87,31 @@ export interface HumanizedChange {
   generic: boolean;
   /** The cleaned (prefix/noise stripped) source text, for traceability. */
   cleaned: string;
+  /** The detected conventional-commit type ("feat"/"fix"/"docs"/...) or undefined when the
+   *  title had no recognizable prefix. Callers use it to skip user-irrelevant deploys. */
+  type?: string;
+}
+
+/**
+ * Conventional-commit types whose changes are invisible to end users (docs, tooling, deps).
+ * A deploy whose ONLY signal is one of these — and which carries no human-written notify
+ * line — is skipped (no Admin notification), so the inbox is not polluted with "アプリを更新
+ * しました" rows that say nothing. A human notify line always overrides this (opt-in notify).
+ */
+export const USER_IRRELEVANT_TYPES: ReadonlySet<string> = new Set([
+  "docs",
+  "chore",
+  "build",
+  "ci",
+  "test",
+  "style",
+  "deps",
+]);
+
+/** Detect the leading conventional-commit type of a title (lowercased), or undefined. */
+export function detectConventionalType(title: string | undefined | null): string | undefined {
+  const m = (title ?? "").trim().match(CONVENTIONAL_PREFIX);
+  return m?.[1]?.toLowerCase();
 }
 
 /** Strip code/markdown noise from a change title so it reads as prose. */
@@ -122,7 +147,68 @@ export function humanizeChange(rawTitle: string | undefined | null): HumanizedCh
   const presentable = cleaned.length > 0 && JAPANESE.test(cleaned);
   const headline = presentable ? cleaned : GENERIC_HEADLINE[kind];
 
-  return { kind, label: KIND_LABEL[kind], headline, generic: !presentable, cleaned };
+  return { kind, label: KIND_LABEL[kind], headline, generic: !presentable, cleaned, ...(type ? { type } : {}) };
+}
+
+// ---- human-written notify line (PR body 1st line) --------------------------------------
+// The forward CI step + backfill prefer a HUMAN-written one-line notification copy over any
+// machine humanization of the commit title. That line lives in the PR body (see
+// .github/PULL_REQUEST_TEMPLATE.md): the author writes "何ができるようになったか" for the
+// reader, and CI surfaces it verbatim. This is the only reliable way to say what actually
+// became usable — CI cannot infer intent from a diff.
+
+// Placeholder / guidance fragments that mean "the author left the field blank". Treated as
+// no notify line (→ fall back to humanization). Matched case-insensitively on the trimmed line.
+const NOTIFY_PLACEHOLDER = /^[（(]?\s*(例[:：]|ここに|todo\b|なし$|n\/?a$)|^<!--|^[-–—]+$/i;
+// A PR-body heading whose section holds the notify line (## 通知文言 …).
+const NOTIFY_HEADING = /通知文言/;
+// Markdown heading / HTML comment / quote / list-bullet lines are template scaffolding, not
+// the notify copy.
+const SCAFFOLD_LINE = /^\s*(#{1,6}\s|<!--|-->|>|[-*]\s|---\s*$)/;
+
+/**
+ * A notify line is presentable when, after noise-stripping, it has real Japanese content and
+ * is not a template placeholder. English/dev shorthand is rejected so a raw string never
+ * shows verbatim (same bar as humanizeChange's `presentable`).
+ */
+export function isPresentableNotifyLine(line: string | undefined | null): boolean {
+  const cleaned = stripNoise((line ?? "").trim());
+  if (cleaned.length === 0) return false;
+  if (NOTIFY_PLACEHOLDER.test(cleaned)) return false;
+  return JAPANESE.test(cleaned);
+}
+
+/**
+ * Extract the human notify line from a PR body. Prefers the first content line inside the
+ * "## 通知文言" section; if there is no such heading, falls back to the first content line of
+ * the whole body (the "PR本文の1行目 = 通知文言" convention). Scaffolding lines (headings,
+ * HTML comments, quotes, bullets) and placeholders are skipped. Returns the cleaned line, or
+ * undefined when the author wrote nothing usable.
+ */
+export function extractNotifyLine(prBody: string | undefined | null): string | undefined {
+  const body = (prBody ?? "").replace(/\r\n?/g, "\n");
+  if (!body.trim()) return undefined;
+  const lines = body.split("\n");
+
+  // Locate the 通知文言 heading, if present, and scan only its section.
+  let start = 0;
+  let end = lines.length;
+  const headingIdx = lines.findIndex((l) => /^\s*#{1,6}\s/.test(l) && NOTIFY_HEADING.test(l));
+  if (headingIdx >= 0) {
+    start = headingIdx + 1;
+    const nextHeading = lines.slice(start).findIndex((l) => /^\s*#{1,6}\s/.test(l));
+    if (nextHeading >= 0) end = start + nextHeading;
+  }
+
+  for (let i = start; i < end; i++) {
+    const raw = (lines[i] ?? "").trim();
+    if (!raw) continue;
+    if (SCAFFOLD_LINE.test(raw)) continue;
+    const cleaned = stripNoise(raw);
+    if (!cleaned || NOTIFY_PLACEHOLDER.test(cleaned)) continue;
+    return cleaned;
+  }
+  return undefined;
 }
 
 /** Format an ISO8601 instant as a readable JST date-time (YYYY年M月D日 HH:mm). Deterministic
@@ -138,6 +224,10 @@ export function formatJst(iso: string): string {
 export interface DeployCopyInput {
   /** Raw PR title / commit subject (the "what changed"). */
   title?: string;
+  /** Human-written notification copy (PR body 1st line). When presentable, it becomes the
+   *  headline verbatim — the author said "何ができるようになったか", so we trust it over any
+   *  machine humanization of the title. */
+  notifyLine?: string;
   /** ISO8601 instant of the deploy/merge (already resolved by the caller). */
   createdAt: string;
   /** Merged PR / commit URL (shown as a "詳細" link when present). */
@@ -154,13 +244,26 @@ export interface DeployCopy {
 /**
  * Build the user-friendly notification title + body for a deploy.
  *
+ * Headline source (in priority order):
+ *   1. input.notifyLine — the human-written PR-body line, when presentable (Japanese, not a
+ *      placeholder). This is what actually tells the reader "何ができるようになったか".
+ *   2. humanizeChange(title) — machine humanization of the commit title.
+ *   3. a generic per-kind phrase (inside humanizeChange) when neither is presentable.
+ * The genre (種別/emoji) always comes from the commit title so it reflects the real change
+ * kind even when the human line is a plain sentence.
+ *
  * title: "🎉 新機能: <headline>" — genre-tagged, reads as an "アップデート内容".
  * body : a short "アプリがアップデートされました" lead + the headline + 種別/更新日時 (+ 詳細 link).
  *        The raw commit SHA / ref / services summary are intentionally NOT rendered here
  *        (kept in meta_json for admin traceability) so no dev string shows to the reader.
  */
 export function buildDeployCopy(input: DeployCopyInput): DeployCopy {
-  const change = humanizeChange(input.title);
+  const humanized = humanizeChange(input.title);
+  const useLine = isPresentableNotifyLine(input.notifyLine);
+  // Prefer the human notify line as the headline; keep the title-derived genre/generic flag.
+  const change: HumanizedChange = useLine
+    ? { ...humanized, headline: stripNoise((input.notifyLine ?? "").trim()), generic: false }
+    : humanized;
   const title = `${KIND_EMOJI[change.kind]} ${change.label}: ${change.headline}`;
   const bodyLines = [
     "アプリがアップデートされました。",
