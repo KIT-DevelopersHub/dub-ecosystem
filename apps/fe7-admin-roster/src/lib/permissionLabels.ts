@@ -23,7 +23,25 @@ const DOMAIN_LABELS: Record<string, string> = {
   github: "GitHub 連携",
   drive: "Google Drive",
   webhook: "Webhook",
+  app: "アプリのアクセス権",
 };
+
+// Per-app access keys (domain "app"). The role matrix renders these via AppAccessSection
+// (有効化トグル + 閲覧/編集作成), but effective-permission lists elsewhere render them per-key,
+// so give each a plain-Japanese label/description too.
+const APP_LABELS: { id: string; name: string }[] = [
+  { id: "events", name: "イベント" },
+  { id: "tasks", name: "マイタスク" },
+  { id: "gantt", name: "ガントチャート" },
+  { id: "notifications", name: "通知" },
+  { id: "chat", name: "チャット" },
+  { id: "mail", name: "メール" },
+  { id: "usage", name: "無料枠 / 課金ガード" },
+  { id: "members", name: "運営メンバー" },
+  { id: "participation", name: "参加届" },
+  { id: "driveshare", name: "Drive共有" },
+  { id: "admin", name: "管理" },
+];
 
 // Descriptions are written as an outcome ("オンにすると〜できるようになる") so even
 // non-obvious keys make clear what granting them lets a member do.
@@ -64,6 +82,12 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "drive:read": { label: "Drive の閲覧", description: "Google Drive のファイル情報の閲覧・検索とダウンロードができるようになります。" },
   "drive:write": { label: "Drive の更新", description: "Google Drive へのファイルのアップロード・更新ができるようになります。" },
   "webhook:read": { label: "Webhook の閲覧", description: "Webhook の配信履歴を検索・確認できるようになります。" },
+  ...Object.fromEntries(
+    APP_LABELS.flatMap((a) => [
+      [`app:${a.id}:view`, { label: `${a.name}：有効化（閲覧まで）`, description: `${a.name} アプリを開いて閲覧できるようになります。` }],
+      [`app:${a.id}:edit`, { label: `${a.name}：編集・作成まで`, description: `${a.name} アプリ内での作成・編集ができるようになります（閲覧を含みます）。` }],
+    ]),
+  ),
 };
 
 /** Japanese feature-group heading for a catalog domain (English domain fallback). */

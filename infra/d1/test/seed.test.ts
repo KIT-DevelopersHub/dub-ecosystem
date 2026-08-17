@@ -160,4 +160,30 @@ describe("seedScenario", () => {
     const missing = identity.PERMISSION_CATALOG.map((e) => e.key).filter((k) => !granted.has(k));
     expect(missing, `admin missing catalog perms: ${missing.join(", ")}`).toEqual([]);
   });
+
+  // Per-app access tier (0008): the previously-uncontrollable apps (gantt rode task:read,
+  // 参加届 rode identity:read) now have their OWN per-app keys granted to the roles that can
+  // already reach them — so an admin can toggle each app individually without breaking
+  // current access. Guards the non-breaking backfill mapping stays in lockstep.
+  it("system roles grant per-app access keys for the apps they can reach (0008)", async () => {
+    const { raw } = await migratedD1();
+    const has = (roleId: string, key: string): boolean =>
+      !!(raw
+        .prepare("SELECT 1 AS ok FROM identity_role_permissions WHERE role_id = ? AND permission_key = ?")
+        .get(roleId, key) as { ok: number } | undefined);
+
+    // headline: member (and everyone) can now open ガント and 参加届 via their OWN keys
+    for (const roleId of ["role_sys_admin", "role_sys_maintainer", "role_sys_organizer", "role_sys_member"]) {
+      expect(has(roleId, "app:gantt:view"), `${roleId} app:gantt:view`).toBe(true);
+      expect(has(roleId, "app:participation:view"), `${roleId} app:participation:view`).toBe(true);
+    }
+    // member can write tasks today ⇒ gets edit; cannot read mail ⇒ no mail app
+    expect(has("role_sys_member", "app:tasks:edit")).toBe(true);
+    expect(has("role_sys_member", "app:mail:view")).toBe(false);
+    expect(has("role_sys_member", "app:admin:view")).toBe(false);
+    // maintainer writes drive ⇒ driveshare edit; no identity:admin ⇒ members view-only, no 管理
+    expect(has("role_sys_maintainer", "app:driveshare:edit")).toBe(true);
+    expect(has("role_sys_maintainer", "app:members:edit")).toBe(false);
+    expect(has("role_sys_maintainer", "app:admin:view")).toBe(false);
+  });
 });
