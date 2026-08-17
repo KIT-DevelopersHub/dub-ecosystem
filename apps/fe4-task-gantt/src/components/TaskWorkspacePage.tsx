@@ -78,13 +78,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const history = useUndoRedo();
   useUndoRedoHotkeys(history, { enabled: caps.canWrite });
 
-  // Load the whole event in one page: the gantt intersects its rows with this
-  // store set (see `filteredDto`), so a short default page would silently drop
-  // work-packages/leaves from the timeline. The WBS tree is ~170 rows.
-  // NOTE: task-service caps `limit` at 200 (services/task-service/src/validate.ts —
-  // throws VALIDATION_FAILED on >200). 500 made every task-list load 400 with a
-  // "Validation failed" banner (and an empty timeline). 200 is the contract max and
-  // still covers the current tree; events beyond 200 tasks need cursor pagination.
+  // Load the WHOLE event: the gantt intersects its rows with this store set (see
+  // `filteredDto`), so any task missing from the store silently vanishes from the
+  // timeline. task-service caps `limit` at 200 (validate.ts throws on >200), so the
+  // 216-task conference lost its tail — those rows disappeared and their edits were
+  // impossible (F3). `store.loadAll` walks nextCursor to pull every page; 200 is the
+  // per-page ceiling, not the total.
   const WORKSPACE_PAGE_LIMIT = 200;
   const query = useMemo(
     () => toListTasksQuery({ ...filter, limit: filter.limit ?? WORKSPACE_PAGE_LIMIT }),
@@ -92,7 +91,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   );
 
   useEffect(() => {
-    void store.load(client, query);
+    void store.loadAll(client, query);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
@@ -222,7 +221,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     gantt.setRowScheduleOptimistic(id, startsAt, endsAt);
     return patchGanttRow(client, id, { startsAt, endsAt })
       .then(() => gantt.refetchFresh())
-      .then(() => store.load(client, query))
+      .then(() => store.loadAll(client, query))
       .catch(() => {
         void gantt.refetchFresh();
       });
@@ -253,7 +252,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     for (const s of shifts) gantt.setRowScheduleOptimistic(s.id, s.startsAt, s.endsAt);
     return Promise.all(shifts.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
       .then(() => gantt.refetchFresh())
-      .then(() => store.load(client, query))
+      .then(() => store.loadAll(client, query))
       .catch(() => {
         void gantt.refetchFresh();
       });
@@ -281,7 +280,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       // parent/dependency save vanished silently ("保存を押しても無反応"). Surface it.
       store.reportError(e);
     } finally {
-      await store.load(client, query);
+      await store.loadAll(client, query);
       await gantt.refetchFresh();
     }
   };
@@ -414,30 +413,32 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     }
     if (draft.dependsOnIds.length > 0) {
       try {
-        const withDeps = await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
-        version = withDeps.version;
+        // NOTE: the deps endpoint returns { taskId, dependsOnIds } (NOT a Task), so it
+        // carries no version — do not read one off it. `version` is unused afterwards.
+        await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
       } catch (e) {
         // dependency cycle / out-of-scope — the task IS created; tell the user why
         // the dependency didn't take instead of dropping it on the floor.
         store.reportError(e);
       }
     }
-    // "先行タスクを作成": add the new task as a predecessor of the source task.
+    // "先行タスクを作成": add the new task as a predecessor of the source task. Fetch the
+    // source task FRESH for its current version — the render-snapshot `tasks` list can be
+    // stale (and, before F3, omitted tasks past #200 entirely), which sent a stale version
+    // and 409'd: the task was created but linking errored ("作られるのにエラー").
     if (linkPredecessorFor) {
-      const target = tasks.find((t) => t.id === linkPredecessorFor);
-      if (target) {
+      try {
+        const target = await getTask(client, linkPredecessorFor);
         const curDeps = gantt.data?.dependencies.filter((d) => d.toTaskId === linkPredecessorFor).map((d) => d.fromTaskId) ?? [];
-        try {
-          await replaceDependencies(client, linkPredecessorFor, {
-            version: target.version,
-            dependsOnIds: [...curDeps, created.id],
-          });
-        } catch (e) {
-          store.reportError(e); // out-of-scope / cycle — surfaced; the new task still exists
-        }
+        await replaceDependencies(client, linkPredecessorFor, {
+          version: target.version,
+          dependsOnIds: [...curDeps, created.id],
+        });
+      } catch (e) {
+        store.reportError(e); // not-found / out-of-scope / cycle — surfaced; the new task still exists
       }
     }
-    await store.load(client, query);
+    await store.loadAll(client, query);
     await gantt.refetchFresh();
   };
 
@@ -486,7 +487,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     gantt.removeRowOptimistic(id);
     void store.removeTask(client, id).then(async (ok) => {
       if (ok) {
-        await store.load(client, query);
+        await store.loadAll(client, query);
         await gantt.refetchFresh();
       } else {
         void gantt.refetchFresh(); // delete failed — restore the bar from the server
@@ -629,7 +630,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
             ? {
                 onRetry: () => {
                   store.clearError();
-                  void store.load(client, query);
+                  void store.loadAll(client, query);
                   void gantt.refetchFresh();
                 },
               }

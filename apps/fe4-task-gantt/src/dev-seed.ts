@@ -332,8 +332,33 @@ type MockSeedRowDates = Record<
   { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }
 >;
 
-export function createDevClient(): MockApiClient {
+export function createDevClient(opts: { padTo?: number } = {}): MockApiClient {
   const { tasks, rowDates, deps, hierarchy } = build();
+  // Dev/E2E only: pad the event with extra top-level tasks so the timeline can be
+  // exercised past the 200-per-page ceiling (F3 — verify all rows load & render).
+  if (opts.padTo && opts.padTo > tasks.length) {
+    const base = Date.parse("2027-03-01T00:00:00.000Z");
+    for (let i = tasks.length; i < opts.padTo; i++) {
+      const due = new Date(base + (i % 30) * 86_400_000).toISOString();
+      tasks.push({
+        id: `task_pad_${i}`,
+        eventId: DEMO_EVENT_ID,
+        title: `追加タスク #${i}`,
+        description: null,
+        status: "todo",
+        priority: "medium",
+        assigneeId: null,
+        teamId: null,
+        createdBy: DEMO_CURRENT_USER,
+        dueAt: due,
+        origin: "internal",
+        version: 1,
+        archivedAt: null,
+        createdAt: due,
+        updatedAt: due,
+      } as task.Task);
+    }
+  }
   return new MockApiClient({
     currentUserId: DEMO_CURRENT_USER,
     users,

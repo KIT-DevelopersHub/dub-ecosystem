@@ -81,12 +81,21 @@ export function deleteTaskAttachment(
   });
 }
 
+/** Wire response of PUT /tasks/:id/dependencies. The server returns ONLY this
+ *  (NOT a full task.Task) — it bumps the task's version internally but does not
+ *  echo it back, so callers must NOT read `.version` here and should re-fetch the
+ *  task (getTask) when a fresh version is needed for a chained write. */
+export interface ReplaceDependenciesResult {
+  taskId: common.TaskId;
+  dependsOnIds: common.TaskId[];
+}
+
 export function replaceDependencies(
   client: ApiClient,
   id: common.TaskId,
   body: task.ReplaceDependenciesRequest,
-): Promise<task.Task> {
-  return client.request<task.Task>({
+): Promise<ReplaceDependenciesResult> {
+  return client.request<ReplaceDependenciesResult>({
     method: "PUT",
     path: `${P}/tasks/${id}/dependencies` as ApiPath,
     body,
