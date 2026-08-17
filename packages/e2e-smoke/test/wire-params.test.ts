@@ -21,6 +21,7 @@ import {
   mailAutomation,
   drive,
   auditLog,
+  notification,
 } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
@@ -48,20 +49,6 @@ function serviceSrcFiles(service: ServiceName): string[] {
  *    (b) destructured: const q = c.req.query(); q.X -> "X"
  *  so the "server reads == SoT" reconciliation works whether a handler pulls one key or
  *  destructures the whole query object. */
-/** Brace-balanced body of the function whose header starts at/near `fromIdx` (the text
- *  from its opening `{` to the matching `}`). Good enough for the validation parsers here
- *  (no braces buried in strings/regex within their signatures). */
-function functionBody(src: string, fromIdx: number): string {
-  const open = src.indexOf("{", fromIdx);
-  if (open < 0) return "";
-  let depth = 0;
-  for (let i = open; i < src.length; i++) {
-    if (src[i] === "{") depth++;
-    else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
-  }
-  return src.slice(open);
-}
-
 function serverQueryKeys(service: ServiceName): Set<string> {
   const keys = new Set<string>();
   const sources = serviceSrcFiles(service).map((f) => readFileSync(f, "utf8"));
@@ -80,23 +67,27 @@ function serverQueryKeys(service: ServiceName): Set<string> {
     }
   }
   // (c) parser reads: services that pass the whole query object to a validation parser
-  //     (`parseX(c.req.query())`, parser in validation.ts) read the keys as `param.prop`
-  //     inside the parser body. Resolve each parser called with the raw query, find its
-  //     definition + param name across the tree, and collect that param's property reads.
+  //     (`parseX(c.req.query())`, parser defined in validation.ts) read the keys as
+  //     `param.prop` inside the parser. Resolve each parser called with the raw query,
+  //     then scan the file that DEFINES it for that param's property reads. These
+  //     validation files are query-dedicated (their only `param.prop` reads are query
+  //     keys), so scanning the whole defining file is robust and avoids brittle
+  //     function-body brace matching (parser return types embed object literals).
   const all = sources.join("\n\n");
   const parsers = new Set<string>();
   const callRe = /([A-Za-z_$][\w$]*)\s*\(\s*[A-Za-z_$][\w$.]*\.req\.query\(\s*\)/g;
   for (let m; (m = callRe.exec(all)); ) parsers.add(m[1]!);
-  for (const name of parsers) {
-    const defRe = new RegExp(
-      `(?:function\\s+${name}\\s*\\(|(?:const|let|var)\\s+${name}\\s*=\\s*(?:async\\s*)?\\()\\s*([A-Za-z_$][\\w$]*)`,
-    );
-    const dm = defRe.exec(all);
-    if (!dm) continue;
-    const param = dm[1]!;
-    const body = functionBody(all, dm.index);
-    const prop = new RegExp(`\\b${param}\\.([A-Za-z_$][\\w$]*)`, "g");
-    for (let m; (m = prop.exec(body)); ) keys.add(m[1]!);
+  for (const src of sources) {
+    for (const name of parsers) {
+      const defRe = new RegExp(
+        `(?:function\\s+${name}\\s*\\(|(?:const|let|var)\\s+${name}\\s*=\\s*(?:async\\s*)?\\()\\s*([A-Za-z_$][\\w$]*)`,
+      );
+      const dm = defRe.exec(src);
+      if (!dm) continue;
+      const param = dm[1]!;
+      const prop = new RegExp(`\\b${param}\\.([A-Za-z_$][\\w$]*)`, "g");
+      for (let m; (m = prop.exec(src)); ) keys.add(m[1]!);
+    }
   }
   return keys;
 }
@@ -334,6 +325,30 @@ describe("audit-log wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ s
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by audit-log`).toBe(true);
+    }
+  });
+});
+
+describe("notification wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("notification").file);
+  const serverKeys = serverQueryKeys("notification"); // reads via parseListInbox/Feedback/ManageQuery
+
+  // Union across the spec'd read endpoints (listInbox/listFeedback). The admin /manage
+  // parser reads only cursor/limit — a subset — so it needs no separate WIRE entry.
+  const sotKeys = new Set<string>(Object.values(notification.NOTIFICATION_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(notification.NOTIFICATION_WIRE)) {
+    it(`${op}: OpenAPI query params == NOTIFICATION_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (incl. the admin /manage parser's subset)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `notification reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by notification`).toBe(true);
     }
   });
 });
