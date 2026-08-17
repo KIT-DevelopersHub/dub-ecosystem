@@ -81,6 +81,23 @@ function qs(params: Record<string, string | number | undefined>): string {
   return s ? `?${s}` : "";
 }
 
+/**
+ * Normalize a list response to a plain array. chat-service (and identity /users)
+ * return the frozen `common.Paginated<T>` envelope `{ items, nextCursor }` for
+ * channels / unread / user-resolution, whereas the mock server and a few other
+ * endpoints (members, pins, search) return a bare array. Downstream code does
+ * `for..of` / spread / `.find` on these results, so a non-iterable envelope object
+ * crashes the whole app with "e is not iterable" (chat error-fix). Accept either
+ * shape — and null/undefined — and always hand back an array.
+ */
+function unwrapItems<T>(res: unknown): T[] {
+  if (Array.isArray(res)) return res as T[];
+  if (res && typeof res === "object" && Array.isArray((res as { items?: unknown }).items)) {
+    return (res as { items: T[] }).items;
+  }
+  return [];
+}
+
 /** fetch-based client. Cookie session (Web) travels via credentials: "include". */
 export class HttpChatClient implements ChatApiClient {
   private readonly base: string;
@@ -88,7 +105,10 @@ export class HttpChatClient implements ChatApiClient {
 
   constructor(opts: HttpChatClientOptions = {}) {
     this.base = opts.baseUrl ?? "";
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    // Bind to the global (window/globalThis) — a bare `fetch` reference called as
+    // `this.fetchImpl(...)` runs with `this === client`, which native fetch rejects
+    // with "Illegal invocation", so live-mode requests never leave the client.
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -112,8 +132,10 @@ export class HttpChatClient implements ChatApiClient {
     return (await res.json()) as T;
   }
 
-  listChannels(eventId?: common.EventId): Promise<Channel[]> {
-    return this.request<Channel[]>("GET", `${CHAT}/channels${qs({ eventId })}`);
+  async listChannels(eventId?: common.EventId): Promise<Channel[]> {
+    // Server returns common.Paginated<Channel> ({ items, nextCursor }); unwrap to array.
+    const res = await this.request<unknown>("GET", `${CHAT}/channels${qs({ eventId })}`);
+    return unwrapItems<Channel>(res);
   }
   createChannel(req: CreateChannelRequest): Promise<Channel> {
     return this.request<Channel>("POST", `${CHAT}/channels`, req);
@@ -164,15 +186,19 @@ export class HttpChatClient implements ChatApiClient {
   updateReadState(req: ReadStateUpdateRequest): Promise<void> {
     return this.request<void>("POST", `${CHAT}/channels/${req.channelId}/read`, req);
   }
-  listUnread(): Promise<UnreadSummary[]> {
-    return this.request<UnreadSummary[]>("GET", `${CHAT}/unread`);
+  async listUnread(): Promise<UnreadSummary[]> {
+    // Server returns { items: UnreadSummary[] } (UnreadResponse); unwrap to array.
+    const res = await this.request<unknown>("GET", `${CHAT}/unread`);
+    return unwrapItems<UnreadSummary>(res);
   }
   getWsTicket(id: common.ChannelId): Promise<WsTicketResponse> {
     return this.request<WsTicketResponse>("GET", `${CHAT}/channels/${id}/ws-ticket`);
   }
-  resolveUsers(ids: common.UserId[]): Promise<identity.UserSummary[]> {
-    if (ids.length === 0) return Promise.resolve([]);
+  async resolveUsers(ids: common.UserId[]): Promise<identity.UserSummary[]> {
+    if (ids.length === 0) return [];
     const batch = ids.slice(0, IDENTITY_BATCH_MAX);
-    return this.request<identity.UserSummary[]>("GET", `${IDENTITY}/users${qs({ ids: batch.join(",") })}`);
+    // identity /users returns common.Paginated<UserSummary> ({ items, nextCursor }); unwrap to array.
+    const res = await this.request<unknown>("GET", `${IDENTITY}/users${qs({ ids: batch.join(",") })}`);
+    return unwrapItems<identity.UserSummary>(res);
   }
 }
