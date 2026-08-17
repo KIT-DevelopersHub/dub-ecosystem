@@ -21,6 +21,14 @@ export function isPhone(v: unknown): v is string {
   return typeof v === "string" && PHONE_RE.test(v.trim());
 }
 
+/** ローマ字 (氏名のアルファベット表記) shape: starts with a Latin letter, then letters /
+ *  spaces / hyphens / apostrophes (e.g. "Yamada", "O'Brien", "Van Dyke"). 任意フィールド
+ *  なので緩め — アルファベットのメール発行に使う前提で、非ラテン文字だけ弾く。 */
+const ROMAJI_RE = /^[A-Za-z][A-Za-z\s'-]*$/;
+export function isRomaji(v: unknown): v is string {
+  return typeof v === "string" && ROMAJI_RE.test(v.trim());
+}
+
 /** Compose "姓 名" from the split fields, skipping empty parts. Used to keep the legacy
  *  single `name` / `name_kana` columns in sync so every existing reader keeps working. */
 export function composeName(last: string | null, first: string | null): string {
@@ -82,6 +90,8 @@ export function toMember(r: PersonRow, teamIds: string[]): member.Member {
     firstName: r.firstName,
     lastNameKana: r.lastNameKana,
     firstNameKana: r.firstNameKana,
+    lastNameRomaji: r.lastNameRomaji,
+    firstNameRomaji: r.firstNameRomaji,
     phone: r.phone,
     note: r.note,
     sortOrder: r.sortOrder,
@@ -102,6 +112,9 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     nameKana: r.nameKana,
     lastNameKana: r.lastNameKana,
     firstNameKana: r.firstNameKana,
+    nameRomaji: r.nameRomaji,
+    lastNameRomaji: r.lastNameRomaji,
+    firstNameRomaji: r.firstNameRomaji,
     grade: r.grade,
     department: r.department,
     contact: r.contact,
