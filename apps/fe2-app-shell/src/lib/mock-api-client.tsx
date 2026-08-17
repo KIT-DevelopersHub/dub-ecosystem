@@ -25,7 +25,11 @@ const DEFAULT_SEED: MockSeed = {
     user: { id: "usr_demo", displayName: "デモ ユーザー", avatarUrl: null, email: "demo@developershub.jp" },
     orgId: "org_demo",
     // Broad-but-not-admin permission set so the primary nav + self-service
-    // routes render under the mock. Matches PERMISSION_CATALOG keys.
+    // routes render under the mock. Matches PERMISSION_CATALOG keys. Includes the
+    // per-app access grants (app:<id>:view, #270) for the apps this non-admin role was
+    // "granted" in ロール管理 — so the launcher shows them ACTIVE (not greyed) exactly as a
+    // granted organizer should. Apps left ungranted (usage/members/participation/
+    // driveshare/admin) stay greyed, demonstrating the per-app gate both ways.
     permissions: [
       "identity:read",
       "event:read",
@@ -37,6 +41,12 @@ const DEFAULT_SEED: MockSeed = {
       "notif:prefs:self",
       "mail:read",
       "chat:create",
+      "app:events:view",
+      "app:tasks:view",
+      "app:gantt:view",
+      "app:notifications:view",
+      "app:mail:view",
+      "app:chat:view",
     ],
     sessionExpiresAt: Date.now() + 60 * 60 * 1000,
   },

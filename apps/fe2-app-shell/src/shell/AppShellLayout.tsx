@@ -16,8 +16,7 @@ import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
 import {
-  isAppPublished,
-  isPrivilegedViewer,
+  isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
   UNAUTHORIZED_TILE_REASON,
 } from "../lib/releaseGate.ts";
@@ -78,7 +77,6 @@ export interface AppShellLayoutProps {
 // Sort order: usable apps first, greyed apps last; the existing order-based sequence is
 // preserved within each group (a stable partition), and nothing is removed.
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
-  const privileged = isPrivilegedViewer(can);
   const items = [...navEntries]
     .sort((a, b) => a.order - b.order)
     .map((entry) => {
@@ -90,7 +88,7 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
-      const releaseGated = !privileged && !isAppPublished(entry.appId);
+      const releaseGated = isReleaseGatedFor(entry.appId, can);
       const lacksPermission =
         entry.requiredPermissions !== undefined &&
         entry.requiredPermissions.length > 0 &&

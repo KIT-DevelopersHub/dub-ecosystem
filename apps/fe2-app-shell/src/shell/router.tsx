@@ -13,7 +13,7 @@ import type { ComponentType } from "react";
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { Registry, ResolvedRoute } from "../modules/types.tsx";
 import { RequireAuth, RequirePermission, usePermissions } from "../auth/AuthProvider.tsx";
-import { isAppPublished, isPrivilegedViewer } from "../lib/releaseGate.ts";
+import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 import type { FeatureModuleId } from "../modules/types.tsx";
 import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
@@ -35,7 +35,9 @@ export function toTanstackPath(path: string): string {
 // page; only full admins (isPrivilegedViewer = identity:admin) bypass it, matching the launcher.
 function RequirePublished({ moduleId, children }: { moduleId: FeatureModuleId; children: JSX.Element }): JSX.Element {
   const { can } = usePermissions();
-  if (isPrivilegedViewer(can) || isAppPublished(moduleId)) return children;
+  // Parity with the launcher (AppShellLayout): an explicit per-app grant (app:<id>:view)
+  // OR admin OR member-publish releases the app; only an unannounced+ungranted app 403s.
+  if (!isReleaseGatedFor(moduleId, can)) return children;
   return <PermissionDeniedScreen />;
 }
 
