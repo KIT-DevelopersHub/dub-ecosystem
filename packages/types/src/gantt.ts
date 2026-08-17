@@ -54,3 +54,27 @@ export interface PutGanttViewRequest {
   zoom: GanttZoom;
   collapsedTaskIds: TaskId[];
 }
+
+// ── Wire contract (query params) ─────────────────────────────────────────────
+// SINGLE source of truth for the query-parameter *names* every gantt read endpoint
+// puts on the wire. The FE client (apps/fe4 endpoints.ts), the server (gantt-service),
+// and the OpenAPI spec (docs/openapi/gantt-service.yaml) all derive from — and are
+// reconciled against — this one map in CI. This is the guard the `?event` vs `?eventId`
+// production drift needed: renaming a key here is the ONLY legitimate way to change a
+// wire param; any side that disagrees turns a contract-conformance test red (unmergeable).
+// `path` is the gateway path AFTER the /api/v1 prefix strip. Extend per-service the same
+// way (see docs/api-contracts/_wire-contract-enforcement.md) — do not hand-map keys.
+export const GANTT_WIRE = {
+  getGantt: { method: "GET", path: "/gantt", query: ["eventId"] },
+  getGanttDependencies: { method: "GET", path: "/gantt/dependencies", query: ["eventId"] },
+  getGanttView: { method: "GET", path: "/gantt/views", query: ["eventId"] },
+  putGanttView: { method: "PUT", path: "/gantt/views", query: ["eventId"] },
+} as const;
+
+// Compile-time tie between the runtime descriptor and the typed query interface: every
+// query key the descriptor lists must be a real key of GetGanttQuery, so the descriptor
+// and the hand-written type can never silently drift from each other.
+type _GanttWireKeysAreTyped =
+  (typeof GANTT_WIRE)[keyof typeof GANTT_WIRE]["query"][number] extends keyof GetGanttQuery ? true : never;
+const _ganttWireKeyGuard: _GanttWireKeysAreTyped = true;
+void _ganttWireKeyGuard;

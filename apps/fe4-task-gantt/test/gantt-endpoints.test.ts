@@ -36,7 +36,7 @@ describe("gantt endpoints (design tests 4/6/8/12)", () => {
     await api.getGanttFresh(c, "evt_1");
     const call = c.calls.find((r) => r.path === "/api/v1/gantt");
     expect(call?.headers?.["Cache-Control"]).toBe("no-cache");
-    expect(call?.query?.eventId).toBe("evt_1"); // gantt reads ?eventId= (matches gantt-service)
+    expect(call?.query?.eventId).toBe("evt_1"); // wire key = gantt.GetGanttQuery.eventId (SoT)
   });
 
   it("gantt view state round-trips: PUT then GET (test 8)", async () => {

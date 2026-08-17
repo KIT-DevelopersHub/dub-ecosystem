@@ -137,6 +137,9 @@ export class MockApiClient implements ApiClient {
     const ganttRow = path.match(/^\/api\/v1\/gantt\/rows\/([^/]+)$/);
     if (ganttRow && req.method === "PATCH")
       return this.patchRowSchedule(ganttRow[1]!, req.body as { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }) as T;
+    // Query key is `eventId` — the @dub/types wire contract (gantt.GetGanttQuery). The mock
+    // reads the SAME key the server does; it must never mirror a FE-local rename (the old
+    // `event` here is exactly why FE unit tests stayed green while prod 400'd).
     if (path === "/api/v1/gantt" && req.method === "GET") return this.ganttDto(String(req.query?.eventId)) as T;
     if (path === "/api/v1/gantt/dependencies" && req.method === "GET") return this.ganttDeps(String(req.query?.eventId)) as T;
     if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.eventId)) as T;
