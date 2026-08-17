@@ -18,10 +18,12 @@ const mk = (id: string, teamId: string | null): task.Task => ({
 });
 
 describe("teams — canonical shared entity (feature B)", () => {
-  it("GET /teams returns the seeded canonical teams", async () => {
+  it("GET /teams returns the seeded canonical teams (member.ListTeamsResponse: { teams })", async () => {
     const c = new MockApiClient({ teams: TEAMS });
     const res = await api.listTeams(c);
-    expect(res.items.map((t) => t.key)).toEqual(["ops", "content"]);
+    // member-service's canonical envelope is { teams }, not { items }. Pinning this
+    // keeps the mock aligned with prod so the team switcher never silently empties.
+    expect(res.teams.map((t) => t.key)).toEqual(["ops", "content"]);
   });
 
   it("listTasks filters by teamId (feature C source)", async () => {

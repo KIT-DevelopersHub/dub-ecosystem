@@ -2,7 +2,7 @@
 // real `@dub/api-client` (gateway HTTP) lands. Enforces the same contract the
 // server does: version conflicts, status-transition rules, dependency cycles —
 // so optimistic-UI rollback paths (tests 2/3/5/9/11) exercise real branches.
-import type { gantt, identity, event, common, gateway, team } from "@dub/types";
+import type { gantt, identity, event, common, gateway, team, member } from "@dub/types";
 import { task } from "@dub/types";
 import type { ErrorResponse } from "@dub/errors";
 import { CommonErrorCodes } from "@dub/errors";
@@ -147,7 +147,9 @@ export class MockApiClient implements ApiClient {
       return this.putView(String(req.query?.eventId), req.body as gantt.PutGanttViewRequest) as T;
     // --- teams (canonical team.Team; future: member-service) ---
     if ((path === "/api/v1/members/teams" || path === "/api/v1/teams") && req.method === "GET")
-      return ({ items: this.teams } as team.ListTeamsResponse) as T;
+      // Mirror member-service's canonical { teams } envelope so the mock and prod
+      // agree (previously { items }, which hid a prod-only empty team switcher).
+      return ({ teams: this.teams } as member.ListTeamsResponse) as T;
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(req.query ?? {}) as T;
     // --- events ---
