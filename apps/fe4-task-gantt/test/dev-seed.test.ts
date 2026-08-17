@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { createDevClient, DEMO_EVENT_ID } from "../src/dev-seed";
 import * as api from "../src/api/endpoints";
-import type { gantt, task, team } from "@dub/types";
+import type { gantt, task, member } from "@dub/types";
 
 async function getDto(): Promise<gantt.GanttChartDTO> {
   // Route through the real endpoint wrapper so this fixture can never re-encode a
@@ -14,10 +14,10 @@ async function getDto(): Promise<gantt.GanttChartDTO> {
 describe("dev-seed (real LMB conference data)", () => {
   it("exposes the 7 real conference teams with colours", async () => {
     const client = createDevClient();
-    const res = await client.request<team.ListTeamsResponse>({ method: "GET", path: "/api/v1/teams" });
-    const names = res.items.map((t) => t.name).sort();
+    const res = await client.request<member.ListTeamsResponse>({ method: "GET", path: "/api/v1/teams" });
+    const names = res.teams.map((t) => t.name).sort();
     expect(names).toEqual(["会場", "会計", "全体進行", "集客告知", "スポンサー", "開発", "本部"].sort());
-    expect(res.items.every((t) => typeof t.color === "string")).toBe(true);
+    expect(res.teams.every((t) => typeof t.color === "string")).toBe(true);
   });
 
   it("renders the 41 work-packages + 128 WBS leaves as a two-level tree, each with a bar", async () => {

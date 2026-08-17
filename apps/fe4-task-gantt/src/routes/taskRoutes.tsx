@@ -10,7 +10,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTeams, listEvents } from "../api/endpoints";
+import { listTeams, listEvents, toDomainTeams } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
 import type { EventOption } from "../components/MyTaskCreateModal";
@@ -74,7 +74,7 @@ export function MeTasksRoute() {
     let live = true;
     void listTeams(client)
       .then((res) => {
-        if (live) setTeams(res.items);
+        if (live) setTeams(toDomainTeams(res));
       })
       .catch(() => {
         /* teams are optional; the hub degrades gracefully without them */
