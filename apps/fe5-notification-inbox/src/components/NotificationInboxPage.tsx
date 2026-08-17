@@ -16,6 +16,7 @@ import {
   type InboxFilter,
 } from "../lib/inbox-filter";
 import { resolveLinkUrl } from "../lib/routes";
+import { resolveTypeDisplay, NOTIFICATION_GROUP_PREFIXES } from "../lib/type-dictionary";
 import { NotificationFilterBar } from "./NotificationFilterBar";
 import { NotificationList } from "./NotificationList";
 import { MarkAllReadButton } from "./MarkAllReadButton";
@@ -84,18 +85,34 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
     [inbox, navigate, toast],
   );
 
-  // Search filters the loaded buffer client-side; paging then windows the result.
-  const filtered = useMemo(
-    () => (query ? inbox.items.filter((i) => matchesQuery(i, query)) : inbox.items),
-    [inbox.items, query],
+  // The type tabs select a notification GROUP (release/task/event/system). Both the tab
+  // filter and the search box narrow the loaded buffer CLIENT-SIDE — the inbox list
+  // endpoint does not filter by type server-side (ListInboxQuery has no `type`), so doing
+  // it here is what actually makes the tabs work. Matching by the resolved GROUP (not a raw
+  // type prefix) keeps a tab consistent with the grouped sections the user sees — e.g. a
+  // "mail.received" row is displayed under システム, so the System tab includes it too.
+  const selectedGroup = useMemo(
+    () =>
+      filter.type
+        ? (NOTIFICATION_GROUP_PREFIXES.find((g) => g.prefix === filter.type)?.group ?? null)
+        : null,
+    [filter.type],
   );
-  const searching = query.length > 0;
+
+  const filtered = useMemo(() => {
+    let items = inbox.items;
+    if (selectedGroup) items = items.filter((i) => resolveTypeDisplay(i.type).group === selectedGroup);
+    if (query) items = items.filter((i) => matchesQuery(i, query));
+    return items;
+  }, [inbox.items, selectedGroup, query]);
+  // Any client-side narrowing (tab or search) windows the already-loaded buffer.
+  const clientFiltering = query.length > 0 || selectedGroup !== null;
 
   const visible = filtered.slice(page * displaySize, page * displaySize + displaySize);
 
   // Total pages: known loaded pages, plus one more when the server still has rows to
-  // fetch (only meaningful when NOT client-side searching the already-loaded buffer).
-  const canFetchMore = inbox.hasMore && !searching;
+  // fetch (only meaningful when NOT client-side narrowing the already-loaded buffer).
+  const canFetchMore = inbox.hasMore && !clientFiltering;
   const totalCount = filtered.length + (canFetchMore ? displaySize : 0);
   const showPager = totalCount > displaySize;
 
@@ -103,13 +120,13 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
     (next1Based: number) => {
       const target = Math.max(0, next1Based - 1);
       // Reaching a page past what's loaded triggers a lazy fetch of the next cursor page.
-      if (!searching && target * displaySize >= inbox.items.length && inbox.hasMore) {
+      if (!clientFiltering && target * displaySize >= inbox.items.length && inbox.hasMore) {
         void inbox.loadMore().then(() => setPage(target));
       } else {
         setPage(target);
       }
     },
-    [inbox, displaySize, searching],
+    [inbox, displaySize, clientFiltering],
   );
 
   return (

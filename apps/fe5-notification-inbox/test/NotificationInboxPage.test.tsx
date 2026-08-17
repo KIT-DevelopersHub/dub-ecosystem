@@ -52,6 +52,28 @@ describe("NotificationInboxPage", () => {
     });
   });
 
+  it("type tab narrows the list to the selected group (client-side)", async () => {
+    const { deps } = makeDeps();
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    await screen.findByTestId("fe5-inbox-list");
+    // All: seed has 8 items across release/task/event/system.
+    expect(within(screen.getByTestId("fe5-inbox-list")).getAllByRole("listitem")).toHaveLength(8);
+    const user = userEvent.setup();
+    // Click the "Tasks" tab (id "task.").
+    await user.click(screen.getByTestId("fe5-inbox-typefilter-tab-task."));
+    await waitFor(() => {
+      const rows = within(screen.getByTestId("fe5-inbox-list")).getAllByRole("listitem");
+      // Only the 3 task-group rows remain (assigned / due_soon / completed).
+      expect(rows).toHaveLength(3);
+    });
+    // A task item is present; an event item is filtered out.
+    expect(screen.getByTestId("fe5-inbox-item-notif_0001")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe5-inbox-item-notif_0003")).not.toBeInTheDocument();
+    // Only the タスク section is rendered.
+    expect(screen.getByTestId("fe5-inbox-group-task")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe5-inbox-group-event")).not.toBeInTheDocument();
+  });
+
   it("restores a read notification to unread (optimistic, per-item action)", async () => {
     const { deps } = makeDeps();
     useUnreadStore.setState({ count: 3, initialized: true });

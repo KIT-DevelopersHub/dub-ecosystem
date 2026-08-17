@@ -152,10 +152,25 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
 };
 
 // ── notifications ─────────────────────────────────────────────────────────────
+// Seeded with several rows PER genre (release / task / event / system) and varied
+// createdAt + read state, so the type tabs visibly narrow the list and the sort toggle
+// (新しい順 / 古い順) visibly reorders it in the demo. Ordered newest-first by createdAt.
 const NOTIFICATIONS: notification.InboxItem[] = [
-  { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
-  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
-  { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
+  // 新機能 (release)
+  { id: "ntf_r1", type: "release", title: "🎉 ガントチャート（Notion風）を追加しました", body: "タスクの期間・進捗・依存をタイムラインで確認できます。", readAt: null, createdAt: "2026-08-02T05:00:00Z", resourceType: null, resourceId: null },
+  { id: "ntf_r2", type: "release", title: "🎉 メールにファイルを添付できるようになりました", body: "送受信で添付ファイルを扱えるようになりました。", readAt: "2026-08-02T04:40:00Z", createdAt: "2026-08-02T04:30:00Z", resourceType: null, resourceId: null },
+  // タスク (task)
+  { id: "ntf_t1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T04:00:00Z", resourceType: "task", resourceId: "tsk_1" },
+  { id: "ntf_t2", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「会場レイアウト確定」は明日が期限です。", readAt: null, createdAt: "2026-08-02T03:30:00Z", resourceType: "task", resourceId: "tsk_2" },
+  { id: "ntf_t3", type: "task.completed", title: "タスクが完了しました", body: "「スポンサー資料の送付」が完了しました。", readAt: "2026-08-02T03:20:00Z", createdAt: "2026-08-02T03:00:00Z", resourceType: "task", resourceId: "tsk_3" },
+  // イベント (event)
+  { id: "ntf_e1", type: "event.invited", title: "イベントに招待されました", body: "「北陸ITカンファレンス 2026」に招待されました。", readAt: null, createdAt: "2026-08-02T02:30:00Z", resourceType: "event", resourceId: "evt_1" },
+  { id: "ntf_e2", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-02T02:10:00Z", createdAt: "2026-08-02T02:00:00Z", resourceType: "event", resourceId: "evt_1" },
+  { id: "ntf_e3", type: "event.reminder", title: "イベントのリマインダー", body: "「運営定例ミーティング」は明日開催です。", readAt: null, createdAt: "2026-08-02T01:30:00Z", resourceType: "event", resourceId: "evt_2" },
+  // システム (system)
+  { id: "ntf_s1", type: "system.announcement", title: "メンテナンスのお知らせ", body: "本日深夜にメンテナンスを予定しています。", readAt: "2026-08-02T01:05:00Z", createdAt: "2026-08-02T01:00:00Z", resourceType: null, resourceId: null },
+  { id: "ntf_s2", type: "system.announcement", title: "利用規約を更新しました", body: "利用規約の改定を行いました。ご確認ください。", readAt: null, createdAt: "2026-08-02T00:30:00Z", resourceType: null, resourceId: null },
+  { id: "ntf_m1", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T00:00:00Z", resourceType: "mail", resourceId: "msg_1" },
 ];
 
 // audience='admin' notifications powering the Notification管理 screen
@@ -914,7 +929,18 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     // notifications
     if (pathname === "/api/v1/notifications/inbox") {
       const unreadOnly = url.searchParams.get("unreadOnly") === "true";
-      return json(page(unreadOnly ? NOTIFICATIONS.filter((n) => n.readAt === null) : NOTIFICATIONS));
+      const oldestFirst = url.searchParams.get("sort") === "oldest";
+      // Mirror the production repo: apply unreadOnly + chronological sort (newest-first by
+      // default, oldest-first when sort=oldest). Type/group narrowing is done client-side by
+      // FE5 (the list endpoint has no `type` param), so the demo returns all groups here.
+      const rows = (unreadOnly ? NOTIFICATIONS.filter((n) => n.readAt === null) : NOTIFICATIONS)
+        .slice()
+        .sort((a, b) =>
+          oldestFirst
+            ? a.createdAt.localeCompare(b.createdAt)
+            : b.createdAt.localeCompare(a.createdAt),
+        );
+      return json(page(rows));
     }
     if (pathname === "/api/v1/notifications/inbox/unread-count") {
       return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
