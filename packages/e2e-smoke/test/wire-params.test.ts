@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { gantt, event, fileMeta, webhook, githubSync, deploy } from "@dub/types";
+import { gantt, event, fileMeta, webhook, githubSync, deploy, identity } from "@dub/types";
 import { extractQueryParamsFromFile } from "../src/openapi";
 import { specPathFor, appPathFor, type ServiceName } from "../src/conformance";
 
@@ -197,6 +197,30 @@ describe("deploy-service wire-contract: query keys agree across SoT ⟷ OpenAPI 
     }
     for (const key of sotKeys) {
       expect(serverKeys.has(key), `SoT key "${key}" is never read by deploy-service`).toBe(true);
+    }
+  });
+});
+
+describe("identity-roster wire-contract: query keys agree across SoT ⟷ OpenAPI ⟷ server", () => {
+  const specParams = extractQueryParamsFromFile(specPathFor("identity-roster").file);
+  const serverKeys = serverQueryKeys("identity-roster");
+
+  // Union across the public (/identity/*) read endpoints. `roleKey` is the accepted
+  // deprecated alias of `role`; the internal /internal/users route reads a subset.
+  const sotKeys = new Set<string>(Object.values(identity.IDENTITY_WIRE).flatMap((e) => [...e.query]));
+
+  for (const [op, endpoint] of Object.entries(identity.IDENTITY_WIRE)) {
+    it(`${op}: OpenAPI query params == IDENTITY_WIRE (${endpoint.query.join(",")})`, () => {
+      expect(specParams[op] ?? []).toEqual([...endpoint.query].sort());
+    });
+  }
+
+  it("server reads exactly the SoT query keys (role canonical + roleKey deprecated alias, both accepted)", () => {
+    for (const key of serverKeys) {
+      expect(sotKeys.has(key), `identity-roster reads query key "${key}" not in the SoT`).toBe(true);
+    }
+    for (const key of sotKeys) {
+      expect(serverKeys.has(key), `SoT key "${key}" is never read by identity-roster`).toBe(true);
     }
   });
 });
