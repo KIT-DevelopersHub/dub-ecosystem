@@ -156,3 +156,37 @@ describe("toggleReactionLocal", () => {
     expect(m[0]!.reactions[0]!.userIds).toEqual([OTHER, ME]);
   });
 });
+
+describe("normalizeMessage (wire -> client Message coercion)", () => {
+  it("upsertMessage coerces a chat-service wire message so render never sees undefined", () => {
+    // The server wire shape: attachmentFileIds + reactions-as-Record, no replyCount.
+    const wire = {
+      id: "msg_01",
+      channelId: CH,
+      authorId: OTHER,
+      body: "hi",
+      attachmentFileIds: ["file_a"],
+      reactions: { "🎉": ["usr_1", "usr_2"] },
+      version: 1,
+      editedAt: null,
+      deletedAt: null,
+      createdAt: "2026-08-18T00:00:00.000Z",
+    } as unknown as Message;
+    const m = upsertMessage([], wire)[0]!;
+    expect(Array.isArray(m.attachments)).toBe(true);
+    expect(m.attachments).toHaveLength(1);
+    expect(m.attachments[0]!.fileId).toBe("file_a");
+    expect(Array.isArray(m.reactions)).toBe(true);
+    expect(m.reactions).toEqual([{ emoji: "🎉", userIds: ["usr_1", "usr_2"] }]);
+    expect(m.replyCount).toBe(0);
+    expect(m.threadRootId).toBeNull();
+  });
+
+  it("is idempotent for an already client-shaped message", () => {
+    const m = msg("msg_02", { reactions: [{ emoji: "👍", userIds: [ME] }], attachments: [], replyCount: 3 });
+    const out = upsertMessage([], m)[0]!;
+    expect(out.reactions).toEqual([{ emoji: "👍", userIds: [ME] }]);
+    expect(out.attachments).toEqual([]);
+    expect(out.replyCount).toBe(3);
+  });
+});

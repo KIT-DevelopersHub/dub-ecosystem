@@ -1,8 +1,50 @@
 // Pure timeline reducer — the heart of FE6. No React, no I/O; fully unit-tested.
 // Invariant: `messages` is ULID-ascending and deduped by id at all times.
 import type { common } from "@dub/types";
-import type { ChatRealtimeEvent, Message } from "../api/contract";
+import type { Attachment, ChatRealtimeEvent, Message, Reaction } from "../api/contract";
 import type { ChannelViewState, PendingMessage } from "../types";
+
+/**
+ * Coerce a message into the client Message contract. chat-service's wire Message uses
+ * `attachmentFileIds: string[]` + `reactions` as a `Record<emoji, userIds>` and omits
+ * `replyCount`, whereas the render layer (MessageItem) reads `attachments[].length`,
+ * `reactions[].length` and `replyCount`. Without this, a real server message crashes the
+ * app with "Cannot read properties of undefined (reading 'length')". upsertMessage is the
+ * single funnel for every server-sourced message into the timeline, so normalizing here
+ * covers list/post/edit/react/pin + RT. Idempotent: an already-client-shaped message
+ * (mock, RT-constructed, tests) passes through unchanged.
+ */
+export function normalizeMessage(m: Message): Message {
+  const wire = m as unknown as {
+    attachments?: Attachment[];
+    attachmentFileIds?: string[];
+    reactions?: Reaction[] | Record<string, common.UserId[]>;
+    replyCount?: number;
+    threadRootId?: common.MessageId | null;
+  };
+  const attachments: Attachment[] = Array.isArray(wire.attachments)
+    ? wire.attachments
+    : (wire.attachmentFileIds ?? []).map((fileId) => ({
+        fileId: fileId as common.FileId,
+        name: fileId,
+        mime: "",
+        size: 0,
+        url: null,
+      }));
+  const reactions: Reaction[] = Array.isArray(wire.reactions)
+    ? wire.reactions
+    : Object.entries(wire.reactions ?? {}).map(([emoji, userIds]) => ({
+        emoji,
+        userIds: userIds as common.UserId[],
+      }));
+  return {
+    ...m,
+    threadRootId: wire.threadRootId ?? null,
+    replyCount: typeof wire.replyCount === "number" ? wire.replyCount : 0,
+    reactions,
+    attachments,
+  };
+}
 
 /** Binary-search insert position for a ULID id in an ascending array. */
 function lowerBound(messages: Message[], id: string): number {
@@ -18,6 +60,7 @@ function lowerBound(messages: Message[], id: string): number {
 
 /** Insert or replace a message keeping ULID order. Returns a new array. */
 export function upsertMessage(messages: Message[], msg: Message): Message[] {
+  msg = normalizeMessage(msg);
   const at = lowerBound(messages, msg.id);
   const existing = messages[at];
   const next = messages.slice();
