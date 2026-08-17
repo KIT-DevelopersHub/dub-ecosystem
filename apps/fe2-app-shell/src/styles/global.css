@@ -667,6 +667,26 @@ svg {
   outline: 2px solid var(--dub-color-border-focus);
   outline-offset: 2px;
 }
+/* Release-gated (member-unpublished) app tile: greyed + non-interactive, mirroring the
+   header AppLauncher's disabled tile. No hover lift, muted surface/label/icon. */
+.fe2-home-tile--disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--dub-color-surface-sunken);
+  box-shadow: none;
+}
+.fe2-home-tile--disabled:hover {
+  border-color: var(--dub-color-border-default);
+  box-shadow: none;
+  transform: none;
+}
+.fe2-home-tile--disabled .fe2-home-tile-icon {
+  background: var(--dub-color-surface-raised);
+  color: var(--dub-color-text-muted);
+}
+.fe2-home-tile--disabled .fe2-home-tile-label {
+  color: var(--dub-color-text-muted);
+}
 .fe2-home-tile-icon {
   display: inline-flex;
   align-items: center;

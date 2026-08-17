@@ -30,9 +30,17 @@ describe("releaseGate", () => {
     expect(isPrivilegedViewer(canFrom(["identity:admin"]))).toBe(true);
   });
 
-  it("maintainer (holds *:admin / dangerous perms, but not identity:admin) is privileged", () => {
-    const maintainer: PermissionKey[] = ["identity:read", "event:admin", "mail:admin", "chat:moderate"];
-    expect(isPrivilegedViewer(canFrom(maintainer))).toBe(true);
+  it("maintainer (dangerous perms but NOT identity:admin) is NOT privileged -> gated", () => {
+    // Regression: keying the bypass off any `dangerous` permission let non-admin
+    // operator roles skip the gate and see every app active (the reported bug). Only
+    // identity:admin bypasses now, so a maintainer is release-gated like a member.
+    const maintainer: PermissionKey[] = ["identity:read", "event:admin", "mail:send", "chat:moderate", "infra:deploy"];
+    expect(isPrivilegedViewer(canFrom(maintainer))).toBe(false);
+  });
+
+  it("organizer (holds event:admin, a dangerous perm, but not identity:admin) is NOT privileged", () => {
+    const organizer: PermissionKey[] = ["identity:read", "event:read", "event:write", "event:admin", "task:write"];
+    expect(isPrivilegedViewer(canFrom(organizer))).toBe(false);
   });
 
   it("a general member (read-only perms) is NOT privileged", () => {

@@ -53,14 +53,25 @@ export interface AppShellLayoutProps {
 }
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
-// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal), sorted by
-// order. Member release-gating (社長決定 2026-08-14, see lib/releaseGate): every tile
-// is ALWAYS rendered (消さない — apps are never removed from the launcher, per
-// [[dub-never-hide-or-reduce-apps]]); an app the current viewer may not open yet is
-// greyed-out + disabled instead. Admins/maintainers (isPrivilegedViewer) bypass the
-// gate and see every app active for testing/development; a general member sees only
-// member-published apps active (メールのみ as of 2026-08-14) and the rest greyed with
-// a "準備中" tooltip. Route guards (router.tsx) enforce the same on direct navigation.
+// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal). Every tile is
+// ALWAYS rendered (消さない — apps are never removed from the launcher, per
+// [[dub-never-hide-or-reduce-apps]]); an app the current viewer cannot open is
+// greyed-out + disabled + tooltip instead, and greyed apps are SORTED to the bottom.
+//
+// "Cannot open" mirrors the route access gate (router.tsx) so the launcher and a
+// deep-link stay consistent — an app greyed here 403s on direct navigation, and vice
+// versa. Two gates decide it:
+//   1. Member release gate (社長決定 2026-08-14, see lib/releaseGate / RequirePublished):
+//      an app not member-published is greyed for general members; only admins
+//      (identity:admin, isPrivilegedViewer) bypass it — non-admin operator roles
+//      (maintainer/organizer) are gated too. メールのみ published as of 2026-08-14.
+//   2. Permission gate (RequirePermission): an app whose requiredPermissions the viewer
+//      does not hold is greyed for EVERYONE — admins included — exactly matching the
+//      route's own requiredPermissions guard (e.g. a maintainer without identity:admin
+//      can't open a role-admin tool, so its tile greys). No privileged bypass here, so
+//      the launcher never shows an app that would 403.
+// Sort order: usable apps first, greyed apps last; the existing order-based sequence is
+// preserved within each group (a stable partition), and nothing is removed.
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
   const privileged = isPrivilegedViewer(can);
   return [...navEntries]

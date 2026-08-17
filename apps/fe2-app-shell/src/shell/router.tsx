@@ -32,7 +32,8 @@ export function toTanstackPath(path: string): string {
 // Member release-gating on direct navigation (defense in depth for the launcher
 // grey-out, see lib/releaseGate). A general member who deep-links to an app that is
 // not yet member-published gets the permission-denied screen instead of the working
-// page; admins/maintainers (isPrivilegedViewer) bypass it, matching the launcher.
+// page; only admins (identity:admin, isPrivilegedViewer) bypass it, matching the
+// launcher — non-admin operator roles (maintainer/organizer) are gated too.
 function RequirePublished({ moduleId, children }: { moduleId: FeatureModuleId; children: JSX.Element }): JSX.Element {
   const { can } = usePermissions();
   if (isPrivilegedViewer(can) || isAppPublished(moduleId)) return children;
