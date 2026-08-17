@@ -3,46 +3,62 @@ import 'package:dub_api_client/dub_api_client.dart';
 
 import '../config/app_config.dart';
 
-/// Builds the single generated gateway client for the app.
+/// The single transport into the api-gateway. Owns base URL, session-bearer
+/// forwarding and the generated [DubApiClient] — one place so credential and
+/// correlation concerns live in exactly one spot.
 ///
-/// One place constructs [DubApiClient] so transport concerns (base URL, session
-/// credential forwarding, correlation-id logging) live in exactly one spot.
-///
-/// Auth (P0 scope): desktop reuses the web/self-hosted session — it does NOT
-/// implement its own auth (roadmap §7). On desktop the OS cookie jar is not
-/// shared with a browser, so P1 will attach the session cookie / bearer here via
-/// [sessionCredential]. For the P0 smoke this is optional and left null.
-class GatewayClientFactory {
-  const GatewayClientFactory(this.config);
+/// Auth (roadmap §7): the desktop reuses the self-hosted session. There is no
+/// browser cookie jar on desktop, so after an interactive login we forward the
+/// session as `Authorization: Bearer <token>` — the gateway's frozen extraction
+/// order is Bearer first, then the `dub_session` cookie (services/api-gateway
+/// auth.ts), so a bearer is the natural desktop credential. The token is read
+/// live from [tokenProvider] on every request, so a login/logout after the
+/// client is built takes effect immediately.
+class Gateway {
+  Gateway._(this.dio, this.api);
 
-  final AppConfig config;
+  /// The raw transport — used by the auth layer for the login/logout endpoints
+  /// (public, proxied, not part of the generated gateway surface) and by the
+  /// proxy repositories for per-service reads the gateway forwards verbatim.
+  final Dio dio;
 
-  DubApiClient create({String? sessionCredential}) {
+  /// The generated, OpenAPI-derived client for the gateway's OWN typed surface
+  /// (`/me`, `/bff/home`, …). Never hand-write these calls.
+  final DubApiClient api;
+
+  factory Gateway.create(
+    AppConfig config, {
+    required String? Function() tokenProvider,
+    HttpClientAdapter? adapter,
+  }) {
     final dio = Dio(
       BaseOptions(
         baseUrl: config.apiBaseUrl,
-        connectTimeout: const Duration(seconds: 5),
-        receiveTimeout: const Duration(seconds: 10),
-        // Send cookies on same-site; desktop has no browser jar so P1 will set
-        // the Cookie/Authorization header explicitly via the interceptor below.
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 15),
         headers: const {'accept': 'application/json'},
+        // Never throw on non-2xx from the auth POST — we read the error body.
+        validateStatus: (s) => s != null && s < 500,
       ),
     );
 
-    if (sessionCredential != null && sessionCredential.isNotEmpty) {
-      dio.interceptors.add(
-        InterceptorsWrapper(
-          onRequest: (options, handler) {
-            // Session reuse: forward the self-hosted session cookie.
-            options.headers['cookie'] = sessionCredential;
-            handler.next(options);
-          },
-        ),
-      );
-    }
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          final token = tokenProvider();
+          if (token != null && token.isNotEmpty) {
+            options.headers['authorization'] = 'Bearer $token';
+          }
+          handler.next(options);
+        },
+      ),
+    );
 
-    // interceptors: [] disables the generated auth stubs (OAuth/Basic/Bearer/
-    // ApiKey) we don't use; session handling is ours (above).
-    return DubApiClient(dio: dio, interceptors: dio.interceptors.toList());
+    // Tests inject an in-memory adapter so the whole app can be driven without a
+    // real socket (which the fake-async test clock cannot pump).
+    if (adapter != null) dio.httpClientAdapter = adapter;
+
+    final api = DubApiClient(dio: dio, interceptors: dio.interceptors.toList());
+    return Gateway._(dio, api);
   }
 }
