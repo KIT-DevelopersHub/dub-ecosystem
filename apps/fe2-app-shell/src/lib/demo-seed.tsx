@@ -1637,6 +1637,30 @@ export function createDemoFetch(): typeof fetch {
     home: {
       upcomingEvents: EVENTS.slice(0, 2),
       unreadCount: NOTIFICATIONS.filter((n) => n.readAt === null).length,
+      // Task breakdown derived from the seeded task list (same shape the gateway BFF
+      // aggregates from task-service), so the demo dashboard reads like live data.
+      taskSummary: {
+        total: TASKS.length,
+        byStatus: TASKS.reduce(
+          (acc, t) => {
+            acc[t.status] += 1;
+            return acc;
+          },
+          { todo: 0, in_progress: 0, blocked: 0, done: 0, cancelled: 0 } as Record<task.TaskStatus, number>,
+        ),
+      },
+      // Illustrative free-tier snapshot (same projection the BFF derives from usage-meter).
+      usageSummary: {
+        metrics: [
+          { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 58.2 },
+          { key: "d1_rows_read_day", label: "D1 行読み取り(日)", pct: 41.0 },
+          { key: "workers_requests_day", label: "Workers リクエスト(日)", pct: 9.4 },
+          { key: "emails_month", label: "メール送信(月)", pct: 22.5 },
+        ],
+        worst: { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 58.2 },
+      },
+      // 運営メンバー / チーム — matches the seeded roster below (6 teams, 17 members).
+      orgStats: { members: 17, teams: 6 },
       partialErrors: [],
     },
   });

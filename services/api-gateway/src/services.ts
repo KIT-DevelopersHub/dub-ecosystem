@@ -13,6 +13,13 @@ export interface GatewayServices {
   identity: ServiceClient;
   event: ServiceClient;
   notification: ServiceClient;
+  // task-service + usage-meter clients for the /bff/home dashboard aggregation.
+  // Both are genuine gateway-originated s2s calls (attach x-dub-internal + the
+  // authenticated x-dub-user-id from ctx). task-service scopes to the caller's own
+  // tasks via ?assigneeId; usage-meter's /usage/summary is org-wide but gated on an
+  // authenticated viewer.
+  task: ServiceClient;
+  usage: ServiceClient;
   // member-service client for the gateway's OWN public 参加届 forward. Unlike the
   // transparent proxy, this is a genuine gateway-originated s2s call: it attaches
   // x-dub-internal (+ a system x-dub-user-id), which member-service's internal-only
@@ -32,6 +39,8 @@ export function createServices(env: GatewayEnv): GatewayServices {
     identity: createServiceClient(env.SVC_IDENTITY, { service: "identity-roster", caller: CALLER }),
     event: createServiceClient(env.SVC_EVENT, { service: "event-service", caller: CALLER }),
     notification: createServiceClient(env.SVC_NOTIFICATION, { service: "notification-service", caller: CALLER }),
+    task: createServiceClient(env.SVC_TASK, { service: "task-service", caller: CALLER }),
+    usage: createServiceClient(env.SVC_USAGE_METER, { service: "usage-meter", caller: CALLER }),
     member: createServiceClient(env.SVC_MEMBER, { service: "member-service", caller: CALLER }),
     authSvc: createServiceClient(env.SVC_AUTH, { service: "auth-service", caller: CALLER }),
     auth: createAuthClient({
