@@ -42,3 +42,5 @@ ALLOWED_LOGIN_DOMAIN = "developershub.jp"
 SESSION_ACCESS_TTL_SEC = "3600"
 SESSION_ABS_WEB_TTL_SEC = "2592000"
 SESSION_ABS_MOBILE_TTL_SEC = "15552000"
+# Grace window (s) for race-safe refresh-token rotation (see wrangler.toml / sessions.ts).
+SESSION_REFRESH_GRACE_SEC = "30"

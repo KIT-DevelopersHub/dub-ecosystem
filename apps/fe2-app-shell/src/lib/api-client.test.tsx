@@ -64,6 +64,34 @@ describe("createApiClient", () => {
     expect((refreshCall[1] as RequestInit).body).toBe("{}");
   });
 
+  it("coalesces concurrent 401s into a SINGLE refresh (single-flight), then all retry", async () => {
+    // Two requests firing together (e.g. /me + /bff/home on mount) both 401. They
+    // must share ONE /auth/refresh — concurrent refreshes race server-side rotation.
+    let refreshCount = 0;
+    const seen = new Map<string, number>(); // per-path: first hit => 401, retry => 200
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        // hold the promise so both callers pile onto the same in-flight refresh
+        await new Promise((r) => setTimeout(r, 5));
+        return jsonRes({ session: "new" }, 200);
+      }
+      const n = (seen.get(url) ?? 0) + 1;
+      seen.set(url, n);
+      return n === 1 ? jsonRes(errBody("UNAUTHENTICATED"), 401) : jsonRes({ ok: true, url }, 200);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    const [a, b] = await Promise.all([
+      api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/me" }),
+      api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/bff/home" }),
+    ]);
+    expect(a).toMatchObject({ ok: true });
+    expect(b).toMatchObject({ ok: true });
+    expect(refreshCount).toBe(1); // single-flight: exactly one refresh for both 401s
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
+
   it("calls onUnauthenticated when refresh fails", async () => {
     const fetchImpl = vi
       .fn()
