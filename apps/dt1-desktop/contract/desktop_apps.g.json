@@ -1,0 +1,90 @@
+[
+  {
+    "id": "events",
+    "label": "イベント",
+    "navPath": "/events",
+    "permission": "event:read",
+    "status": "live",
+    "openToAllAuthenticated": false
+  },
+  {
+    "id": "tasks",
+    "label": "マイタスク",
+    "navPath": "/me/tasks",
+    "permission": "task:read",
+    "status": "live",
+    "openToAllAuthenticated": false
+  },
+  {
+    "id": "gantt",
+    "label": "ガントチャート",
+    "navPath": "/gantt",
+    "permission": "task:read",
+    "status": "live",
+    "openToAllAuthenticated": false
+  },
+  {
+    "id": "notifications",
+    "label": "通知",
+    "navPath": "/notifications",
+    "permission": "notif:inbox:self",
+    "status": "live",
+    "openToAllAuthenticated": false
+  },
+  {
+    "id": "chat",
+    "label": "チャット",
+    "navPath": "/chat",
+    "permission": "chat:create",
+    "status": "skeleton",
+    "openToAllAuthenticated": false
+  },
+  {
+    "id": "mail",
+    "label": "メール",
+    "navPath": "/mail",
+    "permission": "mail:read",
+    "status": "skeleton",
+    "openToAllAuthenticated": false
+  },
+  {
+    "id": "usage",
+    "label": "無料枠 / 課金ガード",
+    "navPath": "/usage",
+    "permission": "usage:view",
+    "status": "skeleton",
+    "openToAllAuthenticated": true
+  },
+  {
+    "id": "members",
+    "label": "運営メンバー",
+    "navPath": "/members",
+    "permission": "identity:read",
+    "status": "skeleton",
+    "openToAllAuthenticated": false
+  },
+  {
+    "id": "participation",
+    "label": "参加届",
+    "navPath": "/participation",
+    "permission": "identity:read",
+    "status": "skeleton",
+    "openToAllAuthenticated": true
+  },
+  {
+    "id": "driveshare",
+    "label": "Drive共有",
+    "navPath": "/driveshare",
+    "permission": "drive:read",
+    "status": "skeleton",
+    "openToAllAuthenticated": true
+  },
+  {
+    "id": "admin",
+    "label": "管理",
+    "navPath": "/admin/users",
+    "permission": "identity:admin",
+    "status": "skeleton",
+    "openToAllAuthenticated": false
+  }
+]

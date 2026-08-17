@@ -1,0 +1,32 @@
+{
+  "getGantt": {
+    "method": "GET",
+    "path": "/gantt",
+    "query": [
+      "eventId"
+    ]
+  },
+  "listInbox": {
+    "method": "GET",
+    "path": "/inbox",
+    "query": [
+      "unreadOnly",
+      "limit"
+    ]
+  },
+  "listEvents": {
+    "method": "GET",
+    "path": "/events",
+    "query": [
+      "limit"
+    ]
+  },
+  "listTasks": {
+    "method": "GET",
+    "path": "/tasks",
+    "query": [
+      "eventId",
+      "assigneeId"
+    ]
+  }
+}
