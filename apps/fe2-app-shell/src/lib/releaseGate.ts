@@ -25,6 +25,12 @@ export const PUBLISHED_APPS: ReadonlySet<FeatureModuleId> = new Set<FeatureModul
 /** Tooltip shown on a member's greyed (unpublished) launcher tile. */
 export const UNPUBLISHED_TILE_REASON = "準備中（メンバー未公開）";
 
+/** Tooltip shown on a launcher tile the viewer lacks the permission to open. Kept
+ *  consistent with the route guard (router.tsx RequirePermission → 403): an app whose
+ *  requiredPermissions the viewer does not hold is greyed rather than removed. Applies
+ *  to everyone, admins included, so it never contradicts the actual per-route authz. */
+export const UNAUTHORIZED_TILE_REASON = "権限がありません（アクセス不可）";
+
 /** True when the app is published to general members. An unknown/undefined appId
  *  defaults to published so bare test fixtures (nav entries without an appId) are
  *  never accidentally greyed — the real shell always tags composition nav. */

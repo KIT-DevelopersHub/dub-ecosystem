@@ -1,5 +1,5 @@
 // identity — identity-roster namespace. Owns the frozen RBAC permission catalog.
-import type { UserId, OrgId, RoleId, ISODateTime } from "./common";
+import type { UserId, OrgId, RoleId, ISODateTime, CursorQuery } from "./common";
 
 export interface PermissionCatalogEntry {
   key: string;
@@ -134,8 +134,50 @@ export interface ProvisionUserRequest {
   displayName: string;
   githubLogin?: string;
 }
-export interface ListUsersQuery {
+export interface ListUsersQuery extends CursorQuery {
   ids?: string; // comma-separated batch (?ids=)
-  cursor?: string;
-  limit?: number;
+  status?: UserStatus;
+  /** Canonical role filter (a roleId). */
+  role?: RoleId;
+  /**
+   * @deprecated Legacy alias for `role` (the FE7 client's original spelling). The server
+   * still accepts it (`role ?? roleKey`), so it stays in the contract as a documented
+   * deprecated alias; new callers must use `role`. Do not remove without a migration.
+   */
+  roleKey?: RoleId;
+  q?: string; // free-text search
 }
+/** GET /identity/orgs — cursor-only. */
+export type ListOrgsQuery = CursorQuery;
+/** GET /identity/roles — cursor-only. */
+export type ListRolesQuery = CursorQuery;
+
+// ── Wire contract (query params) ─────────────────────────────────────────────
+// SINGLE source of truth for the query-parameter *names* identity-roster's public
+// (/identity/*) read endpoints put on the wire. The server (identity-roster app.ts) and
+// the OpenAPI spec (docs/openapi/identity-roster.yaml) are reconciled against this map in
+// CI (see @dub/e2e-smoke wire-params.test.ts). `roleKey` is intentionally listed as an
+// accepted (deprecated) alias of `role` — the server reads both; canonical is `role`.
+// The internal `/internal/users` route (not in the public spec) reads a subset of these
+// same keys, so it needs no separate entry. See docs/api-contracts/_wire-contract-enforcement.md.
+export const IDENTITY_WIRE = {
+  listOrgs: { method: "GET", path: "/identity/orgs", query: ["cursor", "limit"] },
+  listUsers: {
+    method: "GET",
+    path: "/identity/users",
+    query: ["cursor", "limit", "ids", "status", "role", "roleKey", "q"],
+  },
+  listRoles: { method: "GET", path: "/identity/roles", query: ["cursor", "limit"] },
+} as const;
+
+// Compile-time tie: each endpoint's query keys must be real keys of its query type.
+type _IdentityWireKeysAreTyped =
+  (typeof IDENTITY_WIRE.listOrgs.query)[number] extends keyof ListOrgsQuery
+    ? (typeof IDENTITY_WIRE.listUsers.query)[number] extends keyof ListUsersQuery
+      ? (typeof IDENTITY_WIRE.listRoles.query)[number] extends keyof ListRolesQuery
+        ? true
+        : never
+      : never
+    : never;
+const _identityWireKeyGuard: _IdentityWireKeysAreTyped = true;
+void _identityWireKeyGuard;

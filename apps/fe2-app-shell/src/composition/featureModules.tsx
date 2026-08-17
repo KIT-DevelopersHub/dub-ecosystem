@@ -140,9 +140,12 @@ function adaptEvents(api: ApiClient): FeatureModule {
     }
     return route;
   });
-  // FE3 declares its own /events nav (order 20); the shell owns top-level nav
-  // ordering and pins events first (order 10).
-  const nav: NavEntry[] = [{ label: "イベント", path: routePaths.list, icon: "calendar", order: 10 }];
+  // イベントアプリはユーザー明示承認で launcher/ナビから外す（登録解除・非表示）。
+  // ただし FE3 のルート（/events, /events/:eventId とその配下に splice される FE4 の
+  // タスク/ガント routes）は保持する: ガント(/gantt)ランディングが
+  // `/events/:eventId/tasks/gantt` へ遷移し、マイタスクの event-scoped 動線もこの
+  // routes に依存するため。nav を空にするだけでタイルは消え、可逆（将来 nav を戻せば復活）。
+  const nav: NavEntry[] = [];
   return withModulePerms(eventFeatureModule, { id: "events", routes, nav });
 }
 
@@ -298,10 +301,10 @@ function adaptAdmin(api: ApiClient): FeatureModule {
   const src = adminModule.routes as readonly SourceRoute[];
   const routes = src.map((r) => wrapRoute(r, wrap));
   // Map each admin route path -> its own requiredPermissions so the launcher can
-  // hide the admin tools (ユーザー名簿 / ロール管理 / 変更履歴) from non-admins, matching
-  // the route guard (defense in depth; a non-admin can neither see nor open them).
-  // 社長要望: admin ツール（ユーザー名簿・ロール管理・変更履歴）は全てナビ/ランチャーに表示する。
-  // 権限を持つユーザーには全て出す（アプリは減らさない）。
+  // hide the admin tools (ユーザー名簿 / ロール管理) from non-admins, matching the route
+  // guard (defense in depth; a non-admin can neither see nor open them).
+  // メールアドレス管理・変更履歴 はユーザー明示承認で FE7 の routes/nav から登録解除済み
+  // （fe7-admin-roster/src/routes.tsx）。残る admin ツールは権限保持者に全て表示する。
   const permByPath = new Map(src.map((r) => [r.path, r.requiredPermissions]));
   const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => {
     const perms = permByPath.get(n.path);

@@ -483,3 +483,91 @@ describe("contract branches — validation + guards", () => {
     expect(await h.repo.getDependsOn(a.id)).toEqual([]);
   });
 });
+
+describe("task attachments", () => {
+  it("POST adds a url attachment (201, fileId null) and GET lists it", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "資料リンク", url: "https://example.com/doc" }),
+    );
+    expect(res.status).toBe(201);
+    const att = (await res.json()) as task.TaskAttachment;
+    expect(att.kind).toBe("url");
+    expect(att.fileId).toBeNull();
+    expect(att.taskId).toBe(t.id);
+
+    const list = await app.request(`/tasks/${t.id}/attachments`, userInit("GET"));
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as task.ListTaskAttachmentsResponse;
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.name).toBe("資料リンク");
+  });
+
+  it("POST adds a file attachment carrying fileId + display meta", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", {
+        kind: "file",
+        name: "図.png",
+        url: "/api/v1/files/file_1/download",
+        fileId: "file_1",
+        mimeType: "image/png",
+        sizeBytes: 1234,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const att = (await res.json()) as task.TaskAttachment;
+    expect(att.fileId).toBe("file_1");
+    expect(att.mimeType).toBe("image/png");
+    expect(att.sizeBytes).toBe(1234);
+  });
+
+  it("400 on a url-kind attachment whose url is not http(s) (no javascript: etc.)", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "javascript:alert(1)" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("404 when attaching to a task that does not exist", async () => {
+    const { app } = setup();
+    const res = await app.request(
+      `/tasks/task_missing/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "https://example.com" }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE soft-removes an attachment so it drops out of the list", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const add = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "https://example.com" }),
+    );
+    const att = (await add.json()) as task.TaskAttachment;
+    const del = await app.request(`/tasks/${t.id}/attachments/${att.id}`, userInit("DELETE"));
+    expect(del.status).toBe(200);
+    const list = await app.request(`/tasks/${t.id}/attachments`, userInit("GET"));
+    const body = (await list.json()) as task.ListTaskAttachmentsResponse;
+    expect(body.items).toHaveLength(0);
+  });
+
+  it("403 when the caller lacks task:write", async () => {
+    const { h, app } = setup();
+    const t = await create(app);
+    h.authz.denied.add("task:write");
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "https://example.com" }),
+    );
+    expect(res.status).toBe(403);
+  });
+});

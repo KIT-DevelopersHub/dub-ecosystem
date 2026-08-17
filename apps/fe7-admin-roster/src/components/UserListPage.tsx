@@ -18,10 +18,11 @@ import {
 } from "@dub/ui";
 import { UserStatusBadge } from "./UserStatusBadge";
 import { UserInlineEditor } from "./UserInlineEditor";
+import { InlineRoleEditor } from "./InlineRoleEditor";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
 import { SyncPreviewDialog } from "./SyncPreviewDialog";
-import { useUsers, useSyncEmailRouting, usePreviewEmailRouting, isEmailRoutingUnconfigured } from "../hooks/useRosterApi";
+import { useUsers, useRoles, useSyncEmailRouting, usePreviewEmailRouting, isEmailRoutingUnconfigured } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
@@ -82,12 +83,15 @@ export function UserListPage() {
   const { can } = usePermissions();
   const { me } = useRosterContext();
   const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
+  const rolesQuery = useRoles();
   const sync = useSyncEmailRouting();
   const preview = usePreviewEmailRouting();
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const currentUserId = me?.user.id ?? "";
   const canInvite = can("identity:admin");
+  const canManageRoles = can("identity:admin"); // grant/revoke org-wide roles inline
+  const roles = rolesQuery.data?.items ?? [];
   const canManageRouting = can("mail:admin"); // read the proxy / issue addresses
   const canSync = canInvite && canManageRouting; // relay proxy -> roster upsert
   const notConnected = isEmailRoutingUnconfigured(sync.error) || isEmailRoutingUnconfigured(preview.error);
@@ -130,6 +134,11 @@ export function UserListPage() {
     },
     { key: "email", header: "メール", cell: (u) => u.email },
     { key: "source", header: "種別", cell: (u) => <SourceBadge source={u.source} testId={`fe7-users-source-${u.id}`} /> },
+    {
+      key: "roles",
+      header: "ロール",
+      cell: (u) => <InlineRoleEditor user={u} roles={roles} currentUserId={currentUserId} canAdmin={canManageRoles} />,
+    },
     { key: "status", header: "状態", cell: (u) => <UserStatusBadge status={u.status} /> },
   ];
 
@@ -165,7 +174,7 @@ export function UserListPage() {
       />
 
       <p style={noticeTextStyle}>
-        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。名前をクリックすると右側で表示名・ロール・在籍状態をその場で編集できます。
+        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。ロール列をクリックすると、各メンバーのロールをその場で追加・削除できます。表示名や在籍状態の変更は、名前をクリックすると右側でその場で編集できます。
       </p>
 
       {notConnected ? (

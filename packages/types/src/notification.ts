@@ -88,6 +88,29 @@ export interface ListFeedbackQuery extends CursorQuery {
 }
 export type ListFeedbackResponse = Paginated<FeedbackItem>;
 
+// ── Wire contract (query params) ─────────────────────────────────────────────
+// SINGLE source of truth for the query-parameter *names* notification's spec'd read
+// endpoints put on the wire. The server (notification validation.ts parsers) and the
+// OpenAPI spec (docs/openapi/notification.yaml) are reconciled against this map in CI (see
+// @dub/e2e-smoke wire-params.test.ts). The admin `/manage` GET (parseListManageQuery) is
+// not in the public spec; its cursor/limit keys are a subset of the union below, so the
+// server-reads check still guards it against undocumented additions. See
+// docs/api-contracts/_wire-contract-enforcement.md.
+export const NOTIFICATION_WIRE = {
+  listInbox: { method: "GET", path: "/inbox", query: ["cursor", "limit", "unreadOnly"] },
+  listFeedback: { method: "GET", path: "/feedback", query: ["cursor", "limit", "unreadOnly"] },
+} as const;
+
+// Compile-time tie: each endpoint's query keys must be real keys of its query type.
+type _NotificationWireKeysAreTyped =
+  (typeof NOTIFICATION_WIRE.listInbox.query)[number] extends keyof ListInboxQuery
+    ? (typeof NOTIFICATION_WIRE.listFeedback.query)[number] extends keyof ListFeedbackQuery
+      ? true
+      : never
+    : never;
+const _notificationWireKeyGuard: _NotificationWireKeysAreTyped = true;
+void _notificationWireKeyGuard;
+
 // ---- Notification management (admin) ----
 // The admin screen lists audience="admin" notifications and can publish any of them to
 // members as a broadcast. `publishedBroadcastId` is the id of the members broadcast

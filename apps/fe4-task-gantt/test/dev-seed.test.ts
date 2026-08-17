@@ -2,11 +2,13 @@
 // the gantt DTO with real teams, dependency lines, and a critical governance spine.
 import { describe, expect, it } from "vitest";
 import { createDevClient, DEMO_EVENT_ID } from "../src/dev-seed";
+import * as api from "../src/api/endpoints";
 import type { gantt, task, team } from "@dub/types";
 
 async function getDto(): Promise<gantt.GanttChartDTO> {
-  const client = createDevClient();
-  return client.request<gantt.GanttChartDTO>({ method: "GET", path: "/api/v1/gantt", query: { eventId: DEMO_EVENT_ID } });
+  // Route through the real endpoint wrapper so this fixture can never re-encode a
+  // hand-written query key (the old `?event=`); the wire key comes from @dub/types.
+  return api.getGantt(createDevClient(), DEMO_EVENT_ID);
 }
 
 describe("dev-seed (real LMB conference data)", () => {

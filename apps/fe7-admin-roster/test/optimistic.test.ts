@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { isOptimistic, applyUserPatch, applyRoleGrant, makePendingAssignment } from "../src/lib/optimistic";
-import type { RoleAssignment } from "../src/contracts/pending";
+import { isOptimistic, applyUserPatch, applyRoleGrant, makePendingAssignment, addUserRoleId, removeUserRoleId } from "../src/lib/optimistic";
+import type { RoleAssignment, RosterUser } from "../src/contracts/pending";
+import type { common } from "@dub/types";
+
+function page(users: Partial<RosterUser>[]): common.Paginated<RosterUser> {
+  return { items: users as RosterUser[], nextCursor: null };
+}
 
 describe("optimistic policy", () => {
   it("marks profile edit and role grant optimistic; destructive ops non-optimistic", () => {
@@ -34,5 +39,31 @@ describe("cache transforms", () => {
     const pending = makePendingAssignment({ userId: "u1", roleId: "r1", roleName: "member", resourceType: "event", resourceId: "e1", grantedBy: "admin", now: "t" });
     expect(pending.resourceType).toBe("event");
     expect(pending.resourceId).toBe("e1");
+  });
+});
+
+describe("roster-list roleIds transforms (inline role edit)", () => {
+  it("addUserRoleId adds a role id to the target user only, idempotently", () => {
+    const p = page([{ id: "u1", roleIds: [] }, { id: "u2", roleIds: ["r9"] }]);
+    const once = addUserRoleId(p, "u1", "r1")!;
+    expect(once.items[0]!.roleIds).toEqual(["r1"]);
+    expect(once.items[1]!.roleIds).toEqual(["r9"]); // untouched
+    // idempotent: adding the same id again is a no-op
+    expect(addUserRoleId(once, "u1", "r1")!.items[0]!.roleIds).toEqual(["r1"]);
+    // original not mutated
+    expect(p.items[0]!.roleIds).toEqual([]);
+  });
+
+  it("removeUserRoleId removes a role id from the target user only", () => {
+    const p = page([{ id: "u1", roleIds: ["r1", "r2"] }, { id: "u2", roleIds: ["r1"] }]);
+    const next = removeUserRoleId(p, "u1", "r1")!;
+    expect(next.items[0]!.roleIds).toEqual(["r2"]);
+    expect(next.items[1]!.roleIds).toEqual(["r1"]); // untouched
+    expect(p.items[0]!.roleIds).toEqual(["r1", "r2"]); // original not mutated
+  });
+
+  it("both helpers pass through undefined pages (no cache entry yet)", () => {
+    expect(addUserRoleId(undefined, "u1", "r1")).toBeUndefined();
+    expect(removeUserRoleId(undefined, "u1", "r1")).toBeUndefined();
   });
 });

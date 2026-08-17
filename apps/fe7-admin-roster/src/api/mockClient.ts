@@ -196,6 +196,15 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
         resourceId: req.resourceId ?? null, grantedBy: s.me.user.id, grantedAt: now(),
       };
       s.assignments.set(userId, [...list, asg]);
+      // Keep the denormalized user.roleIds in sync for ORG-WIDE grants so the roster
+      // list's ロール column stays truthful after an inline edit (event-scoped grants
+      // are not org roles and never touch roleIds).
+      if (asg.resourceType === null) {
+        const u = s.users.get(userId);
+        if (u && !u.roleIds.includes(asg.roleId)) {
+          s.users.set(userId, { ...u, roleIds: [...u.roleIds, asg.roleId], updatedAt: now() });
+        }
+      }
       return asg as unknown as T;
     }
     if (path.endsWith("/users/sync-email-routing/preview")) {
@@ -392,7 +401,18 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (asgMatch) {
       const [, userId, asgId] = asgMatch;
       const list = s.assignments.get(userId!) ?? [];
-      s.assignments.set(userId!, list.filter((a) => a.id !== asgId));
+      const removed = list.find((a) => a.id === asgId);
+      const remaining = list.filter((a) => a.id !== asgId);
+      s.assignments.set(userId!, remaining);
+      // Mirror the org-wide revoke into user.roleIds (unless another org-wide
+      // assignment still grants the same role).
+      if (removed && removed.resourceType === null) {
+        const stillOrgWide = remaining.some((a) => a.roleId === removed.roleId && a.resourceType === null);
+        if (!stillOrgWide) {
+          const u = s.users.get(userId!);
+          if (u) s.users.set(userId!, { ...u, roleIds: u.roleIds.filter((r) => r !== removed.roleId), updatedAt: now() });
+        }
+      }
       return;
     }
     const emailMatch = path.match(/\/admin\/email-routing\/addresses\/([^/]+)$/);

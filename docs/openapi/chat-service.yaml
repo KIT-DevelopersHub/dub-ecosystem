@@ -58,6 +58,14 @@ paths:
       summary: List channels the caller can see
       tags:
         - chat
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: eventId
+          in: query
+          description: Scope channels to an event.
+          schema:
+            type: string
       responses:
         '200':
           description: Channels
@@ -351,6 +359,43 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /chat/search:
+    get:
+      operationId: searchMessages
+      summary: Search messages (Slack-parity workspace/channel search)
+      tags:
+        - chat
+      parameters:
+        - name: q
+          in: query
+          description: Search text.
+          schema:
+            type: string
+        - name: channelId
+          in: query
+          description: Restrict the search to one channel.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Search results
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /chat/unread:
+    get:
+      operationId: listUnread
+      summary: Unread counts for the caller (no query params)
+      tags:
+        - chat
+      responses:
+        '200':
+          description: Unread counts
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /chat/messages:
     get:
       operationId: listMessages
@@ -363,6 +408,16 @@ paths:
         - name: channelId
           in: query
           required: true
+          schema:
+            type: string
+        - name: threadRootId
+          in: query
+          description: List the replies of this thread root.
+          schema:
+            type: string
+        - name: afterMessageId
+          in: query
+          description: Catch-up fetch of messages after this id.
           schema:
             type: string
       responses:
