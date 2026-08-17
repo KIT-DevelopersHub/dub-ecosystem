@@ -230,6 +230,35 @@ describe("app client adapters feed ApiClient.request", () => {
     expect(empty).toEqual([]);
     expect(calls).toHaveLength(2); // no request for an empty batch
   });
+
+  it("chat client unwraps the Paginated { items } envelope to an array (channels/unread/users)", async () => {
+    // Regression: the server returns common.Paginated<T> = { items, nextCursor } for
+    // channels/unread/users. Returning that object as-is made groupChannels drop it
+    // (non-array guard) → an empty sidebar despite /chat/channels 200. Must unwrap.
+    const envelope = {
+      "/api/v1/chat/channels": { items: [{ id: "c1", name: "general" }], nextCursor: null },
+      "/api/v1/chat/unread": { items: [{ channelId: "c1", unreadCount: 2 }] },
+      "/api/v1/identity/users": { items: [{ id: "u1" }, { id: "u2" }], nextCursor: null },
+    } as Record<string, unknown>;
+    const api = {
+      request: (<TRes,>(input: RequestInput): Promise<TRes> =>
+        Promise.resolve((envelope[input.path] ?? []) as TRes)),
+    } as unknown as ApiClient;
+    const chat = createChatApiClient(api);
+
+    const channels = await chat.listChannels();
+    expect(Array.isArray(channels)).toBe(true);
+    expect(channels).toHaveLength(1);
+    expect(channels[0]).toMatchObject({ id: "c1", name: "general" });
+
+    const unread = await chat.listUnread();
+    expect(Array.isArray(unread)).toBe(true);
+    expect(unread).toHaveLength(1);
+
+    const users = await chat.resolveUsers(["u1", "u2"] as never);
+    expect(Array.isArray(users)).toBe(true);
+    expect(users).toHaveLength(2);
+  });
 });
 
 describe("runtime providers wrap their routes", () => {
