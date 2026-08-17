@@ -36,6 +36,19 @@ paths:
           in: query
           schema:
             type: string
+        - name: syncState
+          in: query
+          description: Repeatable link-state filter (e.g. ?syncState=pending&syncState=error).
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - in_sync
+                - pending
+                - conflict
+                - error
       responses:
         '200':
           description: Page of links

@@ -18,6 +18,16 @@ const cardStyle: React.CSSProperties = {
 const legendRowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", width: "100%" };
 const groupTitleStyle: React.CSSProperties = { fontWeight: 700, fontSize: 15 };
 const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 13 };
+// Two-column grid for the permission rows: halves the vertical scroll length vs the
+// old single full-width column. The min track width (460px) is wide enough that only
+// two columns fit a normal admin panel, so it stays a true 2-column layout instead of
+// packing 3–4 columns on wide screens; `min(100%, …)` lets it collapse to a single
+// full-width column on a narrow (mobile) viewport without overflowing.
+const gridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
+  gap: 4,
+};
 const rowBaseStyle: React.CSSProperties = {
   display: "flex",
   gap: 10,
@@ -86,6 +96,7 @@ export function PermissionMatrix({
                 </span>
               </span>
             </legend>
+            <div style={gridStyle} data-testid={`${idPrefix}-matrix-grid-${g.domain}`}>
             {g.entries.map((e) => {
               const key = e.key as identity.PermissionKey;
               const checked = selected.includes(key);
@@ -126,6 +137,7 @@ export function PermissionMatrix({
                 </div>
               );
             })}
+            </div>
           </fieldset>
         );
       })}

@@ -20,11 +20,12 @@ type App = Hono<{ Bindings: Env; Variables: Vars }>;
 
 export const GANTT_EVENT_NOT_FOUND = "GANTT_EVENT_NOT_FOUND";
 
-/** Read the event id query param. Canonical key is `eventId`; the legacy `event`
- *  key is accepted as a fallback so an older client (which sent `?event=`) is never
- *  rejected with a spurious "eventId is required" validation error. */
+/** Read the event id query param. The wire key is `eventId` — the single source of truth
+ *  (gantt.GetGanttQuery), enforced by the wire-params contract test. The transitional
+ *  `?event=` fallback (added when the client still sent the drifted key) is removed now
+ *  that every client sends `?eventId`; the server must read ONLY the SoT key. */
 function readEventId(c: { req: { query: (k: string) => string | undefined } }): common.EventId | undefined {
-  return c.req.query("eventId") ?? c.req.query("event");
+  return c.req.query("eventId");
 }
 
 function requireEventId(c: { req: { query: (k: string) => string | undefined } }): common.EventId {

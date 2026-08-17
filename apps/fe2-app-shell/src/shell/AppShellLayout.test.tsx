@@ -132,7 +132,8 @@ describe("AppShellLayout", () => {
 
   // Member release-gating (社長決定 2026-08-14, lib/releaseGate). Apps are NEVER removed
   // from the launcher (消さない); an unpublished app is greyed + disabled for general
-  // members, while admins/maintainers bypass the gate and see every app active.
+  // members, while ONLY full admins (identity:admin) bypass the gate and see every app
+  // active — non-admin operator roles are gated like members (#255, 2026-08-17).
   const GATED_NAV: NavEntry[] = [
     { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
     { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events" },
@@ -186,8 +187,8 @@ describe("AppShellLayout", () => {
     expect(onNavigate).toHaveBeenCalledWith("/mail");
   });
 
-  it("admins/maintainers bypass the gate: every app is active", async () => {
-    // holds identity:admin (a dangerous permission) -> privileged -> no greying.
+  it("a full admin (identity:admin) bypasses the gate: every app is active", async () => {
+    // holds identity:admin -> privileged -> no greying (#255 admin-only bypass).
     const me: gateway.MeResponse = { ...ME, permissions: ["identity:admin"] };
     const adminApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -204,5 +205,75 @@ describe("AppShellLayout", () => {
     await userEvent.click(trigger);
     expect(screen.getByTestId("fe2-app-launcher-item-mail")).toBeEnabled();
     expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeEnabled();
+  });
+
+  // Permission gate: an app whose requiredPermissions the viewer lacks is greyed for
+  // EVERYONE (privileged included), matching the route's requiredPermissions guard
+  // (router.tsx RequirePermission → 403). All GATED apps are published here so the
+  // release gate is out of the way and the permission gate is what's under test.
+  const PERM_NAV: NavEntry[] = [
+    { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50, appId: "mail", requiredPermissions: ["identity:admin"] },
+    { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
+  ];
+
+  it("greys an app whose requiredPermissions a privileged viewer still lacks", async () => {
+    // Holds mail:admin (both apps use the published appId "mail", so the release gate is
+    // out of the way) but NOT identity:admin, so the identity:admin-gated ロール管理 must
+    // grey via the permission gate — same as its route 403ing.
+    const me: gateway.MeResponse = { ...ME, permissions: ["mail:admin", "mail:read"] };
+    const maintApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const onNavigate = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={maintApi}>
+          <AppShellLayout navEntries={PERM_NAV} onNavigate={onNavigate}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-app-launcher-trigger"));
+    const roles = screen.getByTestId("fe2-app-launcher-item-admin-roles");
+    expect(roles).toBeDisabled();
+    expect(roles).toHaveAttribute("title", "権限がありません（アクセス不可）");
+    expect(screen.getByTestId("fe2-app-launcher-item-mail")).toBeEnabled();
+    // Greyed permission-gated tile does not navigate.
+    await userEvent.click(roles);
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("sorts usable apps first and greyed apps last, preserving order within each group", async () => {
+    // member: only メール is published + within perms; イベント (unpublished, order 10) and
+    // 管理 (needs identity:admin, order 50) both grey and sink below メール (order 45).
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "mail:read"] };
+    const memberApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events" },
+      { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
+      { label: "管理", path: "/admin/roles", icon: "shield", order: 50, appId: "mail", requiredPermissions: ["identity:admin"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={memberApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-app-launcher-trigger"));
+    const tiles = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
+    // メール (usable) first; then the two greyed apps in their original order (events<admin).
+    expect(tiles).toEqual([
+      "fe2-app-launcher-item-mail",
+      "fe2-app-launcher-item-events",
+      "fe2-app-launcher-item-admin-roles",
+    ]);
+    // The two trailing tiles are the greyed ones.
+    expect(screen.getByTestId("fe2-app-launcher-item-mail")).toBeEnabled();
+    expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeDisabled();
+    expect(screen.getByTestId("fe2-app-launcher-item-admin-roles")).toBeDisabled();
   });
 });

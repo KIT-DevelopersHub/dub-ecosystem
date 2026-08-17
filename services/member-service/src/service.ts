@@ -11,6 +11,7 @@ import {
   isGrade,
   isMemberStatus,
   isPhone,
+  isRomaji,
   MAX_NAME_LEN,
   normalizeName,
   SORT_ORDER_GAP,
@@ -169,6 +170,8 @@ export class MemberService {
       firstName: null,
       lastNameKana: null,
       firstNameKana: null,
+      lastNameRomaji: null,
+      firstNameRomaji: null,
       phone: null,
       note: optText(body.note, "note"),
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
@@ -308,6 +311,18 @@ export class MemberService {
     const firstNameKana = optText(body.firstNameKana, "firstNameKana");
     const composedKana = composeName(lastNameKana, firstNameKana);
     const nameKana = composedKana.length > 0 ? composedKana : optText(body.nameKana, "nameKana");
+    // ローマ字: 姓/名 の分割を優先し合成、無ければ旧単一 nameRomaji。任意フィールドだが
+    // 渡された時だけ英字形式チェック (アルファベットのメール発行に使うため)。
+    const lastNameRomaji = optText(body.lastNameRomaji, "lastNameRomaji");
+    const firstNameRomaji = optText(body.firstNameRomaji, "firstNameRomaji");
+    if (lastNameRomaji !== null && !isRomaji(lastNameRomaji)) {
+      throw errors.validationFailed([{ field: "lastNameRomaji", reason: "invalid" }]);
+    }
+    if (firstNameRomaji !== null && !isRomaji(firstNameRomaji)) {
+      throw errors.validationFailed([{ field: "firstNameRomaji", reason: "invalid" }]);
+    }
+    const composedRomaji = composeName(lastNameRomaji, firstNameRomaji);
+    const nameRomaji = composedRomaji.length > 0 ? composedRomaji : optText(body.nameRomaji, "nameRomaji");
     const department = optText(body.department, "department");
     const contact = optText(body.contact, "contact");
     const note = optText(body.note, "note");
@@ -328,6 +343,8 @@ export class MemberService {
       firstName,
       lastNameKana,
       firstNameKana,
+      lastNameRomaji,
+      firstNameRomaji,
       phone,
       department,
       grade,
@@ -350,6 +367,9 @@ export class MemberService {
       nameKana,
       lastNameKana,
       firstNameKana,
+      nameRomaji,
+      lastNameRomaji,
+      firstNameRomaji,
       grade,
       department,
       contact,
@@ -380,6 +400,8 @@ export class MemberService {
       firstName: string | null;
       lastNameKana: string | null;
       firstNameKana: string | null;
+      lastNameRomaji: string | null;
+      firstNameRomaji: string | null;
       phone: string | null;
       department: string | null;
       grade: member.Grade | null;
@@ -415,6 +437,8 @@ export class MemberService {
         firstName: match.firstName ?? input.firstName,
         lastNameKana: match.lastNameKana ?? input.lastNameKana,
         firstNameKana: match.firstNameKana ?? input.firstNameKana,
+        lastNameRomaji: match.lastNameRomaji ?? input.lastNameRomaji,
+        firstNameRomaji: match.firstNameRomaji ?? input.firstNameRomaji,
         phone: match.phone ?? input.phone,
         note: match.note ?? input.note,
         version: match.version + 1,
@@ -444,6 +468,8 @@ export class MemberService {
       firstName: input.firstName,
       lastNameKana: input.lastNameKana,
       firstNameKana: input.firstNameKana,
+      lastNameRomaji: input.lastNameRomaji,
+      firstNameRomaji: input.firstNameRomaji,
       phone: input.phone,
       note: input.note,
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,

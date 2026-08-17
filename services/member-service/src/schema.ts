@@ -140,6 +140,21 @@ ALTER TABLE member_people ADD COLUMN phone TEXT;
 `.trim(),
 };
 
+// 参加届: 氏名のローマ字(アルファベット)表記. Additive ALTER (non-destructive): 姓/名 を
+// ローマ字で別途保持し、アルファベットのメールアドレス発行 (例 first.last@) の候補生成に
+// 使う。任意フィールド (英字) で nullable. Retained on member_people too so the roster
+// keeps the alphabet name. Mirrors 0007_participation_romaji.sql (schema-lockstep).
+export const MEMBER_PARTICIPATION_ROMAJI_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0007_participation_romaji",
+  up: `
+ALTER TABLE member_participations ADD COLUMN last_name_romaji TEXT;
+ALTER TABLE member_participations ADD COLUMN first_name_romaji TEXT;
+ALTER TABLE member_people ADD COLUMN last_name_romaji TEXT;
+ALTER TABLE member_people ADD COLUMN first_name_romaji TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -148,4 +163,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PARTICIPATION_MIGRATION,
   MEMBER_PARTICIPATION_EMAILS_MIGRATION,
   MEMBER_PARTICIPATION_NAME_SPLIT_MIGRATION,
+  MEMBER_PARTICIPATION_ROMAJI_MIGRATION,
 ];

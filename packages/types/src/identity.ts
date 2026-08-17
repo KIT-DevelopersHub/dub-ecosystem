@@ -1,5 +1,5 @@
 // identity — identity-roster namespace. Owns the frozen RBAC permission catalog.
-import type { UserId, OrgId, RoleId, ISODateTime } from "./common";
+import type { UserId, OrgId, RoleId, ISODateTime, CursorQuery } from "./common";
 
 export interface PermissionCatalogEntry {
   key: string;
@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (34 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (35 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -39,6 +39,7 @@ export const PERMISSION_CATALOG = [
   { key: "mail:admin", name: "Administer mail", description: "Manage mailbox/watch/rules", domain: "mail", dangerous: true },
   { key: "chat:create", name: "Create channels", description: "Create chat channels", domain: "chat", dangerous: false },
   { key: "chat:moderate", name: "Moderate chat", description: "Manage channels and delete others' messages", domain: "chat", dangerous: true },
+  { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
   { key: "infra:read", name: "Read infra", description: "View sites/deployments/dns/domains", domain: "infra", dangerous: false },
   { key: "infra:deploy", name: "Deploy", description: "Execute deployments", domain: "infra", dangerous: true },
   { key: "infra:dns", name: "Change DNS", description: "Modify DNS records", domain: "infra", dangerous: true },
@@ -53,7 +54,7 @@ export const PERMISSION_CATALOG = [
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 34 keys (open `${string}:${string}` template retired).
+// Closed union of the 35 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";
@@ -133,8 +134,50 @@ export interface ProvisionUserRequest {
   displayName: string;
   githubLogin?: string;
 }
-export interface ListUsersQuery {
+export interface ListUsersQuery extends CursorQuery {
   ids?: string; // comma-separated batch (?ids=)
-  cursor?: string;
-  limit?: number;
+  status?: UserStatus;
+  /** Canonical role filter (a roleId). */
+  role?: RoleId;
+  /**
+   * @deprecated Legacy alias for `role` (the FE7 client's original spelling). The server
+   * still accepts it (`role ?? roleKey`), so it stays in the contract as a documented
+   * deprecated alias; new callers must use `role`. Do not remove without a migration.
+   */
+  roleKey?: RoleId;
+  q?: string; // free-text search
 }
+/** GET /identity/orgs — cursor-only. */
+export type ListOrgsQuery = CursorQuery;
+/** GET /identity/roles — cursor-only. */
+export type ListRolesQuery = CursorQuery;
+
+// ── Wire contract (query params) ─────────────────────────────────────────────
+// SINGLE source of truth for the query-parameter *names* identity-roster's public
+// (/identity/*) read endpoints put on the wire. The server (identity-roster app.ts) and
+// the OpenAPI spec (docs/openapi/identity-roster.yaml) are reconciled against this map in
+// CI (see @dub/e2e-smoke wire-params.test.ts). `roleKey` is intentionally listed as an
+// accepted (deprecated) alias of `role` — the server reads both; canonical is `role`.
+// The internal `/internal/users` route (not in the public spec) reads a subset of these
+// same keys, so it needs no separate entry. See docs/api-contracts/_wire-contract-enforcement.md.
+export const IDENTITY_WIRE = {
+  listOrgs: { method: "GET", path: "/identity/orgs", query: ["cursor", "limit"] },
+  listUsers: {
+    method: "GET",
+    path: "/identity/users",
+    query: ["cursor", "limit", "ids", "status", "role", "roleKey", "q"],
+  },
+  listRoles: { method: "GET", path: "/identity/roles", query: ["cursor", "limit"] },
+} as const;
+
+// Compile-time tie: each endpoint's query keys must be real keys of its query type.
+type _IdentityWireKeysAreTyped =
+  (typeof IDENTITY_WIRE.listOrgs.query)[number] extends keyof ListOrgsQuery
+    ? (typeof IDENTITY_WIRE.listUsers.query)[number] extends keyof ListUsersQuery
+      ? (typeof IDENTITY_WIRE.listRoles.query)[number] extends keyof ListRolesQuery
+        ? true
+        : never
+      : never
+    : never;
+const _identityWireKeyGuard: _IdentityWireKeysAreTyped = true;
+void _identityWireKeyGuard;

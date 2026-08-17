@@ -6,7 +6,7 @@ import type { task, common, auditLog, identity } from "@dub/types";
 import { DubError, CommonErrorCodes } from "@dub/errors";
 import type { AppConfig } from "../src/env";
 import type { Deps } from "../src/deps";
-import type { TaskRepo, InsertTaskInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
+import type { TaskRepo, InsertTaskInput, InsertAttachmentInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
 import type { EventClient, EventRef, IdentityClient, Authorizer } from "../src/clients";
 import type { EventPublisher, Auditor } from "../src/events";
 import type { Principal } from "../src/principal";
@@ -169,6 +169,47 @@ export class InMemoryTaskRepo implements TaskRepo {
       }
     }
     return out;
+  }
+
+  attachments: Array<task.TaskAttachment & { archivedAt: string | null }> = [];
+
+  async addAttachment(input: InsertAttachmentInput): Promise<task.TaskAttachment> {
+    const att: task.TaskAttachment & { archivedAt: string | null } = {
+      id: input.id,
+      taskId: input.taskId,
+      kind: input.kind,
+      name: input.name,
+      url: input.url,
+      fileId: input.fileId,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      createdBy: input.createdBy,
+      createdAt: input.now,
+      archivedAt: null,
+    };
+    this.attachments.push(att);
+    const { archivedAt: _a, ...pub } = att;
+    void _a;
+    return { ...pub };
+  }
+
+  async listAttachments(taskId: string): Promise<task.TaskAttachment[]> {
+    return this.attachments
+      .filter((a) => a.taskId === taskId && a.archivedAt === null)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+      .map(({ archivedAt: _a, ...pub }) => {
+        void _a;
+        return { ...pub };
+      });
+  }
+
+  async archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean> {
+    const att = this.attachments.find(
+      (a) => a.id === attachmentId && a.taskId === taskId && a.archivedAt === null,
+    );
+    if (!att) return false;
+    att.archivedAt = now;
+    return true;
   }
 }
 

@@ -12,7 +12,7 @@ import { type UserListFilters } from "../lib/listUsersQuery";
 import { type AuditFilters } from "../lib/auditQuery";
 import { type MailStatusResponse } from "../lib/mailStatus";
 import { presentError } from "../lib/errorDisplay";
-import { applyRoleGrant, makePendingAssignment } from "../lib/optimistic";
+import { applyRoleGrant, makePendingAssignment, addUserRoleId, removeUserRoleId } from "../lib/optimistic";
 import { runOffboard } from "../lib/offboard";
 import type {
   CreateRoleRequest,
@@ -172,6 +172,85 @@ export function useRevokeRole(userId: common.UserId) {
     onError: (err) => {
       const p = presentError(err);
       toast({ kind: "error", title: "剥奪に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
+}
+
+/** Partial key matching EVERY cached roster list query (all filter/cursor variants),
+ *  so an inline role edit reflects in the ロール column regardless of active filters. */
+const USERS_LIST_KEY = [queryKeys.root[0], "users", "list"] as const;
+
+/** OPTIMISTIC inline (roster list): grant an ORG-WIDE role straight from the ロール
+ *  column. Reuses the audited assign endpoint but reflects the change instantly in the
+ *  list's `roleIds` (and the per-user roles cache), rolling back on error. */
+export function useAssignRoleInline(userId: common.UserId, grantedBy: common.UserId) {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (input: { roleId: common.RoleId; roleName: string }) =>
+      api.assignRole(userId, { roleId: input.roleId }),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: USERS_LIST_KEY });
+      await qc.cancelQueries({ queryKey: queryKeys.userRoles(userId) });
+      const prevLists = qc.getQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY });
+      const prevRoles = qc.getQueryData<RoleAssignment[]>(queryKeys.userRoles(userId)) ?? [];
+      qc.setQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY }, (page) =>
+        addUserRoleId(page, userId, input.roleId),
+      );
+      const pending = makePendingAssignment({
+        userId, roleId: input.roleId, roleName: input.roleName,
+        grantedBy, now: new Date().toISOString(),
+      });
+      qc.setQueryData(queryKeys.userRoles(userId), applyRoleGrant(prevRoles, pending));
+      return { prevLists, prevRoles };
+    },
+    onError: (err, _input, ctx) => {
+      ctx?.prevLists?.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx) qc.setQueryData(queryKeys.userRoles(userId), ctx.prevRoles);
+      const p = presentError(err);
+      toast({ kind: "error", title: "ロール付与に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: USERS_LIST_KEY });
+      qc.invalidateQueries({ queryKey: queryKeys.userRoles(userId) });
+    },
+  });
+}
+
+/** OPTIMISTIC inline (roster list): revoke an ORG-WIDE role straight from the ロール
+ *  column. The caller resolves the assignment id (from the per-user roles cache); the
+ *  server still enforces the last-admin guard and rejects with a rollback + toast. */
+export function useRevokeRoleInline(userId: common.UserId) {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (input: { assignmentId: string; roleId: common.RoleId }) =>
+      api.revokeRole(userId, input.assignmentId),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: USERS_LIST_KEY });
+      await qc.cancelQueries({ queryKey: queryKeys.userRoles(userId) });
+      const prevLists = qc.getQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY });
+      const prevRoles = qc.getQueryData<RoleAssignment[]>(queryKeys.userRoles(userId)) ?? [];
+      qc.setQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY }, (page) =>
+        removeUserRoleId(page, userId, input.roleId),
+      );
+      qc.setQueryData(
+        queryKeys.userRoles(userId),
+        prevRoles.filter((a) => a.id !== input.assignmentId),
+      );
+      return { prevLists, prevRoles };
+    },
+    onError: (err, _input, ctx) => {
+      ctx?.prevLists?.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx) qc.setQueryData(queryKeys.userRoles(userId), ctx.prevRoles);
+      const p = presentError(err);
+      toast({ kind: "error", title: "剥奪に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: USERS_LIST_KEY });
+      qc.invalidateQueries({ queryKey: queryKeys.userRoles(userId) });
     },
   });
 }

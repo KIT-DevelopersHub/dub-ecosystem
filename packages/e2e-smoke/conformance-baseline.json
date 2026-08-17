@@ -3,7 +3,8 @@
     "missingInSpec": [
       "GET /api/v1/admin/users/{}/password",
       "POST /api/v1/admin/users/{}/password",
-      "POST /api/v1/me/password"
+      "POST /api/v1/me/password",
+      "POST /api/v1/public/participation"
     ],
     "missingInCode": [
       "GET /api/v1/{}/{}"
@@ -54,18 +55,22 @@
     "missingInSpec": [
       "GET /internal/users",
       "POST /identity/users/sync-email-routing",
+      "POST /identity/users/sync-email-routing/preview",
+      "POST /identity/users/{}/offboard",
       "POST /internal/users/lookup"
     ],
     "missingInCode": []
   },
   "mail-gateway": {
     "missingInSpec": [
+      "GET /mail/flags",
       "GET /mail/mailboxes",
       "GET /mail/messages",
       "GET /mail/messages/{}",
       "GET /mail/sent",
       "GET /mail/sent/{}",
       "GET /mail/threads/{}",
+      "POST /mail/flags/{}",
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
       "POST /mail/outbox"
@@ -85,5 +90,29 @@
       "POST /mailboxes/{}",
       "POST /outbox"
     ]
+  },
+  "notification": {
+    "missingInSpec": [
+      "GET /manage",
+      "GET /notifications/inbox",
+      "GET /notifications/inbox/unread-count",
+      "GET /notifications/manage",
+      "GET /notifications/preferences",
+      "PATCH /notifications/inbox/{}/read",
+      "PATCH /notifications/preferences",
+      "POST /manage/publish-batch",
+      "POST /manage/unpublish-batch",
+      "POST /manage/{}/publish",
+      "POST /manage/{}/unpublish",
+      "POST /notifications/inbox/read-all",
+      "POST /notifications/internal/seed-releases",
+      "POST /notifications/manage/publish-batch",
+      "POST /notifications/manage/unpublish-batch",
+      "POST /notifications/manage/{}/publish",
+      "POST /notifications/manage/{}/unpublish",
+      "POST /notifications/notify",
+      "POST /notifications/release"
+    ],
+    "missingInCode": []
   }
 }

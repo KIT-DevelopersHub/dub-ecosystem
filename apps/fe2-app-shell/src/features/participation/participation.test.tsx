@@ -154,7 +154,8 @@ describe("ParticipationPage", () => {
 
 const SUBMISSION: Participation = {
   id: "p_1", orgId: "org", memberId: "m_1", name: "黒川", lastName: "黒川", firstName: null,
-  nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null, grade: "3",
+  nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
+  nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null, grade: "3",
   department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
   gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
   status: "submitted", matchKind: "linked_existing", submittedBy: "u_1",

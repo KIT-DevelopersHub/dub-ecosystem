@@ -157,23 +157,6 @@
 }
 .filterClear:hover { background: var(--dub-color-surface-sunken); }
 
-/* ---- legacy view switcher (ViewSwitcher retained for reuse/tests) ---- */
-.switcher {
-  display: inline-flex;
-  gap: var(--dub-space-1);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md, 8px);
-  overflow: hidden;
-}
-.switcherBtn {
-  padding: var(--dub-space-2) var(--dub-space-3);
-  background: var(--dub-color-surface-raised);
-  border: none;
-  color: var(--dub-color-text-secondary);
-  cursor: pointer;
-}
-.switcherBtnActive { background: var(--dub-color-brand-500); color: var(--dub-color-text-inverse); }
-
 /* ---- legacy list/board (retained components) ---- */
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td {
@@ -239,32 +222,8 @@
 }
 .tlTodayBtn:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); border-color: var(--dub-color-border-strong); }
 
-.tlSeg {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  background: var(--dub-color-surface-sunken);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md, 8px);
-}
-.tlSegBtn {
-  min-width: 34px;
-  padding: 4px 10px;
-  border: none;
-  border-radius: var(--dub-radius-sm, 6px);
-  background: transparent;
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm, 0.82rem);
-  font-weight: var(--dub-font-weight-medium, 600);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.tlSegBtn:hover { color: var(--dub-color-text-primary); }
-.tlSegBtnOn {
-  background: var(--dub-color-surface-base);
-  color: var(--dub-color-text-primary);
-  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
-}
+/* Granularity chips (月/週/日) now use the shared @dub/ui SegmentedControl —
+   the hand-rolled .tlSeg/.tlSegBtn strip was removed in the unification pass. */
 
 /* ---- frame + single scroll surface (two-pane via sticky) ---- */
 .tlFrame {
@@ -1229,3 +1188,80 @@
   .partyName { display: none; }
   .myTable thead { display: none; }
 }
+
+/* ── task attachments (create modal draft + detail view) ─────────────────── */
+.attachRow { margin-bottom: var(--dub-space-2); }
+.attachFileInput {
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-text-secondary);
+}
+.attachUrlRow {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: var(--dub-space-2);
+  align-items: start;
+}
+.attachError {
+  margin-top: var(--dub-space-2);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-danger-600, #b42318);
+}
+.attachDraftList {
+  list-style: none;
+  margin: var(--dub-space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.attachDraftItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default, #e4e4e7);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-surface-sunken, #f8f8fa);
+}
+.attachDraftName { font-size: var(--dub-font-size-sm, 0.85rem); color: var(--dub-color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachDraftRemove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--dub-color-text-secondary);
+  padding: 0 var(--dub-space-1);
+}
+.attachDraftRemove:hover { color: var(--dub-color-danger-600, #b42318); }
+
+.attachViewList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.attachViewItem { min-width: 0; }
+.attachViewImage {
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: var(--dub-radius-md, 8px);
+  border: 1px solid var(--dub-color-border-default, #e4e4e7);
+}
+.attachViewLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default, #e4e4e7);
+  border-radius: var(--dub-radius-md, 8px);
+  text-decoration: none;
+  color: var(--dub-color-accent, #2246d6);
+  background: var(--dub-color-surface-base);
+}
+.attachViewLink:hover { background: var(--dub-color-surface-sunken, #f8f8fa); }
+.attachViewName { font-size: var(--dub-font-size-sm, 0.9rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachViewSize { font-size: var(--dub-font-size-xs, 0.75rem); color: var(--dub-color-text-secondary); }
