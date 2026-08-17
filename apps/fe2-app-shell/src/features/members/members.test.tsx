@@ -85,28 +85,24 @@ describe("createMembersApi", () => {
 });
 
 describe("MembersPage", () => {
-  it("renders the member list once loaded", async () => {
+  it("opens on チーム別 and has no flat 一覧 tab", async () => {
     render(wrap(<MembersPage />, makeApi()));
-    expect(await screen.findByText("山田太郎")).toBeInTheDocument();
+    // default view is the team-grouped one, and it lists members under their team.
+    expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
+    expect(screen.getByText("山田太郎")).toBeInTheDocument();
     expect(screen.getByText("佐藤花子")).toBeInTheDocument();
-    // status badges
-    expect(screen.getByTestId("members-status-m1")).toHaveTextContent("追加済");
-    expect(screen.getByTestId("members-status-m2")).toHaveTextContent("招待中");
-    // 学科・学年 are their own columns (not buried in メモ)
-    const table = screen.getByTestId("members-table");
-    expect(within(table).getByText("学科")).toBeInTheDocument();
-    expect(within(table).getByText("学年")).toBeInTheDocument();
-    expect(within(table).getByText("情報工学科")).toBeInTheDocument();
-    expect(within(table).getByText("3年")).toBeInTheDocument();
+    // the removed 一覧 tab and its flat table must not be present.
+    expect(screen.queryByRole("tab", { name: "一覧" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("members-table")).not.toBeInTheDocument();
   });
 
-  it("switches to the team-grouped and org-chart views", async () => {
+  it("switches between the team-grouped and org-chart views", async () => {
     render(wrap(<MembersPage />, makeApi()));
-    await screen.findByText("山田太郎");
-    await userEvent.click(screen.getByRole("tab", { name: "チーム別" }));
     expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "組織図" }));
     expect(await screen.findByTestId("members-orgchart")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "チーム別" }));
+    expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
   });
 
   it("opens the add-member dialog and creates a member", async () => {
@@ -127,7 +123,8 @@ describe("MembersPage", () => {
     const api = makeApi();
     render(wrap(<MembersPage />, api));
     await screen.findByText("山田太郎");
-    await userEvent.click(screen.getByTestId("members-delete-m1"));
+    // チーム別 view: delete via the member row's アクションアイコン.
+    await userEvent.click(screen.getByRole("button", { name: "山田太郎 を削除" }));
     const confirm = await screen.findByTestId("members-confirm-delete");
     await userEvent.click(within(confirm).getByRole("button", { name: "削除" }));
     await waitFor(() => expect(api.deleteMember).toHaveBeenCalledWith("m1"));
@@ -155,8 +152,13 @@ describe("MembersPage", () => {
     expect(screen.getByTestId("members-orgchip-p_none")).toBeInTheDocument();
     expect(screen.getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
     expect(screen.queryByTestId("members-orgchip-p_gone")).not.toBeInTheDocument();
-    // team-less + orphan-ref members land in the catch-all 未所属 column.
+    // team-less + orphan-ref members land in the muted 未所属 note (NOT a pseudo-team
+    // column) at the foot of the chart.
     const org = screen.getByTestId("members-orgchart");
-    expect(within(org).getByText("未所属")).toBeInTheDocument();
+    const note = within(org).getByTestId("members-orgchart-unassigned");
+    expect(note).toBeInTheDocument();
+    expect(within(note).getByText("未所属（チーム未割り当て）")).toBeInTheDocument();
+    expect(within(note).getByTestId("members-orgchip-p_none")).toBeInTheDocument();
+    expect(within(note).getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
   });
 });
