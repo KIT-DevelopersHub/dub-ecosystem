@@ -127,15 +127,11 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
     return { team: t, members: cm };
   });
   // 取りこぼし防止（母集団の一致を保証）: teamIds が空の人だけでなく、実在しないチーム
-  // だけを指す(削除済み等)人も、HQにも列にも入らなかった active メンバーを全て「未所属」
-  // 列で必ず表示する。これで 一覧(辞退除く) と 組織図 の合計人数が常に一致する。
+  // だけを指す(削除済み等)人も、HQにも列にも入らなかった active メンバーを全て拾う。
+  // ただし「未所属」を擬似チーム列として生やさず、体制図の下部に控えめな注記として並べる
+  // （チーム色・階層を持たせない）。これで 一覧(辞退除く) と 組織図 の母集団は一致しつつ、
+  // 存在しないチームを勝手に作らない。
   const unassigned = active.filter((m) => !placed.has(m.id));
-  if (unassigned.length > 0) {
-    columns.push({
-      team: { id: "__unassigned", key: "unassigned", name: "未所属", color: "#94a3b8", description: null },
-      members: unassigned,
-    });
-  }
 
   const totalConfirmed = active.filter((m) => m.status === "added").length;
   const totalTent = active.length - totalConfirmed;
@@ -192,6 +188,20 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
               <TeamColumn key={team.id} team={team} members={cm} />
             ))}
           </div>
+
+          {unassigned.length > 0 ? (
+            <div className={styles.orgUnassigned} data-testid="members-orgchart-unassigned">
+              <span className={styles.orgUnassignedLabel}>未所属（チーム未割り当て）</span>
+              <div className={styles.orgUnassignedNames}>
+                {unassigned.map((m) => (
+                  <span key={m.id} className={styles.orgUnassignedName} data-testid={`members-orgchip-${m.id}`}>
+                    {m.name}
+                    {isTentative(m.status) ? <span className={styles.miniBadge}>{tentBadge(m.status)}</span> : null}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 

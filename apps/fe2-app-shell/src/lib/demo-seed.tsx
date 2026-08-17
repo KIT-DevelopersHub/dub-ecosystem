@@ -1402,6 +1402,8 @@ function createMembersStore() {
     mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
     mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+    // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
+    mk("member_6", "田村 未", "メンバー", "invited", [], 17, null, "情報工学科", "1年"),
   ];
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
