@@ -874,6 +874,31 @@
   cursor: pointer; font-size: 0.85rem; line-height: 1;
 }
 .ppChipX:hover { background: var(--dub-color-brand-100); }
+/* 依存→親子 変換アクション (chip 内の小ボタン) */
+.ppChipPromote {
+  border: 1px solid var(--dub-color-brand-300, var(--dub-color-brand-200));
+  border-radius: var(--dub-radius-full, 999px);
+  background: transparent;
+  color: var(--dub-color-brand-700);
+  cursor: pointer;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  line-height: 1;
+  padding: 2px 6px;
+}
+.ppChipPromote:hover { background: var(--dub-color-brand-100); border-color: var(--dub-color-brand-400); }
+/* 親子→依存 変換ボタン (親セレクトの下) */
+.relConvertBtn {
+  margin-top: var(--dub-space-2);
+  align-self: flex-start;
+  border: 1px dashed var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 8px);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  cursor: pointer;
+  font-size: var(--dub-font-size-sm, 0.8rem);
+  padding: 4px 8px;
+}
+.relConvertBtn:hover { background: var(--dub-color-surface-sunken, var(--dub-color-brand-50)); color: var(--dub-color-text-primary); border-color: var(--dub-color-brand-400); }
 .ppInputWrap { position: relative; min-width: 0; }
 .ppInput {
   box-sizing: border-box;

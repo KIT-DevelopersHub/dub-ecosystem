@@ -29,7 +29,9 @@ export interface TaskCreateModalProps {
   /** every task in the event with its direct parent — predecessors are scoped to
    *  the chosen parent's siblings (判断10: 同一直接親のみ依存可). */
   scopeTasks: readonly ScopeTask[];
-  onCreate: (draft: TaskDraft) => Promise<void>;
+  /** Resolves `false` when the task was NOT created (keep the modal open so the
+   *  user can fix + retry); `true`/void on success (modal closes). */
+  onCreate: (draft: TaskDraft) => Promise<boolean | void>;
   /** date-input value (YYYY-MM-DD) preset when opened from a timeline cell. */
   initialDue?: string | null;
   /** parent id preset when opened via "ここから子タスクを作成". */
@@ -88,7 +90,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     if (!title.trim() || saving) return;
     setSaving(true);
     try {
-      await onCreate({
+      const ok = await onCreate({
         title: title.trim(),
         status,
         priority,
@@ -98,9 +100,13 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         parentTaskId: parentId,
         dependsOnIds: deps,
       });
-      rememberPredecessors(deps);
-      reset();
-      onClose();
+      // Close ONLY on success — a failed create keeps the form (with its input) open
+      // so the user can retry after reading the error dialog. Success shows a toast.
+      if (ok !== false) {
+        rememberPredecessors(deps);
+        reset();
+        onClose();
+      }
     } finally {
       setSaving(false);
     }
