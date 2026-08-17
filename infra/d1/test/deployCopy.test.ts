@@ -3,7 +3,14 @@
 // (conventional-commit prefix, backticks, English jargon, "(#NN)") must never survive
 // verbatim into the notification title/body; the reader sees a genre tag + a plain headline.
 import { describe, it, expect } from "vitest";
-import { humanizeChange, buildDeployCopy, formatJst } from "../src/deployCopy";
+import {
+  humanizeChange,
+  buildDeployCopy,
+  formatJst,
+  extractNotifyLine,
+  isPresentableNotifyLine,
+  detectConventionalType,
+} from "../src/deployCopy";
 
 describe("humanizeChange — genre classification + prefix/noise stripping", () => {
   // [rawTitle, expectedKind, expectedLabel, expectedHeadline]
@@ -69,5 +76,94 @@ describe("formatJst", () => {
   });
   it("returns the input unchanged on an unparseable date", () => {
     expect(formatJst("not-a-date")).toBe("not-a-date");
+  });
+});
+
+// ---- PR-body notify line (通知文言) --------------------------------------------------------
+
+const PR_TEMPLATE_BODY = `## 通知文言（ユーザー向け・1行）
+
+<!-- ここに1行で書く -->
+
+使用量ダッシュボードを全メンバーに開放しました
+
+## 試せる場所（任意）
+
+ランチャー → 使用量
+
+---
+
+## 変更内容（開発者向け）
+
+- usage-service に /usage/all を追加
+`;
+
+describe("extractNotifyLine — pull the human 通知文言 out of a PR body", () => {
+  it("reads the first content line under the 通知文言 heading", () => {
+    expect(extractNotifyLine(PR_TEMPLATE_BODY)).toBe("使用量ダッシュボードを全メンバーに開放しました");
+  });
+
+  it("skips HTML comments, headings, bullets and the placeholder", () => {
+    const body = `## 通知文言\n<!-- ここに1行で書く -->\n（ここに1行で書く）\n\nロールの権限をその場でトグル編集できるようにしました\n`;
+    expect(extractNotifyLine(body)).toBe("ロールの権限をその場でトグル編集できるようにしました");
+  });
+
+  it("falls back to the 1st content line when there is no 通知文言 heading", () => {
+    const body = `ガントチャートにタスクの期間バーを表示しました\n\n詳細な説明...\n`;
+    expect(extractNotifyLine(body)).toBe("ガントチャートにタスクの期間バーを表示しました");
+  });
+
+  it("returns undefined for an empty / placeholder-only / comment-only body", () => {
+    expect(extractNotifyLine("")).toBeUndefined();
+    expect(extractNotifyLine("## 通知文言\n\n（ここに1行で書く）\n")).toBeUndefined();
+    expect(extractNotifyLine("<!-- nothing here -->")).toBeUndefined();
+  });
+
+  it("normalizes CRLF line endings", () => {
+    expect(extractNotifyLine("## 通知文言\r\n\r\nメール受信の不具合を修正しました\r\n")).toBe(
+      "メール受信の不具合を修正しました",
+    );
+  });
+});
+
+describe("isPresentableNotifyLine", () => {
+  it("accepts real Japanese copy", () => {
+    expect(isPresentableNotifyLine("使用量ダッシュボードを開放しました")).toBe(true);
+  });
+  it("rejects empty, placeholder and English-only lines", () => {
+    expect(isPresentableNotifyLine("")).toBe(false);
+    expect(isPresentableNotifyLine("（ここに1行で書く）")).toBe(false);
+    expect(isPresentableNotifyLine("add usage dashboard")).toBe(false);
+  });
+});
+
+describe("detectConventionalType", () => {
+  it("extracts the leading conventional-commit type", () => {
+    expect(detectConventionalType("fix(db): guard")).toBe("fix");
+    expect(detectConventionalType("docs: readme")).toBe("docs");
+    expect(detectConventionalType("チャートを速くした")).toBeUndefined();
+  });
+});
+
+describe("buildDeployCopy — human notify line wins over title humanization", () => {
+  it("uses the notify line verbatim as the headline, keeping the title-derived genre", () => {
+    const copy = buildDeployCopy({
+      title: "feat(usage): add usage dashboard route", // English → would be generic 新機能
+      notifyLine: "使用量ダッシュボードを全メンバーに開放しました",
+      createdAt: "2026-08-17T00:00:00Z",
+    });
+    expect(copy.title).toBe("🎉 新機能: 使用量ダッシュボードを全メンバーに開放しました");
+    expect(copy.change.generic).toBe(false);
+    expect(copy.body).toContain("使用量ダッシュボードを全メンバーに開放しました");
+    expect(copy.body).not.toContain("usage dashboard");
+  });
+
+  it("falls back to title humanization when the notify line is not presentable", () => {
+    const copy = buildDeployCopy({
+      title: "feat: メンバー管理を追加",
+      notifyLine: "（ここに1行で書く）", // placeholder → ignored
+      createdAt: "2026-08-17T00:00:00Z",
+    });
+    expect(copy.title).toBe("🎉 新機能: メンバー管理を追加");
   });
 });

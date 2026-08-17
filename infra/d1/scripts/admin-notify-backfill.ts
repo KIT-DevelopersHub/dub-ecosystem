@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildBackfillRows, buildBackfillSql, deployDedupKey, type MergedPr } from "../src/adminNotify";
+import { buildBackfillRows, buildBackfillSql, type MergedPr } from "../src/adminNotify";
 
 const WRANGLER = ["dlx", "wrangler@4.35.0"];
 const D1_NAME = "dub-core";
@@ -30,7 +30,7 @@ const has = (n: string): boolean => process.argv.includes(`--${n}`);
 function listMergedPrs(repo: string, limit: number): MergedPr[] {
   const out = execFileSync(
     "gh",
-    ["pr", "list", "--repo", repo, "--state", "merged", "--limit", String(limit), "--json", "number,title,url,mergedAt,mergeCommit"],
+    ["pr", "list", "--repo", repo, "--state", "merged", "--limit", String(limit), "--json", "number,title,body,url,mergedAt,mergeCommit"],
     { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
   );
   return JSON.parse(out) as MergedPr[];
@@ -68,10 +68,13 @@ function main(): void {
   console.log(`# backfill preview — repo=${repo}`);
   console.log(`# merged PRs scanned: ${prs.length}`);
   console.log(`# already recorded (deploy:* in D1): ${existing.size}`);
-  console.log(`# NEW Admin notifications to create: ${rows.length}\n`);
-  console.log("PR#\tSHA(12)\tdedupKey\ttitle");
-  for (const { meta } of rows) {
-    console.log(`#${meta.prNumber}\t${meta.sha.slice(0, 12)}\t${deployDedupKey(meta.sha)}\t${meta.title}`);
+  console.log(`# NEW Admin notifications to create: ${rows.length}`);
+  console.log(`# (user-irrelevant PRs — docs/chore/… with no 通知文言 — are skipped)\n`);
+  // "title" here is the reader-facing notification title actually written (通知文言-derived
+  // when present), not the raw PR title — so the preview matches what members will see.
+  console.log("PR#\tSHA(12)\tsrc\tnotification title");
+  for (const { meta, row } of rows) {
+    console.log(`#${meta.prNumber}\t${meta.sha.slice(0, 12)}\t${meta.notifyLine ? "通知文言" : "title"}\t${row.title}`);
   }
 
   if (!apply) {
