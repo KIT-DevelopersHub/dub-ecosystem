@@ -1,19 +1,20 @@
-// NotificationListItem — one COMPACT inbox row (Gmail-style density: title + time
-// on one line, a single-line snippet below, unread dot). Click marks read + navigates
-// to the resolved linkUrl (FE5 §2-2, test 8).
+// NotificationListItem — one inbox row. Clean, full-width, and compact (Gmail-style):
+// title + one-line snippet, with a trailing cell that shows the timestamp and — on
+// hover/focus — swaps to ONE quiet read/unread toggle icon (mirrors the mail Gmail
+// clone's row-hover pattern). Clicking the row marks read + navigates to the resolved
+// linkUrl (FE5 §2-2, test 8). Unread rows carry a dot + aria state.
 //
-// Read/unread toggle — Gmail behaviour: the action is NOT rendered in the row's flow.
-// It is an overlay chip pinned to the right edge that stays hidden (opacity 0, no
-// reserved space) until the row is hovered/focused, then appears over the timestamp.
-// It toggles both directions — an unread row offers "既読にする" (onMarkRead), a read
-// row offers "未読にする" (onMarkUnread).
+// The toggle direction follows the row's read state: a read row offers "未読にする"
+// (onMarkUnread), an unread row offers "既読にする" (onMarkRead). It is a DS IconButton
+// (properly styled, no default UA border) stacked with the timestamp in one grid cell,
+// so it reserves NO extra width and never shifts the layout.
 //
-// The row is a container <div> (not a <button>) so the overlay action can be a real
-// button without nesting interactive controls: the main clickable area is its own
-// button, the action is a sibling laid over it.
+// The row is a container <div> (not a <button>) so the toggle can be a real button
+// without nesting interactive controls: the main clickable area is its own button, the
+// toggle is a sibling in the trailing cell.
 
 import type { KeyboardEvent, ReactNode } from "react";
-import { Badge } from "@dub/ui";
+import { Badge, IconButton, Tooltip } from "@dub/ui";
 import type { InboxItem } from "../contracts/notification-api";
 import { resolveTypeDisplay } from "../lib/type-dictionary";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -22,9 +23,9 @@ import styles from "./NotificationListItem.module.css";
 export interface NotificationListItemProps {
   item: InboxItem;
   onActivate: (item: InboxItem) => void;
-  /** Optional: when provided, read rows reveal a hover "未読にする" action (restore to unread). */
+  /** Optional: when provided, read rows expose a quiet "未読にする" action (restore to unread). */
   onMarkUnread?: (item: InboxItem) => void;
-  /** Optional: when provided, unread rows reveal a hover "既読にする" action (mark read in place). */
+  /** Optional: when provided, unread rows expose a quiet "既読にする" action (mark read in place). */
   onMarkRead?: (item: InboxItem) => void;
 }
 
@@ -47,6 +48,24 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
   const { item, onActivate, onMarkUnread, onMarkRead } = props;
   const unread = item.readAt === null;
   const isRelease = resolveTypeDisplay(item.type).group === "release";
+  // One quiet trailing toggle; direction depends on the row's read state (Gmail-style):
+  // a read row offers "未読にする"; an unread row offers "既読にする".
+  const toggle =
+    !unread && onMarkUnread
+      ? {
+          icon: "inbox" as const,
+          label: "未読にする",
+          testId: `fe5-inbox-markunread-${item.id}`,
+          run: () => onMarkUnread(item),
+        }
+      : unread && onMarkRead
+        ? {
+            icon: "check" as const,
+            label: "既読にする",
+            testId: `fe5-inbox-markread-${item.id}`,
+            run: () => onMarkRead(item),
+          }
+        : null;
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -70,46 +89,34 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
           <span className={styles.dotSpacer} aria-hidden="true" />
         )}
         <div className={styles.body}>
-          <div className={styles.topline}>
+          <div className={styles.titleRow}>
             {isRelease ? (
               <Badge tone="brand" testId="fe5-inbox-release-badge">
                 🎉 新機能
               </Badge>
             ) : null}
             <span className={styles.title}>{item.title}</span>
-            <span className={styles.time}>{formatRelativeTime(item.createdAt)}</span>
           </div>
           <div className={styles.snippet}>{item.body}</div>
         </div>
       </button>
-      {onMarkRead && unread ? (
-        <button
-          type="button"
-          className={styles.action}
-          data-testid={`fe5-inbox-markread-${item.id}`}
-          aria-label={`既読にする: ${item.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMarkRead(item);
-          }}
-        >
-          既読にする
-        </button>
-      ) : null}
-      {onMarkUnread && !unread ? (
-        <button
-          type="button"
-          className={styles.action}
-          data-testid={`fe5-inbox-markunread-${item.id}`}
-          aria-label={`未読にする: ${item.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMarkUnread(item);
-          }}
-        >
-          未読にする
-        </button>
-      ) : null}
+      <div className={styles.trailing}>
+        <span className={styles.time}>{formatRelativeTime(item.createdAt)}</span>
+        {toggle ? (
+          <span className={styles.action}>
+            <Tooltip content={toggle.label}>
+              <IconButton
+                name={toggle.icon}
+                size="sm"
+                variant="ghost"
+                aria-label={`${toggle.label}: ${item.title}`}
+                testId={toggle.testId}
+                onClick={toggle.run}
+              />
+            </Tooltip>
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

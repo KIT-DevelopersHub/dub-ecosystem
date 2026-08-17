@@ -1,28 +1,35 @@
-/* Compact, Gmail-dense rows: tight vertical rhythm, single-line snippet, the
- * per-item action revealed on hover/focus. All spacing from @dub/tokens. */
+/* Clean, full-width, compact rows. All spacing/color from @dub/tokens. The trailing
+ * cell stacks the timestamp and the read/unread toggle in ONE grid cell so the row
+ * width never shifts and no phantom box is reserved: the timestamp shows by default and
+ * the quiet icon toggle fades in on row hover / keyboard focus. */
 .row {
-  position: relative;
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+}
+
+.row:last-child {
+  border-bottom: none;
 }
 
 .item {
   display: flex;
-  gap: var(--dub-space-2);
+  gap: var(--dub-space-3);
   align-items: flex-start;
   flex: 1;
   min-width: 0;
-  /* denser than before (was space-3/space-4) to cut row height */
-  padding: var(--dub-space-2) var(--dub-space-3);
-  background: var(--dub-color-surface-base);
+  padding: var(--dub-space-3) var(--dub-space-2) var(--dub-space-3) var(--dub-space-4);
+  border: none;
+  background: transparent;
   color: var(--dub-color-text-primary);
   cursor: pointer;
   text-align: left;
   border-left: 3px solid transparent;
 }
 
-.item:hover {
+.item:hover,
+.row:hover .item {
   background: var(--dub-color-surface-sunken);
 }
 
@@ -44,7 +51,7 @@
   flex: none;
   margin-top: 6px;
 }
-/* Keep read rows aligned with unread rows (reserve the dot's column). */
+/* Reserve the dot's column on read rows so titles stay aligned. */
 .dotSpacer {
   width: 8px;
   flex: none;
@@ -53,9 +60,12 @@
 .body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.topline {
+.titleRow {
   display: flex;
   align-items: center;
   gap: var(--dub-space-2);
@@ -67,72 +77,63 @@
   min-width: 0;
   font-weight: var(--dub-font-weight-medium);
   font-size: var(--dub-font-size-sm);
-  line-height: var(--dub-line-height-tight, 1.3);
-  /* one line, ellipsis — keeps the row to two lines total */
+  line-height: var(--dub-line-height-tight, 1.35);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.time {
-  flex: none;
-  color: var(--dub-color-text-muted);
-  font-size: var(--dub-font-size-xs);
+.unread .title {
+  font-weight: var(--dub-font-weight-bold);
 }
 
 .snippet {
   color: var(--dub-color-text-secondary);
   font-size: var(--dub-font-size-xs);
-  line-height: var(--dub-line-height-tight, 1.3);
+  line-height: var(--dub-line-height-tight, 1.35);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Gmail-style read/unread toggle: an overlay chip pinned to the row's right edge.
- * It is taken OUT of the row flow (position:absolute) so it reserves NO space and
- * never shows as an always-there button — it fades in over the timestamp only while
- * the row is hovered or the action itself is focused. */
-.action {
-  position: absolute;
-  top: 50%;
-  right: var(--dub-space-3);
-  transform: translateY(-50%);
-  padding: var(--dub-space-1) var(--dub-space-2);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md);
-  background: var(--dub-color-surface-base);
-  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-xs);
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity var(--dub-motion-fast) var(--dub-motion-easing),
-    background-color var(--dub-motion-fast) var(--dub-motion-easing),
-    color var(--dub-motion-fast) var(--dub-motion-easing);
-}
-.row:hover .action,
-.action:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-.action:hover {
-  background: var(--dub-color-surface-sunken);
+.unread .snippet {
   color: var(--dub-color-text-primary);
 }
-.action:focus-visible {
-  outline: 2px solid var(--dub-color-border-focus);
-  outline-offset: 1px;
+
+/* Trailing cell: timestamp and the quiet read/unread toggle share one grid cell. */
+.trailing {
+  flex: none;
+  display: grid;
+  align-items: center;
+  justify-items: end;
+  padding: var(--dub-space-2) var(--dub-space-3) var(--dub-space-2) var(--dub-space-2);
 }
 
-/* Touch / no-hover devices: no hover to reveal, so keep the action reachable. */
-@media (hover: none) {
-  .action {
-    opacity: 1;
-    pointer-events: auto;
-  }
+.trailing > * {
+  grid-area: 1 / 1;
+}
+
+.time {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  white-space: nowrap;
+  transition: opacity var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+}
+
+/* Quiet until the row is hovered or something inside it takes focus. */
+.action {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+}
+
+.row:hover .time,
+.row:focus-within .time {
+  opacity: 0;
+}
+
+.row:hover .action,
+.row:focus-within .action {
+  opacity: 1;
+  pointer-events: auto;
 }
