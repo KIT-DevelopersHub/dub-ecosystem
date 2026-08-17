@@ -13,13 +13,16 @@
 // need to know admin user ids at write time. Idempotency is the dedup_key unique index:
 // re-running the same deploy (dedupKey=deploy:<sha>) is INSERT OR IGNORE → a no-op.
 
-import { buildDeployCopy } from "./deployCopy";
+import { buildDeployCopy, extractNotifyLine, isPresentableNotifyLine, detectConventionalType, USER_IRRELEVANT_TYPES } from "./deployCopy";
 
 export interface DeployNotifyMeta {
   /** Commit SHA of the deployed tree (required; drives the dedup key + row id). */
   sha: string;
   /** Merged PR title or commit subject (the "what changed"). */
   title?: string;
+  /** Human-written notification copy (PR body 1st line). Preferred over `title` for the
+   *  reader-facing headline; also opts a user-irrelevant-typed deploy back into notifying. */
+  notifyLine?: string;
   /** Merged PR number, if this deploy came from a merge. */
   prNumber?: number;
   /** Merged PR / commit URL. */
@@ -73,9 +76,15 @@ function shortSha(sha: string): string {
 export function buildDeployNotifyRow(meta: DeployNotifyMeta): NotifNotificationRow {
   if (!meta.sha) throw new Error("buildDeployNotifyRow: sha is required");
   const createdAt = meta.timestamp ?? new Date().toISOString();
-  const copy = buildDeployCopy({ createdAt, ...(meta.title ? { title: meta.title } : {}), ...(meta.url ? { url: meta.url } : {}) });
+  const copy = buildDeployCopy({
+    createdAt,
+    ...(meta.title ? { title: meta.title } : {}),
+    ...(meta.notifyLine ? { notifyLine: meta.notifyLine } : {}),
+    ...(meta.url ? { url: meta.url } : {}),
+  });
   const metaObj: Record<string, string | number> = { sha: meta.sha, kind: copy.change.kind };
   if (meta.title) metaObj.rawTitle = meta.title; // keep the developer string for traceability
+  if (meta.notifyLine) metaObj.notifyLine = meta.notifyLine; // human copy source, for traceability
   if (meta.prNumber) metaObj.prNumber = meta.prNumber;
   if (meta.url) metaObj.url = meta.url;
   if (meta.services) metaObj.services = meta.services;
@@ -154,12 +163,28 @@ export function buildDeployNotifySql(meta: DeployNotifyMeta): string {
   return buildInsertNotificationSql(buildDeployNotifyRow(meta));
 }
 
+/**
+ * Whether a deploy should produce an Admin notification at all.
+ *
+ * A human notify line always wins (opt-in): if the author wrote a presentable PR-body line,
+ * we notify. Otherwise a deploy whose commit type is user-irrelevant (docs/chore/ci/deps/…)
+ * is skipped, so the inbox is not filled with contentless "アプリを更新しました" rows. Anything
+ * with a real change type (feat/fix/perf/refactor/…) or an unknown type still notifies. */
+export function shouldNotifyDeploy(meta: DeployNotifyMeta): boolean {
+  if (isPresentableNotifyLine(meta.notifyLine)) return true;
+  const type = detectConventionalType(meta.title);
+  if (type && USER_IRRELEVANT_TYPES.has(type)) return false;
+  return true;
+}
+
 // ---- backfill (one-time): past merged PRs that never produced an Admin notification ----
 
-/** Shape of a `gh pr list --json number,title,url,mergedAt,mergeCommit` item. */
+/** Shape of a `gh pr list --json number,title,body,url,mergedAt,mergeCommit` item. */
 export interface MergedPr {
   number: number;
   title: string;
+  /** Full PR body — its 1st line (通知文言) is the preferred notification copy. */
+  body?: string;
   url?: string;
   mergedAt?: string;
   mergeCommit?: { oid?: string } | null;
@@ -168,20 +193,28 @@ export interface MergedPr {
 /**
  * Map a merged PR to deploy-notify meta, keyed by its merge/squash commit SHA — the SAME
  * key space as the forward CI step (GITHUB_SHA on main), so backfilling a PR and a later
- * CI run for the same commit never double-insert (dedupKey=deploy:<sha>). Returns null
- * when the PR has no merge commit (not actually merged / unknown), so it is skipped.
+ * CI run for the same commit never double-insert (dedupKey=deploy:<sha>). The PR body's
+ * notify line (通知文言) is extracted and preferred over the title for the reader copy.
+ *
+ * Returns null (→ skipped) when the PR has no merge commit (not actually merged / unknown),
+ * OR when the change is user-irrelevant (docs/chore/…) with no human notify line — so the
+ * backfill only records notifications a member would actually care about.
  */
 export function mergedPrToMeta(pr: MergedPr): DeployNotifyMeta | null {
   const sha = pr.mergeCommit?.oid;
   if (!sha) return null;
-  return {
+  const notifyLine = extractNotifyLine(pr.body);
+  const meta: DeployNotifyMeta = {
     sha,
     title: pr.title,
+    ...(notifyLine ? { notifyLine } : {}),
     prNumber: pr.number,
     ...(pr.url ? { url: pr.url } : {}),
     ...(pr.mergedAt ? { timestamp: pr.mergedAt } : {}),
     services: "backfill (過去のマージ/デプロイ取り込み)",
   };
+  if (!shouldNotifyDeploy(meta)) return null;
+  return meta;
 }
 
 export interface BackfillRow {
