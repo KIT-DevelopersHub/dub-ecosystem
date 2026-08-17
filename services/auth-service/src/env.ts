@@ -22,6 +22,7 @@ export interface Env {
   SESSION_ACCESS_TTL_SEC?: string; // access lifetime (default 3600 = 1h)
   SESSION_ABS_WEB_TTL_SEC?: string; // web absolute (default 2592000 = 30d)
   SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute (default 15552000 = 180d)
+  SESSION_REFRESH_GRACE_SEC?: string; // rotation grace window (default 30) — see sessions.ts refresh()
   PWLOGIN_MAX_FAILURES?: string; // password-login failures per window before 429 (default 5)
   PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
   PASSWORD_MIN_LENGTH?: string; // min length for user/admin-set passwords (default 8)
@@ -47,6 +48,11 @@ const DEFAULTS = {
   accessTtlSec: 3600,
   absWebTtlSec: 30 * 24 * 60 * 60,
   absMobileTtlSec: 180 * 24 * 60 * 60,
+  // Grace window (seconds) during which the pre-rotation token still resolves to
+  // its successor on /auth/refresh. Absorbs concurrent refresh bursts (multi-tab
+  // page loads / Promise.all) and KV read-your-write lag so a duplicate refresh
+  // returns the same new token instead of a spurious "Invalid token".
+  refreshGraceSec: 30,
 } as const;
 
 export interface AppConfig {
@@ -61,6 +67,7 @@ export interface AppConfig {
   accessTtlSec: number;
   absWebTtlSec: number;
   absMobileTtlSec: number;
+  refreshGraceSec: number;
   passwordLogin: {
     maxFailures: number;
     windowSec: number;
@@ -93,6 +100,7 @@ export function configFromEnv(env: Env): AppConfig {
     accessTtlSec: intVar(env.SESSION_ACCESS_TTL_SEC, DEFAULTS.accessTtlSec),
     absWebTtlSec: intVar(env.SESSION_ABS_WEB_TTL_SEC, DEFAULTS.absWebTtlSec),
     absMobileTtlSec: intVar(env.SESSION_ABS_MOBILE_TTL_SEC, DEFAULTS.absMobileTtlSec),
+    refreshGraceSec: intVar(env.SESSION_REFRESH_GRACE_SEC, DEFAULTS.refreshGraceSec),
     passwordLogin: {
       maxFailures: intVar(env.PWLOGIN_MAX_FAILURES, 5),
       windowSec: intVar(env.PWLOGIN_WINDOW_SEC, 900),
