@@ -10,6 +10,7 @@ import { runOptimistic, type StateBox } from "../store/optimistic";
 import {
   ackPending,
   addPending,
+  applyReactions,
   applyRealtimeEvent,
   failPending,
   mergeMessages,
@@ -213,7 +214,10 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
       await runOptimistic(box, {
         apply: (s) => ({ ...s, messages: toggleReactionLocal(s.messages, id, emoji, currentUserId) }),
         mutate: () => api.toggleReaction(id, { emoji }),
-        reconcile: (s, _v, res) => ({ ...s, messages: upsertMessage(s.messages, res) }),
+        // A toggle returns only { messageId, reactions } — apply the server's
+        // authoritative reaction set onto the message (NOT upsertMessage, which
+        // expects a full Message and would inject a phantom id=undefined entry).
+        reconcile: (s, _v, res) => ({ ...s, messages: applyReactions(s.messages, res.messageId, res.reactions) }),
       }, { id, emoji });
     },
     [api, currentUserId], // eslint-disable-line react-hooks/exhaustive-deps

@@ -14,6 +14,7 @@ import type {
   PostMessageRequest,
   PostMessageResponse,
   ReactionToggleRequest,
+  ReactionToggleResponse,
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
@@ -266,12 +267,13 @@ export class MockChatClient implements ChatApiClient {
     return this.settle(next);
   }
 
-  async toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<Message> {
+  async toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<ReactionToggleResponse> {
     const idx = this.messages.findIndex((m) => m.id === id);
     if (idx < 0) throw new ChatApiError(404, { error: { code: "NOT_FOUND", message: "message not found", retryable: false } });
     this.messages = toggleReactionLocal(this.messages, id, req.emoji, this.me);
     const updated = this.messages.find((m) => m.id === id)!;
-    return this.settle(updated);
+    // Match the server contract: return only the affected message's reactions.
+    return this.settle({ messageId: id, reactions: updated.reactions });
   }
 
   async updateReadState(req: ReadStateUpdateRequest): Promise<void> {

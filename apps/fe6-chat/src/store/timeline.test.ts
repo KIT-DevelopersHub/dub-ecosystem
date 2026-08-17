@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import type { ChatRealtimeEvent, Message } from "../api/contract";
 import {
   ackPending,
+  applyReactions,
+  reactionsFromWire,
   addPending,
   applyRealtimeEvent,
   failPending,
@@ -188,5 +190,35 @@ describe("normalizeMessage (wire -> client Message coercion)", () => {
     expect(out.reactions).toEqual([{ emoji: "👍", userIds: [ME] }]);
     expect(out.attachments).toEqual([]);
     expect(out.replyCount).toBe(3);
+  });
+});
+
+describe("applyReactions (reaction-toggle reconcile)", () => {
+  it("replaces the target message's reactions from the server's authoritative set", () => {
+    const base = upsertMessage([], msg("msg_r1", { reactions: [] }));
+    const out = applyReactions(base, "msg_r1", [{ emoji: "🎉", userIds: [ME, OTHER] }]);
+    expect(out[0]!.reactions).toEqual([{ emoji: "🎉", userIds: [ME, OTHER] }]);
+    // does not inject a phantom entry (bug: upsertMessage on { messageId, reactions })
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("msg_r1");
+  });
+
+  it("is a no-op when the message is not loaded", () => {
+    const base = upsertMessage([], msg("msg_r2"));
+    const out = applyReactions(base, "msg_absent", [{ emoji: "👍", userIds: [ME] }]);
+    expect(out).toBe(base);
+  });
+});
+
+describe("reactionsFromWire", () => {
+  it("converts a Record<emoji, userIds> to Reaction[]", () => {
+    expect(reactionsFromWire({ "🎉": ["u1"], "👍": ["u1", "u2"] })).toEqual([
+      { emoji: "🎉", userIds: ["u1"] },
+      { emoji: "👍", userIds: ["u1", "u2"] },
+    ]);
+  });
+  it("passes an array through and tolerates undefined", () => {
+    expect(reactionsFromWire([{ emoji: "🔥", userIds: ["u1"] }])).toEqual([{ emoji: "🔥", userIds: ["u1"] }]);
+    expect(reactionsFromWire(undefined)).toEqual([]);
   });
 });
