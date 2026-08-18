@@ -185,6 +185,10 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       if (q.threadRootId !== undefined) {
         where.push("thread_root_id = ?");
         binds.push(q.threadRootId);
+      } else {
+        // Main timeline = top-level messages only; replies live in the thread pane
+        // (Slack-parity). Fetched via threadRootId above.
+        where.push("thread_root_id IS NULL");
       }
       let order: string;
       if (q.afterMessageId !== undefined) {
@@ -204,6 +208,19 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
         ...binds,
       );
       return rows.map(toMessageRow);
+    },
+    async replyCounts(rootIds): Promise<Map<string, number>> {
+      const out = new Map<string, number>();
+      if (rootIds.length === 0) return out;
+      const placeholders = rootIds.map(() => "?").join(", ");
+      const rows = await db.all<{ root: string; n: number }>(
+        `SELECT thread_root_id AS root, COUNT(*) AS n FROM chat_messages
+          WHERE thread_root_id IN (${placeholders}) AND deleted_at IS NULL
+          GROUP BY thread_root_id`,
+        ...rootIds,
+      );
+      for (const r of rows) out.set(r.root, Number(r.n));
+      return out;
     },
     async updateMessage(next: MessageRow, expectedVersion: number): Promise<boolean> {
       const res = await db.run(

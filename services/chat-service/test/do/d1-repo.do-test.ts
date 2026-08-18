@@ -240,21 +240,26 @@ describe("d1-repo: messages", () => {
     const threadReply = message({ id: id.msg(4), channelId: chan.id, authorId: id.user(1), threadRootId: m1.id });
     for (const m of [m1, m2, m3, threadReply]) await repo.createMessage(m);
 
-    // default desc history (newest id first)
+    // default desc history (newest id first) — main list is TOP-LEVEL only (reply excluded)
     const desc = await repo.listMessages({ channelId: chan.id, limit: 10 });
-    expect(desc.map((m) => m.id)).toEqual([threadReply.id, m3.id, m2.id, m1.id]);
+    expect(desc.map((m) => m.id)).toEqual([m3.id, m2.id, m1.id]);
 
     // cursor: id < beforeId, still desc
     const page = await repo.listMessages({ channelId: chan.id, beforeId: m3.id, limit: 10 });
     expect(page.map((m) => m.id)).toEqual([m2.id, m1.id]);
 
-    // asc gap-fill: id > afterMessageId, ascending
+    // asc gap-fill: id > afterMessageId, ascending (still top-level only)
     const asc = await repo.listMessages({ channelId: chan.id, afterMessageId: m1.id, limit: 10 });
-    expect(asc.map((m) => m.id)).toEqual([m2.id, m3.id, threadReply.id]);
+    expect(asc.map((m) => m.id)).toEqual([m2.id, m3.id]);
 
-    // thread filter
+    // thread filter returns the reply
     const thread = await repo.listMessages({ channelId: chan.id, threadRootId: m1.id, limit: 10 });
     expect(thread.map((m) => m.id)).toEqual([threadReply.id]);
+
+    // replyCounts: m1 has one reply; others have none
+    const counts = await repo.replyCounts([m1.id, m2.id, m3.id]);
+    expect(counts.get(m1.id)).toBe(1);
+    expect(counts.get(m2.id)).toBeUndefined();
 
     // LIMIT is honored
     expect((await repo.listMessages({ channelId: chan.id, limit: 2 })).length).toBe(2);

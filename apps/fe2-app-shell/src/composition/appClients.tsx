@@ -16,7 +16,7 @@ import { createHttpEventApi } from "@dub/fe3-event-action";
 import type { NotificationApi } from "@dub/fe5-notification-inbox";
 import { createNotificationApi } from "@dub/fe5-notification-inbox";
 import { createRosterApi } from "@dub/admin-roster";
-import { reactionsFromWire } from "@dub/fe6-chat/src/store/timeline";
+import { normalizeMessage, reactionsFromWire } from "@dub/fe6-chat/src/store/timeline";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import type {
   Fe4ApiClient,
@@ -181,7 +181,9 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       return api.request<SearchHit[]>({ method: "GET", path: `${CHAT}/search`, ...(query ? { query } : {}) });
     },
     listPinned: (id: common.ChannelId) =>
-      api.request<Message[]>({ method: "GET", path: `${CHAT}/channels/${id}/pins` as ApiPath }),
+      api
+        .request<Message[]>({ method: "GET", path: `${CHAT}/channels/${id}/pins` as ApiPath })
+        .then((ms) => ms.map(normalizeMessage)),
     togglePin: (id: common.ChannelId, messageId: common.MessageId) =>
       api.request<Message[]>({ method: "POST", path: `${CHAT}/channels/${id}/pins` as ApiPath, body: { messageId } }),
     listMessages: (req: ListMessagesRequest) => {
@@ -192,7 +194,9 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
         threadRootId: req.threadRootId,
         afterMessageId: req.afterMessageId,
       });
-      return api.request<ListMessagesResponse>({ method: "GET", path: `${CHAT}/messages`, ...(query ? { query } : {}) });
+      return api
+        .request<ListMessagesResponse>({ method: "GET", path: `${CHAT}/messages`, ...(query ? { query } : {}) })
+        .then((res) => (res && Array.isArray(res.items) ? { ...res, items: res.items.map(normalizeMessage) } : res));
     },
     // The server returns the created Message (bare), but FE6's optimistic layer
     // reconciles by PostMessageResponse = { message, clientTempId }. The client already
@@ -202,11 +206,13 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
     postMessage: (req: PostMessageRequest) =>
       api
         .request<Message>({ method: "POST", path: `${CHAT}/messages`, body: req })
-        .then((message) => ({ message, clientTempId: req.clientTempId })),
+        .then((message) => ({ message: normalizeMessage(message), clientTempId: req.clientTempId })),
     editMessage: (id: common.MessageId, req: EditMessageRequest) =>
-      api.request<Message>({ method: "PATCH", path: `${CHAT}/messages/${id}` as ApiPath, body: req }),
+      api
+        .request<Message>({ method: "PATCH", path: `${CHAT}/messages/${id}` as ApiPath, body: req })
+        .then(normalizeMessage),
     deleteMessage: (id: common.MessageId) =>
-      api.request<Message>({ method: "DELETE", path: `${CHAT}/messages/${id}` as ApiPath }),
+      api.request<Message>({ method: "DELETE", path: `${CHAT}/messages/${id}` as ApiPath }).then(normalizeMessage),
     // Server returns { messageId, reactions } (reactions as a Record); normalize to the
     // client's Reaction[] so the optimistic reconcile can apply it (see applyReactions).
     toggleReaction: (id: common.MessageId, req: ReactionToggleRequest) =>

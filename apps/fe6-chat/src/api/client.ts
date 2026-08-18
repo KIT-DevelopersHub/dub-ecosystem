@@ -5,7 +5,7 @@
 // an in-memory mock (mock-client.ts) so the unit is complete without chat-service.
 import type { common, identity } from "@dub/types";
 import { isErrorResponse, type ErrorResponse } from "@dub/errors";
-import { reactionsFromWire } from "../store/timeline";
+import { normalizeMessage, reactionsFromWire } from "../store/timeline";
 import type {
   Channel,
   ChannelMember,
@@ -162,7 +162,7 @@ export class HttpChatClient implements ChatApiClient {
     return this.request<SearchHit[]>("GET", `${CHAT}/search${qs({ q: req.q, channelId: req.channelId, limit: req.limit })}`);
   }
   listPinned(id: common.ChannelId): Promise<Message[]> {
-    return this.request<Message[]>("GET", `${CHAT}/channels/${id}/pins`);
+    return this.request<Message[]>("GET", `${CHAT}/channels/${id}/pins`).then((ms) => ms.map(normalizeMessage));
   }
   togglePin(id: common.ChannelId, messageId: common.MessageId): Promise<Message[]> {
     return this.request<Message[]>("POST", `${CHAT}/channels/${id}/pins`, { messageId });
@@ -172,20 +172,23 @@ export class HttpChatClient implements ChatApiClient {
     return this.request<ListMessagesResponse>(
       "GET",
       `${CHAT}/messages${qs({ channelId, cursor, limit, threadRootId, afterMessageId })}`,
-    );
+    ).then((res) => (res && Array.isArray(res.items) ? { ...res, items: res.items.map(normalizeMessage) } : res));
   }
   postMessage(req: PostMessageRequest): Promise<PostMessageResponse> {
     // Server returns the created Message (bare); the optimistic layer wants
     // { message, clientTempId }. We already hold the clientTempId we sent, so compose
     // the envelope here (mirror the shell adapter) — otherwise the optimistic entry
     // is never acked and shows "送信に失敗しました" despite a 201.
-    return this.request<Message>("POST", `${CHAT}/messages`, req).then((message) => ({ message, clientTempId: req.clientTempId }));
+    return this.request<Message>("POST", `${CHAT}/messages`, req).then((message) => ({
+      message: normalizeMessage(message),
+      clientTempId: req.clientTempId,
+    }));
   }
   editMessage(id: common.MessageId, req: EditMessageRequest): Promise<Message> {
-    return this.request<Message>("PATCH", `${CHAT}/messages/${id}`, req);
+    return this.request<Message>("PATCH", `${CHAT}/messages/${id}`, req).then(normalizeMessage);
   }
   deleteMessage(id: common.MessageId): Promise<Message> {
-    return this.request<Message>("DELETE", `${CHAT}/messages/${id}`);
+    return this.request<Message>("DELETE", `${CHAT}/messages/${id}`).then(normalizeMessage);
   }
   toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<ReactionToggleResponse> {
     // Server returns { messageId, reactions } with reactions as a Record<emoji,userIds>;

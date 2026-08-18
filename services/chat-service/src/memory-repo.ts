@@ -111,6 +111,7 @@ export class InMemoryChatRepo implements ChatRepo {
   }): Promise<MessageRow[]> {
     let rows = [...this.messages.values()].filter((m) => m.channelId === q.channelId);
     if (q.threadRootId !== undefined) rows = rows.filter((m) => m.threadRootId === q.threadRootId);
+    else rows = rows.filter((m) => m.threadRootId === null); // main timeline = top-level only
     if (q.afterMessageId !== undefined) {
       // asc gap-fill: id > afterMessageId
       rows = rows.filter((m) => m.id > q.afterMessageId!).sort((a, b) => cmpStr(a.id, b.id));
@@ -120,6 +121,16 @@ export class InMemoryChatRepo implements ChatRepo {
       rows.sort((a, b) => cmpStr(b.id, a.id));
     }
     return rows.slice(0, q.limit).map((m) => ({ ...m, attachmentFileIds: [...m.attachmentFileIds] }));
+  }
+  async replyCounts(rootIds: common.MessageId[]): Promise<Map<string, number>> {
+    const want = new Set(rootIds);
+    const out = new Map<string, number>();
+    for (const m of this.messages.values()) {
+      if (m.threadRootId && want.has(m.threadRootId) && m.deletedAt === null) {
+        out.set(m.threadRootId, (out.get(m.threadRootId) ?? 0) + 1);
+      }
+    }
+    return out;
   }
   async updateMessage(next: MessageRow, expectedVersion: number): Promise<boolean> {
     const cur = this.messages.get(next.id);

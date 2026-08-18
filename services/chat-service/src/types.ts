@@ -52,6 +52,7 @@ export interface Message {
   body: string; // logically-deleted messages return a redacted body
   attachmentFileIds: common.FileId[];
   reactions: Record<string, common.UserId[]>; // emoji -> userId[]
+  replyCount: number; // thread replies to this message (top-level list only; 0 otherwise)
   version: number;
   editedAt: common.ISODateTime | null;
   deletedAt: common.ISODateTime | null;
@@ -265,6 +266,8 @@ export interface ChatRepo {
     beforeId?: string; // cursor: id < beforeId, desc
     limit: number;
   }): Promise<MessageRow[]>;
+  /** Count non-deleted thread replies per root message id (for the top-level list summary). */
+  replyCounts(rootIds: common.MessageId[]): Promise<Map<string, number>>;
   updateMessage(next: MessageRow, expectedVersion: number): Promise<boolean>;
 
   // reactions
