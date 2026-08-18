@@ -66,7 +66,24 @@ export type IconName =
   | "bell-off"
   | "archive"
   | "folder"
-  | "folder-open";
+  | "folder-open"
+  // chat + rich-text formatting (fe6). Additive, closed-union preserved.
+  | "bold"
+  | "italic"
+  | "underline"
+  | "strikethrough"
+  | "code"
+  | "code-block"
+  | "quote"
+  | "list-ordered"
+  | "link"
+  | "smile"
+  | "at-sign"
+  | "paperclip"
+  | "send"
+  | "reply"
+  | "pin"
+  | "hash";
 
 export interface IconProps extends TestableProps {
   name: IconName;
