@@ -10,7 +10,7 @@
 // Edit/delete are gated by authorship + can("chat:moderate") (design §6).
 // Deleted messages render as a redacted tombstone. Test-ids preserved for units.
 import { useState } from "react";
-import { Avatar } from "@dub/ui";
+import { Avatar, Icon } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message } from "../api/contract";
 import { MessageBody } from "./MessageBody";
@@ -121,7 +121,7 @@ export function MessageItem({
             </button>
           ))}
           <button type="button" className={styles.hoverAction} aria-label="スレッドで返信" onClick={() => onReply?.(message)}>
-            💬
+            <Icon name="reply" size="sm" />
           </button>
           {onTogglePin && (
             <button
@@ -132,7 +132,7 @@ export function MessageItem({
               data-testid="fe6-timeline-pin"
               onClick={() => onTogglePin(message)}
             >
-              📌
+              <Icon name="pin" size="sm" />
             </button>
           )}
           {canEdit && (
@@ -143,7 +143,7 @@ export function MessageItem({
               data-testid="fe6-timeline-edit"
               onClick={startEdit}
             >
-              ✏️
+              <Icon name="edit" size="sm" />
             </button>
           )}
           {canDelete && (
@@ -154,7 +154,7 @@ export function MessageItem({
               data-testid="fe6-timeline-delete"
               onClick={() => onDelete?.(message)}
             >
-              🗑
+              <Icon name="trash" size="sm" />
             </button>
           )}
         </div>
