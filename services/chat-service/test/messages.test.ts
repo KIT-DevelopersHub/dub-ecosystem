@@ -71,6 +71,11 @@ describe("threads (1 level)", () => {
     const thread = await call(app, "GET", "/chat/messages", { query: { channelId: ch1, threadRootId: root.json.id } });
     expect(thread.json.items.map((m: any) => m.id)).toEqual([reply.json.id]);
 
+    // main timeline excludes the reply (top-level only) and the root reports replyCount
+    const main = await call(app, "GET", "/chat/messages", { query: { channelId: ch1 } });
+    expect(main.json.items.map((m: any) => m.id)).toEqual([root.json.id]);
+    expect(main.json.items[0].replyCount).toBe(1);
+
     const cross = await call(app, "POST", "/chat/messages", { body: { channelId: ch2, body: "x", threadRootId: root.json.id } });
     expect(cross.status).toBe(400);
     expect(cross.json.error.code).toBe("VALIDATION_FAILED");

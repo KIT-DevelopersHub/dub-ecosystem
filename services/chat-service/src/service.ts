@@ -369,8 +369,7 @@ export class ChatService {
         afterMessageId: q.afterMessageId,
         limit,
       });
-      const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.id));
-      return { items: rows.map((r) => toMessage(r, reactions.get(r.id) ?? {})), nextCursor: null };
+      return { items: await this.decorate(rows, q.threadRootId === undefined), nextCursor: null };
     }
 
     const beforeId = q.cursor ? decodeCursor(q.cursor) ?? invalidCursor(q.cursor) : undefined;
@@ -383,11 +382,18 @@ export class ChatService {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
-    const reactions = await this.deps.repo.reactionsFor(page.map((r) => r.id));
     return {
-      items: page.map((r) => toMessage(r, reactions.get(r.id) ?? {})),
+      items: await this.decorate(page, q.threadRootId === undefined),
       nextCursor: hasMore && last ? encodeCursor(last.id) : null,
     };
+  }
+
+  // Map rows -> wire messages with reactions and (for the top-level list only) each
+  // message's thread reply count, so the client can show the "N 件の返信" summary.
+  private async decorate(rows: MessageRow[], withReplyCounts: boolean): Promise<Message[]> {
+    const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.id));
+    const counts = withReplyCounts ? await this.deps.repo.replyCounts(rows.map((r) => r.id)) : undefined;
+    return rows.map((r) => toMessage(r, reactions.get(r.id) ?? {}, counts?.get(r.id) ?? 0));
   }
 
   async editMessage(ctx: ReqCtx, id: common.MessageId, body: { version?: number; body?: string }): Promise<Message> {
