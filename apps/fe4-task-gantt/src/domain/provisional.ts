@@ -32,6 +32,7 @@ export interface ProvisionalDraft {
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  startAt: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
   parentTaskId: common.TaskId | null;
 }
@@ -52,6 +53,7 @@ export function buildProvisionalTask(
     priority: draft.priority,
     assigneeId: draft.assigneeId,
     teamId: draft.teamId,
+    startAt: draft.startAt,
     dueAt: draft.dueAt,
     origin: "internal",
     version: 1,
@@ -75,10 +77,17 @@ export function provisionalGanttRow(
 ): gantt.GanttRow {
   let startsAt: common.ISODateTime | null = null;
   let endsAt: common.ISODateTime | null = null;
-  if (t.dueAt) {
+  const dur = DURATION_DAYS_BY_PRIORITY[t.priority];
+  // Mirror gantt-service toRow: real dates win, else derive from whichever is set.
+  if (t.startAt && t.dueAt) {
+    startsAt = t.startAt;
     endsAt = t.dueAt;
-    const dur = DURATION_DAYS_BY_PRIORITY[t.priority];
+  } else if (t.dueAt) {
+    endsAt = t.dueAt;
     startsAt = new Date(Date.parse(t.dueAt) - dur * MS_PER_DAY).toISOString() as common.ISODateTime;
+  } else if (t.startAt) {
+    startsAt = t.startAt;
+    endsAt = new Date(Date.parse(t.startAt) + dur * MS_PER_DAY).toISOString() as common.ISODateTime;
   }
   return {
     taskId: t.id,

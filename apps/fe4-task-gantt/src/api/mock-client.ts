@@ -274,6 +274,7 @@ export class MockApiClient implements ApiClient {
       assigneeId: body.assigneeId ?? null,
       teamId: body.teamId ?? null,
       createdBy: this.currentUserId, // server stamps created_by from the principal
+      startAt: body.startAt ?? null,
       dueAt: body.dueAt ?? null,
       origin: body.origin ?? "internal",
       archivedAt: null,
@@ -304,6 +305,7 @@ export class MockApiClient implements ApiClient {
       ...(body.priority !== undefined ? { priority: body.priority } : {}),
       ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
       ...(body.teamId !== undefined ? { teamId: body.teamId } : {}),
+      ...(body.startAt !== undefined ? { startAt: body.startAt } : {}),
       ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),
       version: cur.version + 1,
       updatedAt: new Date().toISOString(),
@@ -400,7 +402,14 @@ export class MockApiClient implements ApiClient {
     const t = this.taskById.get(taskId);
     if (!t) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
     this.rowDates[taskId] = { startsAt: body.startsAt, endsAt: body.endsAt };
-    if (body.endsAt) this.taskById.set(taskId, { ...t, dueAt: body.endsAt, updatedAt: new Date().toISOString() });
+    // Persist onto the task's real columns so list/detail views + a cache-bypassing
+    // refetch stay consistent (startsAt→startAt, endsAt→dueAt), matching the server.
+    this.taskById.set(taskId, {
+      ...t,
+      startAt: body.startsAt,
+      ...(body.endsAt ? { dueAt: body.endsAt } : {}),
+      updatedAt: new Date().toISOString(),
+    });
     const h = this.hierarchy[taskId];
     return {
       taskId,
@@ -494,10 +503,12 @@ function deriveSchedule(
   override?: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
 ): { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null } {
   if (override) return override;
-  if (!t.dueAt) return { startsAt: null, endsAt: null };
-  const end = Date.parse(t.dueAt);
-  const start = end - DURATION_DAYS_BY_PRIORITY[t.priority] * MS_PER_DAY;
-  return { startsAt: new Date(start).toISOString(), endsAt: t.dueAt };
+  const dur = DURATION_DAYS_BY_PRIORITY[t.priority] * MS_PER_DAY;
+  // Real dates win (PR-C): both explicit ⇒ exact span; else derive from whichever is set.
+  if (t.startAt && t.dueAt) return { startsAt: t.startAt, endsAt: t.dueAt };
+  if (t.dueAt) return { startsAt: new Date(Date.parse(t.dueAt) - dur).toISOString(), endsAt: t.dueAt };
+  if (t.startAt) return { startsAt: t.startAt, endsAt: new Date(Date.parse(t.startAt) + dur).toISOString() };
+  return { startsAt: null, endsAt: null };
 }
 
 /** DFS cycle detection over adjacency (node -> dependsOn). */

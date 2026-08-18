@@ -139,6 +139,45 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /gantt/rows/{taskId}:
+    patch:
+      operationId: patchGanttRow
+      summary: Persist a row's schedule window (bar move/resize or start/due edit)
+      tags:
+        - gantt
+      description: |-
+        Writes the underlying task's startAt/dueAt (startsAt→startAt, endsAt→dueAt) via
+        task-service (read-modify-write, optimistic-locked). Requires task:write on the
+        caller, enforced downstream by task-service.
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchGanttRowRequest'
+      responses:
+        '200':
+          description: Updated gantt row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GanttRow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 components:
   schemas:
     Error:
@@ -289,6 +328,22 @@ components:
           type: array
           items:
             type: string
+    PatchGanttRowRequest:
+      type: object
+      required:
+        - startsAt
+        - endsAt
+      properties:
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        endsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
     GanttDependencies:
       type: object
       required:

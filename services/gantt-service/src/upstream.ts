@@ -72,5 +72,22 @@ export function createHttpUpstream(env: Env): UpstreamPort {
         throw e;
       }
     },
+
+    async updateTaskDates(
+      ctx: RequestContext,
+      taskId: common.TaskId,
+      dates: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+    ): Promise<task.Task> {
+      // Read-modify-write: the task carries the optimistic version, so read it first
+      // (404 propagates as-is) then PATCH with the fresh version. gantt maps the bar
+      // window onto the task's real columns: startsAt → startAt, endsAt → dueAt.
+      const current = await taskSvc.get<task.Task>(ctx, `/tasks/${encodeURIComponent(taskId)}`);
+      const patch: task.UpdateTaskRequest = {
+        version: current.version,
+        startAt: dates.startsAt,
+        dueAt: dates.endsAt,
+      };
+      return taskSvc.patch<task.Task>(ctx, `/tasks/${encodeURIComponent(taskId)}`, patch);
+    },
   };
 }

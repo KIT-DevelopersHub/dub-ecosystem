@@ -50,6 +50,14 @@ export interface GanttViewState {
 export interface GetGanttQuery {
   eventId: EventId;
 }
+/** Body of PATCH /gantt/rows/:taskId — persist a bar's window after a timeline
+ *  drag/resize or a start/due edit. gantt-service maps startsAt → the task's
+ *  startAt and endsAt → the task's dueAt (read-modify-write, optimistic-locked
+ *  upstream). Either value may be null to clear that edge. */
+export interface PatchGanttRowRequest {
+  startsAt: ISODateTime | null;
+  endsAt: ISODateTime | null;
+}
 export interface PutGanttViewRequest {
   zoom: GanttZoom;
   collapsedTaskIds: TaskId[];

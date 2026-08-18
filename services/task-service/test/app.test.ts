@@ -605,4 +605,27 @@ describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory re
     res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version + 2, parentTaskId: null }));
     expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBeNull();
   });
+
+  it("persists startAt on create, updates + clears it via PATCH, and echoes it on read (PR-C)", async () => {
+    const { h, app } = setup();
+    const t = await create(app, { startAt: "2026-08-05T00:00:00Z", dueAt: "2026-08-10T00:00:00Z" } as Partial<task.CreateTaskRequest>);
+    expect((await get(app, t.id)).body.startAt).toBe("2026-08-05T00:00:00Z");
+
+    // move the start; task.updated must report startAt as a changed field (→ gantt cache purge)
+    let res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1, startAt: "2026-08-07T00:00:00Z" }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as task.Task).startAt).toBe("2026-08-07T00:00:00Z");
+    expect(h.events.byName("task.updated").at(-1)!.payload).toMatchObject({ changed: ["startAt"] });
+
+    // clear it (null)
+    res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 2, startAt: null }));
+    expect(((await res.json()) as task.Task).startAt).toBeNull();
+  });
+
+  it("400 on a non-ISO startAt", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", startAt: "nope" }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+  });
 });

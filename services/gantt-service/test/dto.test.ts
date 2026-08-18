@@ -14,6 +14,7 @@ function mkTask(over: Partial<task.Task> & { id: string }): task.Task {
     teamId: over.teamId ?? null,
     parentTaskId: over.parentTaskId ?? null,
     wbs: over.wbs ?? null,
+    startAt: over.startAt ?? null,
     dueAt: over.dueAt ?? null,
     origin: "internal",
     archivedAt: over.archivedAt ?? null,
@@ -157,5 +158,39 @@ describe("buildGanttChartDTO", () => {
   it("ignores a parentTaskId pointing outside the live set (flat top-level row)", () => {
     const dto = buildGanttChartDTO("event_1", [mkTask({ id: "orphan", parentTaskId: "ghost", teamId: "team_x" })], []);
     expect(dto.rows[0]).toMatchObject({ parentTaskId: null, depth: 0, hasChildren: false, teamId: "team_x" });
+  });
+});
+
+describe("startAt/dueAt bar derivation (PR-C: real dates win)", () => {
+  it("both explicit → the bar spans exactly [startAt, dueAt] (ignores priority duration)", () => {
+    const dto = buildGanttChartDTO(
+      "event_1",
+      [mkTask({ id: "t", priority: "urgent", startAt: "2026-08-03T00:00:00Z", dueAt: "2026-08-20T00:00:00Z" })],
+      [],
+    );
+    expect(dto.rows[0]).toMatchObject({ startsAt: "2026-08-03T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" });
+  });
+
+  it("start only → a nominal-duration bar anchored at the real start", () => {
+    const dto = buildGanttChartDTO("event_1", [mkTask({ id: "t", priority: "medium", startAt: "2026-08-05T00:00:00Z" })], []);
+    const row = dto.rows[0]!;
+    expect(row.startsAt).toBe("2026-08-05T00:00:00Z");
+    // medium = 3 days → end is start + 3d.
+    expect(new Date(row.endsAt!).getTime() - new Date(row.startsAt!).getTime()).toBe(3 * 86_400_000);
+  });
+
+  it("gives a dateless-but-scheduled task an arrow-linkable bar (both endpoints have dates)", () => {
+    const rows = buildGanttChartDTO(
+      "event_1",
+      [
+        mkTask({ id: "a", startAt: "2026-08-01T00:00:00Z", dueAt: "2026-08-05T00:00:00Z" }),
+        mkTask({ id: "b", startAt: "2026-08-06T00:00:00Z", dueAt: "2026-08-09T00:00:00Z" }),
+      ],
+      [dep("b", "a")], // b depends on a — arrow only renders when both bars exist
+    ).rows;
+    for (const r of rows) {
+      expect(r.startsAt).not.toBeNull();
+      expect(r.endsAt).not.toBeNull();
+    }
   });
 });
