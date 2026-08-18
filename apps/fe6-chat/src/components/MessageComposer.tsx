@@ -145,6 +145,27 @@ export function MessageComposer({
     [text, focusCaret],
   );
 
+  /** Prefix each line touched by the selection (blockquote / bullet / ordered list). */
+  const prefixLines = useCallback(
+    (prefix: (lineIndex: number) => string) => {
+      const el = ref.current;
+      const start = el?.selectionStart ?? text.length;
+      const end = el?.selectionEnd ?? text.length;
+      const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+      const lineEnd = text.indexOf("\n", end);
+      const blockEnd = lineEnd === -1 ? text.length : lineEnd;
+      const block = text.slice(lineStart, blockEnd);
+      const prefixed = block
+        .split("\n")
+        .map((ln, i) => `${prefix(i)}${ln}`)
+        .join("\n");
+      const next = text.slice(0, lineStart) + prefixed + text.slice(blockEnd);
+      setText(next);
+      focusCaret(lineStart + prefixed.length);
+    },
+    [text, focusCaret],
+  );
+
   const submit = useCallback(async () => {
     if (!canSend) return;
     const body = text;
@@ -173,6 +194,30 @@ export function MessageComposer({
         e.preventDefault();
         const pick = candidates[selected];
         if (pick) pickMention(pick);
+        return;
+      }
+    }
+    // Formatting shortcuts (Slack-style): Cmd/Ctrl + B / I / U / Shift+X (strike).
+    if (e.metaKey || e.ctrlKey) {
+      const k = e.key.toLowerCase();
+      if (k === "b") {
+        e.preventDefault();
+        wrapSelection("*");
+        return;
+      }
+      if (k === "i") {
+        e.preventDefault();
+        wrapSelection("_");
+        return;
+      }
+      if (k === "u") {
+        e.preventDefault();
+        wrapSelection("++");
+        return;
+      }
+      if (e.shiftKey && k === "x") {
+        e.preventDefault();
+        wrapSelection("~");
         return;
       }
     }
@@ -219,14 +264,29 @@ export function MessageComposer({
           <button type="button" className={`${styles.toolbarBtn} ${styles.bold}`} aria-label="太字" title="太字" disabled={disabled} onClick={() => wrapSelection("*")}>
             B
           </button>
-          <button type="button" className={`${styles.toolbarBtn} ${styles.italic}`} aria-label="斜体" title="斜体" disabled={disabled} onClick={() => wrapSelection("_")}>
+          <button type="button" className={`${styles.toolbarBtn} ${styles.italic}`} aria-label="斜体" title="斜体 (Cmd+I)" disabled={disabled} onClick={() => wrapSelection("_")}>
             i
+          </button>
+          <button type="button" className={`${styles.toolbarBtn} ${styles.underlineGlyph}`} aria-label="下線" title="下線 (Cmd+U)" disabled={disabled} onClick={() => wrapSelection("++")}>
+            U
+          </button>
+          <button type="button" className={`${styles.toolbarBtn} ${styles.strikeGlyph}`} aria-label="取り消し線" title="取り消し線 (Cmd+Shift+X)" disabled={disabled} onClick={() => wrapSelection("~")}>
+            S
           </button>
           <button type="button" className={`${styles.toolbarBtn} ${styles.codeGlyph}`} aria-label="コード" title="インラインコード" disabled={disabled} onClick={() => wrapSelection("`")}>
             {"</>"}
           </button>
           <button type="button" className={`${styles.toolbarBtn} ${styles.codeGlyph}`} aria-label="コードブロック" title="コードブロック" disabled={disabled} onClick={() => wrapSelection("```", "```", true)}>
             {"{ }"}
+          </button>
+          <button type="button" className={styles.toolbarBtn} aria-label="引用" title="引用" disabled={disabled} onClick={() => prefixLines(() => "> ")}>
+            &ldquo;
+          </button>
+          <button type="button" className={styles.toolbarBtn} aria-label="箇条書き" title="箇条書き" disabled={disabled} onClick={() => prefixLines(() => "- ")}>
+            •
+          </button>
+          <button type="button" className={styles.toolbarBtn} aria-label="番号付きリスト" title="番号付きリスト" disabled={disabled} onClick={() => prefixLines((i) => `${i + 1}. `)}>
+            1.
           </button>
           <span className={styles.toolbarDivider} aria-hidden />
           <button type="button" className={styles.toolbarBtn} aria-label="リンク" title="リンク" disabled={disabled} onClick={() => wrapSelection("[", "](url)")}>

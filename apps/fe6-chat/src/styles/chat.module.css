@@ -762,6 +762,13 @@
 .toolbarBtn.codeGlyph {
   font-family: var(--dub-font-family-mono);
 }
+.toolbarBtn.underlineGlyph {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.toolbarBtn.strikeGlyph {
+  text-decoration: line-through;
+}
 .toolbarDivider {
   width: 1px;
   height: 18px;
@@ -954,6 +961,31 @@
 }
 .mdLink:hover {
   text-decoration: underline;
+}
+.mdUnderline {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mdParagraph {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mdParagraph + .mdParagraph {
+  margin-top: var(--dub-space-1);
+}
+.mdQuote {
+  margin: var(--dub-space-1) 0;
+  padding: 2px 0 2px var(--dub-space-3);
+  border-left: 3px solid var(--dub-color-border-strong);
+  color: var(--dub-color-text-secondary);
+}
+.mdList {
+  margin: var(--dub-space-1) 0;
+  padding-left: var(--dub-space-5);
+}
+.mdList li {
+  margin: 1px 0;
 }
 
 /* ── inline edit editor ──────────────────────────────────────────────────── */

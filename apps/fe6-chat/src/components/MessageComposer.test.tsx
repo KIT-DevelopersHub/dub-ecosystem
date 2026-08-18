@@ -67,4 +67,44 @@ describe("MessageComposer", () => {
     render(<MessageComposer channelId="chn_a" error="本文を確認してください" onSend={vi.fn()} />);
     expect(screen.getByTestId("fe6-composer-error")).toHaveTextContent("本文を確認してください");
   });
+
+  it("underline button wraps the selection with ++", async () => {
+    const user = userEvent.setup();
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} />);
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "word");
+    input.setSelectionRange(0, 4);
+    await user.click(screen.getByLabelText("下線"));
+    expect(input.value).toBe("++word++");
+  });
+
+  it("quote button prefixes the line with '> '", async () => {
+    const user = userEvent.setup();
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} />);
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "hello");
+    input.setSelectionRange(0, 5);
+    await user.click(screen.getByLabelText("引用"));
+    expect(input.value).toBe("> hello");
+  });
+
+  it("ordered-list button numbers each selected line", async () => {
+    const user = userEvent.setup();
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} />);
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "a{Shift>}{Enter}{/Shift}b");
+    input.setSelectionRange(0, input.value.length);
+    await user.click(screen.getByLabelText("番号付きリスト"));
+    expect(input.value).toBe("1. a\n2. b");
+  });
+
+  it("Cmd+B wraps the selection in *bold*", async () => {
+    const user = userEvent.setup();
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} />);
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "x");
+    input.setSelectionRange(0, 1);
+    await user.keyboard("{Meta>}b{/Meta}");
+    expect(input.value).toBe("*x*");
+  });
 });

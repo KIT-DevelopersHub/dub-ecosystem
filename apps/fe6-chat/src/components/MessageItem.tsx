@@ -13,7 +13,7 @@ import { useState } from "react";
 import { Avatar } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message } from "../api/contract";
-import { segmentBody } from "../lib/render-body";
+import { MessageBody } from "./MessageBody";
 import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
 import styles from "../styles/chat.module.css";
@@ -222,54 +222,7 @@ export function MessageItem({
           </div>
         ) : (
           <div className={styles.textBody} data-testid="fe6-timeline-body">
-            {segmentBody(message.body).map((seg, i) => {
-              switch (seg.type) {
-                case "mention":
-                  return (
-                    <span key={i} className={styles.mention}>
-                      @{nameOf(seg.userId, resolveUser)}
-                    </span>
-                  );
-                case "code":
-                  return (
-                    <code key={i} className={styles.inlineCode}>
-                      {seg.value}
-                    </code>
-                  );
-                case "codeblock":
-                  return (
-                    <pre key={i} className={styles.codeBlock}>
-                      <code>{seg.value}</code>
-                    </pre>
-                  );
-                case "bold":
-                  return (
-                    <strong key={i} className={styles.mdBold}>
-                      {seg.value}
-                    </strong>
-                  );
-                case "italic":
-                  return (
-                    <em key={i} className={styles.mdItalic}>
-                      {seg.value}
-                    </em>
-                  );
-                case "strike":
-                  return (
-                    <s key={i} className={styles.mdStrike}>
-                      {seg.value}
-                    </s>
-                  );
-                case "link":
-                  return (
-                    <a key={i} className={styles.mdLink} href={seg.href} target="_blank" rel="noreferrer">
-                      {seg.label}
-                    </a>
-                  );
-                default:
-                  return <span key={i}>{seg.value}</span>;
-              }
-            })}
+            <MessageBody body={message.body} resolveUser={resolveUser} />
             {grouped && message.editedAt && <span className={styles.editedTag}> (編集済み)</span>}
           </div>
         )}
