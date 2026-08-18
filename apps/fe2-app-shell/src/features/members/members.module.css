@@ -84,6 +84,14 @@
 
 /* チーム未割り当てのメンバー — 擬似チームカードではなく、控えめな「要対応」帯として
    全幅で表示する。チーム色ドット・チーム操作を持たず、チームと視覚的に明確に区別する。 */
+/* 統合アプリ「運営メンバー・名簿」の共有サブナビ帯（運営メンバー/名簿/ロール/
+   アドレス/履歴 を横断）。ページ見出しの上に薄い区切りとして敷く。 */
+.rosterSubnav {
+  border-bottom: 1px solid var(--dub-color-border-default);
+  margin-bottom: var(--dub-space-4);
+  overflow-x: auto;
+}
+
 .unassignedSection {
   grid-column: 1 / -1;
   border: 1px dashed var(--dub-color-border-default);

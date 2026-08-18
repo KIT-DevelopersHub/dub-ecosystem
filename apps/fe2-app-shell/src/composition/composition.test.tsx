@@ -115,29 +115,34 @@ describe("assembleFeatureModules", () => {
     expect(paths.filter((p) => p === "/events/:eventId/tasks")).toHaveLength(1);
   });
 
-  it("builds nav sorted by shell-owned order (events first, admin last)", () => {
+  it("builds nav sorted by shell-owned order (events first)", () => {
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const labels = registry.nav.map((n) => n.path);
-    // イベント(order 10)を先頭に固定。末尾は admin の最後のツール 変更履歴(/admin/history)。
+    // イベント(order 10)を先頭に固定。
     expect(labels[0]).toBe("/events");
-    expect(labels.at(-1)).toBe("/admin/history");
     // every nav icon resolved to a valid IconName (no crash-on-unknown)
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("removes only メールアドレス管理 from nav; keeps every other app (events + 変更履歴 復活)", () => {
-    // ユーザー明示承認で launcher/ナビから外すのは メールアドレス管理(/admin/email-routing) のみ。
-    // イベント(/events)・変更履歴(/admin/history) は誤撤去のため復活。他アプリは絶対に減らさない。
+  it("merges 運営メンバー + ユーザー名簿 into ONE launcher tile; admin routes kept but off-launcher", () => {
+    // 統合: 運営メンバー(member-service) と ユーザー名簿/ロール/履歴(FE7) を 1 アプリに合体。
+    // ランチャータイルは「運営メンバー・名簿」(/members) の 1 つだけ。名簿/ロール/履歴 の
+    // 個別タイルは廃止し、統合アプリ内の共有サブナビ(MemberRosterNav)から横断する。
+    // メールアドレス管理(/admin/email-routing) は従前どおり未登録。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
-    // 意図的撤去のままなのは email-routing だけ
+    // 統合アプリの単一タイル
+    expect(navPaths).toContain("/members");
+    const membersNav = registry.nav.find((n) => n.path === "/members");
+    expect(membersNav?.label).toBe("運営メンバー・名簿");
+    // admin ツールは launcher から消える（タイル統合）— email-routing は元から無い
+    expect(navPaths).not.toContain("/admin/users");
+    expect(navPaths).not.toContain("/admin/roles");
+    expect(navPaths).not.toContain("/admin/history");
     expect(navPaths).not.toContain("/admin/email-routing");
-    // 復活した2つは nav にある
-    expect(navPaths).toContain("/events");
-    expect(navPaths).toContain("/admin/history");
-    // 残す他アプリは全て nav にある
+    // 他アプリは絶対に減らさない
     expect(navPaths).toEqual(
       expect.arrayContaining([
         "/events",
@@ -149,14 +154,13 @@ describe("assembleFeatureModules", () => {
         "/usage",
         "/members",
         "/driveshare",
-        "/admin/users",
-        "/admin/roles",
-        "/admin/history",
       ]),
     );
-    // イベント routes も保持（ガント/タスクの event-scoped 動線が依存 + deep-link 生存）
+    // ただし admin routes（名簿/ロール/履歴）は保持（統合ナビ + deep-link 生存）
     const routePaths = registry.routes.map((r) => r.path);
-    expect(routePaths).toEqual(expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/history", "/events", "/events/:eventId/tasks/gantt"]));
+    expect(routePaths).toEqual(
+      expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/history", "/members", "/events", "/events/:eventId/tasks/gantt"]),
+    );
   });
 
   it("carries badge sources through for notifications and chat", () => {
