@@ -140,6 +140,17 @@ export function applyRealtimeEvent(
   if (event.channelId !== state.channelId) return state;
   switch (event.kind) {
     case "message.created": {
+      // A thread reply belongs in the thread pane, NOT the main timeline. Keep it out of
+      // the top-level list and instead bump the root message's reply count live so the
+      // "N 件の返信" summary updates without a reload.
+      if (event.threadRootId) {
+        const idx = lowerBound(state.messages, event.threadRootId);
+        const root = state.messages[idx];
+        if (!root || root.id !== event.threadRootId) return state;
+        const next = state.messages.slice();
+        next[idx] = { ...root, replyCount: root.replyCount + 1 };
+        return { ...state, messages: next };
+      }
       const echoed =
         event.authorId === currentUserId &&
         state.pending.find((p) => p.state !== "failed" && p.request.body === event.body);

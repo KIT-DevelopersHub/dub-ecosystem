@@ -344,6 +344,7 @@ export class ChatService {
       authorId: ctx.userId,
       body: text,
       at: now,
+      threadRootId: row.threadRootId,
     });
     return toMessage(row, {});
   }

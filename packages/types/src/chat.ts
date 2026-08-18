@@ -4,7 +4,18 @@ import type { ChannelId, MessageId, UserId, EventId, ISODateTime, CursorQuery } 
 
 // Server-internal fanout contract AND client WS wire contract (frozen · RT裁定#4).
 export type ChatRealtimeEvent =
-  | { kind: "message.created"; channelId: ChannelId; messageId: MessageId; authorId: UserId; body: string; at: ISODateTime }
+  | {
+      kind: "message.created";
+      channelId: ChannelId;
+      messageId: MessageId;
+      authorId: UserId;
+      body: string;
+      at: ISODateTime;
+      // Present when the new message is a thread reply. Lets clients keep replies out of
+      // the main timeline (they belong in the thread pane) and bump the root's reply
+      // count live. Optional for backward-compat with older publishers.
+      threadRootId?: MessageId | null;
+    }
   | { kind: "message.deleted"; channelId: ChannelId; messageId: MessageId; at: ISODateTime }
   | { kind: "member.added"; channelId: ChannelId; userId: UserId; at: ISODateTime }
   | { kind: "member.removed"; channelId: ChannelId; userId: UserId; at: ISODateTime };
