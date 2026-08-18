@@ -222,3 +222,38 @@ describe("reactionsFromWire", () => {
     expect(reactionsFromWire(undefined)).toEqual([]);
   });
 });
+
+describe("applyRealtimeEvent — thread replies stay out of the main timeline", () => {
+  it("a reply event bumps the root's replyCount and does NOT insert into main", () => {
+    const root = msg("msg_root", { replyCount: 0 });
+    const base = upsertMessage([], root);
+    const view = { ...emptyChannelView(CH), messages: base };
+    const ev: ChatRealtimeEvent = {
+      kind: "message.created",
+      channelId: CH as any,
+      messageId: "msg_reply" as any,
+      authorId: OTHER as any,
+      body: "a reply",
+      at: "2026-08-18T00:00:00.000Z" as any,
+      threadRootId: "msg_root" as any,
+    };
+    const next = applyRealtimeEvent(view, ev, ME as any);
+    expect(next.messages).toHaveLength(1); // reply not inserted into main
+    expect(next.messages[0]!.id).toBe("msg_root");
+    expect(next.messages[0]!.replyCount).toBe(1); // summary bumped live
+  });
+
+  it("a top-level event still inserts into main", () => {
+    const view = emptyChannelView(CH);
+    const ev: ChatRealtimeEvent = {
+      kind: "message.created",
+      channelId: CH as any,
+      messageId: "msg_top" as any,
+      authorId: OTHER as any,
+      body: "hi",
+      at: "2026-08-18T00:00:00.000Z" as any,
+    };
+    const next = applyRealtimeEvent(view, ev, ME as any);
+    expect(next.messages.map((m) => m.id)).toContain("msg_top");
+  });
+});
