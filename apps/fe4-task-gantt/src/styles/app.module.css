@@ -536,8 +536,13 @@
 /* dependency connectors: a distinct indigo (not the gray gridline colour), so a
    dependency arrow never reads as a border. Paired with the legend + a hover
    tooltip so the meaning is unambiguous vs the parent-child grouping. */
-.tlDep { stroke: var(--dub-color-brand-500); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.85; }
-.tlDepArrow { fill: var(--dub-color-brand-500); }
+/* Dependency connector (前工程 → 後工程). Bumped for legibility — the 1.5px/85%
+   dashed line read as "ほぼ見えない", especially for long top-level spans. */
+.tlDep { stroke: var(--dub-color-brand-600, var(--dub-color-brand-500)); stroke-width: 2.25; stroke-dasharray: 6 3; opacity: 1; stroke-linejoin: round; stroke-linecap: round; }
+/* Aggregated edge (an endpoint hidden in a collapsed parent) — denser dashes hint it
+   stands for one-or-more folded-away dependencies. */
+.tlDepAgg { stroke-dasharray: 2 3; }
+.tlDepArrow { fill: var(--dub-color-brand-600, var(--dub-color-brand-500)); }
 
 .tlToday {
   position: absolute;
