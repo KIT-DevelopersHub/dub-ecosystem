@@ -34,6 +34,7 @@ import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.ts
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
+import { MemberRosterNav } from "../features/members/MemberRosterNav.tsx";
 import { participationRoutes, participationNav } from "../features/participation/index.tsx";
 import { ParticipationProvider } from "../features/participation/ParticipationProvider.tsx";
 import {
@@ -99,6 +100,11 @@ function toIcon(raw: string | undefined): IconName {
 function providerWrapper(Provider: ProviderComponent, api: ApiClient): ElementWrapper {
   return (node) => createElement(Provider, { api, children: node });
 }
+
+/** 運営メンバー・名簿 統合アプリの共有サブナビ帯でセクション本体を包む（Provider の外側）。
+ *  members(member-service) と admin(identity-roster) の両セクションに同じ帯を敷き、
+ *  ランチャー 1 タイルの中で横断できるようにする（合体後も両ルート/Providerは維持）。 */
+const rosterChromeWrapper: ElementWrapper = (node) => createElement(MemberRosterNav, { children: node });
 
 /** Wrap a canonical `lazy` loader so the resolved Component mounts inside `wrap`. */
 function wrapLazy(lazy: FeatureRoute["lazy"], wrap: ElementWrapper): FeatureRoute["lazy"] {
@@ -254,9 +260,14 @@ function adaptGantt(api: ApiClient): FeatureModule {
 // rather than a separate FE package. Nav sits after usage (order 47), before admin.
 // Route gate = identity:read; write actions are re-authorized server-side (identity:admin).
 function adaptMembers(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(MembersProvider, api);
+  const provider = providerWrapper(MembersProvider, api);
+  // chrome(サブナビ) は Provider の外側: (node) => <MemberRosterNav>{<MembersProvider>node</MembersProvider>}</MemberRosterNav>
+  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = membersNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 47 }));
+  // 統合後はランチャー 1 タイル。運営メンバーと名簿(FE7)を同じアプリとして開くので、
+  // タイル名は「運営メンバー・名簿」。名簿/ロール/アドレス/履歴 の個別タイルは廃止し
+  // （adaptAdmin の nav=[]）、このタイル内の共有サブナビから横断する（ユーザー明示指示の統合）。
+  const nav: NavEntry[] = membersNav.map((n) => ({ label: "運営メンバー・名簿", path: n.path, icon: n.icon, order: 47 }));
   return { id: "members", routes, nav };
 }
 
@@ -296,22 +307,17 @@ function adaptDriveShare(api: ApiClient): FeatureModule {
 
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(RosterProviders, api);
+  const provider = providerWrapper(RosterProviders, api);
+  // chrome(共有サブナビ) は Provider の外側に敷く。名簿/ロール/履歴 も
+  // 「運営メンバー・名簿」統合アプリの一部として同じ横断ナビで表示する。
+  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const src = adminModule.routes as readonly SourceRoute[];
   const routes = src.map((r) => wrapRoute(r, wrap));
-  // Map each admin route path -> its own requiredPermissions so the launcher can
-  // hide the admin tools (ユーザー名簿 / ロール管理 / 変更履歴) from non-admins, matching
-  // the route guard (defense in depth; a non-admin can neither see nor open them).
-  // メールアドレス管理 (/admin/email-routing) のみユーザー明示承認で FE7 の routes/nav から
-  // 登録解除済み（fe7-admin-roster/src/routes.tsx）。変更履歴 は誤撤去のため復活済み。
-  // 残る admin ツールは権限保持者に全て表示する。
-  const permByPath = new Map(src.map((r) => [r.path, r.requiredPermissions]));
-  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => {
-    const perms = permByPath.get(n.path);
-    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
-    if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
-    return e;
-  });
+  // 統合により、ユーザー名簿/ロール管理/変更履歴 の個別ランチャータイルは廃止する。
+  // ルート自体と route ガード(requiredPermissions)・headerWidget は維持したまま nav を空に
+  // し、これらは「運営メンバー・名簿」タイル内の共有サブナビ(MemberRosterNav)からのみ横断する。
+  // （ランチャー削減は原則NGだが、本件は「2アプリを1アプリに統合」というユーザー明示指示。）
+  const nav: NavEntry[] = [];
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 

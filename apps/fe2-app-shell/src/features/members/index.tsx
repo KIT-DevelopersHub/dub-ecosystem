@@ -3,6 +3,7 @@ export { createMembersApi } from "./membersApi.tsx";
 export type { MembersApi } from "./membersApi.tsx";
 export { MembersProvider, MembersApiProvider, useMembersApi } from "./MembersProvider.tsx";
 export { MembersPage } from "./MembersPage.tsx";
+export { MemberRosterNav } from "./MemberRosterNav.tsx";
 export { MemberStatusBadge, STATUS_LABEL } from "./MemberStatusBadge.tsx";
 export { membersRoutes, membersNav } from "./module.tsx";
 export type { MembersSourceRoute, MembersNavEntry } from "./module.tsx";
