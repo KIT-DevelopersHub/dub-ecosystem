@@ -1,17 +1,18 @@
 // 運営メンバー・名簿 — 統合アプリの共有サブナビ（横タブ帯）。
 //
 // 運営メンバー(member-service: チーム/組織/学科学年) と ユーザー名簿(identity-roster:
-// ログイン/ロール/メールアドレス/表示名) は「使い分けが難しい」ため 1 アプリに統合した。
-// ランチャーのタイルは 1 つ（運営メンバー・名簿）にまとめ、その中をこの共有サブナビで
-// 横断する。各セクションは従来のルート/Provider をそのまま維持（additive・非破壊）:
-//   運営メンバー → /members（内部に チーム別/組織図 タブ）
-//   名簿         → /admin/users
-//   ロール       → /admin/roles
-//   アドレス発行 → /admin/email-routing
-//   変更履歴     → /admin/history
-// データ源は 2 つ（member-service / identity-roster）のままで、突合キーは
-// member.identityUserId（＝メール一致で紐付く既存の仕組み）。表示の一貫性はこの共有
-// サブナビ + 各セクション見出しで担保する。
+// ログイン/メールアドレス/表示名) と 参加届(member-service: 届出→名簿反映) を 1 アプリに
+// 統合する。ランチャーのタイルは 1 つ（運営メンバー・名簿）にまとめ、その中をこの共有
+// サブナビで横断する。各セクションは従来のルート/Provider をそのまま維持（additive・非破壊）:
+//   運営メンバー   → /members（内部に チーム別/組織図 タブ）
+//   名簿           → /admin/users
+//   参加届         → /participation（提出フォーム）
+//   参加届の回答   → /participation/list（回答管理）
+// データ源は member-service / identity-roster のままで、突合キーは member.identityUserId
+// （＝メール一致で紐付く既存の仕組み）。表示の一貫性はこの共有サブナビ + 各セクション見出しで担保する。
+//
+// ロール管理(/admin/roles) は独立ランチャータイル「ロール管理」に切り出したのでこのサブナビには
+// 載せない。変更履歴(/admin/history) の UI アプリは撤去済みなので同様に載せない。
 //
 // 各タブは対応ルートと同じ requiredPermissions で出し分ける（権限が無ければタブ自体を
 // 出さない = ルートガードと二重で fail-closed）。
@@ -32,18 +33,17 @@ interface SectionTab {
 }
 
 // 順序 = 表示順。active 判定は「pathname が path で始まる最長一致」なので、より深い
-// パス（例: /admin/users/:id）は親タブ（名簿）にハイライトが乗る。
+// パス（例: /admin/users/:id, /participation/list）は親タブにハイライトが乗る。
 // 各タブの requiredPermissions は、対応ルートが registry.flatten で AND される実効権限と
-// 一致させる = ドメイン権限（identity:read / audit:read）＋ per-app view キー
-// （app:members:view / app:admin:view, withAppAccessGate 由来）。これでタブの表示可否が
+// 一致させる = ドメイン権限（identity:read）＋ per-app view キー（app:members:view /
+// app:admin:view / app:participation:view, withAppAccessGate 由来）。これでタブの表示可否が
 // ルートガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
-// NOTE: アドレス発行(/admin/email-routing) は現状 FE7 の routes/nav から登録解除されている
-// （main で撤去済み）。ルートが復活した時点でここに 1 行足せば統合ナビにも自動で出る。
+// 参加届(提出) は openToAll（ドメイン権限なし）なので app:participation:view のみでガードする。
 const SECTIONS: SectionTab[] = [
   { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["identity:read", "app:members:view"] },
   { id: "roster", label: "名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
-  { id: "roles", label: "ロール", path: "/admin/roles", requiredPermissions: ["identity:read", "app:admin:view"] },
-  { id: "history", label: "変更履歴", path: "/admin/history", requiredPermissions: ["audit:read", "app:admin:view"] },
+  { id: "participation", label: "参加届", path: "/participation", requiredPermissions: ["app:participation:view"] },
+  { id: "participation-list", label: "参加届の回答", path: "/participation/list", requiredPermissions: ["identity:read", "app:participation:view"] },
 ];
 
 /** pathname に最も長く前方一致するセクションの id（統合アプリ外なら null）。 */

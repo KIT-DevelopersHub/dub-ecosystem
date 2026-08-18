@@ -35,7 +35,7 @@ import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.ts
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
 import { MemberRosterNav } from "../features/members/MemberRosterNav.tsx";
-import { participationRoutes, participationNav } from "../features/participation/index.tsx";
+import { participationRoutes } from "../features/participation/index.tsx";
 import { ParticipationProvider } from "../features/participation/ParticipationProvider.tsx";
 import {
   ChatProviders,
@@ -264,9 +264,10 @@ function adaptMembers(api: ApiClient): FeatureModule {
   // chrome(サブナビ) は Provider の外側: (node) => <MemberRosterNav>{<MembersProvider>node</MembersProvider>}</MemberRosterNav>
   const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  // 統合後はランチャー 1 タイル。運営メンバーと名簿(FE7)を同じアプリとして開くので、
-  // タイル名は「運営メンバー・名簿」。名簿/ロール/アドレス/履歴 の個別タイルは廃止し
-  // （adaptAdmin の nav=[]）、このタイル内の共有サブナビから横断する（ユーザー明示指示の統合）。
+  // 統合タイル「運営メンバー・名簿」。運営メンバー(member-service) と 名簿(FE7 /admin/users) と
+  // 参加届＋回答(participation) を同じアプリとして開く。名簿/参加届/回答 の個別タイルは廃止し、この
+  // タイル内の共有サブナビ(MemberRosterNav)から横断する。ロール管理(/admin/roles) だけは独立タイル
+  // として adaptAdmin が別に出す（ユーザー明示指示: ロールを外に括り出す）。
   const nav: NavEntry[] = membersNav.map((n) => ({ label: "運営メンバー・名簿", path: n.path, icon: n.icon, order: 47 }));
   return { id: "members", routes, nav };
 }
@@ -279,16 +280,14 @@ function adaptMembers(api: ApiClient): FeatureModule {
 // authenticated user, so the launcher tile shows for everyone signed in; the roster
 // write is re-authorized server-side by member-service.
 function adaptParticipation(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(ParticipationProvider, api);
+  const provider = providerWrapper(ParticipationProvider, api);
+  // 参加届(提出) と 参加届の回答(管理) は「運営メンバー・名簿」統合アプリのセクションに畳む。
+  // 共有サブナビ(MemberRosterNav) を Provider の外側に敷き、名簿/運営メンバーと同じ帯で横断する。
+  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = participationNav.map((n, i) => {
-    // 参加届(提出)は全員に、回答一覧は identity:read を持つ運営だけにランチャー表示。
-    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 49 + i };
-    if (n.requiredPermissions && n.requiredPermissions.length > 0) {
-      e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
-    }
-    return e;
-  });
+  // 個別ランチャータイルは廃止（nav=[]）。参加届は運営メンバー・名簿タイル内のサブナビからのみ横断する
+  // （ユーザー明示指示: 参加届＋回答管理を運営メンバーにまとめる）。ルート/Provider は維持し deep-link も生存。
+  const nav: NavEntry[] = [];
   return { id: "participation", routes, nav };
 }
 
@@ -308,16 +307,19 @@ function adaptDriveShare(api: ApiClient): FeatureModule {
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const provider = providerWrapper(RosterProviders, api);
-  // chrome(共有サブナビ) は Provider の外側に敷く。名簿/ロール/履歴 も
-  // 「運営メンバー・名簿」統合アプリの一部として同じ横断ナビで表示する。
-  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
+  // 名簿(/admin/users*) は「運営メンバー・名簿」統合タイルの一部 → 共有サブナビ(chrome)を Provider の
+  // 外側に敷き、そのタブから横断する（個別タイルは出さない）。ロール管理(/admin/roles*) はユーザー明示
+  // 指示で独立ランチャータイル「ロール管理」として単独で開く → chrome は敷かず単独アプリとして成立させる。
+  const rosterWrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const src = adminModule.routes as readonly SourceRoute[];
-  const routes = src.map((r) => wrapRoute(r, wrap));
-  // 統合により、ユーザー名簿/ロール管理/変更履歴 の個別ランチャータイルは廃止する。
-  // ルート自体と route ガード(requiredPermissions)・headerWidget は維持したまま nav を空に
-  // し、これらは「運営メンバー・名簿」タイル内の共有サブナビ(MemberRosterNav)からのみ横断する。
-  // （ランチャー削減は原則NGだが、本件は「2アプリを1アプリに統合」というユーザー明示指示。）
-  const nav: NavEntry[] = [];
+  const routes = src.map((r) =>
+    r.path.startsWith("/admin/roles") ? wrapRoute(r, provider) : wrapRoute(r, rosterWrap),
+  );
+  // 独立ランチャータイルは「ロール管理」(/admin/roles) の 1 つだけ。名簿(/admin/users) は運営メンバー・
+  // 名簿タイル内の共有サブナビ(MemberRosterNav)から開くので個別タイルを出さない。変更履歴(/admin/history)
+  // の UI は撤去済み（ルート/コンポーネントごと削除・監査ログのデータ基盤は残置）。route ガード
+  // (requiredPermissions)・headerWidget は維持。app:admin:view が名簿タブとロール管理タイルの両方をガードする。
+  const nav: NavEntry[] = [{ label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50 }];
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 

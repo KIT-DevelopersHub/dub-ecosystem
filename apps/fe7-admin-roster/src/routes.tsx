@@ -51,30 +51,24 @@ function roleNewRoute(): Promise<{ Component: ComponentType }> {
   }));
 }
 
-function historyRoute(): Promise<{ Component: ComponentType }> {
-  return import("./components/AuditHistoryPage").then(({ AuditHistoryPage }) => ({
-    Component: AuditHistoryPage,
-  }));
-}
-
 // メールアドレス管理 (/admin/email-routing) のみユーザー明示承認で launcher/ナビ/route から
 // 完全撤去。EmailRoutingPage コンポーネントと専用フック/API/型も削除済み。名簿のアドレス発行
 // (NewEmailAddressDialog) と退任フロー(offboard)が使う createEmailAddress / list / delete は
 // 名簿機能なので残置している。
-// 変更履歴 (/admin/history) は誤って撤去されていたためユーザー承認で復活（アプリを減らさない原則）。
+// 変更履歴 (/admin/history) の UI アプリ（AuditHistoryPage・ルート・タイル・サブナビ項目）は
+// ユーザー明示指示で完全撤去した。監査ログの取得基盤（rosterApi.auditLogs / useAuditLogs /
+// buildAuditQuery とバックエンドの収集）は壊さず残置している（他機能/将来の再利用のため）。
 
 export const routes: FeatureRoute[] = [
   { path: "/admin/users", lazy: usersRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/users/:userId", lazy: userDetailRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles", lazy: rolesRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles/new", lazy: roleNewRoute, auth: "required", requiredPermissions: ["identity:admin"] },
-  { path: "/admin/history", lazy: historyRoute, auth: "required", requiredPermissions: ["audit:read"] },
 ];
 
 export const nav: NavEntry[] = [
   { label: "ユーザー名簿", path: "/admin/users", icon: "users", order: 10 },
   { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 20 },
-  { label: "変更履歴", path: "/admin/history", icon: "history", order: 30 },
 ];
 
 // headerWidget: mounted by the FE2 shell above the module surface (same slot as FE5's
