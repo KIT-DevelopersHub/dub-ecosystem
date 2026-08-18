@@ -37,7 +37,7 @@ describe("optimistic create", () => {
     const tempId = provisionalTaskId();
     const provisional = buildProvisionalTask(
       tempId,
-      { title: "会場確認", status: "todo", priority: "high", assigneeId: "usr_a", teamId: null, dueAt: "2026-09-01T00:00:00.000Z", parentTaskId: null },
+      { title: "会場確認", status: "todo", priority: "high", assigneeId: "usr_a", teamId: null, startAt: null, dueAt: "2026-09-01T00:00:00.000Z", parentTaskId: null },
       "evt_1",
       "2026-08-17T00:00:00.000Z",
     );
@@ -58,7 +58,7 @@ describe("optimistic create", () => {
     const tempId = provisionalTaskId();
     const provisional = buildProvisionalTask(
       tempId,
-      { title: "x", status: "todo", priority: "medium", assigneeId: null, teamId: null, dueAt: null, parentTaskId: null },
+      { title: "x", status: "todo", priority: "medium", assigneeId: null, teamId: null, startAt: null, dueAt: null, parentTaskId: null },
       "evt_1",
       "2026-08-17T00:00:00.000Z",
     );

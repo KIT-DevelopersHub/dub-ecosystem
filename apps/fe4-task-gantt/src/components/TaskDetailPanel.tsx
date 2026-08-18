@@ -67,6 +67,7 @@ export function TaskDetailPanel({
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
   const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
+  const [start, setStart] = useState<string | null>(dateInputFromIso(t.startAt ?? null));
   const [due, setDue] = useState<string | null>(dateInputFromIso(t.dueAt));
   // Relations (親子 / 先行タスク). Seeded from the gantt read model via props; the
   // panel is remounted per task (keyed on id) so these never go stale.
@@ -88,7 +89,9 @@ export function TaskDetailPanel({
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
+  const nextStartIso = isoFromDateInput(start);
   const nextDueIso = isoFromDateInput(due);
+  const curStart = t.startAt ?? null;
   const curTeam = t.teamId ?? null;
   const parentChanged = parentId !== parentTaskId;
   const sameDeps =
@@ -100,6 +103,7 @@ export function TaskDetailPanel({
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
     teamId !== curTeam ||
+    nextStartIso !== curStart ||
     nextDueIso !== t.dueAt ||
     parentChanged ||
     depsChanged;
@@ -111,6 +115,7 @@ export function TaskDetailPanel({
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
     if (teamId !== curTeam) patch.teamId = teamId;
+    if (nextStartIso !== curStart) patch.startAt = nextStartIso;
     if (nextDueIso !== t.dueAt) patch.dueAt = nextDueIso;
     if (parentChanged) patch.parentTaskId = parentId;
     onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
@@ -169,19 +174,27 @@ export function TaskDetailPanel({
           </div>
         </div>
 
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
+            担当
+          </label>
+          <Select
+            id="fe4-detail-assignee"
+            value={assigneeId ?? ""}
+            disabled={!canWrite}
+            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
+            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+            testId="fe4-detail-assignee"
+          />
+        </div>
+
+        {/* 開始日 / 期日: a task with both gets an exact gantt bar (arrow-linkable). */}
         <div className={styles.formRow}>
           <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
-              担当
+            <label className={styles.formLabel} htmlFor="fe4-detail-start">
+              開始日
             </label>
-            <Select
-              id="fe4-detail-assignee"
-              value={assigneeId ?? ""}
-              disabled={!canWrite}
-              onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-              options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
-              testId="fe4-detail-assignee"
-            />
+            <DateField id="fe4-detail-start" value={start} disabled={!canWrite} onChange={setStart} testId="fe4-detail-start" />
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-due">

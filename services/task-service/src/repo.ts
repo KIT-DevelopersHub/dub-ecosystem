@@ -15,6 +15,7 @@ export interface TaskRow {
   team_id: string | null;
   parent_id: string | null;
   wbs: string | null;
+  start_at: string | null;
   due_at: string | null;
   origin: task.TaskOrigin;
   version: number;
@@ -38,6 +39,7 @@ export function rowToTask(r: TaskRow): task.Task {
     parentTaskId: r.parent_id,
     wbs: r.wbs,
     createdBy: r.created_by,
+    startAt: r.start_at,
     dueAt: r.due_at,
     origin: r.origin,
     version: r.version,
@@ -58,6 +60,7 @@ export interface InsertTaskInput {
   teamId?: common.TeamId | null;
   parentId?: common.TaskId | null;
   wbs?: string | null;
+  startAt?: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
   origin: task.TaskOrigin;
   createdBy: common.UserId;
@@ -74,6 +77,7 @@ export interface TaskPatch {
   teamId?: common.TeamId | null;
   parentId?: common.TaskId | null;
   wbs?: string | null;
+  startAt?: common.ISODateTime | null;
   dueAt?: common.ISODateTime | null;
 }
 
@@ -188,14 +192,14 @@ export function decodeCursor(cursor: string): string {
 }
 
 const ALL_COLUMNS =
-  "id, event_id, title, description, status, priority, assignee_id, team_id, parent_id, wbs, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at";
+  "id, event_id, title, description, status, priority, assignee_id, team_id, parent_id, wbs, start_at, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at";
 
 export function createD1TaskRepo(db: DbClient): TaskRepo {
   return {
     async insert(input: InsertTaskInput): Promise<task.Task> {
       await db.run(
         `INSERT INTO task_tasks (${ALL_COLUMNS})
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL)`,
         input.id,
         input.eventId,
         input.title,
@@ -206,6 +210,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         input.teamId ?? null,
         input.parentId ?? null,
         input.wbs ?? null,
+        input.startAt ?? null,
         input.dueAt,
         input.origin,
         input.createdBy,
@@ -283,6 +288,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (patch.teamId !== undefined) col("team_id", patch.teamId);
       if (patch.parentId !== undefined) col("parent_id", patch.parentId);
       if (patch.wbs !== undefined) col("wbs", patch.wbs);
+      if (patch.startAt !== undefined) col("start_at", patch.startAt);
       if (patch.dueAt !== undefined) col("due_at", patch.dueAt);
       col("updated_at", now);
       sets.push("version = version + 1");

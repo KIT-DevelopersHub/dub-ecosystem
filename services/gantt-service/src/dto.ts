@@ -131,9 +131,18 @@ function toRow(
   let endsAt: common.ISODateTime | null = null;
   if (isParent) {
     // parent span is derived from children (rollup on the client); leave null.
+  } else if (t.startAt && t.dueAt) {
+    // Both explicit ⇒ the bar spans exactly [startAt, dueAt] (PR-C: real dates win
+    // over the derived window, so a user-set start/due gives an arrow-linkable bar).
+    startsAt = t.startAt;
+    endsAt = t.dueAt;
   } else if (t.dueAt) {
     endsAt = t.dueAt;
     startsAt = isoAtDay(dayOf(t.dueAt) - dur);
+  } else if (t.startAt) {
+    // Start only ⇒ anchor a nominal-duration bar at the real start.
+    startsAt = t.startAt;
+    endsAt = isoAtDay(dayOf(t.startAt) + dur);
   } else if (t.id in esOffsetByTask) {
     const start = anchorDay + esOffsetByTask[t.id]!;
     startsAt = isoAtDay(start);
@@ -157,10 +166,13 @@ function toRow(
 /** Project start day: earliest deadline-anchored start, else earliest createdAt,
  *  else today. Anchors CPM-derived (dueAt-less) bars onto the real calendar. */
 function anchorDayOf(live: task.Task[]): number {
+  // Earliest real anchor: an explicit startAt, or a deadline-anchored derived start.
+  const explicitStarts = live.filter((t) => t.startAt).map((t) => dayOf(t.startAt!));
   const dueStarts = live
     .filter((t) => t.dueAt !== null)
     .map((t) => dayOf(t.dueAt!) - durationDaysOf(t.priority));
-  if (dueStarts.length > 0) return Math.min(...dueStarts);
+  const anchored = [...explicitStarts, ...dueStarts];
+  if (anchored.length > 0) return Math.min(...anchored);
   const created = live.map((t) => dayOf(t.createdAt));
   if (created.length > 0) return Math.min(...created);
   return dayOf(new Date().toISOString());

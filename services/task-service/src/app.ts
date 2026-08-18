@@ -169,6 +169,7 @@ export function buildApp(deps: Deps): Hono {
       fe.push({ field: "description", reason: "invalid_type" });
     }
     checkPriority(body.priority, fe);
+    checkIso(body.startAt, "startAt", fe);
     checkIso(body.dueAt, "dueAt", fe);
     if (body.assigneeId !== undefined && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
@@ -213,6 +214,7 @@ export function buildApp(deps: Deps): Hono {
       teamId: body.teamId ?? null,
       parentId: body.parentTaskId ?? null,
       wbs: body.wbs ?? null,
+      startAt: body.startAt ?? null,
       dueAt: body.dueAt ?? null,
       origin: (isServiceRole(principal) ? body.origin : undefined) ?? "internal",
       createdBy: actorId,
@@ -260,6 +262,7 @@ export function buildApp(deps: Deps): Hono {
     }
     checkPriority(body.priority, fe);
     checkStatusValue(body.status, fe);
+    checkIso(body.startAt, "startAt", fe);
     checkIso(body.dueAt, "dueAt", fe);
     if (body.assigneeId !== undefined && body.assigneeId !== null && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
@@ -307,6 +310,7 @@ export function buildApp(deps: Deps): Hono {
       teamId?: common.TeamId | null;
       parentId?: common.TaskId | null;
       wbs?: string | null;
+      startAt?: common.ISODateTime | null;
       dueAt?: common.ISODateTime | null;
     } = {};
     if (body.title !== undefined) patch.title = body.title;
@@ -317,6 +321,7 @@ export function buildApp(deps: Deps): Hono {
     if (body.teamId !== undefined) patch.teamId = body.teamId;
     if (body.parentTaskId !== undefined) patch.parentId = body.parentTaskId;
     if (body.wbs !== undefined) patch.wbs = body.wbs;
+    if (body.startAt !== undefined) patch.startAt = body.startAt;
     if (body.dueAt !== undefined) patch.dueAt = body.dueAt;
 
     if (Object.keys(patch).length === 0) return c.json(current); // version-only no-op
@@ -332,7 +337,7 @@ export function buildApp(deps: Deps): Hono {
     const evt = current.eventId ? { eventId: current.eventId } : {};
     const specs: EventSpec[] = [];
     const changed: string[] = [];
-    for (const f of ["title", "description", "priority", "dueAt"] as const) {
+    for (const f of ["title", "description", "priority", "startAt", "dueAt"] as const) {
       if (patch[f] !== undefined && current[f] !== updated[f]) changed.push(f);
     }
     if (changed.length > 0) {
