@@ -125,11 +125,11 @@ describe("assembleFeatureModules", () => {
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("merges 運営メンバー + ユーザー名簿 into ONE launcher tile; admin routes kept but off-launcher", () => {
-    // 統合: 運営メンバー(member-service) と ユーザー名簿/ロール/履歴(FE7) を 1 アプリに合体。
-    // ランチャータイルは「運営メンバー・名簿」(/members) の 1 つだけ。名簿/ロール/履歴 の
-    // 個別タイルは廃止し、統合アプリ内の共有サブナビ(MemberRosterNav)から横断する。
-    // メールアドレス管理(/admin/email-routing) は従前どおり未登録。
+  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理 an independent tile; 変更履歴 gone", () => {
+    // 統合: 運営メンバー(member-service) + 名簿(FE7 /admin/users) + 参加届/回答(participation) を
+    // 1 タイル「運営メンバー・名簿」(/members) に合体し、共有サブナビ(MemberRosterNav)で横断する。
+    // ロール管理(/admin/roles) はそこから括り出して独立ランチャータイルに戻す。変更履歴(/admin/history)
+    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) は従前どおり未登録。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
@@ -137,10 +137,16 @@ describe("assembleFeatureModules", () => {
     expect(navPaths).toContain("/members");
     const membersNav = registry.nav.find((n) => n.path === "/members");
     expect(membersNav?.label).toBe("運営メンバー・名簿");
-    // admin ツールは launcher から消える（タイル統合）— email-routing は元から無い
+    // ロール管理は独立タイルとして復活
+    expect(navPaths).toContain("/admin/roles");
+    const rolesNav = registry.nav.find((n) => n.path === "/admin/roles");
+    expect(rolesNav?.label).toBe("ロール管理");
+    expect(rolesNav?.appId).toBe("admin");
+    // 名簿/参加届/回答 は統合タイル内サブナビから開くので個別タイルは無い。変更履歴タイルは消滅。
     expect(navPaths).not.toContain("/admin/users");
-    expect(navPaths).not.toContain("/admin/roles");
     expect(navPaths).not.toContain("/admin/history");
+    expect(navPaths).not.toContain("/participation");
+    expect(navPaths).not.toContain("/participation/list");
     expect(navPaths).not.toContain("/admin/email-routing");
     // 他アプリは絶対に減らさない
     expect(navPaths).toEqual(
@@ -154,13 +160,24 @@ describe("assembleFeatureModules", () => {
         "/usage",
         "/members",
         "/driveshare",
+        "/admin/roles",
       ]),
     );
-    // ただし admin routes（名簿/ロール/履歴）は保持（統合ナビ + deep-link 生存）
+    // admin/participation routes（名簿/ロール/参加届/回答）は保持（統合ナビ + deep-link 生存）。
+    // 変更履歴ルート(/admin/history) は撤去済みなので存在しないこと。
     const routePaths = registry.routes.map((r) => r.path);
     expect(routePaths).toEqual(
-      expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/history", "/members", "/events", "/events/:eventId/tasks/gantt"]),
+      expect.arrayContaining([
+        "/admin/users",
+        "/admin/roles",
+        "/participation",
+        "/participation/list",
+        "/members",
+        "/events",
+        "/events/:eventId/tasks/gantt",
+      ]),
     );
+    expect(routePaths).not.toContain("/admin/history");
   });
 
   it("carries badge sources through for notifications and chat", () => {
