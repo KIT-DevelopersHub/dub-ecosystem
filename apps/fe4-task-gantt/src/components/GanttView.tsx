@@ -178,23 +178,55 @@ export function GanttView({
   const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
+  // Every row (visible or hidden) by id — used to walk the WBS up to a visible anchor.
+  const rowByIdAll = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r] as const)), [dto.rows]);
+  // Resolve a dependency endpoint to the nearest row that is actually drawn: if the
+  // endpoint is hidden inside a collapsed parent, walk up to the visible ancestor so
+  // the edge renders as an AGGREGATE arrow on that parent instead of vanishing. A
+  // fully-visible endpoint resolves to itself. This is why top-level ↔ top-level and
+  // collapsed-subtree dependencies both show up now (判断: 折りたたみ中は集約表示).
+  const visibleAnchor = useMemo(() => {
+    return (taskId: common.TaskId): common.TaskId | null => {
+      let id: common.TaskId | null = taskId;
+      const guard = new Set<common.TaskId>();
+      while (id && !guard.has(id)) {
+        guard.add(id);
+        if (barById.has(id)) return id;
+        id = rowByIdAll.get(id)?.parentTaskId ?? null;
+      }
+      return null;
+    };
+  }, [barById, rowByIdAll]);
+
   const segs = useMemo(() => {
+    const seen = new Set<string>(); // dedup edges aggregated onto the same anchor pair
     return dto.dependencies
       .map((d) => {
-        const from = barById.get(d.fromTaskId);
-        const to = barById.get(d.toTaskId);
+        const fromId = visibleAnchor(d.fromTaskId);
+        const toId = visibleAnchor(d.toTaskId);
+        // both collapsed into the SAME visible ancestor → an internal edge, nothing to draw
+        if (!fromId || !toId || fromId === toId) return null;
+        const from = barById.get(fromId);
+        const to = barById.get(toId);
         if (!from || !to || !from.hasBar || !to.hasBar) return null;
+        const key = `${fromId}->${toId}`;
+        if (seen.has(key)) return null;
+        seen.add(key);
+        const aggregated = fromId !== d.fromTaskId || toId !== d.toTaskId;
         return {
           id: d.id,
           x1: from.x + from.width,
           y1: from.y + ROW_HEIGHT / 2,
           x2: to.x,
           y2: to.y + ROW_HEIGHT / 2,
-          tip: `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
+          aggregated,
+          tip: aggregated
+            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の依存を含む）`
+            : `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
-  }, [dto.dependencies, barById, titleById]);
+  }, [dto.dependencies, barById, titleById, visibleAnchor]);
 
   // Faint enclosing band drawn behind an open parent + its (contiguous) children,
   // so the parent-child grouping reads as a container — distinct from the arrows,
@@ -402,13 +434,13 @@ export function GanttView({
           まとめバー（親＝子の期間を合算）
         </span>
         <span className={styles.tlGuideItem}>
-          <svg className={styles.tlGuideDepIcon} width="26" height="10" aria-hidden>
+          <svg className={styles.tlGuideDepIcon} width="28" height="12" aria-hidden>
             <defs>
-              <marker id="fe4-legend-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                <path d="M0,0 L5,3 L0,6 Z" className={styles.tlDepArrow} />
+              <marker id="fe4-legend-arrow" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+                <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrow} />
               </marker>
             </defs>
-            <path d="M1,5 H20" fill="none" className={styles.tlDep} markerEnd="url(#fe4-legend-arrow)" />
+            <path d="M1,6 H20" fill="none" className={styles.tlDep} markerEnd="url(#fe4-legend-arrow)" />
           </svg>
           依存（前工程 → 後工程）
         </span>
@@ -549,19 +581,28 @@ export function GanttView({
                   <div key={i} className={styles.tlRowLine} style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }} aria-hidden />
                 ))}
 
-                {/* dependency connectors (subtle) */}
+                {/* dependency connectors (前工程 → 後工程) */}
                 {segs.length > 0 && (
                   <svg width={width} height={rowsH} className={styles.tlSvg} aria-hidden>
                     <defs>
-                      <marker id="fe4-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                        <path d="M0,0 L5,3 L0,6 Z" className={styles.tlDepArrow} />
+                      <marker id="fe4-arrow" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+                        <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrow} />
                       </marker>
                     </defs>
                     {segs.map((s) => {
                       const midX = Math.max(s.x1 + 10, s.x2 - 10);
                       const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
+                      const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
                       return (
-                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`}>
+                        <path
+                          key={s.id}
+                          d={d}
+                          fill="none"
+                          className={cls}
+                          markerEnd="url(#fe4-arrow)"
+                          data-testid={`fe4-gantt-dep-${s.id}`}
+                          data-aggregated={s.aggregated ? "1" : undefined}
+                        >
                           <title>{s.tip}</title>
                         </path>
                       );
