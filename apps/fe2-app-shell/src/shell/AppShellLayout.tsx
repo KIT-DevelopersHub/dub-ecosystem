@@ -47,6 +47,9 @@ function accountEmail(auth: ReturnType<typeof useAuth>): string | null {
 export interface AppShellLayoutProps {
   navEntries: NavEntry[];
   headerWidgets?: ComponentType[];
+  // Widgets rendered BEFORE the 9-dot AppLauncher (e.g. the gantt event switcher),
+  // so a context selector sits left of the app/utility icon cluster.
+  leadingHeaderWidgets?: ComponentType[];
   onNavigate?: (path: string) => void;
   onLogout?: () => void;
   title?: string;
@@ -109,6 +112,7 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
 export function AppShellLayout({
   navEntries,
   headerWidgets = [],
+  leadingHeaderWidgets = [],
   onNavigate,
   onLogout,
   title = "DevHub",
@@ -182,6 +186,10 @@ export function AppShellLayout({
       title={brand}
       actions={
         <>
+          {/* Leading widgets (e.g. the gantt event switcher) sit LEFT of the 9-dot. */}
+          {leadingHeaderWidgets.map((Widget, i) => (
+            <Widget key={`lead-${i}`} />
+          ))}
           <AppLauncher
             testId="fe2-app-launcher"
             title="アプリ"

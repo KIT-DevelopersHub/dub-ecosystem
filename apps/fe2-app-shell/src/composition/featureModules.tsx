@@ -273,9 +273,10 @@ function adaptGantt(api: ApiClient): FeatureModule {
   const module: FeatureModule = { id: "gantt", routes, nav };
   // Global イベント header selector (GCP-style). Wrapped in GanttProvider (for the
   // api-client) like FE5's bell; it self-gates to gantt/tasks routes and navigates
-  // the event param on select. Sits before the notifications bell in the actions row
-  // (gantt is assembled before notifications).
+  // the event param on select. Placed "leading" = LEFT of the 9-dot AppLauncher (the
+  // context selector precedes the app/utility icon cluster; the bell stays trailing).
   module.headerWidget = () => wrap(createElement(GlobalEventSwitcher));
+  module.headerWidgetPlacement = "leading";
   return module;
 }
 

@@ -33,6 +33,7 @@ export function buildRegistry(modules: FeatureModule[]): Registry {
   const routes: ResolvedRoute[] = [];
   const nav: NavEntry[] = [];
   const headerWidgets: ComponentType[] = [];
+  const leadingHeaderWidgets: ComponentType[] = [];
   const homeWidgets: HomeWidget[] = [];
 
   for (const m of modules) {
@@ -42,7 +43,9 @@ export function buildRegistry(modules: FeatureModule[]): Registry {
     seenModuleIds.add(m.id);
     flatten(m.routes, m.id, m.requiredPermissions ?? [], routes);
     nav.push(...m.nav);
-    if (m.headerWidget) headerWidgets.push(m.headerWidget);
+    if (m.headerWidget) {
+      (m.headerWidgetPlacement === "leading" ? leadingHeaderWidgets : headerWidgets).push(m.headerWidget);
+    }
     if (m.homeWidget) homeWidgets.push(m.homeWidget);
   }
 
@@ -57,7 +60,7 @@ export function buildRegistry(modules: FeatureModule[]): Registry {
   }
 
   nav.sort((a, b) => a.order - b.order);
-  return { modules: [...modules], nav, routes, headerWidgets, homeWidgets };
+  return { modules: [...modules], nav, routes, headerWidgets, leadingHeaderWidgets, homeWidgets };
 }
 
 let current: Registry | null = null;

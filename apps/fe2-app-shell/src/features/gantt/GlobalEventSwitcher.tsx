@@ -71,7 +71,6 @@ export function GlobalEventSwitcher(): JSX.Element | null {
 
   return (
     <div className={styles.switcher} data-testid="fe2-global-event-switcher">
-      <span className={styles.eyebrow}>イベント</span>
       <Menu
         testId="fe2-global-event-menu"
         label={label}
