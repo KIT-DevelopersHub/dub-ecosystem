@@ -13,8 +13,13 @@ export interface Env {
   // ---- notification fan-out (admin in-app alert via POST /notify, recipientRoles=[admin]) ----
   SVC_NOTIFICATION?: Fetcher;
 
+  // ---- the fe2 admin SPA (assets worker) — probed for "can each app page open?" over its
+  //      binding (public workers.dev fetch loops back to 404 for same-account workers). ----
+  SVC_FE?: Fetcher;
+
   // ---- backend services probed over their /health (or /internal/health) via Service Binding.
   //      Names mirror the live free-tier workers; see config.ts SERVICE_TARGETS for the paths. ----
+  SVC_GATEWAY?: Fetcher; // api-gateway /healthz (public entry, but probed over its binding)
   SVC_IDENTITY?: Fetcher;
   SVC_AUTH?: Fetcher;
   SVC_EVENT?: Fetcher;
@@ -33,10 +38,6 @@ export interface Env {
   SVC_WEBHOOK?: Fetcher;
 
   // ---- vars / secrets ----
-  // Public origin of the fe2 admin SPA (assets Worker). Default = the workers.dev origin.
-  FE_ORIGIN?: string;
-  // Public origin of the api-gateway (its /healthz is the one publicly-reachable service probe).
-  GATEWAY_ORIGIN?: string;
   // Shared secret gating the /internal/monitor/* control routes over the public origin (kick /
   // run / status). A request must carry `x-monitor-token: <token>`. Fail-closed: when this is
   // unset the control routes are denied entirely (the internal marker is NOT accepted on a public

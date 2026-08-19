@@ -47,7 +47,16 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 binding = "SVC_NOTIFICATION"
 service = "dub-notification-service"
 
+# --- fe2 admin SPA (assets worker) — "can each app page open?" probed over this binding ---
+[[services]]
+binding = "SVC_FE"
+service = "dub-fe2-app-shell"
+
 # --- backend services probed over /health (or /internal/health) via Service Binding ---
+[[services]]
+binding = "SVC_GATEWAY"
+service = "dub-api-gateway"
+
 [[services]]
 binding = "SVC_IDENTITY"
 service = "dub-identity-roster"
