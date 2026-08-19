@@ -3,14 +3,17 @@ import { SegmentedControl, Select } from "@dub/ui";
 import type { SegmentedOption, SelectOption } from "@dub/ui";
 import type { GanttSortMode } from "../domain/row-sort";
 import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
+import { groupRuns, type RowGroup } from "../domain/row-groups";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   useSensor,
   useSensors,
   useDraggable,
   useDroppable,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import type { common, gantt, task } from "@dub/types";
 import {
@@ -75,6 +78,10 @@ export interface GanttViewProps {
   teamColorById?: ReadonlyMap<common.TaskId, string>;
   /** ordered [teamId,{name,color}] for the legend under the toolbar. */
   teamLegend?: ReadonlyArray<{ id: string; name: string; color: string }>;
+  /** taskId -> its grouping descriptor for the current sort (チーム名/重要度ラベル…). When
+   *  present, contiguous same-group rows get a labelled bracket down the list's right
+   *  edge. Absent/empty (手動・時期) ⇒ no brackets. */
+  rowGroupById?: ReadonlyMap<common.TaskId, RowGroup>;
   canWrite?: boolean;
 }
 
@@ -111,6 +118,7 @@ function LeftPaneRow({
   r,
   isOpen,
   dragEnabled,
+  grouped,
   onSelect,
   toggleParent,
   statusById,
@@ -120,6 +128,8 @@ function LeftPaneRow({
   r: gantt.GanttRow;
   isOpen: boolean;
   dragEnabled: boolean;
+  /** true when the group-bracket rail is shown — reserves right padding for it. */
+  grouped: boolean;
   onSelect?: (taskId: common.TaskId) => void;
   toggleParent: (id: common.TaskId) => void;
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
@@ -136,7 +146,7 @@ function LeftPaneRow({
     <button
       ref={setDropRef}
       type="button"
-      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${isOver ? styles.tlRowDropOver : ""} ${isDragging ? styles.tlRowDragging : ""}`}
+      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""} ${isOver ? styles.tlRowDropOver : ""} ${isDragging ? styles.tlRowDragging : ""}`}
       // Parent rows move the left indent INTO the toggle so the whole left gutter
       // toggles — a much bigger hit target than the chevron glyph (feedback #39).
       style={{ height: ROW_HEIGHT, paddingLeft: r.hasChildren ? 0 : 12 + depth * 18 }}
@@ -210,6 +220,7 @@ export function GanttView({
   assigneeNameById,
   teamColorById,
   teamLegend,
+  rowGroupById,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -217,6 +228,9 @@ export function GanttView({
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
   const [collapsed, setCollapsed] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // The row currently being drag-reordered — drives the floating DragOverlay clone
+  // (a lifted, cursor-following copy) so the left-pane reorder reads as "picked up".
+  const [activeRowId, setActiveRowId] = useState<common.TaskId | null>(null);
   // WBS drill-down: set of expanded work-package ids. Empty = all collapsed, so the
   // view opens on the 41 work-packages and each toggle reveals its leaf children.
   const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() => new Set());
@@ -237,8 +251,12 @@ export function GanttView({
   // overwrite the drop on the next render, so hide the handles when a sort is active.
   const reorderEnabled = !!onReorder && canWrite && sortMode === "manual";
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const onRowDragStart = useCallback((e: DragStartEvent) => {
+    setActiveRowId((e.active?.id as common.TaskId | undefined) ?? null);
+  }, []);
   const onRowDragEnd = useCallback(
     (e: DragEndEvent) => {
+      setActiveRowId(null);
       const activeId = e.active?.id as common.TaskId | undefined;
       const overId = e.over?.id as common.TaskId | undefined;
       if (!activeId || !overId || activeId === overId) return;
@@ -246,6 +264,7 @@ export function GanttView({
     },
     [onReorder],
   );
+  const onRowDragCancel = useCallback(() => setActiveRowId(null), []);
 
   // Parent (work-package) bars always enclose their children: roll each parent's
   // span up to the union of its descendants before any geometry runs, so widening
@@ -375,6 +394,19 @@ export function GanttView({
     });
     return bands;
   }, [rows, openParents]);
+
+  // Sort grouping brackets: collapse the (already sorted) visible rows into runs of
+  // rows that share a group key, so the list's right edge can draw one labelled
+  // bracket per range (チーム順 → 「統括チーム」…, 重要度順 → 「高」「中」…). Empty in
+  // 手動/時期 modes (no map passed), so the rail simply doesn't render there.
+  const groupRunList = useMemo(() => groupRuns(rows, rowGroupById), [rows, rowGroupById]);
+  const hasGroupRail = groupRunList.length > 0;
+
+  // The visible row under an active reorder drag — its data feeds the floating clone.
+  const activeRow = useMemo(
+    () => (activeRowId ? rows.find((r) => r.taskId === activeRowId) ?? null : null),
+    [activeRowId, rows],
+  );
 
   // ---- centre on today (initial + on zoom change) ----
   const scrollToToday = useCallback(
@@ -613,13 +645,19 @@ export function GanttView({
                     ‹
                   </button>
                 </div>
-                <DndContext sensors={sensors} onDragEnd={onRowDragEnd}>
+                <DndContext
+                  sensors={sensors}
+                  onDragStart={onRowDragStart}
+                  onDragEnd={onRowDragEnd}
+                  onDragCancel={onRowDragCancel}
+                >
                   {rows.map((r) => (
                     <LeftPaneRow
                       key={r.taskId}
                       r={r}
                       isOpen={openParents.has(r.taskId)}
                       dragEnabled={reorderEnabled}
+                      grouped={hasGroupRail}
                       onSelect={onSelect}
                       toggleParent={toggleParent}
                       statusById={statusById}
@@ -627,7 +665,41 @@ export function GanttView({
                       assigneeNameById={assigneeNameById}
                     />
                   ))}
+                  {/* Floating clone that follows the cursor while a row is dragged — the
+                      lifted/elevated look (shadow + slight scale). The source row stays
+                      dimmed in place (`.tlRowDragging`) as the placeholder, and the drop
+                      target row shows the insertion cue (`.tlRowDropOver`). */}
+                  <DragOverlay>
+                    {activeRow ? (
+                      <div className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }} data-testid="fe4-gantt-drag-overlay">
+                        <span className={styles.tlRowDrag} aria-hidden>⠿</span>
+                        {teamColorById?.get(activeRow.taskId) && (
+                          <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(activeRow.taskId) }} aria-hidden />
+                        )}
+                        <span className={`${styles.tlDot} ${statusById?.get(activeRow.taskId) ? STATUS_BAR_CLASS[statusById.get(activeRow.taskId)!] : ""}`} aria-hidden />
+                        <span className={styles.tlRowName}>{activeRow.title}</span>
+                      </div>
+                    ) : null}
+                  </DragOverlay>
                 </DndContext>
+                {/* sort grouping brackets: one labelled bracket per contiguous same-group run */}
+                {hasGroupRail && (
+                  <div className={styles.tlGroupRail} style={{ top: HEADER_H }} data-testid="fe4-gantt-group-rail" aria-hidden>
+                    {groupRunList.map((run) => (
+                      <div
+                        key={`${run.key}-${run.startIndex}`}
+                        className={styles.tlGroupBracket}
+                        style={{ top: run.startIndex * ROW_HEIGHT, height: run.length * ROW_HEIGHT, ...(run.color ? { borderColor: run.color } : {}) }}
+                        data-testid={`fe4-gantt-group-bracket-${run.key}`}
+                        title={run.label}
+                      >
+                        <span className={styles.tlGroupBracketLabel} style={run.color ? { color: run.color } : {}}>
+                          {run.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {canWrite && onCreateOnDate && (
                   <button type="button" className={styles.tlAddRow} style={{ height: ROW_HEIGHT }} onClick={() => onCreateOnDate(null)} data-testid="fe4-gantt-addrow">
                     ＋ 新規タスク

@@ -19,6 +19,8 @@ import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "..
 import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
+import type { RowGroup } from "../domain/row-groups";
+import { PRIORITY_LABEL } from "../domain/task-form";
 import { useGanttSortMode } from "../domain/gantt-sort-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
@@ -160,6 +162,27 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     }
     return m;
   }, [tasks, users]);
+
+  // Per-task grouping descriptor for the sort-bracket rail. Only チーム順 / 重要度順 group
+  // into visible ranges; 手動・時期 pass undefined so no brackets render. Team-less rows
+  // fall into a "チーム未設定" run so every row is accounted for. Pure read-only overlay.
+  const rowGroupById = useMemo<ReadonlyMap<common.TaskId, RowGroup> | undefined>(() => {
+    if (sortMode === "team") {
+      const m = new Map<common.TaskId, RowGroup>();
+      for (const t of tasks) {
+        const team = t.teamId ? teamById.get(t.teamId) : undefined;
+        if (team) m.set(t.id, { key: team.id, label: team.name, ...(team.color ? { color: team.color } : {}) });
+        else m.set(t.id, { key: "__noteam__", label: "チーム未設定" });
+      }
+      return m;
+    }
+    if (sortMode === "priority") {
+      const m = new Map<common.TaskId, RowGroup>();
+      for (const t of tasks) m.set(t.id, { key: t.priority, label: PRIORITY_LABEL[t.priority] });
+      return m;
+    }
+    return undefined;
+  }, [sortMode, tasks, teamById]);
 
   // Sort context for the automatic 並び替え modes (重要度/時期/チーム). priority already
   // lives on task.Task (no schema change); team order = the order member-service
@@ -721,6 +744,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           assigneeNameById={assigneeNameById}
           teamColorById={teamColorById}
           teamLegend={teamLegend}
+          {...(rowGroupById ? { rowGroupById } : {})}
           canWrite={caps.canWrite}
         />
       )}
