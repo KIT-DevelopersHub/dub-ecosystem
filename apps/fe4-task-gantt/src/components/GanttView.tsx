@@ -251,6 +251,14 @@ export function GanttView({
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
   const [collapsed, setCollapsed] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // 拡大（全画面）閲覧モード: みんなで投影して「見るだけ」の大画面表示。ON の間は
+  // 編集（バーのドラッグ/リサイズ・詳細を開く・新規作成・並べ替え）を全て無効化し、
+  // ズーム（日/週/月）と横スクロールだけを許す。Fullscreen API を使い、非対応/失敗時も
+  // position:fixed のオーバーレイ（.ganttPresenting）で画面いっぱいに広がる。
+  const [presenting, setPresenting] = useState(false);
+  // 拡大中は編集不可（editing）・タップで詳細も開かない（interactive）＝純粋な閲覧。
+  const editing = canWrite && !presenting;
+  const interactive = !presenting;
   // WBS drill-down: set of expanded work-package ids. Empty = all collapsed, so the
   // view opens on the 41 work-packages and each toggle reveals its leaf children.
   const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() => new Set());
@@ -268,7 +276,7 @@ export function GanttView({
   // clone + neighbour reflow + keyboard a11y; this view only supplies the rows and
   // commits the drop. Drag only makes sense in 手動 mode (an automatic sort would just
   // overwrite the drop next render), so the handles are hidden when a sort is active.
-  const reorderEnabled = !!onReorder && canWrite && sortMode === "manual";
+  const reorderEnabled = !!onReorder && editing && sortMode === "manual";
   // The current visible rows, read inside the reorder handler (which is memoised
   // before `rows` is derived). Kept fresh every render so the drop maps to the screen.
   const visibleRowsRef = useRef<gantt.GanttRow[]>([]);
@@ -338,6 +346,7 @@ export function GanttView({
   // start/end must read these displayed dates, not the parent's pre-rollup seed.
   const rolledById = useMemo(() => new Map(rolledRows.map((r) => [r.taskId, r])), [rolledRows]);
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
   const movedRef = useRef(false);
@@ -364,6 +373,43 @@ export function GanttView({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dto.rows]);
+
+  // ---- 拡大（全画面）閲覧モード ----
+  const enterPresent = useCallback(() => {
+    setPresenting(true); // overlay covers the viewport even if native FS is unavailable
+    const el = rootRef.current;
+    // Prefer the native Fullscreen API for a truly immersive projector view; if it
+    // rejects (permission/unsupported) the .ganttPresenting overlay already handles it.
+    el?.requestFullscreen?.().catch(() => {});
+  }, []);
+
+  const exitPresent = useCallback(() => {
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
+    }
+    setPresenting(false);
+  }, []);
+
+  // Native fullscreen exit (Esc / browser chrome) → leave presenting so the UI syncs.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onFsChange = () => {
+      if (!document.fullscreenElement) setPresenting(false);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  // Esc closes the overlay-only fallback (when native fullscreen never engaged; the
+  // native path is handled by the browser + fullscreenchange above).
+  useEffect(() => {
+    if (!presenting || typeof window === "undefined") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitPresent();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [presenting, exitPresent]);
 
   const width = canvasWidth(win);
   const bars = useMemo(() => timelineBars(rows, win), [rows, win]);
@@ -502,9 +548,10 @@ export function GanttView({
 
   // ---- bar pointer session (move + resize + click-to-open) ----
   const beginDrag = (e: React.PointerEvent, bar: TimelineBar, mode: DragMode) => {
-    if (!canWrite || !onSchedule) {
-      // read-only: a tap still opens detail
-      if (mode === "move") onSelect?.(bar.taskId);
+    if (!editing || !onSchedule) {
+      // read-only: a tap still opens detail — but NOT in the 拡大 viewing mode
+      // (interactive=false), which is strictly look-only.
+      if (mode === "move" && interactive) onSelect?.(bar.taskId);
       return;
     }
     // Parents are draggable too now: read the ROLLED (displayed) span so a move
@@ -533,7 +580,7 @@ export function GanttView({
     const { taskId, mode, startsAt, endsAt, dxPx } = drag;
     if (!movedRef.current) {
       // A click that didn't move opens detail — same affordance as leaf bars.
-      if (mode === "move") onSelect?.(taskId);
+      if (mode === "move" && interactive) onSelect?.(taskId);
     } else {
       const deltaDays = pxToDays(dxPx, win);
       if (deltaDays !== 0) {
@@ -601,7 +648,7 @@ export function GanttView({
 
   // click an empty timeline cell -> create with that day preset
   const onCanvasBackgroundClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!canWrite || !onCreateOnDate) return;
+    if (!editing || !onCreateOnDate) return;
     if (e.target !== e.currentTarget) return; // ignore clicks that bubbled from a bar
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -612,15 +659,26 @@ export function GanttView({
   const effLeftW = collapsed ? 0 : leftW;
 
   return (
-    <div data-testid="fe4-gantt-view" className={styles.ganttView}>
+    <div
+      ref={rootRef}
+      data-testid="fe4-gantt-view"
+      className={`${styles.ganttView} ${presenting ? styles.ganttPresenting : ""}`}
+      data-presenting={presenting ? "1" : undefined}
+    >
       {/* Notion-style toolbar: view name + jump-to-today + granularity */}
       <div className={styles.tlToolbar}>
         <div className={styles.tlToolbarLeft}>
           <span className={styles.tlViewName}>タイムライン</span>
           <span className={styles.tlCount}>{rows.length} 件</span>
+          {presenting && (
+            <span className={styles.tlViewBadge} data-testid="fe4-gantt-viewonly-badge">
+              閲覧モード（編集不可）
+            </span>
+          )}
         </div>
         <div className={styles.tlToolbarRight}>
-          {onSortModeChange && (
+          {/* 並び替えは編集寄りの操作なので閲覧（拡大）モードでは隠す */}
+          {onSortModeChange && !presenting && (
             <label className={styles.tlSort}>
               <span className={styles.tlSortLabel}>並び替え</span>
               <Select<GanttSortMode>
@@ -644,6 +702,37 @@ export function GanttView({
             aria-label="時間軸の単位"
             testId="fe4-gantt-zoom"
           />
+          {presenting ? (
+            <button
+              type="button"
+              className={styles.tlPresentBtn}
+              onClick={exitPresent}
+              aria-label="全画面を終了"
+              title="全画面を終了（Esc）"
+              data-testid="fe4-gantt-fullscreen-exit"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden focusable="false">
+                <path d="M9 9L4 4M9 9V5M9 9H5M15 9l5-5M15 9V5M15 9h4M9 15l-5 5M9 15v4M9 15H5M15 15l5 5M15 15v4M15 15h4"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>閉じる</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.tlPresentBtn}
+              onClick={enterPresent}
+              aria-label="ガントを全画面で表示（閲覧モード）"
+              title="拡大（全画面でガントだけを表示・見るだけ）"
+              data-testid="fe4-gantt-fullscreen-btn"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden focusable="false">
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>拡大</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -722,7 +811,7 @@ export function GanttView({
                       grouped={hasGroupRail}
                       dragHandleProps={ctx.dragHandleProps}
                       number={numberById?.get(r.taskId)}
-                      onSelect={onSelect}
+                      onSelect={interactive ? onSelect : undefined}
                       toggleParent={toggleParent}
                       statusById={statusById}
                       assigneeNameById={assigneeNameById}
@@ -777,7 +866,7 @@ export function GanttView({
                     })}
                   </div>
                 )}
-                {canWrite && onCreateOnDate && (
+                {editing && onCreateOnDate && (
                   <button type="button" className={styles.tlAddRow} style={{ height: ROW_HEIGHT }} onClick={() => onCreateOnDate(null)} data-testid="fe4-gantt-addrow">
                     ＋ 新規タスク
                   </button>
@@ -887,7 +976,7 @@ export function GanttView({
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
                       )}
                       <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
-                      {canWrite && onSchedule && (
+                      {editing && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleL}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-l`}
@@ -896,7 +985,7 @@ export function GanttView({
                         />
                       )}
                       {showInside && <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>}
-                      {canWrite && onSchedule && (
+                      {editing && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleR}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-r`}
