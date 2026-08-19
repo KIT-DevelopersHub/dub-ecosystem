@@ -96,4 +96,32 @@ describe("Undo wiring in the gantt workspace (判断57)", () => {
     fireEvent.keyDown(window, { key: "z", ctrlKey: true });
     await waitFor(() => expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("会場予約")).toBeInTheDocument());
   });
+
+  it("Undo/Redo show a user-visible toast naming the operation", async () => {
+    render(<App client={client()} eventId={EVENT} permissions={PERMS} />);
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "会場を確定する" } });
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(screen.getByTestId("fe4-undo")).toBeEnabled());
+
+    // Ctrl-Z → toast "タスクの編集を元に戻しました"
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(await screen.findByText("タスクの編集を元に戻しました")).toBeInTheDocument();
+
+    // Shift-Ctrl-Z → toast "タスクの編集をやり直しました"
+    await waitFor(() => expect(screen.getByTestId("fe4-redo")).toBeEnabled());
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByText("タスクの編集をやり直しました")).toBeInTheDocument();
+  });
+
+  it("pressing Ctrl-Z with nothing to undo shows a subtle boundary toast", async () => {
+    render(<App client={client()} eventId={EVENT} permissions={PERMS} />);
+    await screen.findByTestId("fe4-gantt-row-t1");
+    expect(screen.getByTestId("fe4-undo")).toBeDisabled();
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(await screen.findByText("これ以上戻せません")).toBeInTheDocument();
+    // no error surfaced — it's an info toast, not an error banner
+    expect(screen.queryByTestId("fe4-error-banner")).toBeNull();
+  });
 });

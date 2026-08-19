@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
 import { Button, ErrorDialog, useToast } from "@dub/ui";
@@ -112,7 +112,35 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
   // hotkey is off for read-only users and never steals a focused field's own undo.
   const history = useUndoRedo();
-  useUndoRedoHotkeys(history, { enabled: caps.canWrite });
+  // Coalesce the "nothing to undo/redo" notice so a held-down ⌘Z on an empty stack
+  // (which returns synchronously — no API round-trip to rate-limit it) can't spam the
+  // toast. A successful undo/redo awaits its API inverse, so those are naturally paced.
+  const lastBoundaryToast = useRef(0);
+  const notifyBoundary = (message: string) => {
+    const now = Date.now();
+    if (now - lastBoundaryToast.current < 1500) return;
+    lastBoundaryToast.current = now;
+    toast.show({ kind: "info", title: message });
+  };
+  // Run undo/redo AND tell the user what happened (判断: 戻した/やり直したのが見えるように).
+  // Reads the label of the command about to be reversed (undoLabel/redoLabel) so the
+  // toast names the operation ("並び替えを元に戻しました"); falls back to a generic line.
+  // Both the hotkeys and the header buttons route through these, so the copy is one place.
+  const runUndo = async (): Promise<boolean> => {
+    const label = history.undoLabel;
+    const ok = await history.undo();
+    if (ok) toast.show({ kind: "info", title: label ? `${label}を元に戻しました` : "元に戻しました" });
+    else notifyBoundary("これ以上戻せません");
+    return ok;
+  };
+  const runRedo = async (): Promise<boolean> => {
+    const label = history.redoLabel;
+    const ok = await history.redo();
+    if (ok) toast.show({ kind: "info", title: label ? `${label}をやり直しました` : "やり直しました" });
+    else notifyBoundary("これ以上やり直せません");
+    return ok;
+  };
+  useUndoRedoHotkeys({ undo: runUndo, redo: runRedo }, { enabled: caps.canWrite });
 
   // Load the WHOLE event: the gantt intersects its rows with this store set (see
   // `filteredDto`), so any task missing from the store silently vanishes from the
@@ -803,7 +831,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
               <button
                 type="button"
                 className={styles.undoBtn}
-                onClick={() => void history.undo()}
+                onClick={() => void runUndo()}
                 disabled={!history.canUndo}
                 title={`元に戻す${history.undoLabel ? `: ${history.undoLabel}` : ""}（Ctrl/⌘+Z）`}
                 aria-label="元に戻す"
@@ -814,7 +842,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
               <button
                 type="button"
                 className={styles.undoBtn}
-                onClick={() => void history.redo()}
+                onClick={() => void runRedo()}
                 disabled={!history.canRedo}
                 title={`やり直す${history.redoLabel ? `: ${history.redoLabel}` : ""}（Ctrl/⌘+Shift+Z）`}
                 aria-label="やり直す"
