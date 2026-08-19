@@ -1,28 +1,25 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { isGanttContext } from "./GlobalEventSwitcher.tsx";
+import { eventIdFromPath } from "./GlobalEventSwitcher.tsx";
 import {
   SELECTED_EVENT_STORAGE_KEY,
   loadSelectedEvent,
   saveSelectedEvent,
 } from "./selectedEventStore.ts";
 
-describe("isGanttContext (global event switcher visibility)", () => {
-  it("shows on the gantt landing", () => {
-    expect(isGanttContext("/gantt")).toBe(true);
+describe("eventIdFromPath (current event from an event-scoped route)", () => {
+  it("extracts the eventId from a tasks/gantt route", () => {
+    expect(eventIdFromPath("/events/evt_1/tasks")).toBe("evt_1");
+    expect(eventIdFromPath("/events/evt_1/tasks/gantt")).toBe("evt_1");
+    expect(eventIdFromPath("/events/evt_9/tasks/tsk_3")).toBe("evt_9");
   });
 
-  it("shows on an event-scoped tasks/gantt route", () => {
-    expect(isGanttContext("/events/evt_1/tasks")).toBe(true);
-    expect(isGanttContext("/events/evt_1/tasks/gantt")).toBe(true);
-    expect(isGanttContext("/events/evt_1/tasks/tsk_9")).toBe(true);
-  });
-
-  it("hides on unrelated app routes (mail / chat / roster / event detail)", () => {
-    expect(isGanttContext("/mail")).toBe(false);
-    expect(isGanttContext("/chat")).toBe(false);
-    expect(isGanttContext("/admin/users")).toBe(false);
-    expect(isGanttContext("/events/evt_1")).toBe(false); // event detail, not tasks
-    expect(isGanttContext("/")).toBe(false);
+  it("returns null off event-scoped routes (the switcher still renders, using the stored event)", () => {
+    expect(eventIdFromPath("/mail")).toBeNull();
+    expect(eventIdFromPath("/chat")).toBeNull();
+    expect(eventIdFromPath("/admin/users")).toBeNull();
+    expect(eventIdFromPath("/events/evt_1")).toBeNull(); // event detail, not tasks
+    expect(eventIdFromPath("/gantt")).toBeNull(); // landing (no event param)
+    expect(eventIdFromPath("/")).toBeNull();
   });
 });
 
