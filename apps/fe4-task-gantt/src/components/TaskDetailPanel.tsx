@@ -26,6 +26,10 @@ export interface TaskDetailPanelProps {
   teams?: readonly team.Team[];
   onSave: (patch: task.UpdateTaskRequest, relations: RelationEdit) => void;
   onDelete: () => void;
+  /** Called instead of opening the delete confirm when the task still has children
+   *  (deleting would orphan them). The host surfaces this as a bottom-right warning
+   *  toast (#375) — the old inline block message under the button was hard to notice. */
+  onDeleteBlocked?: (childCount: number) => void;
   onClose: () => void;
   /** "ここから子タスクを作成": open the create modal with this task preset as the parent. */
   onCreateChild?: (parentId: common.TaskId) => void;
@@ -62,6 +66,7 @@ export function TaskDetailPanel({
   teams = [],
   onSave,
   onDelete,
+  onDeleteBlocked,
   onClose,
   onCreateChild,
   onCreatePredecessor,
@@ -102,9 +107,6 @@ export function TaskDetailPanel({
   const [parentId, setParentId] = useState<common.TaskId | null>(parentTaskId);
   const [deps, setDeps] = useState<common.TaskId[]>([...dependsOnIds]);
   const [confirming, setConfirming] = useState(false);
-  // "子タスクがあるため削除できません" block — shown instead of the delete confirm when
-  // the task still has direct children (deleting would orphan/re-parent them).
-  const [blockedByChildren, setBlockedByChildren] = useState(false);
 
   // Predecessors are limited to this task's siblings under its (possibly changed)
   // parent — same scope only (判断10). Excludes self.
@@ -348,34 +350,20 @@ export function TaskDetailPanel({
           <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
             保存
           </Button>
-          {canDelete && !confirming && !blockedByChildren && (
+          {canDelete && !confirming && (
             <Button
               variant="danger"
               // A task with children cannot be deleted (deleting it would orphan the
-              // children and the read model would silently re-parent them). Show the
-              // block message instead of the delete confirm — no re-parenting ever.
-              onClick={() => (childCount > 0 ? setBlockedByChildren(true) : setConfirming(true))}
+              // children and the read model would silently re-parent them). Instead of the
+              // old inline block message (hard to notice under the button, #375), hand the
+              // block to the host, which shows a bottom-right warning toast.
+              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
               testId="fe4-detail-delete"
             >
               削除
             </Button>
           )}
         </div>
-
-        {/* 子タスクを持つ親は削除不可（削除すると子が孤児化し read model が暗黙に再ペアレントするため）。
-            削除確認(ConfirmDialog)は出さず、ブロックメッセージを表示する。#375 */}
-        {blockedByChildren && (
-          <div className={styles.confirmBox} data-testid="fe4-delete-blocked" role="alert">
-            <p className={styles.confirmText}>
-              子タスクが{childCount}件あるため削除できません。先に子タスクを削除または別の親へ移動してください。
-            </p>
-            <div className={styles.panelActions}>
-              <Button variant="ghost" onClick={() => setBlockedByChildren(false)} testId="fe4-delete-blocked-ok">
-                閉じる
-              </Button>
-            </div>
-          </div>
-        )}
       </aside>
 
       {/* 削除確認は運営メンバー削除などと同じ @dub/ui の ConfirmDialog に統一（インライン表示は撤去）。
