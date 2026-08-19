@@ -869,6 +869,100 @@ function createRosterStore() {
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
+// ── chat (FE6) ────────────────────────────────────────────────────────────────
+// Read-mostly chat seed for the demo transport: a full Slack-style channel set so
+// the sidebar renders 全体 / チーム別 / 役割別 channels out of the box. Channel names
+// stay romaji for consistency (#7); Japanese topics describe each one. Team channels
+// mirror member-service's real 運営チーム (統括/開発/当日進行/スポンサー/会場/集客広報)
+// — no invented teams. Messages/WS are not seeded (no WS in demo): channels open to a
+// clean empty timeline; the sidebar list is the enriched surface.
+interface DemoChatChannel {
+  id: string;
+  type: "topic" | "event" | "dm";
+  name: string;
+  topic: string | null;
+  eventId: string | null;
+  memberCount: number;
+}
+
+function createChatStore() {
+  const CH_TS = "2026-08-01T00:00:00.000Z";
+  // 全体: everyone. announcements is the read-mostly 全体周知 channel.
+  const overall: DemoChatChannel[] = [
+    { id: "chn_general", type: "topic", name: "general", topic: "全体連絡・雑多な共有 📣", eventId: null, memberCount: 24 },
+    { id: "chn_announcements", type: "topic", name: "announcements", topic: "運営からのお知らせ・全体周知（重要連絡）", eventId: null, memberCount: 24 },
+    { id: "chn_random", type: "topic", name: "random", topic: "雑談なんでも ☕", eventId: null, memberCount: 21 },
+  ];
+  // チーム別: one per real member-service 運営チーム (key / 表示名 / 説明はロスター準拠).
+  const teamChannels: DemoChatChannel[] = [
+    { id: "chn_team_soukatsu", type: "topic", name: "team-soukatsu", topic: "統括チーム — 全体意思決定・進行統制・チーム間調整", eventId: null, memberCount: 3 },
+    { id: "chn_team_dev", type: "topic", name: "team-dev", topic: "開発チーム — 運営ツール内製・名簿・当日連絡基盤", eventId: null, memberCount: 3 },
+    { id: "chn_team_ops", type: "topic", name: "team-ops", topic: "当日進行チーム — 進行管理・タイムテーブル・人員配置", eventId: null, memberCount: 2 },
+    { id: "chn_team_sponsor", type: "topic", name: "team-sponsor", topic: "スポンサーチーム — 協賛打診・メニュー設計・契約", eventId: null, memberCount: 2 },
+    { id: "chn_team_venue", type: "topic", name: "team-venue", topic: "会場チーム — 会場・設営・ネットワーク／配信", eventId: null, memberCount: 2 },
+    { id: "chn_team_pr", type: "topic", name: "team-pr", topic: "集客広報チーム — LP・SNS・デザイン・広報／集客", eventId: null, memberCount: 3 },
+  ];
+  // 役割/目的別: cross-cutting roles & workstreams that span teams.
+  const roleChannels: DemoChatChannel[] = [
+    { id: "chn_admin", type: "topic", name: "admin", topic: "管理者運用・権限管理・全体統制（admin 向け）", eventId: null, memberCount: 4 },
+    { id: "chn_maintainers", type: "topic", name: "maintainers", topic: "メンテナ調整・リリース判断・レビュー割当", eventId: null, memberCount: 5 },
+    { id: "chn_dev", type: "topic", name: "dev", topic: "開発・デプロイ・コードレビュー", eventId: null, memberCount: 8 },
+    { id: "chn_design", type: "topic", name: "design", topic: "UI/UX・デザインレビュー", eventId: null, memberCount: 6 },
+    { id: "chn_pr", type: "topic", name: "pr-koho", topic: "広報・集客・SNS 運用（目的別）", eventId: null, memberCount: 6 },
+    { id: "chn_help", type: "topic", name: "help", topic: "質問・困りごと・サポート", eventId: null, memberCount: 24 },
+  ];
+  // イベント: the conference operations channel (grouped under イベント in the sidebar).
+  const eventChannels: DemoChatChannel[] = [
+    { id: "chn_evt_conf", type: "event", name: "北陸itカンファレンス", topic: "北陸ITカンファレンス2026 運営チャネル", eventId: "evt_1", memberCount: 18 },
+  ];
+  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels];
+
+  const toWire = (c: DemoChatChannel) => ({
+    id: c.id,
+    orgId: ORG,
+    type: c.type,
+    name: c.name,
+    topic: c.topic,
+    eventId: c.eventId,
+    archived: false,
+    memberCount: c.memberCount,
+    version: 1,
+    createdAt: CH_TS,
+    updatedAt: CH_TS,
+  });
+  const byId = new Map(all.map((c) => [c.id, c]));
+
+  function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
+    if (method === "GET" && pathname === "/api/v1/chat/channels") {
+      // Optional ?eventId= filter (contract): event channels for that event only.
+      const eventId = url.searchParams.get("eventId");
+      const list = eventId ? all.filter((c) => c.eventId === eventId) : all;
+      return json(list.map(toWire)); // raw array (not Paginated) per fe6 contract
+    }
+    if (method === "GET" && pathname === "/api/v1/chat/unread") {
+      return json([]); // no unread badges in demo
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const c = byId.get(decodeURIComponent(m[1]!));
+        if (!c) return notFound(`GET ${pathname}`);
+        return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "member", joinedAt: CH_TS } });
+      }
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/read$/.exec(pathname);
+      if (m && method === "POST") return json(null, 204);
+    }
+    if (method === "GET" && pathname === "/api/v1/chat/messages") {
+      return json(page([])); // empty timeline (Paginated envelope)
+    }
+    return null;
+  }
+
+  return { handle };
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -938,9 +1032,9 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     // identity / roster (users, roles, assignments, catalog, audit, mail-status)
     // are served by the stateful roster store (createRosterStore) so the admin
     // console's mutations persist — see createDemoFetch below.
-    // chat: seed empty so the screen renders its empty state (no WS in demo).
-    if (pathname === "/api/v1/chat/channels") return json([]);
-    if (pathname === "/api/v1/chat/unread") return json([]);
+    // chat channels/messages/unread are served by the stateful chat store
+    // (createChatStore) so the sidebar renders a full 全体/チーム別/役割別 channel set
+    // — mirrors member-service's real 運営チーム names. See createDemoFetch below.
   }
 
   if (method === "POST") {
@@ -1697,6 +1791,8 @@ export function createDemoFetch(): typeof fetch {
   const driveShareStore = createDriveShareStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
+  // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
+  const chatStore = createChatStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -1720,6 +1816,7 @@ export function createDemoFetch(): typeof fetch {
       mailStore.handle(method, url.pathname, url, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
+      chatStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.
