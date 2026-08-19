@@ -15,6 +15,7 @@ import {
   listInbox,
   unreadCount,
   markRead,
+  markUnread,
   markAllRead,
   backfillBroadcastInbox,
   backfillAdminAudienceInbox,
@@ -261,6 +262,15 @@ export function createApp(options: CreateAppOptions = {}) {
     app.patch(`${p}/inbox/:id/read`, async (c) => {
       const userId = getUserId(c);
       const ok = await markRead(dbOf(c), userId, c.req.param("id"));
+      if (!ok) {
+        throw new DubError("NOTIF_INBOX_ITEM_NOT_FOUND", `inbox item not found: ${c.req.param("id")}`, { status: 404 });
+      }
+      return c.json({ ok: true });
+    });
+
+    app.patch(`${p}/inbox/:id/unread`, async (c) => {
+      const userId = getUserId(c);
+      const ok = await markUnread(dbOf(c), userId, c.req.param("id"));
       if (!ok) {
         throw new DubError("NOTIF_INBOX_ITEM_NOT_FOUND", `inbox item not found: ${c.req.param("id")}`, { status: 404 });
       }

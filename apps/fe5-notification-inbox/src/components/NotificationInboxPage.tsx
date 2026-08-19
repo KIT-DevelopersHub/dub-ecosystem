@@ -18,7 +18,7 @@ import { resolveLinkUrl } from "../lib/routes";
 import { NotificationFilterBar } from "./NotificationFilterBar";
 import { NotificationList } from "./NotificationList";
 import { MarkAllReadButton } from "./MarkAllReadButton";
-import { itemLinkUrl } from "./NotificationListItem";
+import { itemLinkUrl } from "./NotificationCard";
 
 function readFilterFromLocation(): InboxFilter {
   if (typeof window === "undefined") return EMPTY_FILTER;
@@ -85,6 +85,7 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
         loading={inbox.loading}
         error={inbox.error}
         onActivate={onActivate}
+        onMarkUnread={(item) => void inbox.markUnread(item.id)}
         onLoadMore={() => void inbox.loadMore()}
         onRetry={() => void inbox.reload()}
       />
