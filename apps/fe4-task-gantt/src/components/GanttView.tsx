@@ -316,6 +316,27 @@ export function GanttView({
     return s;
   }, [dto.rows]);
 
+  // Auto-expand a row the instant it becomes a parent (gains its first child). Adding
+  // a subtask to a previously-childless task must reveal that child at once — otherwise
+  // the new toggle appears collapsed and the child stays hidden ("追加した子タスクが
+  // 見えない"). We diff parentIds against the previous render: only NEWLY-parented ids
+  // are force-opened, so the initial all-collapsed load and any parent the user later
+  // collapsed by hand are left untouched.
+  const prevParentIdsRef = useRef<ReadonlySet<common.TaskId> | null>(null);
+  useEffect(() => {
+    const prev = prevParentIdsRef.current;
+    prevParentIdsRef.current = parentIds;
+    if (!prev) return; // first render: seed only, don't expand the whole seeded tree
+    const newlyParented: common.TaskId[] = [];
+    for (const id of parentIds) if (!prev.has(id)) newlyParented.push(id);
+    if (newlyParented.length === 0) return;
+    setOpenParents((cur) => {
+      const next = new Set(cur);
+      for (const id of newlyParented) next.add(id);
+      return next;
+    });
+  }, [parentIds]);
+
   // taskId -> the ROLLED row (parent dates are the union of their children). Drag
   // start/end must read these displayed dates, not the parent's pre-rollup seed.
   const rolledById = useMemo(() => new Map(rolledRows.map((r) => [r.taskId, r])), [rolledRows]);
