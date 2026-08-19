@@ -302,21 +302,20 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       const result: SyncEmailRoutingResult = { added, updated, deactivated, total: normalized.length };
       return result as unknown as T;
     }
-    if (path.endsWith("/admin/email-routing/addresses")) {
-      const req = body as { localPart: string; destination: string };
+    if (path.endsWith("/admin/email-routing/addresses/issue")) {
+      // Issue a receiving address bound to the shared Email Worker: localPart only, no
+      // forward destination (destination stays null = Worker-routed to the Dub mail app).
+      const req = body as { localPart: string };
       const localPart = req.localPart?.trim().toLowerCase();
       if (!localPart || !/^[a-z0-9._-]+$/.test(localPart)) {
         throw err("VALIDATION_FAILED", "invalid local part", [{ field: "localPart", reason: "format" }]);
-      }
-      if (!EMAIL_RE.test(req.destination ?? "")) {
-        throw err("VALIDATION_FAILED", "invalid destination", [{ field: "destination", reason: "format" }]);
       }
       if (s.emailAddresses.some((a) => a.localPart === localPart)) throw err("CONFLICT", "address already exists");
       const addr: EmailRoutingAddress = {
         id: `eml_${Math.random().toString(36).slice(2, 8)}`,
         localPart,
         address: `${localPart}@${EMAIL_ROUTING_DOMAIN}`,
-        destination: req.destination,
+        destination: null,
         enabled: true,
         createdAt: now(),
       };
