@@ -1,10 +1,19 @@
 import { describe, it, expect } from "vitest";
 import type { gantt } from "@dub/types";
 import { createEvent } from "@dub/events";
+import type { KVNamespace } from "@cloudflare/workers-types";
 import { createApp } from "../src/app";
+import { createKvCache } from "../src/cache";
 import type { Env } from "../src/env";
 import type { AppDeps, DtoCache, UpstreamPort } from "../src/ports";
 import { fakeAuthClient, fakeUpstream, fakeViewRepo, fakeCache, mkTask } from "./helpers";
+
+// The prod DtoCache backed by a KV whose every op rejects (free-tier write/delete quota
+// exhausted, or a transient KV error). Used to prove a KV failure never fails a request.
+function throwingKvCache(): DtoCache {
+  const boom = () => Promise.reject(new Error("KV put() limit exceeded"));
+  return createKvCache({ get: boom, put: boom, delete: boom, list: boom, getWithMetadata: boom } as unknown as KVNamespace);
+}
 
 const ENV = {} as Env;
 const H = (extra: Record<string, string> = {}) => ({ "x-dub-request-id": "req_test", ...extra });
@@ -226,5 +235,37 @@ describe("PATCH /gantt/rows/:taskId (persist a bar window)", () => {
     const up = fakeUpstream({ tasks: [] });
     const res = await patch(createApp(deps({ upstream: up })), "task_missing", { startsAt: null, endsAt: null });
     expect(res.status).toBe(404);
+  });
+
+  // Regression (bar move/resize shows a spurious server error): the task write persists
+  // upstream, but the inline cache purge used to 500 when KV was unavailable. A KV
+  // failure must NEVER fail a persisted write — the resize must still return 200.
+  it("still 200 (write persisted) when the cache purge hits an unavailable KV", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a", eventId: "event_1", title: "会場" })] });
+    const res = await patch(createApp(deps({ upstream: up, cache: throwingKvCache() })), "task_a", {
+      startsAt: "2026-08-15T00:00:00.000Z",
+      endsAt: "2026-08-18T00:00:00.000Z",
+    });
+    expect(res.status).toBe(200);
+    expect(up.calls.updateTaskDates).toBe(1); // the write actually happened
+    const row = (await res.json()) as gantt.GanttRow;
+    expect(row.endsAt).toBe("2026-08-18T00:00:00.000Z");
+  });
+});
+
+describe("GET /gantt is resilient to an unavailable KV (best-effort DTO cache)", () => {
+  // The FE refetches with Cache-Control: no-cache right after every bar move/resize; that
+  // rebuild writes the DTO back to KV. A KV put failure must not 500 the read (which is
+  // what surfaced the "時間をおいて再試行" toast on an already-saved resize).
+  it("rebuilds + returns the DTO even when the cache put hits an unavailable KV", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a", eventId: "event_1" })] });
+    const res = await createApp(deps({ upstream: up, cache: throwingKvCache() })).request(
+      "/gantt?eventId=event_1",
+      { headers: H({ "x-dub-user-id": "user_a", "cache-control": "no-cache" }) },
+      ENV,
+    );
+    expect(res.status).toBe(200);
+    const dto = (await res.json()) as gantt.GanttChartDTO;
+    expect(dto.rows).toHaveLength(1);
   });
 });
