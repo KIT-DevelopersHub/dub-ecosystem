@@ -22,6 +22,7 @@ export function Menu({
   variant = "ghost",
   align = "end",
   menuLabel,
+  iconOnly = false,
   testId,
 }: MenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -52,17 +53,35 @@ export function Menu({
     item.onSelect();
   };
 
+  const triggerTestId = testId ? `${testId}-trigger` : undefined;
+
   return (
     <div className={cx(styles.root)} ref={rootRef} data-testid={testId}>
-      <Button
-        variant={variant}
-        iconLeft={icon ? <Icon name={icon} /> : undefined}
-        iconRight={<Icon name="chevron-down" size="sm" />}
-        onClick={() => setOpen((v) => !v)}
-        {...(testId ? { testId: `${testId}-trigger` } : {})}
-      >
-        {label}
-      </Button>
+      {iconOnly ? (
+        // 40px square icon control — same class as the AppLauncher/bell triggers,
+        // so header controls read as one uniform row (no text, no chevron).
+        <button
+          type="button"
+          className={cx(styles.iconTrigger)}
+          aria-label={menuLabel ?? label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-testid={triggerTestId}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {icon ? <Icon name={icon} /> : null}
+        </button>
+      ) : (
+        <Button
+          variant={variant}
+          iconLeft={icon ? <Icon name={icon} /> : undefined}
+          iconRight={<Icon name="chevron-down" size="sm" />}
+          onClick={() => setOpen((v) => !v)}
+          {...(triggerTestId ? { testId: triggerTestId } : {})}
+        >
+          {label}
+        </Button>
+      )}
       {open && (
         <div
           role="menu"
