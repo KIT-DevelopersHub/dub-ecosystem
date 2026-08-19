@@ -245,6 +245,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
+  // The selected task's DISPLAYED bar window (derived by the gantt read model). Seeds the
+  // detail 開始日/期日 when the task's own startAt/dueAt columns are null, so the panel value
+  // equals the bar and the axis (値=バー=横軸) even for a derived-start task (real data
+  // seeds only dueAt — start_at is null until first edited).
+  const selectedRow = useMemo(
+    () => (selected ? gantt.data?.rows.find((r) => r.taskId === selected) ?? null : null),
+    [selected, gantt.data],
+  );
 
   // Hierarchy/scope model over ALL rows (unfiltered by status) so parents and
   // same-scope siblings stay selectable even when a status filter hides some rows.
@@ -869,6 +877,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           parentTaskId={selectedParentId}
           scopeTasks={scopeTasks}
           dependsOnIds={selectedDependsOn}
+          barStartsAt={selectedRow?.startsAt ?? null}
+          barEndsAt={selectedRow?.endsAt ?? null}
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}

@@ -39,6 +39,12 @@ export interface TaskDetailPanelProps {
   scopeTasks?: readonly ScopeTask[];
   /** This task's current predecessors (先行タスク＝依存元). */
   dependsOnIds?: readonly common.TaskId[];
+  /** The bar's DISPLAYED window (gantt row startsAt/endsAt). Seeds 開始日/期日 when the
+   *  task has no explicit startAt/dueAt column yet — the gantt read model derives a bar
+   *  window from dueAt (＋priority/CPM), so a task with only dueAt still SHOWS a start on
+   *  its bar while its startAt column is null. Seeding from here makes 値(詳細)=バー=横軸. */
+  barStartsAt?: common.ISODateTime | null;
+  barEndsAt?: common.ISODateTime | null;
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
@@ -58,6 +64,8 @@ export function TaskDetailPanel({
   parentTaskId = null,
   scopeTasks = [],
   dependsOnIds = [],
+  barStartsAt = null,
+  barEndsAt = null,
   fieldErrors,
   canWrite,
   canDelete,
@@ -67,8 +75,14 @@ export function TaskDetailPanel({
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
   const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
-  const [start, setStart] = useState<string | null>(dateInputFromIso(t.startAt ?? null));
-  const [due, setDue] = useState<string | null>(dateInputFromIso(t.dueAt));
+  // Seed the date fields from the task's own columns, else the bar's displayed window,
+  // so 開始日/期日 always equal what the bar (and the axis) show — even for a task whose
+  // start is only derived (startAt column still null). Compared at the yyyy-mm-dd input
+  // level so a millisecond-format difference never counts as an edit.
+  const startInputSeed = dateInputFromIso(t.startAt ?? barStartsAt ?? null);
+  const dueInputSeed = dateInputFromIso(t.dueAt ?? barEndsAt ?? null);
+  const [start, setStart] = useState<string | null>(startInputSeed);
+  const [due, setDue] = useState<string | null>(dueInputSeed);
   // Relations (親子 / 先行タスク). Seeded from the gantt read model via props; the
   // panel is remounted per task (keyed on id) so these never go stale.
   const [parentId, setParentId] = useState<common.TaskId | null>(parentTaskId);
@@ -91,7 +105,8 @@ export function TaskDetailPanel({
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
   const nextStartIso = isoFromDateInput(start);
   const nextDueIso = isoFromDateInput(due);
-  const curStart = t.startAt ?? null;
+  // A date edit relative to the seeded (displayed) window.
+  const datesChanged = start !== startInputSeed || due !== dueInputSeed;
   const curTeam = t.teamId ?? null;
   const parentChanged = parentId !== parentTaskId;
   const sameDeps =
@@ -103,8 +118,7 @@ export function TaskDetailPanel({
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
     teamId !== curTeam ||
-    nextStartIso !== curStart ||
-    nextDueIso !== t.dueAt ||
+    datesChanged ||
     parentChanged ||
     depsChanged;
 
@@ -115,8 +129,14 @@ export function TaskDetailPanel({
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
     if (teamId !== curTeam) patch.teamId = teamId;
-    if (nextStartIso !== curStart) patch.startAt = nextStartIso;
-    if (nextDueIso !== t.dueAt) patch.dueAt = nextDueIso;
+    // Any 開始日/期日 change materialises BOTH edges (startsAt↔startAt, endsAt↔dueAt) so the
+    // saved task carries an explicit window. The gantt bar then equals the detail values
+    // exactly (no re-derivation drift when startAt was previously null), and the optimistic
+    // bar move matches the authoritative refetch — no post-save jump.
+    if (datesChanged) {
+      patch.startAt = nextStartIso;
+      patch.dueAt = nextDueIso;
+    }
     if (parentChanged) patch.parentTaskId = parentId;
     onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
   };
