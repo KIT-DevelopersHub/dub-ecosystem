@@ -67,6 +67,59 @@ check() {
   echo "  ok (HTTP ${code})"
 }
 
+# ---- First-deploy bootstrap (idempotent) --------------------------------------------
+# Cloudflare rejects a service binding whose target Worker does not yet exist. On the very
+# first staging deploy the ENTIRE -staging set is absent and the binding graph has a cycle
+# (identity <-> audit) plus forward refs (event->task, notification->chat/mail, ...), so no
+# single deploy ORDER can succeed. Ensure every Worker EXISTS first by deploying a
+# binding-stripped copy; the real ordered deploy below then resolves all bindings. Idempotent:
+# Workers that already exist are skipped (one API list call), so steady-state deploys are
+# unaffected.
+strip_services() {  # echo $1 with every [[services]] block removed (binding-free config)
+  awk '
+    /^\[\[services\]\]/ { inservice=1; next }
+    inservice {
+      if ($0 ~ /^\[/)                                     { inservice=0; print; next }
+      if ($0 ~ /^binding = / || $0 ~ /^service = /)       { next }
+      if ($0 ~ /^environment = /)                         { next }
+      if ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) { next }
+      inservice=0; print; next
+    }
+    { print }
+  ' "$1"
+}
+
+existing_script_names() {  # names of Workers already on the account (empty when unknown)
+  [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || return 0
+  curl -sS "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts" \
+    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --max-time 25 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);(j.result||[]).forEach(x=>console.log(x.id))}catch{}})'
+}
+
+bootstrap_missing_workers() {
+  local existing; existing="$(existing_script_names || true)"
+  local dir cfg name tmp
+  for dir in "${STAGING_WORKER_DIRS[@]}"; do
+    cfg="${dir}/wrangler.staging.toml"
+    name="$(awk -F'"' '/^name = "/{print $2; exit}' "$cfg")"
+    if [ -n "$existing" ] && printf '%s\n' "$existing" | grep -qxF "$name"; then
+      continue   # already exists — nothing to bootstrap
+    fi
+    echo "::group::bootstrap (binding-free) ${name}"
+    tmp="${cfg}.bootstrap"
+    strip_services "$cfg" > "$tmp"
+    if ! $WRANGLER deploy --config "$tmp"; then
+      echo "bootstrap first attempt failed, retrying in 8s..." >&2; sleep 8
+      $WRANGLER deploy --config "$tmp"
+    fi
+    rm -f "$tmp"
+    echo "::endgroup::"
+  done
+}
+
+# Ensure every Worker exists (binding-free) before the real ordered deploy resolves bindings.
+bootstrap_missing_workers
+
 # Deploy every Worker in dependency order (identity -> auth -> peripherals -> api-gateway
 # -> fe2 -> mo3 -> app-health-monitor). Gateway smoke runs right after the gateway, before
 # the public faces — same fail-fast placement as prod.
