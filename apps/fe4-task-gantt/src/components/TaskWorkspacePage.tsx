@@ -23,7 +23,7 @@ import type { RowGroup } from "../domain/row-groups";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { useGanttSortMode } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
-import { useTaskNumberPrefix, useTaskNumberPadWidth } from "../domain/task-number-pref";
+import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
@@ -97,6 +97,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // view settings, persisted per event.
   const [numberPrefix, setNumberPrefix] = useTaskNumberPrefix(eventId);
   const [numberPadWidth, setNumberPadWidth] = useTaskNumberPadWidth(eventId);
+  // Show/hide the task-number badge (default ON). OFF hides the badges and the
+  // prefix/桁数 inputs, but keeps their saved values for when it's turned back on.
+  const [numberVisible, setNumberVisible] = useTaskNumberVisible(eventId);
   const teams = useTeams().data ?? [];
   // Org member roster — the source for the assignee dropdown. Without it the only
   // options were users ALREADY assigned to a task, so a fresh event showed just
@@ -237,8 +240,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // is computed over the exact rows the gantt renders (filtered + sorted), so the
   // badges match what's on screen. View-time only — nothing persisted.
   const numberById = useMemo<ReadonlyMap<common.TaskId, string>>(
-    () => (filteredDto ? computeTaskNumbers(filteredDto.rows, numberPrefix, numberPadWidth) : new Map()),
-    [filteredDto, numberPrefix, numberPadWidth],
+    () => (filteredDto && numberVisible ? computeTaskNumbers(filteredDto.rows, numberPrefix, numberPadWidth) : new Map()),
+    [filteredDto, numberVisible, numberPrefix, numberPadWidth],
   );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
@@ -748,33 +751,48 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onClear={() => setFilter(emptyFilter(eventId))}
           disabled={!caps.canRead}
         />
-        <label className={styles.numPrefix}>
-          <span className={styles.numPrefixLabel}>番号プレフィックス</span>
+        <label className={styles.numToggle}>
           <input
-            type="text"
-            className={styles.numPrefixInput}
-            value={numberPrefix}
-            onChange={(e) => setNumberPrefix(e.target.value)}
-            maxLength={8}
-            placeholder="AA"
-            aria-label="タスク番号のプレフィックス"
-            data-testid="fe4-number-prefix"
+            type="checkbox"
+            className={styles.numToggleInput}
+            checked={numberVisible}
+            onChange={(e) => setNumberVisible(e.target.checked)}
+            aria-label="タスク番号を表示"
+            data-testid="fe4-number-visible"
           />
+          <span className={styles.numPrefixLabel}>タスク番号を表示</span>
         </label>
-        <label className={styles.numPrefix}>
-          <span className={styles.numPrefixLabel}>桁数</span>
-          <input
-            type="number"
-            className={styles.numPadInput}
-            value={numberPadWidth}
-            onChange={(e) => setNumberPadWidth(Number(e.target.value))}
-            min={0}
-            max={MAX_PAD_WIDTH}
-            step={1}
-            aria-label="タスク番号の桁数（ゼロ埋め）"
-            data-testid="fe4-number-pad"
-          />
-        </label>
+        {numberVisible && (
+          <>
+            <label className={styles.numPrefix}>
+              <span className={styles.numPrefixLabel}>番号プレフィックス</span>
+              <input
+                type="text"
+                className={styles.numPrefixInput}
+                value={numberPrefix}
+                onChange={(e) => setNumberPrefix(e.target.value)}
+                maxLength={8}
+                placeholder="AA"
+                aria-label="タスク番号のプレフィックス"
+                data-testid="fe4-number-prefix"
+              />
+            </label>
+            <label className={styles.numPrefix}>
+              <span className={styles.numPrefixLabel}>桁数</span>
+              <input
+                type="number"
+                className={styles.numPadInput}
+                value={numberPadWidth}
+                onChange={(e) => setNumberPadWidth(Number(e.target.value))}
+                min={0}
+                max={MAX_PAD_WIDTH}
+                step={1}
+                aria-label="タスク番号の桁数（ゼロ埋め）"
+                data-testid="fe4-number-pad"
+              />
+            </label>
+          </>
+        )}
       </div>
 
       {store.lastError && !showErrorDialog && (

@@ -15,6 +15,10 @@ function padStorageKey(eventId: common.EventId): string {
   return `fe4:gantt-number-pad:${eventId}`;
 }
 
+function visibleStorageKey(eventId: common.EventId): string {
+  return `fe4:gantt-number-visible:${eventId}`;
+}
+
 /** Read the saved prefix (defaults to "AA"); tolerant of no/blocked storage. */
 export function loadPrefix(eventId: common.EventId): string {
   try {
@@ -87,4 +91,40 @@ export function useTaskNumberPadWidth(
     [eventId],
   );
   return [width, set];
+}
+
+/** Read whether the number badge is shown (defaults to true). Only an explicit
+ *  "false" hides it, so any missing/garbage value keeps the badge visible. */
+export function loadNumberVisible(eventId: common.EventId): boolean {
+  try {
+    const raw = globalThis.localStorage?.getItem(visibleStorageKey(eventId));
+    return raw !== "false";
+  } catch {
+    return true;
+  }
+}
+
+/** Persist the badge visibility; silently no-ops when storage is unavailable. */
+export function saveNumberVisible(eventId: common.EventId, visible: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(visibleStorageKey(eventId), visible ? "true" : "false");
+  } catch {
+    /* storage blocked (private mode / quota) — the in-memory state still applies */
+  }
+}
+
+/** Badge-visibility state backed by localStorage (default ON). Optimistic like the
+ *  other number prefs: the setter flips state immediately and writes through. */
+export function useTaskNumberVisible(
+  eventId: common.EventId,
+): [boolean, (visible: boolean) => void] {
+  const [visible, setVisible] = useState<boolean>(() => loadNumberVisible(eventId));
+  const set = useCallback(
+    (next: boolean) => {
+      setVisible(next);
+      saveNumberVisible(eventId, next);
+    },
+    [eventId],
+  );
+  return [visible, set];
 }

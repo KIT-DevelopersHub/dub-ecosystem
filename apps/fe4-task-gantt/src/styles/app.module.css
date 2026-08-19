@@ -80,6 +80,9 @@
 
 /* task-number prefix input (view setting). Compact, sits inline in the toolbar. */
 .numPrefix { display: inline-flex; align-items: center; gap: var(--dub-space-1, 4px); }
+/* task-number show/hide toggle (view setting). */
+.numToggle { display: inline-flex; align-items: center; gap: var(--dub-space-1, 4px); cursor: pointer; }
+.numToggleInput { width: 15px; height: 15px; accent-color: var(--dub-color-brand-500); cursor: pointer; }
 .numPrefixLabel {
   font-size: var(--dub-font-size-xs, 0.72rem);
   color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
