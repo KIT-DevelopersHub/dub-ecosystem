@@ -81,6 +81,12 @@ export interface GanttViewProps {
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
   /** taskId -> assignee display name, shown as a left-pane property. */
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
+  /** taskId -> title from the optimistic task store (task-service = the authority on
+   *  title). Overrides the gantt read model's denormalized row title so a detail-panel
+   *  rename reflects on every row/bar the SAME tick — and never reverts to a stale
+   *  read-model copy after the reconciling refetch. Absent ⇒ use the DTO row title.
+   *  Mirrors how statusById / assigneeNameById already flow from the store. */
+  titleOverrides?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> team accent colour, for the row stripe + bar cap (team grouping). */
   teamColorById?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> WBS number label (e.g. "AA-1-1"), shown as a badge before the title.
@@ -233,6 +239,7 @@ export function GanttView({
   onCreateOnDate,
   statusById,
   assigneeNameById,
+  titleOverrides,
   teamColorById,
   teamLegend,
   rowGroupById,
@@ -304,10 +311,21 @@ export function GanttView({
     [onReorder],
   );
 
+  // Swap in the store's (authoritative + optimistic) title before any geometry runs,
+  // so a rename shows on every row/bar the same tick and survives the reconciling
+  // refetch. Only the label changes; the DTO row still owns layout (dates/tree).
+  const rowsTitled = useMemo(() => {
+    if (!titleOverrides || titleOverrides.size === 0) return dto.rows;
+    return dto.rows.map((r) => {
+      const t = titleOverrides.get(r.taskId);
+      return t !== undefined && t !== r.title ? { ...r, title: t } : r;
+    });
+  }, [dto.rows, titleOverrides]);
+
   // Parent (work-package) bars always enclose their children: roll each parent's
   // span up to the union of its descendants before any geometry runs, so widening
   // a child auto-grows the parent bar (and, via the window effect, the axis).
-  const rolledRows = useMemo(() => rollupRowDates(dto.rows), [dto.rows]);
+  const rolledRows = useMemo(() => rollupRowDates(rowsTitled), [rowsTitled]);
 
   // Rows actually shown: a child (has a parent) is hidden unless its parent is open.
   const rows = useMemo(
@@ -323,6 +341,27 @@ export function GanttView({
     for (const r of dto.rows) if (r.hasChildren) s.add(r.taskId);
     return s;
   }, [dto.rows]);
+
+  // Auto-expand a row the instant it becomes a parent (gains its first child). Adding
+  // a subtask to a previously-childless task must reveal that child at once — otherwise
+  // the new toggle appears collapsed and the child stays hidden ("追加した子タスクが
+  // 見えない"). We diff parentIds against the previous render: only NEWLY-parented ids
+  // are force-opened, so the initial all-collapsed load and any parent the user later
+  // collapsed by hand are left untouched.
+  const prevParentIdsRef = useRef<ReadonlySet<common.TaskId> | null>(null);
+  useEffect(() => {
+    const prev = prevParentIdsRef.current;
+    prevParentIdsRef.current = parentIds;
+    if (!prev) return; // first render: seed only, don't expand the whole seeded tree
+    const newlyParented: common.TaskId[] = [];
+    for (const id of parentIds) if (!prev.has(id)) newlyParented.push(id);
+    if (newlyParented.length === 0) return;
+    setOpenParents((cur) => {
+      const next = new Set(cur);
+      for (const id of newlyParented) next.add(id);
+      return next;
+    });
+  }, [parentIds]);
 
   // taskId -> the ROLLED row (parent dates are the union of their children). Drag
   // start/end must read these displayed dates, not the parent's pre-rollup seed.

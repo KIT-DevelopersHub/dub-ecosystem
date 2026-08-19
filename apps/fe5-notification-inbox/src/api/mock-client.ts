@@ -338,6 +338,16 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
         if (item.readAt === null) item.readAt = new Date().toISOString();
         return undefined as T;
       }
+      const unreadMatch = path.match(new RegExp(`^${BASE}/inbox/([^/]+)/unread$`));
+      if (unreadMatch) {
+        const id = decodeURIComponent(unreadMatch[1]!);
+        const item = store.items.find((i) => i.id === id);
+        if (!item) {
+          throw new MockApiError("NOTIF_INBOX_ITEM_NOT_FOUND", 404, `Inbox item not found: ${id}`);
+        }
+        item.readAt = null;
+        return undefined as T;
+      }
       if (path === `${BASE}/preferences`) {
         const req = (body ?? { entries: [] }) as UpdatePreferencesRequest;
         for (const entry of req.entries) {
