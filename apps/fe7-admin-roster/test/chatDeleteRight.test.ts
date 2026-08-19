@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { chatDeleteRight, setChatDeleteRight, chatDeletionTier, CHAT_DELETE_KEYS } from "../src/lib/chatDeleteRight";
+import {
+  chatDeleteRight,
+  setChatDeleteRight,
+  chatDeletionTier,
+  chatDeleteChoice,
+  applyChatDeleteChoice,
+  CHAT_DELETE_KEYS,
+} from "../src/lib/chatDeleteRight";
 import type { identity } from "@dub/types";
 
 const K = (arr: string[]) => arr as identity.PermissionKey[];
@@ -32,5 +39,48 @@ describe("chatDeleteRight", () => {
 
   it("owns exactly the two delete keys (hidden from the flat chat grid)", () => {
     expect([...CHAT_DELETE_KEYS].sort()).toEqual(K(["chat:delete", "chat:moderate"]));
+  });
+});
+
+describe("chatDeleteChoice (4-step, folds protectReacted)", () => {
+  it("splits the own tier on protectReacted; none/any ignore it", () => {
+    expect(chatDeleteChoice(K([]), false)).toBe("none");
+    expect(chatDeleteChoice(K([]), true)).toBe("none");
+    expect(chatDeleteChoice(K(["chat:delete"]), false)).toBe("own");
+    expect(chatDeleteChoice(K(["chat:delete"]), true)).toBe("own_protected");
+    expect(chatDeleteChoice(K(["chat:moderate"]), false)).toBe("any");
+    expect(chatDeleteChoice(K(["chat:moderate"]), true)).toBe("any");
+  });
+});
+
+describe("applyChatDeleteChoice (resolves keys + workspace protectReacted)", () => {
+  const base = K(["app:chat:view"]);
+
+  it("none clears the keys and leaves protectReacted unchanged", () => {
+    expect(applyChatDeleteChoice(base, "none", true)).toEqual({ keys: K(["app:chat:view"]), protectReacted: true });
+    expect(applyChatDeleteChoice(base, "none", false)).toEqual({ keys: K(["app:chat:view"]), protectReacted: false });
+  });
+
+  it("own_protected grants chat:delete and turns protectReacted ON", () => {
+    expect(applyChatDeleteChoice(base, "own_protected", false)).toEqual({
+      keys: K(["app:chat:view", "chat:delete"]),
+      protectReacted: true,
+    });
+  });
+
+  it("own grants chat:delete and turns protectReacted OFF", () => {
+    expect(applyChatDeleteChoice(base, "own", true)).toEqual({
+      keys: K(["app:chat:view", "chat:delete"]),
+      protectReacted: false,
+    });
+  });
+
+  it("any grants chat:moderate and leaves protectReacted unchanged (moderators exempt)", () => {
+    expect(applyChatDeleteChoice(base, "any", true)).toEqual({
+      keys: K(["app:chat:view", "chat:moderate"]),
+      protectReacted: true,
+    });
+    // switching away from moderate replaces the key, never accumulates both
+    expect(applyChatDeleteChoice(K(["chat:moderate"]), "own_protected", false).keys).toEqual(K(["chat:delete"]));
   });
 });

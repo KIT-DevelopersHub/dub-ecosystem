@@ -41,3 +41,44 @@ export function setChatDeleteRight(selected: readonly PermissionKey[], right: Ch
 export function chatDeletionTier(right: ChatDeleteRight): "member" | "moderator" {
   return right === "any" ? "moderator" : "member";
 }
+
+// ---- 4-choice UI selector (folds the workspace protectReacted flag into 削除あり(単)) ----
+// The role editor presents ONE 削除権限 segment with four ordered steps. The middle two
+// share the same per-role key (chat:delete = 自分の投稿を削除) and differ only by the
+// workspace-wide protectReacted flag, so choosing between them writes that org policy
+// (moderators/admin are exempt regardless). Ordered by how restrictive they are:
+//   none          = 削除不可                        (no key)
+//   own_protected = リアクション付きは削除不可        (chat:delete + protectReacted ON)
+//   own           = 自分の投稿のみ削除               (chat:delete + protectReacted OFF)
+//   any           = 全員の投稿を削除（モデレート）    (chat:moderate)
+export type ChatDeleteChoice = "none" | "own_protected" | "own" | "any";
+
+/** Fold the role's key-level 削除権限 and the workspace protectReacted flag into the
+ *  4-choice shown in the segment. Only the `own` tier splits on protectReacted. */
+export function chatDeleteChoice(selected: readonly PermissionKey[], protectReacted: boolean): ChatDeleteChoice {
+  const right = chatDeleteRight(selected);
+  if (right === "any") return "any";
+  if (right === "own") return protectReacted ? "own_protected" : "own";
+  return "none";
+}
+
+/** Resolve a 4-choice back to (a) the role's new key set and (b) the workspace
+ *  protectReacted value to persist. Only the two `own` steps set protectReacted; `none`
+ *  and `any` leave it unchanged (nothing to protect / moderators are exempt anyway). */
+export function applyChatDeleteChoice(
+  selected: readonly PermissionKey[],
+  choice: ChatDeleteChoice,
+  currentProtect: boolean,
+): { keys: PermissionKey[]; protectReacted: boolean } {
+  switch (choice) {
+    case "own_protected":
+      return { keys: setChatDeleteRight(selected, "own"), protectReacted: true };
+    case "own":
+      return { keys: setChatDeleteRight(selected, "own"), protectReacted: false };
+    case "any":
+      return { keys: setChatDeleteRight(selected, "any"), protectReacted: currentProtect };
+    case "none":
+    default:
+      return { keys: setChatDeleteRight(selected, "none"), protectReacted: currentProtect };
+  }
+}
