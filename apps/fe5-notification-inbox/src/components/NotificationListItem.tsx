@@ -1,13 +1,16 @@
-// NotificationListItem — one inbox row. Clicking the row marks read + navigates to
-// the resolved linkUrl (FE5 §2-2, test 8). Unread rows carry a dot + aria state.
+// NotificationListItem — one inbox row, rendered as a COMPACT two-line card:
+//   line 1: [unread dot] title …… relative time
+//   line 2: category badge + one-line body snippet
+// Both lines truncate to a single line so every row stays ~half the height of a
+// paragraph card — dense but readable. Clicking the row marks read + navigates to the
+// resolved linkUrl (FE5 §2-2, test 8). Unread rows carry a dot + aria state.
 //
 // When `onMarkUnread` is supplied, a read row also exposes a trailing "未読にする"
-// action (restore to unread — the inverse of click-to-read). It is a small ghost
-// button with an ALWAYS-VISIBLE text label (not an icon-only/hover-tooltip control):
-// text-primary on the surface reads at high contrast, so the affordance is legible and
-// discoverable. The row is a container <div> (not a single <button>) so the action is a
-// real sibling button and interactive controls are never nested; it reserves its own
-// trailing cell, so it never shifts the row layout.
+// action (restore to unread — the inverse of click-to-read): a small secondary button
+// with an ALWAYS-VISIBLE text label (not an icon-only/hover-tooltip control) so the
+// affordance stays legible even at the compact height. The row is a container <div>
+// (not a single <button>) so the action is a real sibling button and interactive
+// controls are never nested; it reserves its own trailing cell.
 
 import type { KeyboardEvent, ReactNode } from "react";
 import { Badge, Button, Icon } from "@dub/ui";
@@ -65,18 +68,22 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
         onClick={() => onActivate(item)}
         onKeyDown={onKeyDown}
       >
-        {unread ? <span className={styles.dot} data-testid="fe5-inbox-unread-dot" aria-hidden="true" /> : null}
         <div className={styles.body}>
-          <div className={styles.title}>{item.title}</div>
-          <div className={styles.snippet}>{item.body}</div>
-          <div className={styles.meta}>
+          <div className={styles.line1}>
+            {unread ? (
+              <span className={styles.dot} data-testid="fe5-inbox-unread-dot" aria-hidden="true" />
+            ) : null}
+            <span className={styles.title}>{item.title}</span>
+            <span className={styles.time}>{formatRelativeTime(item.createdAt)}</span>
+          </div>
+          <div className={styles.line2}>
             <Badge
               tone={categoryMeta.tone}
               testId={`fe5-inbox-cat-badge-${category}`}
             >
               {categoryMeta.label}
             </Badge>
-            <span>{formatRelativeTime(item.createdAt)}</span>
+            <span className={styles.snippet}>{item.body}</span>
           </div>
         </div>
       </button>
