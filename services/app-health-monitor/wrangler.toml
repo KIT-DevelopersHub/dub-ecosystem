@@ -1,0 +1,100 @@
+# app-health-monitor — free-tier死活監視. Hourly polling is driven by a Durable Object ALARM
+# (class MonitorDO), NOT a Cron Trigger: the Workers Free plan's 5-cron ACCOUNT cap is already
+# full of business crons and a DO alarm does not count against it. This base toml documents the
+# frozen binding topology; the actual deploy uses wrangler.free.toml.
+name = "app-health-monitor"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "MONITOR_DO"
+class_name = "MonitorDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MonitorDO"]   # SQLite-backed DO is available on the Workers Free plan
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+
+# --- Service bindings: notification (admin alert) + every probed backend service. Real targets
+#     are the dub-* live worker names in wrangler.free.toml. ---
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "notification"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"
+
+[[services]]
+binding = "SVC_AUTH"
+service = "auth-service"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "event-service"
+
+[[services]]
+binding = "SVC_TASK"
+service = "task-service"
+
+[[services]]
+binding = "SVC_GANTT"
+service = "gantt-service"
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "mail-gateway"
+
+[[services]]
+binding = "SVC_CHAT"
+service = "chat-service"
+
+[[services]]
+binding = "SVC_MEMBER"
+service = "member-service"
+
+[[services]]
+binding = "SVC_USAGE"
+service = "usage-meter"
+
+[[services]]
+binding = "SVC_FILE_META"
+service = "file-meta"
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "audit-log"
+
+[[services]]
+binding = "SVC_DEPLOY"
+service = "deploy-service"
+
+[[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "drive-share-service"
+
+[[services]]
+binding = "SVC_DRIVE_PROXY"
+service = "drive-proxy"
+
+[[services]]
+binding = "SVC_GITHUB_SYNC"
+service = "github-sync"
+
+[[services]]
+binding = "SVC_WEBHOOK"
+service = "webhook-ingest"
+
+# --- NO cron trigger. The MonitorDO alarm drives the hourly poll. ---
+
+[vars]
+ENVIRONMENT = "production"
