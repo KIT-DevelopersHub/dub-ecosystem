@@ -28,8 +28,6 @@ import {
 } from "./validate";
 import { decodeCursor, type ListFilter } from "./repo";
 
-const TASK_ID_PREFIX = "task_";
-
 function ctxOf(c: Context): RequestContext {
   return extractContext(c.req.raw.headers, { allowGenerate: true });
 }
@@ -237,7 +235,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:read");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
     return c.json(found);
@@ -249,7 +246,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const body = await readJson<Partial<task.UpdateTaskRequest>>(c);
 
     if (typeof body.version !== "number") {
@@ -366,7 +362,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:delete");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
@@ -394,7 +389,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:read");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
     const items = await deps.repo.listAttachments(id);
@@ -411,7 +405,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
 
@@ -454,7 +447,6 @@ export function buildApp(deps: Deps): Hono {
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
     const attachmentId = c.req.param("attachmentId");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const ok = await deps.repo.archiveAttachment(id, attachmentId, nowIso());
     if (!ok) throw taskErrors.notFound(attachmentId);
     return c.json({ ok: true });
@@ -466,7 +458,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const body = await readJson<Partial<task.ReplaceDependenciesRequest>>(c);
 
     if (typeof body.version !== "number") {

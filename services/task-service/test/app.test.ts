@@ -184,6 +184,41 @@ describe("PUT /tasks/:id/dependencies", () => {
     expect(h.audit.records.some((r) => r.action === "task.dependency.replaced")).toBe(true);
   });
 
+  it("supports seeded task ids without the task_ prefix (GET + first dependency add persists) [regression]", async () => {
+    // Real conference data was seeded with human-readable ids (e.g. "lmbconf-wp-01"),
+    // NOT the task_<ULID> the API mints. A premature `id.startsWith("task_")` guard
+    // 404'd every single-item route on those tasks, so 「先行タスクを保存」 silently
+    // failed for 212/215 conference tasks. Ids are opaque; the DB is the source of truth.
+    const { h, app } = setup();
+    const now = "2026-08-19T00:00:00.000Z";
+    const base = {
+      eventId: "evt_1",
+      description: null,
+      status: "todo" as const,
+      priority: "medium" as const,
+      assigneeId: null,
+      dueAt: null,
+      origin: "internal" as const,
+      createdBy: "usr_alice",
+      now,
+    };
+    const pred = await h.repo.insert({ ...base, id: "lmbconf-wp-00", title: "会計: 法人設立" });
+    const succ = await h.repo.insert({ ...base, id: "lmbconf-wp-01", title: "会計: 設立後の届出" });
+
+    // GET on a non-task_ id must resolve (was 404 via the prefix guard).
+    const got = await app.request(`/tasks/${succ.id}`, userInit("GET"));
+    expect(got.status).toBe(200);
+
+    // First dependency add on a task that had none must persist.
+    const res = await app.request(
+      `/tasks/${succ.id}/dependencies`,
+      userInit("PUT", { version: succ.version, dependsOnIds: [pred.id] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await h.repo.getDependsOn(succ.id)).toEqual([pred.id]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(1);
+  });
+
   it("409 TASK_DEPENDENCY_CYCLE (A->B->C->A); dependencies unchanged, no event", async () => {
     const { h, app } = setup();
     const a = await create(app, { title: "A" });
