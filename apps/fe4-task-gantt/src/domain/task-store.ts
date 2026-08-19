@@ -8,7 +8,12 @@ export type TaskMap = Readonly<Record<common.TaskId, task.Task>>;
 
 export interface OptimisticPatch {
   id: common.TaskId;
-  changes: Partial<Pick<task.Task, "status" | "dueAt" | "assigneeId" | "title" | "description" | "priority">>;
+  // Fields an optimistic edit may set on the cached Task. Covers every field the
+  // detail panel edits (title/status/priority/assignee/team/開始日/期日) so a
+  // field-edit undo/redo reflects instantly in the cache before the refetch lands.
+  changes: Partial<
+    Pick<task.Task, "status" | "dueAt" | "startAt" | "assigneeId" | "teamId" | "title" | "description" | "priority">
+  >;
 }
 
 export interface Snapshot {

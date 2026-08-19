@@ -11,6 +11,7 @@ import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
 import { useRoster } from "../api/useRoster";
 import { useTaskStore } from "../store/useTaskStore";
+import type { OptimisticPatch } from "../domain/task-store";
 import { emptyFilter, toListTasksQuery, type TaskFilterState } from "../domain/task-query";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import { taskCapabilities } from "../domain/permissions";
@@ -450,6 +451,35 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return true;
   };
 
+  // Re-issue a field-only patch (title/status/優先度/担当/チーム/開始日/期日) as a plain
+  // "set" — the reversible primitive an undo/redo command re-runs. It reads a FRESH
+  // version (getTask) first, so a DEFERRED undo/redo (run long after the edit, once the
+  // task's version has moved on) can never 409 on a stale panel-cached version — the
+  // same latest-version discipline applyRelationsRaw uses. Optimistic through the store
+  // (snappy), then refetch so any date change re-flows onto the bar.
+  const applyFieldPatchRaw = async (
+    id: common.TaskId,
+    fields: OptimisticPatch["changes"],
+  ): Promise<boolean> => {
+    if (Object.keys(fields).length === 0) return true;
+    try {
+      const cur = await getTask(client, id); // fresh version — deferred-undo safe
+      const body: task.UpdateTaskRequest = { ...fields, version: cur.version };
+      const ok = await store.patchOptimistic(client, id, fields, cur.version, body);
+      if (ok) void gantt.refetchFresh();
+      return !!ok;
+    } catch (e) {
+      store.reportError(e);
+      return false;
+    }
+  };
+
+  // Persist a manual row order (drag reorder) — the reversible primitive for the
+  // reorder undo/redo. Quiet on success (undo/redo shouldn't toast "更新しました"); the
+  // view hook already rolls its cache back and we surface a failure.
+  const applyOrderRaw = (order: common.TaskId[]): Promise<unknown> =>
+    view.saveOrder(order).catch((e) => feedback.failure(e, "並び順の保存に失敗しました"));
+
   // ---- timeline bar edits (push an undo command around each raw apply) ----
 
   // Bar move/resize: record where the bar WAS so Ctrl-Z can snap it back.
@@ -621,11 +651,23 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
     if (!selectedTask) return;
     const needsRelations = relations.parentChanged || relations.depsChanged;
-    // Field-only edit (title/status/…): keep the optimistic fast-path. Field edits
-    // are not in the undo history yet — see the PR notes (需要があれば拡張).
+    // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
+    // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
+    // field from the current task so Ctrl/⌘-Z restores exactly those fields.
     const { parentTaskId: _p, ...fieldOnlyPatch } = patch;
     const hasFieldPatch = Object.keys(fieldOnlyPatch).some((k) => k !== "version");
     if (!needsRelations) {
+      const id = selectedTask.id;
+      const before = selectedTask;
+      // Snapshot the BEFORE value of each changed field so Ctrl/⌘-Z restores exactly them.
+      const afterFields: OptimisticPatch["changes"] = {};
+      const beforeFields: OptimisticPatch["changes"] = {};
+      for (const k of Object.keys(fieldOnlyPatch)) {
+        if (k === "version") continue;
+        (afterFields as Record<string, unknown>)[k] = (fieldOnlyPatch as Record<string, unknown>)[k];
+        // absent (e.g. never-set 開始日) restores to null, the API's "clear" value.
+        (beforeFields as Record<string, unknown>)[k] = (before as unknown as Record<string, unknown>)[k] ?? null;
+      }
       // Optimistically move the timeline bar the SAME tick the user saves a 開始日/期日
       // change (optimistic-UI). The detail panel edits task.startAt/dueAt, which map
       // onto the gantt row's startsAt/endsAt (startsAt↔startAt, endsAt↔dueAt). Without
@@ -635,17 +677,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       const changesDates =
         fieldOnlyPatch.startAt !== undefined || fieldOnlyPatch.dueAt !== undefined;
       const barBefore = changesDates
-        ? gantt.currentRows().find((r) => r.taskId === selectedTask.id)
+        ? gantt.currentRows().find((r) => r.taskId === id)
         : undefined;
       if (changesDates) {
         const nextStarts =
           fieldOnlyPatch.startAt !== undefined ? fieldOnlyPatch.startAt : barBefore?.startsAt ?? null;
         const nextEnds =
           fieldOnlyPatch.dueAt !== undefined ? fieldOnlyPatch.dueAt : barBefore?.endsAt ?? null;
-        gantt.setRowScheduleOptimistic(selectedTask.id, nextStarts, nextEnds);
+        gantt.setRowScheduleOptimistic(id, nextStarts, nextEnds);
       }
       void store
-        .patchOptimistic(client, selectedTask.id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
+        .patchOptimistic(client, id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
         .then((ok) => {
           if (ok) {
             void gantt.refetchFresh();
@@ -655,6 +697,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
             void gantt.refetchFresh();
           }
         });
+      if (Object.keys(afterFields).length > 0) {
+        history.push({
+          label: "タスクの編集",
+          undo: async () => {
+            await applyFieldPatchRaw(id, beforeFields);
+          },
+          redo: async () => {
+            await applyFieldPatchRaw(id, afterFields);
+          },
+        });
+      }
       return;
     }
     // Relation edit (親子 / 依存). Snapshot the BEFORE state so Ctrl-Z can restore
@@ -713,10 +766,22 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     const displayed = applyManualOrder(gantt.currentRows(), orderedTaskIds);
     const nextOrder = reorderWithinSiblings(displayed, draggedId, beforeTaskId);
     if (!nextOrder) return; // cross-parent drop or no-op
+    // Snapshot the FULL current order (not the possibly-partial orderedTaskIds overlay)
+    // so undo pins the exact pre-drag arrangement — and redo re-applies the new one.
+    const prevOrder = displayed.map((r) => r.taskId);
     void view
       .saveOrder(nextOrder)
       .then(() => feedback.success("並び順を更新しました"))
       .catch((e) => feedback.failure(e, "並び順の保存に失敗しました"));
+    history.push({
+      label: "タスクの並び替え",
+      undo: async () => {
+        await applyOrderRaw(prevOrder);
+      },
+      redo: async () => {
+        await applyOrderRaw(nextOrder);
+      },
+    });
   };
 
   return (
