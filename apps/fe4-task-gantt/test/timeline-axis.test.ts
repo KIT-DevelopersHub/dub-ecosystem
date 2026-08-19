@@ -124,6 +124,30 @@ describe("timeline-axis — bars & drag", () => {
     expect(bars[1]!.width).toBe(0);
   });
 
+  it("bar span is INCLUSIVE of both endpoints (no off-by-one)", () => {
+    const w = withGranularity(initialWindow(rows, "day", NOW), "day");
+    // 08-05 → 08-08 covers 4 calendar days (5,6,7,8) → 4 cells, not 3.
+    const multi = timelineBars(
+      [row("m", "2026-08-05T00:00:00Z", "2026-08-08T00:00:00Z", 0)],
+      w,
+    );
+    expect(multi[0]!.width).toBeCloseTo(PX_PER_DAY.day * 4, 5);
+
+    // A same-day task fills exactly one cell.
+    const single = timelineBars(
+      [row("s", "2026-08-05T00:00:00Z", "2026-08-05T00:00:00Z", 0)],
+      w,
+    );
+    expect(single[0]!.width).toBeCloseTo(PX_PER_DAY.day, 5);
+
+    // Crossing a month boundary still counts inclusively (07-30 → 08-02 = 4 days).
+    const crossing = timelineBars(
+      [row("x", "2026-07-30T00:00:00Z", "2026-08-02T00:00:00Z", 0)],
+      w,
+    );
+    expect(crossing[0]!.width).toBeCloseTo(PX_PER_DAY.day * 4, 5);
+  });
+
   it("shiftBar: move slides both edges; resize slides one and keeps >=1 day", () => {
     const s = "2026-08-05T00:00:00Z";
     const e = "2026-08-08T00:00:00Z";
