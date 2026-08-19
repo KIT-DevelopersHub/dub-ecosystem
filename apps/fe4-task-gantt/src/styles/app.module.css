@@ -303,6 +303,29 @@
   transition: background 0.1s ease;
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
+/* ---- drag-to-reorder (left pane) ---- */
+/* Drag handle (⠿): appears on the row, grabs the pointer to reorder. Kept subtle
+   until row hover so the list stays calm; the handle itself is always grab-cursored. */
+.tlRowDrag {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  margin-left: -2px;
+  color: var(--dub-color-text-tertiary, var(--dub-color-text-secondary));
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: grab;
+  opacity: 0.35;
+  touch-action: none; /* let the pointer sensor own vertical drags */
+  transition: opacity 0.1s ease;
+}
+.tlRow:hover .tlRowDrag { opacity: 0.75; }
+.tlRowDrag:active { cursor: grabbing; }
+/* Drop target: a crisp top edge marks "the dragged row will land here (before me)". */
+.tlRowDropOver { box-shadow: inset 0 2px 0 0 var(--dub-color-accent-solid, var(--dub-color-border-strong)); }
+.tlRowDragging { opacity: 0.5; }
 /* WBS leaf rows read a touch lighter than their work-package parent, and carry a
    vertical tree guide so the parent-child nesting is legible at a glance (this is
    the "親子" affordance — dependency is shown only by arrows on the timeline). */

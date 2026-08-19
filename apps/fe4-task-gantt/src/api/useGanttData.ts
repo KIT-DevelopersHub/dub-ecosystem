@@ -21,6 +21,11 @@ export function useGanttData(eventId: common.EventId) {
    *  and overshoots — see the parent drag-shift undo bug. */
   const currentRows = (): gantt.GanttChartDTO["rows"] =>
     qc.getQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId))?.rows ?? [];
+  /** LIVE cached dependency lines (same rationale as currentRows). Used to snapshot
+   *  the before-state for an optimistic dependency edit so a failure can snap back
+   *  instantly instead of waiting on the reconciling refetch. */
+  const currentDependencies = (): gantt.GanttChartDTO["dependencies"] =>
+    qc.getQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId))?.dependencies ?? [];
   /** after an edit, refetch with Cache-Control: no-cache (design test 6). */
   const refetchFresh = async () => {
     const fresh = await getGanttFresh(client, eventId);
@@ -72,13 +77,37 @@ export function useGanttData(eventId: common.EventId) {
       return { ...old, rows: rows.map((r) => ({ ...r, hasChildren: withKids.has(r.taskId) })) };
     });
   };
+  /** Optimistically set the predecessor (先行タスク＝依存) edges of ONE task so the
+   *  timeline's arrows appear/disappear the SAME tick the user saves — instead of
+   *  waiting for the persist + refetch round-trip (the "追加/削除しても時差があって
+   *  失敗したか不安" complaint). Edges point predecessor(from) → task(to); this
+   *  rebuilds exactly the `to === taskId` edges from `dependsOnIds` and leaves every
+   *  other task's edges untouched. Server dedup/format is mirrored (`${to}->${from}`). */
+  const setDependenciesOptimistic = (taskId: common.TaskId, dependsOnIds: readonly common.TaskId[]) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) => {
+      if (!old) return old;
+      const others = old.dependencies.filter((d) => d.toTaskId !== taskId);
+      const seen = new Set(others.map((d) => d.id));
+      const next = [...others];
+      for (const from of dependsOnIds) {
+        if (from === taskId) continue; // no self-edge
+        const id = `${taskId}->${from}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        next.push({ id, fromTaskId: from, toTaskId: taskId, type: "FS", lagDays: 0 });
+      }
+      return { ...old, dependencies: next };
+    });
+  };
   return {
     ...query,
     currentRows,
+    currentDependencies,
     refetchFresh,
     setRowScheduleOptimistic,
     upsertRowOptimistic,
     removeRowOptimistic,
     setRowParentOptimistic,
+    setDependenciesOptimistic,
   };
 }

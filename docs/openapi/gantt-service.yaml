@@ -316,6 +316,14 @@ components:
           type: array
           items:
             type: string
+        orderedTaskIds:
+          type: array
+          description: >-
+            Per-user manual row order (drag reorder in the left pane). Additive/
+            optional: absent means the server's WBS/title order is used. Ids pin
+            their position within their sibling group.
+          items:
+            type: string
     PutGanttViewRequest:
       type: object
       required:
@@ -326,6 +334,11 @@ components:
           $ref: '#/components/schemas/GanttZoom'
         collapsedTaskIds:
           type: array
+          items:
+            type: string
+        orderedTaskIds:
+          type: array
+          description: Per-user manual row order (see GanttViewState.orderedTaskIds). Additive/optional.
           items:
             type: string
     PatchGanttRowRequest:

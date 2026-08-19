@@ -46,6 +46,12 @@ export interface GanttViewState {
   eventId: EventId;
   zoom: GanttZoom;
   collapsedTaskIds: TaskId[];
+  /** Manual row order (per-user personal ordering set by drag-and-drop in the left
+   *  pane). Additive/optional: absent ⇒ the server's WBS/title ordering is used. A
+   *  task id appearing here pins its position within its sibling group; ids not
+   *  listed keep the default order after the listed ones. Persisted in the same
+   *  per-user view-state JSON blob (no schema change). */
+  orderedTaskIds?: TaskId[];
 }
 export interface GetGanttQuery {
   eventId: EventId;
@@ -61,6 +67,8 @@ export interface PatchGanttRowRequest {
 export interface PutGanttViewRequest {
   zoom: GanttZoom;
   collapsedTaskIds: TaskId[];
+  /** Manual row order (see GanttViewState.orderedTaskIds). Additive/optional. */
+  orderedTaskIds?: TaskId[];
 }
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
