@@ -387,7 +387,16 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.upsertParticipation(row);
-    return { participation: toParticipation(row), member: resolved, matchKind };
+    const participation = toParticipation(row);
+    // 参加届が届いたら管理者へ通知（best-effort・失敗しても提出は成功させる）。
+    if (this.deps.notifyParticipationSubmitted) {
+      try {
+        await this.deps.notifyParticipationSubmitted(ctx, participation);
+      } catch {
+        // notifier is contracted best-effort, but guard here too so a throw never fails submit.
+      }
+    }
+    return { participation, member: resolved, matchKind };
   }
 
   /** Resolve (promote-or-create) the roster member behind a submission. */
