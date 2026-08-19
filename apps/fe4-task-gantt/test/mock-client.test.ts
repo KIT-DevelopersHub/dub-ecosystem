@@ -98,6 +98,39 @@ describe("PATCH /gantt/rows/:id — timeline bar move/resize persistence", () =>
       api.patchGanttRow(c, "missing", { startsAt: null, endsAt: null }),
     ).rejects.toSatisfy((e: unknown) => isApiError(e) && e.status === 404);
   });
+
+  it("a work-package (parent) row returns NULL own dates and a parent-date PATCH is discarded on the next GET (server parity)", async () => {
+    // gantt-service dto.toRow returns a parent's own startsAt/endsAt as null (the span is
+    // rolled up from children on the client). The mock must mirror this, or a parent bar
+    // resize appears to persist in dev but is silently dropped in prod ("親のリサイズが
+    // 反映されない"). Parent p with one child leaf.
+    const c = new MockApiClient({
+      tasks: [
+        seedTask("p", { eventId: "evt_1" }),
+        seedTask("leaf", { eventId: "evt_1" }),
+      ],
+      hierarchy: { leaf: { parentTaskId: "p", depth: 1 } },
+      rowDates: {
+        leaf: { startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-09T00:00:00Z" },
+      },
+    });
+    const before = await api.getGantt(c, "evt_1");
+    const pBefore = before.rows.find((r) => r.taskId === "p")!;
+    expect(pBefore.hasChildren).toBe(true);
+    expect(pBefore.startsAt).toBeNull(); // derived, not own
+    expect(pBefore.endsAt).toBeNull();
+
+    // Try to persist the parent's own span (what a direct parent resize would do)…
+    await api.patchGanttRow(c, "p", { startsAt: "2026-07-01T00:00:00Z", endsAt: "2026-07-20T00:00:00Z" });
+    // …and it is discarded by the read model on the next GET: the parent stays null.
+    const after = await api.getGantt(c, "evt_1");
+    const pAfter = after.rows.find((r) => r.taskId === "p")!;
+    expect(pAfter.startsAt).toBeNull();
+    expect(pAfter.endsAt).toBeNull();
+    // the leaf still persists its own dates (the write path that sticks)
+    const leafRow = after.rows.find((r) => r.taskId === "leaf")!;
+    expect(leafRow.startsAt).toBe("2026-08-05T00:00:00Z");
+  });
 });
 
 describe("hasCycle util", () => {
