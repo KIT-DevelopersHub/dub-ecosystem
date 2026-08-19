@@ -1,0 +1,159 @@
+/* TaskSearchSelect — searchable task picker. Every value is a @dub/tokens custom
+ * property so it themes (light/dark) and retunes automatically. Mirrors the look
+ * of the FE4 predecessor picker it replaces so the migration is visually 1:1. */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-1);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 4px 3px var(--dub-space-2);
+  border-radius: var(--dub-radius-full, 999px);
+  border: 1px solid var(--dub-color-brand-200, var(--dub-color-brand-100));
+  background: var(--dub-color-brand-50, var(--dub-color-brand-100));
+  color: var(--dub-color-brand-700);
+  font-size: var(--dub-font-size-sm, 0.8rem);
+}
+.chipText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dub-color-brand-600);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.chipRemove:hover {
+  background: var(--dub-color-brand-100);
+}
+.chipRemove:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+}
+
+/* Secondary per-chip action (e.g. 依存→親子 変換). */
+.chipAction {
+  border: 1px solid var(--dub-color-brand-300, var(--dub-color-brand-200));
+  border-radius: var(--dub-radius-full, 999px);
+  background: transparent;
+  color: var(--dub-color-brand-700);
+  cursor: pointer;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  line-height: 1;
+  padding: 2px 6px;
+}
+.chipAction:hover {
+  background: var(--dub-color-brand-100);
+  border-color: var(--dub-color-brand-400);
+}
+
+.inputWrap {
+  position: relative;
+  min-width: 0;
+}
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-md, 0.95rem);
+  font-family: inherit;
+}
+.input:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+  border-color: var(--dub-color-border-focus);
+}
+.input:disabled {
+  background: var(--dub-color-surface-sunken);
+  opacity: 0.7;
+}
+
+.menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: var(--dub-z-index-dropdown, 20);
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 10px);
+  box-shadow: var(--dub-shadow-overlay, 0 10px 24px rgba(15, 23, 42, 0.16));
+}
+.menuHint {
+  padding: 6px var(--dub-space-2) 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+}
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  width: 100%;
+  padding: var(--dub-space-2);
+  border: none;
+  border-radius: var(--dub-radius-sm, 6px);
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  text-align: left;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  cursor: pointer;
+}
+.option:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.optionText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.optionAdd {
+  flex: 0 0 auto;
+  color: var(--dub-color-brand-600);
+  font-weight: 700;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+}
+.empty {
+  padding: var(--dub-space-2);
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+}
+
+.hint {
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+}
