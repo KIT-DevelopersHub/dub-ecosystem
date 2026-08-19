@@ -33,6 +33,22 @@ describe("transparent routing", () => {
     expect(await fwd.json()).toEqual({ x: 1 });
   });
 
+  it("[case1] /task-requests/* reaches SVC_TASK (送る・受け取る)", async () => {
+    const task = fakeBinding((req) => json(200, { echoPath: new URL(req.url).pathname }));
+    const env = makeEnv({ SVC_AUTH: authBinding(validSession("usr_9")).fetcher, SVC_TASK: task.fetcher });
+    const res = await app().fetch(
+      new Request("https://api.developershub.jp/api/v1/task-requests/treq_1/accept", {
+        method: "POST",
+        headers: { authorization: "Bearer t", "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { echoPath: string }).echoPath).toBe("/task-requests/treq_1/accept");
+  });
+
   it("[case1] /actions/* and /webhooks/* reach their bindings", async () => {
     const event = fakeBinding(() => json(200, { ok: "event" }));
     const webhook = fakeBinding(() => json(200, { ok: "webhook" }));
