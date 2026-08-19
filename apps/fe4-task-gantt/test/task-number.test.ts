@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import type { gantt } from "@dub/types";
-import { computeTaskNumbers, sanitizePrefix, DEFAULT_PREFIX } from "../src/domain/task-number";
+import {
+  computeTaskNumbers,
+  sanitizePrefix,
+  clampPadWidth,
+  DEFAULT_PREFIX,
+  DEFAULT_PAD_WIDTH,
+  MAX_PAD_WIDTH,
+} from "../src/domain/task-number";
 
 const row = (id: string, parentTaskId: string | null = null): gantt.GanttRow => ({
   taskId: id,
@@ -67,6 +74,46 @@ describe("computeTaskNumbers", () => {
     const n = computeTaskNumbers([row("x", "x")], "AA");
     // parent not yet numbered when the row is visited → top-level
     expect(n.get("x")).toBe("AA-1");
+  });
+});
+
+describe("computeTaskNumbers — zero padding", () => {
+  it("zero-pads each segment to a fixed width (4 -> AA-0001, AA-0001-0001)", () => {
+    const rows = [row("p1"), row("c1", "p1"), row("c2", "p1"), row("p2")];
+    const n = computeTaskNumbers(rows, "AA", 4);
+    expect(n.get("p1")).toBe("AA-0001");
+    expect(n.get("c1")).toBe("AA-0001-0001");
+    expect(n.get("c2")).toBe("AA-0001-0002");
+    expect(n.get("p2")).toBe("AA-0002");
+  });
+
+  it("does not truncate a number longer than the pad width", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => row(`t${i}`));
+    const n = computeTaskNumbers(rows, "AA", 2);
+    expect(n.get("t0")).toBe("AA-01");
+    expect(n.get("t11")).toBe("AA-12");
+  });
+
+  it("width 0 or 1 leaves numbers unpadded", () => {
+    expect(computeTaskNumbers([row("a")], "AA", 0).get("a")).toBe("AA-1");
+    expect(computeTaskNumbers([row("a")], "AA", 1).get("a")).toBe("AA-1");
+  });
+
+  it("padding works with an empty prefix (bare padded code)", () => {
+    const n = computeTaskNumbers([row("a"), row("b", "a")], "", 3);
+    expect(n.get("b")).toBe("001-001");
+  });
+});
+
+describe("clampPadWidth", () => {
+  it("clamps to [0, MAX] and floors", () => {
+    expect(clampPadWidth(-2)).toBe(0);
+    expect(clampPadWidth(3.9)).toBe(3);
+    expect(clampPadWidth(99)).toBe(MAX_PAD_WIDTH);
+    expect(clampPadWidth(Number.NaN)).toBe(0);
+  });
+  it("default pad width is 4", () => {
+    expect(DEFAULT_PAD_WIDTH).toBe(4);
   });
 });
 

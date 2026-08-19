@@ -5,10 +5,14 @@
 // wanted later, this hook is the single seam to swap for an event-setting read.)
 import { useCallback, useState } from "react";
 import type { common } from "@dub/types";
-import { DEFAULT_PREFIX, sanitizePrefix } from "./task-number";
+import { DEFAULT_PREFIX, DEFAULT_PAD_WIDTH, clampPadWidth, sanitizePrefix } from "./task-number";
 
 function storageKey(eventId: common.EventId): string {
   return `fe4:gantt-number-prefix:${eventId}`;
+}
+
+function padStorageKey(eventId: common.EventId): string {
+  return `fe4:gantt-number-pad:${eventId}`;
 }
 
 /** Read the saved prefix (defaults to "AA"); tolerant of no/blocked storage. */
@@ -45,4 +49,42 @@ export function useTaskNumberPrefix(
     [eventId],
   );
   return [prefix, set];
+}
+
+/** Read the saved pad width (defaults to 4); tolerant of no/blocked/garbage storage. */
+export function loadPadWidth(eventId: common.EventId): number {
+  try {
+    const raw = globalThis.localStorage?.getItem(padStorageKey(eventId));
+    if (raw == null) return DEFAULT_PAD_WIDTH;
+    const n = Number(raw);
+    return Number.isFinite(n) ? clampPadWidth(n) : DEFAULT_PAD_WIDTH;
+  } catch {
+    return DEFAULT_PAD_WIDTH;
+  }
+}
+
+/** Persist the pad width; silently no-ops when storage is unavailable. */
+export function savePadWidth(eventId: common.EventId, width: number): void {
+  try {
+    globalThis.localStorage?.setItem(padStorageKey(eventId), String(clampPadWidth(width)));
+  } catch {
+    /* storage blocked (private mode / quota) — the in-memory state still applies */
+  }
+}
+
+/** Pad-width state backed by localStorage (default 4 digits). Optimistic like the
+ *  prefix: the setter updates state immediately and writes through to storage. */
+export function useTaskNumberPadWidth(
+  eventId: common.EventId,
+): [number, (width: number) => void] {
+  const [width, setWidth] = useState<number>(() => loadPadWidth(eventId));
+  const set = useCallback(
+    (next: number) => {
+      const clean = clampPadWidth(next);
+      setWidth(clean);
+      savePadWidth(eventId, clean);
+    },
+    [eventId],
+  );
+  return [width, set];
 }

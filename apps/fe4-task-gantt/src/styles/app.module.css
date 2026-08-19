@@ -99,6 +99,20 @@
   outline: 2px solid var(--dub-color-brand-500);
   outline-offset: 1px;
 }
+.numPadInput {
+  width: 56px;
+  padding: var(--dub-space-1, 4px) var(--dub-space-2, 8px);
+  font-family: var(--dub-font-family-mono, monospace);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 6px);
+}
+.numPadInput:focus-visible {
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 1px;
+}
 
 .filterBar {
   display: flex;
@@ -360,10 +374,9 @@
 .tlRowDropOver { box-shadow: inset 0 2px 0 0 var(--dub-color-accent-solid, var(--dub-color-border-strong)); }
 .tlRowDragging { opacity: 0.5; }
 
-/* Floating clone rendered by @dnd-kit's DragOverlay while a row is picked up: lifted
-   off the list with elevation (shadow) + a hair of scale, cursor-following, so the
-   reorder feels like grabbing a physical card. The in-place source row stays dimmed
-   (`.tlRowDragging`) as the placeholder. */
+/* The row content inside @dub/ui SortableList's floating clone. The lift itself —
+   elevation (shadow) + slight scale + grabbing cursor — is provided by SortableList's
+   overlay wrapper; this only styles the card surface so the clone matches a list row. */
 .tlRowOverlay {
   box-sizing: border-box;
   display: flex;
@@ -373,11 +386,8 @@
   background: var(--dub-color-surface-base);
   border: 1px solid var(--dub-color-border-strong, var(--dub-color-border-default));
   border-radius: var(--dub-radius-md, 8px);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.26), 0 2px 6px rgba(15, 23, 42, 0.16);
   color: var(--dub-color-text-primary);
   font-size: var(--dub-font-size-sm, 0.85rem);
-  transform: scale(1.03);
-  cursor: grabbing;
 }
 .tlRowOverlay .tlRowDrag { opacity: 0.9; cursor: grabbing; }
 .tlRowOverlay .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -495,7 +505,7 @@
 .tlToggleSpacer { flex: 0 0 auto; width: 16px; margin-right: 2px; }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
 /* WBS number badge shown before the task title (gantt left pane + list view). Mono +
-   tabular so codes like "AA-1-12" stay column-aligned and read as an identifier. */
+   tabular so codes like "AA-0001-0012" stay column-aligned and read as an identifier. */
 .tlRowNum {
   flex: 0 0 auto;
   font-family: var(--dub-font-family-mono, monospace);
@@ -509,9 +519,15 @@
   line-height: 1.6;
   white-space: nowrap;
 }
-/* team accent stripe on a row (team-grouped rows are ordered by team; the stripe
-   makes each group's boundary legible without a heavyweight section header). */
+/* team accent stripe — inline variant, kept ONLY for the drag-overlay clone (a single
+   floating row, so no alignment issue). In-list rows use the fixed-x .tlTeamRail. */
 .tlTeamStripe { flex: 0 0 auto; width: 3px; align-self: stretch; border-radius: 2px; margin-right: 2px; background: var(--dub-color-gray-300); }
+/* team accent as a fixed-x LEFT rail: pinned to the pane's left edge so contiguous
+   same-team rows draw ONE straight vertical line, independent of each row's WBS indent
+   (the old inline stripe stepped horizontally with the indent). Non-interactive overlay
+   above the rows; the faint drag handle's glyph is centred and clears the 3px rail. */
+.tlTeamRail { position: absolute; left: 0; width: 3px; z-index: 4; pointer-events: none; }
+.tlTeamRailSeg { position: absolute; left: 0; width: 3px; border-radius: 0 2px 2px 0; }
 /* team legend chips under the toolbar. */
 .tlLegend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px var(--dub-space-3); border-bottom: 1px solid var(--dub-color-border-default); }
 .tlLegendItem { display: inline-flex; align-items: center; gap: 5px; font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }

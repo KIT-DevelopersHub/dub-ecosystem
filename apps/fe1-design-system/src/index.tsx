@@ -108,6 +108,15 @@ export { Skeleton, SkeletonList, SkeletonTable, SkeletonCard } from "./component
 export { RateLimitNotice, formatRecoveryText } from "./components/RateLimitNotice";
 export { Timeline } from "./components/Timeline";
 export { MessageList } from "./components/MessageList";
+// Drag-to-reorder primitive (floating overlay + neighbour reflow + keyboard a11y).
+// Every reorder UI should use this — see FRONTEND_GUIDE「並べ替え UI」.
+export { SortableList } from "./components/SortableList";
+export type {
+  SortableListProps,
+  SortableItemContext,
+  SortableReorderEvent,
+  SortableDragHandleProps,
+} from "./components/SortableList";
 
 // Timeline geometry helpers (pure, data-agnostic — consumers reuse for D&D/ticks).
 export {
