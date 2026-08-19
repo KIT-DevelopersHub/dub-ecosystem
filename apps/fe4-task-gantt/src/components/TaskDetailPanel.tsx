@@ -45,6 +45,10 @@ export interface TaskDetailPanelProps {
    *  its bar while its startAt column is null. Seeding from here makes 値(詳細)=バー=横軸. */
   barStartsAt?: common.ISODateTime | null;
   barEndsAt?: common.ISODateTime | null;
+  /** True when this task is a WBS parent (work-package). A parent's bar span is the
+   *  ROLLUP of its children, so the rolled bar window — not the parent's own (possibly
+   *  stale) start_at/due_at column — is the authoritative value to show (症状#7 値ズレ). */
+  hasChildren?: boolean;
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
@@ -66,6 +70,7 @@ export function TaskDetailPanel({
   dependsOnIds = [],
   barStartsAt = null,
   barEndsAt = null,
+  hasChildren = false,
   fieldErrors,
   canWrite,
   canDelete,
@@ -75,12 +80,20 @@ export function TaskDetailPanel({
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
   const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
-  // Seed the date fields from the task's own columns, else the bar's displayed window,
-  // so 開始日/期日 always equal what the bar (and the axis) show — even for a task whose
-  // start is only derived (startAt column still null). Compared at the yyyy-mm-dd input
-  // level so a millisecond-format difference never counts as an edit.
-  const startInputSeed = dateInputFromIso(t.startAt ?? barStartsAt ?? null);
-  const dueInputSeed = dateInputFromIso(t.dueAt ?? barEndsAt ?? null);
+  // Seed the date fields so 開始日/期日 always equal what the bar (and the axis) show.
+  //  - LEAF task: prefer its own start_at/due_at column, falling back to the bar's derived
+  //    window when the column is still null (real seed sets only due_at).
+  //  - PARENT (work-package): its bar is the ROLLUP of its children, and its own
+  //    start_at/due_at column is authoritatively null in the read model — but a stale value
+  //    can linger in the task row from before it had children. The rolled bar window is the
+  //    single source of truth, so it WINS over the stored column (症状#7 親子の値ズレ: detail
+  //    /save must never show a parent date that disagrees with its children's rollup).
+  const startInputSeed = dateInputFromIso(
+    hasChildren ? barStartsAt ?? t.startAt ?? null : t.startAt ?? barStartsAt ?? null,
+  );
+  const dueInputSeed = dateInputFromIso(
+    hasChildren ? barEndsAt ?? t.dueAt ?? null : t.dueAt ?? barEndsAt ?? null,
+  );
   const [start, setStart] = useState<string | null>(startInputSeed);
   const [due, setDue] = useState<string | null>(dueInputSeed);
   // Relations (親子 / 先行タスク). Seeded from the gantt read model via props; the
