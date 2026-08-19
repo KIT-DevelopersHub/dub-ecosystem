@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { gantt } from "@dub/types";
 import { GanttView } from "../src/components/GanttView";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
@@ -206,7 +206,8 @@ describe("delete is blocked when the task has children (no re-parenting)", () =>
     );
     fireEvent.click(screen.getByTestId("fe4-detail-delete"));
     expect(screen.queryByTestId("fe4-delete-blocked")).toBeNull();
-    fireEvent.click(screen.getByTestId("fe4-confirm-yes"));
+    // leaf → the standardized ConfirmDialog (#364) opens; confirm via its 削除 button.
+    fireEvent.click(within(screen.getByTestId("fe4-confirm-delete")).getByText("削除"));
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 });
