@@ -7,6 +7,13 @@ idle で黙って未実行になる単一障害点を排除するのが目的。
 - 手順（何を・どの順で・何を確認するか）の詳細は [runbooks/01-deploy.md](./runbooks/01-deploy.md)。
 - この文書は **CI 自動デプロイの契約**（必要な GitHub secrets・権限・流れ・手動起動）に絞る。
 
+> **3環境 + ラベルゲートへの移行**: 本番直行は **PR → staging 確認 → 「確認した」ラベル →
+> 本番マージ** のゲート方式へ移行する。staging 基盤（全複製 `-staging` Worker・専用 D1/KV）と
+> ラベルゲート二重強制の全体像・無料枠実数・カットオーバー手順は
+> [runbooks/04-staging-label-gate.md](./runbooks/04-staging-label-gate.md)。
+> 本 §（本番直行の契約）は、カットオーバーで `PROD_LABEL_GATE=true` + main ブランチ保護を
+> 適用した後もそのまま有効（deploy.yml が本番反映の正本）。
+
 ## 目次
 
 - [1. 結論（流れ）](#1-結論流れ)
