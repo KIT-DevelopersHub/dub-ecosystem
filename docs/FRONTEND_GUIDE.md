@@ -127,6 +127,15 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
   しない（a11y・`prefers-reduced-motion`・折返し追従がブレる）。画面の主セクション切替（下線
   タブ）は既存 `Tabs`。既存の手組み箇所と寄せ替え順は
   [選択UIの統一プラン](./segmented-control-unification.md) を参照。
+- **並べ替え（ドラッグ&ドロップ）UI はコアで組む**: リストの手動並べ替えは `@dub/ui` の
+  **`SortableList`** を使う。`@dnd-kit` を各画面で直接組んで「浮遊オーバーレイ・周辺行の
+  reflow（場所を空ける）・ドロップのコミット・キーボード操作/aria」を再実装しない
+  （体験と a11y がブレる）。コンポーネントが「掴んだ行が浮くクローン＋隣接行が滑らかにずれて
+  ギャップを開ける＋`prefers-reduced-motion` 尊重＋Space/矢印でのキーボード並べ替え＋
+  ライブリージョン通知」を一括で提供する。`items`／`getItemId`／`renderItem(item, {dragHandleProps})`／
+  `renderOverlay?`／`onReorder(event)` を渡し、**並び順の確定ロジック（フラットな `arrayMove`か、
+  ツリーの兄弟内移動か）は呼び出し側が `onReorder` で持つ**（例: `apps/fe4-task-gantt` のガントは
+  兄弟スコープに写像して既存の順序 API に渡す）。ドラッグの見た目/操作は変えず、確定だけ差し替える。
 
 ## 5. 状態の扱い (loading / empty / error)
 

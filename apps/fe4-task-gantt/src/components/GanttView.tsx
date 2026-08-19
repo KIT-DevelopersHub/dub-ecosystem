@@ -1,28 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SegmentedControl, Select } from "@dub/ui";
-import type { SegmentedOption, SelectOption } from "@dub/ui";
+import { SegmentedControl, Select, SortableList } from "@dub/ui";
+import type { SegmentedOption, SelectOption, SortableItemContext, SortableReorderEvent } from "@dub/ui";
 import type { GanttSortMode } from "../domain/row-sort";
 import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
 import { groupRuns, type RowGroup } from "../domain/row-groups";
 import { readableTextColor } from "../domain/color-contrast";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  closestCenter,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-  arrayMove,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import type { common, gantt, task } from "@dub/types";
+
+/** arrayMove — pure list move (kept local so fe4 needs no direct @dnd-kit/sortable dep;
+ *  the DnD itself lives in @dub/ui's SortableList). */
+function moveInList<T>(arr: readonly T[], from: number, to: number): T[] {
+  const copy = arr.slice();
+  const [moved] = copy.splice(from, 1);
+  if (moved !== undefined) copy.splice(to, 0, moved);
+  return copy;
+}
 import {
   type AxisWindow,
   type TimelineBar,
@@ -118,14 +110,16 @@ interface DragState {
   dxPx: number;
 }
 
-/** One left-pane task row. When `dragEnabled`, it is a drop target (drop = place the
- *  dragged row before this one) and carries a drag handle (⠿). The handle is the ONLY
- *  draggable surface so the row's click-to-open affordance is preserved. */
+/** One left-pane task row. Presentational: the DnD (reflow + floating clone) is owned
+ *  by @dub/ui's `SortableList`, which hands this row its `dragHandleProps` (spread on
+ *  the ⠿ handle — the ONLY drag surface, so the row's click-to-open is preserved) and
+ *  wraps it in the transform/opacity node. */
 function LeftPaneRow({
   r,
   isOpen,
   dragEnabled,
   grouped,
+  dragHandleProps,
   onSelect,
   toggleParent,
   statusById,
@@ -137,6 +131,8 @@ function LeftPaneRow({
   dragEnabled: boolean;
   /** true when the group-bracket rail is shown — reserves right padding for it. */
   grouped: boolean;
+  /** from SortableList.renderItem — spread on the drag handle to arm pointer/keyboard. */
+  dragHandleProps: SortableItemContext["dragHandleProps"];
   onSelect?: (taskId: common.TaskId) => void;
   toggleParent: (id: common.TaskId) => void;
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
@@ -144,28 +140,14 @@ function LeftPaneRow({
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
 }) {
   const depth = r.depth ?? 0;
-  // Sortable (not plain draggable) so the OTHER rows reflow — dnd-kit shifts them via
-  // transform to slide open a gap at the drop target that the floating clone drops
-  // into (standard vertical-list reorder). The handle is the only drag activator.
-  const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({
-    id: r.taskId,
-    disabled: !dragEnabled,
-  });
   const style: React.CSSProperties = {
     height: ROW_HEIGHT,
     // Parent rows move the left indent INTO the toggle so the whole left gutter
     // toggles — a much bigger hit target than the chevron glyph (feedback #39).
     paddingLeft: r.hasChildren ? 0 : 12 + depth * 18,
-    transform: CSS.Transform.toString(transform),
-    transition,
-    // The picked-up row is shown by the floating DragOverlay clone, so hide the
-    // in-place node — its reserved height then reads as the empty GAP the neighbours
-    // slide around and the clone settles into.
-    ...(isDragging ? { opacity: 0 } : {}),
   };
   return (
     <button
-      ref={setNodeRef}
       type="button"
       className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""}`}
       style={style}
@@ -175,8 +157,7 @@ function LeftPaneRow({
     >
       {dragEnabled && (
         <span
-          {...attributes}
-          {...listeners}
+          {...dragHandleProps}
           className={styles.tlRowDrag}
           aria-label="ドラッグして並べ替え"
           title="ドラッグして並べ替え"
@@ -246,9 +227,6 @@ export function GanttView({
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
   const [collapsed, setCollapsed] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
-  // The row currently being drag-reordered — drives the floating DragOverlay clone
-  // (a lifted, cursor-following copy) so the left-pane reorder reads as "picked up".
-  const [activeRowId, setActiveRowId] = useState<common.TaskId | null>(null);
   // WBS drill-down: set of expanded work-package ids. Empty = all collapsed, so the
   // view opens on the 41 work-packages and each toggle reveals its leaf children.
   const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() => new Set());
@@ -262,28 +240,21 @@ export function GanttView({
     });
   }, []);
 
-  // Row drag-reorder (left pane). A 4px activation distance keeps a plain click on
-  // the handle from starting a drag. Dropping onto a row places the dragged row
-  // immediately before it; the container ignores cross-parent drops.
-  // Drag-to-reorder only makes sense in 手動 mode — an automatic sort would just
-  // overwrite the drop on the next render, so hide the handles when a sort is active.
+  // Row drag-reorder (left pane) via @dub/ui's SortableList — it owns the floating
+  // clone + neighbour reflow + keyboard a11y; this view only supplies the rows and
+  // commits the drop. Drag only makes sense in 手動 mode (an automatic sort would just
+  // overwrite the drop next render), so the handles are hidden when a sort is active.
   const reorderEnabled = !!onReorder && canWrite && sortMode === "manual";
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  // The current visible rows, read inside onDragEnd (which is memoised before `rows`
-  // is derived). Kept fresh every render so the drop maps against what's on screen.
+  // The current visible rows, read inside the reorder handler (which is memoised
+  // before `rows` is derived). Kept fresh every render so the drop maps to the screen.
   const visibleRowsRef = useRef<gantt.GanttRow[]>([]);
-  const onRowDragStart = useCallback((e: DragStartEvent) => {
-    setActiveRowId((e.active?.id as common.TaskId | undefined) ?? null);
-  }, []);
-  const onRowDragEnd = useCallback(
-    (e: DragEndEvent) => {
-      setActiveRowId(null);
-      const activeId = e.active?.id as common.TaskId | undefined;
-      const overId = e.over?.id as common.TaskId | undefined;
-      if (!activeId || !overId || activeId === overId) return;
+  const onRowReorder = useCallback(
+    (e: SortableReorderEvent) => {
+      const activeId = e.activeId as common.TaskId;
+      const overId = e.overId as common.TaskId;
       // Translate the drop into the container's "place before X" contract so the
       // committed order equals the sortable PREVIEW (no post-drop jump). Same-parent
-      // only: arrayMove the sibling id list, then whichever id ends up right AFTER the
+      // only: move the sibling id list, then whichever id ends up right AFTER the
       // dragged one is `beforeTaskId` (null ⇒ it became the group's last row). A
       // cross-parent drop is forwarded as-is — the container rejects it (no-op).
       const rows = visibleRowsRef.current;
@@ -297,7 +268,7 @@ export function GanttView({
           onReorder?.(activeId, overId);
           return;
         }
-        const moved = arrayMove(sibs, from, to);
+        const moved = moveInList(sibs, from, to);
         const pos = moved.indexOf(activeId);
         const before = pos + 1 < moved.length ? moved[pos + 1]! : null;
         onReorder?.(activeId, before);
@@ -307,7 +278,6 @@ export function GanttView({
     },
     [onReorder],
   );
-  const onRowDragCancel = useCallback(() => setActiveRowId(null), []);
 
   // Parent (work-package) bars always enclose their children: roll each parent's
   // span up to the union of its descendants before any geometry runs, so widening
@@ -320,8 +290,6 @@ export function GanttView({
     [rolledRows, openParents],
   );
   visibleRowsRef.current = rows;
-  // Sortable needs the id list (order = render order) for its reflow strategy.
-  const rowIds = useMemo(() => rows.map((r) => r.taskId), [rows]);
 
   // taskId -> true when the row is a WBS parent (its bar spans its children via
   // rollup). Parents are now draggable too — a move shifts the whole subtree.
@@ -447,12 +415,6 @@ export function GanttView({
   // 手動/時期 modes (no map passed), so the rail simply doesn't render there.
   const groupRunList = useMemo(() => groupRuns(rows, rowGroupById), [rows, rowGroupById]);
   const hasGroupRail = groupRunList.length > 0;
-
-  // The visible row under an active reorder drag — its data feeds the floating clone.
-  const activeRow = useMemo(
-    () => (activeRowId ? rows.find((r) => r.taskId === activeRowId) ?? null : null),
-    [activeRowId, rows],
-  );
 
   // ---- centre on today (initial + on zoom change) ----
   const scrollToToday = useCallback(
@@ -691,46 +653,40 @@ export function GanttView({
                     ‹
                   </button>
                 </div>
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  onDragStart={onRowDragStart}
-                  onDragEnd={onRowDragEnd}
-                  onDragCancel={onRowDragCancel}
-                >
-                  <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
-                    {rows.map((r) => (
-                      <LeftPaneRow
-                        key={r.taskId}
-                        r={r}
-                        isOpen={openParents.has(r.taskId)}
-                        dragEnabled={reorderEnabled}
-                        grouped={hasGroupRail}
-                        onSelect={onSelect}
-                        toggleParent={toggleParent}
-                        statusById={statusById}
-                        teamColorById={teamColorById}
-                        assigneeNameById={assigneeNameById}
-                      />
-                    ))}
-                  </SortableContext>
-                  {/* Floating clone that follows the cursor while a row is dragged — the
-                      lifted/elevated look (shadow + slight scale). The in-place row is
-                      hidden (opacity 0) so its slot is the gap the neighbours reflow open
-                      (via SortableContext transforms) and the clone drops into. */}
-                  <DragOverlay>
-                    {activeRow ? (
-                      <div className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }} data-testid="fe4-gantt-drag-overlay">
-                        <span className={styles.tlRowDrag} aria-hidden>⠿</span>
-                        {teamColorById?.get(activeRow.taskId) && (
-                          <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(activeRow.taskId) }} aria-hidden />
-                        )}
-                        <span className={`${styles.tlDot} ${statusById?.get(activeRow.taskId) ? STATUS_BAR_CLASS[statusById.get(activeRow.taskId)!] : ""}`} aria-hidden />
-                        <span className={styles.tlRowName}>{activeRow.title}</span>
-                      </div>
-                    ) : null}
-                  </DragOverlay>
-                </DndContext>
+                {/* Drag-to-reorder via the shared @dub/ui SortableList: the floating
+                    clone (renderOverlay), the neighbour reflow, and keyboard a11y all
+                    live there — this view supplies the rows and commits the drop. */}
+                <SortableList<gantt.GanttRow>
+                  items={rows}
+                  getItemId={(r) => r.taskId}
+                  disabled={!reorderEnabled}
+                  onReorder={onRowReorder}
+                  aria-label="タスクの並び替え"
+                  renderItem={(r, ctx) => (
+                    <LeftPaneRow
+                      r={r}
+                      isOpen={openParents.has(r.taskId)}
+                      dragEnabled={reorderEnabled}
+                      grouped={hasGroupRail}
+                      dragHandleProps={ctx.dragHandleProps}
+                      onSelect={onSelect}
+                      toggleParent={toggleParent}
+                      statusById={statusById}
+                      teamColorById={teamColorById}
+                      assigneeNameById={assigneeNameById}
+                    />
+                  )}
+                  renderOverlay={(r) => (
+                    <div className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }} data-testid="fe4-gantt-drag-overlay">
+                      <span className={styles.tlRowDrag} aria-hidden>⠿</span>
+                      {teamColorById?.get(r.taskId) && (
+                        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
+                      )}
+                      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+                      <span className={styles.tlRowName}>{r.title}</span>
+                    </div>
+                  )}
+                />
                 {/* sort grouping brackets: one labelled bracket per contiguous same-group run */}
                 {hasGroupRail && (
                   <div className={styles.tlGroupRail} style={{ top: HEADER_H }} data-testid="fe4-gantt-group-rail" aria-hidden>
