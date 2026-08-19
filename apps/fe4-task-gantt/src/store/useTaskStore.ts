@@ -48,6 +48,10 @@ export interface TaskStoreState {
    *  failure it leaves the (optimistic, now-authoritative) cache untouched and silent.
    *  Returns true iff the reconcile fetch succeeded (caller may background-retry). */
   reconcile: (client: ApiClient, q: task.ListTasksQuery) => Promise<boolean>;
+  /** Merge ONE authoritative server task into the cache. Used when the detail panel
+   *  opens: it force-refetches getTask so 開始日/期日/version reflect the server — never a
+   *  stale cached value after a bar drag/resize or someone else's edit. Never errors. */
+  hydrate: (t: task.Task) => void;
   loadMore: (client: ApiClient, q: task.ListTasksQuery) => Promise<void>;
   // optimistic mutation (board D&D / gantt bar D&D / inline edit)
   patchOptimistic: (
@@ -130,6 +134,10 @@ export const useTaskStore = create<TaskStoreState>((set, get) => ({
       // leave the optimistic cache in place and stay silent — caller retries later.
       return false;
     }
+  },
+
+  hydrate(t) {
+    set((s) => ({ tasks: upsert(s.tasks, t) }));
   },
 
   async loadMore(client, q) {

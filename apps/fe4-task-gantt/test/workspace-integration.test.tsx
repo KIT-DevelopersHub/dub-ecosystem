@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import type { task, identity } from "@dub/types";
 import { App } from "../src/App";
 import { MockApiClient } from "../src/api/mock-client";
+import * as api from "../src/api/endpoints";
 
 const EVENT = "evt_test";
 const PERMS: identity.PermissionKey[] = ["task:read", "task:write", "task:delete"];
@@ -81,5 +82,28 @@ describe("TaskWorkspacePage — gantt-only workspace", () => {
     fireEvent.click(await screen.findByTestId("fe4-confirm-yes"));
     await waitFor(() => expect(screen.queryByTestId("fe4-gantt-row-t2")).toBeNull());
     expect(screen.getByTestId("fe4-gantt-row-t1")).toBeInTheDocument();
+  });
+
+  it("force-refetches the task on detail open — shows the fresh schedule, never a stale one", async () => {
+    // Regression for「移動してから詳細を開くと古い日程が出る」. Hold an explicit client so we can
+    // change the server-side schedule WITHOUT going through the page (mimics the race after a
+    // bar drag, or another user's edit): the page's task store still holds t1's OLD dueAt.
+    const client = seedClient();
+    render(<App client={client} eventId={EVENT} permissions={PERMS} />);
+    await screen.findByTestId("fe4-gantt-row-t1");
+
+    // Server now says t1 runs 2026-09-01 → 2026-09-10; the store is NOT reloaded, so it is stale.
+    await api.patchGanttRow(client, "t1", {
+      startsAt: "2026-09-01T00:00:00Z",
+      endsAt: "2026-09-10T00:00:00Z",
+    });
+
+    // Opening the detail must refetch (getTask) and bind the FRESH dates, not the stale cache.
+    fireEvent.click(screen.getByTestId("fe4-gantt-row-t1"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    const start = within(panel).getByTestId("fe4-detail-start") as HTMLInputElement;
+    const due = within(panel).getByTestId("fe4-detail-due") as HTMLInputElement;
+    await waitFor(() => expect(due.value).toBe("2026-09-10"));
+    expect(start.value).toBe("2026-09-01");
   });
 });
