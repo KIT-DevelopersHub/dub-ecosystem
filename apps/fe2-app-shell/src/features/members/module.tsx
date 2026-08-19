@@ -9,6 +9,7 @@ import type { ComponentType } from "react";
 import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { MembersPage } from "./MembersPage.tsx";
+import { MemberRosterPage } from "./MemberRosterPage.tsx";
 
 type PermissionKey = identity.PermissionKey;
 
@@ -28,6 +29,14 @@ export const membersRoutes: MembersSourceRoute[] = [
   {
     path: "/members",
     lazy: () => Promise.resolve({ Component: MembersPage }),
+    auth: "required",
+    requiredPermissions: ["identity:read"],
+  },
+  {
+    // 運営名簿: 運営メンバー全員をフラットな一覧で並べる名簿ビュー（/members と同じ Provider・
+    // 共有サブナビ配下・同じ requiredPermissions）。
+    path: "/members/roster",
+    lazy: () => Promise.resolve({ Component: MemberRosterPage }),
     auth: "required",
     requiredPermissions: ["identity:read"],
   },

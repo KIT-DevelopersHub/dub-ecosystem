@@ -67,7 +67,7 @@ export const routes: FeatureRoute[] = [
 ];
 
 export const nav: NavEntry[] = [
-  { label: "ユーザー名簿", path: "/admin/users", icon: "users", order: 10 },
+  { label: "メール名簿", path: "/admin/users", icon: "users", order: 10 },
   { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 20 },
 ];
 
