@@ -28,6 +28,8 @@ export interface NotificationApi {
   listInbox(query: InboxQueryParams): Promise<ListInboxResponse>;
   getUnreadCount(): Promise<UnreadCountResponse>;
   markRead(id: string): Promise<void>;
+  /** Restore a previously-read item to unread (additive inverse of markRead). */
+  markUnread(id: string): Promise<void>;
   markAllRead(req: ReadAllRequest): Promise<void>;
   getPreferences(): Promise<GetPreferencesResponse>;
   updatePreferences(req: UpdatePreferencesRequest): Promise<void>;
@@ -55,6 +57,9 @@ export function createNotificationApi(client: ApiClient): NotificationApi {
     },
     async markRead(id) {
       await client.patch<void>(`${BASE}/inbox/${encodeURIComponent(id)}/read`);
+    },
+    async markUnread(id) {
+      await client.patch<void>(`${BASE}/inbox/${encodeURIComponent(id)}/unread`);
     },
     async markAllRead(req) {
       await client.post<void>(`${BASE}/inbox/read-all`, req);
