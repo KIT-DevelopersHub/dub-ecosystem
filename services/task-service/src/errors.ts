@@ -9,6 +9,7 @@ export const TaskErrorCodes = {
   VERSION_CONFLICT: "TASK_VERSION_CONFLICT", // 409 optimistic lock mismatch
   DEPENDENCY_CYCLE: "TASK_DEPENDENCY_CYCLE", // 409 cycle (gantt-calc validateDependencies)
   INVALID_STATUS_TRANSITION: "TASK_INVALID_STATUS_TRANSITION", // 409 not in transition table
+  HAS_CHILDREN: "TASK_HAS_CHILDREN", // 409 delete blocked: task still has live children
   GITHUB_ORIGIN_READONLY: "TASK_GITHUB_ORIGIN_READONLY", // 422 protected github field write
   EVENT_ARCHIVED: "TASK_EVENT_ARCHIVED", // 422 create/update under archived event
 } as const;
@@ -34,6 +35,13 @@ export const taskErrors = {
       status: 409,
       details: { from, to },
     });
+  },
+  hasChildren(id: string, childCount: number): DubError {
+    return new DubError(
+      TaskErrorCodes.HAS_CHILDREN,
+      `Task has ${childCount} child task(s); delete or move them first: ${id}`,
+      { status: 409, details: { taskId: id, childCount } },
+    );
   },
   githubOriginReadonly(fields: string[]): DubError {
     return new DubError(TaskErrorCodes.GITHUB_ORIGIN_READONLY, "origin=github task: protected fields are read-only", {

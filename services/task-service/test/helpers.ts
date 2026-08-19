@@ -110,6 +110,14 @@ export class InMemoryTaskRepo implements TaskRepo {
     return true;
   }
 
+  async countLiveChildren(parentId: string): Promise<number> {
+    let n = 0;
+    for (const r of this.rows.values()) {
+      if (r.parentTaskId === parentId && r.archivedAt === null) n += 1;
+    }
+    return n;
+  }
+
   async archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]> {
     const ids: string[] = [];
     for (const r of this.rows.values()) {

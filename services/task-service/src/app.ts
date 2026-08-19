@@ -366,6 +366,13 @@ export function buildApp(deps: Deps): Hono {
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
 
+    // Fail-close: a parent with live children must not be archived. Archiving it would
+    // orphan the children (their parent_id points at an archived row) and the gantt read
+    // model then silently re-parents them under the previous element. Block the delete
+    // and require the caller to remove/move the children first. Idempotent + additive.
+    const childCount = await deps.repo.countLiveChildren(id);
+    if (childCount > 0) throw taskErrors.hasChildren(id, childCount);
+
     const now = nowIso();
     const ok = await deps.repo.archive(id, now);
     if (!ok) throw taskErrors.notFound(id);

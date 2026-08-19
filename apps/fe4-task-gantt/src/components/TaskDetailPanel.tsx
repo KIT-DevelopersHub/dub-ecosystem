@@ -88,6 +88,9 @@ export function TaskDetailPanel({
   const [parentId, setParentId] = useState<common.TaskId | null>(parentTaskId);
   const [deps, setDeps] = useState<common.TaskId[]>([...dependsOnIds]);
   const [confirming, setConfirming] = useState(false);
+  // "子タスクがあるため削除できません" block — shown instead of the delete confirm when
+  // the task still has direct children (deleting would orphan/re-parent them).
+  const [blockedByChildren, setBlockedByChildren] = useState(false);
 
   // Predecessors are limited to this task's siblings under its (possibly changed)
   // parent — same scope only (判断10). Excludes self.
@@ -327,8 +330,15 @@ export function TaskDetailPanel({
           <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
             保存
           </Button>
-          {canDelete && !confirming && (
-            <Button variant="danger" onClick={() => setConfirming(true)} testId="fe4-detail-delete">
+          {canDelete && !confirming && !blockedByChildren && (
+            <Button
+              variant="danger"
+              // A task with children cannot be deleted (deleting it would orphan the
+              // children and the read model would silently re-parent them). Show the
+              // block message instead of the delete confirm — no re-parenting ever.
+              onClick={() => (childCount > 0 ? setBlockedByChildren(true) : setConfirming(true))}
+              testId="fe4-detail-delete"
+            >
               削除
             </Button>
           )}
@@ -343,6 +353,19 @@ export function TaskDetailPanel({
               </Button>
               <Button variant="ghost" onClick={() => setConfirming(false)} testId="fe4-confirm-no">
                 やめる
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {blockedByChildren && (
+          <div className={styles.confirmBox} data-testid="fe4-delete-blocked" role="alert">
+            <p className={styles.confirmText}>
+              子タスクが{childCount}件あるため削除できません。先に子タスクを削除または別の親へ移動してください。
+            </p>
+            <div className={styles.panelActions}>
+              <Button variant="ghost" onClick={() => setBlockedByChildren(false)} testId="fe4-delete-blocked-ok">
+                閉じる
               </Button>
             </div>
           </div>
