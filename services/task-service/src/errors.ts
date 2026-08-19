@@ -11,6 +11,7 @@ export const TaskErrorCodes = {
   INVALID_STATUS_TRANSITION: "TASK_INVALID_STATUS_TRANSITION", // 409 not in transition table
   GITHUB_ORIGIN_READONLY: "TASK_GITHUB_ORIGIN_READONLY", // 422 protected github field write
   EVENT_ARCHIVED: "TASK_EVENT_ARCHIVED", // 422 create/update under archived event
+  REQUEST_NOT_FOUND: "TASK_REQUEST_NOT_FOUND", // 404 missing task request (send-receive)
 } as const;
 
 export const taskErrors = {
@@ -46,5 +47,12 @@ export const taskErrors = {
       status: 422,
       details: { eventId },
     });
+  },
+  requestNotFound(id?: string): DubError {
+    return new DubError(
+      TaskErrorCodes.REQUEST_NOT_FOUND,
+      id ? `Task request not found: ${id}` : "Task request not found",
+      { status: 404 },
+    );
   },
 };

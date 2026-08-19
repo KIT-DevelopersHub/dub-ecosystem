@@ -747,3 +747,61 @@ describe("POST /task-requests (send / 送る)", () => {
     expect(res.status).toBe(400);
   });
 });
+
+// GET /task-requests (incoming/outgoing) + GET /task-requests/:id. Default caller usr_alice.
+describe("GET /task-requests (list + one)", () => {
+  const seed = (h: TestHarness, id: string, from: string, to: string, over: Record<string, unknown> = {}) =>
+    h.repo.insertRequest({
+      id,
+      eventId: "evt_1",
+      fromUserId: from,
+      toUserId: to,
+      fromTeamId: null,
+      toTeamId: null,
+      title: id,
+      description: null,
+      priority: "medium",
+      dueAt: null,
+      sourceTaskId: null,
+      now: "2026-08-20T00:00:00.000Z",
+      ...over,
+    });
+
+  it("box=incoming returns only requests addressed to the caller; outgoing only from the caller", async () => {
+    const { h, app } = setup();
+    await seed(h, "treq_in", "usr_carol", "usr_alice");
+    await seed(h, "treq_out", "usr_alice", "usr_bob");
+    await seed(h, "treq_other", "usr_dan", "usr_eve");
+
+    const inc = (await (await app.request("/task-requests?box=incoming", userInit("GET"))).json()) as task.ListTaskRequestsResponse;
+    expect(inc.items.map((r) => r.id)).toEqual(["treq_in"]);
+    const out = (await (await app.request("/task-requests?box=outgoing", userInit("GET"))).json()) as task.ListTaskRequestsResponse;
+    expect(out.items.map((r) => r.id)).toEqual(["treq_out"]);
+  });
+
+  it("400 when box is missing or invalid", async () => {
+    const { app } = setup();
+    expect((await app.request("/task-requests", userInit("GET"))).status).toBe(400);
+    expect((await app.request("/task-requests?box=sideways", userInit("GET"))).status).toBe(400);
+  });
+
+  it("filters by state", async () => {
+    const { h, app } = setup();
+    await seed(h, "treq_p", "usr_bob", "usr_alice");
+    await seed(h, "treq_a", "usr_bob", "usr_alice");
+    await h.repo.decideRequest("treq_a", { state: "accepted" }, 1, "2026-08-20T01:00:00.000Z");
+    const res = (await (await app.request("/task-requests?box=incoming&state=pending", userInit("GET"))).json()) as task.ListTaskRequestsResponse;
+    expect(res.items.map((r) => r.id)).toEqual(["treq_p"]);
+  });
+
+  it("GET /:id returns the request to a participant, 404 to a stranger, 404 when missing", async () => {
+    const { h, app } = setup();
+    await seed(h, "treq_x", "usr_alice", "usr_bob");
+    await seed(h, "treq_y", "usr_dan", "usr_eve");
+    expect((await app.request("/task-requests/treq_x", userInit("GET"))).status).toBe(200);
+    const stranger = await app.request("/task-requests/treq_y", userInit("GET"));
+    expect(stranger.status).toBe(404);
+    expect(((await stranger.json()) as { error: { code: string } }).error.code).toBe("TASK_REQUEST_NOT_FOUND");
+    expect((await app.request("/task-requests/treq_missing", userInit("GET"))).status).toBe(404);
+  });
+});

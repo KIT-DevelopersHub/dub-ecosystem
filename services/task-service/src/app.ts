@@ -645,5 +645,54 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res, 201);
   });
 
+  // ---- GET /task-requests (my incoming / outgoing) ----
+  app.get("/task-requests", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:read");
+    // incoming/outgoing are self-scoped ("my" requests), so a caller identity is required.
+    if (principal.kind !== "user") {
+      throw errors.validationFailed([{ field: "box", reason: "requires_user" }]);
+    }
+    const box = c.req.query("box");
+    if (box !== "incoming" && box !== "outgoing") {
+      throw errors.validationFailed([{ field: "box", reason: "required" }]);
+    }
+    const statesRaw = (c.req.queries("state") ?? []).flatMap((s) => s.split(",")).filter(Boolean);
+    const valid = new Set<task.TaskRequestState>(["pending", "accepted", "declined", "cancelled"]);
+    const fe: FieldError[] = [];
+    for (const s of statesRaw) if (!valid.has(s as task.TaskRequestState)) fe.push({ field: "state", reason: "invalid" });
+    assertValid(fe);
+
+    const eventId = c.req.query("eventId");
+    const cursorRaw = c.req.query("cursor");
+    const page = await deps.repo.listRequests({
+      box,
+      userId: principal.userId,
+      limit: normalizeLimit(c.req.query("limit")),
+      ...(statesRaw.length > 0 ? { states: statesRaw as task.TaskRequestState[] } : {}),
+      ...(eventId ? { eventId } : {}),
+      ...(cursorRaw ? { cursorId: decodeCursor(cursorRaw) } : {}),
+    });
+    const res: task.ListTaskRequestsResponse = { items: page.items, nextCursor: page.nextCursor };
+    return c.json(res);
+  });
+
+  // ---- GET /task-requests/:id ----
+  app.get("/task-requests/:id", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:read");
+    const id = c.req.param("id");
+    const found = await deps.repo.getRequestById(id);
+    if (!found) throw taskErrors.requestNotFound(id);
+    // Only the two participants (requester / receiver) may read a request; to anyone else
+    // it is 404 (never leak its existence). Service-role reads (mobile-bff) are trusted.
+    if (principal.kind === "user" && principal.userId !== found.fromUserId && principal.userId !== found.toUserId) {
+      throw taskErrors.requestNotFound(id);
+    }
+    return c.json(found);
+  });
+
   return app;
 }
