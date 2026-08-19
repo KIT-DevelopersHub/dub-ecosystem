@@ -6,6 +6,10 @@
 //   POST /api/v1/auth/password/login  -> Set-Cookie dub_session + {token,session}
 //   GET  /api/v1/me                   -> MeResponse         (needs dub_session)
 //   GET  /api/v1/notifications/inbox  -> PaginatedInbox     (needs dub_session)
+//   GET  /api/v1/identity/users       -> PaginatedUsers     (roster members)
+//   GET  /api/v1/identity/roles       -> PaginatedRoles     (role catalog)
+//   GET  /api/v1/mail/admin/email-routing/addresses
+//                                     -> EmailRoutingAddressList (メール名簿)
 //   POST /api/v1/auth/logout          -> {ok:true}
 //
 // Run:  dart run tool/mock_gateway.dart [port]   (default port 8799)
@@ -68,6 +72,16 @@ Future<void> _route(HttpRequest req) async {
   }
   if (method == 'GET' && path == '/api/v1/notifications/inbox') {
     return _json(req, 200, _inbox());
+  }
+  if (method == 'GET' && path == '/api/v1/identity/users') {
+    return _json(req, 200, _users());
+  }
+  if (method == 'GET' && path == '/api/v1/identity/roles') {
+    return _json(req, 200, _roles());
+  }
+  if (method == 'GET' &&
+      path == '/api/v1/mail/admin/email-routing/addresses') {
+    return _json(req, 200, _emailRoutingAddresses());
   }
 
   _json(req, 404, {
@@ -139,7 +153,12 @@ Map<String, dynamic> _me() => {
         'avatarUrl': null,
       },
       'orgId': 'org_devhub',
-      'permissions': ['notif:inbox:self', 'chat:read'],
+      'permissions': [
+        'notif:inbox:self',
+        'chat:read',
+        'identity:read',
+        'mail:admin',
+      ],
       'sessionExpiresAt':
           DateTime.now().add(const Duration(hours: 12)).millisecondsSinceEpoch,
     };
@@ -191,6 +210,96 @@ Map<String, dynamic> _inbox() {
       },
     ],
     'nextCursor': null,
+  };
+}
+
+// identity-roster PaginatedRoles — the org's role catalog (roleId -> name).
+Map<String, dynamic> _roles() => {
+      'items': [
+        {
+          'id': 'role_admin',
+          'orgId': 'org_devhub',
+          'name': '管理者',
+          'permissions': ['identity:admin', 'identity:read'],
+          'isSystem': true,
+          'memberCount': 1,
+        },
+        {
+          'id': 'role_organizer',
+          'orgId': 'org_devhub',
+          'name': '運営',
+          'permissions': ['event:write', 'identity:read'],
+          'isSystem': false,
+          'memberCount': 2,
+        },
+        {
+          'id': 'role_member',
+          'orgId': 'org_devhub',
+          'name': 'メンバー',
+          'permissions': ['chat:read'],
+          'isSystem': false,
+          'memberCount': 3,
+        },
+      ],
+      'nextCursor': null,
+    };
+
+// identity-roster PaginatedUsers — the roster members (email + roleIds).
+Map<String, dynamic> _users() {
+  String iso(Duration ago) =>
+      DateTime.now().toUtc().subtract(ago).toIso8601String();
+  Map<String, dynamic> u(
+    String id,
+    String name,
+    String email,
+    String status,
+    List<String> roleIds, {
+    String? github,
+  }) =>
+      {
+        'id': id,
+        'orgId': 'org_devhub',
+        'displayName': name,
+        'email': email,
+        'githubLogin': github,
+        'avatarUrl': null,
+        'status': status,
+        'roleIds': roleIds,
+        'createdAt': iso(const Duration(days: 30)),
+        'updatedAt': iso(const Duration(days: 1)),
+      };
+  return {
+    'items': [
+      u('usr_demo', 'デモ 太郎', 'demo@developershub.jp', 'active',
+          ['role_admin', 'role_organizer'], github: 'demo-taro'),
+      u('usr_hanako', '運営 花子', 'hanako@developershub.jp', 'active',
+          ['role_organizer']),
+      u('usr_ichiro', '一般 一郎', 'ichiro@developershub.jp', 'active',
+          ['role_member']),
+      u('usr_jiro', '招待 次郎', 'jiro@developershub.jp', 'invited',
+          const <String>[]),
+    ],
+    'nextCursor': null,
+  };
+}
+
+// mail-gateway EmailRoutingAddressList — Cloudflare Email Routing destinations.
+Map<String, dynamic> _emailRoutingAddresses() {
+  String iso(Duration ago) =>
+      DateTime.now().toUtc().subtract(ago).toIso8601String();
+  Map<String, dynamic> a(String id, String email, {bool verified = true}) => {
+        'id': id,
+        'email': email,
+        'verified': verified ? iso(const Duration(days: 10)) : null,
+        'created': iso(const Duration(days: 40)),
+        'modified': iso(const Duration(days: 5)),
+      };
+  return {
+    'items': [
+      a('adr_1', 'taro.personal@gmail.com'),
+      a('adr_2', 'hanako.personal@gmail.com'),
+      a('adr_3', 'ichiro.personal@outlook.com', verified: false),
+    ],
   };
 }
 

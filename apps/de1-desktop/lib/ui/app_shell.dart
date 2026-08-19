@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/roster/roster_view.dart';
 import '../state/auth.dart';
 import 'inbox_view.dart';
 
@@ -22,7 +23,7 @@ const _apps = <DubApp>[
   DubApp('gantt', 'ガント', Icons.timeline),
   DubApp('mail', 'メール', Icons.mail_outline),
   DubApp('events', 'イベント', Icons.event_outlined),
-  DubApp('roster', '名簿', Icons.groups_outlined),
+  DubApp('roster', '名簿', Icons.groups_outlined, ready: true),
   DubApp('drive', 'ドライブ', Icons.folder_outlined),
 ];
 
@@ -112,6 +113,8 @@ class _AppBody extends StatelessWidget {
     switch (selectedId) {
       case 'notifications':
         return const InboxView();
+      case 'roster':
+        return const RosterView();
       default:
         final app = _apps.firstWhere((a) => a.id == selectedId,
             orElse: () => _apps.first);

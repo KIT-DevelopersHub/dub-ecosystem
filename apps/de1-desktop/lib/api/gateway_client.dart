@@ -77,6 +77,23 @@ class GatewayClient {
     return PaginatedInbox.fromJson(res.data!);
   }
 
+  /// Generic authenticated GET returning the decoded JSON object. Feature
+  /// modules (e.g. roster) call this with a gateway-relative path (leading
+  /// slash, without the `/api/v1` prefix) and parse the body into their own
+  /// contract models, so this shared client stays free of feature-specific
+  /// types. Non-2xx bodies are mapped to [DubApiException].
+  Future<Map<String, dynamic>> getJson(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    final res = await _dio.get<Map<String, dynamic>>(
+      '$_p$path',
+      queryParameters: query,
+    );
+    _throwIfError(res);
+    return res.data ?? const <String, dynamic>{};
+  }
+
   /// POST /api/v1/auth/logout — revoke the current session and clear cookies.
   Future<void> logout() async {
     try {
