@@ -1,0 +1,137 @@
+name: Deploy (staging)
+
+# PR -> STAGING deploy, label-triggered.
+#
+# WHY label-triggered (not every push): there is ONE shared staging environment but
+# many concurrent open PRs. Auto-deploying every push would make them fight over the
+# single environment. Instead, the reviewer adds the `stagingへ` label to the ONE PR
+# under review; that PR (and its subsequent pushes) occupy staging. Per-PR preview
+# environments would be needed for "every PR auto-deploys" — a future step, not $0.
+#
+# Flow:
+#   add `stagingへ` label  -> this workflow builds the PR head and deploys the
+#                             `-staging` Worker set (infra/deploy/deploy-staging.sh)
+#                          -> posts/updates a sticky PR comment with the staging URLs
+#   owner opens the URL, verifies, then adds `確認した` (prod-gate.yml turns green)
+#
+# Cost: staging Workers/D1/KV are all free tier; GitHub Actions minutes are free on
+# this public repo. See docs/runbooks/04-staging-label-gate.md.
+
+on:
+  pull_request:
+    # `labeled` fires when `stagingへ` is added; `synchronize` redeploys new pushes of
+    # an already-labelled PR; `reopened` re-covers a reopened labelled PR.
+    types: [labeled, synchronize, reopened]
+
+# Single shared staging environment: newest labelled PR/push wins, older run cancelled.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write # sticky staging-URL comment
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+
+jobs:
+  staging:
+    name: build · deploy-staging · comment
+    # Only run when the PR currently carries the `stagingへ` label (covers both the
+    # `labeled` event that added it and later `synchronize` pushes while it stays on).
+    if: contains(github.event.pull_request.labels.*.name, 'stagingへ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Preflight — CF token present (same-repo PRs only)
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN is unavailable (fork PR?). Staging deploy is skipped — run it from a same-repo branch."
+            exit 1
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
+      # Derive the staging gateway/fe2 origins from the committed resource file so the
+      # fe2 bundle bakes in the STAGING gateway (never the prod one).
+      - name: Resolve staging origins
+        id: origins
+        run: |
+          set -a; . infra/deploy/staging-resources.env; set +a
+          SUB="${STAGING_WORKERS_SUBDOMAIN}"
+          echo "gateway=https://dub-api-gateway-staging.${SUB}.workers.dev" >> "$GITHUB_OUTPUT"
+          echo "fe2=https://dub-fe2-app-shell-staging.${SUB}.workers.dev"   >> "$GITHUB_OUTPUT"
+
+      # Build everything; fe2's Vite bundle bakes in the STAGING gateway base URL.
+      - name: Build
+        env:
+          VITE_API_BASE_URL: ${{ steps.origins.outputs.gateway }}
+        run: pnpm run build
+
+      - name: Deploy to staging
+        run: bash infra/deploy/deploy-staging.sh
+
+      - name: Sticky staging-URL comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          FE2_URL: ${{ steps.origins.outputs.fe2 }}
+          GW_URL: ${{ steps.origins.outputs.gateway }}
+        run: |
+          MARKER="<!-- staging-deploy -->"
+          # Build the comment body into a file (every line stays indented under `run: |`,
+          # so no column-0 heredoc that would break the YAML block scalar).
+          {
+            echo "${MARKER}"
+            echo "### 🌐 staging デプロイ完了 (\`stagingへ\`)"
+            echo ""
+            echo "| 対象 | URL |"
+            echo "|---|---|"
+            echo "| 管理画面 (fe2) | ${FE2_URL} |"
+            echo "| api-gateway | ${GW_URL} |"
+            echo ""
+            echo "- commit: \`${SHA}\`"
+            echo "- 更新時刻: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo ""
+            echo "動作確認できたら、この PR に **\`確認した\`** ラベルを付けてください（本番マージのゲートが緑になります）。"
+          } > /tmp/staging-comment.md
+          CID="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n1)"
+          if [ -n "${CID}" ]; then
+            gh api --method PATCH "repos/${REPO}/issues/comments/${CID}" -F body=@/tmp/staging-comment.md >/dev/null
+            echo "updated sticky comment ${CID}"
+          else
+            gh pr comment "${PR}" --repo "${REPO}" --body-file /tmp/staging-comment.md
+            echo "created sticky comment"
+          fi
