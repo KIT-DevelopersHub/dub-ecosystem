@@ -16,6 +16,7 @@ import {
 import { MyTasksFilterBar } from "./MyTasksFilterBar";
 import { MyTaskList } from "./MyTaskList";
 import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
+import { MyTaskRequests } from "./MyTaskRequests";
 import { TaskDetailDialog } from "./TaskDetailDialog";
 import styles from "../styles/app.module.css";
 
@@ -252,6 +253,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           </button>
         ))}
       </div>
+
+      <MyTaskRequests seedUsers={effectivePeople} onChanged={load} />
 
       <MyTasksFilterBar
         value={filter}
