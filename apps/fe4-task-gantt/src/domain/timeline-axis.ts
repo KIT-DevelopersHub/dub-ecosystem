@@ -300,6 +300,56 @@ export function rollupRowDates(rows: readonly gantt.GanttRow[]): gantt.GanttRow[
   return rows.map((r) => byId.get(r.taskId)!);
 }
 
+/**
+ * A parent (work-package) enclosure: the vertical band a parent bar grows to
+ * cover so it visually CONTAINS its (visible) descendant rows — the "内包" look.
+ *
+ * Pure geometry over the *visible* rows: a parent's descendants always render as
+ * a contiguous run immediately after it (children only appear when the parent is
+ * open, depth-first), so the enclosure is [parentRow .. lastRow with depth > the
+ * parent's depth]. Using `depth` (not direct `parentTaskId`) is what makes 3–4
+ * level nesting work — a grandparent's run keeps counting THROUGH an inner
+ * parent's own children instead of stopping at the first non-direct-child.
+ *
+ * `rowStart`/`rowCount` are row indices/counts; `top`/`height` are the px band.
+ * A parent whose children are collapsed (no deeper rows follow) yields nothing —
+ * folded parents fall back to the ordinary 1-row bar. The horizontal extent
+ * (start/end) is the parent bar's own span and is applied by the view.
+ */
+export interface ParentEnclosure {
+  taskId: string;
+  depth: number;
+  rowStart: number;
+  rowCount: number; // parent row + its visible descendants
+  top: number;
+  height: number;
+}
+
+export function parentEnclosures(rows: readonly gantt.GanttRow[]): ParentEnclosure[] {
+  const out: ParentEnclosure[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]!;
+    if (!r.hasChildren) continue;
+    const depth = r.depth ?? 0;
+    let n = 0;
+    for (let j = i + 1; j < rows.length; j++) {
+      if ((rows[j]!.depth ?? 0) > depth) n += 1;
+      else break;
+    }
+    if (n > 0) {
+      out.push({
+        taskId: r.taskId,
+        depth,
+        rowStart: i,
+        rowCount: n + 1,
+        top: i * ROW_HEIGHT,
+        height: (n + 1) * ROW_HEIGHT,
+      });
+    }
+  }
+  return out;
+}
+
 /** Minimum bar width so a same-day task stays grabbable. */
 const MIN_BAR_PX = 16;
 
