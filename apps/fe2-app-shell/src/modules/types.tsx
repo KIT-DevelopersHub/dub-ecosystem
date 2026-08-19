@@ -41,6 +41,11 @@ export interface FeatureModule {
   nav: NavEntry[];
   requiredPermissions?: PermissionKey[]; // applies to all module routes; fail-closed while /me loading
   headerWidget?: ComponentType; // e.g. FE5 NotificationBell
+  // Where headerWidget sits in the header actions row. "trailing" (default) renders
+  // it in the right-hand icon group (after the 9-dot AppLauncher) — the bell. "leading"
+  // renders it BEFORE the AppLauncher — used by the gantt event switcher so the context
+  // selector sits left of the 9-dot (GCP-style), while the bell stays right of it.
+  headerWidgetPlacement?: "leading" | "trailing";
   homeWidget?: HomeWidget; // dashboard body a feature contributes to HomeScreen (design 2-1)
 }
 
@@ -69,6 +74,7 @@ export interface Registry {
   modules: FeatureModule[];
   nav: NavEntry[]; // sorted by order asc
   routes: ResolvedRoute[]; // flattened (children included)
-  headerWidgets: ComponentType[];
+  headerWidgets: ComponentType[]; // trailing widgets (right icon group, after the AppLauncher)
+  leadingHeaderWidgets: ComponentType[]; // rendered BEFORE the AppLauncher (e.g. event switcher)
   homeWidgets: HomeWidget[]; // dashboard cards, in module registration order
 }

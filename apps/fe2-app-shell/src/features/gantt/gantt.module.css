@@ -1,0 +1,14 @@
+/* Global イベント switcher in the app-shell header (GCP-style project selector).
+   All colours/space via @dub/tokens. Sits at the LEADING edge of the header actions
+   row — left of the 9-dot AppLauncher — as the bare dropdown (no text label); a right
+   divider + spacing separate it from the app/utility icon cluster. */
+.switcher {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--dub-space-2, 8px);
+  padding-right: var(--dub-space-3, 12px);
+  border-right: 1px solid var(--dub-color-border-default);
+}
+@media (max-width: 640px) {
+  .switcher { padding-right: var(--dub-space-2, 8px); }
+}

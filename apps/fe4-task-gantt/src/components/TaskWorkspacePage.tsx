@@ -87,6 +87,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // ("先行タスクを作成" from the detail panel).
   const [createPredecessorFor, setCreatePredecessorFor] = useState<common.TaskId | null>(null);
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
+  // When the active event changes (the global header switcher navigates to another
+  // event's gantt → new eventId prop, same mounted route), drop the previous event's
+  // filter (it carries the eventId + status narrowing) and any open selection so the
+  // new event loads clean. Skip the initial mount — filter is already seeded.
+  const prevEventRef = useRef(eventId);
+  useEffect(() => {
+    if (prevEventRef.current === eventId) return;
+    prevEventRef.current = eventId;
+    setFilter(emptyFilter(eventId));
+    setSelected(null);
+  }, [eventId]);
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
   // Per-user view state — carries the personal manual row order (drag reorder).
