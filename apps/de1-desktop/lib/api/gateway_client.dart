@@ -18,6 +18,11 @@ class GatewayClient {
   final Dio _dio;
   final PersistCookieJar _jar;
 
+  /// The authenticated dio (carries the persistent `dub_session` cookie).
+  /// Exposed so per-feature API wrappers (e.g. `GanttApi`) can reuse the same
+  /// browser-identical session without re-plumbing auth. Additive, read-only.
+  Dio get dio => _dio;
+
   static Future<GatewayClient> create() async {
     final jar = PersistCookieJar(storage: FileStorage(_cookieDir()));
     final dio = Dio(

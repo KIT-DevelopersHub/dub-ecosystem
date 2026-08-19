@@ -70,6 +70,68 @@ Future<void> _route(HttpRequest req) async {
     return _json(req, 200, _inbox());
   }
 
+  // --- gantt-service segment (docs/openapi/gantt-service.yaml) ---
+  // Query param is `eventId` (NOT `event`) per the contract.
+  if (method == 'GET' && path == '/api/v1/gantt') {
+    final eventId = req.uri.queryParameters['eventId'];
+    if (eventId == null || eventId.isEmpty) {
+      return _json(req, 400, {
+        'error': {
+          'code': 'VALIDATION_FAILED',
+          'message': 'eventId is required',
+          'retryable': false,
+        }
+      });
+    }
+    return _json(req, 200, _ganttChart(eventId));
+  }
+  if (method == 'GET' && path == '/api/v1/gantt/dependencies') {
+    final eventId = req.uri.queryParameters['eventId'] ?? 'evt_conf';
+    final chart = _ganttChart(eventId);
+    return _json(req, 200, {
+      'eventId': eventId,
+      'dependencies': chart['dependencies'],
+    });
+  }
+  if (path == '/api/v1/gantt/views') {
+    final eventId = req.uri.queryParameters['eventId'] ?? 'evt_conf';
+    if (method == 'GET') {
+      return _json(req, 200, _ganttView(eventId));
+    }
+    if (method == 'PUT') {
+      final body = await utf8.decoder.bind(req).join();
+      final data = body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(body) as Map<String, dynamic>;
+      return _json(req, 200, {
+        'eventId': eventId,
+        'zoom': (data['zoom'] as String?) ?? 'week',
+        'collapsedTaskIds': data['collapsedTaskIds'] ?? <String>[],
+        if (data['orderedTaskIds'] != null)
+          'orderedTaskIds': data['orderedTaskIds'],
+      });
+    }
+  }
+  if (method == 'PATCH' && path.startsWith('/api/v1/gantt/rows/')) {
+    final taskId = path.substring('/api/v1/gantt/rows/'.length);
+    final body = await utf8.decoder.bind(req).join();
+    final data = body.isEmpty
+        ? <String, dynamic>{}
+        : jsonDecode(body) as Map<String, dynamic>;
+    // Echo back an updated row reflecting the requested window.
+    final base = _ganttRowsById()[taskId];
+    if (base == null) {
+      return _json(req, 404, {
+        'error': {'code': 'NOT_FOUND', 'message': 'no such task', 'retryable': false}
+      });
+    }
+    return _json(req, 200, {
+      ...base,
+      'startsAt': data['startsAt'],
+      'endsAt': data['endsAt'],
+    });
+  }
+
   _json(req, 404, {
     'error': {'code': 'NOT_FOUND', 'message': 'no route', 'retryable': false}
   });
@@ -193,6 +255,107 @@ Map<String, dynamic> _inbox() {
     'nextCursor': null,
   };
 }
+
+// --- gantt mock data ---------------------------------------------------------
+
+/// A small, contract-faithful gantt anchored around "today" so the bars always
+/// land in the visible window. FS dependencies chain the rows.
+List<Map<String, dynamic>> _ganttRows() {
+  String day(int offset) {
+    final base = DateTime.now().toUtc();
+    final d = DateTime.utc(base.year, base.month, base.day)
+        .add(Duration(days: offset));
+    return d.toIso8601String();
+  }
+
+  return [
+    {
+      'taskId': 'tsk_plan',
+      'title': '企画・要件定義',
+      'startsAt': day(-3),
+      'endsAt': day(2),
+      'progressPercent': 100,
+      'assigneeId': 'usr_demo',
+    },
+    {
+      'taskId': 'tsk_design',
+      'title': '会場・登壇者調整',
+      'startsAt': day(3),
+      'endsAt': day(9),
+      'progressPercent': 60,
+      'assigneeId': 'usr_demo',
+    },
+    {
+      'taskId': 'tsk_build',
+      'title': 'サイト・受付システム構築',
+      'startsAt': day(6),
+      'endsAt': day(16),
+      'progressPercent': 25,
+      'assigneeId': 'usr_demo',
+    },
+    {
+      'taskId': 'tsk_promo',
+      'title': '告知・集客',
+      'startsAt': day(10),
+      'endsAt': day(20),
+      'progressPercent': 10,
+      'assigneeId': null,
+    },
+    {
+      'taskId': 'tsk_run',
+      'title': '当日運営',
+      'startsAt': day(21),
+      'endsAt': day(22),
+      'progressPercent': 0,
+      'assigneeId': null,
+    },
+  ];
+}
+
+Map<String, Map<String, dynamic>> _ganttRowsById() => {
+      for (final r in _ganttRows()) r['taskId'] as String: r,
+    };
+
+Map<String, dynamic> _ganttChart(String eventId) => {
+      'eventId': eventId,
+      'rows': _ganttRows(),
+      'dependencies': [
+        {
+          'id': 'dep_1',
+          'fromTaskId': 'tsk_plan',
+          'toTaskId': 'tsk_design',
+          'type': 'FS',
+          'lagDays': 0,
+        },
+        {
+          'id': 'dep_2',
+          'fromTaskId': 'tsk_design',
+          'toTaskId': 'tsk_build',
+          'type': 'FS',
+          'lagDays': 0,
+        },
+        {
+          'id': 'dep_3',
+          'fromTaskId': 'tsk_build',
+          'toTaskId': 'tsk_run',
+          'type': 'FS',
+          'lagDays': 0,
+        },
+        {
+          'id': 'dep_4',
+          'fromTaskId': 'tsk_promo',
+          'toTaskId': 'tsk_run',
+          'type': 'FS',
+          'lagDays': 0,
+        },
+      ],
+    };
+
+Map<String, dynamic> _ganttView(String eventId) => {
+      'eventId': eventId,
+      'zoom': 'week',
+      'collapsedTaskIds': <String>[],
+    };
 
 void _json(HttpRequest req, int status, Map<String, dynamic> body) {
   req.response
