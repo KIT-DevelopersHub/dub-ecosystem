@@ -156,6 +156,10 @@ export function UserListPage() {
     {
       key: "member",
       header: "運営メンバー",
+      // noWrap keeps the badge名/ボタンを1行に保つ (white-space:nowrap)。列見出しが文脈を
+      // 与えるのでボタンは「紐付け」に短縮し、幅を詰め込みすぎず1行に収める。
+      noWrap: true,
+      minWidth: "9rem",
       cell: (u) => {
         const linked = memberByIdentity.get(u.id);
         if (linked) {
@@ -175,7 +179,7 @@ export function UserListPage() {
         }
         return canLinkMembers ? (
           <Button variant="ghost" size="sm" onClick={() => setLinkAccount(u)} testId={`fe7-users-member-link-${u.id}`}>
-            運営メンバーと紐付け
+            紐付け
           </Button>
         ) : (
           <span style={{ color: "var(--dub-color-fg-muted, #57606a)" }}>未設定</span>
