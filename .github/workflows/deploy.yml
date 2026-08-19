@@ -55,6 +55,10 @@ jobs:
       # Public origins used by the post-deploy smoke checks.
       GATEWAY_HEALTH_URL: ${{ vars.GATEWAY_HEALTH_URL || 'https://dub-api-gateway.developershub-site.workers.dev' }}
       MOBILE_BFF_HEALTH_URL: ${{ vars.MOBILE_BFF_HEALTH_URL }}
+      # Optional: when set, deploy-prod.sh arms the app-health-monitor hourly alarm after deploy
+      # (POST /internal/monitor/kick, gated by this shared token). Unset => armed manually once.
+      MONITOR_ADMIN_TOKEN: ${{ secrets.MONITOR_ADMIN_TOKEN }}
+      MONITOR_HEALTH_URL: ${{ vars.MONITOR_HEALTH_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
