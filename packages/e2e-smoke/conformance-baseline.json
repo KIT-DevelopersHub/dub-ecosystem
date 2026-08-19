@@ -32,6 +32,7 @@
   },
   "drive-proxy": {
     "missingInSpec": [
+      "GET /internal/health",
       "POST /drive/watch",
       "POST /drive/watch/{}/stop"
     ],
@@ -45,6 +46,7 @@
   },
   "github-sync": {
     "missingInSpec": [
+      "GET /internal/health",
       "POST /internal/events-async",
       "POST /internal/reconcile/kick",
       "POST /internal/webhooks-async"

@@ -433,6 +433,11 @@ paths:
                     moderator:
                       type: string
                       enum: [hard, tombstone]
+                    protectReacted:
+                      type: boolean
+                      description: >-
+                        誤削除防止. When true, a reacted message cannot be deleted by a
+                        non-moderator (moderators/admin are exempt). Default false.
       responses:
         '200':
           description: The updated deletion policy
