@@ -176,6 +176,7 @@ export function AppShellLayout({
               menuLabel="設定"
               icon="settings"
               align="end"
+              iconOnly
               items={[
                 {
                   id: "change-password",

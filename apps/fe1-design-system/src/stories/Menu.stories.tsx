@@ -27,6 +27,23 @@ export const SettingsMenu: Story = {
   ),
 };
 
+// Icon-only trigger (40px square) — matches the header AppLauncher/bell controls.
+// This is how FE2 renders the header 設定 menu.
+export const IconOnly: Story = {
+  args: {
+    label: "設定",
+    menuLabel: "設定",
+    icon: "settings",
+    iconOnly: true,
+    items: [{ id: "password", label: "パスワード変更", icon: "lock", onSelect: () => {} }],
+  },
+  render: (args) => (
+    <div style={{ padding: 48, display: "flex", justifyContent: "flex-end" }}>
+      <Menu {...args} />
+    </div>
+  ),
+};
+
 export const MultipleItems: Story = {
   args: {
     label: "操作",
