@@ -124,6 +124,7 @@ function toRow(
   anchorDay: number,
   esOffsetByTask: Record<common.TaskId, number>,
   h: Hierarchy,
+  roleByTask: Map<common.TaskId, task.TaskCrossRole>,
 ): gantt.GanttRow {
   const isParent = h.hasChildren.has(t.id);
   const dur = durationDaysOf(t.priority);
@@ -160,6 +161,10 @@ function toRow(
     depth: h.depthOf.get(t.id) ?? 0,
     hasChildren: isParent,
     ...(t.wbs ? { wbs: t.wbs } : {}),
+    // 送る・受け取る badge (ADR-0007): a row that is an endpoint of a cross-link carries
+    // its role. NO arrow is drawn — this is a separate channel from `dependencies`, so
+    // CPM never sees it. Absent ⇒ no cross-team link on this row.
+    ...(roleByTask.has(t.id) ? { crossTeamRole: roleByTask.get(t.id)! } : {}),
   };
 }
 
@@ -184,9 +189,22 @@ export function buildGanttChartDTO(
   eventId: common.EventId,
   tasks: task.Task[],
   dependencies: task.TaskDependency[],
+  crossLinks: task.TaskCrossLink[] = [],
 ): gantt.GanttChartDTO {
   const live = tasks.filter((t) => t.archivedAt === null);
   const ids = new Set(live.map((t) => t.id));
+
+  // Cross-team links (送る・受け取る): a SEPARATE channel from dependencies so no arrow is
+  // drawn. Keep only links whose endpoints are both live rows (drop dangling, like deps),
+  // then project each endpoint's role: requester → "requested", requestee → "accepted".
+  const liveCrossLinks: task.TaskCrossLink[] = [];
+  const roleByTask = new Map<common.TaskId, task.TaskCrossRole>();
+  for (const link of crossLinks) {
+    if (!ids.has(link.requesterTaskId) || !ids.has(link.requesteeTaskId)) continue;
+    liveCrossLinks.push(link);
+    roleByTask.set(link.requesterTaskId, "requested");
+    roleByTask.set(link.requesteeTaskId, "accepted");
+  }
 
   const seen = new Set<string>();
   const lines: gantt.GanttDependencyLine[] = [];
@@ -241,7 +259,13 @@ export function buildGanttChartDTO(
     for (const t of [...live].sort(sortSiblings)) if (!emitted.has(t.id)) ordered.push(t);
   }
 
-  const rows = ordered.map((t) => toRow(byId.get(t.id)!, anchorDay, esOffsetByTask, h));
+  const rows = ordered.map((t) => toRow(byId.get(t.id)!, anchorDay, esOffsetByTask, h, roleByTask));
 
-  return { eventId, rows, dependencies: lines, criticalTaskIds };
+  return {
+    eventId,
+    rows,
+    dependencies: lines,
+    criticalTaskIds,
+    ...(liveCrossLinks.length > 0 ? { crossLinks: liveCrossLinks } : {}),
+  };
 }
