@@ -69,32 +69,18 @@ describe("#39-2 parent bar is draggable: a move shifts the whole subtree", () =>
     expect(onSchedule).not.toHaveBeenCalled(); // parent move does NOT persist a single row
   });
 
-  it("a parent (work-package) bar exposes NO resize handles — its span is derived from children", () => {
-    // gantt-service dto.toRow returns a work-package's own startsAt/endsAt as null; the
-    // client rolls its span up from the children. So a direct parent resize can never
-    // persist (the PATCH is discarded on the next GET → the bar snaps back). The view must
-    // therefore not offer resize on a parent. A leaf DOES expose them (regression below).
+  it("resizing the parent edge persists the parent's own span via onSchedule", () => {
     const onSchedule = vi.fn();
-    render(<GanttView dto={wbsDto} zoom="day" onSchedule={onSchedule} canWrite />);
-    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-r")).toBeNull();
-    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-l")).toBeNull();
-    // open the parent so a leaf bar is present, then assert the leaf keeps its handles
-    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p"));
-    expect(screen.getByTestId("fe4-gantt-bar-c1-rz-r")).toBeInTheDocument();
-    expect(screen.getByTestId("fe4-gantt-bar-c1-rz-l")).toBeInTheDocument();
-  });
-
-  it("a leaf resize still persists via onSchedule (the write path that sticks)", () => {
-    const onSchedule = vi.fn();
-    render(<GanttView dto={wbsDto} zoom="day" onSchedule={onSchedule} canWrite />);
-    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p")); // reveal the leaves
-    const handle = screen.getByTestId("fe4-gantt-bar-c2-rz-r");
+    const onScheduleShift = vi.fn();
+    render(<GanttView dto={wbsDto} zoom="day" onSchedule={onSchedule} onScheduleShift={onScheduleShift} canWrite />);
+    const handle = screen.getByTestId("fe4-gantt-bar-p-rz-r");
     const scroll = screen.getByTestId("fe4-gantt-scroll");
     fireEvent.pointerDown(handle, { clientX: 200, pointerId: 1 });
     fireEvent.pointerMove(scroll, { clientX: 300, pointerId: 1 });
     fireEvent.pointerUp(scroll, { clientX: 300, pointerId: 1 });
     expect(onSchedule).toHaveBeenCalledTimes(1);
-    expect(onSchedule.mock.calls[0]![0]).toBe("c2");
+    expect(onSchedule.mock.calls[0]![0]).toBe("p");
+    expect(onScheduleShift).not.toHaveBeenCalled();
   });
 });
 
