@@ -178,6 +178,39 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /gantt/ws-ticket:
+    get:
+      operationId: getGanttWsTicket
+      summary: Issue a realtime ws-ticket for the event's GanttRoom
+      tags:
+        - gantt
+      description: |-
+        Short-lived HMAC ticket + the absolute GanttRoom Durable Object URL for the
+        gateway-bypassing / DO-direct WebSocket (presence + live data sync). The userId is
+        taken from the verified session (never the client), so the DO can trust the signed
+        identity on the public /ws path. Requires event:read. 503 when realtime is not
+        provisioned for the deployment.
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ws-ticket + DO URL + the caller's own identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GanttWsTicketResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/BadRequest'
 components:
   schemas:
     Error:
@@ -228,6 +261,33 @@ components:
       properties:
         retryAfterSec:
           type: integer
+    GanttWsTicketResponse:
+      type: object
+      description: gantt.WsTicketResponse — realtime handshake (ticket + DO URL + self identity).
+      required:
+        - ticket
+        - doUrl
+        - expiresAt
+        - self
+      properties:
+        ticket:
+          type: string
+          description: Short-lived HMAC ticket; verified by the GanttRoom DO at connect.
+        doUrl:
+          type: string
+          description: Absolute wss:// URL of the GanttRoom DO (gateway bypassed).
+        expiresAt:
+          type: string
+          format: date-time
+        self:
+          type: object
+          required:
+            - userId
+          properties:
+            userId:
+              type: string
+            displayName:
+              type: string
     GanttZoom:
       type: string
       enum:
