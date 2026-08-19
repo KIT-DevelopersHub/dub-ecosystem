@@ -48,6 +48,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const app = new Hono<{ Variables: Vars }>();
   app.onError(dubErrorHandler({ service: "drive-proxy" }));
 
+  // ---- liveness (unauthenticated; app-health-monitor probes this over the Service Binding).
+  app.get("/internal/health", (c) => c.json({ status: "ok", service: "drive-proxy" }));
+
   const requireAuth: MiddlewareHandler<{ Variables: Vars }> = async (c, next) => {
     const userId = c.req.header(HDR_USER_ID);
     if (!userId) throw errors.unauthenticated("x-dub-user-id absent");
