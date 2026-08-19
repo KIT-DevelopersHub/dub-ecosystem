@@ -578,9 +578,12 @@
 }
 .tlGuideSummary {
   width: 24px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--dub-color-brand-500);
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--dub-color-brand-500) 34%, var(--dub-color-border-default));
+  border-left: 3px solid var(--dub-color-brand-500);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
 }
 .tlGuideDepIcon { display: inline-block; vertical-align: middle; }
 /* thin team-coloured cap at the left edge of each bar. */
@@ -676,15 +679,22 @@
    "8月 / 2026年" labels (vertical-overlay fix). Ordering is guaranteed at the
    component level, not by tuning individual bar z-indexes. */
 .tlBody { position: relative; z-index: 1; isolation: isolate; }
-/* faint enclosure behind an open parent + its children — reads as "these rows
-   belong together" (parent-child), visually separate from dependency arrows. */
-.tlGroupBand {
+/* 内包バー (experimental): an open parent's bar grows into a container that
+   ENCLOSES its subtree — the parent period runs horizontally, the descendant
+   rows are wrapped vertically, so どれが親か reads straight off the chart. The
+   translucent fill + brand left-spine + soft border make children sit visibly
+   "inside"; nested boxes (3–4 level WBS) stack, deeper = stronger tint. Purely
+   visual (pointer-events:none) so drag/resize/toggle/deps are untouched. */
+.tlEncl {
   position: absolute;
-  left: 0;
   box-sizing: border-box;
-  border: 1px solid var(--dub-color-border-default);
+  border: 1px solid color-mix(in srgb, var(--dub-color-brand-500) 34%, var(--dub-color-border-default));
+  border-left-width: 3px;
+  border-left-color: var(--dub-color-brand-500);
   border-radius: var(--dub-radius-md, 8px);
+  /* fill is set inline (depth-tinted); this is the fallback. */
   background: color-mix(in srgb, var(--dub-color-brand-500) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dub-color-brand-500) 8%, transparent);
   z-index: 0;
   pointer-events: none;
 }

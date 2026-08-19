@@ -17,7 +17,10 @@ document.head.appendChild(style);
 
 // Dev/E2E only: `?tasks=N` pads the demo event to N tasks (F3 verification).
 const padTo = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get("tasks")) || undefined : undefined;
-const client = createDevClient(padTo ? { padTo } : {});
+// Demo shows the 3-level WBS nest so the 内包バー (parent-encloses-children) is
+// visible end-to-end; `?flat=1` opts back to the plain 2-level real-data seed.
+const deepNest = new URLSearchParams(location.search).get("flat") !== "1";
+const client = createDevClient({ ...(padTo ? { padTo } : {}), deepNest });
 
 // Dev-only test seam (tree-shaken from production via import.meta.env.DEV): lets a
 // real-browser E2E force the next mock mutation to fail so the error-handling UI

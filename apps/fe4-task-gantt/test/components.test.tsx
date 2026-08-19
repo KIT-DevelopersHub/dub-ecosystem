@@ -6,6 +6,7 @@ import { ViewSwitcher } from "../src/components/ViewSwitcher";
 import { TaskListView } from "../src/components/TaskListView";
 import { TaskBoardView } from "../src/components/TaskBoardView";
 import { createUserCache } from "../src/domain/user-cache";
+import { ROW_HEIGHT } from "../src/domain/timeline-axis";
 
 const mk = (id: string, status: task.TaskStatus = "todo"): task.Task => ({
   id, eventId: "evt_1", title: `T-${id}`, description: null, status,
@@ -63,8 +64,38 @@ describe("GanttView render (design test 4/7)", () => {
     expect(screen.queryByTestId("fe4-gantt-row-c1")).toBeNull();
     fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p"));
     expect(screen.getByTestId("fe4-gantt-row-c1")).toBeInTheDocument();
-    // expanded parent draws its faint enclosing group band
-    expect(screen.getByTestId("fe4-gantt-group-p")).toBeInTheDocument();
+    // expanded parent grows into its 内包バー container box (covers its children)
+    const box = screen.getByTestId("fe4-gantt-group-p");
+    expect(box).toBeInTheDocument();
+    expect(box).toHaveAttribute("data-depth", "0");
+    // container is 3 rows tall (parent + 2 children), inset by 2px top/bottom
+    expect(box.style.height).toBe(`${3 * ROW_HEIGHT - 4}px`);
+    expect(box.style.top).toBe("2px");
+  });
+
+  const nestedDto: gantt.GanttChartDTO = {
+    eventId: "evt_1",
+    rows: [
+      { taskId: "gp", title: "統括", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-30T00:00:00Z", progressPercent: 0, assigneeId: null, depth: 0, hasChildren: true },
+      { taskId: "p", title: "設計フェーズ", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "gp", depth: 1, hasChildren: true },
+      { taskId: "g1", title: "孫1", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 2 },
+      { taskId: "g2", title: "孫2", startsAt: "2026-08-13T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 2 },
+    ],
+    dependencies: [],
+  };
+
+  it("nests a container per level for a 3-level WBS (内包バーの入れ子)", () => {
+    render(<GanttView dto={nestedDto} zoom="week" />);
+    // open the grandparent, then the inner parent
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-gp"));
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p"));
+    const gpBox = screen.getByTestId("fe4-gantt-group-gp");
+    const pBox = screen.getByTestId("fe4-gantt-group-p");
+    // grandparent box wraps all 4 rows; inner parent box wraps its 3 — nested, deeper depth
+    expect(gpBox).toHaveAttribute("data-depth", "0");
+    expect(pBox).toHaveAttribute("data-depth", "1");
+    expect(gpBox.style.height).toBe(`${4 * ROW_HEIGHT - 4}px`);
+    expect(pBox.style.height).toBe(`${3 * ROW_HEIGHT - 4}px`);
   });
 
   it("parent bar is now draggable/resizable too (feedback #39: exposes resize handles)", () => {
