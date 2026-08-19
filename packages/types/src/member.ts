@@ -21,6 +21,8 @@ export interface Team {
   key: string;
   name: string;
   color: string | null;
+  /** 2-letter uppercase task-ID prefix code (e.g. "TK"). Additive/optional. */
+  code?: string;
   description: string | null;
 }
 

@@ -174,6 +174,7 @@ export function createApp(deps: AppDeps = defaultDeps): App {
       progressPercent: updated.status === "done" ? 100 : 0,
       assigneeId: updated.assigneeId,
       teamId: updated.teamId ?? null,
+      createdAt: updated.createdAt,
     };
     return c.json(row satisfies gantt.GanttRow);
   });

@@ -5,6 +5,9 @@ import styles from "../styles/app.module.css";
 export interface PredecessorOption {
   id: common.TaskId;
   title: string;
+  /** Stable task-ID number (e.g. "TK-0026"), shown and searchable so a predecessor
+   *  can be identified BY ID, not only by title. Optional (absent ⇒ title only). */
+  number?: string;
 }
 
 export interface PredecessorPickerProps {
@@ -61,7 +64,10 @@ export function PredecessorPicker({ options, value, onChange, onPromoteToParent,
     const q = query.trim().toLowerCase();
     const pool = options.filter((o) => !value.includes(o.id));
     if (!q) return [];
-    return pool.filter((o) => o.title.toLowerCase().includes(q)).slice(0, 8);
+    // Match on title OR the stable ID number, so "TK-0026" finds the predecessor by ID.
+    return pool
+      .filter((o) => o.title.toLowerCase().includes(q) || (o.number ?? "").toLowerCase().includes(q))
+      .slice(0, 8);
   }, [options, value, query]);
 
   const add = (id: common.TaskId) => {
@@ -80,6 +86,7 @@ export function PredecessorPicker({ options, value, onChange, onPromoteToParent,
         <div className={styles.ppSelected}>
           {selected.map((o) => (
             <span key={o.id} className={styles.ppChip} data-testid={testId ? `${testId}-chip-${o.id}` : undefined}>
+              {o.number && <span className={styles.ppOptNum}>{o.number}</span>}
               <span className={styles.ppChipText}>{o.title}</span>
               {onPromoteToParent && (
                 <button
@@ -129,6 +136,7 @@ export function PredecessorPicker({ options, value, onChange, onPromoteToParent,
                 }}
                 data-testid={testId ? `${testId}-opt-${o.id}` : undefined}
               >
+                {o.number && <span className={styles.ppOptNum}>{o.number}</span>}
                 <span className={styles.ppOptText}>{o.title}</span>
                 <span className={styles.ppOptAdd}>＋</span>
               </button>
