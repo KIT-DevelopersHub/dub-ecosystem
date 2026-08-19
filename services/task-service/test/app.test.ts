@@ -356,6 +356,54 @@ describe("DELETE /tasks/:id (archive)", () => {
   });
 });
 
+describe("POST /tasks/:id/restore (undo of a soft delete)", () => {
+  it("restores an archived task: GET is live again, list shows it, task.updated emitted", async () => {
+    const { h, app } = setup();
+    const t = await create(app);
+    await app.request(`/tasks/${t.id}`, userInit("DELETE"));
+
+    const res = await app.request(`/tasks/${t.id}/restore`, userInit("POST"));
+    expect(res.status).toBe(200);
+    const restored = (await res.json()) as task.Task;
+    expect(restored.archivedAt).toBeNull();
+    // version bumped by both archive and restore (1 -> 2 -> 3).
+    expect(restored.version).toBe(3);
+    // gantt-service purges its cache on task.updated (no new event name needed).
+    expect(h.events.byName("task.updated").length).toBeGreaterThanOrEqual(1);
+
+    const get = await app.request(`/tasks/${t.id}`, userInit("GET"));
+    expect(get.status).toBe(200);
+
+    const listed = await app.request(`/tasks?eventId=evt_1`, userInit("GET"));
+    expect(((await listed.json()) as task.ListTasksResponse).items).toHaveLength(1);
+  });
+
+  it("is idempotent — restoring a live task returns it without error", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const res = await app.request(`/tasks/${t.id}/restore`, userInit("POST"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.Task;
+    expect(body.id).toBe(t.id);
+    expect(body.archivedAt).toBeNull();
+  });
+
+  it("404 for an unknown task id", async () => {
+    const { app } = setup();
+    const res = await app.request(`/tasks/task_missing/restore`, userInit("POST"));
+    expect(res.status).toBe(404);
+  });
+
+  it("403 when the caller lacks task:delete", async () => {
+    const { h, app } = setup();
+    const t = await create(app);
+    await app.request(`/tasks/${t.id}`, userInit("DELETE"));
+    h.authz.denied.add("task:delete");
+    const res = await app.request(`/tasks/${t.id}/restore`, userInit("POST"));
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("GET /tasks (list + paging)", () => {
   it("filters by assignee+status and paginates without dup/loss", async () => {
     const { app } = setup();

@@ -386,6 +386,48 @@ export function buildApp(deps: Deps): Hono {
     return c.json(archived ?? { ok: true });
   });
 
+  // ---- POST /tasks/:id/restore (undo of a soft delete = un-archive) ----
+  // The inverse of DELETE. archive() only flips archived_at (no cascade), so a plain
+  // restore brings the task back with its parent/assignee/dependency rows intact — no
+  // re-create, no lost ID, no orphaned dependencies. Guarded by task:delete (same
+  // capability as the delete it reverses). Idempotent: restoring a live task is a no-op
+  // that returns the live task, so a double-undo can't error.
+  app.post("/tasks/:id/restore", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:delete");
+    const id = c.req.param("id");
+
+    // Look through the archive (includeArchived) — a live-only read would 404 the very
+    // task we intend to restore.
+    const current = await deps.repo.getById(id, true);
+    if (!current) throw taskErrors.notFound(id);
+
+    const now = nowIso();
+    const ok = await deps.repo.restore(id, now);
+    if (!ok) {
+      // Already live (nothing to restore) — return it idempotently instead of erroring.
+      const live = await deps.repo.getById(id);
+      return c.json(live ?? current);
+    }
+
+    const restored = await deps.repo.getById(id);
+    const actorId = actorIdOf(principal);
+    const evt = restored?.eventId ? { eventId: restored.eventId } : {};
+    // task.updated (not a new event name) — gantt-service purges its cache on it and the
+    // restored task re-enters every read model that filters archived_at IS NULL.
+    await emit(deps.events, { requestId: ctx.requestId, actorId }, [
+      { name: "task.updated", payload: { taskId: id, ...evt, changed: ["archivedAt"] } },
+    ]);
+    await deps.audit.record(
+      auditRecord("task.task.restored", actorId, config.orgId, ctx.requestId, id, {
+        eventId: restored?.eventId ?? null,
+      }),
+    );
+
+    return c.json(restored ?? { ok: true });
+  });
+
   // ---- GET /tasks/:id/attachments (list a task's file/url attachments) ----
   app.get("/tasks/:id/attachments", async (c) => {
     const ctx = ctxOf(c);
