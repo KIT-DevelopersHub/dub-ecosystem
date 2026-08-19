@@ -266,6 +266,7 @@ function build(): {
         endMs = Date.parse(iso("2026-09-15"));
       }
       const status = s.status ?? defaultStatus(phase, endMs);
+      const startAt = new Date(startMs).toISOString();
       const dueAt = new Date(endMs).toISOString();
       // ---- parent (work-package) row ----
       pushTask({
@@ -277,6 +278,10 @@ function build(): {
         priority: s.priority ?? "medium",
         assigneeId: OWNER[s.team] ?? null,
         teamId: TEAM_ID[s.team] ?? null,
+        // The bar's start lives on the task's real column (startAt) — NOT only in the
+        // rowDates read-model override — so the detail panel's 開始日 shows the SAME
+        // date the bar starts on, and editing it moves the bar (startsAt↔startAt).
+        startAt,
         dueAt,
         origin: "internal",
         archivedAt: null,
@@ -284,7 +289,7 @@ function build(): {
         updatedAt: now,
         version: 1,
       });
-      rowDates[id] = { startsAt: new Date(startMs).toISOString(), endsAt: dueAt };
+      rowDates[id] = { startsAt: startAt, endsAt: dueAt };
       hierarchy[id] = { parentTaskId: null, depth: 0, wbs: s.wbs };
 
       // ---- children (WBS leaves), sliced across the parent's bar ----
@@ -297,6 +302,7 @@ function build(): {
         const cStart = startMs + j * cSlot;
         const cEnd = j === k - 1 ? endMs : startMs + (j + 1) * cSlot;
         const cStatus = defaultStatus(phase, cEnd);
+        const cStartIso = new Date(cStart).toISOString();
         const cDue = new Date(cEnd).toISOString();
         pushTask({
           id: cid,
@@ -307,6 +313,8 @@ function build(): {
           priority: "medium",
           assigneeId: OWNER[s.team] ?? null,
           teamId: TEAM_ID[s.team] ?? null,
+          // real start on the task column (see the parent row above) so 開始日 == bar start.
+          startAt: cStartIso,
           dueAt: cDue,
           origin: "internal",
           archivedAt: null,
@@ -314,7 +322,7 @@ function build(): {
           updatedAt: now,
           version: 1,
         });
-        rowDates[cid] = { startsAt: new Date(cStart).toISOString(), endsAt: cDue };
+        rowDates[cid] = { startsAt: cStartIso, endsAt: cDue };
         hierarchy[cid] = { parentTaskId: id, depth: 1, wbs: w };
       });
     });

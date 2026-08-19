@@ -618,12 +618,33 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     const { parentTaskId: _p, ...fieldOnlyPatch } = patch;
     const hasFieldPatch = Object.keys(fieldOnlyPatch).some((k) => k !== "version");
     if (!needsRelations) {
+      // Optimistically move the timeline bar the SAME tick the user saves a 開始日/期日
+      // change (optimistic-UI). The detail panel edits task.startAt/dueAt, which map
+      // onto the gantt row's startsAt/endsAt (startsAt↔startAt, endsAt↔dueAt). Without
+      // this the bar only moved once the post-save refetch resolved — and stayed on the
+      // OLD position if that refetch lagged or the read-model was stale ("変えても反映
+      // されない/古いまま"). refetchFresh() then reconciles to the authoritative window.
+      const changesDates =
+        fieldOnlyPatch.startAt !== undefined || fieldOnlyPatch.dueAt !== undefined;
+      const barBefore = changesDates
+        ? gantt.currentRows().find((r) => r.taskId === selectedTask.id)
+        : undefined;
+      if (changesDates) {
+        const nextStarts =
+          fieldOnlyPatch.startAt !== undefined ? fieldOnlyPatch.startAt : barBefore?.startsAt ?? null;
+        const nextEnds =
+          fieldOnlyPatch.dueAt !== undefined ? fieldOnlyPatch.dueAt : barBefore?.endsAt ?? null;
+        gantt.setRowScheduleOptimistic(selectedTask.id, nextStarts, nextEnds);
+      }
       void store
         .patchOptimistic(client, selectedTask.id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
         .then((ok) => {
           if (ok) {
             void gantt.refetchFresh();
             feedback.success();
+          } else if (changesDates) {
+            // Save failed (reason surfaced by the store) — restore the true bar position.
+            void gantt.refetchFresh();
           }
         });
       return;

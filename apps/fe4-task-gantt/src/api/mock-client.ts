@@ -311,6 +311,16 @@ export class MockApiClient implements ApiClient {
       updatedAt: new Date().toISOString(),
     };
     this.taskById.set(id, next);
+    // Keep the gantt read-model in sync with a start/due edit. The bar reads its
+    // window from `rowDates` (a stand-in for gantt-service's derived DTO); the real
+    // gantt-service derives the bar from the task's live startAt/dueAt columns on
+    // every read, so a detail-panel date edit reflects immediately. The mock cached
+    // the seed override and never refreshed it here, so editing 開始日/期日 changed the
+    // task columns but the bar kept rendering the stale seed dates (the "詳細で日付を
+    // 変更してもバーが変わらない" bug). Re-derive the override from the updated columns.
+    if (body.startAt !== undefined || body.dueAt !== undefined) {
+      this.rowDates[id] = deriveSchedule(next, undefined);
+    }
     // re-parent (親子関係の変更) lives in the hierarchy overlay, not on the task row.
     if (body.parentTaskId !== undefined) this.setParent(id, body.parentTaskId ?? null);
     return next;
