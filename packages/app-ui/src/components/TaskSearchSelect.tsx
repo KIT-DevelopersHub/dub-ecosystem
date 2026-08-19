@@ -34,6 +34,9 @@ interface BaseProps<Id extends string> {
   noMatchLabel?: string;
   /** localStorage key for the "最近選んだタスク" suggestions; omit to disable recents. */
   recentKey?: string;
+  /** Shown on empty focus when `recentKey` is set but there's no history yet, so the
+   *  feature is discoverable before any task has been chosen. */
+  recentsEmptyLabel?: string;
   disabled?: boolean;
   testId?: string;
 }
@@ -92,7 +95,7 @@ export function rememberTaskSearch(key: string, ids: readonly string[]): void {
  * whether picking replaces or appends.
  */
 export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSelectProps<Id>) {
-  const { options, placeholder, emptyOptionsLabel, noMatchLabel, recentKey, disabled, testId } = props;
+  const { options, placeholder, emptyOptionsLabel, noMatchLabel, recentKey, recentsEmptyLabel, disabled, testId } = props;
   const multiple = props.multiple === true;
 
   const [query, setQuery] = useState("");
@@ -147,7 +150,11 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
     }
   };
 
-  const showRecent = focused && query.trim() === "" && recentIds.length > 0;
+  // Open the recents dropdown on empty focus whenever the feature is enabled
+  // (recentKey set + options exist) — even with NO history yet, so the menu shows
+  // a "まだありません" placeholder and the feature is visibly present from the start.
+  const recentsEnabled = !!recentKey && !noOptions;
+  const showRecent = focused && query.trim() === "" && recentsEnabled;
   const showMatches = focused && query.trim() !== "";
   const menuOptions = showRecent ? recentIds.map((id) => byId.get(id)!).filter(Boolean) : matches;
   const listId = testId ? `${testId}-listbox` : undefined;
@@ -242,6 +249,11 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
                 <span className={styles.optionAdd}>{multiple ? "＋" : "選択"}</span>
               </button>
             ))}
+            {showRecent && recentIds.length === 0 && (
+              <div className={styles.empty} data-testid={testId ? `${testId}-recents-empty` : undefined}>
+                {recentsEmptyLabel ?? "最近選んだタスクはまだありません"}
+              </div>
+            )}
             {showMatches && matches.length === 0 && (
               <div className={styles.empty}>{noMatchLabel ?? "一致するタスクがありません"}</div>
             )}

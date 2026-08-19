@@ -91,6 +91,25 @@ describe("TaskSearchSelect — multi mode (先行タスク) + recents", () => {
     expect(screen.queryByTestId("p-opt-t1")).toBeNull();
   });
 
+  it("on focus with recentKey but NO history, shows a discoverable placeholder", () => {
+    // localStorage is cleared in beforeEach — no recents yet.
+    render(
+      <TaskSearchSelect value={null} options={OPTS} onChange={() => {}} recentKey="parents" testId="p" />,
+    );
+    fireEvent.focus(screen.getByTestId("p-input"));
+    // the menu opens even with no history, so the feature is visibly present
+    expect(screen.getByText("最近選んだタスク")).toBeInTheDocument();
+    expect(screen.getByTestId("p-recents-empty")).toBeInTheDocument();
+    expect(screen.queryAllByTestId(/^p-opt-/)).toHaveLength(0);
+  });
+
+  it("without a recentKey, focus opens no menu (recents feature disabled)", () => {
+    render(<TaskSearchSelect value={null} options={OPTS} onChange={() => {}} testId="p" />);
+    fireEvent.focus(screen.getByTestId("p-input"));
+    expect(screen.queryByText("最近選んだタスク")).toBeNull();
+    expect(screen.queryByTestId("p-recents-empty")).toBeNull();
+  });
+
   it("clicking a recent suggestion selects it", () => {
     const onChange = vi.fn();
     rememberTaskSearch("parents", ["t2"]);
