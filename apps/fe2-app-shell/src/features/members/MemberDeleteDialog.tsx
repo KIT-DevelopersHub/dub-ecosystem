@@ -2,7 +2,7 @@
 // 「削除」(=status deleted・組織図から消える)でき、「削除済み」セクションから
 // 「在籍に戻す」で復帰もできる。物理削除はしない。楽観的UI＋admin fail-close(サーバ)。
 import { useMemo, useState } from "react";
-import { Modal, Button, TextField, Badge, EmptyState } from "@dub/ui";
+import { Modal, Button, TextField, Badge, EmptyState, ConfirmDialog } from "@dub/ui";
 import type { OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
 import { useSoftDeleteMember, useRestoreMember } from "./hooks.ts";
@@ -20,6 +20,8 @@ export function MemberDeleteDialog({
   const softDelete = useSoftDeleteMember();
   const restore = useRestoreMember();
   const [q, setQ] = useState("");
+  // 削除は重い操作なので、実行前に確認ダイアログを必ず挟む（対象を明示）。復帰は非破壊なので即時。
+  const [confirmTarget, setConfirmTarget] = useState<OrgMember | null>(null);
   const needle = q.trim().toLowerCase();
   const pending = softDelete.isPending || restore.isPending;
 
@@ -60,7 +62,7 @@ export function MemberDeleteDialog({
                     size="sm"
                     variant="danger"
                     loading={pending}
-                    onClick={() => softDelete.mutate({ id: m.id, version: m.version })}
+                    onClick={() => setConfirmTarget(m)}
                     testId={`members-delete-${m.id}`}
                   >
                     削除
@@ -106,6 +108,25 @@ export function MemberDeleteDialog({
           閉じる
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title="メンバーを削除しますか？"
+        message={
+          confirmTarget
+            ? `「${confirmTarget.name}」を削除済みにします（名簿には残り、組織図には表示されません）。あとで在籍に戻せます。`
+            : ""
+        }
+        danger
+        confirmLabel="削除済みにする"
+        cancelLabel="キャンセル"
+        onConfirm={() => {
+          if (confirmTarget) softDelete.mutate({ id: confirmTarget.id, version: confirmTarget.version });
+          setConfirmTarget(null);
+        }}
+        onCancel={() => setConfirmTarget(null)}
+        testId="members-delete-confirm"
+      />
     </Modal>
   );
 }

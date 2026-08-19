@@ -137,9 +137,24 @@ describe("MembersPage", () => {
     await screen.findByText("山田太郎");
     await userEvent.click(screen.getByTestId("members-delete-open"));
     const dialog = await screen.findByTestId("members-delete-dialog");
-    // アクティブなメンバーが一覧に出る → 「削除」で status=deleted。
+    // アクティブなメンバーが一覧に出る → 「削除」で確認ダイアログ → 実行で status=deleted。
     await userEvent.click(within(dialog).getByTestId("members-delete-m2"));
+    const confirm = await screen.findByTestId("members-delete-confirm");
+    expect(within(confirm).getByText(/佐藤花子/)).toBeInTheDocument();
+    await userEvent.click(within(confirm).getByRole("button", { name: "削除済みにする" }));
     await waitFor(() => expect(api.updateMember).toHaveBeenCalledWith("m2", { status: "deleted", version: 1 }));
+  });
+
+  it("削除ダイアログの削除はキャンセルで実行されない", async () => {
+    const api = makeApi();
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("山田太郎");
+    await userEvent.click(screen.getByTestId("members-delete-open"));
+    const dialog = await screen.findByTestId("members-delete-dialog");
+    await userEvent.click(within(dialog).getByTestId("members-delete-m2"));
+    const confirm = await screen.findByTestId("members-delete-confirm");
+    await userEvent.click(within(confirm).getByRole("button", { name: "キャンセル" }));
+    expect(api.updateMember).not.toHaveBeenCalled();
   });
 
   it("削除済みメンバーを「在籍に戻す」で復帰(status→added)できる", async () => {

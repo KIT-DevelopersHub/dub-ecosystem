@@ -71,16 +71,18 @@ export function MembersPage(): JSX.Element {
         <PageHeader
           title="運営メンバー"
           description="運営メンバーの招待状況と所属チームを管理します（組織図PDFの代替）"
+          // 並び順は左→右で 破壊的→追加。右端(最も押しやすい)を「メンバーを追加」に。
+          // 「メンバーを削除」は破壊的なので左端＋控えめ(secondary・危険色は出さない)。
           actions={
             <span style={{ display: "inline-flex", gap: "var(--dub-space-2)" }}>
+              <Button variant="secondary" iconLeft={<span aria-hidden>🗑</span>} onClick={() => setDeleteDialogOpen(true)} testId="members-delete-open">
+                メンバーを削除
+              </Button>
               <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} onClick={openAddTeam} testId="members-add-team">
                 チームを追加
               </Button>
               <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} testId="members-add-member">
                 メンバーを追加
-              </Button>
-              <Button variant="secondary" iconLeft={<span aria-hidden>🗑</span>} onClick={() => setDeleteDialogOpen(true)} testId="members-delete-open">
-                メンバーを削除
               </Button>
             </span>
           }
