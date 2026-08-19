@@ -67,13 +67,15 @@ describe("GanttView render (design test 4/7)", () => {
     expect(screen.getByTestId("fe4-gantt-group-p")).toBeInTheDocument();
   });
 
-  it("parent bar is now draggable/resizable too (feedback #39: exposes resize handles)", () => {
+  it("parent bar is movable (subtree shift) but NOT resizable — a parent span is derived from children", () => {
     const onSchedule = vi.fn();
     render(<GanttView dto={wbsDto} zoom="week" onSchedule={onSchedule} canWrite />);
-    // parent bar exists AND carries drag handles (a move shifts the subtree)
+    // parent bar exists and is drag-movable (the bar body starts a subtree shift), but it
+    // exposes NO resize handles: gantt-service nulls a work-package's own dates and derives
+    // its span from children, so a direct parent resize would be silently discarded.
     expect(screen.getByTestId("fe4-gantt-bar-p")).toBeInTheDocument();
-    expect(screen.getByTestId("fe4-gantt-bar-p-rz-l")).toBeInTheDocument();
-    expect(screen.getByTestId("fe4-gantt-bar-p-rz-r")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-l")).toBeNull();
+    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-r")).toBeNull();
   });
 
   it("zoom SegmentedControl fires onZoomChange and reflects the active granularity", () => {

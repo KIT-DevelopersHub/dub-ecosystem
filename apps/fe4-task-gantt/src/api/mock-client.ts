@@ -371,8 +371,18 @@ export class MockApiClient implements ApiClient {
     return [...this.taskById.values()]
       .filter((t) => t.eventId === eventId && t.archivedAt === null)
       .map((t): gantt.GanttRow => {
-        const schedule = deriveSchedule(t, this.rowDates[t.id]);
         const h = this.hierarchy[t.id];
+        // Mirror gantt-service dto.toRow: a work-package (hasChildren) row carries NO own
+        // dates — the read model returns startsAt/endsAt null and the client rolls the span
+        // up from the children. The mock previously echoed a parent's stored rowDates, so a
+        // parent bar resize (which PATCHes the parent's own columns) appeared to persist in
+        // dev but was DISCARDED in prod on the next GET ("親のリサイズが反映されない"). Null the
+        // parent here so dev/tests reproduce prod exactly and the parent bar derives from
+        // its children.
+        const isParent = parents.has(t.id);
+        const schedule = isParent
+          ? { startsAt: null, endsAt: null }
+          : deriveSchedule(t, this.rowDates[t.id]);
         return {
           taskId: t.id,
           title: t.title,
