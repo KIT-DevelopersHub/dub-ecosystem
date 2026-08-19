@@ -47,27 +47,31 @@ export function ParticipationListPage(): JSX.Element {
     return (id: string | null): string => (id ? (map.get(id) ?? id) : "—");
   }, [teamsQuery.data]);
 
+  // 全列を noWrap + minWidth にして、狭い画面でも各回答を1行で見せ、はみ出しは
+  // DataTable の overflow-x:auto で横スクロールさせる（2行に折り返して崩れるのを防ぐ）。
   const columns: ColumnDef<Participation>[] = [
-    { key: "name", header: "氏名", cell: (p) => p.name },
-    { key: "nameKana", header: "ふりがな", cell: (p) => p.nameKana ?? "—" },
-    { key: "nameRomaji", header: "ローマ字", cell: (p) => p.nameRomaji ?? "—" },
-    { key: "schoolEmail", header: "学校メール", cell: (p) => p.schoolEmail },
-    { key: "gmail", header: "Gmail", cell: (p) => p.gmail },
-    { key: "phone", header: "電話番号", cell: (p) => p.phone ?? "—" },
-    { key: "grade", header: "学年", cell: (p) => (p.grade ? GRADE_LABEL[p.grade] : "—") },
-    { key: "department", header: "学科", cell: (p) => p.department ?? "—" },
-    { key: "team", header: "希望チーム", cell: (p) => teamName(p.desiredTeamId) },
-    { key: "activity", header: "希望活動", cell: (p) => (p.desiredActivity ? ACTIVITY_LABEL[p.desiredActivity] : "—") },
+    { key: "name", header: "氏名", noWrap: true, minWidth: "8rem", cell: (p) => p.name },
+    { key: "nameKana", header: "ふりがな", noWrap: true, minWidth: "8rem", cell: (p) => p.nameKana ?? "—" },
+    { key: "nameRomaji", header: "ローマ字", noWrap: true, minWidth: "9rem", cell: (p) => p.nameRomaji ?? "—" },
+    { key: "schoolEmail", header: "学校メール", noWrap: true, minWidth: "14rem", cell: (p) => p.schoolEmail },
+    { key: "gmail", header: "Gmail", noWrap: true, minWidth: "14rem", cell: (p) => p.gmail },
+    { key: "phone", header: "電話番号", noWrap: true, minWidth: "8rem", cell: (p) => p.phone ?? "—" },
+    { key: "grade", header: "学年", noWrap: true, minWidth: "4rem", cell: (p) => (p.grade ? GRADE_LABEL[p.grade] : "—") },
+    { key: "department", header: "学科", noWrap: true, minWidth: "8rem", cell: (p) => p.department ?? "—" },
+    { key: "team", header: "希望チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
+    { key: "activity", header: "希望活動", noWrap: true, minWidth: "6rem", cell: (p) => (p.desiredActivity ? ACTIVITY_LABEL[p.desiredActivity] : "—") },
     {
       key: "matchKind",
       header: "反映",
+      noWrap: true,
+      minWidth: "7rem",
       cell: (p) => (
         <Badge tone={MATCH_TONE[p.matchKind]} testId={`participation-match-${p.id}`}>
           {MATCH_LABEL[p.matchKind]}
         </Badge>
       ),
     },
-    { key: "submittedAt", header: "提出日時", cell: (p) => fmtDateTime(p.submittedAt) },
+    { key: "submittedAt", header: "提出日時", noWrap: true, minWidth: "11rem", cell: (p) => fmtDateTime(p.submittedAt) },
   ];
 
   if (list.isLoading) return <SkeletonLoader testId="participation-list-loading" />;
