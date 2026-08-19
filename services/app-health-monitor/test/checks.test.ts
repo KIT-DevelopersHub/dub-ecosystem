@@ -53,14 +53,36 @@ describe("probeBinding", () => {
     expect(out.ok).toBe(false);
     expect(out.detail).toContain("missing marker");
   });
+
+  it("content-type gate: a 200 text/html (SPA fallback) fails a javascript expectation", async () => {
+    const out = await probeBinding(stubFetcher(() => res(200, "<!doctype html>", "text/html")), "/assets/x.js", {
+      method: "HEAD",
+      expectContentTypeIncludes: "javascript",
+    });
+    expect(out.ok).toBe(false);
+    expect(out.detail).toContain("SPA-fallback => missing");
+  });
+
+  it("content-type gate: a real text/javascript chunk passes", async () => {
+    const out = await probeBinding(stubFetcher(() => res(200, "", "text/javascript")), "/assets/x.js", {
+      method: "HEAD",
+      expectContentTypeIncludes: "javascript",
+    });
+    expect(out.ok).toBe(true);
+  });
 });
 
 describe("sweepAssets — stale/missing chunk detection (over SVC_FE binding)", () => {
-  it("prefers loadBearing and passes when every listed chunk resolves 200", async () => {
+  // A present chunk answers with its real content-type (js/css); the SPA fallback answers 200
+  // text/html for a MISSING chunk, so the stub returns js/css for known assets, html otherwise.
+  const okAsset = (path: string) => (path.endsWith(".css") ? res(200, "", "text/css") : res(200, "", "text/javascript"));
+  const spaFallback = () => res(200, "<!doctype html>", "text/html");
+
+  it("prefers loadBearing and passes when every listed chunk serves its real type", async () => {
     const fe = stubFetcher((path) => {
       if (path === "/app-health.json")
         return res(200, JSON.stringify({ loadBearing: ["/assets/entry.js", "/assets/ChatApp.js"], assets: ["/assets/x.js"] }), "application/json");
-      return res(200);
+      return okAsset(path);
     });
     const out = await sweepAssets(fe);
     expect(out.ok).toBe(true);
@@ -70,17 +92,16 @@ describe("sweepAssets — stale/missing chunk detection (over SVC_FE binding)", 
   it("falls back to assets when loadBearing is absent (older manifest)", async () => {
     const fe = stubFetcher((path) => {
       if (path === "/app-health.json") return res(200, JSON.stringify({ assets: ["/assets/a.js", "/assets/b.css"] }), "application/json");
-      return res(200);
+      return okAsset(path);
     });
-    const out = await sweepAssets(fe);
-    expect(out.ok).toBe(true);
+    expect((await sweepAssets(fe)).ok).toBe(true);
   });
 
-  it("fails and names the missing chunk (the incident)", async () => {
+  it("detects a missing chunk served as the SPA fallback (200 text/html) — the incident", async () => {
     const fe = stubFetcher((path) => {
       if (path === "/app-health.json") return res(200, JSON.stringify({ loadBearing: ["/assets/a.js", "/assets/stale.js"] }), "application/json");
-      if (path === "/assets/stale.js") return res(404);
-      return res(200);
+      if (path === "/assets/stale.js") return spaFallback(); // missing -> index.html, NOT 404
+      return okAsset(path);
     });
     const out = await sweepAssets(fe);
     expect(out.ok).toBe(false);
