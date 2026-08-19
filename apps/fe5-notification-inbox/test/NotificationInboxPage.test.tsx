@@ -109,21 +109,19 @@ describe("NotificationInboxPage", () => {
     expect(remainingUnread.every((i) => !i.type.startsWith("task."))).toBe(true);
   });
 
-  it("category tabs filter the list to their category + label each card", async () => {
+  it("category tabs filter the list to their category (genre shown by tabs, not a per-card tag)", async () => {
     const { deps } = makeDeps();
     renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
     await screen.findByTestId("fe5-inbox-list");
     const list = () => screen.getByTestId("fe5-inbox-list");
     const user = userEvent.setup();
 
-    // メール tab -> only the mail item, badged メール.
+    // メール tab -> only the mail item; genre is conveyed by the active tab + URL.
     await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-mail"));
     await waitFor(() => {
       const rows = within(list()).getAllByRole("listitem");
       expect(rows).toHaveLength(1);
     });
-    expect(within(list()).getByTestId("fe5-inbox-cat-badge-mail")).toBeInTheDocument();
-    expect(within(list()).queryByTestId("fe5-inbox-cat-badge-participation")).not.toBeInTheDocument();
     expect(window.location.search).toContain("cat=mail");
 
     // 参加届 tab -> only the participation item.
@@ -131,14 +129,13 @@ describe("NotificationInboxPage", () => {
     await waitFor(() => {
       expect(within(list()).getAllByRole("listitem")).toHaveLength(1);
     });
-    expect(within(list()).getByTestId("fe5-inbox-cat-badge-participation")).toBeInTheDocument();
+    expect(window.location.search).toContain("cat=participation");
 
     // アプリアップデート tab -> the two release items.
     await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-app_update"));
     await waitFor(() => {
       expect(within(list()).getAllByRole("listitem")).toHaveLength(2);
     });
-    expect(within(list()).getAllByTestId("fe5-inbox-cat-badge-app_update")).toHaveLength(2);
 
     // Back to すべて (All) -> everything is visible again (8 member-audience items).
     await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-all"));

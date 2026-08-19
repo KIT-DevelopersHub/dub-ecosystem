@@ -18,7 +18,7 @@ import { resolveLinkUrl } from "../lib/routes";
 import { NotificationFilterBar } from "./NotificationFilterBar";
 import { NotificationList } from "./NotificationList";
 import { MarkAllReadButton } from "./MarkAllReadButton";
-import { itemLinkUrl } from "./NotificationListItem";
+import { itemLinkUrl } from "./NotificationCard";
 
 function readFilterFromLocation(): InboxFilter {
   if (typeof window === "undefined") return EMPTY_FILTER;

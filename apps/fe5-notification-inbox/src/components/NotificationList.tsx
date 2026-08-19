@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { Button, EmptyState, LoadMore, SkeletonLoader } from "@dub/ui";
 import type { ApiError } from "../contracts/fe2";
 import type { InboxItem } from "../contracts/notification-api";
-import { NotificationListItem } from "./NotificationListItem";
+import { NotificationCard } from "./NotificationCard";
 import styles from "./NotificationList.module.css";
 
 export interface NotificationListProps {
@@ -57,7 +57,7 @@ export function NotificationList(props: NotificationListProps): ReactNode {
     <div role="list" className={styles.list} data-testid="fe5-inbox-list">
       {items.map((item) => (
         <div role="listitem" className={styles.rowItem} key={item.id}>
-          <NotificationListItem
+          <NotificationCard
             item={item}
             onActivate={props.onActivate}
             {...(props.onMarkUnread ? { onMarkUnread: props.onMarkUnread } : {})}

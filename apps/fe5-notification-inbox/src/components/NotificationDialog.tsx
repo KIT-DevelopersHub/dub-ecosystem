@@ -1,7 +1,7 @@
 // NotificationDialog — the ONE shared notification modal. Opened from two entry
 // points that both flip the shared dialog-store: the header bell and the shell
 // Home "未読の通知" card. Reuses the existing inbox UI (useInbox + NotificationList
-// + NotificationListItem: unread emphasis, click-to-read, 🎉 new-feature type
+// + NotificationCard: unread emphasis, click-to-read, quiet 未読にする action
 // badge) so there is a single source of truth for the list — no duplicate UI.
 //
 // Split in two so the inbox is fetched only while the dialog is open: the outer
@@ -18,7 +18,7 @@ import { ROUTE_INBOX, resolveLinkUrl } from "../lib/routes";
 import { useNotificationDialogStore } from "../store/dialog-store";
 import { MarkAllReadButton } from "./MarkAllReadButton";
 import { NotificationList } from "./NotificationList";
-import { itemLinkUrl } from "./NotificationListItem";
+import { itemLinkUrl } from "./NotificationCard";
 
 function NotificationDialogBody({ onClose }: { onClose: () => void }): ReactNode {
   const { navigate, toast } = useNotificationDeps();

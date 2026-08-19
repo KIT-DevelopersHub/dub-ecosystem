@@ -1,25 +1,29 @@
-// NotificationListItem — one inbox row. Clicking the row marks read + navigates to
-// the resolved linkUrl (FE5 §2-2, test 8). Unread rows carry a dot + aria state.
+// NotificationCard — the SINGLE, canonical notification card. Rendered everywhere a
+// notification row appears: the /notifications inbox list AND the header-bell / Home
+// "未読の通知" dropdown (both go through NotificationList). One definition = one look,
+// no drift. Presentational + data-injected (an InboxItem + handlers); it never fetches.
 //
-// When `onMarkUnread` is supplied, a read row also exposes a trailing "未読にする"
-// action (restore to unread — the inverse of click-to-read). It is a small ghost
-// button with an ALWAYS-VISIBLE text label (not an icon-only/hover-tooltip control):
-// text-primary on the surface reads at high contrast, so the affordance is legible and
-// discoverable. The row is a container <div> (not a single <button>) so the action is a
-// real sibling button and interactive controls are never nested; it reserves its own
-// trailing cell, so it never shifts the row layout.
+// Layout (tokens only — see NotificationCard.module.css):
+//   line 1: [unread dot] title …………………… time (top-right)
+//   line 2: one/two-line body snippet
+// The genre is shown by the inbox tabs, not by a per-card tag, so the card is clean and
+// naturally short while keeping the rounded-card / shadow / hover-lift / unread polish.
+//
+// Clicking the card marks read + navigates (onActivate). A read card also exposes a
+// trailing "未読にする" action (onMarkUnread) — a real sibling <button> with an
+// always-visible label, so interactive controls are never nested and the affordance
+// stays legible.
 
 import type { KeyboardEvent, ReactNode } from "react";
-import { Badge, Button, Icon } from "@dub/ui";
+import { Button, Icon } from "@dub/ui";
 import type { InboxItem } from "../contracts/notification-api";
-import { resolveCategory, NOTIFICATION_CATEGORY_META } from "../lib/type-dictionary";
 import { formatRelativeTime } from "../lib/relative-time";
-import styles from "./NotificationListItem.module.css";
+import styles from "./NotificationCard.module.css";
 
-export interface NotificationListItemProps {
+export interface NotificationCardProps {
   item: InboxItem;
   onActivate: (item: InboxItem) => void;
-  /** Optional: when provided, read rows expose a quiet "未読にする" action (restore to unread). */
+  /** Optional: when provided, read cards expose a quiet "未読にする" action (restore to unread). */
   onMarkUnread?: (item: InboxItem) => void;
 }
 
@@ -38,12 +42,10 @@ export function itemLinkUrl(item: InboxItem): string | null {
   }
 }
 
-export function NotificationListItem(props: NotificationListItemProps): ReactNode {
+export function NotificationCard(props: NotificationCardProps): ReactNode {
   const { item, onActivate, onMarkUnread } = props;
   const unread = item.readAt === null;
-  const category = resolveCategory(item.type);
-  const categoryMeta = NOTIFICATION_CATEGORY_META[category];
-  // A read row can be restored to unread (Gmail-style quiet trailing toggle).
+  // A read card can be restored to unread (quiet trailing action).
   const canMarkUnread = !unread && onMarkUnread !== undefined;
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
     if (e.key === "Enter" || e.key === " ") {
@@ -67,17 +69,11 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
       >
         {unread ? <span className={styles.dot} data-testid="fe5-inbox-unread-dot" aria-hidden="true" /> : null}
         <div className={styles.body}>
-          <div className={styles.title}>{item.title}</div>
-          <div className={styles.snippet}>{item.body}</div>
-          <div className={styles.meta}>
-            <Badge
-              tone={categoryMeta.tone}
-              testId={`fe5-inbox-cat-badge-${category}`}
-            >
-              {categoryMeta.label}
-            </Badge>
-            <span>{formatRelativeTime(item.createdAt)}</span>
+          <div className={styles.line1}>
+            <span className={styles.title}>{item.title}</span>
+            <span className={styles.time}>{formatRelativeTime(item.createdAt)}</span>
           </div>
+          <div className={styles.snippet}>{item.body}</div>
         </div>
       </button>
       {canMarkUnread ? (
