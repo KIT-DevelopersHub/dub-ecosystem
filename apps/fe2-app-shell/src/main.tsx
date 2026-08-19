@@ -22,6 +22,18 @@ import { registerFeatureModules } from "./modules/registry.tsx";
 import { assembleFeatureModules } from "./composition/index.tsx";
 import { AppRoot } from "./shell/AppRoot.tsx";
 import { createShellRouter } from "./shell/router.tsx";
+import { reloadForStaleChunk } from "./lib/chunkReload.ts";
+
+// Recover from a stale hashed chunk after a deploy at the earliest point: Vite
+// dispatches `vite:preloadError` when a dynamic import / modulepreload 404s
+// (old chunk name removed by the new deploy). Reload once to fetch the fresh
+// index.html instead of letting the route render a "Something went wrong!"
+// (the 通知 / メール名簿 が開けない incident). The loop guard prevents reload-spin.
+if (typeof window !== "undefined") {
+  window.addEventListener("vite:preloadError", (event) => {
+    if (reloadForStaleChunk()) event.preventDefault();
+  });
+}
 
 // Resolve the API base baked in at build time. Defaults to the live free-tier
 // gateway on workers.dev and hard-refuses the known-NXDOMAIN custom domain

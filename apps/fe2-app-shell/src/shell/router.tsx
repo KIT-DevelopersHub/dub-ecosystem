@@ -23,6 +23,27 @@ import { PublicParticipationPage, PUBLIC_PARTICIPATION_PATH } from "../features/
 import { openNotificationDialog } from "@dub/fe5-notification-inbox";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
+import { RouteErrorScreen } from "./screens/RouteErrorScreen.tsx";
+import { isChunkLoadError, reloadForStaleChunk } from "../lib/chunkReload.ts";
+
+/** Wrap a lazy route factory so a failed dynamic import (stale hashed chunk after
+ *  a deploy) auto-recovers with a one-time reload instead of surfacing a bare
+ *  "Something went wrong!" — the 通知 / 名簿 が開けない incident. On a chunk-load
+ *  error we reload once to fetch the fresh index.html; the returned never-settling
+ *  promise keeps React in Suspense until the navigation happens. If the loop guard
+ *  suppresses the reload, the original error is rethrown so RouteErrorScreen shows. */
+function lazyRoute(load: () => Promise<{ Component: ComponentType }>): ComponentType {
+  return lazy(() =>
+    load()
+      .then((m) => ({ default: m.Component }))
+      .catch((err: unknown) => {
+        if (isChunkLoadError(err) && reloadForStaleChunk()) {
+          return new Promise<{ default: ComponentType }>(() => {});
+        }
+        throw err;
+      }),
+  );
+}
 
 /** Convert design `:param` segments to TanStack Router `$param`. */
 export function toTanstackPath(path: string): string {
@@ -122,7 +143,7 @@ export function createShellRouter(
   });
 
   const featureRoutes = registry.routes.map((r) => {
-    const Body = lazy(() => r.lazy().then((m) => ({ default: m.Component })));
+    const Body = lazyRoute(() => r.lazy());
     const Guarded = guard(r, Body);
     return createRoute({
       getParentRoute: () => shellRoute,
@@ -140,5 +161,8 @@ export function createShellRouter(
   return createRouter({
     routeTree,
     defaultNotFoundComponent: NotFoundScreen,
+    // Replace TanStack's bare "Something went wrong!" with a screen that, for a
+    // stale-chunk failure, auto-reloads once (and always offers a manual reload).
+    defaultErrorComponent: RouteErrorScreen,
   });
 }
