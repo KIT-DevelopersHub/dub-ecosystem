@@ -5,6 +5,7 @@ import { activeSectionId } from "./MemberRosterNav.tsx";
 describe("activeSectionId", () => {
   it("maps each section root path to its id", () => {
     expect(activeSectionId("/members")).toBe("members");
+    expect(activeSectionId("/members/roster")).toBe("member-roster");
     expect(activeSectionId("/admin/users")).toBe("roster");
     expect(activeSectionId("/participation")).toBe("participation");
     expect(activeSectionId("/participation/list")).toBe("participation-list");
@@ -12,6 +13,9 @@ describe("activeSectionId", () => {
 
   it("keeps the parent tab highlighted on deeper sub-routes", () => {
     expect(activeSectionId("/admin/users/usr_123")).toBe("roster");
+    // /members は運営メンバー、/members/roster は運営名簿（最長一致で運営名簿が勝つ）
+    expect(activeSectionId("/members/roster")).toBe("member-roster");
+    expect(activeSectionId("/members")).toBe("members");
     // /participation/list は独立タブ（最長一致で 提出フォームより回答一覧が勝つ）
     expect(activeSectionId("/participation/list")).toBe("participation-list");
   });

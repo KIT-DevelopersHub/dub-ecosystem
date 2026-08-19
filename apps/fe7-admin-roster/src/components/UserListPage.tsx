@@ -145,7 +145,7 @@ export function UserListPage() {
   return (
     <div>
       <PageHeader
-        title="ユーザー名簿"
+        title="メール名簿"
         testId="fe7-users-header"
         actions={
           <div style={actionsStyle}>

@@ -5,7 +5,8 @@
 // 統合する。ランチャーのタイルは 1 つ（運営メンバー・名簿）にまとめ、その中をこの共有
 // サブナビで横断する。各セクションは従来のルート/Provider をそのまま維持（additive・非破壊）:
 //   運営メンバー   → /members（内部に チーム別/組織図 タブ）
-//   名簿           → /admin/users
+//   運営名簿       → /members/roster（運営メンバー全員の情報をフラットな一覧で並べる）
+//   メール名簿     → /admin/users（Email Routing アドレス／メールアカウントの一覧・発行・同期）
 //   参加届         → /participation（提出フォーム）
 //   参加届の回答   → /participation/list（回答管理）
 // データ源は member-service / identity-roster のままで、突合キーは member.identityUserId
@@ -41,7 +42,8 @@ interface SectionTab {
 // 参加届(提出) は openToAll（ドメイン権限なし）なので app:participation:view のみでガードする。
 const SECTIONS: SectionTab[] = [
   { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["identity:read", "app:members:view"] },
-  { id: "roster", label: "名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
+  { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["identity:read", "app:members:view"] },
+  { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
   { id: "participation", label: "参加届", path: "/participation", requiredPermissions: ["app:participation:view"] },
   { id: "participation-list", label: "参加届の回答", path: "/participation/list", requiredPermissions: ["identity:read", "app:participation:view"] },
 ];
