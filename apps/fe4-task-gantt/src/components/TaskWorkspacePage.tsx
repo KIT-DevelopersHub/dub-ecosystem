@@ -19,6 +19,8 @@ import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "..
 import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
+import type { RowGroup } from "../domain/row-groups";
+import { PRIORITY_LABEL } from "../domain/task-form";
 import { useGanttSortMode } from "../domain/gantt-sort-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
@@ -33,6 +35,17 @@ export interface TaskWorkspacePageProps {
   /** effectivePermissions from GET /api/v1/me (null = still loading -> deny). */
   permissions: readonly identity.PermissionKey[] | null;
 }
+
+// Solid fill colours for the sort-group brackets (@dub/tokens hex). Priorities map to
+// the semantic scales (緊急=danger / 高=warning / 中=info / 低=gray); the neutral is
+// gray.500, used for team-less rows. GanttView overlays a WCAG-legible text colour.
+const PRIORITY_GROUP_COLOR: Record<task.TaskPriority, string> = {
+  urgent: "#d92d20", // danger.600
+  high: "#dc6803", // warning.600
+  medium: "#1570ef", // info.600
+  low: "#6f7a90", // gray.500
+};
+const NEUTRAL_GROUP_COLOR = "#6f7a90"; // gray.500
 
 /** Human labels for validation `field` keys shown in the ErrorDialog breakdown. */
 const FIELD_LABEL: Record<string, string> = {
@@ -160,6 +173,29 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     }
     return m;
   }, [tasks, users]);
+
+  // Per-task grouping descriptor for the sort-bracket rail. Only チーム順 / 重要度順 group
+  // into visible ranges; 手動・時期 pass undefined so no brackets render. Team-less rows
+  // fall into a "チーム未設定" run so every row is accounted for. Every group carries a
+  // solid fill colour (team colour / priority colour / a neutral) — the bracket fills
+  // with it and GanttView picks a WCAG-legible text colour on top. Read-only overlay.
+  const rowGroupById = useMemo<ReadonlyMap<common.TaskId, RowGroup> | undefined>(() => {
+    if (sortMode === "team") {
+      const m = new Map<common.TaskId, RowGroup>();
+      for (const t of tasks) {
+        const team = t.teamId ? teamById.get(t.teamId) : undefined;
+        if (team) m.set(t.id, { key: team.id, label: team.name, color: team.color || NEUTRAL_GROUP_COLOR });
+        else m.set(t.id, { key: "__noteam__", label: "チーム未設定", color: NEUTRAL_GROUP_COLOR });
+      }
+      return m;
+    }
+    if (sortMode === "priority") {
+      const m = new Map<common.TaskId, RowGroup>();
+      for (const t of tasks) m.set(t.id, { key: t.priority, label: PRIORITY_LABEL[t.priority], color: PRIORITY_GROUP_COLOR[t.priority] });
+      return m;
+    }
+    return undefined;
+  }, [sortMode, tasks, teamById]);
 
   // Sort context for the automatic 並び替え modes (重要度/時期/チーム). priority already
   // lives on task.Task (no schema change); team order = the order member-service
@@ -721,6 +757,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           assigneeNameById={assigneeNameById}
           teamColorById={teamColorById}
           teamLegend={teamLegend}
+          {...(rowGroupById ? { rowGroupById } : {})}
           canWrite={caps.canWrite}
         />
       )}

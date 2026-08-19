@@ -118,26 +118,40 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
 };
 
 // ── tasks ───────────────────────────────────────────────────────────────────
+// teamId is seeded here so the gantt's 並び替え→チーム順 groups these rows into
+// colour-coded team brackets (統括/開発/当日進行 …) — the same team ids/colours the
+// member roster seeds (createMembersStore). Two tasks per team so each bracket spans
+// a legible range.
 const TASKS: task.Task[] = [
   {
     version: 2, id: "tsk_1", eventId: "evt_1", title: "登壇者スケジュール確定", description: "全12セッションの時間割を確定する",
-    status: "in_progress", priority: "high", assigneeId: ME_ID, dueAt: "2026-08-03T09:00:00Z", origin: "internal",
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_hq", dueAt: "2026-08-03T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
   },
   {
     version: 1, id: "tsk_2", eventId: "evt_1", title: "会場レイアウト図作成", description: null,
-    status: "todo", priority: "medium", assigneeId: ME_ID, dueAt: "2026-08-04T09:00:00Z", origin: "internal",
+    status: "todo", priority: "medium", assigneeId: ME_ID, teamId: "team_dev", dueAt: "2026-08-04T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-05T00:00:00Z", updatedAt: "2026-07-20T00:00:00Z",
   },
   {
     version: 1, id: "tsk_3", eventId: "evt_1", title: "スポンサー請求書送付", description: "確定した3社へ請求",
-    status: "done", priority: "urgent", assigneeId: "usr_bob", dueAt: "2026-07-25T09:00:00Z", origin: "internal",
+    status: "done", priority: "urgent", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-07-25T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-02T00:00:00Z", updatedAt: "2026-07-24T00:00:00Z",
   },
   {
     version: 1, id: "tsk_4", eventId: "evt_1", title: "受付システム連携確認", description: null,
-    status: "blocked", priority: "medium", assigneeId: null, dueAt: null, origin: "github",
+    status: "blocked", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: null, origin: "github",
     archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_5", eventId: "evt_1", title: "運営ツール名簿連携", description: "名簿とタスクの連携確認",
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_dev", dueAt: "2026-08-06T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-12T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_6", eventId: "evt_1", title: "当日タイムテーブル作成", description: null,
+    status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
   },
 ];
 
@@ -149,6 +163,8 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
       { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
       { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
       { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
