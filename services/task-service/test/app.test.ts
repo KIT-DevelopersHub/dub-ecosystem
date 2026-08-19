@@ -275,6 +275,67 @@ describe("PUT /tasks/:id/dependencies", () => {
   });
 });
 
+// Feature 1 / ADR-0007: dependencies (arrows) are same-team only. Cross-team work goes
+// through the request/approval flow, never a dependency edge.
+describe("PUT /tasks/:id/dependencies — same-team gate (Feature 1)", () => {
+  it("200 same team: an edge between two tasks of the same team is allowed", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A", teamId: "team_dev" });
+    const b = await create(app, { title: "B", teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await h.repo.getDependsOn(a.id)).toEqual([b.id]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(1);
+  });
+
+  it("400 cross_team_not_allowed: a task cannot depend on another team's task", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A", teamId: "team_dev" });
+    const b = await create(app, { title: "B", teamId: "team_sponsor" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; details?: Array<{ field: string; reason: string }> } };
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.details).toEqual([
+      expect.objectContaining({ field: "dependsOnIds", reason: "cross_team_not_allowed" }),
+    ]);
+    //门番 rejected: nothing persisted, no event emitted.
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(0);
+  });
+
+  it("200 null teams: two team-less (team_id=null) tasks may still depend (D2 back-compat)", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A" }); // no teamId ⇒ null
+    const b = await create(app, { title: "B" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await h.repo.getDependsOn(a.id)).toEqual([b.id]);
+  });
+
+  it("400 cross_team_not_allowed: a one-sided null team is a mismatch", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A", teamId: "team_dev" });
+    const b = await create(app, { title: "B" }); // team_id=null
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+  });
+});
+
 describe("DELETE /tasks/:id (archive)", () => {
   it("archives, emits task.archived, then GET is 404 and list hides it (includeArchived reveals)", async () => {
     const { h, app } = setup();
