@@ -18,6 +18,7 @@ import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
+import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
@@ -379,6 +380,67 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         feedback.failure(e, "予定の保存に失敗しました");
         void gantt.refetchFresh();
       });
+  };
+
+  // Optimistically apply, then persist, a SET of explicit child schedules (used by the
+  // parent-bar resize and its undo/redo — each is an idempotent "set" of absolute dates).
+  const applyChildScheduleSet = (
+    set: ReadonlyArray<{ id: common.TaskId; startsAt: common.ISODateTime; endsAt: common.ISODateTime }>,
+  ): Promise<void> => {
+    if (set.length === 0) return Promise.resolve();
+    for (const s of set) gantt.setRowScheduleOptimistic(s.id, s.startsAt, s.endsAt);
+    return Promise.all(set.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
+      .then(() => gantt.refetchFresh())
+      .then(() => store.loadAll(client, query))
+      .catch((e) => {
+        feedback.failure(e, "予定の保存に失敗しました");
+        void gantt.refetchFresh();
+      });
+  };
+
+  // Resize a work-package (parent) BAR at one edge. A parent's span is the rollup of its
+  // children (the read model returns the parent's own dates as null), so we cannot persist
+  // the parent's own row — the next GET discards it and the bar snaps back ("親バーを伸ばし
+  // ても反映されない"). Instead we SCALE the dated descendants about the opposite edge so the
+  // rolled span reaches the dragged edge; those child writes persist and roll the parent bar
+  // up to match. Undo restores the children's EXACT prior dates (scaling has no clean day-
+  // aligned inverse), so Ctrl-Z is one step.
+  const onParentResize = (parentId: common.TaskId, edge: "start" | "end", deltaDays: number) => {
+    if (deltaDays === 0) return;
+    const rows = gantt.currentRows();
+    const parent = rollupRowDates(rows).find((r) => r.taskId === parentId);
+    if (!parent?.startsAt || !parent?.endsAt) return;
+    // BFS the subtree to collect every descendant (any depth).
+    const ids: common.TaskId[] = [parentId];
+    for (let i = 0; i < ids.length; i++) for (const r of rows) if (r.parentTaskId === ids[i]) ids.push(r.taskId);
+    const descendants = ids
+      .slice(1)
+      .map((id) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r)
+      .map((r) => ({ taskId: r.taskId, startsAt: r.startsAt ?? null, endsAt: r.endsAt ?? null }));
+    const scaled = scaleChildrenForParentResize(
+      { startsAt: parent.startsAt, endsAt: parent.endsAt },
+      descendants,
+      edge,
+      deltaDays,
+    );
+    if (scaled.length === 0) return;
+    const after = scaled.map((s) => ({
+      id: s.taskId as common.TaskId,
+      startsAt: s.startsAt as common.ISODateTime,
+      endsAt: s.endsAt as common.ISODateTime,
+    }));
+    // Snapshot the children's CURRENT dates so undo restores them exactly.
+    const before = after
+      .map(({ id }) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r && !!r.startsAt && !!r.endsAt)
+      .map((r) => ({ id: r.taskId, startsAt: r.startsAt!, endsAt: r.endsAt! }));
+    void applyChildScheduleSet(after);
+    history.push({
+      label: "まとめ行のリサイズ",
+      undo: () => applyChildScheduleSet(before),
+      redo: () => applyChildScheduleSet(after),
+    });
   };
 
   // Re-issue a task's field patch (optional) + WBS parent and/or predecessors as a
@@ -930,6 +992,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           truncated={filteredDto.rows.length >= 2000}
           onSchedule={caps.canWrite ? onSchedule : undefined}
           onScheduleShift={caps.canWrite ? onScheduleShift : undefined}
+          onParentResize={caps.canWrite ? onParentResize : undefined}
           onReorder={caps.canWrite ? onReorder : undefined}
           sortMode={sortMode}
           onSortModeChange={setSortMode}

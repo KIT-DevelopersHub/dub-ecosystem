@@ -174,6 +174,38 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   },
 };
 
+// Serve the gantt DTO the way gantt-service does: a work-package (hasChildren) row's OWN
+// startsAt/endsAt are NULL — the span is DERIVED from its children (the client rolls it up
+// for the bar AND the parent's detail 開始/終了). Echoing a parent's stored dates here would
+// diverge from prod (the exact mock/prod drift that shipped a broken build), so we null
+// them on read. Leaves keep their dates. This makes the demo reproduce prod faithfully.
+function ganttDtoFor(ev: string): gantt.GanttChartDTO {
+  const dto = GANTT[ev];
+  if (!dto) return { eventId: ev as gantt.GanttChartDTO["eventId"], rows: [], dependencies: [] };
+  const rows = dto.rows.map((r) => (r.hasChildren ? { ...r, startsAt: null, endsAt: null } : r));
+  return { ...dto, rows };
+}
+
+/** Persist a bar's window (leaf move/resize) or a detail date edit onto BOTH the task
+ *  columns and the gantt row, so a reload / refetch reflects it. Mirrors gantt-service +
+ *  task-service (startsAt↔startAt, endsAt↔dueAt). */
+function applyScheduleToDemo(taskId: string, startsAt: string | null, endsAt: string | null): task.Task | null {
+  const t = TASKS.find((x) => x.id === taskId);
+  if (!t) return null;
+  t.startAt = startsAt;
+  t.dueAt = endsAt;
+  t.updatedAt = new Date().toISOString();
+  t.version += 1;
+  for (const dto of Object.values(GANTT)) {
+    const row = dto.rows.find((r) => r.taskId === taskId);
+    if (row) {
+      row.startsAt = startsAt;
+      row.endsAt = endsAt;
+    }
+  }
+  return t;
+}
+
 // Per-user gantt view state (zoom / collapsed / manual drag order). Mutable in-session
 // so a drag-reorder PERSISTS across the round-trip — otherwise the reorder would snap
 // back (the SortableList's optimistic override releases once the persisted order fails
@@ -1047,13 +1079,15 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         return t ? json(t) : notFound(`GET ${pathname}`);
       }
     }
-    // gantt
+    // gantt — the wire key is `eventId` (@dub/types); read it first (the old `event`
+    // fallback stays only so a hand-written key never 500s the demo). Parent rows are
+    // served with null own-dates (see ganttDtoFor) to mirror gantt-service.
     if (pathname === "/api/v1/gantt") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
-      return json(GANTT[ev] ?? { eventId: ev, rows: [], dependencies: [] });
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
+      return json(ganttDtoFor(ev));
     }
     if (pathname === "/api/v1/gantt/dependencies") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
       return json(GANTT[ev]?.dependencies ?? []);
     }
     // per-user view state (zoom / collapsed / manual drag order)
@@ -1150,6 +1184,54 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   if (method === "PATCH") {
     if (/^\/api\/v1\/notifications\/inbox\/[^/]+\/read$/.test(pathname)) return json(null, 204);
     if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
+    // Persist a bar's window after a leaf move/resize (Notion-style edit). Mutates the task
+    // columns + the gantt row so the change survives a refetch/reload (in-session). Returns
+    // the updated GanttRow. Parents never reach here (the client blocks a parent resize).
+    {
+      const rowId = seg(/^\/api\/v1\/gantt\/rows\/([^/]+)$/);
+      if (rowId) {
+        const b = (body ?? {}) as { startsAt?: string | null; endsAt?: string | null };
+        const t = applyScheduleToDemo(rowId, b.startsAt ?? null, b.endsAt ?? null);
+        if (!t) return notFound(`PATCH ${pathname}`);
+        const row = ganttDtoFor(String(t.eventId)).rows.find((r) => r.taskId === rowId);
+        return json(
+          row ?? {
+            taskId: rowId,
+            title: t.title,
+            startsAt: b.startsAt ?? null,
+            endsAt: b.endsAt ?? null,
+            progressPercent: t.status === "done" ? 100 : 0,
+            assigneeId: t.assigneeId,
+            teamId: t.teamId ?? null,
+          },
+        );
+      }
+    }
+    // Detail-panel edit (title/status/priority/担当/チーム/開始日/期日). Updates the task and,
+    // when the dates change, mirrors them onto the gantt row so the BAR moves immediately.
+    {
+      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      if (id) {
+        const t = TASKS.find((x) => x.id === id);
+        if (!t) return notFound(`PATCH ${pathname}`);
+        const b = (body ?? {}) as Partial<task.UpdateTaskRequest>;
+        if (b.title !== undefined) t.title = b.title;
+        if (b.status !== undefined) t.status = b.status;
+        if (b.priority !== undefined) t.priority = b.priority;
+        if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
+        if (b.teamId !== undefined) t.teamId = b.teamId;
+        const datesChanged = b.startAt !== undefined || b.dueAt !== undefined;
+        if (datesChanged) {
+          const nextStart = b.startAt !== undefined ? b.startAt : t.startAt ?? null;
+          const nextDue = b.dueAt !== undefined ? b.dueAt : t.dueAt ?? null;
+          applyScheduleToDemo(id, nextStart ?? null, nextDue ?? null); // bumps version + mirrors row
+        } else {
+          t.version += 1;
+        }
+        t.updatedAt = new Date().toISOString();
+        return json(t);
+      }
+    }
   }
 
   return null;
