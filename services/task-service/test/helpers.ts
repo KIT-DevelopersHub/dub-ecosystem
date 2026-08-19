@@ -6,7 +6,18 @@ import type { task, common, auditLog, identity } from "@dub/types";
 import { DubError, CommonErrorCodes } from "@dub/errors";
 import type { AppConfig } from "../src/env";
 import type { Deps } from "../src/deps";
-import type { TaskRepo, InsertTaskInput, InsertAttachmentInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
+import type {
+  TaskRepo,
+  InsertTaskInput,
+  InsertAttachmentInput,
+  TaskPatch,
+  ListFilter,
+  DueSoonRow,
+  InsertTaskRequestInput,
+  ListRequestsFilter,
+  TaskRequestDecision,
+  InsertCrossLinkInput,
+} from "../src/repo";
 import type { EventClient, EventRef, IdentityClient, Authorizer } from "../src/clients";
 import type { EventPublisher, Auditor } from "../src/events";
 import type { Principal } from "../src/principal";
@@ -220,6 +231,100 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (!att) return false;
     att.archivedAt = now;
     return true;
+  }
+
+  // ── send / receive: task requests + cross-links ────────────────────────────
+  requests = new Map<string, task.TaskRequest>();
+  crossLinks: task.TaskCrossLink[] = [];
+
+  async insertRequest(input: InsertTaskRequestInput): Promise<task.TaskRequest> {
+    const rec: task.TaskRequest = {
+      id: input.id,
+      eventId: input.eventId,
+      fromUserId: input.fromUserId,
+      toUserId: input.toUserId,
+      fromTeamId: input.fromTeamId,
+      toTeamId: input.toTeamId,
+      title: input.title,
+      description: input.description,
+      priority: input.priority,
+      dueAt: input.dueAt,
+      sourceTaskId: input.sourceTaskId,
+      state: "pending",
+      declineReason: null,
+      createdTaskId: null,
+      version: 1,
+      createdAt: input.now,
+      decidedAt: null,
+      updatedAt: input.now,
+    };
+    this.requests.set(rec.id, rec);
+    return { ...rec };
+  }
+
+  async getRequestById(id: string): Promise<task.TaskRequest | null> {
+    const r = this.requests.get(id);
+    return r ? { ...r } : null;
+  }
+
+  async listRequests(
+    filter: ListRequestsFilter,
+  ): Promise<{ items: task.TaskRequest[]; nextCursor: string | null }> {
+    let recs = [...this.requests.values()].filter((r) =>
+      filter.box === "incoming" ? r.toUserId === filter.userId : r.fromUserId === filter.userId,
+    );
+    if (filter.states && filter.states.length > 0) {
+      const set = new Set(filter.states);
+      recs = recs.filter((r) => set.has(r.state));
+    }
+    if (filter.eventId) recs = recs.filter((r) => (r.eventId ?? null) === filter.eventId);
+    recs.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)); // id DESC
+    if (filter.cursorId) recs = recs.filter((r) => r.id < filter.cursorId!);
+    const hasMore = recs.length > filter.limit;
+    const page = hasMore ? recs.slice(0, filter.limit) : recs;
+    const last = page[page.length - 1];
+    return {
+      items: page.map((r) => ({ ...r })),
+      nextCursor: hasMore && last ? btoa(last.id) : null,
+    };
+  }
+
+  async decideRequest(
+    id: string,
+    decision: TaskRequestDecision,
+    expectedVersion: number,
+    now: string,
+  ): Promise<boolean> {
+    const r = this.requests.get(id);
+    if (!r || r.version !== expectedVersion || r.state !== "pending") return false;
+    r.state = decision.state;
+    r.decidedAt = now;
+    r.updatedAt = now;
+    if (decision.declineReason !== undefined) r.declineReason = decision.declineReason;
+    if (decision.createdTaskId !== undefined) r.createdTaskId = decision.createdTaskId;
+    if (decision.toTeamId !== undefined) r.toTeamId = decision.toTeamId;
+    r.version += 1;
+    return true;
+  }
+
+  async insertCrossLink(input: InsertCrossLinkInput): Promise<task.TaskCrossLink> {
+    const rec: task.TaskCrossLink = {
+      id: input.id,
+      requestId: input.requestId,
+      requesterTaskId: input.requesterTaskId,
+      requesteeTaskId: input.requesteeTaskId,
+      eventId: input.eventId,
+      createdAt: input.now,
+    };
+    this.crossLinks.push(rec);
+    return { ...rec };
+  }
+
+  async listCrossLinksByEvent(eventId: string): Promise<task.TaskCrossLink[]> {
+    return this.crossLinks
+      .filter((c) => (c.eventId ?? null) === eventId)
+      .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .map((c) => ({ ...c }));
   }
 }
 
