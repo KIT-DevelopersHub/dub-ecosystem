@@ -25,11 +25,17 @@ interface AssetSweep {
 
 interface AppHealthManifest {
   generatedAt?: string;
+  loadBearing?: unknown;
   assets?: unknown;
 }
 
-/** GET /app-health.json (over the SVC_FE binding) and probe every listed asset. A missing
- *  manifest is itself a failure (the build/deploy didn't ship it), reported distinctly. */
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? (v as unknown[]).filter((a): a is string => typeof a === "string") : [];
+}
+
+/** GET /app-health.json (over the SVC_FE binding) and probe the load-bearing chunk set (entry +
+ *  per-screen dynamic chunks). Bounded (~1 per screen) so the whole poll stays under the Workers
+ *  free-plan 50-subrequest cap. A missing manifest is itself a failure, reported distinctly. */
 export async function sweepAssets(fe: Fetcher): Promise<AssetSweep> {
   let manifest: AppHealthManifest;
   try {
@@ -41,11 +47,12 @@ export async function sweepAssets(fe: Fetcher): Promise<AssetSweep> {
   } catch (err) {
     return { ok: false, detail: `app-health.json unreachable: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const assets = Array.isArray(manifest.assets) ? (manifest.assets as unknown[]).filter((a): a is string => typeof a === "string") : [];
-  if (assets.length === 0) return { ok: false, detail: "app-health.json has no assets listed" };
+  // Prefer the bounded load-bearing set; fall back to the full asset list for older manifests.
+  const chunks = strList(manifest.loadBearing).length > 0 ? strList(manifest.loadBearing) : strList(manifest.assets);
+  if (chunks.length === 0) return { ok: false, detail: "app-health.json lists no chunks" };
 
   const missing: string[] = [];
-  for (const asset of assets) {
+  for (const asset of chunks) {
     const path = asset.startsWith("/") ? asset : `/${asset}`;
     // HEAD first (cheap); some asset servers 405 HEAD, so fall back to GET on non-200/404.
     let out = await probeBinding(fe, path, { method: "HEAD" });
@@ -53,9 +60,9 @@ export async function sweepAssets(fe: Fetcher): Promise<AssetSweep> {
     if (!out.ok) missing.push(`${asset} (${out.detail.match(/HTTP \d+/)?.[0] ?? "fail"})`);
   }
   if (missing.length > 0) {
-    return { ok: false, detail: `${missing.length}/${assets.length} chunk(s) missing: ${missing.slice(0, 5).join(", ")}` };
+    return { ok: false, detail: `${missing.length}/${chunks.length} chunk(s) missing: ${missing.slice(0, 5).join(", ")}` };
   }
-  return { ok: true, detail: `all ${assets.length} chunks present` };
+  return { ok: true, detail: `all ${chunks.length} load-bearing chunks present` };
 }
 
 /** Produce one TargetResult per frontend app (id = "fe:<appId>"). */
@@ -70,15 +77,21 @@ export async function checkFrontend(env: Env): Promise<TargetResult[]> {
       detail: "SVC_FE binding not bound",
     }));
   }
+  // The SPA fallback (not_found_handling=single-page-application) serves index.html for EVERY
+  // unmatched path, so all app routes return the same shell — probe it ONCE (not once per app)
+  // to keep well under the Workers free-plan 50-subrequest cap.
+  const shell = await probeBinding(fe, "/", { bodyIncludes: `id="root"` });
   const sweep = await sweepAssets(fe);
 
-  const results: TargetResult[] = [];
-  for (const app of FRONTEND_APPS) {
-    // SPA fallback returns index.html for every route; require real HTML (the app mount point).
-    const route = await probeBinding(fe, app.route, { bodyIncludes: `id="root"` });
-    const ok = route.ok && sweep.ok;
-    const detail = !route.ok ? route.detail : !sweep.ok ? sweep.detail : `route+chunks ok (${sweep.detail})`;
-    results.push({ id: `fe:${app.id}`, kind: "frontend", label: `画面: ${app.label}`, status: ok ? "ok" : "down", detail });
-  }
-  return results;
+  const ok = shell.ok && sweep.ok;
+  const detail = !shell.ok ? `SPA shell: ${shell.detail}` : !sweep.ok ? sweep.detail : `shell+chunks ok (${sweep.detail})`;
+  // One row per app (アプリ単位). The check is shared (shell + load-bearing chunks), so a missing
+  // chunk marks every app down — correct: the whole SPA is broken when its code doesn't resolve.
+  return FRONTEND_APPS.map((app) => ({
+    id: `fe:${app.id}`,
+    kind: "frontend" as const,
+    label: `画面: ${app.label}`,
+    status: ok ? ("ok" as const) : ("down" as const),
+    detail,
+  }));
 }
