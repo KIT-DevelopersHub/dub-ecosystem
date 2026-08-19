@@ -162,3 +162,51 @@ describe("#39-3 parent detail shows the child count", () => {
     expect(screen.queryByTestId("fe4-detail-child-count")).toBeNull();
   });
 });
+
+describe("delete is blocked when the task has children (no re-parenting)", () => {
+  it("削除 on a parent shows the block message and never calls onDelete", () => {
+    const onDelete = vi.fn();
+    render(
+      <TaskDetailPanel
+        task={mkParent("p")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={onDelete}
+        onClose={() => {}}
+        scopeTasks={[
+          { id: "p", title: "親", parentTaskId: null },
+          { id: "c1", title: "子1", parentTaskId: "p" },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("fe4-detail-delete"));
+    // No delete confirm — the child-block message is shown instead.
+    expect(screen.queryByTestId("fe4-confirm-delete")).toBeNull();
+    const blocked = screen.getByTestId("fe4-delete-blocked");
+    expect(blocked.textContent).toMatch(/子タスク/);
+    expect(blocked.textContent).toMatch(/削除できません/);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("a leaf task still deletes through the normal confirm flow", () => {
+    const onDelete = vi.fn();
+    render(
+      <TaskDetailPanel
+        task={mkParent("leaf")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={onDelete}
+        onClose={() => {}}
+        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("fe4-detail-delete"));
+    expect(screen.queryByTestId("fe4-delete-blocked")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe4-confirm-yes"));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});

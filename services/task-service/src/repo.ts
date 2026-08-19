@@ -151,6 +151,10 @@ export interface TaskRepo {
   update(id: string, patch: TaskPatch, expectedVersion: number, now: string): Promise<boolean>;
   /** Soft-delete (archive) a live task; false if not found / already archived. */
   archive(id: string, now: string): Promise<boolean>;
+  /** Count of LIVE (non-archived) tasks whose direct parent is `parentId`. Guards
+   *  delete: a task with live children must not be archived (else the children are
+   *  orphaned and the read model silently re-parents them). */
+  countLiveChildren(parentId: string): Promise<number>;
   /** Bulk-archive every live task of an event (event.archived compensation). */
   archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]>;
   getDependsOn(taskId: string): Promise<common.TaskId[]>;
@@ -309,6 +313,14 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         id,
       );
       return res.meta.changes > 0;
+    },
+
+    async countLiveChildren(parentId: string): Promise<number> {
+      const row = await db.first<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM task_tasks WHERE parent_id = ? AND archived_at IS NULL`,
+        parentId,
+      );
+      return row?.n ?? 0;
     },
 
     async archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]> {
