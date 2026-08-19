@@ -91,6 +91,42 @@ function UndoToast(): JSX.Element | null {
   );
 }
 
+// Transient error toast (e.g. a read/unread persist that failed and rolled back). Unlike
+// UndoToast it carries no action button and auto-dismisses after 4s.
+function ErrorToast(): JSX.Element | null {
+  const { state, dispatch } = useMailStore();
+  useEffect(() => {
+    if (!state.toast) return;
+    const t = setTimeout(() => dispatch({ type: "DISMISS_TOAST" }), 4000);
+    return () => clearTimeout(t);
+  }, [state.toast, dispatch]);
+  if (!state.toast) return null;
+  return (
+    <div
+      data-testid="fe2-mail-toast"
+      role="status"
+      style={{
+        position: "fixed",
+        left: "50%",
+        transform: "translateX(-50%)",
+        bottom: 24,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "12px 16px",
+        borderRadius: "var(--dub-radius-md)",
+        background: "var(--dub-color-danger-600, var(--dub-color-text-primary))",
+        color: "#fff",
+        boxShadow: "var(--dub-shadow-lg)",
+        zIndex: 1400,
+        fontSize: "var(--dub-font-size-sm)",
+      }}
+    >
+      <span>{state.toast}</span>
+    </div>
+  );
+}
+
 function Shortcuts(): null {
   const { state, dispatch } = useMailStore();
   useEffect(() => {
@@ -146,6 +182,7 @@ function GmailBody(): JSX.Element {
         <ComposeWindow key={c.id} compose={c} offset={i} />
       ))}
       <UndoToast />
+      <ErrorToast />
       <Shortcuts />
     </main>
   );

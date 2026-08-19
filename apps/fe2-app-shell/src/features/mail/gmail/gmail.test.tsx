@@ -29,6 +29,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getMessage: vi.fn(),
     getThread: vi.fn().mockResolvedValue(DEMO_INBOX_THREAD),
     markRead: vi.fn().mockResolvedValue({ read: true }),
+    markUnread: vi.fn().mockResolvedValue({ read: false }),
     listSent: vi.fn().mockResolvedValue({ items: DEMO_SENT_ITEMS, nextCursor: null }),
     getSent: vi.fn().mockResolvedValue(DEMO_SENT_DETAIL),
     downloadAttachment: vi.fn().mockResolvedValue(new Blob(["x"])),
@@ -201,6 +202,33 @@ describe("GmailApp (hydrates from the gateway)", () => {
     const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!; // mailin_1 is unread
     await userEvent.click(firstRow);
     await waitFor(() => expect(api.markRead).toHaveBeenCalledWith("mailin_1"));
+  });
+
+  it("persists a mark-UNREAD to the server so it survives a reload", async () => {
+    const api = fakeApi();
+    render(wrap(<GmailApp />, api));
+    await waitFor(() => expect(api.listInbox).toHaveBeenCalled());
+    const rows = await screen.findAllByTestId("fe2-mail-inbox-item");
+    const readRow = rows[1]!; // mailin_2 / thr_in_2 is READ → its hover action is "未読にする"
+    await userEvent.hover(readRow);
+    await userEvent.click(await within(readRow).findByRole("button", { name: "未読にする" }));
+    // The optimistic unread flip is POSTed to the gateway (server-backed, reload-safe).
+    await waitFor(() => expect(api.markUnread).toHaveBeenCalledWith("mailin_2"));
+  });
+
+  it("rolls the unread flip back and shows a toast when the server rejects it", async () => {
+    const api = fakeApi({ markUnread: vi.fn().mockRejectedValue(new Error("boom")) });
+    render(wrap(<GmailApp />, api));
+    await waitFor(() => expect(api.listInbox).toHaveBeenCalled());
+    const rows = await screen.findAllByTestId("fe2-mail-inbox-item");
+    const readRow = rows[1]!; // mailin_2 / thr_in_2 is READ
+    await userEvent.hover(readRow);
+    await userEvent.click(await within(readRow).findByRole("button", { name: "未読にする" }));
+    // The failed POST rolls the UI back (the row is read again → hover shows "未読にする")
+    // and surfaces an error toast.
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-toast")).toBeInTheDocument());
+    await userEvent.hover(readRow);
+    expect(await within(readRow).findByRole("button", { name: "未読にする" })).toBeInTheDocument();
   });
 
   it("shows the Sent folder from GET /mail/sent", async () => {

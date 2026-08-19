@@ -489,10 +489,33 @@ function createMailStore() {
     return out;
   };
 
+  // Read/unread state is PERSISTED per message (localStorage) so a mark-unread (or mark-read)
+  // survives a reload — mirroring the real gateway clearing / stamping read_at, so the shared
+  // demo is a faithful review surface for this slice (not just poll-safe within a session).
+  const READ_KEY = "dub_demo_mail_read";
+  function readOverrides(): Record<string, boolean> {
+    try {
+      const raw = globalThis.localStorage?.getItem(READ_KEY);
+      return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+    } catch {
+      return {};
+    }
+  }
+  function saveReadOverride(msgId: string, read: boolean): void {
+    try {
+      const cur = readOverrides();
+      cur[msgId] = read;
+      globalThis.localStorage?.setItem(READ_KEY, JSON.stringify(cur));
+    } catch {
+      /* storage unavailable — read-state is best-effort in the demo */
+    }
+  }
+
   function inboxOf(id: string): mail.MailMessageDetail[] {
     if (!received[id]) {
       const acct = DEMO_ACCOUNTS.find((a) => a.id === id);
-      received[id] = (acct?.inbox ?? []).map((m) => ({ ...m }));
+      const overrides = readOverrides();
+      received[id] = (acct?.inbox ?? []).map((m) => ({ ...m, ...(m.id in overrides ? { read: overrides[m.id]! } : {}) }));
     }
     return received[id]!;
   }
@@ -561,7 +584,20 @@ function createMailStore() {
         const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
         if (!found) return notFound(`POST ${pathname}`); // another account's message (no oversight) → 404
         found.read = true;
+        saveReadOverride(found.id, true); // survive a reload
         return json({ read: true });
+      }
+    }
+    if (method === "POST") {
+      const m = /^\/api\/v1\/mail\/messages\/([^/]+)\/unread$/.exec(pathname);
+      if (m) {
+        const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
+        if (!found) return notFound(`POST ${pathname}`); // another account's message (no oversight) → 404
+        // Flip back to unread on the in-memory row and persist the override so it survives a
+        // reload, mirroring the gateway clearing read_at.
+        found.read = false;
+        saveReadOverride(found.id, false);
+        return json({ read: false });
       }
     }
     // thread: this account's messages in the thread (every account's under oversight).

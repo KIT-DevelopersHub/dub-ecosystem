@@ -43,6 +43,9 @@ export interface MailState {
   search: string;
   composes: ComposeState[];
   undo: UndoState | null;
+  /** Transient error toast (e.g. a read/unread persist that failed and rolled back). Plain
+   *  message, no undo action — auto-dismissed by the UI. Null = nothing showing. */
+  toast: string | null;
   /** Bumped to ask the hydration hook to re-fetch inbox+sent (e.g. after a send). */
   syncNonce: number;
 }
@@ -68,6 +71,8 @@ export type MailAction =
   | { type: "CLOSE_COMPOSE"; id: string }
   | { type: "UNDO" }
   | { type: "DISMISS_UNDO" }
+  | { type: "SHOW_TOAST"; message: string }
+  | { type: "DISMISS_TOAST" }
   // ---- server sync ----
   | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
@@ -232,6 +237,10 @@ export function reducer(state: MailState, action: MailAction): MailState {
       return state.undo ? { ...state, threads: state.undo.prevThreads, undo: null } : state;
     case "DISMISS_UNDO":
       return { ...state, undo: null };
+    case "SHOW_TOAST":
+      return { ...state, toast: action.message };
+    case "DISMISS_TOAST":
+      return { ...state, toast: null };
     case "HYDRATE":
       // Replace threads with the server view. Drop selections/undo that referenced the
       // now-stale set; keep the open thread if it still exists (so an open reading pane
@@ -285,6 +294,7 @@ export const initialMailState: MailState = {
   search: "",
   composes: [],
   undo: null,
+  toast: null,
   syncNonce: 0,
 };
 
