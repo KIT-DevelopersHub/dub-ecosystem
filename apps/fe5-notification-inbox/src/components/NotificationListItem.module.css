@@ -1,14 +1,14 @@
-/* Notification row = a refined but compact card: two lines (title+time / badge+snippet)
-   with generous padding and a soft radius, a hairline border + subtle shadow, and a
-   gentle hover lift. Denser than a paragraph card, but the padding/line rhythm keeps it
-   polished (not cramped). Tokens only (FRONTEND_GUIDE §4).
+/* Notification row = a modern card: rounded corners, a hairline border + subtle
+   shadow at rest, and a gentle hover lift (deeper shadow + 1px rise). Tokens only
+   (FRONTEND_GUIDE §4).
 
-   Unread vs read stays quiet and theme-safe:
+   Unread vs read is expressed quietly and theme-safely:
    - a faint brand tint mixed over the *theme's own* surface (works in light AND dark,
      unlike a fixed brand-50 fill which stays light in dark mode),
    - a rounded brand accent bar on the left edge,
    - a brand dot + a bolder title.
-   Read cards stay calm. color-mix over tokens keeps this token-driven — no raw hex. */
+   Read cards stay calm (plain surface, muted body). color-mix over tokens keeps this
+   token-driven — no raw hex. */
 
 /* Card wrapper: main clickable area + optional trailing action share one rounded box. */
 .row {
@@ -37,11 +37,11 @@
   border-color: var(--dub-color-border-focus);
 }
 
-/* Main clickable area — a two-line stack with comfortable padding + line rhythm. */
+/* Main clickable area fills the card; the rounded corners come from the wrapper. */
 .item {
   display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-2);
+  gap: var(--dub-space-3);
+  align-items: flex-start;
   padding: var(--dub-space-4);
   background: transparent;
   color: var(--dub-color-text-primary);
@@ -80,68 +80,52 @@
   font-weight: var(--dub-font-weight-bold);
 }
 
-/* ── Two content lines ───────────────────────────────────────────────────── */
+.unread .snippet {
+  color: var(--dub-color-text-primary);
+}
+
+/* ── Content ─────────────────────────────────────────────────────────────── */
 .body {
   flex: 1;
   min-width: 0;
 }
 
-/* Line 1: dot + title (truncates) + relative time pinned right. */
-.line1 {
-  display: flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  min-width: 0;
-}
-
 .title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: var(--dub-font-weight-medium);
   font-size: var(--dub-font-size-sm);
   line-height: var(--dub-font-lineHeight-tight);
   color: var(--dub-color-text-primary);
 }
 
-.time {
-  flex: none;
-  font-size: var(--dub-font-size-xs);
-  color: var(--dub-color-text-muted);
-}
-
-/* Line 2: category badge + one-line snippet (truncates). */
-.line2 {
-  display: flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  min-width: 0;
-}
-
 .snippet {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-top: var(--dub-space-1);
   color: var(--dub-color-text-secondary);
   font-size: var(--dub-font-size-sm);
-  line-height: var(--dub-font-lineHeight-tight);
+  line-height: var(--dub-font-lineHeight-normal);
+  /* Keep long bodies to two tidy lines so every card is a predictable height. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.unread .snippet {
-  color: var(--dub-color-text-primary);
+.meta {
+  display: flex;
+  gap: var(--dub-space-2);
+  align-items: center;
+  margin-top: var(--dub-space-3);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
 }
 
-/* Brand dot, vertically centered on line 1. */
+/* Brand dot, aligned to the title's first line. */
 .dot {
   width: 8px;
   height: 8px;
   border-radius: var(--dub-radius-full);
   background: var(--dub-color-brand-500);
   flex: none;
+  margin-top: 5px;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--dub-color-brand-500) 14%, transparent);
 }
 
