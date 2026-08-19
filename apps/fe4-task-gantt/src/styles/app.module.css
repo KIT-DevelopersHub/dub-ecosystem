@@ -22,6 +22,18 @@
   flex-wrap: wrap;
 }
 .pageHeaderText { display: flex; flex-direction: column; gap: var(--dub-space-1); }
+/* Right-aligned header group: presence avatars + the existing header actions live here
+   as flex siblings with a gap, so they never overlap. It hugs the right (margin-left:auto
+   against the wrapping .pageHeader) and wraps its own contents on a narrow header, keeping
+   undo/redo + タスク作成 fully visible and clickable. */
+.headerRight {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
 .headerActions { display: flex; align-items: center; gap: var(--dub-space-3); }
 /* undo / redo controls (判断57). The keyboard shortcut is the primary path; these
    buttons make it discoverable and give touch users an affordance. */

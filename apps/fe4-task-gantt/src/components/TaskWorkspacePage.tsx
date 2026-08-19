@@ -736,16 +736,21 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
           <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
-        {/* Realtime presence: who is viewing/editing this gantt right now (live). */}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+        {/* Right-aligned control group. Presence avatars and the existing header actions
+            are flex SIBLINGS inside one wrapping container (justify-end), so they can
+            never visually or interactively overlap: on a narrow header the whole group
+            wraps below the title, and presence collapses to +N — the undo/redo + create
+            controls stay fully visible and clickable. The toolbar row (filters / sort /
+            番号 toggle / prefix inputs) is a separate row below and is untouched. */}
+        <div className={styles.headerRight}>
+          {/* Realtime presence: who is viewing/editing this gantt right now (live). */}
           <PresenceBar
             presence={rt.presence}
             status={rt.status}
             selfUserId={rt.selfUserId}
             displayNameById={displayNameById}
           />
-        </div>
-        {caps.canWrite && (
+          {caps.canWrite && (
           <div className={styles.headerActions}>
             {/* Organizer edit affordance. Placeholder gating today: canWrite comes
                 from effectivePermissions (task:write). Wire the real organizer role
@@ -781,7 +786,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
               タスク作成
             </Button>
           </div>
-        )}
+          )}
+        </div>
       </header>
 
       <div className={styles.toolbar}>
