@@ -37,12 +37,16 @@ describe("PredecessorPicker — searchable combobox (feature #1)", () => {
     expect(screen.getByTestId("pp-chip-t3")).toBeInTheDocument();
   });
 
-  it("surfaces recently-chosen tasks (max 4) when the query is empty", () => {
-    rememberPredecessors(["t2"]);
+  it("surfaces the latest 2 recently-chosen tasks when the query is empty", () => {
+    rememberPredecessors(["t3", "t2", "t1"]); // stored most-recent first
     render(<PredecessorPicker options={OPTS} value={[]} onChange={() => {}} testId="pp" />);
     fireEvent.focus(screen.getByTestId("pp-input"));
     expect(screen.getByText("最近選んだタスク")).toBeInTheDocument();
+    // exactly 2 suggestions (the 3rd, t1, is dropped)
+    expect(screen.getAllByTestId(/^pp-opt-/)).toHaveLength(2);
+    expect(screen.getByTestId("pp-opt-t3")).toBeInTheDocument();
     expect(screen.getByTestId("pp-opt-t2")).toBeInTheDocument();
+    expect(screen.queryByTestId("pp-opt-t1")).toBeNull();
   });
 
   it("rememberPredecessors dedupes and caps recent history", () => {
