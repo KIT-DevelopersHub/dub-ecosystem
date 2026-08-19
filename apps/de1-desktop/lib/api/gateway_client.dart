@@ -18,6 +18,11 @@ class GatewayClient {
   final Dio _dio;
   final PersistCookieJar _jar;
 
+  /// The configured, cookie-aware Dio. Feature modules issue their own calls
+  /// through the shared [ApiClient] (which wraps this) instead of adding methods
+  /// here — so parallel feature work never edits this session client.
+  Dio get dio => _dio;
+
   static Future<GatewayClient> create() async {
     final jar = PersistCookieJar(storage: FileStorage(_cookieDir()));
     final dio = Dio(
@@ -62,19 +67,6 @@ class GatewayClient {
     final res = await _dio.get<Map<String, dynamic>>('$_p/me');
     _throwIfError(res);
     return MeResponse.fromJson(res.data!);
-  }
-
-  /// GET /api/v1/notifications/inbox — the caller's notification inbox.
-  Future<PaginatedInbox> inbox({int limit = 50, bool unreadOnly = false}) async {
-    final res = await _dio.get<Map<String, dynamic>>(
-      '$_p/notifications/inbox',
-      queryParameters: {
-        'limit': limit,
-        if (unreadOnly) 'unreadOnly': true,
-      },
-    );
-    _throwIfError(res);
-    return PaginatedInbox.fromJson(res.data!);
   }
 
   /// POST /api/v1/auth/logout — revoke the current session and clear cookies.

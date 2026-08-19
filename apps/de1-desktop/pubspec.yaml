@@ -42,6 +42,9 @@ dependencies:
   dio: ^5.7.0
   dio_cookie_manager: ^3.1.1
   cookie_jar: ^4.0.8
+  # DO-direct realtime WebSocket (ADR-0002). Pure Dart — no platform channels,
+  # so the macOS/Windows builds need no extra pods.
+  web_socket_channel: ^3.0.1
 
 dev_dependencies:
   flutter_test:

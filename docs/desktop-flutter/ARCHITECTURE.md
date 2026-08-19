@@ -22,29 +22,43 @@ difference is an optional local DB (deferred).
 - **No paid dependencies, local-first.** All Dart deps are pure-Dart (no native
   plugins), so macOS/Windows builds need no extra CocoaPods.
 
-## Layers (as built for the vertical slice)
+## Layers (feature-module architecture)
+
+Features are **plug-ins**: each lives in `lib/features/<feature>/` and registers
+one line in `lib/features/modules.dart`. The shell/launcher/nav are derived from
+that registry, so features can be built in parallel without editing shared files.
+Full how-to: **`FEATURE_MODULE_GUIDE.md`**.
 
 ```
 lib/
   config.dart            GATEWAY_BASE_URL + dev auto-login defines
   api/
-    models.dart          Dart mirrors of the wire contract (MeResponse, InboxItem, ...)
-    gateway_client.dart  dio + persistent cookie jar over /api/v1
+    models.dart          cross-feature wire types (MeResponse, DubApiException, ...)
+    gateway_client.dart  dio + persistent cookie jar over /api/v1 (session concern)
+  core/
+    api_client.dart      ApiClient (shared HTTP; getJson/getList/postJson) + provider
+    feature_module.dart  FeatureModule contract + ComingSoonModule placeholder
   state/
     auth.dart            Riverpod: gatewayClientProvider + AuthController (phases)
-    notifications.dart   Riverpod: inboxProvider (FutureProvider)
+  features/
+    modules.dart         THE registry (single shared append point) + providers
+    notifications/       reference module (api/models/view/module)
+    chat/                chat: api, models, realtime (WS), providers, view, module
   ui/
     theme.dart           Material3 seed (approximates @dub/tokens)
     login_screen.dart    email + password
-    app_shell.dart       top bar + 9-dot app launcher (web-parity nav)
-    inbox_view.dart      the vertical-slice feature (notification inbox)
-tool/mock_gateway.dart   contract-faithful local stand-in for the gateway
-integration_test/        live-HTTP end-to-end slice + screenshot capture
+    app_shell.dart       registry-driven shell: 9-dot launcher + body (never edited per-feature)
+tool/mock_gateway.dart   contract-faithful local stand-in (HTTP + loopback WS)
+integration_test/        live-HTTP/WS end-to-end slices + screenshot capture
 ```
 
 - **State management: Riverpod.** `gatewayClientProvider` (async singleton),
   `authControllerProvider` (StateNotifier with `unknown/unauthenticated/
-  authenticating/authenticated`), `inboxProvider` (FutureProvider).
+  authenticating/authenticated`), `apiClientProvider` (shared HTTP), and
+  per-feature providers (e.g. `inboxProvider`, `chatChannelsProvider`).
+- **Shared HTTP: `ApiClient`.** Features call the gateway through `ApiClient`
+  (wraps the one cookie-aware Dio) instead of adding methods to a single giant
+  client — so parallel feature work never edits a shared client file.
 - **HTTP: dio + cookie_jar.** `PersistCookieJar` captures `Set-Cookie:
   dub_session` on login and replays it on every call — browser-identical auth
   (ADR-0004). Non-2xx bodies are decoded into `DubApiException` from the
@@ -95,13 +109,21 @@ The mock log shows the real request sequence: `GET /me` (401) → `POST
 /auth/password/login` (Set-Cookie) → `GET /me` (authed) → `GET
 /notifications/inbox`. Screenshot: `~/DubVault/docs/dav-desktop-flutter/`.
 
+## Chat (done — first real feature)
+
+`lib/features/chat/`. Two-pane UI (channel list + timeline/composer) at
+web-parity for the slice: browse channels, read history, **optimistic send**,
+and **realtime receive over the DO-direct WebSocket** (ADR-0002). The client
+mints a `ws-ticket` from `GET /api/v1/chat/channels/{id}/ws-ticket`, then
+connects straight to the ChatRoom Durable Object at `doUrl?ticket=…` (the gateway
+rejects WS upgrades). Native clients send no `Origin`, which the DO allows.
+`ChatSocket` handles heartbeat-ping + reconnect-with-backoff and re-mints a
+ticket on every connect. Proven end-to-end on the real macOS app against the
+mock's loopback WS. Screenshots: `~/DubVault/docs/dav-desktop-flutter/chat-*`.
+
 ## Next steps (for feature parity)
 
-1. **Chat** (the main everyday-use driver): `GET /api/v1/chat/channels` +
-   messages; realtime is Durable-Object-direct (WebSocket) per ADR-0002 — the
-   gateway rejects WS upgrades, so chat realtime connects to the DO with a
-   `ws-ticket` from `/chat/channels/{id}/ws-ticket`.
-2. **Native push notifications** (the other motivation): local notifications
+1. **Native push notifications** (the other motivation): local notifications
    first; a device-registration + APNs/FCM-style transport later (possibly
    reusing `mo3-mobile-bff`'s device registry). Needs a design step — not yet
    decided.

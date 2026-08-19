@@ -1,48 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/feature_module.dart';
+import '../features/modules.dart';
 import '../state/auth.dart';
-import 'inbox_view.dart';
 
-/// One launchable app in the ecosystem (mirrors the web 9-dot launcher).
-class DubApp {
-  const DubApp(this.id, this.label, this.icon, {this.ready = false});
-  final String id;
-  final String label;
-  final IconData icon;
+/// The currently selected feature id. Defaults to the first registered module.
+final selectedFeatureProvider = StateProvider<String>((_) => defaultFeatureId);
 
-  /// Whether this app is implemented in the desktop client yet.
-  final bool ready;
-}
-
-const _apps = <DubApp>[
-  DubApp('notifications', '通知', Icons.notifications_outlined, ready: true),
-  DubApp('chat', 'チャット', Icons.chat_bubble_outline),
-  DubApp('tasks', 'タスク', Icons.check_circle_outline),
-  DubApp('gantt', 'ガント', Icons.timeline),
-  DubApp('mail', 'メール', Icons.mail_outline),
-  DubApp('events', 'イベント', Icons.event_outlined),
-  DubApp('roster', '名簿', Icons.groups_outlined),
-  DubApp('drive', 'ドライブ', Icons.folder_outlined),
-];
-
-final selectedAppProvider = StateProvider<String>((_) => 'notifications');
-
+/// The app shell: top bar with the 9-dot launcher + account menu, and a body
+/// rendered from the selected [FeatureModule]. Fully registry-driven — adding a
+/// feature never edits this file (see FEATURE_MODULE_GUIDE.md).
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final selectedId = ref.watch(selectedAppProvider);
+    final modules = ref.watch(featureModulesProvider);
+    final selectedId = ref.watch(selectedFeatureProvider);
     final me = ref.watch(authControllerProvider).me;
     final theme = Theme.of(context);
+
+    final selected = modules.firstWhere(
+      (m) => m.id == selectedId,
+      orElse: () => modules.first,
+    );
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 12,
         title: Row(
           children: [
-            _AppLauncherButton(),
+            const _AppLauncherButton(),
             const SizedBox(width: 12),
             Container(
               width: 28,
@@ -58,6 +47,14 @@ class AppShell extends ConsumerWidget {
             ),
             const SizedBox(width: 10),
             const Text('DAV Desktop'),
+            const SizedBox(width: 10),
+            Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.outline),
+            const SizedBox(width: 6),
+            Text(
+              selected.label,
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(color: theme.colorScheme.outline),
+            ),
           ],
         ),
         actions: [
@@ -93,7 +90,7 @@ class AppShell extends ConsumerWidget {
           const SizedBox(width: 8),
         ],
       ),
-      body: _AppBody(selectedId: selectedId),
+      body: selected.buildView(context),
     );
   }
 
@@ -103,24 +100,9 @@ class AppShell extends ConsumerWidget {
   }
 }
 
-class _AppBody extends StatelessWidget {
-  const _AppBody({required this.selectedId});
-  final String selectedId;
-
-  @override
-  Widget build(BuildContext context) {
-    switch (selectedId) {
-      case 'notifications':
-        return const InboxView();
-      default:
-        final app = _apps.firstWhere((a) => a.id == selectedId,
-            orElse: () => _apps.first);
-        return _ComingSoon(app: app);
-    }
-  }
-}
-
 class _AppLauncherButton extends ConsumerWidget {
+  const _AppLauncherButton();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return IconButton(
@@ -131,6 +113,7 @@ class _AppLauncherButton extends ConsumerWidget {
   }
 
   void _openLauncher(BuildContext context, WidgetRef ref) {
+    final modules = ref.read(featureModulesProvider);
     showDialog<void>(
       context: context,
       barrierColor: Colors.black26,
@@ -149,11 +132,12 @@ class _AppLauncherButton extends ConsumerWidget {
               mainAxisSpacing: 8,
               crossAxisSpacing: 8,
               children: [
-                for (final app in _apps)
+                for (final module in modules)
                   _LauncherTile(
-                    app: app,
+                    module: module,
                     onTap: () {
-                      ref.read(selectedAppProvider.notifier).state = app.id;
+                      ref.read(selectedFeatureProvider.notifier).state =
+                          module.id;
                       Navigator.of(ctx).pop();
                     },
                   ),
@@ -167,8 +151,8 @@ class _AppLauncherButton extends ConsumerWidget {
 }
 
 class _LauncherTile extends StatelessWidget {
-  const _LauncherTile({required this.app, required this.onTap});
-  final DubApp app;
+  const _LauncherTile({required this.module, required this.onTap});
+  final FeatureModule module;
   final VoidCallback onTap;
 
   @override
@@ -182,12 +166,12 @@ class _LauncherTile extends StatelessWidget {
         children: [
           Stack(
             children: [
-              Icon(app.icon,
+              Icon(module.icon,
                   size: 30,
-                  color: app.ready
+                  color: module.ready
                       ? theme.colorScheme.primary
                       : theme.colorScheme.outline),
-              if (!app.ready)
+              if (!module.ready)
                 const Positioned(
                   right: 0,
                   top: 0,
@@ -196,33 +180,7 @@ class _LauncherTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(app.label, style: theme.textTheme.bodySmall),
-        ],
-      ),
-    );
-  }
-}
-
-class _ComingSoon extends StatelessWidget {
-  const _ComingSoon({required this.app});
-  final DubApp app;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(app.icon, size: 56, color: theme.colorScheme.outline),
-          const SizedBox(height: 12),
-          Text('${app.label} は準備中', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            '共有APIに接続済み。Web と同じ機能をこの画面に載せていきます。',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.outline),
-          ),
+          Text(module.label, style: theme.textTheme.bodySmall),
         ],
       ),
     );

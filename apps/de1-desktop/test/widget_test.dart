@@ -3,6 +3,8 @@ import 'dart:async';
 
 import 'package:dub_desktop/api/gateway_client.dart';
 import 'package:dub_desktop/api/models.dart';
+import 'package:dub_desktop/features/chat/chat_models.dart';
+import 'package:dub_desktop/features/notifications/notifications_models.dart';
 import 'package:dub_desktop/main.dart';
 import 'package:dub_desktop/state/auth.dart';
 import 'package:flutter/material.dart';
@@ -60,5 +62,55 @@ void main() {
     );
     expect(e.code, 'UNAUTHENTICATED');
     expect(e.statusCode, 401);
+  });
+
+  test('ChannelList + MessagePage parse the chat wire contract', () {
+    final channels = ChannelList.fromJson({
+      'items': [
+        {'id': 'chn_1', 'name': 'general', 'createdAt': '2026-08-19T00:00:00.000Z'}
+      ]
+    });
+    expect(channels.items.single.name, 'general');
+
+    final page = MessagePage.fromJson({
+      'items': [
+        {
+          'id': 'msg_1',
+          'channelId': 'chn_1',
+          'authorId': 'usr_1',
+          'body': 'hi',
+          'createdAt': '2026-08-19T00:00:00.000Z'
+        }
+      ],
+      'nextCursor': null,
+    });
+    expect(page.items.single.body, 'hi');
+    expect(page.nextCursor, isNull);
+  });
+
+  test('ChatRealtimeEvent message.created -> timeline message', () {
+    final e = ChatRealtimeEvent.fromJson({
+      'kind': 'message.created',
+      'channelId': 'chn_1',
+      'messageId': 'msg_9',
+      'authorId': 'usr_2',
+      'body': 'live',
+      'at': '2026-08-19T01:00:00.000Z',
+    });
+    expect(e.isTimelineMessage, isTrue);
+    expect(e.toMessage().body, 'live');
+    expect(e.toMessage().id, 'msg_9');
+  });
+
+  test('WsTicket.connectUri appends the ticket query param', () {
+    final t = WsTicket.fromJson({
+      'ticket': 'abc',
+      'doUrl': 'wss://chat-rt.example/ws/chn_1',
+      'expiresAt': '2026-08-19T01:00:00.000Z',
+    });
+    final uri = t.connectUri();
+    expect(uri.scheme, 'wss');
+    expect(uri.path, '/ws/chn_1');
+    expect(uri.queryParameters['ticket'], 'abc');
   });
 }

@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../api/models.dart';
-import '../state/notifications.dart';
+import '../../api/models.dart';
+import 'notifications_api.dart';
+import 'notifications_models.dart';
 
-/// Vertical-slice feature: the notification inbox, fetched live from the shared
-/// gateway (`GET /api/v1/notifications/inbox`).
-class InboxView extends ConsumerWidget {
-  const InboxView({super.key});
+/// The notification inbox, fetched live from the shared gateway
+/// (`GET /api/v1/notifications/inbox`).
+class NotificationsView extends ConsumerWidget {
+  const NotificationsView({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -173,8 +174,7 @@ class _ErrorState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline,
-              size: 44, color: theme.colorScheme.error),
+          Icon(Icons.error_outline, size: 44, color: theme.colorScheme.error),
           const SizedBox(height: 8),
           Text('読み込みに失敗しました', style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
