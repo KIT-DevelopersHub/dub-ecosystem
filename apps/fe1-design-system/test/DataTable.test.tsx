@@ -79,4 +79,18 @@ describe("DataTable", () => {
     await userEvent.click(first!);
     expect(onChange).toHaveBeenCalledWith(["1"]);
   });
+
+  it("applies minWidth + noWrap to header and body cells (wide-table horizontal scroll)", () => {
+    const wideColumns: ColumnDef<Row>[] = [
+      { key: "name", header: "名前", cell: (r) => r.name, minWidth: "12rem", noWrap: true },
+    ];
+    render(<DataTable columns={wideColumns} rows={rows} rowKey={(r) => r.id} />);
+    // header carries the min-width so the column keeps its natural width…
+    const th = screen.getByRole("columnheader", { name: "名前" });
+    expect(th).toHaveStyle({ minWidth: "12rem" });
+    // …and each body cell also gets min-width + the nowrap class (no 2–3 line wrap).
+    const cell = screen.getByText("Alpha");
+    expect(cell).toHaveStyle({ minWidth: "12rem" });
+    expect(cell.className).toMatch(/noWrap/);
+  });
 });

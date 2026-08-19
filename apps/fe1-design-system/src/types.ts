@@ -240,6 +240,19 @@ export interface ColumnDef<Row> {
   header: ReactNode;
   cell: (row: Row) => ReactNode;
   width?: string;
+  /**
+   * Minimum column width (any CSS length, e.g. "12rem"). Applied to both the
+   * header and body cells so a wide table keeps its natural width and scrolls
+   * horizontally inside DataTable's `overflow-x:auto` wrapper instead of
+   * squeezing columns until their text wraps (多列テーブルの折り返し崩れ対策).
+   */
+  minWidth?: string;
+  /**
+   * Keep this column's cells on a single line (`white-space: nowrap`). Header
+   * cells are already nowrap; opt body cells in for values that must not wrap
+   * (氏名・ステータス・操作ボタン等). Chip/tag columns can leave this off to wrap.
+   */
+  noWrap?: boolean;
   sortable?: boolean;
   align?: "left" | "center" | "right";
 }
