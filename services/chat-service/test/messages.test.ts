@@ -146,30 +146,34 @@ describe("edit / delete", () => {
     expect(stale.json.error.code).toBe("CHAT_VERSION_CONFLICT");
   });
 
-  it("delete soft-deletes; history redacts body; emits deleted + audit + realtime", async () => {
+  it("delete (default policy = hard) erases the message; history no longer contains it; emits deleted + audit + realtime", async () => {
     const deps = makeDeps();
     const app = createApp(deps);
     const channelId = await newChannel(app);
     const m = await call(app, "POST", "/chat/messages", { body: { channelId, body: "secret" } });
 
     const del = await call(app, "DELETE", `/chat/messages/${m.json.id}`);
-    expect(del.status).toBe(204);
+    expect(del.status).toBe(200);
+    expect(del.json.mode).toBe("hard");
+    expect(del.json.message).toBeNull();
     expect(deps.publisher.namesFor("chat.message.deleted")).toHaveLength(1);
     expect(deps.audit.actions()).toContain("chat.message.delete");
-    expect(deps.realtime.kinds()).toContain("message.deleted");
+    // RT event carries the resolved mode so other clients drop (not tombstone) the row.
+    const rt = deps.realtime.events.find((e) => e.event.kind === "message.deleted");
+    expect(rt?.event).toMatchObject({ kind: "message.deleted", mode: "hard" });
 
+    // Hard delete: the row is gone from the timeline entirely (no tombstone remains).
     const hist = await call(app, "GET", "/chat/messages", { query: { channelId } });
-    const row = hist.json.items.find((x: any) => x.id === m.json.id);
-    expect(row.body).toBe("[deleted]");
-    expect(row.deletedAt).not.toBeNull();
+    expect(hist.json.items.find((x: any) => x.id === m.json.id)).toBeUndefined();
   });
 
-  it("channel admin (moderator) can delete another user's message", async () => {
+  it("channel admin (moderator) can delete another user's message (default hard)", async () => {
     const deps = makeDeps(); // authz grants chat:moderate by default
     const app = createApp(deps);
     const channelId = await newChannel(app, { ...topic, visibility: "private", memberIds: ["user_b"] });
     const m = await call(app, "POST", "/chat/messages", { userId: "user_b", body: { channelId, body: "by b" } });
     const del = await call(app, "DELETE", `/chat/messages/${m.json.id}`); // user_caller is admin
-    expect(del.status).toBe(204);
+    expect(del.status).toBe(200);
+    expect(del.json.mode).toBe("hard");
   });
 });

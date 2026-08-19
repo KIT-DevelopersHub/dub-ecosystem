@@ -2,7 +2,7 @@
 // Powers the standalone dev harness and component/E2E tests (design §5: "P1
 // 実装時の依存先はモックサーバ(契約準拠スタブ)"). NOT shipped to production —
 // FE2 provides the real ResourceClient there.
-import { identity } from "@dub/types"; // value import: identity.PERMISSION_CATALOG (runtime) + types
+import { identity, chat } from "@dub/types"; // value import: identity.PERMISSION_CATALOG + chat.DEFAULT_MESSAGE_DELETION_POLICY
 import type { common, auditLog, gateway, member } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
 import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
@@ -92,9 +92,12 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
   const s = seedState(seed);
   // Dev-only: delay reads so loading/skeleton states are previewable (FRONTEND_GUIDE §5).
   const readDelay = () => (latencyMs > 0 ? new Promise((r) => setTimeout(r, latencyMs)) : Promise.resolve());
+  // Chat message-deletion policy (mock default = product default: all hard, version 0).
+  let chatPolicy: chat.DeletionPolicyResponse = { policy: { ...chat.DEFAULT_MESSAGE_DELETION_POLICY }, version: 0 };
 
   async function get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
     await readDelay();
+    if (path.endsWith("/chat/settings/deletion-policy")) return { policy: { ...chatPolicy.policy }, version: chatPolicy.version } as unknown as T;
     if (path.endsWith("/permissions/catalog")) return [...identity.PERMISSION_CATALOG] as unknown as T;
     if (path.endsWith("/identity/roles")) return paginate([...s.roles.values()]) as unknown as T;
     if (path.endsWith("/identity/users")) {
@@ -352,6 +355,12 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
   }
 
   async function patch<T>(path: string, body?: unknown): Promise<T> {
+    if (path.endsWith("/chat/settings/deletion-policy")) {
+      const req = body as chat.UpdateDeletionPolicyRequest;
+      if (req.version !== chatPolicy.version) throw err("CHAT_VERSION_CONFLICT", "stale deletion-policy version");
+      chatPolicy = { policy: { member: req.policy.member, moderator: req.policy.moderator }, version: chatPolicy.version + 1 };
+      return { policy: { ...chatPolicy.policy }, version: chatPolicy.version } as unknown as T;
+    }
     const roleMatch = path.match(/\/identity\/roles\/([^/]+)$/);
     if (roleMatch) {
       const role = s.roles.get(roleMatch[1]!);

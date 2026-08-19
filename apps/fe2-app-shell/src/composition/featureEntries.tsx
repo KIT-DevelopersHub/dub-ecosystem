@@ -29,6 +29,8 @@ export type {
   Channel,
   ChannelMember,
   CreateChannelRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   EditMessageRequest,
   GetChannelResponse,
   ListMessagesRequest,

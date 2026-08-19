@@ -24,6 +24,8 @@ import type {
   Channel,
   ChannelMember,
   CreateChannelRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   EditMessageRequest,
   GetChannelResponse,
   ListMessagesRequest,
@@ -211,8 +213,14 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       api
         .request<Message>({ method: "PATCH", path: `${CHAT}/messages/${id}` as ApiPath, body: req })
         .then(normalizeMessage),
-    deleteMessage: (id: common.MessageId) =>
-      api.request<Message>({ method: "DELETE", path: `${CHAT}/messages/${id}` as ApiPath }).then(normalizeMessage),
+    // Server envelope { mode, message }: `hard` => message null (FE6 drops the row);
+    // `tombstone` => the redacted message (FE6 upserts it). Normalize the tombstone.
+    deleteMessage: (id: common.MessageId): Promise<DeleteMessageResult> =>
+      api
+        .request<DeleteMessageResult>({ method: "DELETE", path: `${CHAT}/messages/${id}` as ApiPath })
+        .then((r) => ({ mode: r.mode, message: r.message ? normalizeMessage(r.message) : null })),
+    getDeletionPolicy: (): Promise<DeletionPolicyResponse> =>
+      api.request<DeletionPolicyResponse>({ method: "GET", path: `${CHAT}/settings/deletion-policy` }),
     // Server returns { messageId, reactions } (reactions as a Record); normalize to the
     // client's Reaction[] so the optimistic reconcile can apply it (see applyReactions).
     toggleReaction: (id: common.MessageId, req: ReactionToggleRequest) =>

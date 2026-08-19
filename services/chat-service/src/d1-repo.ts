@@ -3,7 +3,7 @@
 // No cross-namespace joins (chat is the DB-split first candidate).
 import type { DbClient } from "@dub/db";
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind, MessageDeletionMode } from "./types";
 
 interface ChannelDbRow {
   id: string;
@@ -359,6 +359,60 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
         channelName: r.channel_name,
         channelType: r.channel_type as ChannelType,
       }));
+    },
+
+    // ---- deletion policy (org-scoped) ----
+    async getDeletionPolicy(orgId): Promise<{ policy: { member: MessageDeletionMode; moderator: MessageDeletionMode }; version: number } | null> {
+      const r = await db.first<{ deletion_member: string; deletion_moderator: string; version: number }>(
+        `SELECT deletion_member, deletion_moderator, version FROM chat_settings WHERE org_id = ?`,
+        orgId,
+      );
+      if (!r) return null;
+      return {
+        policy: { member: r.deletion_member as MessageDeletionMode, moderator: r.deletion_moderator as MessageDeletionMode },
+        version: r.version,
+      };
+    },
+    async setDeletionPolicy(input): Promise<{ version: number } | null> {
+      // UPDATE-then-INSERT upsert with optimistic-concurrency (mirrors addMember /
+      // setReadState — "DO UPDATE SET" trips the @dub/db strict namespace guard).
+      if (input.expectedVersion === 0) {
+        // First write: insert only if no row exists yet. A pre-existing row => conflict.
+        const ins = await db.run(
+          `INSERT OR IGNORE INTO chat_settings
+             (org_id, deletion_member, deletion_moderator, version, updated_at, updated_by)
+           VALUES (?, ?, ?, 1, ?, ?)`,
+          input.orgId, input.policy.member, input.policy.moderator, input.at, input.updatedBy,
+        );
+        return ins.meta.changes > 0 ? { version: 1 } : null;
+      }
+      const nextVersion = input.expectedVersion + 1;
+      const upd = await db.run(
+        `UPDATE chat_settings
+            SET deletion_member = ?, deletion_moderator = ?, version = ?, updated_at = ?, updated_by = ?
+          WHERE org_id = ? AND version = ?`,
+        input.policy.member, input.policy.moderator, nextVersion, input.at, input.updatedBy,
+        input.orgId, input.expectedVersion,
+      );
+      return upd.meta.changes > 0 ? { version: nextVersion } : null;
+    },
+
+    // ---- hard delete (physical removal + dependent-row cascade) ----
+    async hardDeleteMessage(id: common.MessageId): Promise<void> {
+      // Remove reactions/pins for the message AND any thread replies rooted at it,
+      // then the replies, then the message itself. Same-namespace only; idempotent.
+      await db.run(
+        `DELETE FROM chat_reactions
+          WHERE message_id = ? OR message_id IN (SELECT id FROM chat_messages WHERE thread_root_id = ?)`,
+        id, id,
+      );
+      await db.run(
+        `DELETE FROM chat_pins
+          WHERE message_id = ? OR message_id IN (SELECT id FROM chat_messages WHERE thread_root_id = ?)`,
+        id, id,
+      );
+      await db.run(`DELETE FROM chat_messages WHERE thread_root_id = ?`, id);
+      await db.run(`DELETE FROM chat_messages WHERE id = ?`, id);
     },
   } satisfies ChatRepo;
 }
