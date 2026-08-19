@@ -41,6 +41,13 @@ export interface TaskStoreState {
    *  from the store, hiding those rows from the timeline and making their edits
    *  impossible. This walks nextCursor to completion. */
   loadAll: (client: ApiClient, q: task.ListTasksQuery) => Promise<void>;
+  /** Best-effort re-sync of the task cache used AFTER a write has already succeeded.
+   *  Identical fetch to `loadAll`, but a read failure here is NON-fatal: it must never
+   *  set `lastError` (the write is already committed — a failed reconciling read is not
+   *  a save failure). On success it refreshes the cache and clears any stale error; on
+   *  failure it leaves the (optimistic, now-authoritative) cache untouched and silent.
+   *  Returns true iff the reconcile fetch succeeded (caller may background-retry). */
+  reconcile: (client: ApiClient, q: task.ListTasksQuery) => Promise<boolean>;
   loadMore: (client: ApiClient, q: task.ListTasksQuery) => Promise<void>;
   // optimistic mutation (board D&D / gantt bar D&D / inline edit)
   patchOptimistic: (
@@ -100,6 +107,28 @@ export const useTaskStore = create<TaskStoreState>((set, get) => ({
       set({ tasks: indexTasks(all), nextCursor: null, lastError: null, lastErrorDetail: null });
     } catch (e) {
       set(errState(e));
+    }
+  },
+
+  async reconcile(client, q) {
+    // Post-write re-sync. NEVER writes lastError: a failure of this read must not be
+    // mistaken for a save failure (the mutation already succeeded). Mirrors loadAll's
+    // full-pagination walk so the >200-task events stay complete.
+    try {
+      const MAX_PAGES = 50;
+      const first = await api.listTasks(client, q);
+      const all = [...first.items];
+      let cursor = first.nextCursor;
+      for (let page = 0; page < MAX_PAGES && cursor; page++) {
+        const res = await api.listTasks(client, { ...q, cursor });
+        all.push(...res.items);
+        cursor = res.nextCursor;
+      }
+      set({ tasks: indexTasks(all), nextCursor: null, lastError: null, lastErrorDetail: null });
+      return true;
+    } catch {
+      // leave the optimistic cache in place and stay silent — caller retries later.
+      return false;
     }
   },
 

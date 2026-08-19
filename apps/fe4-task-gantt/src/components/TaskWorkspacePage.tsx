@@ -283,6 +283,19 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // a follow-up save carrying the panel's OLD version 409'd; re-reading here fixes it.
   // Both detail-pane save sub-paths (with or without a field change) funnel through
   // this single latest-version save.
+  //
+  // Best-effort background re-sync (task cache + gantt DTO) used AFTER a write has
+  // already succeeded; it NEVER surfaces an error — the write is committed, so a failing
+  // reconcile just retries and converges, never a false save failure.
+  const reconcileRelations = async () => {
+    try {
+      await store.reconcile(client, query);
+      await gantt.refetchFresh();
+    } catch {
+      /* stay silent; the next user action or refetch will converge */
+    }
+  };
+
   const applyRelationsRaw = async (
     id: common.TaskId,
     parentTaskId: common.TaskId | null | undefined,
@@ -302,6 +315,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // SAME tick the user saves, before the persist round-trip resolves.
     if (parentTaskId !== undefined) gantt.setRowParentOptimistic(id, parentTaskId);
     if (dependsOnIds !== undefined) gantt.setDependenciesOptimistic(id, dependsOnIds);
+
+    // ---- WRITE. ONLY a failure of the mutation calls themselves (getTask / updateTask /
+    //      replaceDependencies) is a real save failure: roll the optimistic edit back and
+    //      surface the reason. The post-write reconcile is deliberately OUTSIDE this try —
+    //      see below. ----
     try {
       const cur = await getTask(client, id); // fresh version — the single source for this save
       let version = cur.version;
@@ -323,20 +341,34 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       if (dependsOnIds !== undefined) {
         await replaceDependencies(client, id, { version, dependsOnIds });
       }
-      // reconcile with authoritative state (confirms the optimistic change)
-      await store.loadAll(client, query);
-      await gantt.refetchFresh();
-      return true;
     } catch (e) {
-      // Snap the optimistic parent/deps back at once, then surface the reason. Before
-      // this the change ran with no catch and vanished silently ("保存を押しても無反応").
+      // The WRITE itself failed — snap the optimistic parent/deps back at once, then
+      // surface the reason (before #301 the change ran with no catch and vanished
+      // silently, "保存を押しても無反応").
       if (snapParent !== undefined) gantt.setRowParentOptimistic(id, snapParent);
       if (snapDeps !== undefined) gantt.setDependenciesOptimistic(id, snapDeps);
       store.reportError(e);
       // reconcile in the background so the cache re-converges on the server truth.
-      void store.loadAll(client, query).then(() => gantt.refetchFresh());
+      void reconcileRelations();
       return false;
     }
+
+    // ---- WRITE SUCCEEDED (the server accepted the edit). Reconcile with authoritative
+    //      state, but a failure of this READ must NEVER roll the committed edit back nor
+    //      raise an error. THAT false rollback was the "先行タスクを外すとエラーが出るが、
+    //      少し時間を置くと外れている" bug: the post-write refetch (`refetchFresh`) threw and
+    //      the already-persisted removal got reverted + an error toast shown, then the
+    //      background reconcile re-applied it a moment later. Keep the optimistic (now
+    //      authoritative) state and converge quietly; retry in the background if the read
+    //      fails. ----
+    let reconciled = await store.reconcile(client, query);
+    try {
+      await gantt.refetchFresh();
+    } catch {
+      reconciled = false;
+    }
+    if (!reconciled) void reconcileRelations(); // one background retry; converges quietly
+    return true;
   };
 
   // ---- timeline bar edits (push an undo command around each raw apply) ----
