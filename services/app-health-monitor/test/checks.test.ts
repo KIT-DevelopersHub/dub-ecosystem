@@ -56,19 +56,29 @@ describe("probeBinding", () => {
 });
 
 describe("sweepAssets — stale/missing chunk detection (over SVC_FE binding)", () => {
-  it("passes when every listed chunk resolves 200", async () => {
+  it("prefers loadBearing and passes when every listed chunk resolves 200", async () => {
+    const fe = stubFetcher((path) => {
+      if (path === "/app-health.json")
+        return res(200, JSON.stringify({ loadBearing: ["/assets/entry.js", "/assets/ChatApp.js"], assets: ["/assets/x.js"] }), "application/json");
+      return res(200);
+    });
+    const out = await sweepAssets(fe);
+    expect(out.ok).toBe(true);
+    expect(out.detail).toContain("all 2 load-bearing chunks present");
+  });
+
+  it("falls back to assets when loadBearing is absent (older manifest)", async () => {
     const fe = stubFetcher((path) => {
       if (path === "/app-health.json") return res(200, JSON.stringify({ assets: ["/assets/a.js", "/assets/b.css"] }), "application/json");
       return res(200);
     });
     const out = await sweepAssets(fe);
     expect(out.ok).toBe(true);
-    expect(out.detail).toContain("all 2 chunks present");
   });
 
   it("fails and names the missing chunk (the incident)", async () => {
     const fe = stubFetcher((path) => {
-      if (path === "/app-health.json") return res(200, JSON.stringify({ assets: ["/assets/a.js", "/assets/stale.js"] }), "application/json");
+      if (path === "/app-health.json") return res(200, JSON.stringify({ loadBearing: ["/assets/a.js", "/assets/stale.js"] }), "application/json");
       if (path === "/assets/stale.js") return res(404);
       return res(200);
     });
