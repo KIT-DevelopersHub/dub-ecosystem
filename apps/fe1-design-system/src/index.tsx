@@ -18,6 +18,8 @@ export type {
   SpinnerProps,
   TooltipProps,
   PopoverProps,
+  MenuItem,
+  MenuProps,
   FormProps,
   FormFieldProps,
   TextFieldProps,
@@ -83,6 +85,7 @@ export { Spinner } from "./components/Spinner";
 export { Button, IconButton } from "./components/Button";
 export { Badge, Tag, Avatar } from "./components/Display";
 export { Tooltip, Popover } from "./components/Tooltip";
+export { Menu } from "./components/Menu";
 export { Form, FormField } from "./components/Form";
 export {
   TextField,

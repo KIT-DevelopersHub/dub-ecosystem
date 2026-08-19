@@ -3,7 +3,7 @@
 // No cross-namespace joins (chat is the DB-split first candidate).
 import type { DbClient } from "@dub/db";
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind, MessageDeletionMode } from "./types";
 
 interface ChannelDbRow {
   id: string;
@@ -359,6 +359,71 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
         channelName: r.channel_name,
         channelType: r.channel_type as ChannelType,
       }));
+    },
+
+    // ---- deletion policy (org-scoped) ----
+    async getDeletionPolicy(orgId): Promise<{ policy: { member: MessageDeletionMode; moderator: MessageDeletionMode }; version: number } | null> {
+      let r: { deletion_member: string; deletion_moderator: string; version: number } | null;
+      try {
+        r = await db.first<{ deletion_member: string; deletion_moderator: string; version: number }>(
+          `SELECT deletion_member, deletion_moderator, version FROM chat_settings WHERE org_id = ?`,
+          orgId,
+        );
+      } catch (err) {
+        // Resilience: if the chat_settings migration (0003) has not been applied to
+        // this D1 yet (migrations run out-of-band, see deploy.yml), treat it exactly
+        // like "no override row" -> the in-code default (all hard) is in effect.
+        // Deletion must never 500 just because the settings table is missing. Any
+        // OTHER error propagates (never silently change delete behaviour).
+        if (/no such table/i.test(String((err as Error)?.message ?? err))) return null;
+        throw err;
+      }
+      if (!r) return null;
+      return {
+        policy: { member: r.deletion_member as MessageDeletionMode, moderator: r.deletion_moderator as MessageDeletionMode },
+        version: r.version,
+      };
+    },
+    async setDeletionPolicy(input): Promise<{ version: number } | null> {
+      // UPDATE-then-INSERT upsert with optimistic-concurrency (mirrors addMember /
+      // setReadState — "DO UPDATE SET" trips the @dub/db strict namespace guard).
+      if (input.expectedVersion === 0) {
+        // First write: insert only if no row exists yet. A pre-existing row => conflict.
+        const ins = await db.run(
+          `INSERT OR IGNORE INTO chat_settings
+             (org_id, deletion_member, deletion_moderator, version, updated_at, updated_by)
+           VALUES (?, ?, ?, 1, ?, ?)`,
+          input.orgId, input.policy.member, input.policy.moderator, input.at, input.updatedBy,
+        );
+        return ins.meta.changes > 0 ? { version: 1 } : null;
+      }
+      const nextVersion = input.expectedVersion + 1;
+      const upd = await db.run(
+        `UPDATE chat_settings
+            SET deletion_member = ?, deletion_moderator = ?, version = ?, updated_at = ?, updated_by = ?
+          WHERE org_id = ? AND version = ?`,
+        input.policy.member, input.policy.moderator, nextVersion, input.at, input.updatedBy,
+        input.orgId, input.expectedVersion,
+      );
+      return upd.meta.changes > 0 ? { version: nextVersion } : null;
+    },
+
+    // ---- hard delete (physical removal + dependent-row cascade) ----
+    async hardDeleteMessage(id: common.MessageId): Promise<void> {
+      // Remove reactions/pins for the message AND any thread replies rooted at it,
+      // then the replies, then the message itself. Same-namespace only; idempotent.
+      await db.run(
+        `DELETE FROM chat_reactions
+          WHERE message_id = ? OR message_id IN (SELECT id FROM chat_messages WHERE thread_root_id = ?)`,
+        id, id,
+      );
+      await db.run(
+        `DELETE FROM chat_pins
+          WHERE message_id = ? OR message_id IN (SELECT id FROM chat_messages WHERE thread_root_id = ?)`,
+        id, id,
+      );
+      await db.run(`DELETE FROM chat_messages WHERE thread_root_id = ?`, id);
+      await db.run(`DELETE FROM chat_messages WHERE id = ?`, id);
     },
   } satisfies ChatRepo;
 }

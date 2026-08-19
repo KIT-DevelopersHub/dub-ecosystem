@@ -16,9 +16,63 @@ export type ChatRealtimeEvent =
       // count live. Optional for backward-compat with older publishers.
       threadRootId?: MessageId | null;
     }
-  | { kind: "message.deleted"; channelId: ChannelId; messageId: MessageId; at: ISODateTime }
+  | {
+      kind: "message.deleted";
+      channelId: ChannelId;
+      messageId: MessageId;
+      at: ISODateTime;
+      // How the delete resolved under the workspace deletion policy. `hard` = the
+      // message was physically removed (clients drop it from the timeline entirely,
+      // no tombstone); `tombstone` = redacted-in-place (render "削除されました").
+      // Optional for backward-compat with older publishers — a missing value is
+      // treated as `tombstone` (the pre-policy behaviour).
+      mode?: MessageDeletionMode;
+    }
   | { kind: "member.added"; channelId: ChannelId; userId: UserId; at: ISODateTime }
   | { kind: "member.removed"; channelId: ChannelId; userId: UserId; at: ISODateTime };
+
+// ---- message deletion policy (RBAC-configurable delete behaviour) ------------
+// A deleted message is either HARD-removed (physically gone — vanishes from the
+// timeline, list and unread counts, no trace) or TOMBSTONED (redacted-in-place,
+// rendered as "このメッセージは削除されました"). The workspace picks the behaviour per
+// privilege tier: `member` = a non-moderator deleting their own message; `moderator`
+// = a `chat:moderate` holder (admin / maintainer). The tier is resolved server-side
+// from the actor's permissions (never client-asserted). Default = every tier `hard`
+// (今すぐの体感: 誰が消しても痕跡なく消える). ロール管理から将来 member="tombstone" に切替可能。
+export type MessageDeletionMode = "hard" | "tombstone";
+
+export interface MessageDeletionPolicy {
+  /** Behaviour when a plain member (no `chat:moderate`) deletes their own message. */
+  member: MessageDeletionMode;
+  /** Behaviour when a moderator (holds `chat:moderate`: admin / maintainer) deletes. */
+  moderator: MessageDeletionMode;
+}
+
+/** Product default: everyone's delete is a hard erase (no tombstone). */
+export const DEFAULT_MESSAGE_DELETION_POLICY: MessageDeletionPolicy = {
+  member: "hard",
+  moderator: "hard",
+};
+
+/** GET /chat/settings/deletion-policy. `version` is 0 when no override row exists
+ *  yet (the in-code default is in effect); it increments on each successful save
+ *  and is echoed back into the PATCH for optimistic-concurrency. */
+export interface DeletionPolicyResponse {
+  policy: MessageDeletionPolicy;
+  version: number;
+}
+
+/** PATCH /chat/settings/deletion-policy. `version` must equal the current one (0 for
+ *  the first write) or the server answers 409. */
+export interface UpdateDeletionPolicyRequest {
+  policy: MessageDeletionPolicy;
+  version: number;
+}
+
+// DELETE /chat/messages/:id returns { mode, message } where `mode` is how the policy
+// resolved the delete and `message` is the redacted tombstone (mode="tombstone") or
+// null (mode="hard", the row is gone). The envelope is typed locally by each consumer
+// (chat-service / FE6) over their own wire Message; only `mode` is shared here.
 
 export interface WsTicketResponse {
   ticket: string; // short-lived; verified by the ChatRoom DO

@@ -43,6 +43,7 @@ export type IconName =
   | "menu"
   | "log-out"
   | "shield"
+  | "lock"
   // P1 additions (fe2〜fe7 needs beyond the original 20; keep closed, additive-only)
   | "task"
   | "list"
@@ -381,6 +382,30 @@ export interface PopoverProps extends TestableProps {
   onOpenChange?: (open: boolean) => void;
   placement?: "top" | "bottom" | "left" | "right";
   children: ReactNode;
+}
+
+// Menu (dropdown): a trigger button + a flat list of action items. The generic
+// disclosure primitive for header "設定"/kebab menus. Router-free — each item
+// carries `onSelect`; the panel closes on select, outside-click and Escape.
+export interface MenuItem {
+  id: string;
+  label: string;
+  icon?: IconName;
+  disabled?: boolean;
+  onSelect: () => void;
+  testId?: string;
+}
+export interface MenuProps extends TestableProps {
+  label: string; // trigger button text (also the aria-label when iconOnly)
+  items: MenuItem[];
+  icon?: IconName; // trigger leading icon (e.g. "settings")
+  variant?: Variant; // trigger button variant (default "ghost")
+  align?: "start" | "end"; // panel horizontal alignment (default "end")
+  menuLabel?: string; // aria-label for the panel (defaults to `label`)
+  // Icon-only trigger: renders a 40px square icon button (matching the header
+  // AppLauncher/bell controls) instead of a labelled Button. `icon` is required
+  // and `label` becomes the button's aria-label; the chevron is dropped.
+  iconOnly?: boolean;
 }
 
 // Toast contract is authoritative here (凍結案 1-4-3). FE2 re-exports useToast;

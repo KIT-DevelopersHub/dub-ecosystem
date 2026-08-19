@@ -94,6 +94,16 @@ export function markDeleted(messages: Message[], id: common.MessageId, at: commo
   return next;
 }
 
+/** Hard delete: drop a message from the timeline entirely (no tombstone remains). */
+export function removeMessage(messages: Message[], id: common.MessageId): Message[] {
+  const idx = lowerBound(messages, id);
+  const existing = messages[idx];
+  if (!existing || existing.id !== id) return messages;
+  const next = messages.slice();
+  next.splice(idx, 1);
+  return next;
+}
+
 /** Add an optimistic pending message (design §2-5). */
 export function addPending(state: ChannelViewState, pending: PendingMessage): ChannelViewState {
   return { ...state, pending: [...state.pending, pending] };
@@ -125,7 +135,8 @@ export function discardPending(state: ChannelViewState, clientTempId: string): C
  * Apply a frozen ChatRealtimeEvent to the *currently viewed* channel.
  * - message.created: insert at ULID position; if it echoes one of my own pending
  *   sends (same author + identical body) drop that pending to prevent doubles.
- * - message.deleted: tombstone.
+ * - message.deleted: `hard` drops the row entirely; `tombstone` (or a legacy event
+ *   with no `mode`) redacts it in place. The mode is set server-side per the policy.
  * - member.added/removed: not a timeline mutation here (memberCount handled by the
  *   channel query); returned state is unchanged for those kinds.
  *
@@ -174,7 +185,10 @@ export function applyRealtimeEvent(
       return { ...state, pending, messages: upsertMessage(state.messages, message) };
     }
     case "message.deleted":
-      return { ...state, messages: markDeleted(state.messages, event.messageId, event.at) };
+      // `hard` erases the row; `tombstone`/legacy(no mode) redacts it in place.
+      return event.mode === "hard"
+        ? { ...state, messages: removeMessage(state.messages, event.messageId) }
+        : { ...state, messages: markDeleted(state.messages, event.messageId, event.at) };
     case "member.added":
     case "member.removed":
       return state;

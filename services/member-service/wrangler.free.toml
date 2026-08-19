@@ -29,5 +29,9 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 binding = "SVC_IDENTITY"
 service = "dub-identity-roster"   # POST /authz/check (identity:read / identity:admin)
 
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"   # POST /notify — 参加届→管理者 in-app 通知（best-effort）
+
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"

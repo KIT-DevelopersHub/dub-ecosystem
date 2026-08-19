@@ -22,6 +22,7 @@ import {
   Menu,
   LogOut,
   Shield,
+  Lock,
   // P1 additions (fe2〜fe7 icon needs beyond the original 20)
   ListChecks,
   List,
@@ -87,6 +88,7 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   menu: Menu,
   "log-out": LogOut,
   shield: Shield,
+  lock: Lock,
   // P1 additions — aliases share the same Lucide glyph where semantics match.
   task: ListChecks,
   list: List,

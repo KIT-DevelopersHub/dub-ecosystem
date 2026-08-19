@@ -6,7 +6,7 @@
 // (post-commit) so a failed write never emits. Audit for delete/archive uses
 // Queue publishAudit (design §4 / theme13).
 import { DubError, CommonErrorCodes, errors } from "@dub/errors";
-import type { common, auditLog } from "@dub/types";
+import { chat, type common, type auditLog } from "@dub/types";
 import type {
   AppDeps,
   Channel,
@@ -14,12 +14,16 @@ import type {
   CreateChannelRequest,
   UpdateChannelRequest,
   AddMemberRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   GetChannelResponse,
   ListChannelsResponse,
   ListMessagesResponse,
   Message,
   MessageRow,
   MemberRow,
+  MessageDeletionMode,
+  MessageDeletionPolicy,
   PostMessageRequest,
   PostSystemMessageRequest,
   ReactionToggleResponse,
@@ -28,6 +32,7 @@ import type {
   SearchHit,
   UnreadResponse,
   UnreadSummary,
+  UpdateDeletionPolicyRequest,
   WsTicketResponse,
 } from "./types";
 import {
@@ -71,6 +76,19 @@ function requireLimit(raw?: number): number {
     throw errors.validationFailed([{ field: "limit", reason: raw > MAX_LIMIT ? "too_large" : "invalid" }]);
   }
   return raw;
+}
+
+const DELETION_MODES: readonly MessageDeletionMode[] = ["hard", "tombstone"];
+function requireMode(value: unknown, field: string): MessageDeletionMode {
+  if (typeof value !== "string" || !DELETION_MODES.includes(value as MessageDeletionMode)) {
+    throw errors.validationFailed([{ field, reason: "invalid" }]);
+  }
+  return value as MessageDeletionMode;
+}
+function requirePolicy(raw: unknown): MessageDeletionPolicy {
+  if (typeof raw !== "object" || raw === null) throw errors.validationFailed([{ field: "policy", reason: "required" }]);
+  const p = raw as Record<string, unknown>;
+  return { member: requireMode(p.member, "policy.member"), moderator: requireMode(p.moderator, "policy.moderator") };
 }
 
 export class ChatService {
@@ -416,23 +434,71 @@ export class ChatService {
     return toMessage(next, reactions.get(id) ?? {});
   }
 
-  async deleteMessage(ctx: ReqCtx, id: common.MessageId): Promise<void> {
+  // Resolve the org's effective deletion policy (in-code default when unset).
+  private async resolvePolicy(): Promise<MessageDeletionPolicy> {
+    const row = await this.deps.repo.getDeletionPolicy(this.deps.orgId);
+    return row?.policy ?? chat.DEFAULT_MESSAGE_DELETION_POLICY;
+  }
+
+  // GET /chat/settings/deletion-policy — version 0 signals "no override, default in effect".
+  async getDeletionPolicy(_ctx: ReqCtx): Promise<DeletionPolicyResponse> {
+    const row = await this.deps.repo.getDeletionPolicy(this.deps.orgId);
+    return row ? { policy: row.policy, version: row.version } : { policy: chat.DEFAULT_MESSAGE_DELETION_POLICY, version: 0 };
+  }
+
+  // PATCH /chat/settings/deletion-policy — optimistic-concurrency on `version`. Authz
+  // (chat:moderate) is enforced at the route (fail-close); this only validates + writes.
+  async updateDeletionPolicy(ctx: ReqCtx, body: UpdateDeletionPolicyRequest): Promise<DeletionPolicyResponse> {
+    if (typeof body.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    const policy = requirePolicy(body.policy);
+    const res = await this.deps.repo.setDeletionPolicy({
+      orgId: this.deps.orgId,
+      policy,
+      expectedVersion: body.version,
+      updatedBy: ctx.userId,
+      at: this.deps.now(),
+    });
+    if (!res) throw errVersionConflict("deletion-policy");
+    await this.audit(ctx, "chat.settings.deletion_policy.update", "org", this.deps.orgId, { policy, version: res.version });
+    return { policy, version: res.version };
+  }
+
+  async deleteMessage(ctx: ReqCtx, id: common.MessageId): Promise<DeleteMessageResult> {
     const msg = await this.deps.repo.getMessage(id);
     if (!msg) throw errors.notFound("message", id);
     const channel = await this.deps.repo.getChannel(msg.channelId);
     if (!channel) throw errors.notFound("message", id);
     const isAuthor = msg.authorId === ctx.userId;
-    if (!isAuthor && !(await this.isChannelAdmin(ctx, channel))) {
+    // Moderator tier = channel admin OR the chat:moderate permission (admin/maintainer).
+    // Resolved server-side — the client never asserts its own tier (fail-close authz).
+    const isModerator = await this.isChannelAdmin(ctx, channel);
+    if (!isAuthor && !isModerator) {
       throw new DubError(CommonErrorCodes.FORBIDDEN, "author or channel admin required", { status: 403 });
     }
-    if (msg.deletedAt) return; // idempotent
+    // Idempotent: an already-tombstoned message stays a tombstone.
+    if (msg.deletedAt) return { mode: "tombstone", message: toMessage(msg, {}) };
+
+    const policy = await this.resolvePolicy();
+    const mode: MessageDeletionMode = isModerator ? policy.moderator : policy.member;
     const now = this.deps.now();
-    const next: MessageRow = { ...msg, deletedAt: now, version: msg.version + 1 };
-    if (!(await this.deps.repo.updateMessage(next, msg.version))) throw errVersionConflict(id);
+
+    let outMessage: Message | null;
+    if (mode === "hard") {
+      // Physical erase: the row (and its reactions / pins / thread replies) is gone —
+      // it vanishes from the timeline, lists and unread counts. No tombstone remains.
+      await this.deps.repo.hardDeleteMessage(id);
+      outMessage = null;
+    } else {
+      const next: MessageRow = { ...msg, deletedAt: now, version: msg.version + 1 };
+      if (!(await this.deps.repo.updateMessage(next, msg.version))) throw errVersionConflict(id);
+      outMessage = toMessage(next, {});
+    }
 
     await this.deps.publisher.publish("chat.message.deleted", { channelId: channel.id, messageId: id }, this.actor(ctx));
-    await this.deps.realtime.publishToChannel(channel.id, { kind: "message.deleted", channelId: channel.id, messageId: id, at: now });
-    await this.audit(ctx, "chat.message.delete", "message", id, { channelId: channel.id, byAuthor: isAuthor });
+    await this.deps.realtime.publishToChannel(channel.id, { kind: "message.deleted", channelId: channel.id, messageId: id, at: now, mode });
+    // Audit always records who/when/mode (server-side, never surfaced in the UI).
+    await this.audit(ctx, "chat.message.delete", "message", id, { channelId: channel.id, byAuthor: isAuthor, mode });
+    return { mode, message: outMessage };
   }
 
   async toggleReaction(ctx: ReqCtx, id: common.MessageId, emoji: string): Promise<ReactionToggleResponse> {

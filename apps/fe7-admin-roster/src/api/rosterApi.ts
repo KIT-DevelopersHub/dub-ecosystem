@@ -2,7 +2,7 @@
 // `/api/v1/*` boundary (design §2-4). This unit implements against the contract
 // types only; the concrete transport (auth cookie, base URL, error reconstruction)
 // is FE2's ResourceClient.
-import type { identity, common, auditLog, auth, member } from "@dub/types";
+import type { identity, common, auditLog, auth, member, chat } from "@dub/types";
 import type { ResourceClient } from "../shell/contract";
 import type {
   CreateRoleRequest,
@@ -31,6 +31,9 @@ const ADMIN = `${BASE}/admin`;
 const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
 // 運営メンバー管理 (member-service) — reverse lookup + 在籍更新 during offboarding.
 const MEMBERS = `${BASE}/members`;
+// chat-service — the message deletion policy (RBAC-configurable delete behaviour) is a
+// chat-owned setting; the admin console reaches it through the gateway `/chat` segment.
+const CHAT = `${BASE}/chat`;
 
 export interface RosterApi {
   listUsers(filters: UserListFilters): Promise<common.Paginated<RosterUser>>;
@@ -76,6 +79,9 @@ export interface RosterApi {
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
   deleteEmailAddress(id: string): Promise<void>;
+  // ---- チャット: メッセージ削除ポリシー (RBAC-configurable delete behaviour) ----
+  getChatDeletionPolicy(): Promise<chat.DeletionPolicyResponse>;
+  updateChatDeletionPolicy(req: chat.UpdateDeletionPolicyRequest): Promise<chat.DeletionPolicyResponse>;
 }
 
 export function createRosterApi(client: ResourceClient): RosterApi {
@@ -123,5 +129,7 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/addresses/${id}`),
+    getChatDeletionPolicy: () => client.get<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`),
+    updateChatDeletionPolicy: (req) => client.patch<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`, req),
   };
 }
