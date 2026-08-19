@@ -377,28 +377,30 @@
 .tlGroupBracket {
   position: absolute;
   right: 4px;
-  width: 20px;
+  width: 22px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid var(--dub-color-border-strong, var(--dub-color-border-default));
-  border-left: none;
-  border-radius: 0 var(--dub-radius-md, 8px) var(--dub-radius-md, 8px) 0;
-  background: color-mix(in srgb, currentColor 6%, transparent);
+  /* filled solid with the group colour (set inline); rounded so it reads as a chip.
+     top + height are set inline with a 3px inset so consecutive pills stay separate. */
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--dub-radius-md, 8px);
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 .tlGroupBracketLabel {
   writing-mode: vertical-rl;
   text-orientation: mixed;
-  max-height: calc(100% - 8px);
+  max-height: calc(100% - 10px);
+  padding: 4px 0;
   overflow: hidden;
   font-size: var(--dub-font-size-xs, 0.7rem);
   font-weight: var(--dub-font-weight-bold, 700);
   letter-spacing: 0.02em;
   line-height: 1.05;
   white-space: nowrap;
-  color: var(--dub-color-text-secondary);
+  /* colour set inline to the WCAG-legible pole for the fill */
 }
 /* WBS leaf rows read a touch lighter than their work-package parent, and carry a
    vertical tree guide so the parent-child nesting is legible at a glance (this is
