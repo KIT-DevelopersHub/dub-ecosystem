@@ -129,3 +129,7 @@ export type {
 
 // Icon registry (also available at @dub/ui/icons)
 export { iconRegistry } from "./icons";
+
+// Keyboard primitives — IME-safe Enter-to-submit (shared by every text field).
+export { isImeComposing, isSubmitEnter, useEnterToSubmit } from "./utils/keyboard";
+export type { SubmitEnterOptions, EnterToSubmitHandlers } from "./utils/keyboard";

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageComposer } from "./MessageComposer";
 import { loadDraft } from "../store/draft";
@@ -96,6 +96,42 @@ describe("MessageComposer", () => {
     input.setSelectionRange(0, input.value.length);
     await user.click(screen.getByLabelText("番号付きリスト"));
     expect(input.value).toBe("1. a\n2. b");
+  });
+
+  it("does NOT send on the IME 変換確定 Enter, but sends on the following plain Enter", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    render(<MessageComposer channelId="chn_a" onSend={onSend} />);
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "こんにちは");
+
+    // 変換確定 Enter: fires mid-composition (isComposing=true / keyCode 229) — must not send.
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input.value).toBe("こんにちは");
+
+    // 確定後の単独 Enter: sends.
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("こんにちは", undefined);
+  });
+
+  it("does NOT pick a mention on the IME 変換確定 Enter while the menu is open", async () => {
+    const user = userEvent.setup();
+    render(
+      <MessageComposer
+        channelId="chn_a"
+        onSend={vi.fn()}
+        resolveMentionCandidates={(q) => candidates.filter((c) => c.displayName.toLowerCase().includes(q.toLowerCase()))}
+      />,
+    );
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "hi @ri");
+    expect(screen.getByTestId("fe6-composer-mention-menu")).toBeInTheDocument();
+    // Composing (e.g. converting the query) — Enter belongs to the IME, not the menu.
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(input.value).toBe("hi @ri");
   });
 
   it("Cmd+B wraps the selection in *bold*", async () => {
