@@ -363,10 +363,21 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
 
     // ---- deletion policy (org-scoped) ----
     async getDeletionPolicy(orgId): Promise<{ policy: { member: MessageDeletionMode; moderator: MessageDeletionMode }; version: number } | null> {
-      const r = await db.first<{ deletion_member: string; deletion_moderator: string; version: number }>(
-        `SELECT deletion_member, deletion_moderator, version FROM chat_settings WHERE org_id = ?`,
-        orgId,
-      );
+      let r: { deletion_member: string; deletion_moderator: string; version: number } | null;
+      try {
+        r = await db.first<{ deletion_member: string; deletion_moderator: string; version: number }>(
+          `SELECT deletion_member, deletion_moderator, version FROM chat_settings WHERE org_id = ?`,
+          orgId,
+        );
+      } catch (err) {
+        // Resilience: if the chat_settings migration (0003) has not been applied to
+        // this D1 yet (migrations run out-of-band, see deploy.yml), treat it exactly
+        // like "no override row" -> the in-code default (all hard) is in effect.
+        // Deletion must never 500 just because the settings table is missing. Any
+        // OTHER error propagates (never silently change delete behaviour).
+        if (/no such table/i.test(String((err as Error)?.message ?? err))) return null;
+        throw err;
+      }
       if (!r) return null;
       return {
         policy: { member: r.deletion_member as MessageDeletionMode, moderator: r.deletion_moderator as MessageDeletionMode },
