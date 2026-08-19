@@ -455,6 +455,16 @@ export class MemberService {
       }
       const target = await this.deps.repo.getPerson(memberId);
       if (!target || target.orgId !== this.deps.orgId) throw errPersonNotFound(memberId);
+      // 整合ガード: 同一メンバーを別の 参加届 に二重紐付けしない（1メンバー=1反映元）。
+      const others = await this.deps.repo.listParticipations(this.deps.orgId);
+      const clash = others.find((o) => o.id !== p.id && o.memberId === memberId && o.reviewState === "added");
+      if (clash) {
+        throw new DubError(
+          "MEMBER_PARTICIPATION_ALREADY_LINKED",
+          `member ${memberId} is already linked to another 参加届`,
+          { status: 409, details: [{ field: "memberId", reason: "already_linked", message: clash.id }] },
+        );
+      }
       const resolved = await this.promoteFromParticipation(target, p, expectedVersion);
       const row: ParticipationRow = {
         ...p,

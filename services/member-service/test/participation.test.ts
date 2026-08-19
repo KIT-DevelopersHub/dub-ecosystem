@@ -176,6 +176,57 @@ describe("member-service 参加届 (participation)", () => {
     expect(ov.json.members).toHaveLength(1);
   });
 
+  it("resolve link works for a manually-picked member that auto-candidates would miss (漢字違い)", async () => {
+    const app = createApp(makeDeps());
+    // 招待中「畔川」— 参加届の「黒川」とは氏名/メールが一致しないので自動候補には出ない。
+    const invited = await call(app, "POST", "/members/people", {
+      body: { name: "畔川", status: "invited", teamIds: [] },
+    });
+    const memberId = invited.json.id as string;
+    const version = invited.json.version as number;
+    const sub = await call(app, "POST", "/members/participation", { body: { name: "黒川", ...EMAILS } });
+    const pid = sub.json.participation.id as string;
+
+    // 自動候補は空 (氏名もメールも一致しない)。
+    const cands = await call(app, "GET", `/members/participation/${pid}/candidates`);
+    expect(cands.json.candidates).toHaveLength(0);
+
+    // 管理者が名簿から手動で「畔川」を選んで link → 昇格・結合。
+    const res = await call(app, "POST", `/members/participation/${pid}/resolve`, {
+      body: { action: "link", memberId, expectedVersion: version },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.member.id).toBe(memberId);
+    expect(res.json.member.status).toBe("added");
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members).toHaveLength(1); // 重複なし
+  });
+
+  it("rejects double-linking one member to two different 参加届 (409)", async () => {
+    const app = createApp(makeDeps());
+    const invited = await call(app, "POST", "/members/people", {
+      body: { name: "共有 太郎", status: "invited", teamIds: [] },
+    });
+    const memberId = invited.json.id as string;
+    const version = invited.json.version as number;
+
+    const subA = await call(app, "POST", "/members/participation", { body: { name: "回答A", ...EMAILS } });
+    const subB = await call(app, "POST", "/members/participation", { body: { name: "回答B", schoolEmail: "b@school.ac.jp", gmail: "b@gmail.com" } });
+
+    // 1件目を link → OK。
+    const first = await call(app, "POST", `/members/participation/${subA.json.participation.id}/resolve`, {
+      body: { action: "link", memberId, expectedVersion: version },
+    });
+    expect(first.status).toBe(200);
+
+    // 2件目を同じメンバーへ link → 409 (二重紐付け防止)。
+    const second = await call(app, "POST", `/members/participation/${subB.json.participation.id}/resolve`, {
+      body: { action: "link", memberId, expectedVersion: version + 1 },
+    });
+    expect(second.status).toBe(409);
+    expect(second.json.error.code).toBe("MEMBER_PARTICIPATION_ALREADY_LINKED");
+  });
+
   it("candidates excludes 追加済 members (only 招待中/検討中 are join targets)", async () => {
     const app = createApp(makeDeps());
     await call(app, "POST", "/members/people", { body: { name: "既存 太郎", status: "added", teamIds: [] } });

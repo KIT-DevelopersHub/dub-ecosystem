@@ -1594,6 +1594,17 @@ function createMembersStore() {
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
+    {
+      // 未処理・招待中「鈴木 一郎」(member_3) の漢字違い「一朗」＋別メール → 自動一致には出ない。
+      // 「名簿から手動で紐付け」で検索→選択→link を確認できるユースケース。
+      id: "part_seed_4", orgId: ORG, memberId: null, name: "鈴木 一朗", normalizedName: "鈴木一朗",
+      lastName: "鈴木", firstName: "一朗", nameKana: "すずき いちろう", lastNameKana: "すずき", firstNameKana: "いちろう",
+      nameRomaji: "Suzuki Ichiro", lastNameRomaji: "Suzuki", firstNameRomaji: "Ichiro",
+      grade: "1", department: "メディア情報学科", contact: "suzuki.i@school.ac.jp", phone: "070-7777-8888",
+      schoolEmail: "suzuki.i@school.ac.jp", gmail: "suzuki.ichiro@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "event", note: "広報を手伝いたいです。", status: "submitted",
+      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
   ];
 
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
@@ -1796,6 +1807,9 @@ function createMembersStore() {
       if (action === "link") {
         const mem = members.find((m) => m.id === body?.memberId);
         if (!mem) return json({ error: { code: "MEMBER_NOT_FOUND", message: "not found", retryable: false } }, 404);
+        // 二重紐付け防止: 同一メンバーが別の参加届に反映済みなら 409。
+        const clash = participations.find((o) => o.id !== p.id && o.memberId === mem.id && o.reviewState === "added");
+        if (clash) return json({ error: { code: "MEMBER_PARTICIPATION_ALREADY_LINKED", message: "already linked", retryable: false } }, 409);
         if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
         if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
         if (mem.contact === null) mem.contact = p.schoolEmail;

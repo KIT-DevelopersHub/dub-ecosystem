@@ -47,6 +47,18 @@ export function useParticipationCandidates(id: string | null) {
   });
 }
 
+/** 名簿全体（手動紐付けの検索対象）。「名簿から手動で選ぶ」を開いた時だけ取得する
+ *  (enabled)。自動候補に載らない相手（漢字違い等）も検索して link できるようにする。 */
+export function useParticipationRosterMembers(enabled: boolean) {
+  const api = useParticipationApi();
+  return useQuery({
+    queryKey: MEMBERS_OVERVIEW_KEY,
+    queryFn: () => api.overview(),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 /** 反映確定 (link/create/skip)。楽観的に一覧の reviewState を更新し、確定後は 参加届
  *  一覧＋組織図(members overview) を無効化して重複なく再描画する。失敗時はロールバック。 */
 export function useResolveParticipation() {

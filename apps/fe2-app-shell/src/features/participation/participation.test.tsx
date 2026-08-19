@@ -14,7 +14,18 @@ import { createParticipationApi, type ParticipationApi } from "./participationAp
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
 import { ParticipationPage } from "./ParticipationPage.tsx";
 import { ParticipationListPage } from "./ParticipationListPage.tsx";
-import type { Participation, ParticipationCandidate, PublicParticipationResponse } from "./contracts.ts";
+import type { Participation, ParticipationCandidate, PublicParticipationResponse, RosterMember } from "./contracts.ts";
+
+/** Minimal roster member fixture for the manual-link search. */
+function rosterMember(over: Partial<RosterMember> & Pick<RosterMember, "id" | "name">): RosterMember {
+  return {
+    orgId: "org", roleTitle: null, status: "invited", teamIds: [], department: null, grade: null,
+    identityUserId: null, contact: null, schoolEmail: null, gmail: null, lastName: null, firstName: null,
+    lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null,
+    note: null, sortOrder: 1024, version: 1, createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",
+    ...over,
+  } as RosterMember;
+}
 
 function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: RequestInput[] } {
   const calls: RequestInput[] = [];
@@ -33,6 +44,7 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
     submit: vi.fn(() => Promise.resolve(ACCEPTED)),
     list: vi.fn(() => Promise.resolve({ participations: [] })),
     candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+    overview: vi.fn(() => Promise.resolve({ teams: [], members: [] })),
     resolve: vi.fn((id: string) =>
       Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const }, member: null }),
     ),
@@ -235,6 +247,30 @@ describe("ParticipationListPage", () => {
     await userEvent.click(await screen.findByTestId("participation-link-m_inv"));
     await waitFor(() =>
       expect(resolve).toHaveBeenCalledWith("p_1", { action: "link", memberId: "m_inv", expectedVersion: 3 }),
+    );
+  });
+
+  it("「追加する」→ 候補なし → 名簿から手動で検索して別人に link する", async () => {
+    // 自動候補ゼロだが、名簿には氏名が一致しない招待中メンバーがいる（漢字違いのユースケース）。
+    const invited = rosterMember({ id: "m_manual", name: "畔川", status: "invited", schoolEmail: "kurokawa@school.ac.jp", version: 5 });
+    const resolve = vi.fn((id: string) =>
+      Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const, matchKind: "linked_existing" as const }, member: null }),
+    );
+    const api = makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+      overview: vi.fn(() => Promise.resolve({ teams: [], members: [invited] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-add-p_1"));
+    // 候補なし3択 → 名簿から手動で紐付け。
+    await userEvent.click(await screen.findByTestId("participation-resolve-manual"));
+    // 検索して該当メンバーを選ぶ。
+    await userEvent.type(await screen.findByTestId("participation-manual-search"), "畔");
+    await userEvent.click(await screen.findByTestId("participation-manual-link-m_manual"));
+    await waitFor(() =>
+      expect(resolve).toHaveBeenCalledWith("p_1", { action: "link", memberId: "m_manual", expectedVersion: 5 }),
     );
   });
 

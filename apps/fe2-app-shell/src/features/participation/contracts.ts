@@ -17,6 +17,9 @@ export type ListParticipationCandidatesResponse = member.ListParticipationCandid
 export type ResolveParticipationRequest = member.ResolveParticipationRequest;
 export type ResolveParticipationResponse = member.ResolveParticipationResponse;
 export type MemberStatus = member.MemberStatus;
+/** 名簿(運営メンバー)エンティティ — 手動紐付けの検索対象に使う。 */
+export type RosterMember = member.Member;
+export type MembersOverview = member.MembersOverview;
 /** Minimal response from the PUBLIC (unauthenticated) submit endpoint — no member echo. */
 export type PublicParticipationResponse = gateway.PublicParticipationResponse;
 

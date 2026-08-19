@@ -6,12 +6,28 @@
 // (create) を確認ダイアログで確定する。反映は組織図(体制図)にも重複なく反映される。
 // Route gate = identity:read; 反映確定(resolve)はサーバで identity:admin (fail-close)。
 import { useMemo, useState } from "react";
-import { PageHeader, DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
+import { PageHeader, DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextField, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
 import type { ColumnDef, BadgeTone } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useParticipationList, useParticipationTeams, useParticipationCandidates, useResolveParticipation } from "./hooks.ts";
-import { ACTIVITY_LABEL, GRADE_LABEL, REVIEW_STATE_LABEL, type Participation, type ParticipationCandidate } from "./contracts.ts";
+import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
+import { ACTIVITY_LABEL, GRADE_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import styles from "./participation.module.css";
+
+/** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
+type LinkTarget = { memberId: string; version: number };
+
+const STATUS_LABEL: Partial<Record<MemberStatus, string>> = {
+  invited: "招待中",
+  considering: "検討中",
+  added: "在籍",
+  declined: "辞退",
+};
+const STATUS_TONE: Partial<Record<MemberStatus, BadgeTone>> = {
+  invited: "info",
+  considering: "warning",
+  added: "success",
+  declined: "neutral",
+};
 
 const MATCH_LABEL: Record<Participation["matchKind"], string> = {
   linked_existing: "既存に紐付け",
@@ -149,8 +165,9 @@ export function ParticipationListPage(): JSX.Element {
           participation={addTarget}
           pending={resolveMut.isPending}
           onCancel={() => setAddTarget(null)}
-          onLink={(c) => doResolve(addTarget.id, { action: "link", memberId: c.memberId, expectedVersion: c.version })}
+          onLink={(t) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version })}
           onCreate={() => doResolve(addTarget.id, { action: "create" })}
+          onSkip={() => doResolve(addTarget.id, { action: "skip" })}
         />
       ) : null}
 
@@ -175,20 +192,24 @@ export function ParticipationListPage(): JSX.Element {
 }
 
 /** 反映確定ダイアログ。招待中/検討中の突合候補があれば「同一人物か？」を確認して link、
- *  無ければ「新規メンバーとして追加してよいか？」を確認して create する。 */
+ *  無ければ『新規で追加 / 名簿から手動で紐付け / 対象外』の3択。手動モードでは名簿全体を
+ *  氏名/メールでインクリメンタル検索し、自動一致に載らない相手(漢字違い等)にも link できる。 */
 function ResolveDialog({
   participation,
   pending,
   onCancel,
   onLink,
   onCreate,
+  onSkip,
 }: {
   participation: Participation;
   pending: boolean;
   onCancel: () => void;
-  onLink: (candidate: ParticipationCandidate) => void;
+  onLink: (target: LinkTarget) => void;
   onCreate: () => void;
+  onSkip: () => void;
 }): JSX.Element {
+  const [manual, setManual] = useState(false);
   const candidatesQuery = useParticipationCandidates(participation.id);
   const candidates = candidatesQuery.data?.candidates ?? [];
   const loading = candidatesQuery.isLoading;
@@ -202,21 +223,20 @@ function ResolveDialog({
       size="md"
       testId="participation-resolve-dialog"
       footer={
-        <>
-          <Button variant="ghost" onClick={onCancel} testId="participation-resolve-cancel">
-            キャンセル
-          </Button>
-          {/* 候補が無い / 候補と別人 のときの新規追加。候補ありのときは下の一覧内にも出す。 */}
-          {!hasCandidates ? (
-            <Button variant="primary" loading={pending} onClick={onCreate} testId="participation-resolve-create">
-              新規で追加
-            </Button>
-          ) : null}
-        </>
+        <Button variant="ghost" onClick={onCancel} testId="participation-resolve-cancel">
+          キャンセル
+        </Button>
       }
     >
       <div className={styles.resolveBody}>
-        {loading ? (
+        {manual ? (
+          <ManualLinkPanel
+            participation={participation}
+            pending={pending}
+            onLink={onLink}
+            onBack={() => setManual(false)}
+          />
+        ) : loading ? (
           <div data-testid="participation-resolve-loading">
             <Spinner />
           </div>
@@ -227,43 +247,151 @@ function ResolveDialog({
             </p>
             <ul className={styles.candidateList} data-testid="participation-candidates">
               {candidates.map((c) => (
-                <li className={styles.candidateRow} key={c.memberId}>
-                  <div className={styles.candidateInfo}>
-                    <span className={styles.candidateName}>
-                      {c.name}
-                      <Badge tone="info" testId={`participation-candidate-status-${c.memberId}`}>
-                        {c.status === "invited" ? "招待中" : "検討中"}
-                      </Badge>
-                    </span>
-                    <span className={styles.candidateMeta}>
-                      {[c.schoolEmail, c.gmail].filter(Boolean).join(" / ") || "メール未登録"}
-                      {c.matchedBy.includes("email") ? "・メール一致" : c.matchedBy.includes("name") ? "・氏名一致" : ""}
-                    </span>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    loading={pending}
-                    onClick={() => onLink(c)}
-                    testId={`participation-link-${c.memberId}`}
-                  >
-                    この人に結びつける
-                  </Button>
-                </li>
+                <CandidateRow key={c.memberId} c={c} pending={pending} onLink={onLink} />
               ))}
             </ul>
             <div className={styles.resolveDivider}>または</div>
-            <Button variant="secondary" loading={pending} onClick={onCreate} testId="participation-resolve-create-alt">
-              どれとも別人・新規として追加
-            </Button>
+            <div className={styles.resolveActions}>
+              <Button variant="secondary" loading={pending} onClick={() => setManual(true)} testId="participation-resolve-manual">
+                名簿から手動で選ぶ
+              </Button>
+              <Button variant="secondary" loading={pending} onClick={onCreate} testId="participation-resolve-create-alt">
+                どれとも別人・新規として追加
+              </Button>
+            </div>
           </>
         ) : (
-          <p className={styles.resolveLead} data-testid="participation-resolve-new">
-            「{participation.name}」は招待中に該当者がいません。<strong>新規メンバー</strong>として運営に追加します。よろしいですか？
-          </p>
+          <>
+            <p className={styles.resolveLead} data-testid="participation-resolve-new">
+              「{participation.name}」は招待中に自動で見つかる該当者がいません。どう反映しますか？
+            </p>
+            <div className={styles.resolveActions}>
+              <Button variant="primary" loading={pending} onClick={onCreate} testId="participation-resolve-create">
+                新規で追加
+              </Button>
+              <Button variant="secondary" loading={pending} onClick={() => setManual(true)} testId="participation-resolve-manual">
+                名簿から手動で紐付け
+              </Button>
+              <Button variant="ghost" loading={pending} onClick={onSkip} testId="participation-resolve-skip">
+                対象外にする
+              </Button>
+            </div>
+          </>
         )}
       </div>
     </Modal>
+  );
+}
+
+function CandidateRow({ c, pending, onLink }: { c: ParticipationCandidate; pending: boolean; onLink: (t: LinkTarget) => void }): JSX.Element {
+  return (
+    <li className={styles.candidateRow}>
+      <div className={styles.candidateInfo}>
+        <span className={styles.candidateName}>
+          {c.name}
+          <Badge tone={STATUS_TONE[c.status] ?? "neutral"} testId={`participation-candidate-status-${c.memberId}`}>
+            {STATUS_LABEL[c.status] ?? c.status}
+          </Badge>
+        </span>
+        <span className={styles.candidateMeta}>
+          {[c.schoolEmail, c.gmail].filter(Boolean).join(" / ") || "メール未登録"}
+          {c.matchedBy.includes("email") ? "・メール一致" : c.matchedBy.includes("name") ? "・氏名一致" : ""}
+        </span>
+      </div>
+      <Button
+        size="sm"
+        variant="primary"
+        loading={pending}
+        onClick={() => onLink({ memberId: c.memberId, version: c.version })}
+        testId={`participation-link-${c.memberId}`}
+      >
+        この人に結びつける
+      </Button>
+    </li>
+  );
+}
+
+/** 名簿から手動で紐付ける相手を選ぶパネル。氏名/メールでインクリメンタル検索し、
+ *  招待中/検討中/在籍を1人選んで link する（辞退・退任は除外）。既に他の参加届に反映済み
+ *  の在籍者へ紐付けるとサーバが 409 で弾く（二重紐付け防止）。 */
+function ManualLinkPanel({
+  participation,
+  pending,
+  onLink,
+  onBack,
+}: {
+  participation: Participation;
+  pending: boolean;
+  onLink: (target: LinkTarget) => void;
+  onBack: () => void;
+}): JSX.Element {
+  const [q, setQ] = useState("");
+  const membersQuery = useParticipationRosterMembers(true);
+  const all = membersQuery.data?.members ?? [];
+  const needle = q.trim().toLowerCase();
+  const results = useMemo(() => {
+    const linkable = all.filter((m) => m.status !== "declined");
+    const filtered = needle
+      ? linkable.filter((m) =>
+          [m.name, m.schoolEmail, m.gmail, m.contact]
+            .filter((v): v is string => !!v)
+            .some((v) => v.toLowerCase().includes(needle)),
+        )
+      : linkable;
+    return filtered.slice(0, 20);
+  }, [all, needle]);
+
+  return (
+    <div data-testid="participation-manual-panel">
+      <p className={styles.resolveLead}>
+        「{participation.name}」を名簿の誰に紐付けますか？ 氏名やメールで検索して選んでください（招待中の人は在籍に昇格します）。
+      </p>
+      <TextField
+        id="participation-manual-search"
+        value={q}
+        onChange={setQ}
+        placeholder="氏名・メールで検索"
+        testId="participation-manual-search"
+      />
+      {membersQuery.isLoading ? (
+        <div className={styles.manualLoading}>
+          <Spinner />
+        </div>
+      ) : results.length === 0 ? (
+        <p className={styles.candidateMeta} data-testid="participation-manual-empty">
+          該当する名簿メンバーがいません。
+        </p>
+      ) : (
+        <ul className={styles.candidateList} data-testid="participation-manual-results">
+          {results.map((m: RosterMember) => (
+            <li className={styles.candidateRow} key={m.id}>
+              <div className={styles.candidateInfo}>
+                <span className={styles.candidateName}>
+                  {m.name}
+                  <Badge tone={STATUS_TONE[m.status] ?? "neutral"}>{STATUS_LABEL[m.status] ?? m.status}</Badge>
+                </span>
+                <span className={styles.candidateMeta}>
+                  {[m.schoolEmail, m.gmail].filter(Boolean).join(" / ") || "メール未登録"}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="primary"
+                loading={pending}
+                onClick={() => onLink({ memberId: m.id, version: m.version })}
+                testId={`participation-manual-link-${m.id}`}
+              >
+                この人に紐付ける
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className={styles.resolveDivider}>または</div>
+      <Button variant="ghost" onClick={onBack} testId="participation-manual-back">
+        自動候補に戻る
+      </Button>
+    </div>
   );
 }
 

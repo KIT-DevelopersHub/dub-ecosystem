@@ -140,3 +140,29 @@ test("(f) しない: 対象外 (skip) を確定すると名簿へ反映されな
   await expect(page.getByTestId("participation-reviewstate-part_seed_2")).toHaveText(/対象外/);
   await page.screenshot({ path: shot("11-after-skip.png"), fullPage: true });
 });
+
+test("(g) 追加する: 自動候補なし → 名簿から手動検索 → 招待中の別表記(漢字違い)に link し組織図で昇格", async ({ page }) => {
+  await page.goto("/participation/list");
+  await expect(page.getByTestId("participation-list-table")).toBeVisible();
+  // seed_4「鈴木 一朗」は招待中「鈴木 一郎」(member_3) の漢字違い → 自動一致に出ない。
+  await page.getByTestId("participation-add-part_seed_4").click();
+  await expect(page.getByTestId("participation-resolve-dialog")).toBeVisible();
+  // 候補なし3択 → 名簿から手動で紐付け。
+  await expect(page.getByTestId("participation-resolve-new")).toBeVisible();
+  await page.getByTestId("participation-resolve-manual").click();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: shot("12-manual-search.png"), fullPage: true });
+  // 氏名で検索 → 招待中「鈴木 一郎」を選ぶ。
+  await page.getByTestId("participation-manual-search").fill("鈴木");
+  await expect(page.getByTestId("participation-manual-link-member_3")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: shot("13-manual-results.png"), fullPage: true });
+  await page.getByTestId("participation-manual-link-member_3").click();
+  await expect(page.getByTestId("participation-reviewstate-part_seed_4")).toHaveText(/追加済/);
+
+  // 組織図: 「鈴木 一郎」が重複なく在籍へ昇格 (打診中バッジ消滅)。
+  await gotoMembersOrgInApp(page);
+  await expect(page.getByTestId("members-orgchart").getByText("鈴木 一郎")).toHaveCount(1);
+  await expect(page.getByTestId("members-orgchip-member_3")).not.toContainText("打診中");
+  await page.screenshot({ path: shot("14-orgchart-manual-linked.png"), fullPage: true });
+});
