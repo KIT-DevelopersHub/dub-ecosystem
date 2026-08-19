@@ -104,6 +104,35 @@ describe("AppShellLayout", () => {
     expect(screen.getByText("Chat")).toBeInTheDocument();
   });
 
+  it("hides パスワード変更 behind the 設定 (⚙) menu, opening the dialog from inside it", async () => {
+    // The self-settings导线 only mounts when a shared api-client is wired (showAccount),
+    // so this case passes `api` to the layout — unlike renderShell().
+    const changePassword = vi.fn(() => Promise.resolve());
+    const shellApi = {
+      auth: { me: () => Promise.resolve(ME), changePassword },
+    } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={shellApi}>
+          <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    // The password-change trigger is no longer bare in the header — it lives inside
+    // the 設定 dropdown. Closed menu => the item is not shown.
+    expect(await screen.findByTestId("fe2-settings-menu-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-change-password-open")).not.toBeInTheDocument();
+    // Open 設定 -> the パスワード変更 item appears; clicking it opens the existing dialog.
+    await userEvent.click(screen.getByTestId("fe2-settings-menu-trigger"));
+    const item = screen.getByTestId("fe2-change-password-open");
+    expect(item).toHaveTextContent("パスワード変更");
+    await userEvent.click(item);
+    expect(await screen.findByTestId("fe2-change-password")).toBeInTheDocument();
+  });
+
   it("renders injected nav badge from badgeSource inside the launcher", async () => {
     renderShell();
     await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));

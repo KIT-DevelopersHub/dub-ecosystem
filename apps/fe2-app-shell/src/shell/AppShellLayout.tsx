@@ -7,7 +7,7 @@
 // (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
 // with no nested/double sidebar.
 import { useState, type ComponentType, type ReactNode } from "react";
-import { AppShell, PageHeader, AppLauncher, Button, Icon } from "@dub/ui";
+import { AppShell, PageHeader, AppLauncher, Button, Icon, Menu } from "@dub/ui";
 import type { AppLauncherItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
@@ -166,14 +166,26 @@ export function AppShellLayout({
             <Widget key={i} />
           ))}
           {showAccount ? (
-            <Button
-              testId="fe2-change-password-open"
-              variant="ghost"
-              iconLeft={<Icon name="settings" />}
-              onClick={() => setPwOpen(true)}
-            >
-              パスワード変更
-            </Button>
+            // Settings (⚙) dropdown — the account self-service container. Password
+            // change (#155) now lives INSIDE it instead of being exposed bare in the
+            // header; future self settings (display name / theme …) become extra
+            // items here. Behaviour/API/authz of パスワード変更 are unchanged.
+            <Menu
+              testId="fe2-settings-menu"
+              label="設定"
+              menuLabel="設定"
+              icon="settings"
+              align="end"
+              items={[
+                {
+                  id: "change-password",
+                  label: "パスワード変更",
+                  icon: "lock",
+                  onSelect: () => setPwOpen(true),
+                  testId: "fe2-change-password-open",
+                },
+              ]}
+            />
           ) : null}
           <Button
             testId="fe2-logout"

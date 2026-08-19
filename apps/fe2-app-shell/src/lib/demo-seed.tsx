@@ -1861,6 +1861,10 @@ export function createDemoFetch(): typeof fetch {
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
     // and reloading re-scopes the whole shell — the header title, permissions and mail.
     if (method === "GET" && url.pathname === "/api/v1/me") return json(currentMe());
+    // Self password change (#155): demo accepts any current password and reports
+    // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
+    // Nothing is persisted — the demo session is stateless for credentials.
+    if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
