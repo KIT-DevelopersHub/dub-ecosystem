@@ -25,18 +25,6 @@ export const ADMIN_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"] as const
 // Notification type for health alerts (open vocabulary; FE can badge on it later).
 export const HEALTH_NOTIFY_TYPE = "ops.health";
 
-// Default public origins (workers.dev). Overridable via FE_ORIGIN / GATEWAY_ORIGIN vars so a
-// custom domain (api.developershub.jp) can be pointed at without a code change.
-export const DEFAULT_FE_ORIGIN = "https://dub-fe2-app-shell.developershub-site.workers.dev";
-export const DEFAULT_GATEWAY_ORIGIN = "https://dub-api-gateway.developershub-site.workers.dev";
-
-export function feOrigin(env: Env): string {
-  return (env.FE_ORIGIN || DEFAULT_FE_ORIGIN).replace(/\/$/, "");
-}
-export function gatewayOrigin(env: Env): string {
-  return (env.GATEWAY_ORIGIN || DEFAULT_GATEWAY_ORIGIN).replace(/\/$/, "");
-}
-
 // ---- Frontend app rows (粒度=アプリ単位). Each is a client-side route in the single fe2 SPA;
 // mirrors the app launcher / HomeScreen tiles. "opens" = the SPA fallback serves the route
 // (200 + real HTML) AND every built JS/CSS chunk the SPA needs is present (the stale-chunk
@@ -67,10 +55,9 @@ export const FRONTEND_APPS: FrontendApp[] = [
 // the exact failure that surfaces to users as a blank "something went wrong".
 export const APP_HEALTH_MANIFEST_PATH = "/app-health.json";
 
-// ---- Backend service rows. Probed over their Service Binding /health (or /internal/health);
-// the internal marker is attached so /internal/* routes accept the probe. api-gateway is
-// probed over PUBLIC HTTP (/healthz) instead — it is the one externally-reachable service and
-// the same liveness the deploy smoke uses. ----
+// ---- Backend service rows. ALL probed over their Service Binding (never public fetch — see
+// checks.ts). /health or /internal/health per service; the gateway's public /healthz is reached
+// over its binding too. ----
 export interface ServiceTarget {
   id: string;
   label: string;
@@ -78,6 +65,7 @@ export interface ServiceTarget {
   path: string;
 }
 export const SERVICE_TARGETS: ServiceTarget[] = [
+  { id: "api-gateway", label: "APIゲートウェイ (api-gateway)", binding: "SVC_GATEWAY", path: "/healthz" },
   { id: "identity-roster", label: "認証基盤 (identity-roster)", binding: "SVC_IDENTITY", path: "/health" },
   { id: "auth-service", label: "認証 (auth-service)", binding: "SVC_AUTH", path: "/health" },
   { id: "event-service", label: "イベント (event-service)", binding: "SVC_EVENT", path: "/health" },
@@ -96,6 +84,3 @@ export const SERVICE_TARGETS: ServiceTarget[] = [
   { id: "github-sync", label: "GitHub同期 (github-sync)", binding: "SVC_GITHUB_SYNC", path: "/internal/health" },
   { id: "webhook-ingest", label: "Webhook (webhook-ingest)", binding: "SVC_WEBHOOK", path: "/internal/health" },
 ];
-
-// The gateway is probed over public HTTP (not a binding). id kept stable for the status table.
-export const GATEWAY_TARGET = { id: "api-gateway", label: "APIゲートウェイ (api-gateway)", path: "/healthz" };

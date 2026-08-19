@@ -31,6 +31,14 @@ binding = "SVC_NOTIFICATION"
 service = "notification"
 
 [[services]]
+binding = "SVC_FE"
+service = "fe2-app-shell"
+
+[[services]]
+binding = "SVC_GATEWAY"
+service = "api-gateway"
+
+[[services]]
 binding = "SVC_IDENTITY"
 service = "identity-roster"
 

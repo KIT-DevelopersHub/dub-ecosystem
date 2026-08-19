@@ -13,8 +13,8 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { errors, dubErrorHandler } from "@dub/errors";
 import type { Env } from "./env";
-import { SERVICE_NAME, feOrigin } from "./config";
-import { probeHttp } from "./checks";
+import { SERVICE_NAME } from "./config";
+import { probeBinding } from "./checks";
 import { createD1Repo } from "./repo";
 import { createNotifier } from "./notify";
 import { runCheckCycle } from "./monitor";
@@ -32,17 +32,19 @@ const gate: MiddlewareHandler<AppBindings> = async (c, next) => {
   return next();
 };
 
-/** Build a synthetic probe target to prove the down->alert->recovery pipeline live.
- *  down = probe a guaranteed-missing chunk (404); up = probe the real SPA root (200). Same id
- *  so state transitions across successive /run calls. */
+/** Build a synthetic probe target to prove the down->alert->recovery pipeline live (over the
+ *  SVC_FE binding). down = probe a guaranteed-missing chunk (404); up = probe the real SPA root
+ *  (200). Same id so state transitions across successive /run calls. */
 async function syntheticTarget(env: Env, mode: "down" | "up"): Promise<TargetResult> {
-  const origin = feOrigin(env);
+  const fe = env.SVC_FE;
+  const label = "(合成テスト) 死活監視パイプライン";
+  if (!fe) return { id: "synthetic:probe", kind: "service", label, status: "down", detail: "合成: SVC_FE 未bind" };
   if (mode === "down") {
-    const out = await probeHttp(`${origin}/__healthmonitor_synthetic_missing_chunk__.js`, { expectStatus: 200 });
-    return { id: "synthetic:probe", kind: "service", label: "(合成テスト) 死活監視パイプライン", status: out.ok ? "ok" : "down", detail: `合成: 存在しないチャンクの模擬 -> ${out.detail}` };
+    const out = await probeBinding(fe, "/__healthmonitor_synthetic_missing_chunk__.js", { expectStatus: 200 });
+    return { id: "synthetic:probe", kind: "service", label, status: out.ok ? "ok" : "down", detail: `合成: 存在しないチャンクの模擬 -> ${out.detail}` };
   }
-  const out = await probeHttp(`${origin}/`, { expectStatus: 200 });
-  return { id: "synthetic:probe", kind: "service", label: "(合成テスト) 死活監視パイプライン", status: out.ok ? "ok" : "down", detail: `合成: 復旧確認 -> ${out.detail}` };
+  const out = await probeBinding(fe, "/", { expectStatus: 200, bodyIncludes: `id="root"` });
+  return { id: "synthetic:probe", kind: "service", label, status: out.ok ? "ok" : "down", detail: `合成: 復旧確認 -> ${out.detail}` };
 }
 
 export function createApp() {
