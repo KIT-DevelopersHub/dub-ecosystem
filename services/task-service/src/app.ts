@@ -522,5 +522,128 @@ export function buildApp(deps: Deps): Hono {
     return c.json({ taskId: id, dependsOnIds });
   });
 
+  // ---- POST /task-requests (send / 送る) ----
+  // Issue a task request. The server (never the client) resolves the destination's
+  // team membership and branches (ADR-0007): self / same-team → a task is created
+  // immediately (D1, {kind:"task"}); other team → a pending TaskRequest is created and
+  // the receiver is notified ({kind:"request"}).
+  app.post("/task-requests", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    // Issuing is a human action — the requester is the "from". A service principal has
+    // no identity to route by, so it cannot issue a request.
+    if (principal.kind !== "user") {
+      throw errors.validationFailed([{ field: "toUserId", reason: "requester_must_be_user" }]);
+    }
+    const fromUserId = principal.userId;
+    const body = await readJson<Partial<task.IssueTaskRequestBody>>(c);
+
+    const fe: FieldError[] = [];
+    if (typeof body.toUserId !== "string" || body.toUserId.length === 0) {
+      fe.push({ field: "toUserId", reason: "required" });
+    }
+    checkTitle(body.title, fe);
+    checkPriority(body.priority, fe);
+    checkIso(body.dueAt, "dueAt", fe);
+    if (body.description !== undefined && body.description !== null && typeof body.description !== "string") {
+      fe.push({ field: "description", reason: "invalid_type" });
+    }
+    checkOptString(body.targetTeamId, "targetTeamId", fe);
+    checkOptString(body.sourceTaskId, "sourceTaskId", fe);
+    if (body.eventId !== undefined && body.eventId !== null && typeof body.eventId !== "string") {
+      fe.push({ field: "eventId", reason: "invalid_type" });
+    }
+    assertValid(fe);
+
+    const toUserId = body.toUserId!;
+    const eventId: common.EventId | null = body.eventId ?? null;
+    if (eventId) {
+      const ref = await deps.eventClient.getEvent(ctx, eventId);
+      if (!ref) throw taskErrors.eventNotFound(eventId);
+      if (ref.archivedAt) throw taskErrors.eventArchived(eventId);
+    }
+    if (!(await deps.identity.userExists(ctx, toUserId))) {
+      throw errors.validationFailed([{ field: "toUserId", reason: "not_found" }]);
+    }
+
+    // Server-side self/other-team decision. A client-supplied team hint is UX-only and
+    // never trusted — the branch is decided here from member-service memberships.
+    const fromTeams = await deps.member.teamsOfUser(ctx, fromUserId);
+    const toTeams = toUserId === fromUserId ? fromTeams : await deps.member.teamsOfUser(ctx, toUserId);
+    const shared = fromTeams.filter((t) => toTeams.includes(t));
+    const sameTeam = toUserId === fromUserId || shared.length > 0;
+
+    const now = nowIso();
+    const priority = body.priority ?? "medium";
+
+    if (sameTeam) {
+      // D1: self / same-team → materialise a normal task now (no approval). The existing
+      // task.created/task.assigned events drive gantt + My Tasks sync (no new event).
+      const teamId: common.TeamId | null = body.targetTeamId ?? shared[0] ?? fromTeams[0] ?? null;
+      const id = newId("task");
+      const created = await deps.repo.insert({
+        id,
+        eventId,
+        title: body.title!,
+        description: body.description ?? null,
+        status: "todo",
+        priority,
+        assigneeId: toUserId,
+        teamId,
+        parentId: null,
+        wbs: null,
+        startAt: null,
+        dueAt: body.dueAt ?? null,
+        origin: "internal",
+        createdBy: fromUserId,
+        now,
+      });
+      const evt = eventId ? { eventId } : {};
+      const specs: EventSpec[] = [
+        { name: "task.created", payload: { taskId: id, ...evt } },
+        { name: "task.assigned", payload: { taskId: id, ...evt, assigneeId: toUserId } },
+      ];
+      await emit(deps.events, { requestId: ctx.requestId, actorId: fromUserId }, specs);
+      await deps.audit.record(
+        auditRecord("task.request.materialized", fromUserId, config.orgId, ctx.requestId, id, {
+          toUserId,
+          teamId,
+          via: toUserId === fromUserId ? "self" : "same_team",
+        }),
+      );
+      const res: task.IssueTaskRequestResponse = { kind: "task", task: created };
+      return c.json(res, 201);
+    }
+
+    // Other team → pending request; a task only materialises when the receiver accepts.
+    const id = newId("treq");
+    const request = await deps.repo.insertRequest({
+      id,
+      eventId,
+      fromUserId,
+      toUserId,
+      fromTeamId: fromTeams[0] ?? null,
+      toTeamId: body.targetTeamId ?? toTeams[0] ?? null,
+      title: body.title!,
+      description: body.description ?? null,
+      priority,
+      dueAt: body.dueAt ?? null,
+      sourceTaskId: body.sourceTaskId ?? null,
+      now,
+    });
+    await emit(deps.events, { requestId: ctx.requestId, actorId: fromUserId }, [
+      { name: "task.request.created", payload: { requestId: id, fromUserId, toUserId, ...(eventId ? { eventId } : {}) } },
+    ]);
+    await deps.audit.record(
+      auditRecord("task.request.created", fromUserId, config.orgId, ctx.requestId, id, {
+        toUserId,
+        eventId: eventId ?? null,
+      }),
+    );
+    const res: task.IssueTaskRequestResponse = { kind: "request", request };
+    return c.json(res, 201);
+  });
+
   return app;
 }
