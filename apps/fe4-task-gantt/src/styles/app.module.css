@@ -350,9 +350,16 @@
   text-align: left;
   font-size: var(--dub-font-size-sm, 0.85rem);
   cursor: pointer;
-  transition: background 0.1s ease;
+  /* Fade the row background (hover / the selected-task grey) rather than snapping it.
+     Tuned to ride in with @dub/ui SortableList's ~280ms drop settle so a row dropped
+     under the cursor eases into its grey instead of popping to it the instant the
+     floating clone lands (feedback: 着地後にグレーへ瞬間的に変わって違和感). */
+  transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
+@media (prefers-reduced-motion: reduce) {
+  .tlRow { transition: none; }
+}
 /* ---- drag-to-reorder (left pane) ---- */
 /* Drag handle (⠿): appears on the row, grabs the pointer to reorder. Kept subtle
    until row hover so the list stays calm; the handle itself is always grab-cursored. */
@@ -496,16 +503,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: var(--dub-radius-sm, 4px);
-  color: var(--dub-color-text-secondary);
-  font-size: 0.7rem;
+  /* Bigger + higher-contrast so the open (▾) vs closed (▸) direction reads at a
+     glance instead of a faint 0.7rem triangle (feedback: toggle hard to tell). */
+  color: var(--dub-color-text-primary);
+  font-size: 0.95rem;
   line-height: 1;
 }
-.tlToggleWide:hover .tlToggleGlyph { color: var(--dub-color-text-primary); }
+.tlToggleWide:hover .tlToggleGlyph { color: var(--dub-color-text-primary); background: var(--dub-color-surface-raised, var(--dub-color-surface-base)); }
 /* keeps childless top-level rows' text aligned with rows that have a chevron. */
-.tlToggleSpacer { flex: 0 0 auto; width: 16px; margin-right: 2px; }
+.tlToggleSpacer { flex: 0 0 auto; width: 20px; margin-right: 2px; }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
 /* WBS number badge shown before the task title (gantt left pane + list view). Mono +
    tabular so codes like "AA-0001-0012" stay column-aligned and read as an identifier. */
