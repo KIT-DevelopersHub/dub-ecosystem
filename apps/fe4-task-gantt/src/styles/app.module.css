@@ -338,10 +338,9 @@
 .tlRowDropOver { box-shadow: inset 0 2px 0 0 var(--dub-color-accent-solid, var(--dub-color-border-strong)); }
 .tlRowDragging { opacity: 0.5; }
 
-/* Floating clone rendered by @dnd-kit's DragOverlay while a row is picked up: lifted
-   off the list with elevation (shadow) + a hair of scale, cursor-following, so the
-   reorder feels like grabbing a physical card. The in-place source row stays dimmed
-   (`.tlRowDragging`) as the placeholder. */
+/* The row content inside @dub/ui SortableList's floating clone. The lift itself —
+   elevation (shadow) + slight scale + grabbing cursor — is provided by SortableList's
+   overlay wrapper; this only styles the card surface so the clone matches a list row. */
 .tlRowOverlay {
   box-sizing: border-box;
   display: flex;
@@ -351,11 +350,8 @@
   background: var(--dub-color-surface-base);
   border: 1px solid var(--dub-color-border-strong, var(--dub-color-border-default));
   border-radius: var(--dub-radius-md, 8px);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.26), 0 2px 6px rgba(15, 23, 42, 0.16);
   color: var(--dub-color-text-primary);
   font-size: var(--dub-font-size-sm, 0.85rem);
-  transform: scale(1.03);
-  cursor: grabbing;
 }
 .tlRowOverlay .tlRowDrag { opacity: 0.9; cursor: grabbing; }
 .tlRowOverlay .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
