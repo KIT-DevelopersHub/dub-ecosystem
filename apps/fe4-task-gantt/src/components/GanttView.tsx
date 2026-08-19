@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SegmentedControl } from "@dub/ui";
-import type { SegmentedOption } from "@dub/ui";
+import { SegmentedControl, Select } from "@dub/ui";
+import type { SegmentedOption, SelectOption } from "@dub/ui";
+import type { GanttSortMode } from "../domain/row-sort";
+import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
 import {
   DndContext,
   PointerSensor,
@@ -56,6 +58,11 @@ export interface GanttViewProps {
    *  dragged row should sit immediately before (null ⇒ move to the end of its
    *  group). Only same-parent moves are applied by the container. Absent ⇒ no DnD. */
   onReorder?: (draggedId: common.TaskId, beforeTaskId: common.TaskId | null) => void;
+  /** Current row 並び替え mode (手動/重要度/時期/チーム). The container owns the state
+   *  and applies the actual re-ordering to `dto.rows`; this view only renders the
+   *  selector and, in non-"manual" modes, hides the drag handles (auto-sorted). */
+  sortMode?: GanttSortMode;
+  onSortModeChange?: (mode: GanttSortMode) => void;
   /** Click a bar or row to open the detail panel. */
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
@@ -195,6 +202,8 @@ export function GanttView({
   onSchedule,
   onScheduleShift,
   onReorder,
+  sortMode = "manual",
+  onSortModeChange,
   onSelect,
   onCreateOnDate,
   statusById,
@@ -224,7 +233,9 @@ export function GanttView({
   // Row drag-reorder (left pane). A 4px activation distance keeps a plain click on
   // the handle from starting a drag. Dropping onto a row places the dragged row
   // immediately before it; the container ignores cross-parent drops.
-  const reorderEnabled = !!onReorder && canWrite;
+  // Drag-to-reorder only makes sense in 手動 mode — an automatic sort would just
+  // overwrite the drop on the next render, so hide the handles when a sort is active.
+  const reorderEnabled = !!onReorder && canWrite && sortMode === "manual";
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const onRowDragEnd = useCallback(
     (e: DragEndEvent) => {
@@ -517,6 +528,19 @@ export function GanttView({
           <span className={styles.tlCount}>{rows.length} 件</span>
         </div>
         <div className={styles.tlToolbarRight}>
+          {onSortModeChange && (
+            <label className={styles.tlSort}>
+              <span className={styles.tlSortLabel}>並び替え</span>
+              <Select<GanttSortMode>
+                id="fe4-gantt-sort"
+                value={sortMode}
+                onChange={onSortModeChange}
+                options={GANTT_SORT_OPTIONS as SelectOption<GanttSortMode>[]}
+                aria-label="タスクの並び替え"
+                testId="fe4-gantt-sort"
+              />
+            </label>
+          )}
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
             今日
           </button>
