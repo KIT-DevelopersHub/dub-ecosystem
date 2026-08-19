@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/auth.dart';
 import 'inbox_view.dart';
+import 'tasks_view.dart';
 
 /// One launchable app in the ecosystem (mirrors the web 9-dot launcher).
 class DubApp {
@@ -18,7 +19,7 @@ class DubApp {
 const _apps = <DubApp>[
   DubApp('notifications', '通知', Icons.notifications_outlined, ready: true),
   DubApp('chat', 'チャット', Icons.chat_bubble_outline),
-  DubApp('tasks', 'タスク', Icons.check_circle_outline),
+  DubApp('tasks', 'タスク', Icons.check_circle_outline, ready: true),
   DubApp('gantt', 'ガント', Icons.timeline),
   DubApp('mail', 'メール', Icons.mail_outline),
   DubApp('events', 'イベント', Icons.event_outlined),
@@ -112,6 +113,8 @@ class _AppBody extends StatelessWidget {
     switch (selectedId) {
       case 'notifications':
         return const InboxView();
+      case 'tasks':
+        return const TasksView();
       default:
         final app = _apps.firstWhere((a) => a.id == selectedId,
             orElse: () => _apps.first);
