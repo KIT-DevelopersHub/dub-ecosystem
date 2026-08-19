@@ -135,6 +135,27 @@ export interface SearchHit {
   channelType: ChannelType;
 }
 
+// ---- message deletion policy (RBAC-configurable delete behaviour) ----
+// The policy shape + default are frozen in @dub/types (single source of truth);
+// re-export under local names so the service reads one contract.
+export type MessageDeletionMode = chat.MessageDeletionMode;
+export type MessageDeletionPolicy = chat.MessageDeletionPolicy;
+export type DeletionPolicyResponse = chat.DeletionPolicyResponse;
+export type UpdateDeletionPolicyRequest = chat.UpdateDeletionPolicyRequest;
+
+// DELETE /chat/messages/:id envelope. `mode` = how the policy resolved the delete;
+// `message` = the redacted tombstone (mode="tombstone") or null (mode="hard").
+export interface DeleteMessageResult {
+  mode: MessageDeletionMode;
+  message: Message | null;
+}
+
+// The stored policy plus its optimistic-concurrency version (0 = no row yet / default).
+export interface DeletionPolicyRow {
+  policy: MessageDeletionPolicy;
+  version: number;
+}
+
 // ---- pins (Slack-parity pinned messages) ----
 export interface PinToggleRequest {
   messageId: common.MessageId;
@@ -295,6 +316,22 @@ export interface ChatRepo {
     channelId?: common.ChannelId;
     limit: number;
   }): Promise<SearchRow[]>;
+
+  // deletion policy (org-scoped; null = no override row yet -> in-code default)
+  getDeletionPolicy(orgId: common.OrgId): Promise<DeletionPolicyRow | null>;
+  /** Upsert with optimistic-concurrency on `expectedVersion` (0 = insert first row).
+   *  Returns the new version on success, or null on a version conflict. */
+  setDeletionPolicy(input: {
+    orgId: common.OrgId;
+    policy: MessageDeletionPolicy;
+    expectedVersion: number;
+    updatedBy: common.UserId | null;
+    at: common.ISODateTime;
+  }): Promise<{ version: number } | null>;
+
+  /** Physically remove a message and its dependent rows (reactions, pins, and any
+   *  thread replies rooted at it) — the `hard` delete path. Idempotent. */
+  hardDeleteMessage(id: common.MessageId): Promise<void>;
 }
 
 export interface AppDeps {

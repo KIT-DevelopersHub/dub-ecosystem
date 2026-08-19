@@ -101,10 +101,20 @@ describe("applyRealtimeEvent", () => {
     expect(state.messages.map((m) => m.id)).toEqual(["msg_real"]);
   });
 
-  it("tombstones on message.deleted", () => {
+  it("tombstones on message.deleted (mode tombstone / legacy no-mode)", () => {
     let state = { ...emptyChannelView(CH), messages: [msg("msg_a", { body: "x" })] };
-    state = applyRealtimeEvent(state, { kind: "message.deleted", channelId: CH, messageId: "msg_a", at: "2026-08-09T03:00:00Z" }, ME);
+    state = applyRealtimeEvent(state, { kind: "message.deleted", channelId: CH, messageId: "msg_a", at: "2026-08-09T03:00:00Z", mode: "tombstone" }, ME);
     expect(state.messages[0]!.deletedAt).toBe("2026-08-09T03:00:00Z");
+    // legacy event without a mode still tombstones (backward-compat)
+    let legacy = { ...emptyChannelView(CH), messages: [msg("msg_b", { body: "y" })] };
+    legacy = applyRealtimeEvent(legacy, { kind: "message.deleted", channelId: CH, messageId: "msg_b", at: "2026-08-09T03:00:00Z" }, ME);
+    expect(legacy.messages[0]!.deletedAt).toBe("2026-08-09T03:00:00Z");
+  });
+
+  it("drops the row entirely on message.deleted with mode hard (no tombstone)", () => {
+    let state = { ...emptyChannelView(CH), messages: [msg("msg_a", { body: "x" }), msg("msg_b", { body: "y" })] };
+    state = applyRealtimeEvent(state, { kind: "message.deleted", channelId: CH, messageId: "msg_a", at: "2026-08-09T03:00:00Z", mode: "hard" }, ME);
+    expect(state.messages.map((m) => m.id)).toEqual(["msg_b"]);
   });
 
   it("leaves timeline unchanged for member events", () => {

@@ -131,4 +131,12 @@ export interface AppDeps {
   newTeamId: () => string;
   newMemberId: () => string;
   newParticipationId: () => string;
+  /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
+   *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
+   *  without the binding, in which case the submission simply skips the notify. Must
+   *  never throw — the submission always succeeds regardless of notify outcome. */
+  notifyParticipationSubmitted?: (
+    ctx: { requestId: string; userId: string },
+    participation: member.Participation,
+  ) => Promise<void>;
 }

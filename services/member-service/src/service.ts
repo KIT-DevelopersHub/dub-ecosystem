@@ -376,9 +376,18 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.upsertParticipation(row);
-    // 既に反映済み(再提出)なら反映先メンバーをエコー、未処理なら null。
+    const participation = toParticipation(row);
+    // 参加届が届いたら管理者へ通知（best-effort・失敗しても提出は成功させる）。
+    if (this.deps.notifyParticipationSubmitted) {
+      try {
+        await this.deps.notifyParticipationSubmitted(ctx, participation);
+      } catch {
+        // notifier is contracted best-effort, but guard here too so a throw never fails submit.
+      }
+    }
+    // 既に反映済み(再提出)なら反映先メンバーをエコー、未処理なら null（B案: 提出時は反映しない）。
     const echoed = row.memberId ? await this.getMemberById(row.memberId) : null;
-    return { participation: toParticipation(row), member: echoed, matchKind: row.matchKind };
+    return { participation, member: echoed, matchKind: row.matchKind };
   }
 
   private async getMemberById(id: string): Promise<member.Member | null> {

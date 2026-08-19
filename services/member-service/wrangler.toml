@@ -19,6 +19,11 @@ database_id = "REPLACE_AT_APPLY"
 binding = "SVC_IDENTITY"
 service = "identity-roster"
 
+# notification-service: 参加届が届いたら管理者へ POST /notify で in-app 通知（best-effort）。
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "notification"
+
 [observability]
 enabled = true
 

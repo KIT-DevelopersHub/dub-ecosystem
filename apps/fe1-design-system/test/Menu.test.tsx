@@ -49,6 +49,21 @@ describe("Menu (dropdown 設定/kebab primitive)", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("iconOnly renders a labelled icon button (no visible text/chevron) that opens the menu", async () => {
+    render(<Menu label="設定" menuLabel="設定" icon="settings" iconOnly items={items()} testId="menu" />);
+    const trigger = screen.getByTestId("menu-trigger");
+    // Accessible via aria-label; the visual label text is gone.
+    expect(trigger).toHaveAttribute("aria-label", "設定");
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveTextContent(""); // no visible "設定" text
+    expect(trigger.querySelector('[data-icon="chevron-down"]')).toBeNull(); // no chevron
+    expect(trigger.querySelector('[data-icon="settings"]')).not.toBeNull(); // gear present
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu", { name: "設定" })).toBeInTheDocument();
+  });
+
   it("does not fire onSelect for a disabled item", async () => {
     const onSelect = vi.fn();
     render(

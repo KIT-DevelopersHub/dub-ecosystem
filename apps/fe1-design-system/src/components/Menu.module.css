@@ -3,6 +3,38 @@
   display: inline-flex;
 }
 
+/* Icon-only trigger. Matches the header AppLauncher/bell controls (40px square,
+ * ghost, hover fill, active-when-open) so every header icon reads as one set. */
+.iconTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--dub-radius-md);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--dub-motion-fast) var(--dub-motion-easing),
+    color var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.iconTrigger:hover {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
+}
+.iconTrigger[aria-expanded="true"] {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
+  border-color: var(--dub-color-border-default);
+}
+.iconTrigger:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+
 /* Dropdown panel. Right-aligned by default (menus live at the top-right of the
  * header, so they open flush with the trigger's right edge); data-align="start"
  * flips it to open from the left. Chrome mirrors AppLauncher/Popover panels. */

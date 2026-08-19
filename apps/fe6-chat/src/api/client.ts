@@ -10,6 +10,8 @@ import type {
   Channel,
   ChannelMember,
   CreateChannelRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   EditMessageRequest,
   GetChannelResponse,
   ListMessagesRequest,
@@ -42,8 +44,10 @@ export interface ChatApiClient {
   listMessages(req: ListMessagesRequest): Promise<ListMessagesResponse>;
   postMessage(req: PostMessageRequest): Promise<PostMessageResponse>;
   editMessage(id: common.MessageId, req: EditMessageRequest): Promise<Message>;
-  deleteMessage(id: common.MessageId): Promise<Message>;
+  deleteMessage(id: common.MessageId): Promise<DeleteMessageResult>;
   toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<ReactionToggleResponse>;
+  /** Workspace message-deletion policy (RBAC-configurable delete behaviour). */
+  getDeletionPolicy(): Promise<DeletionPolicyResponse>;
   updateReadState(req: ReadStateUpdateRequest): Promise<void>;
   listUnread(): Promise<UnreadSummary[]>; // subject from auth header — no ?userId= (chat review #10/#13)
   getWsTicket(id: common.ChannelId): Promise<WsTicketResponse>;
@@ -187,8 +191,16 @@ export class HttpChatClient implements ChatApiClient {
   editMessage(id: common.MessageId, req: EditMessageRequest): Promise<Message> {
     return this.request<Message>("PATCH", `${CHAT}/messages/${id}`, req).then(normalizeMessage);
   }
-  deleteMessage(id: common.MessageId): Promise<Message> {
-    return this.request<Message>("DELETE", `${CHAT}/messages/${id}`).then(normalizeMessage);
+  deleteMessage(id: common.MessageId): Promise<DeleteMessageResult> {
+    // Server envelope: { mode, message }. Normalize the tombstone (if any); `hard`
+    // returns message: null and the caller drops the row from the timeline.
+    return this.request<DeleteMessageResult>("DELETE", `${CHAT}/messages/${id}`).then((r) => ({
+      mode: r.mode,
+      message: r.message ? normalizeMessage(r.message) : null,
+    }));
+  }
+  getDeletionPolicy(): Promise<DeletionPolicyResponse> {
+    return this.request<DeletionPolicyResponse>("GET", `${CHAT}/settings/deletion-policy`);
   }
   toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<ReactionToggleResponse> {
     // Server returns { messageId, reactions } with reactions as a Record<emoji,userIds>;
