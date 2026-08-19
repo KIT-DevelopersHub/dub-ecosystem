@@ -508,10 +508,14 @@ export function GanttView({
       const bar = barById.get(e.taskId);
       const left = bar?.hasBar ? bar.x : 0;
       const boxW = bar?.hasBar ? bar.width : width;
-      // deeper nests read as "inside" via a stronger tint (5%,9%,13%…) and a
-      // brand left-spine, all @dub/tokens-derived.
-      const tintPct = 5 + Math.min(e.depth, 5) * 4;
-      return { ...e, left, boxW, tintPct };
+      // Two tints per zone, both @dub/tokens-derived:
+      //  - bodyPct: the淡い parent-colour fill of the whole lane (子タスクが親色の上に載る).
+      //    Deeper nests step up (12→15→18…) so a box reads as "inside" its ancestor.
+      //  - headerPct: a distinctly stronger band over the parent's OWN row so "ここが親ゾーン"
+      //    is legible at a glance (the header lane), independent of the bar riding on top.
+      const bodyPct = 12 + Math.min(e.depth, 4) * 3;
+      const headerPct = bodyPct + 8;
+      return { ...e, left, boxW, bodyPct, headerPct };
     });
   }, [rows, barById, width]);
 
@@ -945,7 +949,14 @@ export function GanttView({
                       height: e.height - 4,
                       left: e.left,
                       width: e.boxW,
-                      background: `color-mix(in srgb, var(--dub-color-brand-500) ${e.tintPct}%, transparent)`,
+                      // Header-lane fill: a stronger band over the parent's own row (first
+                      // ROW_HEIGHT) that steps down to the淡い body tint over the children —
+                      // so the zone reads "親ヘッダ＋その配下" without relying on the faint border.
+                      background: `linear-gradient(180deg,
+                        color-mix(in srgb, var(--dub-color-brand-500) ${e.headerPct}%, transparent) 0px,
+                        color-mix(in srgb, var(--dub-color-brand-500) ${e.headerPct}%, transparent) ${ROW_HEIGHT - 2}px,
+                        color-mix(in srgb, var(--dub-color-brand-500) ${e.bodyPct}%, transparent) ${ROW_HEIGHT - 2}px,
+                        color-mix(in srgb, var(--dub-color-brand-500) ${e.bodyPct}%, transparent) 100%)`,
                     }}
                     data-testid={`fe4-gantt-group-${e.taskId}`}
                     data-depth={e.depth}
