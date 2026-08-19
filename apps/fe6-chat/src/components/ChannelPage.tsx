@@ -5,7 +5,7 @@
 // channel-settings modal. The main section and the ThreadPane are returned as
 // sibling fragment children so both land as columns of the ChatApp grid.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Modal } from "@dub/ui";
+import { Modal, useToast } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
@@ -36,6 +36,7 @@ export function ChannelPage({
 }) {
   const { api, can, currentUserId } = useChatRuntime();
   const view = useChannelView(channelId);
+  const { show } = useToast();
   const markRead = useChatStore((s) => s.markRead);
 
   const [channel, setChannel] = useState<Channel | null>(null);
@@ -175,10 +176,15 @@ export function ChannelPage({
   const onDelete = useCallback(
     (message: Message) => {
       if (globalThis.confirm?.("このメッセージを削除しますか？")) {
-        void view.deleteMessage(message.id, message.version);
+        // Optimistic: the row updates instantly (view.deleteMessage). On failure the
+        // hook rolls back (the message reappears) and we surface an error toast.
+        void view.deleteMessage(message.id, message.version).catch((err) => {
+          const code = err instanceof ChatApiError ? err.code : "INTERNAL";
+          show({ kind: "error", title: "メッセージを削除できませんでした", description: mapChatError(code).message });
+        });
       }
     },
-    [view],
+    [view, show],
   );
 
   const onTogglePin = useCallback(
