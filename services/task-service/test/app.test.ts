@@ -805,3 +805,80 @@ describe("GET /task-requests (list + one)", () => {
     expect((await app.request("/task-requests/treq_missing", userInit("GET"))).status).toBe(404);
   });
 });
+
+// POST /task-requests/:id/accept — receiver materialises both tasks + the cross-link.
+describe("POST /task-requests/:id/accept (受け取る)", () => {
+  const seedReq = (h: TestHarness, id: string, over: Record<string, unknown> = {}) =>
+    h.repo.insertRequest({
+      id,
+      eventId: "evt_1",
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+      fromTeamId: "team_dev",
+      toTeamId: "team_sponsor",
+      title: id,
+      description: null,
+      priority: "medium",
+      dueAt: null,
+      sourceTaskId: null,
+      now: "2026-08-20T00:00:00.000Z",
+      ...over,
+    });
+  const asBob = (body: unknown) => userInit("POST", body, { userId: "usr_bob" });
+
+  it("accepts: creates receiver + requester tasks + cross-link, moves to accepted, emits events", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_1");
+    const res = await app.request("/task-requests/treq_1/accept", asBob({ version: 1 }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.AcceptTaskRequestResponse;
+    expect(body.request.state).toBe("accepted");
+    expect(body.request.createdTaskId).toBe(body.createdTask.id);
+    expect(body.createdTask.assigneeId).toBe("usr_bob");
+    expect(body.createdTask.teamId).toBe("team_sponsor");
+    expect(body.crossLink.requesteeTaskId).toBe(body.createdTask.id);
+    // both sides materialised (receiver + auto-generated requester tracking task)
+    expect(h.events.byName("task.created")).toHaveLength(2);
+    expect(h.events.byName("task.request.accepted")).toHaveLength(1);
+    expect(h.events.byName("task.cross_link.created")).toHaveLength(1);
+    expect(body.crossLink.requesterTaskId).not.toBe(body.createdTask.id);
+  });
+
+  it("reuses sourceTaskId as the requester ('お願いした') task instead of generating one", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_2", { sourceTaskId: "task_src" });
+    const res = await app.request("/task-requests/treq_2/accept", asBob({ version: 1 }));
+    const body = (await res.json()) as task.AcceptTaskRequestResponse;
+    expect(body.crossLink.requesterTaskId).toBe("task_src");
+    expect(h.events.byName("task.created")).toHaveLength(1); // only the receiver task
+  });
+
+  it("403 when a non-receiver (the requester) tries to accept", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_3");
+    const res = await app.request("/task-requests/treq_3/accept", userInit("POST", { version: 1 })); // usr_alice
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_REQUEST_FORBIDDEN_ROLE");
+  });
+
+  it("409 when the request is not pending (already accepted)", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_4");
+    await app.request("/task-requests/treq_4/accept", asBob({ version: 1 }));
+    const again = await app.request("/task-requests/treq_4/accept", asBob({ version: 2 }));
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: { code: string } }).error.code).toBe("TASK_REQUEST_INVALID_STATE");
+  });
+
+  it("409 on a version mismatch", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_5");
+    const res = await app.request("/task-requests/treq_5/accept", asBob({ version: 99 }));
+    expect(res.status).toBe(409);
+  });
+
+  it("404 when the request does not exist", async () => {
+    const { app } = setup();
+    expect((await app.request("/task-requests/treq_missing/accept", userInit("POST", { version: 1 }, { userId: "usr_bob" }))).status).toBe(404);
+  });
+});

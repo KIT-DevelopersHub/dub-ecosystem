@@ -694,5 +694,131 @@ export function buildApp(deps: Deps): Hono {
     return c.json(found);
   });
 
+  // ---- POST /task-requests/:id/accept (受け取る) ----
+  // The receiver accepts a pending cross-team request. This materialises BOTH sides:
+  // the receiver's task ("受け負った"), the requester's tracking task ("お願いした" —
+  // the request's sourceTaskId if given, else auto-generated per D3), and the arrow-less
+  // cross-link joining them. Receiver-only (403) and pending-only (409, atomic).
+  app.post("/task-requests/:id/accept", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    const body = await readJson<Partial<task.AcceptTaskRequestBody>>(c);
+
+    const fe: FieldError[] = [];
+    if (typeof body.version !== "number") fe.push({ field: "version", reason: "required" });
+    checkOptString(body.targetTeamId, "targetTeamId", fe);
+    assertValid(fe);
+
+    const req = await deps.repo.getRequestById(id);
+    if (!req) throw taskErrors.requestNotFound(id);
+    // Only the receiver may accept.
+    if (principal.kind === "user" && principal.userId !== req.toUserId) {
+      throw taskErrors.requestForbiddenRole("accept");
+    }
+    if (req.state !== "pending") throw taskErrors.requestInvalidState(req.state, "accept");
+    if (body.version !== req.version) throw taskErrors.versionConflict();
+
+    const now = nowIso();
+    const evt = req.eventId ? { eventId: req.eventId } : {};
+    const toTeam: common.TeamId | null = body.targetTeamId ?? req.toTeamId ?? null;
+    const actorId = actorIdOf(principal);
+    const specs: EventSpec[] = [];
+
+    // 1) Receiver task — the "受け負った" side (assignee = receiver, team = receiver team).
+    const receiverTaskId = newId("task");
+    const createdTask = await deps.repo.insert({
+      id: receiverTaskId,
+      eventId: req.eventId ?? null,
+      title: req.title,
+      description: req.description,
+      status: "todo",
+      priority: req.priority,
+      assigneeId: req.toUserId,
+      teamId: toTeam,
+      parentId: null,
+      wbs: null,
+      startAt: null,
+      dueAt: req.dueAt,
+      origin: "internal",
+      createdBy: req.fromUserId, // issued by the requester (powers the 依頼 lens)
+      now,
+    });
+    specs.push({ name: "task.created", payload: { taskId: receiverTaskId, ...evt } });
+    specs.push({ name: "task.assigned", payload: { taskId: receiverTaskId, ...evt, assigneeId: req.toUserId } });
+
+    // 2) Requester tracking task — the "お願いした" side. Reuse sourceTaskId when the
+    //    request came from a specific task, else auto-generate one (D3) so BOTH sides
+    //    always have a task to badge.
+    let requesterTaskId: common.TaskId;
+    if (req.sourceTaskId) {
+      requesterTaskId = req.sourceTaskId;
+    } else {
+      requesterTaskId = newId("task");
+      await deps.repo.insert({
+        id: requesterTaskId,
+        eventId: req.eventId ?? null,
+        title: req.title,
+        description: req.description,
+        status: "todo",
+        priority: req.priority,
+        assigneeId: req.fromUserId,
+        teamId: req.fromTeamId ?? null,
+        parentId: null,
+        wbs: null,
+        startAt: null,
+        dueAt: req.dueAt,
+        origin: "internal",
+        createdBy: req.fromUserId,
+        now,
+      });
+      specs.push({ name: "task.created", payload: { taskId: requesterTaskId, ...evt } });
+      specs.push({ name: "task.assigned", payload: { taskId: requesterTaskId, ...evt, assigneeId: req.fromUserId } });
+    }
+
+    // 3) Arrow-less cross-link joining the two tasks (NOT a dependency).
+    const crossLinkId = newId("txl");
+    const crossLink = await deps.repo.insertCrossLink({
+      id: crossLinkId,
+      requestId: id,
+      requesterTaskId,
+      requesteeTaskId: receiverTaskId,
+      eventId: req.eventId ?? null,
+      now,
+    });
+
+    // 4) Atomic gate: pending→accepted with the version guard. A concurrent accept /
+    //    stale version loses here (state is no longer pending) → 409.
+    const moved = await deps.repo.decideRequest(
+      id,
+      { state: "accepted", createdTaskId: receiverTaskId, toTeamId: toTeam },
+      req.version,
+      now,
+    );
+    if (!moved) throw taskErrors.requestInvalidState("accepted", "accept");
+
+    specs.push({
+      name: "task.request.accepted",
+      payload: { requestId: id, createdTaskId: receiverTaskId, sourceTaskId: requesterTaskId, ...evt },
+    });
+    specs.push({
+      name: "task.cross_link.created",
+      payload: { crossLinkId, requesterTaskId, requesteeTaskId: receiverTaskId, ...evt },
+    });
+    await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);
+    await deps.audit.record(
+      auditRecord("task.request.accepted", actorId, config.orgId, ctx.requestId, id, {
+        createdTaskId: receiverTaskId,
+        requesterTaskId,
+        crossLinkId,
+      }),
+    );
+
+    const updated = await deps.repo.getRequestById(id);
+    const res: task.AcceptTaskRequestResponse = { request: updated!, createdTask, crossLink };
+    return c.json(res);
+  });
+
   return app;
 }
