@@ -92,11 +92,21 @@ LOCAL_SQLITE="infra/d1/.wrangler/local-dub-core.sqlite"
 if [ ! -f "$LOCAL_SQLITE" ]; then
   echo "::warning::local seed sqlite not found at ${LOCAL_SQLITE}; skipping remote seed (apply manually)."
 else
-  DUMP="$(mktemp -t staging-seed).sql"
-  # Strip transaction/pragma wrappers; keep CREATE + INSERT (D1 execute runs multi-statement).
-  sqlite3 "$LOCAL_SQLITE" .dump | grep -vE '^(PRAGMA |BEGIN TRANSACTION;|COMMIT;)' > "$DUMP"
-  $WRANGLER d1 execute dub-core-staging --remote --file "$DUMP"
-  rm -f "$DUMP"
+  # Apply schema first, then data in FK-dependency (referenced-first) order.
+  # WHY not a single `.dump` push: D1's remote file import CHUNKS a large file into several
+  # transactions and enforces foreign keys ACROSS those chunks, while a `.dump` lists tables
+  # in creation order — which is NOT foreign-key-safe (e.g. task_dependencies is dumped BEFORE
+  # task_tasks, and a `.dump` also drops the `PRAGMA foreign_keys=OFF` guard once split). That
+  # surfaced as `FOREIGN KEY constraint failed` / `no such table` and rolled the seed back.
+  # Splitting DDL from DML and ordering the INSERTs topologically (with defer_foreign_keys for
+  # self-references) makes the load deterministic regardless of D1's chunk boundaries.
+  SCHEMA="$(mktemp -t staging-schema).sql"
+  DATA="$(mktemp -t staging-data).sql"
+  sqlite3 "$LOCAL_SQLITE" .schema > "$SCHEMA"
+  $WRANGLER d1 execute dub-core-staging --remote --yes --file "$SCHEMA"
+  node infra/deploy/fk-order-seed.mjs "$LOCAL_SQLITE" > "$DATA"
+  $WRANGLER d1 execute dub-core-staging --remote --yes --file "$DATA"
+  rm -f "$SCHEMA" "$DATA"
 fi
 
 # auth-outbox-staging holds only the freeq outbox table (auth's OUTBOX_DB). Apply its DDL.
