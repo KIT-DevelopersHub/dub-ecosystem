@@ -174,6 +174,17 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   },
 };
 
+// Per-user gantt view state (zoom / collapsed / manual drag order). Mutable in-session
+// so a drag-reorder PERSISTS across the round-trip — otherwise the reorder would snap
+// back (the SortableList's optimistic override releases once the persisted order fails
+// to return). Keyed by eventId; seeded lazily on first GET.
+const GANTT_VIEWS: Record<string, gantt.GanttViewState> = {};
+function ganttViewFor(eventId: string): gantt.GanttViewState {
+  const ev = eventId as gantt.GanttViewState["eventId"];
+  if (!GANTT_VIEWS[eventId]) GANTT_VIEWS[eventId] = { eventId: ev, zoom: "week", collapsedTaskIds: [], orderedTaskIds: [] };
+  return GANTT_VIEWS[eventId]!;
+}
+
 // ── notifications ─────────────────────────────────────────────────────────────
 const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
@@ -999,6 +1010,23 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return m ? decodeURIComponent(m[1]!) : null;
   };
 
+  // Persist the per-user gantt view state (manual drag order) so a reorder sticks
+  // across the round-trip (LWW, no version — a personal setting). Without this the
+  // demo would snap the order back after the optimistic override releases.
+  if (method === "PUT" && pathname === "/api/v1/gantt/views") {
+    const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
+    const b = (body ?? {}) as Partial<gantt.PutGanttViewRequest>;
+    const cur = ganttViewFor(ev);
+    const next: gantt.GanttViewState = {
+      eventId: cur.eventId,
+      zoom: b.zoom ?? cur.zoom,
+      collapsedTaskIds: b.collapsedTaskIds ?? cur.collapsedTaskIds,
+      orderedTaskIds: b.orderedTaskIds ?? cur.orderedTaskIds ?? [],
+    };
+    GANTT_VIEWS[ev] = next;
+    return json(next);
+  }
+
   if (method === "GET") {
     // events
     if (pathname === "/api/v1/events") return json(page(EVENTS));
@@ -1027,6 +1055,11 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     if (pathname === "/api/v1/gantt/dependencies") {
       const ev = url.searchParams.get("event") ?? "evt_1";
       return json(GANTT[ev]?.dependencies ?? []);
+    }
+    // per-user view state (zoom / collapsed / manual drag order)
+    if (pathname === "/api/v1/gantt/views") {
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
+      return json(ganttViewFor(ev));
     }
     // notifications
     if (pathname === "/api/v1/notifications/inbox") {
