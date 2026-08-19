@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
+import { Button, Modal, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
+import { TaskAttachmentsEditor } from "./TaskAttachmentsEditor";
 import styles from "../styles/app.module.css";
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -81,6 +82,7 @@ export function TaskDetailPanel({
   canDelete,
 }: TaskDetailPanelProps) {
   const [title, setTitle] = useState(t.title);
+  const [description, setDescription] = useState(t.description ?? "");
   const [status, setStatus] = useState<task.TaskStatus>(t.status);
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
@@ -130,8 +132,12 @@ export function TaskDetailPanel({
   const sameDeps =
     deps.length === dependsOnIds.length && deps.every((id) => dependsOnIds.includes(id));
   const depsChanged = !sameDeps;
+  // メモ/詳細: an empty box clears the description (null), any text stores it.
+  const curDescription = t.description ?? "";
+  const descriptionChanged = description !== curDescription;
   const dirty =
     title !== t.title ||
+    descriptionChanged ||
     status !== t.status ||
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
@@ -143,6 +149,7 @@ export function TaskDetailPanel({
   const save = () => {
     const patch: task.UpdateTaskRequest = { version: t.version };
     if (title !== t.title) patch.title = title;
+    if (descriptionChanged) patch.description = description.trim() === "" ? null : description;
     if (status !== t.status) patch.status = status;
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
@@ -160,16 +167,38 @@ export function TaskDetailPanel({
   };
 
   return (
-    <>
-      <div className={styles.panelScrim} onClick={onClose} data-testid="fe4-detail-scrim" aria-hidden />
-      <aside className={styles.panel} data-testid="fe4-detail-panel" aria-label="タスク詳細">
-        <header className={styles.panelHeader}>
-          <div className={styles.panelHeadInfo}>
-            <TaskStatusBadge status={t.status} />
-            <h2 className={styles.panelTitle}>タスクの詳細</h2>
-          </div>
-          <IconButton name="x" aria-label="閉じる" variant="ghost" onClick={onClose} testId="fe4-detail-close" />
-        </header>
+    <Modal
+      open
+      onClose={onClose}
+      title="タスクの詳細"
+      size="lg"
+      testId="fe4-detail-panel"
+      footer={
+        <div className={styles.modalFooter}>
+          {canDelete && !confirming && (
+            <Button
+              variant="danger"
+              // A task with children cannot be deleted (it would orphan them). Hand the block
+              // to the host as a bottom-right warning toast (#375) instead of confirming.
+              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
+              testId="fe4-detail-delete"
+            >
+              削除
+            </Button>
+          )}
+          <Button variant="ghost" onClick={onClose} testId="fe4-detail-close">
+            閉じる
+          </Button>
+          <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
+            保存
+          </Button>
+        </div>
+      }
+    >
+      <div className={styles.detailPanelBody} aria-label="タスク詳細">
+        <div className={styles.panelHeadInfo}>
+          <TaskStatusBadge status={t.status} />
+        </div>
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-detail-title">
@@ -181,6 +210,22 @@ export function TaskDetailPanel({
               {fieldErrors.title}
             </span>
           )}
+        </div>
+
+        {/* メモ / 詳細: free-text notes captured on the task (optimistic save + toast). */}
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor="fe4-detail-description">
+            メモ / 詳細
+          </label>
+          <Textarea
+            id="fe4-detail-description"
+            value={description}
+            disabled={!canWrite}
+            onChange={setDescription}
+            rows={4}
+            placeholder="タスクの背景・手順・補足などを書けます"
+            testId="fe4-detail-description"
+          />
         </div>
 
         <div className={styles.formRow}>
@@ -341,43 +386,24 @@ export function TaskDetailPanel({
           </div>
         )}
 
-        <div className={styles.panelActions}>
-          <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
-            保存
-          </Button>
-          {canDelete && !confirming && (
-            <Button
-              variant="danger"
-              // A task with children cannot be deleted (deleting it would orphan the
-              // children and the read model would silently re-parent them). Instead of the
-              // old inline block message (hard to notice under the button, #375), hand the
-              // block to the host, which shows a bottom-right warning toast.
-              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
-              testId="fe4-detail-delete"
-            >
-              削除
-            </Button>
-          )}
-        </div>
+        {/* 添付（ファイル・URL）: upload/add, list, download/open, delete. */}
+        <TaskAttachmentsEditor taskId={t.id} canWrite={canWrite} />
 
-      </aside>
-
-      {/* Leaf (no children) delete confirm — a centered MODAL dialog (@dub/ui ConfirmDialog),
-          unified with 運営メンバー削除 etc. The old inline box under the button was easy to
-          miss and kept regressing on merges; a modal is unmissable and lives outside the
-          panel <aside>. A parent-with-children NEVER reaches here — its 削除 fires
-          onDeleteBlocked (bottom-right warning toast), never a confirm. */}
-      <ConfirmDialog
-        open={confirming}
-        title="タスクを削除しますか？"
-        message="このタスクを削除します。この操作は取り消せません。"
-        confirmLabel="削除する"
-        cancelLabel="やめる"
-        danger
-        onConfirm={onDelete}
-        onCancel={() => setConfirming(false)}
-        testId="fe4-confirm-delete"
-      />
-    </>
+        {/* Leaf (no children) delete confirm — a ConfirmDialog modal (#375), unified with
+            運営メンバー削除 etc. A parent-with-children NEVER reaches here — its 削除 fires
+            onDeleteBlocked (bottom-right warning toast), never a confirm. */}
+        <ConfirmDialog
+          open={confirming}
+          title="タスクを削除しますか？"
+          message="このタスクを削除します。この操作は取り消せません。"
+          confirmLabel="削除する"
+          cancelLabel="やめる"
+          danger
+          onConfirm={onDelete}
+          onCancel={() => setConfirming(false)}
+          testId="fe4-confirm-delete"
+        />
+      </div>
+    </Modal>
   );
 }
