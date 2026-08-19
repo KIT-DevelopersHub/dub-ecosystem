@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, resolveUsers, createTaskAttachment } from "../api/endpoints";
+import { listTasks, createTask, resolveUsers, createTaskAttachment, issueTaskRequest } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
   type MyTasksFilter,
@@ -125,8 +125,60 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     }
   };
 
+  // Best-effort attachment persistence after a task exists (needs its real id). A failed
+  // attachment must never undo an already-created task.
+  const attachBestEffort = async (taskId: common.TaskId, attachments: MyTaskDraft["attachments"]) => {
+    if (attachments.files.length + attachments.urls.length === 0) return;
+    try {
+      for (const f of attachments.files) {
+        await createTaskAttachment(client, taskId, { kind: "file", name: f.name, url: f.url, mimeType: f.mimeType, sizeBytes: f.sizeBytes });
+      }
+      for (const u of attachments.urls) {
+        await createTaskAttachment(client, taskId, { kind: "url", name: u.name, url: u.url });
+      }
+    } catch {
+      toast.show({ kind: "error", title: "一部の添付を保存できませんでした", description: "タスクは作成済みです。詳細から再度添付できます。" });
+    }
+  };
+
+  // 送る (依頼): when a 依頼先 is chosen, the submit goes through POST /task-requests. The
+  // SERVER decides (never the client): 自分/自チーム → タスク即作成 (task), 他チーム →
+  // 承認待ちの依頼 (request). Cross-team work therefore can be requested from マイタスク
+  // even though ガント never lets you draw a cross-team arrow.
+  const onIssueRequest = async (draft: MyTaskDraft, toUserId: common.UserId) => {
+    try {
+      const res = await issueTaskRequest(client, {
+        toUserId,
+        title: draft.title,
+        ...(draft.description !== null ? { description: draft.description } : {}),
+        priority: draft.priority,
+        ...(draft.eventId ? { eventId: draft.eventId } : {}),
+        ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+        ...(draft.teamId ? { targetTeamId: draft.teamId } : {}),
+      });
+      if (res.kind === "task") {
+        // self / same team → materialised now. Surface it + best-effort attachments.
+        await attachBestEffort(res.task.id, draft.attachments);
+        const belongs =
+          lens === "all" || lens === "requested" || (lens === "assigned" && res.task.assigneeId === currentUserId);
+        if (belongs) setTasks((prev) => [res.task, ...prev.filter((t) => t.id !== res.task.id)]);
+        toast.show({ kind: "success", title: "タスクを作成しました" });
+      } else {
+        // other team → pending request; it appears under 送った依頼 (承認待ち).
+        const toName = users.get(toUserId)?.displayName ?? "相手";
+        toast.show({ kind: "success", title: "依頼を送信しました", description: `${toName} の承認を待っています。` });
+      }
+    } catch (e) {
+      toast.show({ kind: "error", title: "依頼に失敗しました", description: "もう一度お試しください。" });
+      throw e;
+    }
+  };
+
   const onCreate = async (draft: MyTaskDraft) => {
-    // optimistic: show the new task immediately with a temporary id.
+    // A 依頼先 (assignee) → route through the request flow (server branches self/team/other).
+    if (draft.assigneeId) return onIssueRequest(draft, draft.assigneeId);
+
+    // No assignee → a personal/team task: direct optimistic create with a temporary id.
     const tempId = `task_temp_${Date.now()}` as common.TaskId;
     const now = new Date().toISOString();
     const optimistic: task.Task = {
@@ -159,40 +211,16 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
       });
-      // Persist attachments after the task exists (they need its real id). Best-effort:
-      // a failed attachment must not undo an already-created task.
-      const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
-      if (attachCount > 0) {
-        try {
-          for (const f of draft.attachments.files) {
-            await createTaskAttachment(client, created.id, {
-              kind: "file",
-              name: f.name,
-              url: f.url,
-              mimeType: f.mimeType,
-              sizeBytes: f.sizeBytes,
-            });
-          }
-          for (const u of draft.attachments.urls) {
-            await createTaskAttachment(client, created.id, { kind: "url", name: u.name, url: u.url });
-          }
-        } catch {
-          toast.show({
-            kind: "error",
-            title: "一部の添付を保存できませんでした",
-            description: "タスクは作成済みです。詳細から再度添付できます。",
-          });
-        }
-      }
+      await attachBestEffort(created.id, draft.attachments);
       // reconcile the temp row with the server task (or drop it if out of lens).
       setTasks((prev) => {
         const withoutTemp = prev.filter((t) => t.id !== tempId);
         return belongs ? [created, ...withoutTemp] : withoutTemp;
       });
-      toast.show({ kind: "success", title: "タスクを発行しました" });
+      toast.show({ kind: "success", title: "タスクを作成しました" });
     } catch (e) {
       setTasks((prev) => prev.filter((t) => t.id !== tempId)); // rollback
-      toast.show({ kind: "error", title: "発行に失敗しました", description: "もう一度お試しください。" });
+      toast.show({ kind: "error", title: "作成に失敗しました", description: "もう一度お試しください。" });
       throw e;
     }
   };
@@ -205,7 +233,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           <p className={styles.mySubtitle}>自分に関わるタスクを、誰から誰へかが分かる一覧で管理できます。</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open">
-          ＋ タスクを発行
+          ＋ タスクを依頼
         </Button>
       </header>
 
@@ -259,6 +287,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         teams={teams}
         onCreate={onCreate}
         requesterName={currentUserName}
+        title="タスクを依頼"
+        submitLabel="依頼する"
       />
     </section>
   );
