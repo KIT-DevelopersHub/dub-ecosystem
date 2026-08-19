@@ -119,6 +119,24 @@ describe("member-service HTTP surface", () => {
     expect(cleared.json.department).toBeNull();
   });
 
+  it("soft-deletes via status='deleted': member stays in the overview (not physically removed) and can be restored", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "追放太郎", status: "added", teamIds: [] } });
+    const id = m.json.id as string;
+
+    // 論理削除: status を "deleted" に。物理削除しないので overview に残る。
+    const del = await call(app, "PATCH", `/members/people/${id}`, { body: { status: "deleted", version: 1 } });
+    expect(del.status).toBe(200);
+    expect(del.json.status).toBe("deleted");
+    const ov1 = await call(app, "GET", "/members/overview");
+    expect(ov1.json.members.find((x: any) => x.id === id)?.status).toBe("deleted");
+
+    // 復帰: status を "added" に戻す。
+    const restore = await call(app, "PATCH", `/members/people/${id}`, { body: { status: "added", version: 2 } });
+    expect(restore.status).toBe(200);
+    expect(restore.json.status).toBe("added");
+  });
+
   it("rejects invalid status and unknown teamIds", async () => {
     const app = createApp(makeDeps());
     const bad = await call(app, "POST", "/members/people", { body: { name: "A", status: "bogus", teamIds: [] } });

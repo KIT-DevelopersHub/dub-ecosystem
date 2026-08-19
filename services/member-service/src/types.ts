@@ -6,7 +6,8 @@ import type { common, identity, member } from "@dub/types";
 import type { MiddlewareHandler, Context } from "hono";
 
 export type MemberStatus = member.MemberStatus;
-export const MEMBER_STATUSES = ["added", "invited", "considering", "declined"] as const;
+// "deleted" = 論理削除(削除済み)。物理削除せず status で表現し、他ビューでは非表示に。
+export const MEMBER_STATUSES = ["added", "invited", "considering", "declined", "deleted"] as const;
 
 // ---- internal persistence rows (superset of the wire types) ----
 export interface TeamRow {

@@ -14,10 +14,11 @@ import {
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
+import { useMembersOverview, useSoftDeleteMember, useRestoreMember, useDeleteTeam } from "./hooks.ts";
 import { TeamsView } from "./TeamsView.tsx";
 import { OrgChartView } from "./OrgChartView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
+import { MemberDeleteDialog } from "./MemberDeleteDialog.tsx";
 import { TeamFormDialog } from "./TeamFormDialog.tsx";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import styles from "./members.module.css";
@@ -26,12 +27,14 @@ type TabId = "teams" | "org";
 
 export function MembersPage(): JSX.Element {
   const overview = useMembersOverview();
-  const deleteMember = useDeleteMember();
+  const softDeleteMember = useSoftDeleteMember();
+  const restoreMember = useRestoreMember();
   const deleteTeam = useDeleteTeam();
 
   const [tab, setTab] = useState<TabId>("teams");
   const [memberDialog, setMemberDialog] = useState<{ open: boolean; editing: OrgMember | null }>({ open: false, editing: null });
   const [teamDialog, setTeamDialog] = useState<{ open: boolean; editing: MemberTeam | null }>({ open: false, editing: null });
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [confirm, setConfirm] = useState<
     | { kind: "member"; target: OrgMember }
     | { kind: "team"; target: MemberTeam }
@@ -48,7 +51,8 @@ export function MembersPage(): JSX.Element {
 
   const confirmDelete = () => {
     if (!confirm) return;
-    if (confirm.kind === "member") deleteMember.mutate(confirm.target.id);
+    // メンバーは論理削除(削除済み)。チームは従来どおり削除。
+    if (confirm.kind === "member") softDeleteMember.mutate({ id: confirm.target.id, version: confirm.target.version });
     else deleteTeam.mutate(confirm.target.id);
     setConfirm(null);
   };
@@ -74,6 +78,9 @@ export function MembersPage(): JSX.Element {
               </Button>
               <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} testId="members-add-member">
                 メンバーを追加
+              </Button>
+              <Button variant="secondary" iconLeft={<span aria-hidden>🗑</span>} onClick={() => setDeleteDialogOpen(true)} testId="members-delete-open">
+                メンバーを削除
               </Button>
             </span>
           }
@@ -104,6 +111,7 @@ export function MembersPage(): JSX.Element {
           members={members}
           onEditMember={openEditMember}
           onDeleteMember={(m) => setConfirm({ kind: "member", target: m })}
+          onRestoreMember={(m) => restoreMember.mutate({ id: m.id, version: m.version })}
           onEditTeam={openEditTeam}
           onDeleteTeam={(t) => setConfirm({ kind: "team", target: t })}
         />
@@ -116,6 +124,7 @@ export function MembersPage(): JSX.Element {
         teams={teams}
         editing={memberDialog.editing}
       />
+      <MemberDeleteDialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} members={members} />
       <TeamFormDialog
         open={teamDialog.open}
         onClose={() => setTeamDialog({ open: false, editing: null })}
@@ -128,7 +137,7 @@ export function MembersPage(): JSX.Element {
         message={
           confirm?.kind === "team"
             ? `「${confirm.target.name}」を削除します。メンバーはこのチームから外れます（メンバー自体は残ります）。`
-            : `「${confirm?.target.name ?? ""}」を削除します。よろしいですか？`
+            : `「${confirm?.target.name ?? ""}」を削除します（削除済みになり組織図から外れます）。名簿には残り、あとで在籍に戻せます。`
         }
         danger
         confirmLabel="削除"
