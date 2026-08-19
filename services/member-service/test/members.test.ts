@@ -137,6 +137,52 @@ describe("member-service HTTP surface", () => {
     expect(restore.json.status).toBe("added");
   });
 
+  it("physical delete (purge) is allowed only for a soft-deleted member; else 409", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "完全削除太郎", status: "added", teamIds: [] } });
+    const id = m.json.id as string;
+
+    // 在籍中(added)を直接 purge → 409 (先に削除済みにする必要)。
+    const early = await call(app, "DELETE", `/members/people/${id}/purge`);
+    expect(early.status).toBe(409);
+    expect(early.json.error.code).toBe("MEMBER_NOT_SOFT_DELETED");
+
+    // 論理削除 → purge → 完全消滅(overview から消える)。
+    await call(app, "PATCH", `/members/people/${id}`, { body: { status: "deleted", version: 1 } });
+    const purge = await call(app, "DELETE", `/members/people/${id}/purge`);
+    expect(purge.status).toBe(200);
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members.find((x: any) => x.id === id)).toBeUndefined();
+  });
+
+  it("purge requires identity:admin", async () => {
+    const app = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read"])) }));
+    const res = await call(app, "DELETE", "/members/people/x/purge");
+    expect(res.status).toBe(403);
+  });
+
+  it("purge unlinks the 参加届 (memberId=null, reviewState=skipped) so FK never dangles", async () => {
+    const app = createApp(makeDeps());
+    // 参加届 → create でメンバー化。
+    const sub = await call(app, "POST", "/members/participation", { body: { name: "紐付太郎", schoolEmail: "h@school.ac.jp", gmail: "h@gmail.com" } });
+    const pid = sub.json.participation.id as string;
+    const res = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "create" } });
+    const memberId = res.json.member.id as string;
+
+    // 論理削除 → 物理削除。参加届は紐付け解除＋対象外に。
+    await call(app, "PATCH", `/members/people/${memberId}`, { body: { status: "deleted", version: res.json.member.version } });
+    const purge = await call(app, "DELETE", `/members/people/${memberId}/purge`);
+    expect(purge.status).toBe(200);
+
+    const list = await call(app, "GET", "/members/participation");
+    const p = list.json.participations.find((x: any) => x.id === pid);
+    expect(p.memberId).toBeNull();
+    expect(p.reviewState).toBe("skipped");
+    // メンバーは消滅。
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members.find((x: any) => x.id === memberId)).toBeUndefined();
+  });
+
   it("rejects invalid status and unknown teamIds", async () => {
     const app = createApp(makeDeps());
     const bad = await call(app, "POST", "/members/people", { body: { name: "A", status: "bogus", teamIds: [] } });

@@ -122,6 +122,12 @@
   justify-content: flex-end;
   margin-top: var(--dub-space-3);
 }
+/* 削除済み行のアクション（在籍に戻す＋物理削除）。 */
+.deletedActions {
+  display: inline-flex;
+  gap: var(--dub-space-2);
+  flex: 0 0 auto;
+}
 .rowSpacer {
   flex: 1 1 auto;
 }

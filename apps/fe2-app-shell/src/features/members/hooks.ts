@@ -157,6 +157,18 @@ export function useSoftDeleteMember() {
   });
 }
 
+/** 物理削除(完全削除・不可逆)。名簿から行ごと消す。楽観的に即リストから除去し、失敗時は
+ *  ロールバック＋トースト。サーバは status="deleted"(論理削除済み) のみ許可(それ以外 409)。 */
+export function useHardDeleteMember() {
+  const api = useMembersApi();
+  return useOverviewMutation<{ id: string }, unknown>({
+    mutationFn: ({ id }) => api.hardDeleteMember(id),
+    optimistic: (prev, { id }) => ({ ...prev, members: prev.members.filter((m) => m.id !== id) }),
+    successMessage: "メンバーを完全に削除しました",
+    errorFallback: "完全に削除できませんでした",
+  });
+}
+
 /** 削除済みメンバーを在籍(added)へ戻して復帰させる。楽観的に即反映。 */
 export function useRestoreMember() {
   const api = useMembersApi();

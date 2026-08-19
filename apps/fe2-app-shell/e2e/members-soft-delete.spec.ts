@@ -66,3 +66,37 @@ test("(c) 削除済みメンバーを『在籍に戻す』で復帰できる", a
   await expect(dialog.getByTestId("members-restore-member_7")).toHaveCount(0);
   await page.screenshot({ path: shot("07-after-restore.png"), fullPage: true });
 });
+
+test("(d) 物理削除: 削除済みだけに出る→強い確認→完全消滅（在籍中には出ない）", async ({ page }) => {
+  await page.goto("/members");
+  await expect(page.getByTestId("members-page")).toBeVisible();
+  await page.getByTestId("members-delete-open").click();
+  const dialog = page.getByTestId("members-delete-dialog");
+  await expect(dialog).toBeVisible();
+
+  // 在籍中(member_e1 白木)には物理削除ボタンは出ない。
+  await expect(dialog.getByTestId("members-purge-member_e1")).toHaveCount(0);
+  // 削除済み member_7 には「在籍に戻す」と「物理削除」の2択。
+  await expect(dialog.getByTestId("members-restore-member_7")).toBeVisible();
+  await expect(dialog.getByTestId("members-purge-member_7")).toBeVisible();
+  await page.screenshot({ path: shot("08-deleted-two-actions.png"), fullPage: true });
+
+  // 物理削除 → 強い確認ダイアログ（不可逆・氏名明示）。
+  await dialog.getByTestId("members-purge-member_7").click();
+  const confirm = page.getByTestId("members-purge-confirm");
+  await expect(confirm).toBeVisible();
+  await expect(confirm.getByRole("heading", { name: /完全に削除しますか/ })).toBeVisible();
+  await expect(confirm.getByText(/退 太郎/)).toBeVisible();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: shot("09-purge-confirm.png"), fullPage: true });
+  await confirm.getByRole("button", { name: "完全に削除する" }).click();
+
+  // 完全消滅: ダイアログの削除済みから消え、チーム別・組織図にも出ない。
+  await expect(dialog.getByTestId("members-purge-member_7")).toHaveCount(0);
+  await page.getByTestId("members-delete-close").click();
+  await expect(page.getByTestId("members-teamrow-member_7")).toHaveCount(0);
+  await page.getByTestId("members-tabs-tab-org").click();
+  await expect(page.getByTestId("members-orgchart")).toBeVisible();
+  await expect(page.getByTestId("members-orgchip-member_7")).toHaveCount(0);
+  await page.screenshot({ path: shot("10-after-purge.png"), fullPage: true });
+});

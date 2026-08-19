@@ -112,6 +112,9 @@ export interface MemberRepo {
   listPeople(orgId: common.OrgId): Promise<PersonRow[]>;
   updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean>;
   archivePerson(id: string): Promise<void>;
+  /** 物理削除(完全削除): team links を外し、member_people 行を実際に DELETE する。
+   *  参加届の紐付け解除は呼び出し側(サービス)で先に行う前提。 */
+  hardDeletePerson(id: string): Promise<void>;
   maxPersonSortOrder(orgId: common.OrgId): Promise<number>;
 
   // team membership (person_id -> team_ids) for the whole org in one read.

@@ -1766,6 +1766,25 @@ function createMembersStore() {
       mem.updatedAt = isoNow();
       return json({ ...mem, teamIds: [...mem.teamIds] });
     }
+    // 物理削除(完全削除): status="deleted" の行のみ許可。参加届の紐付けを外して名簿ごと削除。
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/purge$/.exec(pathname);
+    if (m && method === "DELETE") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (mem.status !== "deleted") {
+        const err: ErrorResponse = { error: { code: "MEMBER_NOT_SOFT_DELETED", message: "先に削除済みにしてください", retryable: false } };
+        return json(err, 409);
+      }
+      for (const p of participations) {
+        if (p.memberId === mem.id) {
+          p.memberId = null;
+          p.reviewState = "skipped";
+          p.updatedAt = isoNow();
+        }
+      }
+      members.splice(members.indexOf(mem), 1);
+      return json({ ok: true });
+    }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
       const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));

@@ -44,6 +44,7 @@ function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
     createMember: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
     updateMember: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
     deleteMember: vi.fn(() => Promise.resolve()),
+    hardDeleteMember: vi.fn(() => Promise.resolve()),
     linkIdentity: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
     listIdentityUsers: vi.fn(() => Promise.resolve({ items: [], nextCursor: null })),
     ...overrides,
@@ -172,6 +173,46 @@ describe("MembersPage", () => {
     const dialog = await screen.findByTestId("members-delete-dialog");
     await userEvent.click(within(dialog).getByTestId("members-restore-m_del"));
     await waitFor(() => expect(api.updateMember).toHaveBeenCalledWith("m_del", { status: "added", version: 2 }));
+  });
+
+  it("削除済みメンバーだけに『物理削除』が出て、強い確認→実行で完全削除する", async () => {
+    const overview: MembersOverview = {
+      teams: OVERVIEW.teams,
+      members: [
+        { ...OVERVIEW.members[0]!, status: "added" }, // m1 在籍中
+        { id: "m_del", orgId: "o", name: "削除済 太郎", roleTitle: null, status: "deleted", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3, version: 2, createdAt: "t", updatedAt: "t" },
+      ],
+    };
+    const api = makeApi({ getOverview: () => Promise.resolve(overview) });
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("削除済 太郎");
+    await userEvent.click(screen.getByTestId("members-delete-open"));
+    const dialog = await screen.findByTestId("members-delete-dialog");
+    // 在籍中(m1)には物理削除ボタンは出ない（削除済みだけ）。
+    expect(within(dialog).queryByTestId("members-purge-m1")).not.toBeInTheDocument();
+    // 削除済み m_del には物理削除がある → 強い確認 → 実行。
+    await userEvent.click(within(dialog).getByTestId("members-purge-m_del"));
+    const confirm = await screen.findByTestId("members-purge-confirm");
+    expect(within(confirm).getByRole("heading", { name: /完全に削除しますか/ })).toBeInTheDocument();
+    expect(within(confirm).getByText(/削除済 太郎/)).toBeInTheDocument();
+    await userEvent.click(within(confirm).getByRole("button", { name: "完全に削除する" }));
+    await waitFor(() => expect(api.hardDeleteMember).toHaveBeenCalledWith("m_del"));
+  });
+
+  it("物理削除はキャンセルで実行されない", async () => {
+    const overview: MembersOverview = {
+      teams: OVERVIEW.teams,
+      members: [{ id: "m_del", orgId: "o", name: "削除済 花子", roleTitle: null, status: "deleted", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 1, version: 2, createdAt: "t", updatedAt: "t" }],
+    };
+    const api = makeApi({ getOverview: () => Promise.resolve(overview) });
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("削除済 花子");
+    await userEvent.click(screen.getByTestId("members-delete-open"));
+    const dialog = await screen.findByTestId("members-delete-dialog");
+    await userEvent.click(within(dialog).getByTestId("members-purge-m_del"));
+    const confirm = await screen.findByTestId("members-purge-confirm");
+    await userEvent.click(within(confirm).getByRole("button", { name: "キャンセル" }));
+    expect(api.hardDeleteMember).not.toHaveBeenCalled();
   });
 
   // Regression: the 組織図 must reflect the SAME population as the 一覧 (辞退除く). Nobody
