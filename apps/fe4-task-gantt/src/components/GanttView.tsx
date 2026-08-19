@@ -75,6 +75,9 @@ export interface GanttViewProps {
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> team accent colour, for the row stripe + bar cap (team grouping). */
   teamColorById?: ReadonlyMap<common.TaskId, string>;
+  /** taskId -> WBS number label (e.g. "AA-1-1"), shown as a badge before the title.
+   *  Computed by the container from the current row order + WBS tree; absent ⇒ no badge. */
+  numberById?: ReadonlyMap<common.TaskId, string>;
   /** ordered [teamId,{name,color}] for the legend under the toolbar. */
   teamLegend?: ReadonlyArray<{ id: string; name: string; color: string }>;
   /** taskId -> its grouping descriptor for the current sort (チーム名/重要度ラベル…). When
@@ -120,6 +123,7 @@ function LeftPaneRow({
   dragEnabled,
   grouped,
   dragHandleProps,
+  number,
   onSelect,
   toggleParent,
   statusById,
@@ -132,6 +136,8 @@ function LeftPaneRow({
   grouped: boolean;
   /** from SortableList.renderItem — spread on the drag handle to arm pointer/keyboard. */
   dragHandleProps: SortableItemContext["dragHandleProps"];
+  /** WBS number label (e.g. "AA-1-1"); absent ⇒ no badge. */
+  number?: string;
   onSelect?: (taskId: common.TaskId) => void;
   toggleParent: (id: common.TaskId) => void;
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
@@ -195,6 +201,9 @@ function LeftPaneRow({
           so consecutive same-team rows form a straight vertical line regardless of
           each row's WBS indent (the old in-flow stripe stepped with the indent). */}
       <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+      {number && (
+        <span className={styles.tlRowNum} data-testid={`fe4-gantt-num-${r.taskId}`}>{number}</span>
+      )}
       <span className={styles.tlRowName}>{r.title}</span>
       {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
     </button>
@@ -218,6 +227,7 @@ export function GanttView({
   teamColorById,
   teamLegend,
   rowGroupById,
+  numberById,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -679,6 +689,7 @@ export function GanttView({
                       dragEnabled={reorderEnabled}
                       grouped={hasGroupRail}
                       dragHandleProps={ctx.dragHandleProps}
+                      number={numberById?.get(r.taskId)}
                       onSelect={onSelect}
                       toggleParent={toggleParent}
                       statusById={statusById}
@@ -692,6 +703,9 @@ export function GanttView({
                         <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
                       )}
                       <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+                      {numberById?.get(r.taskId) && (
+                        <span className={styles.tlRowNum}>{numberById.get(r.taskId)}</span>
+                      )}
                       <span className={styles.tlRowName}>{r.title}</span>
                     </div>
                   )}

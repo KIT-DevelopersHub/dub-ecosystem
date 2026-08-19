@@ -11,10 +11,12 @@ export interface TaskListViewProps {
   onLoadMore: () => void;
   onOpen: (id: common.TaskId) => void;
   loading?: boolean;
+  /** taskId -> WBS number label (e.g. "AA-1-1"); absent ⇒ no badge column. */
+  numberById?: ReadonlyMap<common.TaskId, string>;
 }
 
 /** Table list + cursor "さらに読み込む" (no auto infinite-scroll — FE1 LoadMore). */
-export function TaskListView({ tasks, users, hasMore, onLoadMore, onOpen, loading }: TaskListViewProps) {
+export function TaskListView({ tasks, users, hasMore, onLoadMore, onOpen, loading, numberById }: TaskListViewProps) {
   return (
     <div data-testid="fe4-list-view">
       <table className={styles.table}>
@@ -29,7 +31,13 @@ export function TaskListView({ tasks, users, hasMore, onLoadMore, onOpen, loadin
         <tbody>
           {tasks.map((t) => (
             <tr key={t.id} className={styles.row} onClick={() => onOpen(t.id)} data-testid={`fe4-task-row-${t.id}`}>
-              <td>{t.title}</td>
+              <td>
+                {numberById?.get(t.id) && (
+                  <span className={styles.tlRowNum} data-testid={`fe4-list-num-${t.id}`}>{numberById.get(t.id)}</span>
+                )}
+                {numberById?.get(t.id) ? " " : ""}
+                {t.title}
+              </td>
               <td><TaskStatusBadge status={t.status} /></td>
               <td>{displayName(users, t.assigneeId)}</td>
               <td>{t.dueAt ? t.dueAt.slice(0, 10) : "―"}</td>
