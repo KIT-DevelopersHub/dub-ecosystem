@@ -112,6 +112,51 @@ describe("GanttView render (design test 4/7)", () => {
     );
     expect(screen.queryByTestId("fe4-gantt-drag-a")).toBeNull();
   });
+
+  it("拡大: enters a look-only fullscreen mode that hides edit affordances, then Esc/閉じる exits", () => {
+    const onSchedule = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <GanttView
+        dto={wbsDto}
+        zoom="week"
+        canWrite
+        onSchedule={onSchedule}
+        onSelect={onSelect}
+        onCreateOnDate={vi.fn()}
+        onReorder={vi.fn()}
+        sortMode="manual"
+        onSortModeChange={vi.fn()}
+      />,
+    );
+    // editing affordances present before 拡大
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-l")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-gantt-addrow")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-gantt-sort")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-gantt-viewonly-badge")).toBeNull();
+
+    // 拡大 → look-only fullscreen
+    fireEvent.click(screen.getByTestId("fe4-gantt-fullscreen-btn"));
+    const view = screen.getByTestId("fe4-gantt-view");
+    expect(view).toHaveAttribute("data-presenting", "1");
+    expect(screen.getByTestId("fe4-gantt-viewonly-badge")).toBeInTheDocument();
+    // edit affordances are gone (no resize handles, no add-row, no sort)
+    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-l")).toBeNull();
+    expect(screen.queryByTestId("fe4-gantt-addrow")).toBeNull();
+    expect(screen.queryByTestId("fe4-gantt-sort")).toBeNull();
+    // tapping a bar no longer opens detail (pure viewing)
+    fireEvent.pointerDown(screen.getByTestId("fe4-gantt-bar-p"));
+    fireEvent.pointerUp(screen.getByTestId("fe4-gantt-bar-p"));
+    expect(onSelect).not.toHaveBeenCalled();
+    // zoom (a viewing operation) still works while presenting
+    expect(screen.getByTestId("fe4-gantt-zoom-day")).toBeInTheDocument();
+
+    // Esc exits back to the editable view
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByTestId("fe4-gantt-view")).not.toHaveAttribute("data-presenting");
+    expect(screen.queryByTestId("fe4-gantt-viewonly-badge")).toBeNull();
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-l")).toBeInTheDocument();
+  });
 });
 
 describe("ViewSwitcher", () => {

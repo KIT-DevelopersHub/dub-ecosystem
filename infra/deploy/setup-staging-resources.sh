@@ -109,10 +109,31 @@ else
   rm -f "$SCHEMA" "$DATA"
 fi
 
+# dub-core-staging ALSO hosts un-namespaced SHARED tables created OUT-OF-BAND (i.e. NOT by the
+# @dub/infra-d1 migrations, so the seeded local sqlite lacks them). Without these, deployed
+# Workers 500 at runtime on a fresh staging:
+#   * freeq_outbox            — the @dub/freeq D1 outbox that task/event/notification/chat/...
+#                               enqueue their task.* + audit fan-out into (OUTBOX_DB=dub-core).
+#                               Missing => every mutating op that emits an event fails (500).
+#   * monitor_status/_incident — app-health-monitor durable state (shared dub-core convention).
+# Each DDL is idempotent (CREATE ... IF NOT EXISTS), so re-running is a no-op.
+DUBCORE_SHARED_DDLS=(
+  "services/task-service/db/0002_freeq_outbox.sql"    # freeq_outbox (any service's freeq DDL is identical)
+  "services/app-health-monitor/db/0001_monitor.sql"   # monitor_status / monitor_incident
+)
+for ddl in "${DUBCORE_SHARED_DDLS[@]}"; do
+  if [ -f "$ddl" ]; then
+    $WRANGLER d1 execute dub-core-staging --remote --yes --file "$ddl" || \
+      echo "::warning::could not apply ${ddl} to dub-core-staging (apply manually)."
+  else
+    echo "::warning::shared dub-core DDL not found: ${ddl} (skipped)."
+  fi
+done
+
 # auth-outbox-staging holds only the freeq outbox table (auth's OUTBOX_DB). Apply its DDL.
 AUTH_OUTBOX_DDL="$(ls services/auth-service/db/*outbox*.sql 2>/dev/null | head -n1 || true)"
 if [ -n "$AUTH_OUTBOX_DDL" ]; then
-  $WRANGLER d1 execute auth-outbox-staging --remote --file "$AUTH_OUTBOX_DDL" || \
+  $WRANGLER d1 execute auth-outbox-staging --remote --yes --file "$AUTH_OUTBOX_DDL" || \
     echo "::warning::could not apply ${AUTH_OUTBOX_DDL} to auth-outbox-staging (apply manually)."
 fi
 
