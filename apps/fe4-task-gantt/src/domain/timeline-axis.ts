@@ -309,10 +309,14 @@ export function timelineBars(rows: readonly gantt.GanttRow[], w: AxisWindow): Ti
     if (!r.startsAt || !r.endsAt) {
       return { taskId: r.taskId, hasBar: false, x: 0, width: 0, y, progressPercent: r.progressPercent };
     }
-    const start = Date.parse(r.startsAt);
-    const end = Date.parse(r.endsAt);
-    const x = xOf(start, w);
-    const width = Math.max(xOf(end, w) - x, MIN_BAR_PX);
+    // Inclusive span: a task covers BOTH its start and end days, so the bar must
+    // paint (end - start + 1) day-cells. Floor to day, then extend the right edge by
+    // one day (exclusive) so the end day's own cell is filled. Fixes the off-by-one
+    // where e.g. a 08-05→08-08 task (4 days) rendered only 3 cells.
+    const startDay = floorDayUtc(Date.parse(r.startsAt));
+    const endDayExclusive = floorDayUtc(Date.parse(r.endsAt)) + MS_PER_DAY;
+    const x = xOf(startDay, w);
+    const width = Math.max(xOf(endDayExclusive, w) - x, MIN_BAR_PX);
     return {
       taskId: r.taskId,
       hasBar: true,
