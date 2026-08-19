@@ -42,9 +42,12 @@ const ORG = "org_devhub";
 
 function seedState(seed?: MockSeed): MockState {
   const roles = new Map<string, identity.Role>([
-    ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "chat:create", "chat:delete", "chat:moderate", "app:chat:view", "app:chat:edit"], isSystem: true }],
+    ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"], isSystem: true }],
+    // member carries chat access + own-delete so the standalone shows the チャット row's
+    // 削除権限=削除あり + 挙動 toggle (RoleListPage count tests key off admin=5 / organizer=2,
+    // so those two stay at their original bundles).
     ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read", "chat:create", "chat:delete", "app:chat:view"], isSystem: true }],
-    ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write", "chat:create", "chat:delete", "app:chat:view"], isSystem: false }],
+    ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
   ]);
   const users = new Map<string, MockUser>([
     ["user_alice", { id: "user_alice", orgId: ORG, displayName: "Alice Admin", email: "alice@developershub.jp", githubLogin: "alice", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], permissions: ["identity:read", "identity:admin", "audit:read", "event:read"], createdAt: now(), updatedAt: now() }],
