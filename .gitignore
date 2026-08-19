@@ -8,3 +8,6 @@ coverage/
 .env.*
 .dev.vars
 .wrangler/
+
+# Generated staging Worker configs (source of truth: gen-staging-configs.sh + staging-resources.env)
+**/wrangler.staging.toml
