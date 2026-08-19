@@ -39,5 +39,26 @@ service = "event-service"
 binding = "SVC_IDENTITY"
 service = "identity-roster"
 
+# Realtime collaboration (presence + live sync): the gantt-owned GanttRoom Durable Object.
+# One instance per eventId (getByName(eventId)). SQLite-backed DO — runs on the FREE plan.
+# WS is gateway-bypassing / DO-direct (theme11); the DO verifies the HMAC ws-ticket + Origin.
+[[durable_objects.bindings]]
+name = "GANTT_ROOM"
+class_name = "GanttRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GanttRoom"]
+
 [observability]
 enabled = true
+
+[vars]
+# Absolute base for the ws-ticket doUrl (":id" -> eventId). Overridden per environment.
+GANTT_RT_DO_URL_BASE = "wss://dub-gantt-service.developershub-site.workers.dev/ws/:id"
+# Origin allow-list enforced by the GanttRoom DO (comma-separated).
+GANTT_RT_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
+
+# NOTE: WS_TICKET_SECRET is a Worker Secret (never in wrangler.toml). Set via
+# `wrangler secret put WS_TICKET_SECRET` at Apply. The GanttRoom DO verifies with the
+# same secret (gantt self-owned HMAC, theme11).

@@ -16,10 +16,28 @@ name = "dub-gantt-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
-workers_dev = false
+# Realtime WS is gateway-bypassing / DO-direct, so the browser must reach this Worker on
+# the public internet — workers.dev is enabled (mirrors chat-service). The HTTP API stays
+# private: index.ts gates the header-trusting app to service-binding callers (host "svc"),
+# so only /health, /ws/:eventId and the (unset-in-prod) dev demo are publicly reachable.
+workers_dev = true
 
 [observability]
 enabled = true
+
+# Realtime collaboration DO (presence + live sync). SQLite-backed -> FREE plan. No paid
+# Cloudflare Queues involved; the ws-ticket HMAC secret is a Worker Secret set at Apply.
+[[durable_objects.bindings]]
+name = "GANTT_ROOM"
+class_name = "GanttRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GanttRoom"]
+
+[vars]
+GANTT_RT_DO_URL_BASE = "wss://dub-gantt-service.developershub-site.workers.dev/ws/:id"
+GANTT_RT_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
 
 # Shared dub-core D1: gantt owns the gantt_* namespace (per-user view state) only.
 [[d1_databases]]

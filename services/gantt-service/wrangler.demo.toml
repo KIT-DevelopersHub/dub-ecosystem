@@ -1,0 +1,31 @@
+# DEV-ONLY demo config for the gantt realtime layer (presence + live data sync). Boots a
+# minimal `wrangler dev` with ONLY the GanttRoom Durable Object — no D1/KV/service bindings
+# — so the WebSocket collaboration can be exercised with two browser tabs against the REAL
+# DO, without the auth/gateway/task stack (one process; friendly to a low-power machine).
+#
+#   npx wrangler dev --config services/gantt-service/wrangler.demo.toml --port 8787
+#   open http://127.0.0.1:8787/demo?user=usr_ann&name=Ann       (tab A)
+#   open http://127.0.0.1:8787/demo?user=usr_ben&name=Ben       (tab B)
+#
+# NEVER deploy this config. GANTT_RT_DEV_TICKET enables the unauthenticated demo issuer.
+name = "dub-gantt-demo"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "GANTT_ROOM"
+class_name = "GanttRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GanttRoom"]
+
+[vars]
+GANTT_RT_DEV_TICKET = "1"
+# Point the demo client's WS at the local dev server (":id" -> eventId).
+GANTT_RT_DO_URL_BASE = "ws://127.0.0.1:8787/ws/:id"
+# Allow the local demo page's Origin (served from the same worker).
+GANTT_RT_ALLOWED_ORIGINS = "http://127.0.0.1:8787,http://localhost:8787"
+WS_TICKET_SECRET = "dev-insecure-ws-ticket-secret"
