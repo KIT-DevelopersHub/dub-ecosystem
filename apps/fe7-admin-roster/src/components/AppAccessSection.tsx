@@ -22,9 +22,9 @@ export interface ChatDeletionControls {
 }
 
 const DELETE_RIGHT_OPTIONS: { value: ChatDeleteRight; label: string }[] = [
-  { value: "none", label: "削除権限なし" },
-  { value: "own", label: "削除あり" },
-  { value: "any", label: "複数削除あり" },
+  { value: "none", label: "削除不可" },
+  { value: "own", label: "自分の投稿のみ削除" },
+  { value: "any", label: "全員の投稿を削除（モデレート）" },
 ];
 const DELETE_MODE_OPTIONS: { value: chat.MessageDeletionMode; label: string }[] = [
   { value: "tombstone", label: "痕跡を残す" },
