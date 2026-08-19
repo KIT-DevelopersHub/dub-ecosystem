@@ -25,8 +25,10 @@ import { useGanttSortMode } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
 import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
+import { useGanttRealtime } from "../realtime/useGanttRealtime";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
+import { PresenceBar } from "./PresenceBar";
 import { GanttView } from "./GanttView";
 import { TaskDetailPanel, type RelationEdit } from "./TaskDetailPanel";
 import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
@@ -149,6 +151,34 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     for (const u of userList) if (!byId.has(u.id)) byId.set(u.id, u);
     return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "ja"));
   }, [roster, userList]);
+  // userId → display name, for the presence bar labels (roster ∪ resolved-from-tasks).
+  const displayNameById = useMemo(() => {
+    const m = new Map<common.UserId, string>();
+    for (const u of assignableUsers) m.set(u.id, u.displayName);
+    return m;
+  }, [assignableUsers]);
+
+  // ── Realtime collaboration (presence + live data sync) ──────────────────────
+  // A peer's committed change arrives as `data.changed`; we refetch the authoritative
+  // rows (server-is-truth) — but the hook DEFERS that refetch while the local user is
+  // mid-edit (detail panel open / create modal open) so an incoming push never clobbers
+  // an in-flight local edit. A reconnect backfills anything missed. Every successful local
+  // write calls `rt.notifyChange(...)` so peers refetch too.
+  const rt = useGanttRealtime(eventId, {
+    enabled: caps.canRead,
+    onRemoteChange: () => {
+      void store.loadAll(client, query);
+      void gantt.refetchFresh();
+    },
+    shouldDefer: () => selected !== null || creating,
+  });
+  // Broadcast this tab's viewing⇄editing state: editing while a task detail panel or the
+  // create modal is open. Peers see the ring/"編集中" badge on this user's avatar.
+  useEffect(() => {
+    rt.setEditing(selected !== null || creating, selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, creating]);
+
   const statusById = useMemo(() => new Map(tasks.map((t) => [t.id, t.status] as const)), [tasks]);
   // team accent colour per task (team-grouped rows), and a legend of the teams
   // actually present on the board — drives the row stripe / bar cap / legend chips.
@@ -601,6 +631,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // 成功トーストを出す). Reconciling reload/refetch runs after and must never turn a
     // successful create into a thrown error that keeps the modal open.
     toast.show({ kind: "success", title: "タスクを作成しました" });
+    rt.notifyChange("task.upserted", created.id); // peers refetch → the new bar appears live
     try {
       await store.loadAll(client, query);
       await gantt.refetchFresh();
@@ -618,12 +649,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     const { parentTaskId: _p, ...fieldOnlyPatch } = patch;
     const hasFieldPatch = Object.keys(fieldOnlyPatch).some((k) => k !== "version");
     if (!needsRelations) {
+      const savedId = selectedTask.id;
       void store
-        .patchOptimistic(client, selectedTask.id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
+        .patchOptimistic(client, savedId, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
         .then((ok) => {
           if (ok) {
             void gantt.refetchFresh();
             feedback.success();
+            rt.notifyChange("task.upserted", savedId); // peers refetch the edited row
           }
         });
       return;
@@ -641,7 +674,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // reflection (and its rollback) now lives INSIDE applyRelationsRaw, so save + undo +
     // redo all reflect instantly. On success we confirm with a success toast.
     void applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined).then((ok) => {
-      if (ok) feedback.success();
+      if (ok) {
+        feedback.success();
+        rt.notifyChange("relations", id); // peers refetch → tree/arrows update live
+      }
     });
     history.push({
       label: relations.depsChanged ? "先行タスク（依存）の変更" : "親タスク（親子）の変更",
@@ -664,6 +700,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     void store.removeTask(client, id).then(async (ok) => {
       if (ok) {
         feedback.success("タスクを削除しました");
+        rt.notifyChange("task.deleted", id); // peers refetch → the bar disappears live
         await store.loadAll(client, query);
         await gantt.refetchFresh();
       } else {
@@ -684,6 +721,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     const displayed = applyManualOrder(gantt.currentRows(), orderedTaskIds);
     const nextOrder = reorderWithinSiblings(displayed, draggedId, beforeTaskId);
     if (!nextOrder) return; // cross-parent drop or no-op
+    // NOTE: the manual order is a PER-USER view preference (gantt view state), not shared
+    // data — so it is deliberately NOT broadcast; each viewer keeps their own row order.
     void view
       .saveOrder(nextOrder)
       .then(() => feedback.success("並び順を更新しました"))
@@ -696,6 +735,15 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         <div className={styles.pageHeaderText}>
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
           <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
+        </div>
+        {/* Realtime presence: who is viewing/editing this gantt right now (live). */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+          <PresenceBar
+            presence={rt.presence}
+            status={rt.status}
+            selfUserId={rt.selfUserId}
+            displayNameById={displayNameById}
+          />
         </div>
         {caps.canWrite && (
           <div className={styles.headerActions}>

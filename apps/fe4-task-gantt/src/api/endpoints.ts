@@ -150,6 +150,16 @@ export function getGanttDependencies(
   });
 }
 
+/** Realtime handshake: issue a ws-ticket + the GanttRoom DO URL for presence/live sync. */
+export function getGanttWsTicket(client: ApiClient, eventId: common.EventId): Promise<gantt.WsTicketResponse> {
+  const query: gantt.GetGanttQuery = { eventId };
+  return client.request<gantt.WsTicketResponse>({
+    method: "GET",
+    path: `${P}/gantt/ws-ticket`,
+    query: { ...query },
+  });
+}
+
 export function getGanttView(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttViewState> {
   const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttViewState>({
