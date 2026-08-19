@@ -111,13 +111,6 @@
   border-radius: var(--dub-radius-md, 10px);
   box-shadow: var(--dub-shadow-overlay, 0 10px 24px rgba(15, 23, 42, 0.16));
 }
-.menuHint {
-  padding: 6px var(--dub-space-2) 4px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
-}
 .option {
   display: flex;
   align-items: center;
@@ -133,7 +126,8 @@
   font-size: var(--dub-font-size-sm, 0.85rem);
   cursor: pointer;
 }
-.option:hover {
+.option:hover,
+.option[data-active="true"] {
   background: var(--dub-color-surface-sunken);
 }
 .optionText {

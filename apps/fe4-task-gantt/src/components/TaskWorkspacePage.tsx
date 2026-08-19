@@ -17,7 +17,7 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
-import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
+import { scopeTasksFromRows, directParentOf, teamOf, topLevelParentOptions } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
@@ -307,13 +307,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
   const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
-  // Prefer the store's fresh title so the parent / 先行タスク pickers relabel the same
-  // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
-  // which the store list omits).
-  const allTaskOptions = useMemo(
-    () => allRows.map((r) => ({ id: r.taskId, title: titleById.get(r.taskId) ?? r.title })),
-    [allRows, titleById],
-  );
+  // WBS parent候補は「一番上の階層（ルート）のタスクのみ」。ネストした子孫は出さない。
+  const rootParentOptions = useMemo(() => topLevelParentOptions(scopeTasks), [scopeTasks]);
   // predecessors currently on the selected task (先行タスク＝依存元 where to===selected).
   const selectedDependsOn = useMemo(() => {
     if (!selected || !gantt.data) return [] as common.TaskId[];
@@ -323,10 +318,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     () => (selected ? directParentOf(scopeTasks, selected) : null),
     [selected, scopeTasks],
   );
-  // parent options for the detail panel exclude the task itself.
+  // parent options for the detail panel: top-level roots only, minus the task itself.
   const detailParentOptions = useMemo(
-    () => (selected ? allTaskOptions.filter((o) => o.id !== selected) : allTaskOptions),
-    [allTaskOptions, selected],
+    () => topLevelParentOptions(scopeTasks, selected),
+    [scopeTasks, selected],
   );
 
   // Inline field errors read from the RAW error detail (lastErrorDetail carries the
@@ -1054,7 +1049,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         onClose={closeCreate}
         users={assignableUsers}
         teams={teams}
-        parentOptions={allTaskOptions}
+        parentOptions={rootParentOptions}
         scopeTasks={scopeTasks}
         onCreate={onCreate}
       />
