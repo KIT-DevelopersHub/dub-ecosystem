@@ -496,16 +496,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: var(--dub-radius-sm, 4px);
-  color: var(--dub-color-text-secondary);
-  font-size: 0.7rem;
+  /* Bigger + higher-contrast so the open (▾) vs closed (▸) direction reads at a
+     glance instead of a faint 0.7rem triangle (feedback: toggle hard to tell). */
+  color: var(--dub-color-text-primary);
+  font-size: 0.95rem;
   line-height: 1;
 }
-.tlToggleWide:hover .tlToggleGlyph { color: var(--dub-color-text-primary); }
+.tlToggleWide:hover .tlToggleGlyph { color: var(--dub-color-text-primary); background: var(--dub-color-surface-raised, var(--dub-color-surface-base)); }
 /* keeps childless top-level rows' text aligned with rows that have a chevron. */
-.tlToggleSpacer { flex: 0 0 auto; width: 16px; margin-right: 2px; }
+.tlToggleSpacer { flex: 0 0 auto; width: 20px; margin-right: 2px; }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
 /* WBS number badge shown before the task title (gantt left pane + list view). Mono +
    tabular so codes like "AA-0001-0012" stay column-aligned and read as an identifier. */
