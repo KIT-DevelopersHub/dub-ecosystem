@@ -81,6 +81,12 @@ export interface GanttViewProps {
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
   /** taskId -> assignee display name, shown as a left-pane property. */
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
+  /** taskId -> title from the optimistic task store (task-service = the authority on
+   *  title). Overrides the gantt read model's denormalized row title so a detail-panel
+   *  rename reflects on every row/bar the SAME tick — and never reverts to a stale
+   *  read-model copy after the reconciling refetch. Absent ⇒ use the DTO row title.
+   *  Mirrors how statusById / assigneeNameById already flow from the store. */
+  titleOverrides?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> team accent colour, for the row stripe + bar cap (team grouping). */
   teamColorById?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> WBS number label (e.g. "AA-1-1"), shown as a badge before the title.
@@ -233,6 +239,7 @@ export function GanttView({
   onCreateOnDate,
   statusById,
   assigneeNameById,
+  titleOverrides,
   teamColorById,
   teamLegend,
   rowGroupById,
@@ -296,10 +303,21 @@ export function GanttView({
     [onReorder],
   );
 
+  // Swap in the store's (authoritative + optimistic) title before any geometry runs,
+  // so a rename shows on every row/bar the same tick and survives the reconciling
+  // refetch. Only the label changes; the DTO row still owns layout (dates/tree).
+  const rowsTitled = useMemo(() => {
+    if (!titleOverrides || titleOverrides.size === 0) return dto.rows;
+    return dto.rows.map((r) => {
+      const t = titleOverrides.get(r.taskId);
+      return t !== undefined && t !== r.title ? { ...r, title: t } : r;
+    });
+  }, [dto.rows, titleOverrides]);
+
   // Parent (work-package) bars always enclose their children: roll each parent's
   // span up to the union of its descendants before any geometry runs, so widening
   // a child auto-grows the parent bar (and, via the window effect, the axis).
-  const rolledRows = useMemo(() => rollupRowDates(dto.rows), [dto.rows]);
+  const rolledRows = useMemo(() => rollupRowDates(rowsTitled), [rowsTitled]);
 
   // Rows actually shown: a child (has a parent) is hidden unless its parent is open.
   const rows = useMemo(
