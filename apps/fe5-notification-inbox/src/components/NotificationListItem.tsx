@@ -52,10 +52,13 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
     }
   };
   return (
-    <div className={styles.row} data-testid={`fe5-inbox-row-${item.id}`}>
+    <div
+      className={`${styles.row} ${unread ? styles.unread : ""}`}
+      data-testid={`fe5-inbox-row-${item.id}`}
+    >
       <button
         type="button"
-        className={`${styles.item} ${unread ? styles.unread : ""}`}
+        className={styles.item}
         data-testid={`fe5-inbox-item-${item.id}`}
         data-unread={unread}
         aria-label={`${unread ? "Unread. " : ""}${item.title}`}

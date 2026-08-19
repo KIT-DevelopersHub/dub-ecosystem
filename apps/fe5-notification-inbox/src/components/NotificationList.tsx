@@ -57,7 +57,7 @@ export function NotificationList(props: NotificationListProps): ReactNode {
   const groups = groupInboxItems(items);
 
   return (
-    <div role="list" data-testid="fe5-inbox-list">
+    <div role="list" className={styles.list} data-testid="fe5-inbox-list">
       {groups.map((g) => (
         <section
           className={styles.section}
@@ -76,7 +76,7 @@ export function NotificationList(props: NotificationListProps): ReactNode {
             ) : null}
           </div>
           {g.items.map((item) => (
-            <div role="listitem" key={item.id}>
+            <div role="listitem" className={styles.rowItem} key={item.id}>
               <NotificationListItem
                 item={item}
                 onActivate={props.onActivate}
