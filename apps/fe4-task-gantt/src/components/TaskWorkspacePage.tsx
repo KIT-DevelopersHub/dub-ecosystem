@@ -18,6 +18,8 @@ import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
+import { sortRows, type SortContext } from "../domain/row-sort";
+import { useGanttSortMode } from "../domain/gantt-sort-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
@@ -73,6 +75,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // Per-user view state — carries the personal manual row order (drag reorder).
   const view = useGanttView(eventId);
   const orderedTaskIds = useMemo(() => view.data?.orderedTaskIds ?? [], [view.data]);
+  // Row 並び替え mode (手動/重要度/時期/チーム). Personal client-side view preference,
+  // persisted per-event in localStorage; "手動" falls back to the drag order overlay.
+  const [sortMode, setSortMode] = useGanttSortMode(eventId);
   const teams = useTeams().data ?? [];
   // Org member roster — the source for the assignee dropdown. Without it the only
   // options were users ALREADY assigned to a task, so a fresh event showed just
@@ -156,14 +161,26 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return m;
   }, [tasks, users]);
 
+  // Sort context for the automatic 並び替え modes (重要度/時期/チーム). priority already
+  // lives on task.Task (no schema change); team order = the order member-service
+  // returns teams in (useTeams). All read-only overlays — nothing is persisted.
+  const sortContext = useMemo<SortContext>(() => {
+    const priorityById = new Map(tasks.map((t) => [t.id, t.priority] as const));
+    const teamIdById = new Map(tasks.map((t) => [t.id, t.teamId ?? null] as const));
+    const teamOrder = new Map(teams.map((t, i) => [t.id, i] as const));
+    return { priorityById, teamIdById, teamOrder };
+  }, [tasks, teams]);
+
   // The status filter narrows the gantt: keep only rows whose task is in the
   // (server-filtered) store set, and dependencies between two visible tasks.
   const filteredDto = useMemo<ganttNs.GanttChartDTO | null>(() => {
     if (!gantt.data) return null;
     const visible = new Set(tasks.map((t) => t.id));
-    // Apply the per-user manual drag order as a pure overlay on the server rows
-    // (siblings only, parent→children contiguity preserved). Empty ⇒ server order.
-    const rows = applyManualOrder(gantt.data.rows.filter((r) => visible.has(r.taskId)), orderedTaskIds);
+    const base = gantt.data.rows.filter((r) => visible.has(r.taskId));
+    // "手動": apply the per-user drag overlay (siblings only, parent→children
+    // contiguity preserved). Otherwise: apply the chosen automatic sort. Both keep
+    // the WBS hierarchy intact (only re-sort within each sibling group).
+    const rows = sortMode === "manual" ? applyManualOrder(base, orderedTaskIds) : sortRows(base, sortMode, sortContext);
     return {
       ...gantt.data,
       rows,
@@ -171,7 +188,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       criticalTaskIds: (gantt.data.criticalTaskIds ?? []).filter((id) => visible.has(id)),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gantt.data, tasks, orderedTaskIds]);
+  }, [gantt.data, tasks, orderedTaskIds, sortMode, sortContext]);
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
 
@@ -664,6 +681,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onSchedule={caps.canWrite ? onSchedule : undefined}
           onScheduleShift={caps.canWrite ? onScheduleShift : undefined}
           onReorder={caps.canWrite ? onReorder : undefined}
+          sortMode={sortMode}
+          onSortModeChange={setSortMode}
           onSelect={setSelected}
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}

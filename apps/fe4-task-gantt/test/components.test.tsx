@@ -85,6 +85,33 @@ describe("GanttView render (design test 4/7)", () => {
     expect(onZoomChange).toHaveBeenCalledWith("week");
     expect(screen.getByTestId("fe4-gantt-zoom-week")).toHaveAttribute("aria-selected", "true");
   });
+
+  it("renders the 並び替え selector (all four modes) and fires onSortModeChange", () => {
+    const onSortModeChange = vi.fn();
+    render(<GanttView dto={dto} zoom="week" sortMode="manual" onSortModeChange={onSortModeChange} />);
+    const select = screen.getByTestId("fe4-gantt-sort") as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(select.value).toBe("manual");
+    // all four requested modes are offered
+    const values = [...select.options].map((o) => o.value);
+    expect(values).toEqual(["manual", "priority", "schedule", "team"]);
+    fireEvent.change(select, { target: { value: "priority" } });
+    expect(onSortModeChange).toHaveBeenCalledWith("priority");
+  });
+
+  it("hides the drag handles when an automatic sort is active (only 手動 allows DnD)", () => {
+    const onReorder = vi.fn();
+    // manual mode → drag handle present
+    const { rerender } = render(
+      <GanttView dto={dto} zoom="week" canWrite sortMode="manual" onReorder={onReorder} onSortModeChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId("fe4-gantt-drag-a")).toBeInTheDocument();
+    // switch to an automatic sort → handles gone (a re-sort would overwrite the drop)
+    rerender(
+      <GanttView dto={dto} zoom="week" canWrite sortMode="priority" onReorder={onReorder} onSortModeChange={vi.fn()} />,
+    );
+    expect(screen.queryByTestId("fe4-gantt-drag-a")).toBeNull();
+  });
 });
 
 describe("ViewSwitcher", () => {
