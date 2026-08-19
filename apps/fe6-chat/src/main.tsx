@@ -34,6 +34,15 @@ const api: ChatApiClient = live
   ? new HttpChatClient({ baseUrl: import.meta.env.VITE_CHAT_API_BASE ?? "" })
   : new MockChatClient(demoSeed());
 
+// Standalone/E2E affordance: `?deletionPolicy=tombstone` flips the mock's message
+// deletion policy so the tombstone path is previewable without a live backend (the
+// default mock policy mirrors production: all `hard`). No effect in live mode.
+if (!live && api instanceof MockChatClient) {
+  const p = new URLSearchParams(window.location.search).get("deletionPolicy");
+  if (p === "tombstone") api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone" });
+  else if (p === "hard") api.setDeletionPolicy({ member: "hard", moderator: "hard" });
+}
+
 const createRealtimeClient: () => ChatRealtimeClient = live
   ? () => new WsChatClient({ getTicket: (channelId) => api.getWsTicket(channelId) })
   : () => new MockRealtimeClient();

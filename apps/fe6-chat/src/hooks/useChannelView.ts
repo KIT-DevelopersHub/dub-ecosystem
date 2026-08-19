@@ -14,6 +14,7 @@ import {
   applyRealtimeEvent,
   failPending,
   mergeMessages,
+  removeMessage,
   toggleReactionLocal,
   upsertMessage,
 } from "../store/timeline";
@@ -200,11 +201,18 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
     [api], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Delete is destructive => non-optimistic (design: ConfirmDialog then apply).
+  // Delete is destructive => non-optimistic (design: ConfirmDialog then apply). The
+  // server resolves the policy per privilege tier: `hard` erases the row (drop it),
+  // `tombstone` redacts it in place (upsert the redacted message). The RT echo carries
+  // the same mode so other clients converge identically.
   const deleteMessage = useCallback(
     async (id: common.MessageId, _version: number) => {
       const res = await api.deleteMessage(id);
-      setState({ ...stateRef.current, messages: upsertMessage(stateRef.current.messages, res) });
+      const messages =
+        res.mode === "hard" || res.message === null
+          ? removeMessage(stateRef.current.messages, id)
+          : upsertMessage(stateRef.current.messages, res.message);
+      setState({ ...stateRef.current, messages });
     },
     [api, setState],
   );

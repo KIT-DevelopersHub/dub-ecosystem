@@ -119,6 +119,20 @@ export interface EditMessageRequest {
   version: number;
 }
 
+// Message deletion policy (RBAC-configurable). `hard` erases the row (client drops it
+// from the timeline); `tombstone` redacts it in place ("削除されました"). Shape frozen in
+// @dub/types (single source); re-exported for the unit's import surface.
+export type MessageDeletionMode = chat.MessageDeletionMode;
+export type MessageDeletionPolicy = chat.MessageDeletionPolicy;
+export type DeletionPolicyResponse = chat.DeletionPolicyResponse;
+
+// DELETE /messages/:id result: how the policy resolved the delete + the tombstone
+// (mode "tombstone") or null (mode "hard", the row is gone).
+export interface DeleteMessageResult {
+  mode: MessageDeletionMode;
+  message: Message | null;
+}
+
 export interface ReactionToggleRequest {
   emoji: string;
 }

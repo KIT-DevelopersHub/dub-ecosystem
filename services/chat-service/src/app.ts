@@ -19,6 +19,7 @@ import type {
   ReactionToggleRequest,
   ReadStateUpdateRequest,
   UpdateChannelRequest,
+  UpdateDeletionPolicyRequest,
 } from "./types";
 import { ChatService, type ReqCtx } from "./service";
 
@@ -80,6 +81,8 @@ export function createApp(deps: AppDeps): Hono {
   app.use("/chat/messages/*", authz.requireAuth());
   app.use("/chat/unread", authz.requireAuth());
   app.use("/chat/search", authz.requireAuth());
+  app.use("/chat/settings", authz.requireAuth());
+  app.use("/chat/settings/*", authz.requireAuth());
 
   // ---- channels ----
   app.get("/chat/channels", async (c) => {
@@ -181,8 +184,9 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.delete("/chat/messages/:id", async (c) => {
-    await svc.deleteMessage(reqCtx(c), c.req.param("id"));
-    return c.body(null, 204);
+    // Returns { mode, message }: `hard` -> message null (row gone, client drops it);
+    // `tombstone` -> the redacted message (client renders "削除されました").
+    return c.json(await svc.deleteMessage(reqCtx(c), c.req.param("id")));
   });
 
   app.post("/chat/messages/:id/reactions", async (c) => {
@@ -193,6 +197,17 @@ export function createApp(deps: AppDeps): Hono {
   // ---- unread (caller-scoped; no userId param, design §2) ----
   app.get("/chat/unread", async (c) => {
     return c.json(await svc.unread(reqCtx(c)));
+  });
+
+  // ---- settings: message deletion policy (RBAC-configurable delete behaviour) ----
+  // Reading is open to any authenticated member (the FE needs it to render the policy
+  // section); writing requires chat:moderate (admin/maintainer) — enforced fail-close.
+  app.get("/chat/settings/deletion-policy", async (c) => {
+    return c.json(await svc.getDeletionPolicy(reqCtx(c)));
+  });
+  app.patch("/chat/settings/deletion-policy", authz.requirePermission("chat:moderate"), async (c) => {
+    const body = await readJson<UpdateDeletionPolicyRequest>(c);
+    return c.json(await svc.updateDeletionPolicy(reqCtx(c), body));
   });
 
   return app;

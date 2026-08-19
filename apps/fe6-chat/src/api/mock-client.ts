@@ -1,16 +1,19 @@
 // In-memory ChatApiClient — the Phase0 mock server (design §7). Backs standalone
 // dev and unit tests without chat-service. Deterministic, dependency-free.
-import type { common, identity } from "@dub/types";
+import { chat, type common, type identity } from "@dub/types";
 import { newChannelId, newMessageId } from "../lib/ulid";
 import type {
   Channel,
   ChannelMember,
   CreateChannelRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   EditMessageRequest,
   GetChannelResponse,
   ListMessagesRequest,
   ListMessagesResponse,
   Message,
+  MessageDeletionPolicy,
   PostMessageRequest,
   PostMessageResponse,
   ReactionToggleRequest,
@@ -45,6 +48,9 @@ export class MockChatClient implements ChatApiClient {
   private readState = new Map<common.ChannelId, common.MessageId>();
   private pins = new Map<common.ChannelId, Set<common.MessageId>>();
   private readonly me: common.UserId;
+  /** Workspace message-deletion policy (mock default = product default: all hard). */
+  private deletionPolicy: MessageDeletionPolicy = { ...chat.DEFAULT_MESSAGE_DELETION_POLICY };
+  private deletionPolicyVersion = 0;
   /** Latency injected per call (ms). 0 = synchronous microtask. */
   latencyMs = 0;
   /** When set, the next mutating call rejects with this error, then resets. */
@@ -258,13 +264,32 @@ export class MockChatClient implements ChatApiClient {
     return this.settle(next);
   }
 
-  async deleteMessage(id: common.MessageId): Promise<Message> {
+  async deleteMessage(id: common.MessageId): Promise<DeleteMessageResult> {
     const idx = this.messages.findIndex((m) => m.id === id);
     if (idx < 0) throw new ChatApiError(404, { error: { code: "NOT_FOUND", message: "message not found", retryable: false } });
     const msg = this.messages[idx]!;
+    // Single-user dev: treat the caller as a plain member (member tier). Default
+    // policy is `hard`, so a delete erases the row (mirrors production default).
+    const mode = this.deletionPolicy.member;
+    if (mode === "hard") {
+      this.messages.splice(idx, 1);
+      // drop dependent pins for the erased message
+      for (const set of this.pins.values()) set.delete(id);
+      return this.settle({ mode, message: null });
+    }
     const next: Message = { ...msg, deletedAt: now(), body: "", attachments: [], version: msg.version + 1 };
     this.messages[idx] = next;
-    return this.settle(next);
+    return this.settle({ mode, message: next });
+  }
+
+  async getDeletionPolicy(): Promise<DeletionPolicyResponse> {
+    return this.settle({ policy: { ...this.deletionPolicy }, version: this.deletionPolicyVersion });
+  }
+
+  /** Test/dev helper: switch the mock's deletion policy (mirrors the ロール管理 toggle). */
+  setDeletionPolicy(policy: MessageDeletionPolicy): void {
+    this.deletionPolicy = { ...policy };
+    this.deletionPolicyVersion += 1;
   }
 
   async toggleReaction(id: common.MessageId, req: ReactionToggleRequest): Promise<ReactionToggleResponse> {
