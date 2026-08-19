@@ -13,7 +13,8 @@
 //   4. carry each feature's module-level requiredPermissions so registry
 //      flatten() ANDs them onto every route (fail-closed authz).
 // The result is the array FE2's registerFeatureModules() consumes (main.tsx).
-import { createElement, type ComponentType, type ReactNode } from "react";
+import { createElement, useMemo, type ComponentType, type ReactNode } from "react";
+import { useParams } from "@tanstack/react-router";
 import { appRegistry, type identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { eventFeatureModule, routePaths } from "@dub/fe3-event-action";
@@ -21,7 +22,8 @@ import { notificationsModule } from "@dub/fe5-notification-inbox";
 import { adminModule } from "@dub/admin-roster";
 // FE4/FE6 have no package export map yet — reached via the single deep-import
 // boundary (featureEntries.tsx), never directly.
-import { taskModule, eventTaskRoutes, chatFeature } from "./featureEntries.tsx";
+import { taskModule, eventTaskRoutes, chatFeature, TaskRouteProvider, useTaskRoute } from "./featureEntries.tsx";
+import type { TaskRouteContextValue } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { FeatureModule, FeatureRoute, NavEntry } from "../modules/types.tsx";
 import { mailRoutes, mailNav } from "../features/mail/index.tsx";
@@ -30,6 +32,7 @@ import { usageRoutes, usageNav } from "../features/usage/index.tsx";
 import { UsageProvider } from "../features/usage/UsageProvider.tsx";
 import { ganttRoutes, ganttNav } from "../features/gantt/index.tsx";
 import { GanttProvider } from "../features/gantt/GanttProvider.tsx";
+import { GlobalEventSwitcher } from "../features/gantt/GlobalEventSwitcher.tsx";
 import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
@@ -131,11 +134,27 @@ function withModulePerms(source: { requiredPermissions?: readonly string[] }, mo
   return module;
 }
 
+/** Bridge the REACTIVE `:eventId` route param into FE4's TaskRouteContext, on top
+ *  of the currentUserId/permissions TaskProviders already set. Only the event-scoped
+ *  task routes carry an eventId, so the injection lives here (not in TaskProviders,
+ *  which also serves the paramless マイタスク route and must stay router-context-free
+ *  for its isolated unit test). A same-route param change (the header switcher
+ *  navigating evt_A→evt_B) re-runs useParams here → new eventId → the gantt reloads. */
+function TaskEventIdBridge({ children }: { children: ReactNode }): JSX.Element {
+  const params = useParams({ strict: false }) as Record<string, string>;
+  const base = useTaskRoute();
+  const eventId = (params.eventId ?? null) as TaskRouteContextValue["eventId"];
+  const value = useMemo<TaskRouteContextValue>(() => ({ ...base, eventId }), [base, eventId]);
+  return createElement(TaskRouteProvider, { value, children });
+}
+
 // ── events (FE3) + delegated tasks (FE4 nested under /events/:eventId) ─────────
 function adaptEvents(api: ApiClient): FeatureModule {
   const wEvent = providerWrapper(EventProviders, api);
   const wTask = providerWrapper(TaskProviders, api);
-  const wEventTask: ElementWrapper = (node) => wEvent(wTask(node));
+  // EventProviders → TaskProviders → TaskEventIdBridge(reactive eventId) → route.
+  const wEventTask: ElementWrapper = (node) =>
+    wEvent(wTask(createElement(TaskEventIdBridge, { children: node })));
   const src = eventFeatureModule.routes as readonly SourceRoute[];
   const routes: FeatureRoute[] = src.map((r) => {
     const route = wrapRoute(r, wEvent);
@@ -251,7 +270,13 @@ function adaptGantt(api: ApiClient): FeatureModule {
     if (n.requiredPermissions) e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
     return e;
   });
-  return { id: "gantt", routes, nav };
+  const module: FeatureModule = { id: "gantt", routes, nav };
+  // Global イベント header selector (GCP-style). Wrapped in GanttProvider (for the
+  // api-client) like FE5's bell; it self-gates to gantt/tasks routes and navigates
+  // the event param on select. Sits before the notifications bell in the actions row
+  // (gantt is assembled before notifications).
+  module.headerWidget = () => wrap(createElement(GlobalEventSwitcher));
+  return module;
 }
 
 // ── members (FE2-local feature module) ────────────────────────────────────────
