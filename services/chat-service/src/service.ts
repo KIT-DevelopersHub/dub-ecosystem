@@ -469,11 +469,15 @@ export class ChatService {
     const channel = await this.deps.repo.getChannel(msg.channelId);
     if (!channel) throw errors.notFound("message", id);
     const isAuthor = msg.authorId === ctx.userId;
-    // Moderator tier = channel admin OR the chat:moderate permission (admin/maintainer).
-    // Resolved server-side — the client never asserts its own tier (fail-close authz).
+    // Moderator tier = channel admin OR the chat:moderate permission (admin/maintainer):
+    // may delete ANY message. Otherwise deleting one's OWN message requires chat:delete
+    // (the per-role "削除権限" — 削除あり). A role with neither (削除権限なし) cannot delete,
+    // not even its own. Resolved server-side — the client never asserts its tier (fail-close).
     const isModerator = await this.isChannelAdmin(ctx, channel);
-    if (!isAuthor && !isModerator) {
-      throw new DubError(CommonErrorCodes.FORBIDDEN, "author or channel admin required", { status: 403 });
+    const canDeleteOwn =
+      isAuthor && (await this.deps.authz.hasPermission(ctx.userId, this.deps.orgId, { permission: "chat:delete" }));
+    if (!isModerator && !canDeleteOwn) {
+      throw new DubError(CommonErrorCodes.FORBIDDEN, "message delete permission required", { status: 403 });
     }
     // Idempotent: an already-tombstoned message stays a tombstone.
     if (msg.deletedAt) return { mode: "tombstone", message: toMessage(msg, {}) };

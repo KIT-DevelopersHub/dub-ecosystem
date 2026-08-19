@@ -74,7 +74,7 @@ const MAINTAINER_KEYS: identity.PermissionKey[] = [
   "file:read", "file:write",
   "notif:send", "notif:admin", "notif:broadcast_publish",
   "mail:send", "mail:read",
-  "chat:create", "chat:moderate",
+  "chat:create", "chat:delete", "chat:moderate",
   "usage:view",
   "infra:read", "infra:deploy",
   "audit:read",
@@ -95,11 +95,11 @@ const SYSTEM_ROLES: { name: string; permissions: identity.PermissionKey[] }[] = 
   },
   {
     name: "organizer",
-    permissions: withAppAccess(["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "usage:view", "infra:read", "audit:read"]),
+    permissions: withAppAccess(["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "chat:delete", "usage:view", "infra:read", "audit:read"]),
   },
   {
     name: "member",
-    permissions: withAppAccess(["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create", "usage:view"]),
+    permissions: withAppAccess(["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create", "chat:delete", "usage:view"]),
   },
 ];
 
@@ -121,6 +121,45 @@ export async function seedReferenceData(d: SeedDeps, orgId: string, orgName = "D
   // Backfill the per-app access keys onto EXISTING roles (created before this change) so
   // the new gate never removes access a role already has. Runs on every seed (idempotent).
   await backfillAppAccessKeys(d, orgId);
+  // Backfill chat:delete onto EXISTING chat-capable roles: deleting one's OWN message is
+  // now gated on chat:delete (was universal for authors). Granting it to every role that
+  // can already use chat preserves that ability so nobody loses own-delete on rollout.
+  await backfillChatDelete(d, orgId);
+}
+
+/**
+ * Idempotent, additive backfill for the new `chat:delete` gate. Deleting your OWN chat
+ * message used to be universal (any author); it is now gated on `chat:delete`. Grant it
+ * to every role that can already reach chat (holds `chat:create` or an `app:chat` key, or
+ * is the admin role) so the rollout removes nobody's existing own-delete ability. Only
+ * writes roles whose set changes → re-running is a no-op. MUST run before / with the
+ * chat-service gate deploy on the production rollout path.
+ * @returns the names of roles that were updated (empty when already up to date).
+ */
+export async function backfillChatDelete(d: SeedDeps, orgId: string): Promise<string[]> {
+  const chatView = appRegistry.appViewKey("chat");
+  const chatEdit = appRegistry.appEditKey("chat");
+  const updated: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await d.repo.listRoles(orgId, 100, cursor);
+    for (const role of page.items) {
+      const cur = new Set(role.permissions as PermissionKey[]);
+      if (cur.has("chat:delete")) continue;
+      const canUseChat =
+        (role.isSystem && role.name === "admin") ||
+        cur.has("chat:create") ||
+        cur.has("chat:moderate") ||
+        (chatView !== undefined && cur.has(chatView)) ||
+        (chatEdit !== undefined && cur.has(chatEdit));
+      if (!canUseChat) continue;
+      cur.add("chat:delete");
+      await d.repo.updateRolePermissions(role.id, undefined, [...cur], d.now());
+      updated.push(role.name);
+    }
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return updated;
 }
 
 /**

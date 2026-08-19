@@ -11,8 +11,15 @@ import type { Authz } from "../src/types";
 const publicTopic = { type: "topic", visibility: "public", name: "General" } as const;
 const POLICY_PATH = "/chat/settings/deletion-policy";
 
-// chat:moderate is granted only to `moderators`; every other permission is open.
-function tieredAuthz(moderators: Set<string>): Authz {
+// chat:moderate is granted only to `moderators`; chat:delete (own-message delete) to
+// `deleters` ("all" by default); every other permission is open. This lets a test
+// distinguish 削除権限 なし / 削除あり(単) / 複数削除あり(moderate) per user.
+function tieredAuthz(moderators: Set<string>, deleters: Set<string> | "all" = "all"): Authz {
+  const grants = (uid: string, permission: string): boolean => {
+    if (permission === "chat:moderate") return moderators.has(uid);
+    if (permission === "chat:delete") return deleters === "all" || deleters.has(uid);
+    return true;
+  };
   return {
     requireAuth(): MiddlewareHandler {
       return async (c, next) => {
@@ -23,13 +30,12 @@ function tieredAuthz(moderators: Set<string>): Authz {
     requirePermission(permission): MiddlewareHandler {
       return async (c, next) => {
         const uid = c.req.header("x-dub-user-id") ?? "";
-        const ok = permission === "chat:moderate" ? moderators.has(uid) : true;
-        if (!ok) throw new DubError(CommonErrorCodes.FORBIDDEN, `permission denied: ${permission}`, { status: 403 });
+        if (!grants(uid, permission)) throw new DubError(CommonErrorCodes.FORBIDDEN, `permission denied: ${permission}`, { status: 403 });
         await next();
       };
     },
     async hasPermission(userId, _orgId, query) {
-      return query.permission === "chat:moderate" ? moderators.has(userId) : true;
+      return grants(userId, query.permission);
     },
   };
 }
@@ -120,5 +126,31 @@ describe("deletion policy: resolved delete behaviour", () => {
     const m = await call(app, "POST", "/chat/messages", { userId: "user_member", body: { channelId: ch.json.id, body: "hi" } });
     const del = await call(app, "DELETE", `/chat/messages/${m.json.id}`, { userId: "user_other" });
     expect(del.status).toBe(403);
+  });
+
+  // 削除権限 3択 (per-role, resolved server-side):
+  //  なし = neither chat:delete nor chat:moderate -> cannot delete even own (403)
+  //  削除あり(単) = chat:delete -> can delete OWN only
+  //  複数削除あり = chat:moderate -> can delete ANY
+  it("削除権限=なし: an author WITHOUT chat:delete cannot delete their own message (403)", async () => {
+    // no moderators; only user_del has chat:delete. user_none has neither.
+    const app = createApp(makeDeps({ authz: tieredAuthz(new Set(), new Set(["user_del"])) }));
+    const ch = await call(app, "POST", "/chat/channels", { userId: "user_del", body: publicTopic });
+    const mine = await call(app, "POST", "/chat/messages", { userId: "user_none", body: { channelId: ch.json.id, body: "mine" } });
+    const del = await call(app, "DELETE", `/chat/messages/${mine.json.id}`, { userId: "user_none" });
+    expect(del.status).toBe(403);
+  });
+
+  it("削除権限=削除あり(単): chat:delete lets an author delete their OWN but not others'", async () => {
+    const app = createApp(makeDeps({ authz: tieredAuthz(new Set(), new Set(["user_del"])) }));
+    // A NEUTRAL owner creates the channel so user_del joins as a plain member (the channel
+    // creator becomes channel-admin = moderator tier, which would mask the own-only gate).
+    const ch = await call(app, "POST", "/chat/channels", { userId: "user_owner", body: publicTopic });
+    // own -> allowed (user_del holds chat:delete and is a plain member)
+    const own = await call(app, "POST", "/chat/messages", { userId: "user_del", body: { channelId: ch.json.id, body: "own" } });
+    expect((await call(app, "DELETE", `/chat/messages/${own.json.id}`, { userId: "user_del" })).status).toBe(200);
+    // others' -> forbidden (chat:delete is own-only; no chat:moderate)
+    const other = await call(app, "POST", "/chat/messages", { userId: "user_none", body: { channelId: ch.json.id, body: "other" } });
+    expect((await call(app, "DELETE", `/chat/messages/${other.json.id}`, { userId: "user_del" })).status).toBe(403);
   });
 });
