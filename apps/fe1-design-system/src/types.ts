@@ -255,6 +255,25 @@ export interface ColumnDef<Row> {
   noWrap?: boolean;
   sortable?: boolean;
   align?: "left" | "center" | "right";
+  /**
+   * Whether this column can be toggled off from the「表示列」picker (see
+   * DataTableProps.columnHiding). Defaults to `true`. Set `false` for anchor /
+   * action columns that must always render (氏名の行を識別する列・操作ボタン列など);
+   * they stay visible and are omitted from the picker.
+   */
+  hideable?: boolean;
+  /**
+   * When column hiding is enabled, start this column hidden until the user turns
+   * it on. Lets a 多列テーブル open with only its主要列 (横スクロール最小) while the
+   * rest stay one checkbox away. Ignored unless `columnHiding` is set.
+   */
+  defaultHidden?: boolean;
+  /**
+   * Plain-text label for this column in the「表示列」picker. Falls back to
+   * `header` when it is a string, otherwise to `key`. Provide it when `header`
+   * is a ReactNode (icon 等) so the picker checkbox still reads clearly.
+   */
+  pickerLabel?: string;
 }
 export interface SortState {
   key: string;
@@ -270,6 +289,15 @@ export interface DataTableProps<Row> extends TestableProps {
   onSortChange?: (sort: SortState) => void;
   onRowClick?: (row: Row) => void;
   selection?: { selectedKeys: string[]; onChange: (keys: string[]) => void };
+  /**
+   * Opt-in「表示列」picker: a toolbar button above the table lets the user choose
+   * which columns show (checkbox per hideable column). The選択 is persisted per
+   * user in `localStorage` under `storageKey`, so a reload keeps it. Columns with
+   * `defaultHidden` start off; `hideable === false` columns are always shown and
+   * excluded from the picker. Toggling is optimistic (即 UI 反映). Omit to keep the
+   * table exactly as before (all columns always visible, no toolbar).
+   */
+  columnHiding?: { storageKey: string; label?: string };
 }
 
 // offset paging — only for totalCount APIs (凍結案 1-6-3). cursor lists use LoadMore.
