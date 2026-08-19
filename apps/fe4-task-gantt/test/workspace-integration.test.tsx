@@ -78,7 +78,8 @@ describe("TaskWorkspacePage — gantt-only workspace", () => {
     renderApp();
     fireEvent.click(await screen.findByTestId("fe4-gantt-row-t2"));
     fireEvent.click(await screen.findByTestId("fe4-detail-delete"));
-    fireEvent.click(await screen.findByTestId("fe4-confirm-yes"));
+    const confirm = await screen.findByTestId("fe4-confirm-delete");
+    fireEvent.click(within(confirm).getByRole("button", { name: "削除" }));
     await waitFor(() => expect(screen.queryByTestId("fe4-gantt-row-t2")).toBeNull());
     expect(screen.getByTestId("fe4-gantt-row-t1")).toBeInTheDocument();
   });

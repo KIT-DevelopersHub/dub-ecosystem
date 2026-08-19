@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, IconButton, TextField, Select } from "@dub/ui";
+import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -327,27 +327,34 @@ export function TaskDetailPanel({
           <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
             保存
           </Button>
-          {canDelete && !confirming && (
+          {canDelete && (
             <Button variant="danger" onClick={() => setConfirming(true)} testId="fe4-detail-delete">
               削除
             </Button>
           )}
         </div>
-
-        {confirming && (
-          <div className={styles.confirmBox} data-testid="fe4-confirm-delete">
-            <p className={styles.confirmText}>このタスクを削除しますか？この操作は取り消せません。</p>
-            <div className={styles.panelActions}>
-              <Button variant="danger" onClick={onDelete} testId="fe4-confirm-yes">
-                削除する
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirming(false)} testId="fe4-confirm-no">
-                やめる
-              </Button>
-            </div>
-          </div>
-        )}
       </aside>
+
+      {/* 削除確認は運営メンバー削除などと同じ @dub/ui の ConfirmDialog に統一（インライン表示は撤去）。
+          実行フロー（楽観的UI・成功/失敗トースト・失敗ロールバック）は onDelete 側が担う。 */}
+      <ConfirmDialog
+        open={confirming}
+        title="タスクを削除"
+        message={
+          <>
+            「{t.title}」を削除します。この操作は取り消せません。
+          </>
+        }
+        danger
+        confirmLabel="削除"
+        cancelLabel="キャンセル"
+        onConfirm={() => {
+          setConfirming(false);
+          onDelete();
+        }}
+        onCancel={() => setConfirming(false)}
+        testId="fe4-confirm-delete"
+      />
     </>
   );
 }
