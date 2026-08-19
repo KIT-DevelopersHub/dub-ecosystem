@@ -282,6 +282,49 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
       );
     }
 
+    // 6c. enriched channel set (全体 / チーム別 / 役割別) so the chat sidebar renders a
+    //     full Slack-style workspace. Names stay romaji for consistency; Japanese topics
+    //     describe each. Team channels mirror member-service's real 運営チーム (see the
+    //     memberTeams list in step 8 below) — no invented teams. All public/topic; every
+    //     seeded user joins so channels are visible. (general above stays the event channel.)
+    const extraChannels: { key: string; name: string; topic: string }[] = [
+      // 全体
+      { key: "announcements", name: "announcements", topic: "運営からのお知らせ・全体周知（重要連絡）" },
+      { key: "random", name: "random", topic: "雑談なんでも" },
+      // チーム別（member-service の運営チームに対応）
+      { key: "team_soukatsu", name: "team-soukatsu", topic: "統括チーム — 全体意思決定・進行統制・チーム間調整" },
+      { key: "team_dev", name: "team-dev", topic: "開発チーム — 運営ツール内製・名簿・当日連絡基盤" },
+      { key: "team_ops", name: "team-ops", topic: "当日進行チーム — 進行管理・タイムテーブル・人員配置" },
+      { key: "team_sponsor", name: "team-sponsor", topic: "スポンサーチーム — 協賛打診・メニュー設計・契約" },
+      { key: "team_venue", name: "team-venue", topic: "会場チーム — 会場・設営・ネットワーク／配信" },
+      { key: "team_pr", name: "team-pr", topic: "集客広報チーム — LP・SNS・デザイン・広報／集客" },
+      // 役割/目的別
+      { key: "admin", name: "admin", topic: "管理者運用・権限管理・全体統制" },
+      { key: "maintainers", name: "maintainers", topic: "メンテナ調整・リリース判断・レビュー割当" },
+      { key: "dev", name: "dev", topic: "開発・デプロイ・コードレビュー" },
+      { key: "design", name: "design", topic: "UI/UX・デザインレビュー" },
+      { key: "pr_koho", name: "pr-koho", topic: "広報・集客・SNS 運用（目的別）" },
+      { key: "help", name: "help", topic: "質問・困りごと・サポート" },
+    ];
+    for (const c of extraChannels) {
+      const cid = `chan_${c.key}${sfx}`;
+      await w.upsert(
+        "chat_channels",
+        { id: cid, type: "topic", visibility: "public", name: c.name, topic: c.topic, event_id: null, dm_key: null, created_by: adminId, archived_at: null, version: 1, created_at: SEED_TS, updated_at: SEED_TS },
+        "replace",
+        ["id"],
+      );
+      for (const key of userKeys) {
+        const uid = SEED.users[key].id + sfx;
+        await w.upsert(
+          "chat_channel_members",
+          { channel_id: cid, user_id: uid, role: key === "admin" ? "admin" : "member", joined_at: SEED_TS },
+          "replace",
+          ["channel_id", "user_id"],
+        );
+      }
+    }
+
     // 7. audit sample logs (INSERT OR IGNORE; backdated so cleanup may delete them).
     const auditSpecs = [
       { action: "identity.role.assigned", result: "success", rt: "user", rid: SEED.users.member.id + sfx },

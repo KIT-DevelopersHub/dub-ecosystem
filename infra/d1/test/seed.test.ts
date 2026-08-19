@@ -88,11 +88,29 @@ describe("seedScenario", () => {
     // the reply threads onto the welcome message.
     const reply = raw.prepare("SELECT thread_root_id FROM chat_messages WHERE id = ?").get(SEED.messages.reply) as { thread_root_id: string };
     expect(reply.thread_root_id).toBe(SEED.messages.welcome);
-    // 3 primary users all become channel members with read states, admin is channel admin.
-    expect(count(raw, "chat_channel_members")).toBe(3);
+    // 3 primary users all become members of #general with read states, admin is channel admin.
+    const generalMembers = raw.prepare("SELECT COUNT(*) AS n FROM chat_channel_members WHERE channel_id = ?").get(SEED.channel.general) as { n: number };
+    expect(generalMembers.n).toBe(3);
     expect(count(raw, "chat_read_states")).toBe(3);
     const adminRole = raw.prepare("SELECT role FROM chat_channel_members WHERE channel_id = ? AND user_id = ?").get(SEED.channel.general, SEED.users.admin.id) as { role: string };
     expect(adminRole.role).toBe("admin");
+    expect(fkViolations(raw)).toEqual([]);
+  });
+
+  it("conference-demo seeds an enriched 全体/チーム別/役割別 channel set", async () => {
+    const { db, raw } = await migratedD1();
+    await seedScenario(db, "conference-demo");
+    // general (event) + 14 enriched topic channels = 15 public channels.
+    expect(count(raw, "chat_channels")).toBe(15);
+    // team channels mirror member-service's real 運営チーム (public/topic).
+    for (const key of ["announcements", "random", "team_soukatsu", "team_dev", "team_ops", "team_sponsor", "team_venue", "team_pr", "admin", "maintainers", "dev", "design", "pr_koho", "help"]) {
+      expect(exists(raw, "chat_channels", "id", `chan_${key}`)).toBe(true);
+    }
+    // every enriched channel is public/topic and has all 3 seeded users as members.
+    const topicCount = raw.prepare("SELECT COUNT(*) AS n FROM chat_channels WHERE type = 'topic' AND visibility = 'public'").get() as { n: number };
+    expect(topicCount.n).toBe(14);
+    const teamMembers = raw.prepare("SELECT COUNT(*) AS n FROM chat_channel_members WHERE channel_id = 'chan_team_dev'").get() as { n: number };
+    expect(teamMembers.n).toBe(3);
     expect(fkViolations(raw)).toEqual([]);
   });
 
