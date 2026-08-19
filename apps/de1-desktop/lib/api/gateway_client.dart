@@ -77,6 +77,62 @@ class GatewayClient {
     return PaginatedInbox.fromJson(res.data!);
   }
 
+  /// GET /api/v1/events — page of event summaries (requires event:read).
+  Future<PaginatedEvents> listEvents({
+    int limit = 50,
+    String? cursor,
+    String? phase,
+  }) async {
+    final res = await _dio.get<Map<String, dynamic>>(
+      '$_p/events',
+      queryParameters: {
+        'limit': limit,
+        if (cursor != null) 'cursor': cursor,
+        if (phase != null) 'phase': phase,
+      },
+    );
+    _throwIfError(res);
+    return PaginatedEvents.fromJson(res.data!);
+  }
+
+  /// GET /api/v1/events/{id} — event detail with its actions.
+  Future<EventDetail> getEvent(String id) async {
+    final res = await _dio.get<Map<String, dynamic>>('$_p/events/$id');
+    _throwIfError(res);
+    return EventDetail.fromJson(res.data!);
+  }
+
+  /// GET /api/v1/drive/files — page of Drive files/folders (requires
+  /// drive:read). [folderId] lists a folder's direct children.
+  Future<PaginatedDriveFiles> listDriveFiles({
+    int limit = 50,
+    String? cursor,
+    String? folderId,
+    String? q,
+  }) async {
+    final res = await _dio.get<Map<String, dynamic>>(
+      '$_p/drive/files',
+      queryParameters: {
+        'limit': limit,
+        if (cursor != null) 'cursor': cursor,
+        if (folderId != null) 'folderId': folderId,
+        if (q != null && q.isNotEmpty) 'q': q,
+      },
+    );
+    _throwIfError(res);
+    return PaginatedDriveFiles.fromJson(res.data!);
+  }
+
+  /// POST /api/v1/me/password — the logged-in user rotates their own password.
+  /// The gateway re-verifies the session + current password server-side.
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '$_p/me/password',
+      data: {'currentPassword': currentPassword, 'newPassword': newPassword},
+    );
+    _throwIfError(res);
+  }
+
   /// POST /api/v1/auth/logout — revoke the current session and clear cookies.
   Future<void> logout() async {
     try {

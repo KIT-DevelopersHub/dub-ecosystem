@@ -5,7 +5,11 @@
 //
 //   POST /api/v1/auth/password/login  -> Set-Cookie dub_session + {token,session}
 //   GET  /api/v1/me                   -> MeResponse         (needs dub_session)
+//   POST /api/v1/me/password          -> {ok:true}          (needs dub_session)
 //   GET  /api/v1/notifications/inbox  -> PaginatedInbox     (needs dub_session)
+//   GET  /api/v1/events               -> PaginatedEvents    (needs dub_session)
+//   GET  /api/v1/events/{id}          -> EventDetail        (needs dub_session)
+//   GET  /api/v1/drive/files          -> PaginatedDriveFiles(needs dub_session)
 //   POST /api/v1/auth/logout          -> {ok:true}
 //
 // Run:  dart run tool/mock_gateway.dart [port]   (default port 8799)
@@ -66,8 +70,28 @@ Future<void> _route(HttpRequest req) async {
   if (method == 'GET' && path == '/api/v1/me') {
     return _json(req, 200, _me());
   }
+  if (method == 'POST' && path == '/api/v1/me/password') {
+    return _changePassword(req);
+  }
   if (method == 'GET' && path == '/api/v1/notifications/inbox') {
     return _json(req, 200, _inbox());
+  }
+  if (method == 'GET' && path == '/api/v1/events') {
+    return _json(req, 200, _events());
+  }
+  if (method == 'GET' && path.startsWith('/api/v1/events/')) {
+    final id = path.substring('/api/v1/events/'.length);
+    final detail = _eventDetail(id);
+    if (detail == null) {
+      return _json(req, 404, {
+        'error': {'code': 'NOT_FOUND', 'message': 'no event', 'retryable': false}
+      });
+    }
+    return _json(req, 200, detail);
+  }
+  if (method == 'GET' && path == '/api/v1/drive/files') {
+    final folderId = req.uri.queryParameters['folderId'];
+    return _json(req, 200, _driveFiles(folderId));
   }
 
   _json(req, 404, {
@@ -190,6 +214,154 @@ Map<String, dynamic> _inbox() {
         'resourceId': 'evt_conf',
       },
     ],
+    'nextCursor': null,
+  };
+}
+
+Future<void> _changePassword(HttpRequest req) async {
+  final body = await utf8.decoder.bind(req).join();
+  final data = body.isEmpty
+      ? <String, dynamic>{}
+      : jsonDecode(body) as Map<String, dynamic>;
+  final current = (data['currentPassword'] as String?) ?? '';
+  final next = (data['newPassword'] as String?) ?? '';
+  if (current.isEmpty) {
+    return _json(req, 401, {
+      'error': {
+        'code': 'AUTH_INVALID_CREDENTIALS',
+        'message': 'current password is wrong',
+        'retryable': false,
+      }
+    });
+  }
+  if (next.length < 8) {
+    return _json(req, 400, {
+      'error': {
+        'code': 'VALIDATION_FAILED',
+        'message': 'newPassword too short (min 8)',
+        'retryable': false,
+      }
+    });
+  }
+  _json(req, 200, {'ok': true});
+}
+
+Map<String, dynamic> _events() {
+  String? iso(Duration fromNow) =>
+      DateTime.now().toUtc().add(fromNow).toIso8601String();
+  return {
+    'items': [
+      {
+        'id': 'evt_conf',
+        'title': '北陸ITカンファレンス 2026',
+        'phase': 'preparing',
+        'startsAt': iso(const Duration(days: 21)),
+      },
+      {
+        'id': 'evt_meetup',
+        'title': 'リーダーズミートアップ #12',
+        'phase': 'open',
+        'startsAt': iso(const Duration(days: 5)),
+      },
+      {
+        'id': 'evt_hackit',
+        'title': 'Hackit 学生ハッカソン',
+        'phase': 'closed',
+        'startsAt': iso(const Duration(days: -30)),
+      },
+      {
+        'id': 'evt_draft',
+        'title': '未定の新規イベント',
+        'phase': 'planning',
+        'startsAt': null,
+      },
+    ],
+    'nextCursor': null,
+  };
+}
+
+Map<String, dynamic>? _eventDetail(String id) {
+  final summaries = (_events()['items'] as List<dynamic>)
+      .cast<Map<String, dynamic>>();
+  final match = summaries.where((e) => e['id'] == id).toList();
+  if (match.isEmpty) return null;
+  final s = match.first;
+  final now = DateTime.now().toUtc().toIso8601String();
+  return {
+    ...s,
+    'orgId': 'org_devhub',
+    'description': 'イベント「${s['title']}」の詳細です。運営メンバーで準備を進めています。',
+    'endsAt': null,
+    'archivedAt': null,
+    'createdAt': now,
+    'updatedAt': now,
+    'version': 1,
+    'actions': [
+      {
+        'id': 'act_reg',
+        'eventId': id,
+        'kind': 'registration',
+        'title': '参加登録フォームの公開',
+      },
+      {
+        'id': 'act_venue',
+        'eventId': id,
+        'kind': 'venue',
+        'title': '会場の予約と設営',
+      },
+    ],
+  };
+}
+
+Map<String, dynamic> _driveFiles(String? folderId) {
+  String iso(Duration ago) =>
+      DateTime.now().toUtc().subtract(ago).toIso8601String();
+  const folderMime = 'application/vnd.google-apps.folder';
+  final root = <Map<String, dynamic>>[
+    {
+      'id': 'fld_events',
+      'name': 'イベント資料',
+      'mimeType': folderMime,
+      'modifiedAt': iso(const Duration(hours: 3)),
+    },
+    {
+      'id': 'fld_ops',
+      'name': '運営ドキュメント',
+      'mimeType': folderMime,
+      'modifiedAt': iso(const Duration(days: 1)),
+    },
+    {
+      'id': 'file_budget',
+      'name': '2026 予算.xlsx',
+      'mimeType':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'modifiedAt': iso(const Duration(hours: 6)),
+    },
+    {
+      'id': 'file_readme',
+      'name': 'はじめに.pdf',
+      'mimeType': 'application/pdf',
+      'modifiedAt': iso(const Duration(days: 2)),
+    },
+  ];
+  final child = <Map<String, dynamic>>[
+    {
+      'id': 'file_agenda',
+      'name': '当日進行.docx',
+      'mimeType':
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'modifiedAt': iso(const Duration(hours: 1)),
+    },
+    {
+      'id': 'file_slides',
+      'name': 'オープニング.pptx',
+      'mimeType':
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'modifiedAt': iso(const Duration(hours: 4)),
+    },
+  ];
+  return {
+    'items': folderId == null ? root : child,
     'nextCursor': null,
   };
 }

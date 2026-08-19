@@ -61,4 +61,53 @@ void main() {
     expect(e.code, 'UNAUTHENTICATED');
     expect(e.statusCode, 401);
   });
+
+  test('PaginatedEvents parses summaries + nullable startsAt', () {
+    final page = PaginatedEvents.fromJson({
+      'items': [
+        {'id': 'e1', 'title': 'Conf', 'phase': 'preparing', 'startsAt': null},
+        {
+          'id': 'e2',
+          'title': 'Meetup',
+          'phase': 'open',
+          'startsAt': '2026-09-01T09:00:00.000Z'
+        },
+      ],
+      'nextCursor': null,
+    });
+    expect(page.items.length, 2);
+    expect(page.items.first.startsAt, isNull);
+    expect(page.items[1].phase, 'open');
+  });
+
+  test('EventDetail parses DubEvent fields + actions', () {
+    final d = EventDetail.fromJson({
+      'id': 'e1',
+      'title': 'Conf',
+      'phase': 'live',
+      'version': 3,
+      'actions': [
+        {'id': 'a1', 'eventId': 'e1', 'kind': 'venue', 'title': '会場'},
+      ],
+    });
+    expect(d.version, 3);
+    expect(d.actions.single.title, '会場');
+  });
+
+  test('DriveFile detects folders via mimeType', () {
+    final folder = DriveFile.fromJson({
+      'id': 'f1',
+      'name': '資料',
+      'mimeType': 'application/vnd.google-apps.folder',
+      'modifiedAt': '2026-08-19T00:00:00.000Z',
+    });
+    final file = DriveFile.fromJson({
+      'id': 'f2',
+      'name': 'a.pdf',
+      'mimeType': 'application/pdf',
+      'modifiedAt': '2026-08-19T00:00:00.000Z',
+    });
+    expect(folder.isFolder, isTrue);
+    expect(file.isFolder, isFalse);
+  });
 }

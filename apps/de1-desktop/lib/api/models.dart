@@ -140,6 +140,157 @@ class PaginatedInbox {
       );
 }
 
+/// event-service EventSummary (via gateway `/api/v1/events`).
+class EventSummary {
+  const EventSummary({
+    required this.id,
+    required this.title,
+    required this.phase,
+    this.startsAt,
+  });
+
+  final String id;
+  final String title;
+
+  /// One of: planning, preparing, open, live, wrapup, closed.
+  final String phase;
+
+  /// ISO8601 UTC, or null when unscheduled.
+  final String? startsAt;
+
+  factory EventSummary.fromJson(Map<String, dynamic> json) => EventSummary(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        phase: json['phase'] as String,
+        startsAt: json['startsAt'] as String?,
+      );
+}
+
+/// event-service PaginatedEvents.
+class PaginatedEvents {
+  const PaginatedEvents({required this.items, required this.nextCursor});
+
+  final List<EventSummary> items;
+
+  /// null = end of results.
+  final String? nextCursor;
+
+  factory PaginatedEvents.fromJson(Map<String, dynamic> json) =>
+      PaginatedEvents(
+        items: (json['items'] as List<dynamic>? ?? const [])
+            .map((e) => EventSummary.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        nextCursor: json['nextCursor'] as String?,
+      );
+}
+
+/// event-service ActionSummary (an action under an event).
+class ActionSummary {
+  const ActionSummary({
+    required this.id,
+    required this.eventId,
+    required this.kind,
+    required this.title,
+  });
+
+  final String id;
+  final String eventId;
+  final String kind;
+  final String title;
+
+  factory ActionSummary.fromJson(Map<String, dynamic> json) => ActionSummary(
+        id: json['id'] as String,
+        eventId: json['eventId'] as String,
+        kind: json['kind'] as String,
+        title: json['title'] as String,
+      );
+}
+
+/// event-service EventDetail (DubEvent + its actions).
+class EventDetail {
+  const EventDetail({
+    required this.id,
+    required this.title,
+    required this.phase,
+    required this.actions,
+    this.description,
+    this.startsAt,
+    this.endsAt,
+    this.version,
+  });
+
+  final String id;
+  final String title;
+  final String phase;
+  final List<ActionSummary> actions;
+  final String? description;
+  final String? startsAt;
+  final String? endsAt;
+
+  /// optimistic-lock version.
+  final int? version;
+
+  factory EventDetail.fromJson(Map<String, dynamic> json) => EventDetail(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        phase: json['phase'] as String,
+        description: json['description'] as String?,
+        startsAt: json['startsAt'] as String?,
+        endsAt: json['endsAt'] as String?,
+        version: json['version'] as int?,
+        actions: (json['actions'] as List<dynamic>? ?? const [])
+            .map((e) => ActionSummary.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// drive-proxy DriveFile (via gateway `/api/v1/drive/files`). A folder is a
+/// file whose mimeType is `application/vnd.google-apps.folder`.
+class DriveFile {
+  const DriveFile({
+    required this.id,
+    required this.name,
+    required this.mimeType,
+    required this.modifiedAt,
+  });
+
+  static const folderMime = 'application/vnd.google-apps.folder';
+
+  final String id;
+  final String name;
+  final String mimeType;
+
+  /// ISO8601 UTC
+  final String modifiedAt;
+
+  bool get isFolder => mimeType == folderMime;
+
+  factory DriveFile.fromJson(Map<String, dynamic> json) => DriveFile(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        mimeType: json['mimeType'] as String,
+        modifiedAt: json['modifiedAt'] as String,
+      );
+}
+
+/// drive-proxy PaginatedDriveFiles.
+class PaginatedDriveFiles {
+  const PaginatedDriveFiles({required this.items, required this.nextCursor});
+
+  final List<DriveFile> items;
+
+  /// null = end of results.
+  final String? nextCursor;
+
+  factory PaginatedDriveFiles.fromJson(Map<String, dynamic> json) =>
+      PaginatedDriveFiles(
+        items: (json['items'] as List<dynamic>? ?? const [])
+            .map((e) => DriveFile.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        nextCursor: json['nextCursor'] as String?,
+      );
+}
+
 /// Unified error envelope (`@dub/errors` ErrorResponse). Every non-2xx gateway
 /// response uses this shape.
 class DubApiException implements Exception {

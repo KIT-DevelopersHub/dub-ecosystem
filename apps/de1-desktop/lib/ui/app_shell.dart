@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/auth.dart';
+import 'drive_view.dart';
+import 'events_view.dart';
 import 'inbox_view.dart';
+import 'settings_view.dart';
 
 /// One launchable app in the ecosystem (mirrors the web 9-dot launcher).
 class DubApp {
@@ -21,9 +24,9 @@ const _apps = <DubApp>[
   DubApp('tasks', 'タスク', Icons.check_circle_outline),
   DubApp('gantt', 'ガント', Icons.timeline),
   DubApp('mail', 'メール', Icons.mail_outline),
-  DubApp('events', 'イベント', Icons.event_outlined),
+  DubApp('events', 'イベント', Icons.event_outlined, ready: true),
   DubApp('roster', '名簿', Icons.groups_outlined),
-  DubApp('drive', 'ドライブ', Icons.folder_outlined),
+  DubApp('drive', 'ドライブ', Icons.folder_outlined, ready: true),
 ];
 
 final selectedAppProvider = StateProvider<String>((_) => 'notifications');
@@ -84,9 +87,20 @@ class AppShell extends ConsumerWidget {
             onSelected: (v) {
               if (v == 'logout') {
                 ref.read(authControllerProvider.notifier).logout();
+              } else if (v == 'settings') {
+                ref.read(selectedAppProvider.notifier).state = 'settings';
               }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.settings_outlined),
+                  title: Text('設定'),
+                ),
+              ),
+              PopupMenuDivider(),
               PopupMenuItem(value: 'logout', child: Text('ログアウト')),
             ],
           ),
@@ -112,6 +126,12 @@ class _AppBody extends StatelessWidget {
     switch (selectedId) {
       case 'notifications':
         return const InboxView();
+      case 'events':
+        return const EventsView();
+      case 'drive':
+        return const DriveView();
+      case 'settings':
+        return const SettingsView();
       default:
         final app = _apps.firstWhere((a) => a.id == selectedId,
             orElse: () => _apps.first);
