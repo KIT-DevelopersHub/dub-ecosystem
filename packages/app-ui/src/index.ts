@@ -29,6 +29,7 @@ export {
   useUndoRedo,
   useUndoRedoHotkeys,
   type UndoableCommand,
+  type UndoConfirm,
   type UndoRedo,
   type UseUndoRedoOptions,
   type UndoRedoHotkeysOptions,
