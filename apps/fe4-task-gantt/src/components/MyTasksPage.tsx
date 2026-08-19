@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, resolveUsers, createTaskAttachment, issueTaskRequest } from "../api/endpoints";
+import { listTasks, createTask, resolveUsers, createTaskAttachment, issueTaskRequest, listTaskCrossLinks } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
   type MyTasksFilter,
@@ -54,6 +54,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<task.Task | null>(null);
+  // 送る・受け取る: taskId → cross-team role, for the「お願いした/受け負った」badge.
+  const [roleByTask, setRoleByTask] = useState<ReadonlyMap<common.TaskId, task.TaskCrossRole>>(new Map());
   const reqSeq = useRef(0);
 
   const teamNames = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
@@ -103,6 +105,33 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     void ensureUsers(users, ids, (batch) => resolveUsers(client, batch)).then((c) => setUsers(new Map(c)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
+
+  // 送る・受け取る: fetch the cross-team links for the events these tasks belong to and
+  // project a taskId → role map (requester→お願いした / requestee→受け負った). Same data
+  // the ガント badges from — so both views stay in sync.
+  useEffect(() => {
+    let live = true;
+    const events = [...new Set(tasks.map((t) => t.eventId).filter((e): e is common.EventId => !!e))];
+    if (events.length === 0) {
+      setRoleByTask(new Map());
+      return;
+    }
+    void Promise.all(events.map((eventId) => listTaskCrossLinks(client, eventId).catch(() => ({ items: [] }))))
+      .then((results) => {
+        if (!live) return;
+        const map = new Map<common.TaskId, task.TaskCrossRole>();
+        for (const res of results) {
+          for (const link of res.items) {
+            map.set(link.requesterTaskId, "requested");
+            map.set(link.requesteeTaskId, "accepted");
+          }
+        }
+        setRoleByTask(map);
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, tasks]);
 
   // reset the reveal window when the visible result set changes shape.
   useEffect(() => {
@@ -270,6 +299,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         teamNames={teamNames}
         loading={loading}
         onSelect={setSelected}
+        roleByTask={roleByTask}
         visibleCount={visibleCount}
         onShowMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
       />

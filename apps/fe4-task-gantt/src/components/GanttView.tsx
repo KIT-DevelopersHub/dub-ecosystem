@@ -5,6 +5,7 @@ import type { GanttSortMode } from "../domain/row-sort";
 import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
 import { groupRuns, type RowGroup } from "../domain/row-groups";
 import { readableTextColor } from "../domain/color-contrast";
+import { CrossTeamRoleBadge } from "./CrossTeamRoleBadge";
 import type { common, gantt, task } from "@dub/types";
 
 /** arrayMove — pure list move (kept local so fe4 needs no direct @dnd-kit/sortable dep;
@@ -219,6 +220,7 @@ function LeftPaneRow({
         <span className={styles.tlRowNum} data-testid={`fe4-gantt-num-${r.taskId}`}>{number}</span>
       )}
       <span className={styles.tlRowName}>{r.title}</span>
+      {r.crossTeamRole && <CrossTeamRoleBadge role={r.crossTeamRole} testId={`fe4-gantt-role-${r.taskId}`} />}
       {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
     </button>
   );
@@ -849,6 +851,7 @@ export function GanttView({
                         <span className={styles.tlRowNum}>{numberById.get(r.taskId)}</span>
                       )}
                       <span className={styles.tlRowName}>{r.title}</span>
+                      {r.crossTeamRole && <CrossTeamRoleBadge role={r.crossTeamRole} testId={`fe4-gantt-role-${r.taskId}`} />}
                     </div>
                   )}
                 />
