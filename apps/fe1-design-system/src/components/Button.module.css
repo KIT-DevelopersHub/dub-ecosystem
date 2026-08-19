@@ -69,6 +69,11 @@
 .button.iconButton {
   padding: var(--dub-space-2);
   aspect-ratio: 1;
+  /* Never collapse below the icon's own size when placed in a tight flex row
+   * (e.g. a narrow table action cell) — otherwise the danger delete button gets
+   * squeezed into a sliver and the icon disappears. */
+  flex-shrink: 0;
+  line-height: 0;
 }
 .label {
   line-height: var(--dub-font-line-height-tight);

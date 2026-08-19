@@ -20,6 +20,12 @@
   padding: var(--dub-space-2) var(--dub-space-3);
   color: var(--dub-color-text-primary);
   border-bottom: 1px solid var(--dub-color-border-default);
+  vertical-align: middle;
+}
+/* Opt-in single-line cells (ColumnDef.noWrap) — keeps values that must not wrap
+ * on one line; the wide table then scrolls in .wrap's overflow-x:auto. */
+.td.noWrap {
+  white-space: nowrap;
 }
 .tr.clickable {
   cursor: pointer;

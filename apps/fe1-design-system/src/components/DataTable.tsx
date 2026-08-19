@@ -68,7 +68,7 @@ export function DataTable<Row>({
                 <th
                   key={col.key}
                   className={cx(styles.th)}
-                  style={{ width: col.width, textAlign: col.align ?? "left" }}
+                  style={{ width: col.width, minWidth: col.minWidth, textAlign: col.align ?? "left" }}
                   aria-sort={active ? (sort?.direction === "asc" ? "ascending" : "descending") : undefined}
                 >
                   {col.sortable && onSortChange ? (
@@ -117,7 +117,11 @@ export function DataTable<Row>({
                     </td>
                   )}
                   {columns.map((col) => (
-                    <td key={col.key} className={cx(styles.td)} style={{ textAlign: col.align ?? "left" }}>
+                    <td
+                      key={col.key}
+                      className={cx(styles.td, col.noWrap && styles.noWrap)}
+                      style={{ minWidth: col.minWidth, textAlign: col.align ?? "left" }}
+                    >
                       {col.cell(row)}
                     </td>
                   ))}
