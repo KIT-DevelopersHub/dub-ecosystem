@@ -1342,6 +1342,7 @@
 }
 .colFromTo { min-width: 220px; }
 .cellTitle { font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); }
+.cellTitleRow { display: inline-flex; align-items: center; gap: var(--dub-space-2, 8px); flex-wrap: wrap; }
 /* 受け取る — request inbox (受け取った依頼 / 送った依頼). Cards with generous spacing. */
 .requestInbox { display: flex; flex-direction: column; gap: var(--dub-space-5, 20px); margin-bottom: var(--dub-space-5, 20px); }
 .requestGroup { display: flex; flex-direction: column; gap: var(--dub-space-3, 12px); }
