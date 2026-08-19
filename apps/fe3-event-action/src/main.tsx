@@ -5,6 +5,7 @@ import { StrictMode, useMemo, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cssText } from "@dub/tokens/css";
+import "@dub/ui/style.css"; // @dub/ui component CSS (Modal overlay, ConfirmDialog, etc.) — standalone only
 import { ToastProvider } from "@dub/ui";
 import { useAuthStore } from "./contracts/fe2";
 import { NavigationProvider, type NavigationApi } from "./contracts/navigation";
