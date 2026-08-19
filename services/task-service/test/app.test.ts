@@ -664,3 +664,39 @@ describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory re
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
 });
+
+// D4 (ADR-0007): POST /tasks must not let a cross-team assignee be set directly — that
+// bypasses the 送る・受け取る request flow. Guard fires only when team_id is non-null AND
+// the assignee's teams are known and exclude it. Teamless / unknown-team pass through.
+describe("POST /tasks — cross-team assignee guard (D4)", () => {
+  const post = (app: Hono, body: Record<string, unknown>) =>
+    app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", ...body }));
+
+  it("422 when assigning a team task to someone on another team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_bob", ["team_sponsor"]);
+    const res = await post(app, { teamId: "team_dev", assigneeId: "usr_bob" });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_CROSS_TEAM_ASSIGNEE");
+  });
+
+  it("201 when the assignee belongs to the task's team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_bob", ["team_dev", "team_x"]);
+    const res = await post(app, { teamId: "team_dev", assigneeId: "usr_bob" });
+    expect(res.status).toBe(201);
+  });
+
+  it("201 (pass-through) for a teamless task even if the assignee is on some other team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_bob", ["team_sponsor"]);
+    const res = await post(app, { assigneeId: "usr_bob" }); // no teamId
+    expect(res.status).toBe(201);
+  });
+
+  it("201 (pass-through) when the assignee's teams are unknown (no linked member ⇒ [])", async () => {
+    const { app } = setup();
+    const res = await post(app, { teamId: "team_dev", assigneeId: "usr_nomember" });
+    expect(res.status).toBe(201);
+  });
+});

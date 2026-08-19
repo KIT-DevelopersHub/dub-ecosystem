@@ -196,6 +196,19 @@ export function buildApp(deps: Deps): Hono {
     if (body.assigneeId) {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
+
+      // D4 (ADR-0007): a task must not be assigned directly to someone on another team —
+      // that would bypass the request/approval flow (送る・受け取る). This guard fires ONLY
+      // when the task HAS a team (team_id non-null) AND the assignee's teams are KNOWN and
+      // do NOT include it. Teamless tasks (team_id=null) and assignees whose teams are
+      // unresolvable (no linked member ⇒ []) pass through unchanged — back-compat.
+      const teamId = body.teamId ?? null;
+      if (teamId) {
+        const assigneeTeams = await deps.member.teamsOfUser(ctx, body.assigneeId);
+        if (assigneeTeams.length > 0 && !assigneeTeams.includes(teamId)) {
+          throw taskErrors.crossTeamAssignee(body.assigneeId, teamId);
+        }
+      }
     }
 
     const now = nowIso();

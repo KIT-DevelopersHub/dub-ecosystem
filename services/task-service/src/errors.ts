@@ -11,6 +11,7 @@ export const TaskErrorCodes = {
   INVALID_STATUS_TRANSITION: "TASK_INVALID_STATUS_TRANSITION", // 409 not in transition table
   GITHUB_ORIGIN_READONLY: "TASK_GITHUB_ORIGIN_READONLY", // 422 protected github field write
   EVENT_ARCHIVED: "TASK_EVENT_ARCHIVED", // 422 create/update under archived event
+  CROSS_TEAM_ASSIGNEE: "TASK_CROSS_TEAM_ASSIGNEE", // 422 direct cross-team assignee (use the request flow)
 } as const;
 
 export const taskErrors = {
@@ -46,5 +47,12 @@ export const taskErrors = {
       status: 422,
       details: { eventId },
     });
+  },
+  crossTeamAssignee(assigneeId: string, teamId: string): DubError {
+    return new DubError(
+      TaskErrorCodes.CROSS_TEAM_ASSIGNEE,
+      "Cannot directly assign a task to someone on another team — use a task request (送る) instead",
+      { status: 422, details: { assigneeId, teamId } },
+    );
   },
 };
