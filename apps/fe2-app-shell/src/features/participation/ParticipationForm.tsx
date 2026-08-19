@@ -225,8 +225,8 @@ export function ParticipationForm(): JSX.Element {
   );
 }
 
-function ThanksView({ result, onAgain }: { result: PublicParticipationResponse; onAgain: () => void }): JSX.Element {
-  const promoted = result.matchKind === "linked_existing";
+function ThanksView({ onAgain }: { result: PublicParticipationResponse; onAgain: () => void }): JSX.Element {
+  // 名簿への反映は運営が確認のうえ行うため、受付だけを伝える中立的な文面にする。
   return (
     <div data-testid="participation-thanks">
       <Card>
@@ -234,10 +234,7 @@ function ThanksView({ result, onAgain }: { result: PublicParticipationResponse; 
           <p className={styles.thanksLead} aria-hidden>
             ✅
           </p>
-          <p>
-            参加届を受け付けました。ご提出ありがとうございます。
-            {promoted ? "（登録済みの情報を更新しました）" : "（運営メンバー名簿に追加しました）"}
-          </p>
+          <p>参加届を受け付けました。ご提出ありがとうございます。運営が内容を確認します。</p>
           <Button variant="secondary" onClick={onAgain} testId="participation-again">
             続けて提出する
           </Button>

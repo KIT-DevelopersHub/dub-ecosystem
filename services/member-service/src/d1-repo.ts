@@ -81,6 +81,7 @@ interface ParticipationDbRow {
   note: string | null;
   status: string;
   match_kind: string;
+  review_state: string | null;
   submitted_by: string;
   submitted_at: string;
   created_at: string;
@@ -115,6 +116,9 @@ function toParticipationRow(r: ParticipationDbRow): ParticipationRow {
     note: r.note,
     status: "submitted",
     matchKind: r.match_kind as member.ParticipationMatchKind,
+    // 後方互換: review_state 列が無い時代の行 (backfill 前/欠損) は、反映先メンバーが
+    // 有れば "added"、無ければ "pending" とみなす。
+    reviewState: (r.review_state as member.ParticipationReviewState | null) ?? (r.member_id ? "added" : "pending"),
     submittedBy: r.submitted_by,
     submittedAt: r.submitted_at,
     createdAt: r.created_at,
@@ -283,9 +287,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
         `INSERT INTO member_participations
           (id, org_id, member_id, name, normalized_name, last_name, first_name, name_kana,
            last_name_kana, first_name_kana, last_name_romaji, first_name_romaji, grade, department, contact, phone,
-           school_email, gmail, desired_team_id, desired_activity, note, status, match_kind,
+           school_email, gmail, desired_team_id, desired_activity, note, status, match_kind, review_state,
            submitted_by, submitted_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(org_id, normalized_name) DO UPDATE SET
            member_id = excluded.member_id,
            name = excluded.name,
@@ -307,14 +311,19 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
            note = excluded.note,
            status = excluded.status,
            match_kind = excluded.match_kind,
+           review_state = excluded.review_state,
            submitted_by = excluded.submitted_by,
            submitted_at = excluded.submitted_at,
            updated_at = excluded.updated_at`,
         row.id, row.orgId, row.memberId, row.name, row.normalizedName, row.lastName, row.firstName, row.nameKana,
         row.lastNameKana, row.firstNameKana, row.lastNameRomaji, row.firstNameRomaji, row.grade, row.department, row.contact, row.phone,
         row.schoolEmail, row.gmail, row.desiredTeamId, row.desiredActivity,
-        row.note, row.status, row.matchKind, row.submittedBy, row.submittedAt, row.createdAt, row.updatedAt,
+        row.note, row.status, row.matchKind, row.reviewState, row.submittedBy, row.submittedAt, row.createdAt, row.updatedAt,
       );
+    },
+    async getParticipation(id: string): Promise<ParticipationRow | null> {
+      const r = await db.first<ParticipationDbRow>(`SELECT * FROM member_participations WHERE id = ?`, id);
+      return r ? toParticipationRow(r) : null;
     },
     async getParticipationByNormalizedName(orgId, normalizedName: string): Promise<ParticipationRow | null> {
       const r = await db.first<ParticipationDbRow>(
