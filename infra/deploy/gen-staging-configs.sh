@@ -9,6 +9,10 @@
 #   * worker `name`            -> name + "-staging"   (only the top-level name, NOT DO
 #                                                       binding names like METER_DO/ChatRoom)
 #   * service binding targets  -> target + "-staging" (staging binds the staging upstreams)
+#   * service bindings to a Worker NOT in the staging set are DROPPED entirely. Some prod
+#     upstreams (e.g. webhook-ingest, which needs PAID Cloudflare Queues) are intentionally
+#     absent from the $0 free-tier staging replica; a binding to a Worker that will never be
+#     deployed makes the WHOLE api-gateway/app-health-monitor deploy fail (CF code 10143/10144).
 #   * D1 database_name         -> dub-core|auth-outbox + "-staging"
 #   * D1 database_id / KV id    -> the staging resource ids from staging-resources.env
 #   * R2 bucket_name           -> bucket + "-staging"
@@ -48,6 +52,35 @@ for v in STAGING_DUB_CORE_D1_ID STAGING_AUTH_OUTBOX_D1_ID STAGING_AUTH_KV_ID \
 done
 
 FE2_ORIGIN="https://dub-fe2-app-shell-staging.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
+
+# The set of staging Worker names that actually get deployed (= each in-set dir's prod name
+# + "-staging"). Service bindings whose target is NOT in this set are dropped below.
+STAGING_WORKER_NAMES=""
+for _d in "${STAGING_WORKER_DIRS[@]}"; do
+  _n="$(awk -F'"' '/^name = "/{print $2; exit}' "${_d}/wrangler.free.toml")"
+  STAGING_WORKER_NAMES="${STAGING_WORKER_NAMES} ${_n}-staging"
+done
+
+# Remove any [[services]] block whose (already -staging-suffixed) target is not a deployed
+# staging Worker. Keeps the rest of the toml verbatim.
+drop_out_of_set_services() {
+  local f="$1"
+  awk -v allowed=" ${STAGING_WORKER_NAMES} " '
+    function flush() { if (inblk) { if (keep) printf "%s", blk; blk=""; inblk=0; keep=1 } }
+    /^\[\[services\]\]/            { flush(); inblk=1; blk=$0 "\n"; keep=1; next }
+    inblk && /^\[/                 { flush(); print; next }   # next section ends the block
+    inblk {
+      blk = blk $0 "\n"
+      if ($0 ~ /^service = "/) {
+        match($0, /"[^"]*"/); svc=substr($0,RSTART+1,RLENGTH-2)
+        if (index(allowed, " " svc " ") == 0) keep=0
+      }
+      next
+    }
+    { print }
+    END { flush() }
+  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
 
 gen_one() {
   local dir="$1" src="$1/wrangler.free.toml" out="$1/wrangler.staging.toml"
@@ -103,6 +136,7 @@ gen_one() {
       }
     ' "$src"
   } > "$out"
+  drop_out_of_set_services "$out"
   echo "  generated $out"
 }
 
