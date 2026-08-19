@@ -1,19 +1,14 @@
 // 参加届 form body (shared by the in-shell page and the public standalone page).
 // 入力 → バリデーション → 送信 → サンクス。The submit goes to the PUBLIC endpoint, so the
 // サンクス view is intentionally generic (no roster/member echo). 氏名 + 学校メール + Gmail
-// are required (both emails must be a valid mail address); the rest is optional. The
-// 希望チーム select is populated from the canonical team list when available (signed-in);
-// when it can't be read (public/anonymous) the form still submits without a team.
-import { useMemo, useState } from "react";
+// are required (both emails must be a valid mail address); the rest is optional.
+import { useState } from "react";
 import { Button, Card, Form, FormField, TextField, Textarea, Select } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
-import { useParticipationTeams, useSubmitParticipation } from "./hooks.ts";
+import { useSubmitParticipation } from "./hooks.ts";
 import {
-  ACTIVITY_LABEL,
-  DESIRED_ACTIVITIES,
   GRADE_LABEL,
   GRADES,
-  type DesiredActivity,
   type Grade,
   type PublicParticipationResponse,
 } from "./contracts.ts";
@@ -21,10 +16,6 @@ import { kanaToRomaji } from "./romaji.ts";
 import styles from "./participation.module.css";
 
 const GRADE_OPTIONS: SelectOption<Grade>[] = GRADES.map((g) => ({ value: g, label: GRADE_LABEL[g] }));
-const ACTIVITY_OPTIONS: SelectOption<DesiredActivity>[] = DESIRED_ACTIVITIES.map((a) => ({
-  value: a,
-  label: ACTIVITY_LABEL[a],
-}));
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const PHONE_RE = /^[0-9+\-()\s]{6,20}$/;
@@ -44,7 +35,6 @@ type FormErrors = {
 };
 
 export function ParticipationForm(): JSX.Element {
-  const teamsQuery = useParticipationTeams();
   const submit = useSubmitParticipation();
 
   // 氏名・振り仮名は 姓(last)/名(first) に分割入力する。
@@ -63,8 +53,6 @@ export function ParticipationForm(): JSX.Element {
   const [phone, setPhone] = useState("");
   const [grade, setGrade] = useState<Grade | null>(null);
   const [department, setDepartment] = useState("");
-  const [desiredTeamId, setDesiredTeamId] = useState<string | null>(null);
-  const [desiredActivity, setDesiredActivity] = useState<DesiredActivity | null>(null);
   const [note, setNote] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [done, setDone] = useState<PublicParticipationResponse | null>(null);
@@ -86,12 +74,6 @@ export function ParticipationForm(): JSX.Element {
     setFirstRomajiEdited(true);
     setFirstNameRomaji(v);
   };
-
-  const teams = teamsQuery.data?.teams ?? [];
-  const teamOptions: SelectOption<string>[] = useMemo(
-    () => teams.map((t) => ({ value: t.id, label: t.name })),
-    [teams],
-  );
 
   const onSubmit = () => {
     const next: FormErrors = {};
@@ -126,8 +108,6 @@ export function ParticipationForm(): JSX.Element {
         phone: trimOrNull(phone),
         grade,
         department: trimOrNull(department),
-        desiredTeamId,
-        desiredActivity,
         note: trimOrNull(note),
       },
       { onSuccess: (res) => setDone(res) },
@@ -231,31 +211,6 @@ export function ParticipationForm(): JSX.Element {
               <TextField id="p-dept" value={department} onChange={setDepartment} placeholder="情報工学科" />
             </FormField>
           </div>
-          <FormField
-            label="希望チーム"
-            htmlFor="p-team"
-            help={teams.length === 0 ? "チーム未取得のまま送信できます" : "参加したい班を選べます (任意)"}
-          >
-            <Select<string>
-              id="p-team"
-              value={desiredTeamId}
-              onChange={setDesiredTeamId}
-              options={teamOptions}
-              placeholder="選択してください"
-              disabled={teams.length === 0}
-              testId="participation-team"
-            />
-          </FormField>
-          <FormField label="希望する活動" htmlFor="p-activity">
-            <Select<DesiredActivity>
-              id="p-activity"
-              value={desiredActivity}
-              onChange={setDesiredActivity}
-              options={ACTIVITY_OPTIONS}
-              placeholder="選択してください"
-              testId="participation-activity"
-            />
-          </FormField>
           <FormField label="その他" htmlFor="p-note" help="連絡事項など (任意)">
             <Textarea id="p-note" value={note} onChange={setNote} rows={3} />
           </FormField>
