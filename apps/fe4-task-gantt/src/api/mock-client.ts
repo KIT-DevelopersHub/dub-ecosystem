@@ -441,7 +441,17 @@ export class MockApiClient implements ApiClient {
   }
 
   private putView(eventId: string, body: gantt.PutGanttViewRequest): gantt.GanttViewState {
-    this.view = { eventId, zoom: body.zoom, collapsedTaskIds: body.collapsedTaskIds };
+    // Mirror gantt-service's normalize: orderedTaskIds is additive/optional and only
+    // attached when non-empty, so the manual drag order round-trips (mock parity).
+    const ordered = Array.isArray(body.orderedTaskIds)
+      ? body.orderedTaskIds.filter((x): x is common.TaskId => typeof x === "string")
+      : [];
+    this.view = {
+      eventId: eventId as common.EventId,
+      zoom: body.zoom,
+      collapsedTaskIds: body.collapsedTaskIds,
+      ...(ordered.length > 0 ? { orderedTaskIds: ordered } : {}),
+    };
     return this.view;
   }
 
