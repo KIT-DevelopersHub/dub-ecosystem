@@ -1124,7 +1124,11 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
 
   if (method === "POST") {
     // mail read + send are served by the stateful mail store (createMailStore).
-    if (pathname === "/api/v1/notifications/inbox/read-all") return json(null, 204);
+    if (pathname === "/api/v1/notifications/inbox/read-all") {
+      const now = new Date().toISOString();
+      for (const n of NOTIFICATIONS) if (n.readAt === null) n.readAt = now;
+      return json(null, 204);
+    }
     // admin: bulk publish a selection in one request (idempotent, per-item outcomes).
     if (pathname === "/api/v1/notifications/manage/publish-batch") {
       const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
@@ -1182,7 +1186,26 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   }
 
   if (method === "PATCH") {
-    if (/^\/api\/v1\/notifications\/inbox\/[^/]+\/read$/.test(pathname)) return json(null, 204);
+    // Mark one inbox row read — mutate the seed so GET unread-count (polled every 60s)
+    // stays consistent with the optimistic badge.
+    {
+      const m = /^\/api\/v1\/notifications\/inbox\/([^/]+)\/read$/.exec(pathname);
+      if (m) {
+        const n = NOTIFICATIONS.find((x) => x.id === m[1]);
+        if (n && n.readAt === null) n.readAt = new Date().toISOString();
+        return json(null, 204);
+      }
+    }
+    // Restore one inbox row to unread (inverse of /read) — same seed mutation so the
+    // demo's "未読に戻す → 未読バッジ復活" survives a poll/reload.
+    {
+      const m = /^\/api\/v1\/notifications\/inbox\/([^/]+)\/unread$/.exec(pathname);
+      if (m) {
+        const n = NOTIFICATIONS.find((x) => x.id === m[1]);
+        if (n) n.readAt = null;
+        return json(null, 204);
+      }
+    }
     if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
     // Persist a bar's window after a leaf move/resize (Notion-style edit). Mutates the task
     // columns + the gantt row so the change survives a refetch/reload (in-session). Returns

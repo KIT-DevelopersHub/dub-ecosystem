@@ -13,6 +13,7 @@ import {
   hasMore as hasMoreOf,
   markAllReadLocally,
   markReadLocally,
+  markUnreadLocally,
   removeItem,
   replaceFirstPage,
   type InboxState,
@@ -32,6 +33,7 @@ export interface UseInboxResult {
   error: ApiError | null;
   loadMore(): Promise<void>;
   markRead(id: string): Promise<void>;
+  markUnread(id: string): Promise<void>;
   markAllRead(): Promise<void>;
   reload(): Promise<void>;
 }
@@ -117,6 +119,42 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
     [api, state, decrement, toast],
   );
 
+  const markUnread = useCallback(
+    async (id: string) => {
+      const wasRead = state.items.some((i) => i.id === id && i.readAt !== null);
+      await runOptimistic<string>(
+        {
+          optimistic: (targetId) => {
+            let prev: InboxState = state;
+            setState((s) => {
+              const [next, snapshot] = markUnreadLocally(s, targetId);
+              prev = snapshot;
+              return next;
+            });
+            // Restoring to unread bumps the shared badge back up.
+            if (wasRead) useUnreadStore.getState().setCount(useUnreadStore.getState().count + 1);
+            return () => {
+              setState(prev);
+              if (wasRead) decrement(1);
+            };
+          },
+          commit: (targetId) => api.markUnread(targetId),
+          onError: (err, rollback) =>
+            keepOnNotFound(err, rollback, () => {
+              setState((s) => removeItem(s, id)); // 404 -> drop the row
+              toast.show("info", "This notification is no longer available.");
+            }),
+        },
+        id,
+      ).catch((err) => {
+        if (isApiError(err) && err.status !== 404 && !err.code.endsWith("_NOT_FOUND")) {
+          toast.show("error", "Could not mark as unread. Please try again.");
+        }
+      });
+    },
+    [api, state, decrement, toast],
+  );
+
   const markAllRead = useCallback(async () => {
     const unreadBefore = state.items.filter(
       (i) => i.readAt === null && (!type || i.type.startsWith(type)),
@@ -155,6 +193,7 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
     error,
     loadMore,
     markRead,
+    markUnread,
     markAllRead,
     reload,
   };

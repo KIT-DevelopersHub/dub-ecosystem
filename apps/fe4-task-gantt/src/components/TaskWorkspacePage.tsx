@@ -212,6 +212,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     }
     return m;
   }, [tasks, users]);
+  // Displayed titles come from the store (task-service = the authority on title), so a
+  // detail-panel rename reflects on every bar/row the SAME tick (optimistic) and is
+  // reconciled by loadAll — never reverting to the gantt read model's denormalized,
+  // possibly-stale copy after refetch. Mirrors statusById / assigneeNameById.
+  const titleById = useMemo(() => new Map(tasks.map((t) => [t.id, t.title] as const)), [tasks]);
 
   // Per-task grouping descriptor for the sort-bracket rail. Only チーム順 / 重要度順 group
   // into visible ranges; 手動・時期 pass undefined so no brackets render. Team-less rows
@@ -288,9 +293,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
   const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
+  // Prefer the store's fresh title so the parent / 先行タスク pickers relabel the same
+  // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
+  // which the store list omits).
   const allTaskOptions = useMemo(
-    () => allRows.map((r) => ({ id: r.taskId, title: r.title })),
-    [allRows],
+    () => allRows.map((r) => ({ id: r.taskId, title: titleById.get(r.taskId) ?? r.title })),
+    [allRows, titleById],
   );
   // predecessors currently on the selected task (先行タスク＝依存元 where to===selected).
   const selectedDependsOn = useMemo(() => {
@@ -1000,6 +1008,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
           assigneeNameById={assigneeNameById}
+          titleOverrides={titleById}
           teamColorById={teamColorById}
           teamLegend={teamLegend}
           numberById={numberById}

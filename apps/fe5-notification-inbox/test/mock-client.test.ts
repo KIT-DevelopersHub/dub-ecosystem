@@ -31,6 +31,24 @@ describe("mock notification api (contract adherence)", () => {
     expect((await api.getUnreadCount()).count).toBe(before - 1);
   });
 
+  it("unread-count reflects mark-unread (restore); markUnread is the inverse of markRead", async () => {
+    const client = createMockApiClient();
+    const api = createNotificationApi(client);
+    const target = client.__store.items.find((i) => i.readAt === null)!;
+    await api.markRead(target.id);
+    const afterRead = (await api.getUnreadCount()).count;
+    await api.markUnread(target.id);
+    expect(client.__store.items.find((i) => i.id === target.id)!.readAt).toBeNull();
+    expect((await api.getUnreadCount()).count).toBe(afterRead + 1);
+  });
+
+  it("markUnread on an unknown id throws a 404 ApiError with the notif code", async () => {
+    const api = createNotificationApi(createMockApiClient());
+    await expect(api.markUnread("notif_does_not_exist")).rejects.toSatisfy((e: unknown) => {
+      return isApiError(e) && e.status === 404 && e.code === "NOTIF_INBOX_ITEM_NOT_FOUND";
+    });
+  });
+
   it("markRead on an unknown id throws a 404 ApiError with the notif code", async () => {
     const api = createNotificationApi(createMockApiClient());
     await expect(api.markRead("notif_does_not_exist")).rejects.toSatisfy((e: unknown) => {
