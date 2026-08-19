@@ -153,6 +153,28 @@ const TASKS: task.Task[] = [
     status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
   },
+  // ── evt_3 (学生ハッカソン Hackit 秋) — a 2nd event WITH a gantt so the global
+  //    header イベント switcher demonstrably reloads the timeline on switch. ──
+  {
+    version: 1, id: "hk_1", eventId: "evt_3", title: "Hackit: 会場・日程確定", description: null,
+    status: "done", priority: "high", assigneeId: ME_ID, teamId: "team_ops", startAt: "2026-08-01T00:00:00Z", dueAt: "2026-08-20T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_2", eventId: "evt_3", title: "Hackit: 協賛・賞品調整", description: null,
+    status: "in_progress", priority: "medium", assigneeId: "usr_bob", teamId: "team_ops", startAt: "2026-08-10T00:00:00Z", dueAt: "2026-09-05T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_3", eventId: "evt_3", title: "Hackit: 募集LP・告知", description: null,
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_dev", startAt: "2026-08-15T00:00:00Z", dueAt: "2026-09-10T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-15T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_4", eventId: "evt_3", title: "Hackit: 当日運営・審査", description: null,
+    status: "todo", priority: "urgent", assigneeId: ME_ID, teamId: "team_hq", startAt: "2026-09-20T00:00:00Z", dueAt: "2026-09-21T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-20T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
 ];
 
 const GANTT: Record<string, gantt.GanttChartDTO> = {
@@ -170,6 +192,18 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
+    ],
+  },
+  evt_3: {
+    eventId: "evt_3",
+    rows: [
+      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
+      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
+      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+    ],
+    dependencies: [
+      { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },
     ],
   },
 };
