@@ -362,50 +362,59 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
     },
 
     // ---- deletion policy (org-scoped) ----
-    async getDeletionPolicy(orgId): Promise<{ policy: { member: MessageDeletionMode; moderator: MessageDeletionMode }; version: number } | null> {
-      let r: { deletion_member: string; deletion_moderator: string; version: number } | null;
+    async getDeletionPolicy(orgId): Promise<{ policy: { member: MessageDeletionMode; moderator: MessageDeletionMode; protectReacted: boolean }; version: number } | null> {
+      let r: { deletion_member: string; deletion_moderator: string; protect_reacted: number; version: number } | null;
       try {
-        r = await db.first<{ deletion_member: string; deletion_moderator: string; version: number }>(
-          `SELECT deletion_member, deletion_moderator, version FROM chat_settings WHERE org_id = ?`,
+        r = await db.first<{ deletion_member: string; deletion_moderator: string; protect_reacted: number; version: number }>(
+          `SELECT deletion_member, deletion_moderator, protect_reacted, version FROM chat_settings WHERE org_id = ?`,
           orgId,
         );
       } catch (err) {
-        // Resilience: if the chat_settings migration (0003) has not been applied to
+        // Resilience: if the chat_settings migration (0003/0004) has not been applied to
         // this D1 yet (migrations run out-of-band, see deploy.yml), treat it exactly
-        // like "no override row" -> the in-code default (all hard) is in effect.
-        // Deletion must never 500 just because the settings table is missing. Any
-        // OTHER error propagates (never silently change delete behaviour).
-        if (/no such table/i.test(String((err as Error)?.message ?? err))) return null;
+        // like "no override row" -> the in-code default (all hard, protection off) is in
+        // effect. Deletion must never 500 just because the settings table/column is
+        // missing. Any OTHER error propagates (never silently change delete behaviour).
+        if (/no such (table|column)/i.test(String((err as Error)?.message ?? err))) return null;
         throw err;
       }
       if (!r) return null;
       return {
-        policy: { member: r.deletion_member as MessageDeletionMode, moderator: r.deletion_moderator as MessageDeletionMode },
+        policy: {
+          member: r.deletion_member as MessageDeletionMode,
+          moderator: r.deletion_moderator as MessageDeletionMode,
+          protectReacted: r.protect_reacted === 1,
+        },
         version: r.version,
       };
     },
     async setDeletionPolicy(input): Promise<{ version: number } | null> {
       // UPDATE-then-INSERT upsert with optimistic-concurrency (mirrors addMember /
       // setReadState — "DO UPDATE SET" trips the @dub/db strict namespace guard).
+      const protect = input.policy.protectReacted ? 1 : 0;
       if (input.expectedVersion === 0) {
         // First write: insert only if no row exists yet. A pre-existing row => conflict.
         const ins = await db.run(
           `INSERT OR IGNORE INTO chat_settings
-             (org_id, deletion_member, deletion_moderator, version, updated_at, updated_by)
-           VALUES (?, ?, ?, 1, ?, ?)`,
-          input.orgId, input.policy.member, input.policy.moderator, input.at, input.updatedBy,
+             (org_id, deletion_member, deletion_moderator, protect_reacted, version, updated_at, updated_by)
+           VALUES (?, ?, ?, ?, 1, ?, ?)`,
+          input.orgId, input.policy.member, input.policy.moderator, protect, input.at, input.updatedBy,
         );
         return ins.meta.changes > 0 ? { version: 1 } : null;
       }
       const nextVersion = input.expectedVersion + 1;
       const upd = await db.run(
         `UPDATE chat_settings
-            SET deletion_member = ?, deletion_moderator = ?, version = ?, updated_at = ?, updated_by = ?
+            SET deletion_member = ?, deletion_moderator = ?, protect_reacted = ?, version = ?, updated_at = ?, updated_by = ?
           WHERE org_id = ? AND version = ?`,
-        input.policy.member, input.policy.moderator, nextVersion, input.at, input.updatedBy,
+        input.policy.member, input.policy.moderator, protect, nextVersion, input.at, input.updatedBy,
         input.orgId, input.expectedVersion,
       );
       return upd.meta.changes > 0 ? { version: nextVersion } : null;
+    },
+    async messageHasReactions(messageId: common.MessageId): Promise<boolean> {
+      const r = await db.first<{ one: number }>(`SELECT 1 AS one FROM chat_reactions WHERE message_id = ? LIMIT 1`, messageId);
+      return r !== null;
     },
 
     // ---- hard delete (physical removal + dependent-row cascade) ----

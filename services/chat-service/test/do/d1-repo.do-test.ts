@@ -13,7 +13,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
 import { createDbClient, applyMigrations, assertAllApplied } from "@dub/db";
 import { createD1ChatRepo } from "../../src/d1-repo";
-import { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION } from "../../src/schema";
+import { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SETTINGS_PROTECT_REACTED_MIGRATION } from "../../src/schema";
 import type { ChatRepo, ChannelRow, MemberRow, MessageRow } from "../../src/types";
 
 const AT = "2026-08-10T05:00:00.000Z";
@@ -70,7 +70,7 @@ function message(over: Partial<MessageRow> & Pick<MessageRow, "id" | "channelId"
 
 beforeAll(async () => {
   // Apply the chat DDL to the empty miniflare D1 (idempotent via the ledger).
-  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION]);
+  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SETTINGS_PROTECT_REACTED_MIGRATION]);
   assertAllApplied(results);
 });
 
@@ -414,19 +414,34 @@ describe("d1-repo: deletion policy + hard delete", () => {
     expect(await repo.getDeletionPolicy(org)).toBeNull();
 
     // first write requires expectedVersion 0
-    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "tombstone", moderator: "hard" }, expectedVersion: 5, updatedBy: "u1", at: AT })).toBeNull();
-    const first = await repo.setDeletionPolicy({ orgId: org, policy: { member: "tombstone", moderator: "hard" }, expectedVersion: 0, updatedBy: "u1", at: AT });
+    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "tombstone", moderator: "hard", protectReacted: false }, expectedVersion: 5, updatedBy: "u1", at: AT })).toBeNull();
+    const first = await repo.setDeletionPolicy({ orgId: org, policy: { member: "tombstone", moderator: "hard", protectReacted: true }, expectedVersion: 0, updatedBy: "u1", at: AT });
     expect(first).toEqual({ version: 1 });
-    expect(await repo.getDeletionPolicy(org)).toEqual({ policy: { member: "tombstone", moderator: "hard" }, version: 1 });
+    // protect_reacted round-trips (stored as 0/1, read back as boolean)
+    expect(await repo.getDeletionPolicy(org)).toEqual({ policy: { member: "tombstone", moderator: "hard", protectReacted: true }, version: 1 });
 
     // a second write with expectedVersion 0 conflicts (row already exists)
-    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "hard" }, expectedVersion: 0, updatedBy: "u1", at: AT })).toBeNull();
+    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "hard", protectReacted: true }, expectedVersion: 0, updatedBy: "u1", at: AT })).toBeNull();
     // stale version conflicts
-    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "hard" }, expectedVersion: 9, updatedBy: "u1", at: AT })).toBeNull();
-    // correct version advances
-    const second = await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "tombstone" }, expectedVersion: 1, updatedBy: "u2", at: AT });
+    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "hard", protectReacted: true }, expectedVersion: 9, updatedBy: "u1", at: AT })).toBeNull();
+    // correct version advances; protectReacted can be turned back off
+    const second = await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "tombstone", protectReacted: false }, expectedVersion: 1, updatedBy: "u2", at: AT });
     expect(second).toEqual({ version: 2 });
-    expect(await repo.getDeletionPolicy(org)).toEqual({ policy: { member: "hard", moderator: "tombstone" }, version: 2 });
+    expect(await repo.getDeletionPolicy(org)).toEqual({ policy: { member: "hard", moderator: "tombstone", protectReacted: false }, version: 2 });
+  });
+
+  it("messageHasReactions reflects presence of any reaction (real SQL)", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    await repo.createChannel(chan);
+    const m = message({ id: id.msg(1), channelId: chan.id, authorId: id.user(1) });
+    await repo.createMessage(m);
+    expect(await repo.messageHasReactions(m.id)).toBe(false);
+    await repo.addReaction(m.id, "👍", id.user(2), AT);
+    expect(await repo.messageHasReactions(m.id)).toBe(true);
+    await repo.removeReaction(m.id, "👍", id.user(2));
+    expect(await repo.messageHasReactions(m.id)).toBe(false);
   });
 
   it("hardDeleteMessage physically removes the message, its reactions/pins and thread replies", async () => {

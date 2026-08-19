@@ -21,7 +21,7 @@
 // boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
 // screen), so "what is seeded vs. still stubbed" stays honest.
 import type { ErrorResponse } from "@dub/errors";
-import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
+import type { auditLog, chat, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
@@ -48,6 +48,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:send",
   "mail:admin",
   "chat:create",
+  "chat:delete",
+  "chat:moderate",
   "audit:read",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
@@ -697,11 +699,16 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
   "mail:send",
   "mail:admin",
   "chat:create",
+  "chat:delete",
   "chat:moderate",
+  "app:chat:view",
+  "app:chat:edit",
   "github:read",
   "notif:send",
 ];
-const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
+// member can use chat and delete their OWN messages (削除あり単) — shows the チャット row
+// with 削除権限=削除あり in the demo.
+const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read", "chat:create", "chat:delete", "app:chat:view"];
 
 const SEED_USERS: identity.IdentityUser[] = [
   { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
@@ -1027,7 +1034,24 @@ function createChatStore() {
   });
   const byId = new Map(all.map((c) => [c.id, c]));
 
-  function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
+  // In-session workspace message-deletion policy (RBAC-configurable). Default = all
+  // hard, mirroring production; PATCH persists in-session so the ロール管理 挙動 toggle
+  // reflects + saves in the demo. Nothing leaves the browser.
+  let delPolicy: chat.MessageDeletionPolicy = { member: "hard", moderator: "hard", protectReacted: false };
+  let delVersion = 0;
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname === "/api/v1/chat/settings/deletion-policy") {
+      if (method === "GET") return json({ policy: { ...delPolicy }, version: delVersion });
+      if (method === "PATCH") {
+        const req = body as chat.UpdateDeletionPolicyRequest;
+        if (req?.policy) {
+          delPolicy = { member: req.policy.member, moderator: req.policy.moderator, protectReacted: req.policy.protectReacted };
+          delVersion += 1;
+        }
+        return json({ policy: { ...delPolicy }, version: delVersion });
+      }
+    }
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");

@@ -43,7 +43,10 @@ const ORG = "org_devhub";
 function seedState(seed?: MockSeed): MockState {
   const roles = new Map<string, identity.Role>([
     ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"], isSystem: true }],
-    ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read"], isSystem: true }],
+    // member carries chat access + own-delete so the standalone shows the チャット row's
+    // 削除権限=削除あり + 挙動 toggle (RoleListPage count tests key off admin=5 / organizer=2,
+    // so those two stay at their original bundles).
+    ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read", "chat:create", "chat:delete", "app:chat:view"], isSystem: true }],
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
   ]);
   const users = new Map<string, MockUser>([
@@ -389,7 +392,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (path.endsWith("/chat/settings/deletion-policy")) {
       const req = body as chat.UpdateDeletionPolicyRequest;
       if (req.version !== chatPolicy.version) throw err("CHAT_VERSION_CONFLICT", "stale deletion-policy version");
-      chatPolicy = { policy: { member: req.policy.member, moderator: req.policy.moderator }, version: chatPolicy.version + 1 };
+      chatPolicy = { policy: { member: req.policy.member, moderator: req.policy.moderator, protectReacted: req.policy.protectReacted }, version: chatPolicy.version + 1 };
       return { policy: { ...chatPolicy.policy }, version: chatPolicy.version } as unknown as T;
     }
     const roleMatch = path.match(/\/identity\/roles\/([^/]+)$/);

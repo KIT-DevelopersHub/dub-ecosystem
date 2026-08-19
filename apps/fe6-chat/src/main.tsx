@@ -39,8 +39,8 @@ const api: ChatApiClient = live
 // default mock policy mirrors production: all `hard`). No effect in live mode.
 if (!live && api instanceof MockChatClient) {
   const p = new URLSearchParams(window.location.search).get("deletionPolicy");
-  if (p === "tombstone") api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone" });
-  else if (p === "hard") api.setDeletionPolicy({ member: "hard", moderator: "hard" });
+  if (p === "tombstone") api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone", protectReacted: false });
+  else if (p === "hard") api.setDeletionPolicy({ member: "hard", moderator: "hard", protectReacted: false });
   // Standalone/E2E hook (dev only): lets tests inject latency / a one-shot error to
   // exercise the optimistic-delete immediacy and failure-rollback paths.
   (window as unknown as { __chatApi?: MockChatClient }).__chatApi = api;

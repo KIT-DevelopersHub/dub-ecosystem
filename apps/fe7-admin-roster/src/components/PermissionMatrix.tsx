@@ -2,7 +2,13 @@ import type { identity } from "@dub/types";
 import { Badge, Switch } from "@dub/ui";
 import { groupByDomain, toggleDomain, togglePermission, domainSelectionState, type CatalogEntry } from "../lib/permissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../lib/permissionLabels";
-import { AppAccessSection } from "./AppAccessSection";
+import { CHAT_DELETE_KEYS } from "../lib/chatDeleteRight";
+import { AppAccessSection, type ChatDeletionControls } from "./AppAccessSection";
+
+// chat:delete / chat:moderate are surfaced as the 削除権限 3-choice inside the チャット
+// app-access row, so hide them from the flat "chat" domain grid to avoid a duplicate,
+// conflicting control. chat:create stays in the flat grid (channel creation is orthogonal).
+const CHAT_ROW_KEYS = new Set<string>(CHAT_DELETE_KEYS);
 
 // Design-system tokens (@dub/tokens) with literal fallbacks so the matrix still
 // reads correctly if a token is ever absent. Each permission is an on/off toggle
@@ -58,6 +64,7 @@ export function PermissionMatrix({
   onChange,
   idPrefix = "fe7",
   lockedKeys = [],
+  chatDeletion,
 }: {
   catalog: readonly CatalogEntry[];
   selected: readonly identity.PermissionKey[];
@@ -69,6 +76,8 @@ export function PermissionMatrix({
   // Keys that stay on and cannot be toggled off even when the rest of the matrix is
   // editable — e.g. identity:admin on the admin role (self-lockout guard).
   lockedKeys?: readonly identity.PermissionKey[];
+  // Chat 削除時の挙動 toggle (org-wide policy) — surfaced inside the チャット app row.
+  chatDeletion?: ChatDeletionControls;
 }) {
   const groups = groupByDomain(catalog);
   const locked = new Set(lockedKeys);
@@ -88,11 +97,15 @@ export function PermissionMatrix({
               onChange={onChange}
               idPrefix={idPrefix}
               lockedKeys={lockedKeys}
+              {...(chatDeletion ? { chatDeletion } : {})}
             />
           );
         }
-        const state = domainSelectionState(selected, g.entries);
-        const onCount = g.entries.reduce((n, e) => n + (selected.includes(e.key as identity.PermissionKey) ? 1 : 0), 0);
+        // Hide the chat delete keys from the flat chat grid (owned by the チャット row).
+        const entries = g.domain === "chat" ? g.entries.filter((e) => !CHAT_ROW_KEYS.has(e.key)) : g.entries;
+        if (entries.length === 0) return null;
+        const state = domainSelectionState(selected, entries);
+        const onCount = entries.reduce((n, e) => n + (selected.includes(e.key as identity.PermissionKey) ? 1 : 0), 0);
         return (
           <fieldset key={g.domain} style={cardStyle}>
             <legend style={{ width: "100%" }}>
@@ -103,17 +116,17 @@ export function PermissionMatrix({
                   checked={state.all}
                   ref={(el) => { if (el) el.indeterminate = state.some && !state.all; }}
                   disabled={disabled}
-                  onChange={(e) => onChange(toggleDomain(selected, g.entries, e.target.checked, lockedKeys))}
+                  onChange={(e) => onChange(toggleDomain(selected, entries, e.target.checked, lockedKeys))}
                   data-testid={`${idPrefix}-matrix-domain-${g.domain}`}
                 />
                 <span style={groupTitleStyle}>{domainLabel(g.domain)}</span>
                 <span style={countStyle} data-testid={`${idPrefix}-matrix-count-${g.domain}`}>
-                  {onCount} / {g.entries.length} 有効
+                  {onCount} / {entries.length} 有効
                 </span>
               </span>
             </legend>
             <div style={gridStyle} data-testid={`${idPrefix}-matrix-grid-${g.domain}`}>
-            {g.entries.map((e) => {
+            {entries.map((e) => {
               const key = e.key as identity.PermissionKey;
               const checked = selected.includes(key);
               const isLocked = locked.has(key);
