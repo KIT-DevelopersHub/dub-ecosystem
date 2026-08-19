@@ -468,9 +468,15 @@
 /* keeps childless top-level rows' text aligned with rows that have a chevron. */
 .tlToggleSpacer { flex: 0 0 auto; width: 16px; margin-right: 2px; }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
-/* team accent stripe on a row (team-grouped rows are ordered by team; the stripe
-   makes each group's boundary legible without a heavyweight section header). */
+/* team accent stripe — inline variant, kept ONLY for the drag-overlay clone (a single
+   floating row, so no alignment issue). In-list rows use the fixed-x .tlTeamRail. */
 .tlTeamStripe { flex: 0 0 auto; width: 3px; align-self: stretch; border-radius: 2px; margin-right: 2px; background: var(--dub-color-gray-300); }
+/* team accent as a fixed-x LEFT rail: pinned to the pane's left edge so contiguous
+   same-team rows draw ONE straight vertical line, independent of each row's WBS indent
+   (the old inline stripe stepped horizontally with the indent). Non-interactive overlay
+   above the rows; the faint drag handle's glyph is centred and clears the 3px rail. */
+.tlTeamRail { position: absolute; left: 0; width: 3px; z-index: 4; pointer-events: none; }
+.tlTeamRailSeg { position: absolute; left: 0; width: 3px; border-radius: 0 2px 2px 0; }
 /* team legend chips under the toolbar. */
 .tlLegend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px var(--dub-space-3); border-bottom: 1px solid var(--dub-color-border-default); }
 .tlLegendItem { display: inline-flex; align-items: center; gap: 5px; font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }

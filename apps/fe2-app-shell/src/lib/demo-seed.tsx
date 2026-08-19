@@ -159,10 +159,12 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID },
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
+      // contiguous; used to prove the team rail stays straight across an indented child.
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
       { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
       { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null },
       { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
       { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
     ],

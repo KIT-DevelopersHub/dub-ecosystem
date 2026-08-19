@@ -123,7 +123,6 @@ function LeftPaneRow({
   onSelect,
   toggleParent,
   statusById,
-  teamColorById,
   assigneeNameById,
 }: {
   r: gantt.GanttRow;
@@ -136,7 +135,6 @@ function LeftPaneRow({
   onSelect?: (taskId: common.TaskId) => void;
   toggleParent: (id: common.TaskId) => void;
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
-  teamColorById?: ReadonlyMap<common.TaskId, string>;
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
 }) {
   const depth = r.depth ?? 0;
@@ -193,9 +191,9 @@ function LeftPaneRow({
       ) : (
         depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
       )}
-      {teamColorById?.get(r.taskId) && (
-        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
-      )}
+      {/* team accent is drawn as a fixed-x left rail (see tlTeamRail) — NOT inline —
+          so consecutive same-team rows form a straight vertical line regardless of
+          each row's WBS indent (the old in-flow stripe stepped with the indent). */}
       <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
       <span className={styles.tlRowName}>{r.title}</span>
       {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
@@ -415,6 +413,18 @@ export function GanttView({
   // 手動/時期 modes (no map passed), so the rail simply doesn't render there.
   const groupRunList = useMemo(() => groupRuns(rows, rowGroupById), [rows, rowGroupById]);
   const hasGroupRail = groupRunList.length > 0;
+
+  // Team accent as a fixed-x LEFT rail: collapse the visible rows into contiguous
+  // same-team runs and draw each as one straight 3px segment pinned to the pane's
+  // left edge. This replaces the old per-row inline stripe, whose x moved with each
+  // row's WBS indent and so stepped/zig-zagged between a parent and its child.
+  const teamRailById = useMemo(() => {
+    if (!teamColorById || teamColorById.size === 0) return undefined;
+    const m = new Map<common.TaskId, RowGroup>();
+    for (const [id, color] of teamColorById) m.set(id, { key: color, label: "", color });
+    return m;
+  }, [teamColorById]);
+  const teamRailRuns = useMemo(() => groupRuns(rows, teamRailById), [rows, teamRailById]);
 
   // ---- centre on today (initial + on zoom change) ----
   const scrollToToday = useCallback(
@@ -672,7 +682,6 @@ export function GanttView({
                       onSelect={onSelect}
                       toggleParent={toggleParent}
                       statusById={statusById}
-                      teamColorById={teamColorById}
                       assigneeNameById={assigneeNameById}
                     />
                   )}
@@ -687,6 +696,19 @@ export function GanttView({
                     </div>
                   )}
                 />
+                {/* team accent rail: fixed-x straight segments (one per contiguous team run) */}
+                {teamRailRuns.length > 0 && (
+                  <div className={styles.tlTeamRail} style={{ top: HEADER_H }} data-testid="fe4-gantt-team-rail" aria-hidden>
+                    {teamRailRuns.map((run) => (
+                      <div
+                        key={`${run.key}-${run.startIndex}`}
+                        className={styles.tlTeamRailSeg}
+                        style={{ top: run.startIndex * ROW_HEIGHT, height: run.length * ROW_HEIGHT, background: run.color }}
+                        data-testid={`fe4-gantt-team-seg-${run.startIndex}`}
+                      />
+                    ))}
+                  </div>
+                )}
                 {/* sort grouping brackets: one labelled bracket per contiguous same-group run */}
                 {hasGroupRail && (
                   <div className={styles.tlGroupRail} style={{ top: HEADER_H }} data-testid="fe4-gantt-group-rail" aria-hidden>
