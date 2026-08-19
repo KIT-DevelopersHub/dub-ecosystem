@@ -22,7 +22,16 @@ import { InlineRoleEditor } from "./InlineRoleEditor";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
 import { SyncPreviewDialog } from "./SyncPreviewDialog";
-import { useUsers, useRoles, useSyncEmailRouting, usePreviewEmailRouting, isEmailRoutingUnconfigured } from "../hooks/useRosterApi";
+import { MemberLinkDialog } from "./MemberLinkDialog";
+import {
+  useUsers,
+  useRoles,
+  useSyncEmailRouting,
+  usePreviewEmailRouting,
+  isEmailRoutingUnconfigured,
+  useMembersOverview,
+  useUnlinkMemberIdentity,
+} from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
@@ -80,18 +89,28 @@ export function UserListPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [linkAccount, setLinkAccount] = useState<RosterUser | null>(null);
   const { can } = usePermissions();
   const { me } = useRosterContext();
   const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
   const rolesQuery = useRoles();
   const sync = useSyncEmailRouting();
   const preview = usePreviewEmailRouting();
+  const membersOverview = useMembersOverview();
+  const unlinkMember = useUnlinkMemberIdentity();
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const currentUserId = me?.user.id ?? "";
   const canInvite = can("identity:admin");
   const canManageRoles = can("identity:admin"); // grant/revoke org-wide roles inline
+  const canLinkMembers = can("identity:admin"); // link/unlink 運営メンバー from the メール名簿 side
   const roles = rolesQuery.data?.items ?? [];
+  // identity userId -> the 運営メンバー linked to it (1:1). Drives the「運営メンバー」列.
+  const memberByIdentity = new Map(
+    (membersOverview.data?.members ?? [])
+      .filter((m) => !!m.identityUserId)
+      .map((m) => [m.identityUserId as string, m]),
+  );
   const canManageRouting = can("mail:admin"); // read the proxy / issue addresses
   const canSync = canInvite && canManageRouting; // relay proxy -> roster upsert
   const notConnected = isEmailRoutingUnconfigured(sync.error) || isEmailRoutingUnconfigured(preview.error);
@@ -135,6 +154,35 @@ export function UserListPage() {
     { key: "email", header: "メール", cell: (u) => u.email },
     { key: "source", header: "種別", cell: (u) => <SourceBadge source={u.source} testId={`fe7-users-source-${u.id}`} /> },
     {
+      key: "member",
+      header: "運営メンバー",
+      cell: (u) => {
+        const linked = memberByIdentity.get(u.id);
+        if (linked) {
+          return (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} data-testid={`fe7-users-member-${u.id}`}>
+              <Badge tone="success">{linked.name}</Badge>
+              {canLinkMembers ? (
+                <IconButton
+                  name="x"
+                  aria-label={`${u.email} と ${linked.name} の紐付けを解除`}
+                  onClick={() => unlinkMember.mutate({ member: linked })}
+                  testId={`fe7-users-member-unlink-${u.id}`}
+                />
+              ) : null}
+            </span>
+          );
+        }
+        return canLinkMembers ? (
+          <Button variant="ghost" size="sm" onClick={() => setLinkAccount(u)} testId={`fe7-users-member-link-${u.id}`}>
+            運営メンバーと紐付け
+          </Button>
+        ) : (
+          <span style={{ color: "var(--dub-color-fg-muted, #57606a)" }}>未設定</span>
+        );
+      },
+    },
+    {
       key: "roles",
       header: "ロール",
       cell: (u) => <InlineRoleEditor user={u} roles={roles} currentUserId={currentUserId} canAdmin={canManageRoles} />,
@@ -174,7 +222,7 @@ export function UserListPage() {
       />
 
       <p style={noticeTextStyle}>
-        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。ロール列をクリックすると、各メンバーのロールをその場で追加・削除できます。表示名や在籍状態の変更は、名前をクリックすると右側でその場で編集できます。
+        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。「運営メンバー」列から各アドレスを運営メンバーと紐付け・解除できます。ロール列をクリックすると、各メンバーのロールをその場で追加・削除できます。表示名や在籍状態の変更は、名前をクリックすると右側でその場で編集できます。
       </p>
 
       {notConnected ? (
@@ -283,6 +331,7 @@ export function UserListPage() {
         onApply={applySync}
         onCancel={() => setPreviewOpen(false)}
       />
+      <MemberLinkDialog open={!!linkAccount} account={linkAccount} onClose={() => setLinkAccount(null)} />
     </div>
   );
 }

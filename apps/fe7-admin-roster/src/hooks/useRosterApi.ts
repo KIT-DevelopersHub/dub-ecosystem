@@ -3,7 +3,7 @@
 // roll back on error; revoke / permission-bundle save / status change wait for the
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import type { identity, common, auditLog, auth, chat } from "@dub/types";
+import type { identity, common, auditLog, auth, chat, member } from "@dub/types";
 import { isErrorResponse } from "@dub/errors";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
@@ -392,6 +392,83 @@ export function useCreateEmailAddress() {
   return useMutation({
     mutationFn: (req: CreateEmailAddressRequest) => api.createEmailAddress(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+  });
+}
+
+// ---- 運営メンバー紐付け (メール名簿 ↔ 運営メンバー) --------------------------------
+// The メール名簿 (identity_users) side links each @developershub.jp account to an existing
+// 運営メンバー — the REVERSE direction of fe2's member→account LinkIdentityDialog. Both write
+// the SAME `member.identityUserId` bridge (single source of truth); the server enforces the
+// 1:1 constraint (MEMBER_IDENTITY_ALREADY_LINKED 409). Optimistic per [[optimistic-ui-principle]].
+
+/** 運営メンバー一覧 (member-service overview). Read to show which member each email row is
+ *  linked to, and to power the「運営メンバーと紐付け」picker. Needs identity:read (gateway). */
+export function useMembersOverview(): UseQueryResult<member.MembersOverview> {
+  const { api } = useRosterContext();
+  return useQuery({ queryKey: queryKeys.membersOverview(), queryFn: () => api.listMembersOverview(), staleTime: 60_000 });
+}
+
+/** Patch the members-overview cache so a link/unlink reflects instantly (shared helper). */
+function setMemberIdentityInCache(
+  qc: ReturnType<typeof useQueryClient>,
+  memberId: string,
+  identityUserId: string | null,
+): member.MembersOverview | undefined {
+  const key = queryKeys.membersOverview();
+  const prev = qc.getQueryData<member.MembersOverview>(key);
+  if (prev) {
+    qc.setQueryData<member.MembersOverview>(key, {
+      ...prev,
+      members: prev.members.map((m) =>
+        m.id === memberId ? { ...m, identityUserId, version: m.version + 1 } : m,
+      ),
+    });
+  }
+  return prev;
+}
+
+/** OPTIMISTIC: link an 運営メンバー to a developershub.jp/identity account (メール名簿側)。 */
+export function useLinkMemberIdentity() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation<member.Member, unknown, { member: member.Member; identityUserId: common.UserId }, { prev: member.MembersOverview | undefined }>({
+    mutationFn: ({ member: m, identityUserId }) =>
+      api.linkMemberIdentity(m.id, { identityUserId, version: m.version }),
+    onMutate: async ({ member: m, identityUserId }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.membersOverview() });
+      const prev = setMemberIdentityInCache(qc, m.id, identityUserId);
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKeys.membersOverview(), ctx.prev);
+      const p = presentError(err);
+      toast({ kind: "error", title: "運営メンバーと紐付けできませんでした", description: "message" in p ? p.message : undefined });
+    },
+    onSuccess: () => toast({ kind: "success", title: "運営メンバーと紐付けました" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.membersOverview() }),
+  });
+}
+
+/** OPTIMISTIC: unlink an 運営メンバー from its account (メール名簿側)。identityUserId=null via PATCH. */
+export function useUnlinkMemberIdentity() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation<member.Member, unknown, { member: member.Member }, { prev: member.MembersOverview | undefined }>({
+    mutationFn: ({ member: m }) => api.patchMember(m.id, { identityUserId: null, version: m.version }),
+    onMutate: async ({ member: m }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.membersOverview() });
+      const prev = setMemberIdentityInCache(qc, m.id, null);
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKeys.membersOverview(), ctx.prev);
+      const p = presentError(err);
+      toast({ kind: "error", title: "紐付けを解除できませんでした", description: "message" in p ? p.message : undefined });
+    },
+    onSuccess: () => toast({ kind: "success", title: "紐付けを解除しました" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.membersOverview() }),
   });
 }
 
