@@ -1,14 +1,16 @@
 // NotificationListItem — one inbox row. Clicking the row marks read + navigates to
 // the resolved linkUrl (FE5 §2-2, test 8). Unread rows carry a dot + aria state.
 //
-// When `onMarkUnread` is supplied, a read row also exposes a quiet trailing
-// "未読にする" toggle (restore to unread — the inverse of click-to-read). The row is a
-// container <div> (not a single <button>) so the toggle is a real sibling button and
-// interactive controls are never nested. The toggle reserves its own trailing cell, so
-// it never shifts the row layout.
+// When `onMarkUnread` is supplied, a read row also exposes a trailing "未読にする"
+// action (restore to unread — the inverse of click-to-read). It is a small ghost
+// button with an ALWAYS-VISIBLE text label (not an icon-only/hover-tooltip control):
+// text-primary on the surface reads at high contrast, so the affordance is legible and
+// discoverable. The row is a container <div> (not a single <button>) so the action is a
+// real sibling button and interactive controls are never nested; it reserves its own
+// trailing cell, so it never shifts the row layout.
 
 import type { KeyboardEvent, ReactNode } from "react";
-import { Badge, IconButton, Tooltip } from "@dub/ui";
+import { Badge, Button, Icon } from "@dub/ui";
 import type { InboxItem } from "../contracts/notification-api";
 import { resolveCategory, NOTIFICATION_CATEGORY_META } from "../lib/type-dictionary";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -77,16 +79,16 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
       </button>
       {canMarkUnread ? (
         <div className={styles.trailing}>
-          <Tooltip content="未読にする">
-            <IconButton
-              name="inbox"
-              size="sm"
-              variant="ghost"
-              aria-label={`未読にする: ${item.title}`}
-              testId={`fe5-inbox-markunread-${item.id}`}
-              onClick={() => onMarkUnread?.(item)}
-            />
-          </Tooltip>
+          <Button
+            variant="secondary"
+            size="sm"
+            iconLeft={<Icon name="inbox" size="sm" aria-hidden="true" />}
+            className={styles.markUnread}
+            testId={`fe5-inbox-markunread-${item.id}`}
+            onClick={() => onMarkUnread?.(item)}
+          >
+            未読にする
+          </Button>
         </div>
       ) : null}
     </div>

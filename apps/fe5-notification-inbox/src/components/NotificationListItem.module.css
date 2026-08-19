@@ -21,13 +21,18 @@
   border-left: 3px solid transparent;
 }
 
-/* Trailing cell holds the quiet "未読にする" toggle, aligned with the row. */
+/* Trailing cell holds the always-visible "未読にする" action, aligned with the row. */
 .trailing {
   display: flex;
   align-items: center;
   padding: 0 var(--dub-space-3);
   background: var(--dub-color-surface-base);
   flex: none;
+}
+
+/* Keep the label on one line so the bordered button never wraps in a tight cell. */
+.markUnread {
+  white-space: nowrap;
 }
 
 .item:hover {
