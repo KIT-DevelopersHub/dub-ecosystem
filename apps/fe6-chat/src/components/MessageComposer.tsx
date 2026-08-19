@@ -5,7 +5,7 @@
 // disable (design §2-2, §7). Attachment is a fileId hand-off (upload lives in
 // file-meta) — here it is a stubbed affordance. Test-ids preserved for units.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Icon } from "@dub/ui";
+import { Icon, isImeComposing } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { common } from "@dub/types";
 import { applyMention, detectMentionTrigger } from "../lib/mentions";
@@ -54,6 +54,10 @@ export function MessageComposer({
   const [attachError, setAttachError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Tracks IME composition so the 変換確定 Enter never triggers submit / mention pick /
+  // menu nav. Backs up isImeComposing() for browsers whose confirm keydown reports
+  // isComposing=false right before compositionend.
+  const composingRef = useRef(false);
 
   useEffect(() => {
     // reset attachments when switching channels (drafts persist; files don't)
@@ -180,6 +184,9 @@ export function MessageComposer({
   }, [canSend, text, attachments, channelId, onSend]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 変換確定 Enter (and any keydown mid-composition) must never submit, pick a
+    // mention, or drive menu nav — let the IME own it.
+    if (composingRef.current || isImeComposing(e)) return;
     if (candidates.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -365,6 +372,12 @@ export function MessageComposer({
           onKeyUp={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={onKeyDown}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
         />
 
         <div className={styles.composerBottom}>

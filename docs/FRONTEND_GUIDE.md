@@ -218,6 +218,25 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 - 状態: 選択中は `aria-current` / 展開は `aria-expanded` / エラーは `role="alert"`。
 - コントラスト: テキストは `--dub-color-text-*`、薄字でも `text-muted` 止まり（さらに薄くしない）。
 
+### 6.1 テキスト入力の Enter は IME 安全に（必須）
+
+日本語などの IME で変換候補を確定する Enter（変換確定 Enter）は、`keydown` が
+`isComposing === true`（旧ブラウザは `keyCode === 229`）の状態で発火する。**Enter で送信/確定する
+テキスト入力を自作するときは、必ず `@dub/ui` の共有プリミティブを通す**。これを踏まないと、
+チャット送信欄などで「変換を確定しただけ」なのに送信されてしまう。
+
+- 送信専用の欄（Enter で送信 / Shift+Enter で改行）は `useEnterToSubmit(onSubmit)` を使い、
+  返ってくる `{ onKeyDown, onCompositionStart, onCompositionEnd }` を入力要素にそのまま展開する。
+- `keydown` で送信以外の処理も分岐する複雑な欄（メンション候補・整形ショートカット等）は、
+  ハンドラ先頭で `if (isImeComposing(e)) return;` を必ず入れる（＋堅牢性のため composition ref も併用）。
+- ネイティブ `<form>` の Enter 送信（`<Form onSubmit>`）はブラウザが変換確定 Enter を送信しないので追加対応は不要。
+
+```tsx
+import { useEnterToSubmit } from "@dub/ui";
+const enter = useEnterToSubmit(send);        // Enter=送信 / Shift+Enter=改行 / 変換確定 Enter=何もしない
+<textarea value={text} onChange={...} {...enter} />
+```
+
 ## 7. 命名規約
 
 - コンポーネント = PascalCase（`EmailAddressSelect`）。hook = `useCamelCase`（`useEmailAddressInput`）。
@@ -241,5 +260,6 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 - [ ] **空データを `EmptyState` で明示**し、「読み込み中」と描き分けているか（§5.1）
 - [ ] 編集操作は**楽観的 UI**（先に反映 → 失敗でロールバック）にしたか（§5.3）
 - [ ] `aria-label` / `label`+`htmlFor` / フォーカスリングを満たすか
+- [ ] Enter で送信/確定する自作テキスト入力は `useEnterToSubmit` / `isImeComposing` を通したか（§6.1・変換確定 Enter で誤送信しない）
 - [ ] `testId` を既存から変えていないか
 - [ ] `typecheck` 緑 / 単体テスト緑（重い実ブラウザ E2E は別工程）
