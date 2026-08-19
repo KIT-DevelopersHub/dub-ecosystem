@@ -30,6 +30,11 @@ test("(a) public /participate accepts split 姓/名 + emails + phone and confirm
   await page.getByTestId("participation-school-email").fill("koukai@school.ac.jp");
   await page.getByTestId("participation-gmail").fill("koukai.taro@gmail.com");
   await page.getByTestId("participation-phone").fill("090-1234-5678");
+  // 希望チーム(参加したい班) / 希望する活動 は実際には選べないため削除済み: 存在しないこと。
+  await expect(page.getByTestId("participation-team")).toHaveCount(0);
+  await expect(page.getByTestId("participation-activity")).toHaveCount(0);
+  await expect(page.getByText("参加したい班を選べます")).toHaveCount(0);
+  await expect(page.getByText("希望する活動")).toHaveCount(0);
   await page.screenshot({ path: shot("01-public-form.png"), fullPage: true });
 
   await page.getByTestId("participation-submit").click();
