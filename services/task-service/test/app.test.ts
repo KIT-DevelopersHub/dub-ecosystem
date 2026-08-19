@@ -664,3 +664,86 @@ describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory re
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
 });
+
+// send / receive (ADR-0007): POST /task-requests branches server-side on team membership.
+// Default caller is usr_alice (userInit). member.teams maps identityUserId → teamIds.
+describe("POST /task-requests (send / 送る)", () => {
+  const issue = (
+    app: Hono,
+    body: Record<string, unknown>,
+    init: (method: string, body?: unknown) => RequestInit = userInit,
+  ) => app.request("/task-requests", init("POST", body));
+
+  it("self → materialises a task immediately (kind:task), assigned to the caller", async () => {
+    const { h, app } = setup();
+    const res = await issue(app, { toUserId: "usr_alice", title: "自分用タスク", eventId: "evt_1" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as task.IssueTaskRequestResponse;
+    expect(body.kind).toBe("task");
+    if (body.kind !== "task") throw new Error("expected task");
+    expect(body.task.assigneeId).toBe("usr_alice");
+    expect(body.task.createdBy).toBe("usr_alice");
+    expect(h.events.byName("task.created")).toHaveLength(1);
+    expect(h.events.byName("task.assigned")).toHaveLength(1);
+    expect(h.events.byName("task.request.created")).toHaveLength(0);
+    expect(h.repo.requests.size).toBe(0);
+  });
+
+  it("same team → materialises a task immediately, team = the shared team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_alice", ["team_dev"]);
+    h.member.teams.set("usr_bob", ["team_dev", "team_other"]);
+    const res = await issue(app, { toUserId: "usr_bob", title: "実装おねがい", eventId: "evt_1" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as task.IssueTaskRequestResponse;
+    if (body.kind !== "task") throw new Error("expected task");
+    expect(body.task.assigneeId).toBe("usr_bob");
+    expect(body.task.teamId).toBe("team_dev"); // the intersection
+    expect(h.repo.requests.size).toBe(0);
+  });
+
+  it("other team → creates a pending request (kind:request) + task.request.created, no task", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_alice", ["team_dev"]);
+    h.member.teams.set("usr_bob", ["team_sponsor"]);
+    const res = await issue(app, { toUserId: "usr_bob", title: "スポンサー確認", eventId: "evt_1" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as task.IssueTaskRequestResponse;
+    expect(body.kind).toBe("request");
+    if (body.kind !== "request") throw new Error("expected request");
+    expect(body.request).toMatchObject({
+      state: "pending",
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+      fromTeamId: "team_dev",
+      toTeamId: "team_sponsor",
+    });
+    expect(h.events.byName("task.request.created")).toHaveLength(1);
+    expect(h.events.byName("task.request.created")[0]!.payload).toMatchObject({
+      requestId: body.request.id,
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+    });
+    expect(h.events.byName("task.created")).toHaveLength(0);
+    expect(h.repo.requests.size).toBe(1);
+  });
+
+  it("400 VALIDATION_FAILED when toUserId or title is missing", async () => {
+    const { app } = setup();
+    expect((await issue(app, { title: "no target" })).status).toBe(400);
+    expect((await issue(app, { toUserId: "usr_bob" })).status).toBe(400);
+  });
+
+  it("400 when the receiver does not exist", async () => {
+    const { h, app } = setup();
+    h.identity.unknown.add("usr_ghost");
+    const res = await issue(app, { toUserId: "usr_ghost", title: "宛先不明" });
+    expect(res.status).toBe(400);
+  });
+
+  it("400 when a service principal tries to issue (no from identity)", async () => {
+    const { app } = setup();
+    const res = await issue(app, { toUserId: "usr_bob", title: "svc" }, serviceInit);
+    expect(res.status).toBe(400);
+  });
+});
