@@ -110,8 +110,8 @@ export function createApp(deps: AppDeps): Hono {
   // ---- identity linking (#1) ----
   // Reverse lookup FIRST so the literal segment isn't shadowed by /people/:id/... routes.
   app.get("/members/people/by-identity/:identityUserId", authz.requirePermission(READ), async (c) => {
-    const member = await svc.getByIdentityUserId(reqCtx(c), c.req.param("identityUserId"));
-    return c.json({ member });
+    const found = await svc.getByIdentityUserId(reqCtx(c), c.req.param("identityUserId"));
+    return c.json({ member: found } satisfies member.MemberByIdentityResponse);
   });
   app.post("/members/people/:id/identity-link", authz.requirePermission(WRITE), async (c) => {
     const body = await readJson<member.LinkIdentityRequest>(c);

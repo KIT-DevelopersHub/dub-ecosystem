@@ -4,7 +4,7 @@ import type { Fetcher } from "@cloudflare/workers-types";
 import { createServiceClient, type RequestContext } from "@dub/http";
 import { DubError, isDubError, CommonErrorCodes } from "@dub/errors";
 import { createAuthClient } from "@dub/auth-client";
-import type { event, identity } from "@dub/types";
+import type { event, identity, member, common } from "@dub/types";
 import type { Principal } from "./principal";
 
 // ---- event-service: eventId existence + archived state ----
@@ -45,6 +45,34 @@ export function createServiceBindingIdentityClient(binding: Fetcher): IdentityCl
         return true;
       } catch (err) {
         if (isDubError(err) && err.status === 404) return false;
+        throw err;
+      }
+    },
+  };
+}
+
+// ---- member-service: login account → team memberships ----
+// Resolves an identity (login) userId to the teamIds of the 運営メンバー linked to it.
+// Powers 送る・受け取る self/other-team routing: the server (never the client) decides
+// whether an issued request materialises immediately (self / same-team) or waits for the
+// receiver's approval (other team). A login with no linked member (or no teams) → [].
+export interface MemberClient {
+  teamsOfUser(ctx: RequestContext, identityUserId: string): Promise<common.TeamId[]>;
+}
+
+export function createServiceBindingMemberClient(binding: Fetcher): MemberClient {
+  const client = createServiceClient(binding, { service: "member-service", caller: "task-service" });
+  return {
+    async teamsOfUser(ctx, identityUserId) {
+      try {
+        const res = await client.get<member.MemberByIdentityResponse>(
+          ctx,
+          `/members/people/by-identity/${identityUserId}`,
+        );
+        return res.member?.teamIds ?? [];
+      } catch (err) {
+        // No member linked to this login ⇒ treat as "no teams" (not an error).
+        if (isDubError(err) && err.status === 404) return [];
         throw err;
       }
     },
