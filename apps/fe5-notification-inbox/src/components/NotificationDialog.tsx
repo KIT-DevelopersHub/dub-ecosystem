@@ -69,6 +69,7 @@ function NotificationDialogBody({ onClose }: { onClose: () => void }): ReactNode
         loading={inbox.loading}
         error={inbox.error}
         onActivate={onActivate}
+        onMarkUnread={(item) => void inbox.markUnread(item.id)}
         onLoadMore={() => void inbox.loadMore()}
         onRetry={() => void inbox.reload()}
       />

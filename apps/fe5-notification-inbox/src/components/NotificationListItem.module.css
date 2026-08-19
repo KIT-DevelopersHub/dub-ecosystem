@@ -1,15 +1,33 @@
+/* Row wrapper: the main clickable button + an optional trailing action cell share
+   one border-bottom so the toggle never adds a visual seam. */
+.row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+}
+
 .item {
   display: flex;
   gap: var(--dub-space-3);
   align-items: flex-start;
   padding: var(--dub-space-3) var(--dub-space-4);
-  border-bottom: 1px solid var(--dub-color-border-default);
   background: var(--dub-color-surface-base);
   color: var(--dub-color-text-primary);
   cursor: pointer;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   border-left: 3px solid transparent;
+}
+
+/* Trailing cell holds the quiet "未読にする" toggle, aligned with the row. */
+.trailing {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--dub-space-3);
+  background: var(--dub-color-surface-base);
+  flex: none;
 }
 
 .item:hover {

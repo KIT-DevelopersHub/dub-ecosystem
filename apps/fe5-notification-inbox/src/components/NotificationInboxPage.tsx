@@ -85,6 +85,7 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
         loading={inbox.loading}
         error={inbox.error}
         onActivate={onActivate}
+        onMarkUnread={(item) => void inbox.markUnread(item.id)}
         onLoadMore={() => void inbox.loadMore()}
         onRetry={() => void inbox.reload()}
       />
