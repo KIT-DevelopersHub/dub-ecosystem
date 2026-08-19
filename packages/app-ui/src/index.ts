@@ -25,7 +25,6 @@ export { RolePicker, type RolePickerProps, type RoleOption } from "./components/
 
 export {
   TaskSearchSelect,
-  rememberTaskSearch,
   type TaskSearchOption,
   type TaskChipAction,
   type TaskSearchSelectProps,

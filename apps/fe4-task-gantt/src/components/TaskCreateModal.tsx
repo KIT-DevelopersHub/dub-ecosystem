@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
-import { TaskSearchSelect, rememberTaskSearch } from "@dub/app-ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
-import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
+import { PredecessorPicker } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
 
 export interface TaskDraft {
@@ -108,8 +108,6 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
       // Close ONLY on success — a failed create keeps the form (with its input) open
       // so the user can retry after reading the error dialog. Success shows a toast.
       if (ok !== false) {
-        rememberPredecessors(deps);
-        if (parentId) rememberTaskSearch("fe4:recent-parents", [parentId]);
         reset();
         onClose();
       }
@@ -225,10 +223,9 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
           <TaskSearchSelect<common.TaskId>
             value={parentId}
             options={parentOptions}
-            placeholder="タスク名で検索して親に設定…"
+            placeholder="タスク名で検索・一覧から選択…"
             emptyOptionsLabel="親にできるタスクがありません"
             hint="空欄のままなら親なし（トップレベル）"
-            recentKey="fe4:recent-parents"
             onChange={(next) => {
               setParentId(next);
               // dependencies must stay within the new scope — drop the out-of-scope ones.

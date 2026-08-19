@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
-import { TaskSearchSelect, rememberTaskSearch } from "@dub/app-ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -157,8 +157,6 @@ export function TaskDetailPanel({
       patch.dueAt = nextDueIso;
     }
     if (parentChanged) patch.parentTaskId = parentId;
-    // Surface a newly-chosen parent in the「最近選んだタスク」suggestions next time.
-    if (parentChanged && parentId) rememberTaskSearch("fe4:recent-parents", [parentId]);
     onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
   };
 
@@ -276,10 +274,9 @@ export function TaskDetailPanel({
           <TaskSearchSelect<common.TaskId>
             value={parentId}
             options={canWrite ? parentOptions : []}
-            placeholder="タスク名で検索して親に設定…"
+            placeholder="タスク名で検索・一覧から選択…"
             emptyOptionsLabel="親にできるタスクがありません"
             hint="空欄のままなら親なし（トップレベル）"
-            recentKey="fe4:recent-parents"
             disabled={!canWrite}
             onChange={(next) => {
               if (!canWrite) return;

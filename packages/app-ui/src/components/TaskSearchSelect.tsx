@@ -5,10 +5,10 @@
 //   • 先行タスク (依存) — `multiple` : many chips, optional per-chip action.
 //   • 親タスク (親子) — single       : at most one chip; 空(no chip)=無し, 選択=有り.
 //
-// Instead of listing every task (which grows unbounded) it offers incremental
-// name search plus an optional set of recently-chosen suggestions (Notion-style
-// combobox). See docs/FRONTEND_GUIDE.md「how to add a composite」.
-import { useMemo, useRef, useState, type ReactNode } from "react";
+// On focus it opens a dropdown of ALL candidate options (scrollable when there are
+// many); typing narrows the list by name. Choose with the mouse OR the keyboard
+// (↑/↓ to move, Enter to pick). See docs/FRONTEND_GUIDE.md「how to add a composite」.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isImeComposing } from "@dub/ui";
 import styles from "./TaskSearchSelect.module.css";
 
@@ -30,13 +30,8 @@ interface BaseProps<Id extends string> {
   placeholder?: string;
   /** Shown as the input placeholder when there are no options at all. */
   emptyOptionsLabel?: string;
-  /** Shown under the menu when a query matches nothing. */
+  /** Shown in the menu when a query matches nothing. */
   noMatchLabel?: string;
-  /** localStorage key for the "最近選んだタスク" suggestions; omit to disable recents. */
-  recentKey?: string;
-  /** Shown on empty focus when `recentKey` is set but there's no history yet, so the
-   *  feature is discoverable before any task has been chosen. */
-  recentsEmptyLabel?: string;
   disabled?: boolean;
   testId?: string;
 }
@@ -62,46 +57,21 @@ export type TaskSearchSelectProps<Id extends string> =
   | TaskSearchSelectSingleProps<Id>
   | TaskSearchSelectMultiProps<Id>;
 
-// On focus (empty query) we suggest at most this many recently-chosen tasks — a
-// short「最近選んだタスク」shortlist, not a full history dump. Fixed at 2 so the
-// suggestion never crowds the field; typing switches to full search results.
-const RECENT_MAX = 2;
-const RECENT_STORE_MAX = 12;
-
-function readRecent(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Persist recently-chosen task ids under `key` (most-recent first, de-duped). */
-export function rememberTaskSearch(key: string, ids: readonly string[]): void {
-  if (!key || ids.length === 0) return;
-  try {
-    const prev = readRecent(key);
-    const merged = [...ids, ...prev].filter((v, i, a) => a.indexOf(v) === i).slice(0, RECENT_STORE_MAX);
-    localStorage.setItem(key, JSON.stringify(merged));
-  } catch {
-    /* ignore quota / disabled storage */
-  }
-}
-
 /**
- * Shared searchable task selector. Single (親タスク) and multi (先行タスク) modes
- * render the same combobox; the only differences are chip count (≤1 vs many) and
- * whether picking replaces or appends.
+ * Shared task selector. Single (親タスク) and multi (先行タスク) modes render the
+ * same combobox; the only differences are chip count (≤1 vs many) and whether
+ * picking replaces or appends.
  */
 export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSelectProps<Id>) {
-  const { options, placeholder, emptyOptionsLabel, noMatchLabel, recentKey, recentsEmptyLabel, disabled, testId } = props;
+  const { options, placeholder, emptyOptionsLabel, noMatchLabel, disabled, testId } = props;
   const multiple = props.multiple === true;
 
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const composingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const byId = useMemo(() => new Map(options.map((o) => [o.id, o])), [options]);
 
@@ -117,20 +87,31 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
 
   const noOptions = options.length === 0;
 
-  const recentIds = useMemo(() => {
-    if (!recentKey) return [] as Id[];
-    return readRecent(recentKey)
-      .filter((id): id is Id => byId.has(id as Id) && !selectedIds.includes(id as Id))
-      .slice(0, RECENT_MAX);
-  }, [recentKey, byId, selectedIds]);
-
-  const matches = useMemo(() => {
+  // The candidate list: every not-yet-selected option, narrowed by the query.
+  // No cap — the menu scrolls (see .module.css max-height + overflow-y).
+  const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [] as TaskSearchOption<Id>[];
-    return options
-      .filter((o) => !selectedIds.includes(o.id) && o.title.toLowerCase().includes(q))
-      .slice(0, 8);
+    return options.filter(
+      (o) => !selectedIds.includes(o.id) && (q === "" || o.title.toLowerCase().includes(q)),
+    );
   }, [options, selectedIds, query]);
+
+  const open = focused && !noOptions;
+
+  // Reset/clamp the keyboard cursor whenever the visible list changes.
+  useEffect(() => {
+    setActiveIndex((i) => (filtered.length === 0 ? 0 : Math.min(i, filtered.length - 1)));
+  }, [filtered.length]);
+  useEffect(() => {
+    if (open) setActiveIndex(0);
+  }, [open]);
+  // Keep the highlighted row visible while arrowing through a long, scrolled list.
+  useEffect(() => {
+    if (!open) return;
+    const active = menuRef.current?.querySelector('[data-active="true"]');
+    // scrollIntoView is unimplemented in jsdom — guard so tests don't throw.
+    if (active && typeof active.scrollIntoView === "function") active.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
 
   const commit = (id: Id) => {
     if (multiple) {
@@ -150,14 +131,8 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
     }
   };
 
-  // Open the recents dropdown on empty focus whenever the feature is enabled
-  // (recentKey set + options exist) — even with NO history yet, so the menu shows
-  // a "まだありません" placeholder and the feature is visibly present from the start.
-  const recentsEnabled = !!recentKey && !noOptions;
-  const showRecent = focused && query.trim() === "" && recentsEnabled;
-  const showMatches = focused && query.trim() !== "";
-  const menuOptions = showRecent ? recentIds.map((id) => byId.get(id)!).filter(Boolean) : matches;
   const listId = testId ? `${testId}-listbox` : undefined;
+  const optDomId = (id: Id) => (testId ? `${testId}-opt-${id}` : undefined);
 
   return (
     <div className={styles.root} data-testid={testId}>
@@ -201,8 +176,9 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
           ref={inputRef}
           type="text"
           role="combobox"
-          aria-expanded={showRecent || showMatches}
-          aria-controls={showRecent || showMatches ? listId : undefined}
+          aria-expanded={open}
+          aria-controls={open ? listId : undefined}
+          aria-activedescendant={open && filtered[activeIndex] ? optDomId(filtered[activeIndex]!.id) : undefined}
           autoComplete="off"
           className={styles.input}
           placeholder={noOptions ? (emptyOptionsLabel ?? "候補がありません") : (placeholder ?? "タスク名で検索…")}
@@ -219,42 +195,53 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
           }}
           onKeyDown={(e) => {
             if (composingRef.current || isImeComposing(e)) return;
-            // Enter picks the first match — fast keyboard flow.
-            if (e.key === "Enter" && matches.length > 0) {
+            if (e.key === "ArrowDown") {
               e.preventDefault();
-              commit(matches[0]!.id);
+              if (!open) setFocused(true);
+              setActiveIndex((i) => Math.min(i + 1, filtered.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActiveIndex((i) => Math.max(i - 1, 0));
+            } else if (e.key === "Enter") {
+              const pick = filtered[activeIndex];
+              if (pick) {
+                e.preventDefault();
+                commit(pick.id);
+              }
+            } else if (e.key === "Escape") {
+              if (open) {
+                e.preventDefault();
+                inputRef.current?.blur();
+              }
             }
           }}
           data-testid={testId ? `${testId}-input` : undefined}
         />
 
-        {(showRecent || showMatches) && (
-          <div className={styles.menu} id={listId} role="listbox">
-            {showRecent && <div className={styles.menuHint}>最近選んだタスク</div>}
-            {menuOptions.map((o) => (
+        {open && (
+          <div className={styles.menu} id={listId} role="listbox" ref={menuRef}>
+            {filtered.map((o, i) => (
               <button
                 key={o.id}
                 type="button"
+                id={optDomId(o.id)}
                 role="option"
-                aria-selected={false}
+                aria-selected={i === activeIndex}
+                data-active={i === activeIndex ? "true" : undefined}
                 className={styles.option}
                 // onMouseDown (not onClick) so it fires before the input's blur.
                 onMouseDown={(e) => {
                   e.preventDefault();
                   commit(o.id);
                 }}
+                onMouseEnter={() => setActiveIndex(i)}
                 data-testid={testId ? `${testId}-opt-${o.id}` : undefined}
               >
                 <span className={styles.optionText}>{o.title}</span>
                 <span className={styles.optionAdd}>{multiple ? "＋" : "選択"}</span>
               </button>
             ))}
-            {showRecent && recentIds.length === 0 && (
-              <div className={styles.empty} data-testid={testId ? `${testId}-recents-empty` : undefined}>
-                {recentsEmptyLabel ?? "最近選んだタスクはまだありません"}
-              </div>
-            )}
-            {showMatches && matches.length === 0 && (
+            {filtered.length === 0 && (
               <div className={styles.empty}>{noMatchLabel ?? "一致するタスクがありません"}</div>
             )}
           </div>

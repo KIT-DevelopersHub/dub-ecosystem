@@ -48,6 +48,21 @@ export function dependencyScopeOptions(
     .map((t) => ({ id: t.id, title: t.title }));
 }
 
+/**
+ * Candidate WBS parents = the TOP-LEVEL (root) tasks only. Each tree contributes
+ * just its root, so deeply-nested descendants are never offered as a parent — you
+ * attach a task under a top-level work-package (親は一番上の階層のみ). Excludes
+ * `excludeId` (the task being edited) to keep the self/cycle guard.
+ */
+export function topLevelParentOptions(
+  tasks: readonly ScopeTask[],
+  excludeId?: common.TaskId | null,
+): { id: common.TaskId; title: string }[] {
+  return tasks
+    .filter((t) => (t.parentTaskId ?? null) === null && t.id !== excludeId)
+    .map((t) => ({ id: t.id, title: t.title }));
+}
+
 /** Keep only the dependency ids that are in-scope for `parentId` (drop the rest). */
 export function pruneToScope(
   tasks: readonly ScopeTask[],

@@ -32,18 +32,6 @@ if (import.meta.env.DEV) {
     },
     storeSize: () => useTaskStore.getState().list().length,
   };
-  // Demo-only: pre-seed the 親/先行タスク検索の「最近選んだタスク」history so the
-  // suggestion (frontmatter feature) is visible the instant you open the demo —
-  // without having to first pick tasks twice. Only fills EMPTY keys so any real
-  // selection the user makes still takes over. Ids are seeded top-level tasks.
-  try {
-    const seed = ["task_1_2", "task_1_3", "task_1_4"];
-    for (const key of ["fe4:recent-parents", "fe4:recent-predecessors"]) {
-      if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(seed));
-    }
-  } catch {
-    /* storage disabled — the empty-state placeholder still shows the feature */
-  }
 }
 
 const el = document.getElementById("root");

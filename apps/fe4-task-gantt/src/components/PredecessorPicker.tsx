@@ -1,5 +1,5 @@
 import type { common } from "@dub/types";
-import { TaskSearchSelect, rememberTaskSearch, type TaskSearchOption } from "@dub/app-ui";
+import { TaskSearchSelect, type TaskSearchOption } from "@dub/app-ui";
 
 export type PredecessorOption = TaskSearchOption<common.TaskId>;
 
@@ -13,18 +13,12 @@ export interface PredecessorPickerProps {
   testId?: string;
 }
 
-const RECENT_KEY = "fe4:recent-predecessors";
-
-/** Persist recently-chosen predecessors (called on save). */
-export function rememberPredecessors(ids: readonly common.TaskId[]): void {
-  rememberTaskSearch(RECENT_KEY, ids);
-}
-
 /**
  * Searchable predecessor (先行タスク＝依存) picker. A thin FE4 wrapper over the
  * shared @dub/app-ui `TaskSearchSelect` core (multi mode) — the same core also
- * backs the 親タスク search, so both stay in lockstep. Keeps the existing props
- * so every call site / test is unchanged.
+ * backs the 親タスク search, so both stay in lockstep. Focus opens the full list
+ * of same-scope candidates (scrollable); typing narrows it. Keeps the existing
+ * props so every call site / test is unchanged.
  */
 export function PredecessorPicker({ options, value, onChange, onPromoteToParent, testId }: PredecessorPickerProps) {
   return (
@@ -33,9 +27,8 @@ export function PredecessorPicker({ options, value, onChange, onPromoteToParent,
       options={options}
       value={value}
       onChange={onChange}
-      recentKey={RECENT_KEY}
       emptyOptionsLabel="先行にできるタスクがありません"
-      placeholder="タスク名で検索…"
+      placeholder="タスク名で検索・一覧から選択…"
       testId={testId}
       {...(onPromoteToParent
         ? {
