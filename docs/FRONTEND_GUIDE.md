@@ -136,6 +136,18 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
   `renderOverlay?`／`onReorder(event)` を渡し、**並び順の確定ロジック（フラットな `arrayMove`か、
   ツリーの兄弟内移動か）は呼び出し側が `onReorder` で持つ**（例: `apps/fe4-task-gantt` のガントは
   兄弟スコープに写像して既存の順序 API に渡す）。ドラッグの見た目/操作は変えず、確定だけ差し替える。
+- **モーダル（ダイアログ）はコアで組む**: 画面に重ねて出す確認・フォーム・詳細などの
+  モーダルは `@dub/ui` の **`Modal`**（汎用）・**`ConfirmDialog`**（破壊的操作の確認ゲート）・
+  **`ErrorDialog`**（失敗理由の明示）・**`Drawer`**（横から出るパネル）を使う。**独自の
+  overlay/portal を手組みしない・`role="dialog"` を自前で書かない**（scrim・フォーカストラップ・
+  Esc/オーバーレイクリックで閉じる・スクロールロック・フォーカス復帰・`aria-modal`・
+  トークン準拠の見た目を一括で提供する）。とくに **`window.confirm` / `window.alert` /
+  `window.prompt` などブラウザ標準ダイアログを破壊的操作の確認に使わない**（OS 依存の見た目で
+  統一が崩れ、テーマにも追従しない）。確認は `ConfirmDialog`（`onConfirm` は async 可・保留中は
+  ボタンがローディング）に寄せる。ボタン行は `Modal` の `footer` か `ConfirmDialog` に任せ、
+  末尾ボタンを `justifyContent: flex-end` の inline `style` で手組みしない。確認ダイアログと
+  楽観的 UI は両立する（§7）——確認を閉じた瞬間に楽観反映してよい。既存の手組み箇所と
+  寄せ替え順は [ダイアログの統一プラン](./dialog-unification.md) を参照。
 
 ## 5. 状態の扱い (loading / empty / error)
 
