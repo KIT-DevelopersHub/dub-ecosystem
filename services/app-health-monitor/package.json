@@ -1,0 +1,23 @@
+{
+  "name": "@dub/app-health-monitor",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "app-health-monitor — free-tier死活監視. A DO-alarm-driven (no cron) hourly poller that checks each frontend app can open (SPA root 200 + all built JS/CSS chunks exist) and each backend service /health is ok, and alerts admins in-app when a target is down (flapping-suppressed: N consecutive failures to alert, recovery to clear).",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
