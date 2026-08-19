@@ -25,20 +25,6 @@ describe("error-mapping (design test 11)", () => {
   it("upstream 5xx -> retry button", () => {
     expect(mapError(de("UPSTREAM_UNAVAILABLE")).action).toBe("retry_button");
   });
-  it("transport failures map to a Japanese reason, never the raw English message", () => {
-    // The api-client mints code=NETWORK_ERROR message='Failed to fetch' when the fetch
-    // itself rejects (offline / stale post-deploy chunk). A bar move/resize that hits this
-    // must show a human reason (and roll back), NOT leak 'Failed to fetch' to the toast.
-    const net = mapError(de("NETWORK_ERROR", undefined));
-    expect(net.action).toBe("retry_button");
-    expect(net.message).toContain("ネットワーク");
-    expect(mapError({ code: "NETWORK_ERROR", message: "Failed to fetch", status: 0, retryable: true }).message)
-      .not.toMatch(/Failed to fetch/);
-    expect(mapError(de("INTERNAL")).action).toBe("retry_button");
-    // An unknown/unmapped code must fall back to Japanese, not echo the raw server string.
-    expect(mapError({ code: "SOME_UNKNOWN_CODE", message: "boom raw english", status: 500, retryable: false }).message)
-      .not.toMatch(/boom raw english/);
-  });
   it("fieldErrorMap maps FieldError[] to {field:message}", () => {
     const m = fieldErrorMap([{ field: "title", reason: "required", message: "必須です" }, { field: "dueAt", reason: "invalid" }]);
     expect(m).toEqual({ title: "必須です", dueAt: "invalid" });

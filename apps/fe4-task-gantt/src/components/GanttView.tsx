@@ -842,14 +842,6 @@ export function GanttView({
                   if (!b.hasBar) return null;
                   const g = previewGeom(b);
                   const showInside = g.width > 66;
-                  // Resize handles are LEAF-only. A work-package (parent) bar's span is
-                  // derived by gantt-service from its children (the read model returns the
-                  // parent's own startsAt/endsAt as null — see dto.toRow), so a direct
-                  // parent resize can never persist: the PATCH writes the parent task's
-                  // columns but the next GET discards them and re-rolls from children, so
-                  // the bar snaps back ("リサイズが反映されない"). Offer resize only where it
-                  // sticks; a parent is still MOVE-able (drag body → subtree shift).
-                  const resizable = canWrite && !!onSchedule && !parentIds.has(b.taskId);
                   return (
                     <div
                       key={b.taskId}
@@ -863,7 +855,7 @@ export function GanttView({
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
                       )}
                       <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
-                      {resizable && (
+                      {canWrite && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleL}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-l`}
@@ -872,7 +864,7 @@ export function GanttView({
                         />
                       )}
                       {showInside && <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>}
-                      {resizable && (
+                      {canWrite && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleR}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-r`}
