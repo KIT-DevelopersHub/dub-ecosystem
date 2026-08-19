@@ -18,7 +18,7 @@ import type {
   TaskRequestDecision,
   InsertCrossLinkInput,
 } from "../src/repo";
-import type { EventClient, EventRef, IdentityClient, Authorizer } from "../src/clients";
+import type { EventClient, EventRef, IdentityClient, MemberClient, Authorizer } from "../src/clients";
 import type { EventPublisher, Auditor } from "../src/events";
 import type { Principal } from "../src/principal";
 
@@ -374,6 +374,14 @@ export class FakeIdentityClient implements IdentityClient {
   }
 }
 
+export class FakeMemberClient implements MemberClient {
+  /** identityUserId → teamIds. Absent ⇒ [] (no member linked / no teams). */
+  teams = new Map<string, string[]>();
+  async teamsOfUser(_ctx: RequestContext, identityUserId: string): Promise<string[]> {
+    return this.teams.get(identityUserId) ?? [];
+  }
+}
+
 export class FakeIdempotencyStore implements IdempotencyStore {
   seen = new Set<string>();
   async wasProcessed(id: string): Promise<boolean> {
@@ -392,6 +400,7 @@ export interface TestHarness {
   authz: FakeAuthorizer;
   eventClient: FakeEventClient;
   identity: FakeIdentityClient;
+  member: FakeMemberClient;
   idempotency: FakeIdempotencyStore;
   config: AppConfig;
 }
@@ -409,9 +418,10 @@ export function makeHarness(): TestHarness {
   const authz = new FakeAuthorizer();
   const eventClient = new FakeEventClient();
   const identity = new FakeIdentityClient();
+  const member = new FakeMemberClient();
   const idempotency = new FakeIdempotencyStore();
-  const deps: Deps = { config, repo, events, audit, authz, eventClient, identity, idempotency };
-  return { deps, repo, events, audit, authz, eventClient, identity, idempotency, config };
+  const deps: Deps = { config, repo, events, audit, authz, eventClient, identity, member, idempotency };
+  return { deps, repo, events, audit, authz, eventClient, identity, member, idempotency, config };
 }
 
 // ---- request builders ----
