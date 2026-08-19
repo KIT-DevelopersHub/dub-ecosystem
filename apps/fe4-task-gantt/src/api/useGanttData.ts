@@ -8,6 +8,16 @@ export function ganttQueryKey(eventId: common.EventId) {
   return ["tasks", "gantt", eventId] as const;
 }
 
+/** Recompute every row's `hasChildren` from the current parent links, so a parent
+ *  gains its toggle the instant it takes its first child (optimistic subtask add)
+ *  and loses it the instant its last child leaves (re-parent / optimistic delete).
+ *  The gantt read model derives this flag server-side; we mirror it here so the
+ *  optimistic cache matches what the next GET will return. */
+function withRecomputedHasChildren(rows: readonly gantt.GanttRow[]): gantt.GanttRow[] {
+  const withKids = new Set(rows.map((r) => r.parentTaskId).filter((p): p is common.TaskId => !!p));
+  return rows.map((r) => (r.hasChildren === withKids.has(r.taskId) ? r : { ...r, hasChildren: withKids.has(r.taskId) }));
+}
+
 export function useGanttData(eventId: common.EventId) {
   const client = useApiClient();
   const qc = useQueryClient();
@@ -50,14 +60,17 @@ export function useGanttData(eventId: common.EventId) {
   const upsertRowOptimistic = (row: gantt.GanttRow) => {
     qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
       old
-        ? { ...old, rows: [...old.rows.filter((r) => r.taskId !== row.taskId), row] }
+        ? // recompute hasChildren so a childless parent gains its toggle the moment
+          // a subtask is inserted under it (else the new child stays hidden with no toggle)
+          { ...old, rows: withRecomputedHasChildren([...old.rows.filter((r) => r.taskId !== row.taskId), row]) }
         : old,
     );
   };
   /** Optimistically drop a bar (optimistic delete, or discarding a provisional bar). */
   const removeRowOptimistic = (taskId: common.TaskId) => {
     qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
-      old ? { ...old, rows: old.rows.filter((r) => r.taskId !== taskId) } : old,
+      // recompute hasChildren so a parent that just lost its last child drops its toggle
+      old ? { ...old, rows: withRecomputedHasChildren(old.rows.filter((r) => r.taskId !== taskId)) } : old,
     );
   };
   /** Optimistically re-parent (or detach with null) a row so the tree reflects the
@@ -72,9 +85,9 @@ export function useGanttData(eventId: common.EventId) {
       const rows = old.rows.map((r) =>
         r.taskId === taskId ? { ...r, parentTaskId, depth: parentDepth + 1 } : r,
       );
-      // recompute hasChildren from the mutated parent links (an emptied parent drops its toggle)
-      const withKids = new Set(rows.map((r) => r.parentTaskId).filter((p): p is common.TaskId => !!p));
-      return { ...old, rows: rows.map((r) => ({ ...r, hasChildren: withKids.has(r.taskId) })) };
+      // recompute hasChildren from the mutated parent links (an emptied parent drops its
+      // toggle; the new parent gains one)
+      return { ...old, rows: withRecomputedHasChildren(rows) };
     });
   };
   /** Optimistically set the predecessor (先行タスク＝依存) edges of ONE task so the

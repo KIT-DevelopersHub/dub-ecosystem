@@ -181,9 +181,13 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     // t1 now owns a child → renders the expand/collapse toggle
     expect(await screen.findByTestId("fe4-gantt-toggle-t1")).toBeInTheDocument();
-    // expand → the new child row is revealed
-    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-t1"));
+    // a task that JUST became a parent auto-expands, so the new child is visible at
+    // once — no extra click needed (regression: the toggle used to stay collapsed and
+    // the freshly-added child was hidden with no way to see it optimistically).
     expect((await screen.findAllByText("小タスク")).length).toBeGreaterThan(0);
+    // and the toggle still works: collapsing it hides the child again.
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-t1"));
+    await waitFor(() => expect(screen.queryByText("小タスク")).not.toBeInTheDocument());
   });
 
   it("adding a predecessor from the detail panel draws the dependency arrow", async () => {
