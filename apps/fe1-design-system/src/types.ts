@@ -394,6 +394,8 @@ export interface MenuItem {
   disabled?: boolean;
   onSelect: () => void;
   testId?: string;
+  tone?: "default" | "danger"; // "danger" styles destructive/離脱 actions (e.g. logout)
+  dividerBefore?: boolean; // render a separator above this item (group離脱 actions)
 }
 export interface MenuProps extends TestableProps {
   label: string; // trigger button text (also the aria-label when iconOnly)

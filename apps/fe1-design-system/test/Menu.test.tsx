@@ -64,6 +64,38 @@ describe("Menu (dropdown 設定/kebab primitive)", () => {
     expect(screen.getByRole("menu", { name: "設定" })).toBeInTheDocument();
   });
 
+  it("renders a divider before an item and marks danger-toned items", async () => {
+    const onLogout = vi.fn();
+    render(
+      <Menu
+        label="設定"
+        icon="settings"
+        iconOnly
+        testId="menu"
+        items={[
+          { id: "password", label: "パスワード変更", icon: "lock", onSelect: () => {}, testId: "cp" },
+          {
+            id: "logout",
+            label: "ログアウト",
+            icon: "log-out",
+            tone: "danger",
+            dividerBefore: true,
+            onSelect: onLogout,
+            testId: "logout",
+          },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    const logout = screen.getByTestId("logout");
+    expect(logout).toHaveAttribute("data-tone", "danger");
+    // Safe item carries no danger tone.
+    expect(screen.getByTestId("cp")).not.toHaveAttribute("data-tone");
+    await userEvent.click(logout);
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
   it("does not fire onSelect for a disabled item", async () => {
     const onSelect = vi.fn();
     render(
