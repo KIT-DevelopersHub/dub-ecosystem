@@ -76,6 +76,7 @@ export interface ParticipationRow {
   note: string | null;
   status: "submitted";
   matchKind: member.ParticipationMatchKind;
+  reviewState: member.ParticipationReviewState;
   submittedBy: common.UserId;
   submittedAt: common.ISODateTime;
   createdAt: common.ISODateTime;
@@ -117,6 +118,7 @@ export interface MemberRepo {
 
   // participations (参加届)
   upsertParticipation(row: ParticipationRow): Promise<void>;
+  getParticipation(id: string): Promise<ParticipationRow | null>;
   getParticipationByNormalizedName(orgId: common.OrgId, normalizedName: string): Promise<ParticipationRow | null>;
   listParticipations(orgId: common.OrgId): Promise<ParticipationRow[]>;
 }

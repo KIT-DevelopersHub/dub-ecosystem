@@ -1,7 +1,8 @@
 // 参加届 feature tests: the api adapter maps onto the shell ApiClient.request, and
 // ParticipationForm drives the ParticipationApi (fill → validate → submit → サンクス).
-// The submit targets the PUBLIC endpoint and the サンクス is generic (no member echo).
-// All run against a faked ParticipationApi / ApiClient — no real network, green offline.
+// The submit targets the PUBLIC endpoint and the サンクス is generic (no roster reflect —
+// 名簿への反映は運営が回答一覧で確定する). ParticipationListPage の「追加する」フローも
+// ここで検証する。All run against a faked ParticipationApi / ApiClient — no real network.
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -13,7 +14,7 @@ import { createParticipationApi, type ParticipationApi } from "./participationAp
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
 import { ParticipationPage } from "./ParticipationPage.tsx";
 import { ParticipationListPage } from "./ParticipationListPage.tsx";
-import type { Participation, PublicParticipationResponse } from "./contracts.ts";
+import type { Participation, ParticipationCandidate, PublicParticipationResponse } from "./contracts.ts";
 
 function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: RequestInput[] } {
   const calls: RequestInput[] = [];
@@ -24,13 +25,17 @@ function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: Re
   return { api: { request } as unknown as ApiClient, calls };
 }
 
-const CREATED: PublicParticipationResponse = { accepted: true, matchKind: "created_new" };
+const ACCEPTED: PublicParticipationResponse = { accepted: true };
 
 function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
   return {
     listTeams: () => Promise.resolve({ teams: [{ id: "t1", key: "venue", name: "会場", color: null, description: null }] }),
-    submit: vi.fn(() => Promise.resolve(CREATED)),
+    submit: vi.fn(() => Promise.resolve(ACCEPTED)),
     list: vi.fn(() => Promise.resolve({ participations: [] })),
+    candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+    resolve: vi.fn((id: string) =>
+      Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const }, member: null }),
+    ),
     ...overrides,
   } as ParticipationApi;
 }
@@ -56,7 +61,7 @@ async function fillRequired(last = "新規", first = "太郎"): Promise<void> {
 
 describe("createParticipationApi", () => {
   it("submit POSTs the PUBLIC endpoint /api/v1/public/participation", async () => {
-    const { api, calls } = fakeApiClient(CREATED);
+    const { api, calls } = fakeApiClient(ACCEPTED);
     await createParticipationApi(api).submit({ name: "A", schoolEmail: "a@s.jp", gmail: "a@gmail.com" });
     expect(calls[0]).toMatchObject({ method: "POST", path: "/api/v1/public/participation" });
   });
@@ -71,6 +76,18 @@ describe("createParticipationApi", () => {
     const { api, calls } = fakeApiClient({ participations: [] });
     await createParticipationApi(api).list();
     expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/members/participation" });
+  });
+
+  it("candidates GETs the per-participation candidates endpoint", async () => {
+    const { api, calls } = fakeApiClient({ candidates: [] });
+    await createParticipationApi(api).candidates("p_1");
+    expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/members/participation/p_1/candidates" });
+  });
+
+  it("resolve POSTs the per-participation resolve endpoint", async () => {
+    const { api, calls } = fakeApiClient({ participation: SUBMISSION, member: null });
+    await createParticipationApi(api).resolve("p_1", { action: "create" });
+    expect(calls[0]).toMatchObject({ method: "POST", path: "/api/v1/members/participation/p_1/resolve", body: { action: "create" } });
   });
 });
 
@@ -117,7 +134,7 @@ describe("ParticipationPage", () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
-  it("submits split 姓/名 + both emails and shows the サンクス outcome", async () => {
+  it("submits split 姓/名 + both emails and shows a neutral サンクス (no roster claim)", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
     await fillRequired("新規", "太郎");
@@ -133,16 +150,7 @@ describe("ParticipationPage", () => {
       gmail: "taro@gmail.com",
     });
     expect(await screen.findByTestId("participation-thanks")).toBeInTheDocument();
-    expect(screen.getByText(/運営メンバー名簿に追加しました/)).toBeInTheDocument();
-  });
-
-  it("reports an update for a linked_existing match", async () => {
-    const linked: PublicParticipationResponse = { accepted: true, matchKind: "linked_existing" };
-    const api = makeApi({ submit: vi.fn(() => Promise.resolve(linked)) });
-    render(wrap(<ParticipationPage />, api));
-    await fillRequired("既存", "花子");
-    await userEvent.click(screen.getByTestId("participation-submit"));
-    expect(await screen.findByText(/登録済みの情報を更新しました/)).toBeInTheDocument();
+    expect(screen.getByText(/運営が内容を確認します/)).toBeInTheDocument();
   });
 
   it("links to the public form for sharing", () => {
@@ -153,12 +161,12 @@ describe("ParticipationPage", () => {
 });
 
 const SUBMISSION: Participation = {
-  id: "p_1", orgId: "org", memberId: "m_1", name: "黒川", lastName: "黒川", firstName: null,
+  id: "p_1", orgId: "org", memberId: null, name: "黒川", lastName: "黒川", firstName: null,
   nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
   nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null, grade: "3",
   department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
   gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
-  status: "submitted", matchKind: "linked_existing", submittedBy: "u_1",
+  status: "submitted", matchKind: "created_new", reviewState: "pending", submittedBy: "u_1",
   submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",
 };
 
@@ -171,6 +179,8 @@ describe("ParticipationListPage", () => {
     expect(screen.getByText("kurokawa.dev@gmail.com")).toBeInTheDocument();
     // 希望チーム resolves via the canonical team list (t1 → 会場).
     expect(screen.getByText("会場")).toBeInTheDocument();
+    // 未処理は「未処理」バッジ + 「追加する」ボタンが出る。
+    expect(screen.getByTestId("participation-add-p_1")).toBeInTheDocument();
   });
 
   it("opens the detail drawer on row click", async () => {
@@ -187,5 +197,56 @@ describe("ParticipationListPage", () => {
     const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [] })) });
     render(wrap(<ParticipationListPage />, api));
     expect(await screen.findByText("まだ参加届はありません")).toBeInTheDocument();
+  });
+
+  it("「追加する」→ 候補なし → 新規で追加 (create) を確定する", async () => {
+    const resolve = vi.fn((id: string) =>
+      Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const, matchKind: "created_new" as const }, member: null }),
+    );
+    const api = makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-add-p_1"));
+    // 候補なしダイアログ → 新規で追加。
+    expect(await screen.findByTestId("participation-resolve-new")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("participation-resolve-create"));
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "create" }));
+  });
+
+  it("「追加する」→ 招待中候補あり → 同一人物で結合 (link) を確定する", async () => {
+    const candidate: ParticipationCandidate = {
+      memberId: "m_inv", name: "黒川", status: "invited", schoolEmail: "kurokawa@school.ac.jp",
+      gmail: null, version: 3, matchedBy: ["email", "name"],
+    };
+    const resolve = vi.fn((id: string) =>
+      Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const, matchKind: "linked_existing" as const }, member: null }),
+    );
+    const api = makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [candidate] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-add-p_1"));
+    // 候補ありダイアログ → 候補の「この人に結びつける」。
+    await userEvent.click(await screen.findByTestId("participation-link-m_inv"));
+    await waitFor(() =>
+      expect(resolve).toHaveBeenCalledWith("p_1", { action: "link", memberId: "m_inv", expectedVersion: 3 }),
+    );
+  });
+
+  it("「しない」→ 確認 → 対象外 (skip) を確定する", async () => {
+    const resolve = vi.fn((id: string) =>
+      Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "skipped" as const }, member: null }),
+    );
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })), resolve });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-skip-p_1"));
+    const dialog = await screen.findByTestId("participation-skip-confirm");
+    await userEvent.click(within(dialog).getByRole("button", { name: "対象外にする" }));
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "skip" }));
   });
 });

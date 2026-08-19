@@ -6,11 +6,17 @@ import type { gateway } from "@dub/types";
 
 export type Participation = member.Participation;
 export type ParticipationMatchKind = member.ParticipationMatchKind;
+export type ParticipationReviewState = member.ParticipationReviewState;
 export type DesiredActivity = member.DesiredActivity;
 export type Grade = member.Grade;
 export type SubmitParticipationRequest = member.SubmitParticipationRequest;
 export type SubmitParticipationResponse = member.SubmitParticipationResponse;
 export type ListParticipationsResponse = member.ListParticipationsResponse;
+export type ParticipationCandidate = member.ParticipationCandidate;
+export type ListParticipationCandidatesResponse = member.ListParticipationCandidatesResponse;
+export type ResolveParticipationRequest = member.ResolveParticipationRequest;
+export type ResolveParticipationResponse = member.ResolveParticipationResponse;
+export type MemberStatus = member.MemberStatus;
 /** Minimal response from the PUBLIC (unauthenticated) submit endpoint — no member echo. */
 export type PublicParticipationResponse = gateway.PublicParticipationResponse;
 
@@ -32,4 +38,11 @@ export const ACTIVITY_LABEL: Record<DesiredActivity, string> = {
   event: "イベント運営",
   dev: "チーム開発",
   both: "両方",
+};
+
+/** 管理者レビュー状態の表示ラベル（一覧の「運営メンバー反映」列）。 */
+export const REVIEW_STATE_LABEL: Record<ParticipationReviewState, string> = {
+  pending: "未処理",
+  added: "追加済",
+  skipped: "対象外",
 };

@@ -4,21 +4,27 @@
 // next to 運営メンバー管理, so submitting can reflect onto the roster in one hop).
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type {
+  ListParticipationCandidatesResponse,
   ListParticipationsResponse,
   MemberTeam,
   PublicParticipationResponse,
+  ResolveParticipationRequest,
+  ResolveParticipationResponse,
   SubmitParticipationRequest,
 } from "./contracts.ts";
 
 export interface ParticipationApi {
   /** Canonical team list, to populate the 希望チーム select (identity:read). */
   listTeams(): Promise<{ teams: MemberTeam[] }>;
-  /** Submit a 参加届 via the PUBLIC (unauthenticated) endpoint. Self-registers/promotes
-   *  the person on the roster server-side; the response is minimal (accepted + matchKind,
-   *  no member echo) so nothing about the roster leaks to an anonymous submitter. */
+  /** Submit a 参加届 via the PUBLIC (unauthenticated) endpoint. 提出は 参加届 を記録する
+   *  だけで名簿へは反映しない（管理者が一覧で確定する）。応答は最小（accepted のみ）。 */
   submit(input: SubmitParticipationRequest): Promise<PublicParticipationResponse>;
   /** Admin list of submissions (identity:read). */
   list(): Promise<ListParticipationsResponse>;
+  /** 突合候補（招待中/検討中で氏名/メール一致）を取得 (identity:read)。 */
+  candidates(id: string): Promise<ListParticipationCandidatesResponse>;
+  /** 反映確定 (link/create/skip)。roster を書き換えるので identity:admin。 */
+  resolve(id: string, body: ResolveParticipationRequest): Promise<ResolveParticipationResponse>;
 }
 
 const BASE = "/api/v1/members";
@@ -35,5 +41,16 @@ export function createParticipationApi(api: ApiClient): ParticipationApi {
         body: input,
       }),
     list: () => api.request<ListParticipationsResponse>({ method: "GET", path: `${BASE}/participation` }),
+    candidates: (id) =>
+      api.request<ListParticipationCandidatesResponse>({
+        method: "GET",
+        path: `${BASE}/participation/${encodeURIComponent(id)}/candidates`,
+      }),
+    resolve: (id, body) =>
+      api.request<ResolveParticipationResponse, ResolveParticipationRequest>({
+        method: "POST",
+        path: `${BASE}/participation/${encodeURIComponent(id)}/resolve`,
+        body,
+      }),
   };
 }

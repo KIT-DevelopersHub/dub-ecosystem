@@ -118,6 +118,7 @@ export interface PublicParticipationRequest {
 }
 export interface PublicParticipationResponse {
   accepted: boolean;
-  /** How it resolved on the roster (no member identity leaked). */
-  matchKind: "linked_existing" | "created_new";
+  /** @deprecated 名簿への反映は管理者が後から確定するため、提出時点では解決しない。
+   *  常に省略/undefined（後方互換のためフィールドは残置）。 */
+  matchKind?: "linked_existing" | "created_new";
 }
