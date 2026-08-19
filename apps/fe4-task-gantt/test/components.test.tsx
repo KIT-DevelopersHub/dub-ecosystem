@@ -71,6 +71,12 @@ describe("GanttView render (design test 4/7)", () => {
     // container is 3 rows tall (parent + 2 children), inset by 2px top/bottom
     expect(box.style.height).toBe(`${3 * ROW_HEIGHT - 4}px`);
     expect(box.style.top).toBe("2px");
+    // #369 redesign: the zone fill is a header-lane gradient (親行が濃く子が淡い), not a
+    // flat faint tint — a stronger header band (20%) over the parent row stepping to the
+    // 淡い body tint (12%) over the children, both from the brand token.
+    expect(box.style.background).toContain("linear-gradient");
+    expect(box.style.background).toContain("var(--dub-color-brand-500) 20%");
+    expect(box.style.background).toContain("var(--dub-color-brand-500) 12%");
   });
 
   const nestedDto: gantt.GanttChartDTO = {
@@ -96,6 +102,10 @@ describe("GanttView render (design test 4/7)", () => {
     expect(pBox).toHaveAttribute("data-depth", "1");
     expect(gpBox.style.height).toBe(`${4 * ROW_HEIGHT - 4}px`);
     expect(pBox.style.height).toBe(`${3 * ROW_HEIGHT - 4}px`);
+    // Nested zones step up in body tint so the inner box reads as "inside" its ancestor:
+    // depth0 body=12%, depth1 body=15%.
+    expect(gpBox.style.background).toContain("var(--dub-color-brand-500) 12%");
+    expect(pBox.style.background).toContain("var(--dub-color-brand-500) 15%");
   });
 
   it("parent bar is now draggable/resizable too (feedback #39: exposes resize handles)", () => {

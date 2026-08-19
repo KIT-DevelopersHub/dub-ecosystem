@@ -743,24 +743,42 @@
    "8月 / 2026年" labels (vertical-overlay fix). Ordering is guaranteed at the
    component level, not by tuning individual bar z-indexes. */
 .tlBody { position: relative; z-index: 1; isolation: isolate; }
-/* 内包バー (experimental): an open parent's bar grows into a container that
-   ENCLOSES its subtree — the parent period runs horizontally, the descendant
-   rows are wrapped vertically, so どれが親か reads straight off the chart. The
-   translucent fill + brand left-spine + soft border make children sit visibly
-   "inside"; nested boxes (3–4 level WBS) stack, deeper = stronger tint. Purely
+/* 内包ゾーン: an open parent's bar grows into a rounded CARD that ENCLOSES its
+   subtree — the parent period runs horizontally, its descendant rows are wrapped
+   vertically, so「ここが親ゾーン」reads straight off the chart. Redesign (#369):
+   the old 1px/34% border + 5% fill was too faint to see. Now the zone is a crisp
+   solid brand border + a header-lane gradient fill (親行が濃く子が淡い) + a bold
+   left accent rail + a soft card shadow — the boundary and "どこからどこまでが親"
+   are unmistakable, and nested boxes step up in tint to read as "inside". Purely
    visual (pointer-events:none) so drag/resize/toggle/deps are untouched. */
 .tlEncl {
   position: absolute;
   box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--dub-color-brand-500) 34%, var(--dub-color-border-default));
-  border-left-width: 3px;
-  border-left-color: var(--dub-color-brand-500);
-  border-radius: var(--dub-radius-md, 8px);
-  /* fill is set inline (depth-tinted); this is the fallback. */
-  background: color-mix(in srgb, var(--dub-color-brand-500) 5%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dub-color-brand-500) 8%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--dub-color-brand-500) 58%, var(--dub-color-border-default));
+  border-radius: var(--dub-radius-lg, 10px);
+  /* header-lane gradient fill is set inline; this is the fallback. */
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
+  /* crisp inner hairline + a soft card lift so the zone边界 separates from the grid. */
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--dub-color-brand-500) 20%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 3px 10px color-mix(in srgb, var(--dub-color-brand-500) 14%, transparent);
+  overflow: hidden;
   z-index: 0;
   pointer-events: none;
+}
+/* Left accent rail — the「ここが親ゾーン」anchor. A solid brand spine down the zone's
+   left edge, inset top/bottom so it reads as a rounded handle rather than a plain
+   border, and thick enough to catch the eye immediately. */
+.tlEncl::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 var(--dub-radius-sm, 4px) var(--dub-radius-sm, 4px) 0;
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
 }
 .tlWeekend { position: absolute; top: 0; background: var(--dub-color-gray-50); z-index: 0; }
 .tlRowLine {
