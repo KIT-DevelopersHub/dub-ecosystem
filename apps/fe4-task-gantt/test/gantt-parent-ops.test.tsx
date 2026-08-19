@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { renderWithProviders as render } from "./helpers-providers";
 import type { gantt } from "@dub/types";
 import { GanttView } from "../src/components/GanttView";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
