@@ -135,8 +135,23 @@ function routeWebSocket(request: Request, env: Env, url: URL): Response {
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    // Realtime is DO-direct: browsers open wss://<worker>/ws/:id straight to the DO
+    // (HMAC ticket + Origin verified there — no header trust). This needs the worker's
+    // workers.dev subdomain enabled, i.e. reachable from the public internet.
     if (url.pathname.startsWith("/ws/") && request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
       return routeWebSocket(request, env, url);
+    }
+    // …but the HTTP API trusts `x-dub-user-id`, which the api-gateway sets AFTER
+    // verifying the session. That trust is only safe over the private service binding.
+    // Service-binding calls arrive with host "svc" (api-gateway forwardRequest +
+    // @dub/http createServiceClient both use `https://svc/…`); a public workers.dev
+    // request carries the real subdomain host, which cannot be forged to "svc". So gate
+    // the header-trusting API to service-binding callers only — otherwise enabling the
+    // subdomain for /ws would let anyone spoof x-dub-user-id. /health stays public for
+    // uptime probes; /ws already handled above.
+    const viaServiceBinding = url.hostname === "svc";
+    if (!viaServiceBinding && url.pathname !== "/health" && !url.pathname.startsWith("/ws/")) {
+      return new Response("not found", { status: 404 });
     }
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
     const app = createApp(buildDeps(env, requestId));
@@ -154,6 +169,6 @@ export { ChatService } from "./service";
 export { createD1ChatRepo } from "./d1-repo";
 export { InMemoryChatRepo } from "./memory-repo";
 export { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
-export { CHAT_SCHEMA_MIGRATION } from "./schema";
+export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION } from "./schema";
 export { signWsTicket, verifyWsTicket, ticketExpiryMs } from "./wsticket";
 export type { AppDeps } from "./types";

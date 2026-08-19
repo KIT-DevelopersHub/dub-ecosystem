@@ -24,7 +24,7 @@
   align-items: center;
   gap: var(--dub-space-3);
   padding: var(--dub-space-3) 0;
-  background: #2c0c2d;
+  background: var(--dub-color-gray-900);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 .railTile {
@@ -43,7 +43,7 @@
 }
 .railTile.active {
   background: #ffffff;
-  color: #2c0c2d;
+  color: var(--dub-color-gray-900);
   border-radius: var(--dub-radius-md);
 }
 .railTile.ghost {
@@ -78,8 +78,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #3f0e40;
-  color: #cfc3cf;
+  background: var(--dub-color-brand-900);
+  color: var(--dub-color-brand-200);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 .workspaceHeader {
@@ -196,7 +196,7 @@
   background: rgba(255, 255, 255, 0.08);
 }
 .channelItem.active {
-  background: #1164a3;
+  background: var(--dub-color-brand-600);
   color: #ffffff;
 }
 .channelItem.active .channelGlyph,
@@ -236,7 +236,7 @@
   box-sizing: border-box;
 }
 .presenceDot.online {
-  background: #2bac76;
+  background: var(--dub-color-success-500);
 }
 .presenceDot.away {
   background: transparent;
@@ -252,7 +252,7 @@
   height: 18px;
   padding: 0 6px;
   border-radius: var(--dub-radius-full);
-  background: #cd2553;
+  background: var(--dub-color-danger-500);
   color: #ffffff;
   font-size: var(--dub-font-size-xs);
   font-weight: var(--dub-font-weight-bold);
@@ -762,6 +762,13 @@
 .toolbarBtn.codeGlyph {
   font-family: var(--dub-font-family-mono);
 }
+.toolbarBtn.underlineGlyph {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.toolbarBtn.strikeGlyph {
+  text-decoration: line-through;
+}
 .toolbarDivider {
   width: 1px;
   height: 18px;
@@ -954,6 +961,31 @@
 }
 .mdLink:hover {
   text-decoration: underline;
+}
+.mdUnderline {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mdParagraph {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mdParagraph + .mdParagraph {
+  margin-top: var(--dub-space-1);
+}
+.mdQuote {
+  margin: var(--dub-space-1) 0;
+  padding: 2px 0 2px var(--dub-space-3);
+  border-left: 3px solid var(--dub-color-border-strong);
+  color: var(--dub-color-text-secondary);
+}
+.mdList {
+  margin: var(--dub-space-1) 0;
+  padding-left: var(--dub-space-5);
+}
+.mdList li {
+  margin: 1px 0;
 }
 
 /* ── inline edit editor ──────────────────────────────────────────────────── */
@@ -1258,7 +1290,7 @@
   height: 26px;
   flex-shrink: 0;
   border-radius: var(--dub-radius-sm);
-  background: #4a154b;
+  background: var(--dub-color-brand-600);
   color: #fff;
   display: inline-flex;
   align-items: center;

@@ -30,6 +30,10 @@ export interface SharePermission {
   emailAddress: string | null;
   displayName: string | null;
   domain: string | null;
+  /** True when the grant is inherited from an ancestor folder (or shared drive): Drive
+   *  refuses to change/remove it on this item (403 cannotDeletePermission), so the UI
+   *  shows it read-only with a reason instead of an actionable revoke/role control. */
+  inherited: boolean;
 }
 
 export interface ListFilesResult {
@@ -68,7 +72,21 @@ export interface ListRolesResult {
   nextCursor: string | null;
 }
 
-/** One role→file Drive grant; memberCount = members the role expands to. */
+/** A role member the fan-out could not apply (invalid email / Drive refused). */
+export interface SkippedMember {
+  email: string;
+  reason: string;
+}
+
+/** A role member shared only via an invite because the address has no Google account
+ *  (e.g. a Cloudflare Email-Routing alias). The permission is pending until that address
+ *  is backed by a Google account. */
+export interface InvitedMember {
+  email: string;
+}
+
+/** One role→file Drive grant; memberCount = members the role expands to. `skipped`
+ *  (only on the apply/reapply response) lists members Drive refused, with a reason. */
 export interface RoleFileGrant {
   id: string;
   fileId: string;
@@ -79,6 +97,8 @@ export interface RoleFileGrant {
   appliedCount: number;
   grantedBy: string;
   grantedAt: string;
+  skipped?: SkippedMember[];
+  invited?: InvitedMember[];
 }
 
 export interface ListRoleGrantsResult {

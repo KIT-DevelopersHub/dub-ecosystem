@@ -2,6 +2,7 @@
 import type { OrgId, EpochMs } from "./common";
 import type { UserSummary, PermissionKey } from "./identity";
 import type { EventSummary } from "./event";
+import type { TaskStatus } from "./task";
 
 export interface MeResponse {
   user: UserSummary;
@@ -13,7 +14,44 @@ export interface MeResponse {
 export interface BffHomeResponse {
   upcomingEvents: EventSummary[];
   unreadCount: number;
+  // Home dashboard aggregates — each is a small BFF-owned PROJECTION of a real
+  // upstream (task-service / usage-meter / member-service), NOT a copy of that
+  // service's frozen contract. Optional: absent when the source degraded (its
+  // failure is listed in partialErrors instead). The shell renders a per-frame
+  // "取得できませんでした" fallback when the matching source is in partialErrors.
+  taskSummary?: HomeTaskSummary; // caller's own task breakdown (my tasks)
+  usageSummary?: HomeUsageSummary; // free-tier usage snapshot (org-wide)
+  orgStats?: HomeOrgStats; // 運営メンバー / チーム の総数
   partialErrors: UpstreamPartialError[]; // BFF aggregation tolerates partial upstream failure
+}
+
+/** Breakdown of the caller's own tasks by status (source: task-service /tasks). */
+export interface HomeTaskSummary {
+  total: number; // counted across all statuses below
+  byStatus: Record<TaskStatus, number>;
+}
+
+/** One free-tier metric for the home dashboard. `pct` is the wire-precomputed
+ *  0–100 utilisation (null when the metric could not be measured). The shell
+ *  derives health/color from `pct` via the existing usageStatusFromPct mapping —
+ *  the projection carries no status enum so it never drifts from the usage view. */
+export interface HomeUsageMetric {
+  key: string; // upstream metricKey (e.g. "kv_reads_day")
+  label: string; // JP display label
+  pct: number | null;
+}
+
+/** Free-tier usage snapshot (source: usage-meter /usage/summary), projected to just
+ *  the fields the home dashboard shows. `worst` is the single most-stressed metric. */
+export interface HomeUsageSummary {
+  metrics: HomeUsageMetric[];
+  worst: HomeUsageMetric | null;
+}
+
+/** 運営メンバー / チーム の総数 (source: member-service /members/overview). */
+export interface HomeOrgStats {
+  members: number;
+  teams: number;
 }
 
 export interface UpstreamPartialError {
@@ -80,6 +118,7 @@ export interface PublicParticipationRequest {
 }
 export interface PublicParticipationResponse {
   accepted: boolean;
-  /** How it resolved on the roster (no member identity leaked). */
-  matchKind: "linked_existing" | "created_new";
+  /** @deprecated 名簿への反映は管理者が後から確定するため、提出時点では解決しない。
+   *  常に省略/undefined（後方互換のためフィールドは残置）。 */
+  matchKind?: "linked_existing" | "created_new";
 }

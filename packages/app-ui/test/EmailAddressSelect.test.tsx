@@ -36,6 +36,21 @@ describe("EmailAddressSelect", () => {
     expect((input as HTMLInputElement).value).toBe("");
   });
 
+  it("does NOT commit on the IME 変換確定 Enter, but commits on the plain Enter after", () => {
+    render(<Harness />);
+    const input = screen.getByTestId("to");
+    fireEvent.change(input, { target: { value: "a@b.com" } });
+    // 変換確定 Enter (composing) — must not turn into a chip.
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
+    expect(screen.queryByText("a@b.com")).not.toBeInTheDocument();
+    expect((input as HTMLInputElement).value).toBe("a@b.com");
+    // Plain Enter after 確定 — commits.
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("a@b.com")).toBeInTheDocument();
+  });
+
   it("commits on comma and renders the display name for named addresses", () => {
     render(<Harness initial="Ann <ann@x.com>" />);
     expect(screen.getByText("Ann")).toBeInTheDocument();

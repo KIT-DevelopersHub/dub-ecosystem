@@ -266,6 +266,7 @@ function build(): {
         endMs = Date.parse(iso("2026-09-15"));
       }
       const status = s.status ?? defaultStatus(phase, endMs);
+      const startAt = new Date(startMs).toISOString();
       const dueAt = new Date(endMs).toISOString();
       // ---- parent (work-package) row ----
       pushTask({
@@ -277,6 +278,10 @@ function build(): {
         priority: s.priority ?? "medium",
         assigneeId: OWNER[s.team] ?? null,
         teamId: TEAM_ID[s.team] ?? null,
+        // The bar's start lives on the task's real column (startAt) — NOT only in the
+        // rowDates read-model override — so the detail panel's 開始日 shows the SAME
+        // date the bar starts on, and editing it moves the bar (startsAt↔startAt).
+        startAt,
         dueAt,
         origin: "internal",
         archivedAt: null,
@@ -284,7 +289,7 @@ function build(): {
         updatedAt: now,
         version: 1,
       });
-      rowDates[id] = { startsAt: new Date(startMs).toISOString(), endsAt: dueAt };
+      rowDates[id] = { startsAt: startAt, endsAt: dueAt };
       hierarchy[id] = { parentTaskId: null, depth: 0, wbs: s.wbs };
 
       // ---- children (WBS leaves), sliced across the parent's bar ----
@@ -297,6 +302,7 @@ function build(): {
         const cStart = startMs + j * cSlot;
         const cEnd = j === k - 1 ? endMs : startMs + (j + 1) * cSlot;
         const cStatus = defaultStatus(phase, cEnd);
+        const cStartIso = new Date(cStart).toISOString();
         const cDue = new Date(cEnd).toISOString();
         pushTask({
           id: cid,
@@ -307,6 +313,8 @@ function build(): {
           priority: "medium",
           assigneeId: OWNER[s.team] ?? null,
           teamId: TEAM_ID[s.team] ?? null,
+          // real start on the task column (see the parent row above) so 開始日 == bar start.
+          startAt: cStartIso,
           dueAt: cDue,
           origin: "internal",
           archivedAt: null,
@@ -314,7 +322,7 @@ function build(): {
           updatedAt: now,
           version: 1,
         });
-        rowDates[cid] = { startsAt: new Date(cStart).toISOString(), endsAt: cDue };
+        rowDates[cid] = { startsAt: cStartIso, endsAt: cDue };
         hierarchy[cid] = { parentTaskId: id, depth: 1, wbs: w };
       });
     });
@@ -332,8 +340,33 @@ type MockSeedRowDates = Record<
   { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }
 >;
 
-export function createDevClient(): MockApiClient {
+export function createDevClient(opts: { padTo?: number } = {}): MockApiClient {
   const { tasks, rowDates, deps, hierarchy } = build();
+  // Dev/E2E only: pad the event with extra top-level tasks so the timeline can be
+  // exercised past the 200-per-page ceiling (F3 — verify all rows load & render).
+  if (opts.padTo && opts.padTo > tasks.length) {
+    const base = Date.parse("2027-03-01T00:00:00.000Z");
+    for (let i = tasks.length; i < opts.padTo; i++) {
+      const due = new Date(base + (i % 30) * 86_400_000).toISOString();
+      tasks.push({
+        id: `task_pad_${i}`,
+        eventId: DEMO_EVENT_ID,
+        title: `追加タスク #${i}`,
+        description: null,
+        status: "todo",
+        priority: "medium",
+        assigneeId: null,
+        teamId: null,
+        createdBy: DEMO_CURRENT_USER,
+        dueAt: due,
+        origin: "internal",
+        version: 1,
+        archivedAt: null,
+        createdAt: due,
+        updatedAt: due,
+      } as task.Task);
+    }
+  }
   return new MockApiClient({
     currentUserId: DEMO_CURRENT_USER,
     users,

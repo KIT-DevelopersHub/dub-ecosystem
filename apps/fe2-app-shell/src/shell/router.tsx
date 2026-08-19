@@ -13,7 +13,7 @@ import type { ComponentType } from "react";
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { Registry, ResolvedRoute } from "../modules/types.tsx";
 import { RequireAuth, RequirePermission, usePermissions } from "../auth/AuthProvider.tsx";
-import { isAppPublished, isPrivilegedViewer } from "../lib/releaseGate.ts";
+import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 import type { FeatureModuleId } from "../modules/types.tsx";
 import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
@@ -23,6 +23,27 @@ import { PublicParticipationPage, PUBLIC_PARTICIPATION_PATH } from "../features/
 import { openNotificationDialog } from "@dub/fe5-notification-inbox";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
+import { RouteErrorScreen } from "./screens/RouteErrorScreen.tsx";
+import { isChunkLoadError, reloadForStaleChunk } from "../lib/chunkReload.ts";
+
+/** Wrap a lazy route factory so a failed dynamic import (stale hashed chunk after
+ *  a deploy) auto-recovers with a one-time reload instead of surfacing a bare
+ *  "Something went wrong!" — the 通知 / 名簿 が開けない incident. On a chunk-load
+ *  error we reload once to fetch the fresh index.html; the returned never-settling
+ *  promise keeps React in Suspense until the navigation happens. If the loop guard
+ *  suppresses the reload, the original error is rethrown so RouteErrorScreen shows. */
+function lazyRoute(load: () => Promise<{ Component: ComponentType }>): ComponentType {
+  return lazy(() =>
+    load()
+      .then((m) => ({ default: m.Component }))
+      .catch((err: unknown) => {
+        if (isChunkLoadError(err) && reloadForStaleChunk()) {
+          return new Promise<{ default: ComponentType }>(() => {});
+        }
+        throw err;
+      }),
+  );
+}
 
 /** Convert design `:param` segments to TanStack Router `$param`. */
 export function toTanstackPath(path: string): string {
@@ -32,10 +53,12 @@ export function toTanstackPath(path: string): string {
 // Member release-gating on direct navigation (defense in depth for the launcher
 // grey-out, see lib/releaseGate). A general member who deep-links to an app that is
 // not yet member-published gets the permission-denied screen instead of the working
-// page; admins/maintainers (isPrivilegedViewer) bypass it, matching the launcher.
+// page; only full admins (isPrivilegedViewer = identity:admin) bypass it, matching the launcher.
 function RequirePublished({ moduleId, children }: { moduleId: FeatureModuleId; children: JSX.Element }): JSX.Element {
   const { can } = usePermissions();
-  if (isPrivilegedViewer(can) || isAppPublished(moduleId)) return children;
+  // Parity with the launcher (AppShellLayout): an explicit per-app grant (app:<id>:view)
+  // OR admin OR member-publish releases the app; only an unannounced+ungranted app 403s.
+  if (!isReleaseGatedFor(moduleId, can)) return children;
   return <PermissionDeniedScreen />;
 }
 
@@ -120,7 +143,7 @@ export function createShellRouter(
   });
 
   const featureRoutes = registry.routes.map((r) => {
-    const Body = lazy(() => r.lazy().then((m) => ({ default: m.Component })));
+    const Body = lazyRoute(() => r.lazy());
     const Guarded = guard(r, Body);
     return createRoute({
       getParentRoute: () => shellRoute,
@@ -138,5 +161,8 @@ export function createShellRouter(
   return createRouter({
     routeTree,
     defaultNotFoundComponent: NotFoundScreen,
+    // Replace TanStack's bare "Something went wrong!" with a screen that, for a
+    // stale-chunk failure, auto-reloads once (and always offers a manual reload).
+    defaultErrorComponent: RouteErrorScreen,
   });
 }

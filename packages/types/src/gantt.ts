@@ -46,13 +46,29 @@ export interface GanttViewState {
   eventId: EventId;
   zoom: GanttZoom;
   collapsedTaskIds: TaskId[];
+  /** Manual row order (per-user personal ordering set by drag-and-drop in the left
+   *  pane). Additive/optional: absent ⇒ the server's WBS/title ordering is used. A
+   *  task id appearing here pins its position within its sibling group; ids not
+   *  listed keep the default order after the listed ones. Persisted in the same
+   *  per-user view-state JSON blob (no schema change). */
+  orderedTaskIds?: TaskId[];
 }
 export interface GetGanttQuery {
   eventId: EventId;
 }
+/** Body of PATCH /gantt/rows/:taskId — persist a bar's window after a timeline
+ *  drag/resize or a start/due edit. gantt-service maps startsAt → the task's
+ *  startAt and endsAt → the task's dueAt (read-modify-write, optimistic-locked
+ *  upstream). Either value may be null to clear that edge. */
+export interface PatchGanttRowRequest {
+  startsAt: ISODateTime | null;
+  endsAt: ISODateTime | null;
+}
 export interface PutGanttViewRequest {
   zoom: GanttZoom;
   collapsedTaskIds: TaskId[];
+  /** Manual row order (see GanttViewState.orderedTaskIds). Additive/optional. */
+  orderedTaskIds?: TaskId[];
 }
 
 // ── Wire contract (query params) ─────────────────────────────────────────────

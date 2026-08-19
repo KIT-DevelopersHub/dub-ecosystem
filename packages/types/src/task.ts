@@ -30,6 +30,11 @@ export interface Task extends Versioned {
   assigneeId: UserId | null;
   /** Owning team (canonical team.Team). Additive; null = unassigned to a team. */
   teamId?: TeamId | null;
+  /** WBS parent (親タスク). Additive/optional; null/absent ⇒ a top-level row. The
+   *  gantt read model projects this onto GanttRow.parentTaskId to build the tree. */
+  parentTaskId?: TaskId | null;
+  /** WBS code (e.g. "4.9.3") — stable ordering + a legible label. Additive/optional. */
+  wbs?: string | null;
   /**
    * Requester — the user who issued (created) the task. This is the "from" in the
    * from→to relationship the My Tasks hub renders (createdBy → assigneeId). Server
@@ -37,6 +42,13 @@ export interface Task extends Versioned {
    * many existing Task literals across the monorepo need not be touched (additive).
    */
   createdBy?: UserId;
+  /**
+   * Planned start (開始日). Additive/optional; null/absent ⇒ no explicit start — the
+   * gantt read model then derives a bar from `dueAt` (deadline-anchored) or a CPM
+   * schedule. When BOTH `startAt` and `dueAt` are set the bar spans exactly
+   * [startAt, dueAt], so a dateless task can be given a real, arrow-linkable bar.
+   */
+  startAt?: ISODateTime | null;
   dueAt: ISODateTime | null;
   origin: TaskOrigin;
   archivedAt: ISODateTime | null;
@@ -65,11 +77,15 @@ export interface CreateTaskRequest {
   priority?: TaskPriority; // default "medium"
   assigneeId?: UserId;
   teamId?: TeamId | null;
+  /** Planned start (開始日). Additive/optional; omit ⇒ no explicit start. */
+  startAt?: ISODateTime | null;
   dueAt?: ISODateTime;
   origin?: TaskOrigin; // default "internal"; service-role only, else 400
   /** WBS parent (親タスク). Additive/optional; omit or null ⇒ a top-level row.
    *  The gantt read model projects this onto GanttRow.parentTaskId. */
   parentTaskId?: TaskId | null;
+  /** WBS code (e.g. "4.9.3"). Additive/optional. */
+  wbs?: string | null;
 }
 export interface UpdateTaskRequest extends Versioned {
   title?: string;
@@ -78,10 +94,14 @@ export interface UpdateTaskRequest extends Versioned {
   priority?: TaskPriority;
   assigneeId?: UserId | null;
   teamId?: TeamId | null;
+  /** Planned start (開始日). Additive/optional; omit ⇒ unchanged, null ⇒ clear. */
+  startAt?: ISODateTime | null;
   dueAt?: ISODateTime | null;
   /** Re-parent (親子関係の変更) — set to another task id, or null to detach to
    *  top-level. Additive/optional; omit ⇒ parent unchanged. */
   parentTaskId?: TaskId | null;
+  /** WBS code (e.g. "4.9.3"). Additive/optional; omit ⇒ unchanged. */
+  wbs?: string | null;
 }
 export interface ReplaceDependenciesRequest extends Versioned {
   dependsOnIds: TaskId[];

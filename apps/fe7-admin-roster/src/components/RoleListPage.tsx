@@ -6,6 +6,7 @@ import { useRoles, useDeleteRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { RolePermissionsEditor } from "./RolePermissionsEditor";
+import { ChatDeletionPolicySection } from "./ChatDeletionPolicySection";
 import { errorMessage, displayError } from "../lib/errorDisplay";
 import styles from "./RoleListPage.module.css";
 
@@ -134,6 +135,12 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
           ) : null}
         </>
       )}
+      {/* Workspace-wide chat setting — not per-role, so it lives below the role strip.
+          Today all tiers default to 完全に消す(hard); this is the 器 for a future split. */}
+      <div style={{ marginTop: 24 }}>
+        <ChatDeletionPolicySection />
+      </div>
+
       <ConfirmDialog
         title="ロールを削除"
         message={`「${pendingDelete?.name}」を削除します。よろしいですか？`}

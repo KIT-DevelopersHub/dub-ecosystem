@@ -73,14 +73,17 @@ function scopedClient(): MockApiClient {
 describe("replaceDependencies enforces the same-scope rule (判断10)", () => {
   it("allows a dependency between siblings (同じ直接親)", async () => {
     const c = scopedClient();
+    // Response is the wire shape { taskId, dependsOnIds } — NOT a Task with `version`
+    // (F1: matches the real task-service; the old mock returned a Task and hid the bug).
     const res = await api.replaceDependencies(c, "c1", { version: 1, dependsOnIds: ["c2"] });
-    expect(res.version).toBe(2);
+    expect(res).toEqual({ taskId: "c1", dependsOnIds: ["c2"] });
+    expect((res as { version?: number }).version).toBeUndefined();
   });
 
   it("allows a dependency between two top-level parents (親同士)", async () => {
     const c = scopedClient();
     const res = await api.replaceDependencies(c, "P", { version: 1, dependsOnIds: ["Q"] });
-    expect(res.version).toBe(2);
+    expect(res).toEqual({ taskId: "P", dependsOnIds: ["Q"] });
   });
 
   it("rejects a parent↔child dependency (親子間 NG)", async () => {

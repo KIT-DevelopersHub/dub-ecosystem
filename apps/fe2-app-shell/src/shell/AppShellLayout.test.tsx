@@ -104,6 +104,62 @@ describe("AppShellLayout", () => {
     expect(screen.getByText("Chat")).toBeInTheDocument();
   });
 
+  it("hides パスワード変更 behind the 設定 (⚙) menu, opening the dialog from inside it", async () => {
+    // The self-settings导线 only mounts when a shared api-client is wired (showAccount),
+    // so this case passes `api` to the layout — unlike renderShell().
+    const changePassword = vi.fn(() => Promise.resolve());
+    const shellApi = {
+      auth: { me: () => Promise.resolve(ME), changePassword },
+    } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={shellApi}>
+          <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    // The password-change trigger is no longer bare in the header — it lives inside
+    // the 設定 dropdown. Closed menu => the item is not shown.
+    expect(await screen.findByTestId("fe2-settings-menu-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-change-password-open")).not.toBeInTheDocument();
+    // Open 設定 -> the パスワード変更 item appears; clicking it opens the existing dialog.
+    await userEvent.click(screen.getByTestId("fe2-settings-menu-trigger"));
+    const item = screen.getByTestId("fe2-change-password-open");
+    expect(item).toHaveTextContent("パスワード変更");
+    await userEvent.click(item);
+    expect(await screen.findByTestId("fe2-change-password")).toBeInTheDocument();
+  });
+
+  it("puts ログアウト inside the 設定 menu as a danger item below パスワード変更", async () => {
+    const shellApi = {
+      auth: { me: () => Promise.resolve(ME), changePassword: vi.fn(() => Promise.resolve()) },
+    } as unknown as ApiClient;
+    const onLogout = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={shellApi}>
+          <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={onLogout}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
+    // Both items present; logout is danger-toned and ordered AFTER password change.
+    const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
+    expect(items).toEqual(["fe2-change-password-open", "fe2-logout"]);
+    const logout = screen.getByTestId("fe2-logout");
+    expect(logout).toHaveAttribute("data-tone", "danger");
+    // A separator divides the safe settings from the 離脱 action.
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    await userEvent.click(logout);
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
   it("renders injected nav badge from badgeSource inside the launcher", async () => {
     renderShell();
     await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
@@ -111,13 +167,16 @@ describe("AppShellLayout", () => {
     expect(screen.getByText("5")).toBeInTheDocument();
   });
 
-  it("calls onNavigate on launcher tile click and onLogout on logout", async () => {
+  it("calls onNavigate on launcher tile click and onLogout from the 設定 menu", async () => {
     const onNavigate = vi.fn();
     const onLogout = vi.fn();
     renderShell(onNavigate, onLogout);
     await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
     await userEvent.click(screen.getByText("Events"));
     expect(onNavigate).toHaveBeenCalledWith("/events");
+    // ログアウトはヘッダに剥き出しではなく設定(⚙)メニュー内に移動した。開いてから押す。
+    expect(screen.queryByTestId("fe2-logout")).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
     await userEvent.click(screen.getByTestId("fe2-logout"));
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
@@ -132,7 +191,8 @@ describe("AppShellLayout", () => {
 
   // Member release-gating (社長決定 2026-08-14, lib/releaseGate). Apps are NEVER removed
   // from the launcher (消さない); an unpublished app is greyed + disabled for general
-  // members, while admins/maintainers bypass the gate and see every app active.
+  // members, while ONLY full admins (identity:admin) bypass the gate and see every app
+  // active — non-admin operator roles are gated like members (#255, 2026-08-17).
   const GATED_NAV: NavEntry[] = [
     { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
     { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events" },
@@ -163,6 +223,55 @@ describe("AppShellLayout", () => {
     expect(events).toHaveAttribute("title", "準備中（メンバー未公開）");
   });
 
+  it("ENABLES an unpublished app for a non-admin once ロール管理 grants app:<id>:view (#270 fix)", async () => {
+    // organizer-like: not admin, holds event:read AND the per-app grant app:events:view.
+    // Before the fix the release gate greyed events (not member-published) despite the
+    // grant; now the grant releases it. requiredPermissions mirror the real nav (domain +
+    // per-app) so the tile only enables when BOTH are held.
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "event:read", "app:events:view"] };
+    const grantedApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "メール", path: "/mail", icon: "inbox", order: 45, appId: "mail" },
+      { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events", requiredPermissions: ["event:read", "app:events:view"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={grantedApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
+    await userEvent.click(trigger);
+    // granted -> active + clickable (the reported bug: was disabled).
+    expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeEnabled();
+  });
+
+  it("re-greys the app when the per-app grant is revoked (OFF)", async () => {
+    // same viewer WITHOUT app:events:view -> release-gated again.
+    const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "event:read"] };
+    const revokedApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
+    const nav: NavEntry[] = [
+      { label: "イベント", path: "/events", icon: "calendar", order: 10, appId: "events", requiredPermissions: ["event:read", "app:events:view"] },
+    ];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={revokedApi}>
+          <AppShellLayout navEntries={nav} onNavigate={vi.fn()}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    const trigger = await screen.findByTestId("fe2-app-launcher-trigger");
+    await userEvent.click(trigger);
+    expect(screen.getByTestId("fe2-app-launcher-item-events")).toBeDisabled();
+  });
+
   it("does not navigate when a member clicks a greyed (unpublished) tile", async () => {
     const me: gateway.MeResponse = { ...ME, permissions: ["identity:read", "mail:read"] };
     const memberApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
@@ -186,8 +295,8 @@ describe("AppShellLayout", () => {
     expect(onNavigate).toHaveBeenCalledWith("/mail");
   });
 
-  it("admins/maintainers bypass the gate: every app is active", async () => {
-    // holds identity:admin (a dangerous permission) -> privileged -> no greying.
+  it("a full admin (identity:admin) bypasses the gate: every app is active", async () => {
+    // holds identity:admin -> privileged -> no greying (#255 admin-only bypass).
     const me: gateway.MeResponse = { ...ME, permissions: ["identity:admin"] };
     const adminApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -216,8 +325,9 @@ describe("AppShellLayout", () => {
   ];
 
   it("greys an app whose requiredPermissions a privileged viewer still lacks", async () => {
-    // Privileged (holds mail:admin, a dangerous perm → bypasses the release gate) but
-    // does NOT hold identity:admin, so ロール管理 must grey — same as its route 403ing.
+    // Holds mail:admin (both apps use the published appId "mail", so the release gate is
+    // out of the way) but NOT identity:admin, so the identity:admin-gated ロール管理 must
+    // grey via the permission gate — same as its route 403ing.
     const me: gateway.MeResponse = { ...ME, permissions: ["mail:admin", "mail:read"] };
     const maintApi = { auth: { me: () => Promise.resolve(me) } } as unknown as ApiClient;
     const onNavigate = vi.fn();

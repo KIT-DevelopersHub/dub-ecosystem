@@ -193,6 +193,7 @@ Authorization: Bearer <session>
 |---|---|---|---|
 | `zoom` | `"day" \| "week" \| "month"` | ✓ | 列挙外は 400 `VALIDATION_FAILED`（`field: "zoom", reason: "invalid_enum"`） |
 | `collapsedTaskIds` | `string[]` (`TaskId[]`) | ✓ | 非配列 / 非文字列要素は 400（`field: "collapsedTaskIds", reason: "invalid_type"`） |
+| `orderedTaskIds` | `string[]` (`TaskId[]`) | — | 追加/任意。左ペインのドラッグ並べ替えを永続化する個人ごとの手動順。非配列 / 非文字列要素は 400（`field: "orderedTaskIds", reason: "invalid_type"`）。重複は正規化で除去。未指定なら既定の WBS 順 |
 
 - ボディ内の `userId` / `eventId` は無視（userId は信頼ヘッダ、eventId はクエリが正）。
 

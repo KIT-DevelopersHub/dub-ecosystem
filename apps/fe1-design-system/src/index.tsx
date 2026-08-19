@@ -18,6 +18,8 @@ export type {
   SpinnerProps,
   TooltipProps,
   PopoverProps,
+  MenuItem,
+  MenuProps,
   FormProps,
   FormFieldProps,
   TextFieldProps,
@@ -35,6 +37,8 @@ export type {
   LoadMoreProps,
   ModalProps,
   ConfirmDialogProps,
+  ErrorDialogDetail,
+  ErrorDialogProps,
   DrawerProps,
   ToastKind,
   ToastOptions,
@@ -81,6 +85,7 @@ export { Spinner } from "./components/Spinner";
 export { Button, IconButton } from "./components/Button";
 export { Badge, Tag, Avatar } from "./components/Display";
 export { Tooltip, Popover } from "./components/Tooltip";
+export { Menu } from "./components/Menu";
 export { Form, FormField } from "./components/Form";
 export {
   TextField,
@@ -93,7 +98,7 @@ export {
 } from "./components/Inputs";
 export { DataTable } from "./components/DataTable";
 export { Pagination, LoadMore } from "./components/Pagination";
-export { Modal, ConfirmDialog, Drawer } from "./components/Modal";
+export { Modal, ConfirmDialog, Drawer, ErrorDialog } from "./components/Modal";
 export { ToastProvider, useToast } from "./components/Toast";
 export { ThemeProvider } from "./components/ThemeProvider";
 export { AppShell, PageHeader, Stack, Grid, Card, Divider } from "./components/Layout";
@@ -106,6 +111,15 @@ export { Skeleton, SkeletonList, SkeletonTable, SkeletonCard } from "./component
 export { RateLimitNotice, formatRecoveryText } from "./components/RateLimitNotice";
 export { Timeline } from "./components/Timeline";
 export { MessageList } from "./components/MessageList";
+// Drag-to-reorder primitive (floating overlay + neighbour reflow + keyboard a11y).
+// Every reorder UI should use this — see FRONTEND_GUIDE「並べ替え UI」.
+export { SortableList } from "./components/SortableList";
+export type {
+  SortableListProps,
+  SortableItemContext,
+  SortableReorderEvent,
+  SortableDragHandleProps,
+} from "./components/SortableList";
 
 // Timeline geometry helpers (pure, data-agnostic — consumers reuse for D&D/ticks).
 export {
@@ -127,3 +141,7 @@ export type {
 
 // Icon registry (also available at @dub/ui/icons)
 export { iconRegistry } from "./icons";
+
+// Keyboard primitives — IME-safe Enter-to-submit (shared by every text field).
+export { isImeComposing, isSubmitEnter, useEnterToSubmit } from "./utils/keyboard";
+export type { SubmitEnterOptions, EnterToSubmitHandlers } from "./utils/keyboard";

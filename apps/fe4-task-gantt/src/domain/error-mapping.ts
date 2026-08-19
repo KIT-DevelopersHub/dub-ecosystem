@@ -52,8 +52,37 @@ export function mapError(e: DisplayableError): ErrorUx {
     case CommonErrorCodes.UPSTREAM_TIMEOUT:
     case "GANTT_UPSTREAM_UNAVAILABLE":
       return { action: "retry_button", message: "接続できませんでした。再試行してください" };
+    // Browser-side transport failures. The api-client mints these synthetic codes when
+    // the fetch itself rejects (offline / DNS / CORS / a stale post-deploy chunk) — its
+    // raw `.message` is the English "Failed to fetch", which must NEVER reach a toast.
+    // Map them to a human-readable Japanese reason so a bar move/resize that can't save
+    // explains itself (and rolls back) instead of surfacing "Failed to fetch".
+    case "NETWORK_ERROR":
+      return { action: "retry_button", message: "ネットワークに接続できませんでした。通信環境を確認して再試行してください" };
+    case CommonErrorCodes.INTERNAL:
+      return { action: "retry_button", message: "サーバーでエラーが発生しました。時間をおいて再試行してください" };
+    case "CLIENT_CONTRACT_MISMATCH":
+      return { action: "toast_generic", message: "予期しない応答を受け取りました。時間をおいて再試行してください" };
+    // Unknown code: NEVER echo the raw server/transport `.message` (often an English dev
+    // string). Fall back to a friendly Japanese generic so no English leaks to the user.
     default:
-      return { action: "toast_generic", message: e.message || "エラーが発生しました" };
+      return { action: "toast_generic", message: "エラーが発生しました。時間をおいて再試行してください" };
+  }
+}
+
+/** Where an error is shown. `dialog` = blocking ErrorDialog (the reason must be
+ *  seen — save dropped, permission, dependency cycle, validation, generic/5xx).
+ *  `banner` = quiet inline notice for auto-recovered cases (a conflict we already
+ *  refetched, a read-only fallback, a rate-limit backoff) where a modal would nag. */
+export function errorSurface(action: ErrorUxAction): "dialog" | "banner" {
+  switch (action) {
+    case "rollback_refetch":
+    case "rollback_transition":
+    case "readonly_fallback":
+    case "toast_retry_backoff":
+      return "banner";
+    default:
+      return "dialog";
   }
 }
 

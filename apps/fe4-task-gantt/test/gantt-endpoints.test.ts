@@ -23,6 +23,44 @@ describe("gantt endpoints (design tests 4/6/8/12)", () => {
     expect(dto.dependencies[0]!.type).toBe("FS");
   });
 
+  it("editing a task's startAt/dueAt (detail panel path) moves the gantt bar (regression: 詳細で日付を変更してもバーが変わらない)", async () => {
+    // A seeded row whose bar window came from the rowDates read-model override.
+    const c = new MockApiClient({
+      tasks: [seedTask("t1", { startAt: "2026-08-01T00:00:00.000Z", dueAt: "2026-08-05T00:00:00.000Z" })],
+      rowDates: { t1: { startsAt: "2026-08-01T00:00:00.000Z", endsAt: "2026-08-05T00:00:00.000Z" } },
+    });
+    const before = await api.getGantt(c, "evt_1");
+    const b = before.rows.find((r) => r.taskId === "t1")!;
+    expect(b.startsAt).toBe("2026-08-01T00:00:00.000Z");
+    expect(b.endsAt).toBe("2026-08-05T00:00:00.000Z");
+
+    // Edit dates the way the detail panel does: PATCH /tasks/:id with startAt/dueAt.
+    await api.updateTask(c, "t1", {
+      version: 1,
+      startAt: "2026-08-10T00:00:00.000Z",
+      dueAt: "2026-08-14T00:00:00.000Z",
+    });
+
+    // The gantt DTO must reflect the new window (previously the stale rowDates override
+    // won, so the bar never moved).
+    const after = await api.getGantt(c, "evt_1");
+    const a = after.rows.find((r) => r.taskId === "t1")!;
+    expect(a.startsAt).toBe("2026-08-10T00:00:00.000Z");
+    expect(a.endsAt).toBe("2026-08-14T00:00:00.000Z");
+  });
+
+  it("gantt bar start comes from the task's startAt column so 詳細の開始日 == バーの開始 (regression: 値とバーの不一致)", async () => {
+    const c = new MockApiClient({
+      tasks: [seedTask("t1", { startAt: "2026-09-02T00:00:00.000Z", dueAt: "2026-09-09T00:00:00.000Z" })],
+    });
+    const dto = await api.getGantt(c, "evt_1");
+    const row = dto.rows.find((r) => r.taskId === "t1")!;
+    // No rowDates override → the bar window is the task's real startAt/dueAt, exactly
+    // what the detail panel shows, so the three surfaces agree.
+    expect(row.startsAt).toBe("2026-09-02T00:00:00.000Z");
+    expect(row.endsAt).toBe("2026-09-09T00:00:00.000Z");
+  });
+
   it("getGantt sends the event as ?eventId= (regression: gantt-service reads eventId, not event)", async () => {
     const c = new MockApiClient({ tasks: [seedTask("t1")] });
     await api.getGantt(c, "evt_1");

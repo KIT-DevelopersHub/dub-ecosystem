@@ -21,6 +21,7 @@ import {
   Stack,
   Switch,
   TextField,
+  Tooltip,
   useToast,
 } from "@dub/ui";
 import { RolePicker } from "@dub/app-ui";
@@ -139,6 +140,7 @@ function PermissionRow({
   const toast = useToast();
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const isOwner = permission.role === "owner";
+  const isInherited = !isOwner && permission.inherited;
   const grantee = permission.type === "anyone" ? "リンクを知っている全員" : permission.emailAddress ?? permission.displayName ?? "(不明)";
 
   // Optimistic role change: patch the cached permissions list immediately.
@@ -174,10 +176,24 @@ function PermissionRow({
         <Stack gap={1}>
           <strong>{grantee}</strong>
           {permission.displayName && permission.type !== "anyone" ? <small>{permission.displayName}</small> : null}
+          {isInherited ? (
+            <small data-testid="fe2-driveshare-inherited-reason" style={{ color: "var(--dub-color-fg-muted, #667)" }}>
+              親フォルダから継承された権限のため、このファイル単体では変更・剥奪できません。親フォルダの共有設定で操作してください。
+            </small>
+          ) : null}
         </Stack>
         <Stack direction="row" gap={2} align="center">
           {isOwner ? (
             <Badge tone="neutral">{roleLabel(permission.role)}</Badge>
+          ) : isInherited ? (
+            <Stack direction="row" gap={2} align="center">
+              <Badge tone="neutral">{roleLabel(permission.role)}</Badge>
+              <Tooltip content="親フォルダから継承された権限です。このファイル単体では変更・剥奪できません。親フォルダの共有設定で操作してください。">
+                <Badge tone="warning" testId="fe2-driveshare-inherited-badge">
+                  継承
+                </Badge>
+              </Tooltip>
+            </Stack>
           ) : (
             <>
               <Select<AssignableRole>
@@ -278,10 +294,14 @@ function LinkSharingToggle({
   file,
   permsKey,
   linkShared,
+  linkInherited,
 }: {
   file: DriveFile;
   permsKey: readonly unknown[];
   linkShared: boolean;
+  /** The existing `anyone` permission is inherited from a parent folder → it cannot be
+   *  removed on this item, so the toggle is locked on with an explanation. */
+  linkInherited: boolean;
 }): JSX.Element {
   const driveApi = useDriveShareApi();
   const queryClient = useQueryClient();
@@ -309,18 +329,67 @@ function LinkSharingToggle({
         <Stack gap={1}>
           <strong>リンクを知っている全員</strong>
           <small>{linkShared ? "オン（閲覧者としてリンク共有中）" : "オフ"}</small>
+          {linkInherited ? (
+            <small data-testid="fe2-driveshare-link-inherited-reason" style={{ color: "var(--dub-color-fg-muted, #667)" }}>
+              リンク共有は親フォルダから継承されています。このファイル単体ではオフにできません。親フォルダの共有設定で操作してください。
+            </small>
+          ) : null}
         </Stack>
         <Switch
           id={`fe2-driveshare-link-${file.id}`}
           testId="fe2-driveshare-link-switch"
           checked={linkShared}
-          disabled={toggle.isPending}
+          disabled={toggle.isPending || linkInherited}
           label="リンク共有"
           onChange={(enabled) => toggle.mutate(enabled)}
         />
       </Stack>
     </Card>
   );
+}
+
+const joinEmails = (list: { email: string }[], n = 4): string => {
+  const shown = list.slice(0, n).map((m) => m.email).join(" / ");
+  return list.length > n ? `${shown} 他${list.length - n}件` : shown;
+};
+
+/** Report a role apply/reapply outcome as a single toast:
+ *  - skipped members (Drive refused: invalid email) → WARNING with per-member reason;
+ *  - invited members (no Google account → invite sent, access PENDING) → WARNING that
+ *    names them and suggests sharing with a real Google account instead;
+ *  - otherwise → success (or silent for a clean reapply).
+ *  Nothing ever fails silently, so the operator always knows who did / didn't get access. */
+function showRoleGrantOutcome(
+  toast: ReturnType<typeof useToast>,
+  grant: RoleFileGrant,
+  okTitle: string,
+  opts: { silentOnSuccess?: boolean } = {},
+): void {
+  const skipped = grant.skipped ?? [];
+  const invited = grant.invited ?? [];
+
+  if (skipped.length > 0) {
+    const shown = skipped.slice(0, 4).map((s) => `${s.email}（${s.reason}）`).join(" / ");
+    const more = skipped.length > 4 ? ` 他${skipped.length - 4}件` : "";
+    const invitedNote = invited.length > 0 ? `。招待のみ ${invited.length}人: ${joinEmails(invited)}（Googleアカウント未連携）` : "";
+    toast.show({
+      kind: "warning",
+      title: `${okTitle}（${skipped.length}人はスキップ）`,
+      description: `付与 ${grant.appliedCount}人・スキップ ${skipped.length}人: ${shown}${more}${invitedNote}`,
+    });
+    return;
+  }
+
+  if (invited.length > 0) {
+    toast.show({
+      kind: "warning",
+      title: `${okTitle}（${invited.length}人は招待のみ）`,
+      description: `${joinEmails(invited)} はGoogleアカウントが無いため招待メールを送信しました。本人がGoogleでサインインするまで編集できません。実際のGoogleアカウント（または転送先のアカウント）で共有してください。`,
+    });
+    return;
+  }
+
+  if (!opts.silentOnSuccess) toast.show({ kind: "success", title: okTitle });
 }
 
 function RoleGrantRow({
@@ -367,7 +436,11 @@ function RoleGrantRow({
   });
 
   const reapplyThenSyncChips = (): void => {
-    reapply.mutate(undefined, { onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }) });
+    reapply.mutate(undefined, {
+      // Silent on a clean reapply (it was already optimistic); warn only if Drive refused some members.
+      onSuccess: (result) => showRoleGrantOutcome(toast, result, "再適用しました", { silentOnSuccess: true }),
+      onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }),
+    });
   };
 
   return (
@@ -469,8 +542,8 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
     grantRole.mutate(
       { roleId, driveRole },
       {
-        onSuccess: () => {
-          toast.show({ kind: "success", title: "ロールに振りました", description: `${roleName} を${driveRoleLabel(driveRole)}に設定` });
+        onSuccess: (result) => {
+          showRoleGrantOutcome(toast, result, `${roleName} を${driveRoleLabel(driveRole)}に設定`);
           setRoleId("");
           setDriveRole("reader");
         },
@@ -573,12 +646,14 @@ function PermissionsPanel({ file }: { file: DriveFile }): JSX.Element {
       : { code: "INTERNAL", message: "権限を読み込めませんでした。" };
     body = <ErrorState testId="fe2-driveshare-perms-error" error={display} onRetry={() => void query.refetch()} />;
   } else {
-    const linkShared = query.data.permissions.some((p) => p.type === "anyone");
+    const anyonePerm = query.data.permissions.find((p) => p.type === "anyone");
+    const linkShared = anyonePerm !== undefined;
+    const linkInherited = anyonePerm?.inherited ?? false;
     body = (
       <Stack gap={3}>
         <GrantForm fileId={file.id} permsKey={permsKey} />
         <RolePermissionPanel file={file} grantsKey={roleGrantsKey(file.id)} />
-        <LinkSharingToggle file={file} permsKey={permsKey} linkShared={linkShared} />
+        <LinkSharingToggle file={file} permsKey={permsKey} linkShared={linkShared} linkInherited={linkInherited} />
         <Stack gap={2}>
           {query.data.permissions.map((p) => (
             <PermissionRow key={p.id} fileId={file.id} permission={p} permsKey={permsKey} />

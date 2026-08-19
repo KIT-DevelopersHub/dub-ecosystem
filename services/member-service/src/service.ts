@@ -32,6 +32,8 @@ const errTeamNotFound = (id: string): DubError =>
   new DubError("MEMBER_TEAM_NOT_FOUND", `Team not found: ${id}`, { status: 404 });
 const errPersonNotFound = (id: string): DubError =>
   new DubError("MEMBER_NOT_FOUND", `Member not found: ${id}`, { status: 404 });
+const errParticipationNotFound = (id: string): DubError =>
+  new DubError("MEMBER_PARTICIPATION_NOT_FOUND", `Participation not found: ${id}`, { status: 404 });
 
 function name(value: unknown, field = "name"): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -336,30 +338,15 @@ export class MemberService {
     const gmail = body.gmail.trim();
     const desiredTeamId = await this.optTeamId(body.desiredTeamId);
 
-    const { member: resolved, matchKind } = await this.resolveMemberForParticipation(ctx, {
-      displayName,
-      normalized,
-      lastName,
-      firstName,
-      lastNameKana,
-      firstNameKana,
-      lastNameRomaji,
-      firstNameRomaji,
-      phone,
-      department,
-      grade,
-      contact,
-      schoolEmail,
-      gmail,
-      note,
-      desiredTeamId,
-    });
-
+    // 名簿への反映は管理者が一覧で確定する（B案）。提出時は 参加届 を記録するだけで、
+    // roster には一切書き込まない（自動追加による重複を根絶）。再提出は既存行の
+    // レビュー状態(reviewState/memberId/matchKind)を保持したまま内容だけ更新する。
     const existing = await this.deps.repo.getParticipationByNormalizedName(orgId, normalized);
     const row: ParticipationRow = {
       id: existing?.id ?? this.deps.newParticipationId(),
       orgId,
-      memberId: resolved.id,
+      // 未処理のうちは反映先メンバー無し。確定済みの再提出は既存の反映先を保持。
+      memberId: existing?.memberId ?? null,
       name: displayName,
       normalizedName: normalized,
       lastName,
@@ -380,98 +367,213 @@ export class MemberService {
       desiredActivity,
       note,
       status: "submitted",
-      matchKind,
+      // matchKind は未処理時は意味を持たない placeholder（reviewState で表示制御）。
+      matchKind: existing?.matchKind ?? "created_new",
+      reviewState: existing?.reviewState ?? "pending",
       submittedBy: ctx.userId,
       submittedAt: now,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
     await this.deps.repo.upsertParticipation(row);
-    return { participation: toParticipation(row), member: resolved, matchKind };
+    const participation = toParticipation(row);
+    // 参加届が届いたら管理者へ通知（best-effort・失敗しても提出は成功させる）。
+    if (this.deps.notifyParticipationSubmitted) {
+      try {
+        await this.deps.notifyParticipationSubmitted(ctx, participation);
+      } catch {
+        // notifier is contracted best-effort, but guard here too so a throw never fails submit.
+      }
+    }
+    // 既に反映済み(再提出)なら反映先メンバーをエコー、未処理なら null（B案: 提出時は反映しない）。
+    const echoed = row.memberId ? await this.getMemberById(row.memberId) : null;
+    return { participation, member: echoed, matchKind: row.matchKind };
   }
 
-  /** Resolve (promote-or-create) the roster member behind a submission. */
-  private async resolveMemberForParticipation(
-    ctx: ReqCtx,
-    input: {
-      displayName: string;
-      normalized: string;
-      lastName: string | null;
-      firstName: string | null;
-      lastNameKana: string | null;
-      firstNameKana: string | null;
-      lastNameRomaji: string | null;
-      firstNameRomaji: string | null;
-      phone: string | null;
-      department: string | null;
-      grade: member.Grade | null;
-      contact: string | null;
-      schoolEmail: string;
-      gmail: string;
-      note: string | null;
-      desiredTeamId: string | null;
-    },
-  ): Promise<{ member: member.Member; matchKind: member.ParticipationMatchKind }> {
-    const orgId = this.deps.orgId;
-    const people = await this.deps.repo.listPeople(orgId);
-    const match = people.find((p) => normalizeName(p.name) === input.normalized);
+  private async getMemberById(id: string): Promise<member.Member | null> {
+    const p = await this.deps.repo.getPerson(id);
+    if (!p || p.orgId !== this.deps.orgId) return null;
+    return toMember(p, await this.currentTeamIds(id));
+  }
 
-    if (match) {
-      const currentTeamIds = await this.currentTeamIds(match.id);
-      const mergedTeamIds =
-        input.desiredTeamId && !currentTeamIds.includes(input.desiredTeamId)
-          ? [...currentTeamIds, input.desiredTeamId]
-          : currentTeamIds;
-      const promote = match.status === "invited" || match.status === "considering";
-      const next: PersonRow = {
-        ...match,
-        status: promote ? "added" : match.status,
-        // non-destructive: only fill when currently empty. Both 参加届 emails are
-        // retained on the roster (default `contact` to the school address when unset).
-        department: match.department ?? input.department,
-        grade: match.grade ?? input.grade,
-        contact: match.contact ?? input.schoolEmail,
-        schoolEmail: match.schoolEmail ?? input.schoolEmail,
-        gmail: match.gmail ?? input.gmail,
-        lastName: match.lastName ?? input.lastName,
-        firstName: match.firstName ?? input.firstName,
-        lastNameKana: match.lastNameKana ?? input.lastNameKana,
-        firstNameKana: match.firstNameKana ?? input.firstNameKana,
-        lastNameRomaji: match.lastNameRomaji ?? input.lastNameRomaji,
-        firstNameRomaji: match.firstNameRomaji ?? input.firstNameRomaji,
-        phone: match.phone ?? input.phone,
-        note: match.note ?? input.note,
-        version: match.version + 1,
-        updatedAt: this.deps.now(),
-      };
-      const ok = await this.deps.repo.updatePerson(next, match.version, mergedTeamIds);
-      if (!ok) throw errVersionConflict(match.id);
-      return { member: toMember(next, mergedTeamIds), matchKind: "linked_existing" };
+  // ---- 参加届: 突合候補 (招待中/検討中のみ) ----------------------------------------
+  /** 参加届の提出者と同一人物かもしれない既存メンバーを、氏名(正規化)＋学校メール/Gmail
+   *  の一致で探して候補提示する。email 一致を上位に。結合対象は招待中/検討中のみ
+   *  (added は既に在籍なので結合しない)。最終確定は resolve(link) で管理者が行う。 */
+  async listParticipationCandidates(
+    _ctx: ReqCtx,
+    participationId: string,
+  ): Promise<member.ListParticipationCandidatesResponse> {
+    const p = await this.deps.repo.getParticipation(participationId);
+    if (!p || p.orgId !== this.deps.orgId) throw errParticipationNotFound(participationId);
+    const people = await this.deps.repo.listPeople(this.deps.orgId);
+    const wantEmails = new Set(
+      [p.schoolEmail, p.gmail].filter((e): e is string => !!e).map((e) => e.trim().toLowerCase()),
+    );
+    const candidates: member.ParticipationCandidate[] = [];
+    for (const m of people) {
+      if (m.status !== "invited" && m.status !== "considering") continue;
+      const matchedBy: Array<"email" | "name"> = [];
+      const memberEmails = [m.schoolEmail, m.gmail, m.contact]
+        .filter((e): e is string => !!e)
+        .map((e) => e.trim().toLowerCase());
+      if (memberEmails.some((e) => wantEmails.has(e))) matchedBy.push("email");
+      if (normalizeName(m.name) === p.normalizedName) matchedBy.push("name");
+      if (matchedBy.length === 0) continue;
+      candidates.push({
+        memberId: m.id,
+        name: m.name,
+        status: m.status,
+        schoolEmail: m.schoolEmail,
+        gmail: m.gmail,
+        version: m.version,
+        matchedBy,
+      });
+    }
+    const rank = (c: member.ParticipationCandidate): number =>
+      (c.matchedBy.includes("email") ? 2 : 0) + (c.matchedBy.includes("name") ? 1 : 0);
+    candidates.sort((a, b) => rank(b) - rank(a));
+    return { candidates };
+  }
+
+  // ---- 参加届: 反映確定 (管理者) --------------------------------------------------
+  /** 管理者が 参加届 の名簿反映を確定する。link=既存の招待中/検討中を在籍へ昇格・結合、
+   *  create=新規メンバー作成、skip=対象外。link/create のみ roster を書き換える。 */
+  async resolveParticipation(
+    ctx: ReqCtx,
+    participationId: string,
+    body: member.ResolveParticipationRequest,
+  ): Promise<member.ResolveParticipationResponse> {
+    const p = await this.deps.repo.getParticipation(participationId);
+    if (!p || p.orgId !== this.deps.orgId) throw errParticipationNotFound(participationId);
+    const action = (body as { action?: unknown } | null)?.action;
+    const now = this.deps.now();
+
+    if (action === "skip") {
+      const row: ParticipationRow = { ...p, memberId: null, reviewState: "skipped", updatedAt: now };
+      await this.deps.repo.upsertParticipation(row);
+      return { participation: toParticipation(row), member: null };
     }
 
-    // No roster match → create a new 追加済 member from the submission.
+    if (action === "link") {
+      const memberId = optText((body as { memberId?: unknown }).memberId, "memberId");
+      if (!memberId) throw errors.validationFailed([{ field: "memberId", reason: "required" }]);
+      const expectedVersion = (body as { expectedVersion?: unknown }).expectedVersion;
+      if (typeof expectedVersion !== "number") {
+        throw errors.validationFailed([{ field: "expectedVersion", reason: "required" }]);
+      }
+      const target = await this.deps.repo.getPerson(memberId);
+      if (!target || target.orgId !== this.deps.orgId) throw errPersonNotFound(memberId);
+      // 整合ガード: 同一メンバーを別の 参加届 に二重紐付けしない（1メンバー=1反映元）。
+      const others = await this.deps.repo.listParticipations(this.deps.orgId);
+      const clash = others.find((o) => o.id !== p.id && o.memberId === memberId && o.reviewState === "added");
+      if (clash) {
+        throw new DubError(
+          "MEMBER_PARTICIPATION_ALREADY_LINKED",
+          `member ${memberId} is already linked to another 参加届`,
+          { status: 409, details: [{ field: "memberId", reason: "already_linked", message: clash.id }] },
+        );
+      }
+      const resolved = await this.promoteFromParticipation(target, p, expectedVersion);
+      const row: ParticipationRow = {
+        ...p,
+        memberId: resolved.id,
+        matchKind: "linked_existing",
+        reviewState: "added",
+        updatedAt: now,
+      };
+      await this.deps.repo.upsertParticipation(row);
+      return { participation: toParticipation(row), member: resolved };
+    }
+
+    if (action === "create") {
+      const resolved = await this.createMemberFromParticipation(ctx, p);
+      const row: ParticipationRow = {
+        ...p,
+        memberId: resolved.id,
+        matchKind: "created_new",
+        reviewState: "added",
+        updatedAt: now,
+      };
+      await this.deps.repo.upsertParticipation(row);
+      return { participation: toParticipation(row), member: resolved };
+    }
+
+    throw errors.validationFailed([{ field: "action", reason: "invalid" }]);
+  }
+
+  /** desiredTeamId が今も実在すれば返す (削除済みは無視)。link/create 時の結合に使う。 */
+  private async liveDesiredTeamId(desiredTeamId: string | null): Promise<string | null> {
+    if (!desiredTeamId) return null;
+    const t = await this.deps.repo.getTeam(desiredTeamId);
+    return t && t.orgId === this.deps.orgId ? t.id : null;
+  }
+
+  /** 既存メンバー(招待中/検討中想定)を在籍(added)へ昇格し、参加届の内容を非破壊マージする。
+   *  空欄のみ埋め、希望チームを追加する。楽観ロック(expectedVersion)で衝突は 409。 */
+  private async promoteFromParticipation(
+    match: PersonRow,
+    p: ParticipationRow,
+    expectedVersion: number,
+  ): Promise<member.Member> {
+    const desiredTeamId = await this.liveDesiredTeamId(p.desiredTeamId);
+    const currentTeamIds = await this.currentTeamIds(match.id);
+    const mergedTeamIds =
+      desiredTeamId && !currentTeamIds.includes(desiredTeamId)
+        ? [...currentTeamIds, desiredTeamId]
+        : currentTeamIds;
+    const promote = match.status === "invited" || match.status === "considering";
+    const next: PersonRow = {
+      ...match,
+      status: promote ? "added" : match.status,
+      // 非破壊: 空欄のみ補完。参加届の2アドレスは名簿にも保持 (contact 未設定は学校メール)。
+      department: match.department ?? p.department,
+      grade: match.grade ?? p.grade,
+      contact: match.contact ?? p.schoolEmail,
+      schoolEmail: match.schoolEmail ?? p.schoolEmail,
+      gmail: match.gmail ?? p.gmail,
+      lastName: match.lastName ?? p.lastName,
+      firstName: match.firstName ?? p.firstName,
+      lastNameKana: match.lastNameKana ?? p.lastNameKana,
+      firstNameKana: match.firstNameKana ?? p.firstNameKana,
+      lastNameRomaji: match.lastNameRomaji ?? p.lastNameRomaji,
+      firstNameRomaji: match.firstNameRomaji ?? p.firstNameRomaji,
+      phone: match.phone ?? p.phone,
+      note: match.note ?? p.note,
+      version: match.version + 1,
+      updatedAt: this.deps.now(),
+    };
+    const ok = await this.deps.repo.updatePerson(next, expectedVersion, mergedTeamIds);
+    if (!ok) throw errVersionConflict(match.id);
+    return toMember(next, mergedTeamIds);
+  }
+
+  /** 参加届の内容から新規の在籍(added)メンバーを作成する。 */
+  private async createMemberFromParticipation(ctx: ReqCtx, p: ParticipationRow): Promise<member.Member> {
+    const orgId = this.deps.orgId;
     const now = this.deps.now();
-    const teamIds = input.desiredTeamId ? [input.desiredTeamId] : [];
+    const desiredTeamId = await this.liveDesiredTeamId(p.desiredTeamId);
+    const teamIds = desiredTeamId ? [desiredTeamId] : [];
     const row: PersonRow = {
       id: this.deps.newMemberId(),
       orgId,
-      name: input.displayName,
+      name: p.name,
       roleTitle: null,
       status: "added",
-      department: input.department,
-      grade: input.grade,
+      department: p.department,
+      grade: p.grade,
       identityUserId: null,
-      contact: input.contact ?? input.schoolEmail,
-      schoolEmail: input.schoolEmail,
-      gmail: input.gmail,
-      lastName: input.lastName,
-      firstName: input.firstName,
-      lastNameKana: input.lastNameKana,
-      firstNameKana: input.firstNameKana,
-      lastNameRomaji: input.lastNameRomaji,
-      firstNameRomaji: input.firstNameRomaji,
-      phone: input.phone,
-      note: input.note,
+      contact: p.contact ?? p.schoolEmail,
+      schoolEmail: p.schoolEmail,
+      gmail: p.gmail,
+      lastName: p.lastName,
+      firstName: p.firstName,
+      lastNameKana: p.lastNameKana,
+      firstNameKana: p.firstNameKana,
+      lastNameRomaji: p.lastNameRomaji,
+      firstNameRomaji: p.firstNameRomaji,
+      phone: p.phone,
+      note: p.note,
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
       archivedAt: null,
@@ -480,7 +582,7 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.createPerson(row, teamIds);
-    return { member: toMember(row, teamIds), matchKind: "created_new" };
+    return toMember(row, teamIds);
   }
 
   async listParticipations(_ctx: ReqCtx): Promise<member.ListParticipationsResponse> {

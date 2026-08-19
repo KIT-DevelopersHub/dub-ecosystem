@@ -16,6 +16,7 @@ import { createHttpEventApi } from "@dub/fe3-event-action";
 import type { NotificationApi } from "@dub/fe5-notification-inbox";
 import { createNotificationApi } from "@dub/fe5-notification-inbox";
 import { createRosterApi } from "@dub/admin-roster";
+import { normalizeMessage, reactionsFromWire } from "@dub/fe6-chat/src/store/timeline";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import type {
   Fe4ApiClient,
@@ -23,6 +24,8 @@ import type {
   Channel,
   ChannelMember,
   CreateChannelRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   EditMessageRequest,
   GetChannelResponse,
   ListMessagesRequest,
@@ -30,7 +33,9 @@ import type {
   Message,
   PostMessageRequest,
   PostMessageResponse,
+  Reaction,
   ReactionToggleRequest,
+  ReactionToggleResponse,
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
@@ -136,10 +141,27 @@ const CHAT = "/api/v1/chat";
 const IDENTITY = "/api/v1/identity";
 const IDENTITY_BATCH_MAX = 50;
 
+// chat-service (and identity /users) return the frozen `common.Paginated<T>` envelope
+// `{ items, nextCursor }` for channels / unread / user-resolution, whereas a few other
+// endpoints return a bare array. FE6's own HttpChatClient unwraps these via the same
+// helper — this shell mirror MUST too, or a list result arrives as a non-array envelope
+// object and silently renders EMPTY (groupChannels drops a non-array via its guard),
+// e.g. the channel sidebar shows nothing even though /chat/channels returns 200 with
+// items. Accept either shape (+ null/undefined) and always hand back an array.
+function unwrapItems<T>(res: unknown): T[] {
+  if (Array.isArray(res)) return res as T[];
+  if (res && typeof res === "object" && Array.isArray((res as { items?: unknown }).items)) {
+    return (res as { items: T[] }).items;
+  }
+  return [];
+}
+
 export function createChatApiClient(api: ApiClient): ChatApiClient {
   return {
     listChannels: (eventId?: common.EventId) =>
-      api.request<Channel[]>({ method: "GET", path: `${CHAT}/channels`, ...(eventId ? { query: { eventId } } : {}) }),
+      api
+        .request<unknown>({ method: "GET", path: `${CHAT}/channels`, ...(eventId ? { query: { eventId } } : {}) })
+        .then((r) => unwrapItems<Channel>(r)),
     createChannel: (req: CreateChannelRequest) =>
       api.request<Channel>({ method: "POST", path: `${CHAT}/channels`, body: req }),
     getChannel: (id: common.ChannelId) =>
@@ -161,7 +183,9 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       return api.request<SearchHit[]>({ method: "GET", path: `${CHAT}/search`, ...(query ? { query } : {}) });
     },
     listPinned: (id: common.ChannelId) =>
-      api.request<Message[]>({ method: "GET", path: `${CHAT}/channels/${id}/pins` as ApiPath }),
+      api
+        .request<Message[]>({ method: "GET", path: `${CHAT}/channels/${id}/pins` as ApiPath })
+        .then((ms) => ms.map(normalizeMessage)),
     togglePin: (id: common.ChannelId, messageId: common.MessageId) =>
       api.request<Message[]>({ method: "POST", path: `${CHAT}/channels/${id}/pins` as ApiPath, body: { messageId } }),
     listMessages: (req: ListMessagesRequest) => {
@@ -172,29 +196,57 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
         threadRootId: req.threadRootId,
         afterMessageId: req.afterMessageId,
       });
-      return api.request<ListMessagesResponse>({ method: "GET", path: `${CHAT}/messages`, ...(query ? { query } : {}) });
+      return api
+        .request<ListMessagesResponse>({ method: "GET", path: `${CHAT}/messages`, ...(query ? { query } : {}) })
+        .then((res) => (res && Array.isArray(res.items) ? { ...res, items: res.items.map(normalizeMessage) } : res));
     },
+    // The server returns the created Message (bare), but FE6's optimistic layer
+    // reconciles by PostMessageResponse = { message, clientTempId }. The client already
+    // knows the clientTempId it sent, so compose the envelope here — otherwise
+    // res.clientTempId/res.message are undefined and the optimistic entry can never be
+    // acked, surfacing as "送信に失敗しました" even though the POST returned 201.
     postMessage: (req: PostMessageRequest) =>
-      api.request<PostMessageResponse>({ method: "POST", path: `${CHAT}/messages`, body: req }),
+      api
+        .request<Message>({ method: "POST", path: `${CHAT}/messages`, body: req })
+        .then((message) => ({ message: normalizeMessage(message), clientTempId: req.clientTempId })),
     editMessage: (id: common.MessageId, req: EditMessageRequest) =>
-      api.request<Message>({ method: "PATCH", path: `${CHAT}/messages/${id}` as ApiPath, body: req }),
-    deleteMessage: (id: common.MessageId) =>
-      api.request<Message>({ method: "DELETE", path: `${CHAT}/messages/${id}` as ApiPath }),
+      api
+        .request<Message>({ method: "PATCH", path: `${CHAT}/messages/${id}` as ApiPath, body: req })
+        .then(normalizeMessage),
+    // Server envelope { mode, message }: `hard` => message null (FE6 drops the row);
+    // `tombstone` => the redacted message (FE6 upserts it). Normalize the tombstone.
+    deleteMessage: (id: common.MessageId): Promise<DeleteMessageResult> =>
+      api
+        .request<DeleteMessageResult>({ method: "DELETE", path: `${CHAT}/messages/${id}` as ApiPath })
+        .then((r) => ({ mode: r.mode, message: r.message ? normalizeMessage(r.message) : null })),
+    getDeletionPolicy: (): Promise<DeletionPolicyResponse> =>
+      api.request<DeletionPolicyResponse>({ method: "GET", path: `${CHAT}/settings/deletion-policy` }),
+    // Server returns { messageId, reactions } (reactions as a Record); normalize to the
+    // client's Reaction[] so the optimistic reconcile can apply it (see applyReactions).
     toggleReaction: (id: common.MessageId, req: ReactionToggleRequest) =>
-      api.request<Message>({ method: "POST", path: `${CHAT}/messages/${id}/reactions` as ApiPath, body: req }),
+      api
+        .request<{ messageId: common.MessageId; reactions: Reaction[] | Record<string, common.UserId[]> }>({
+          method: "POST",
+          path: `${CHAT}/messages/${id}/reactions` as ApiPath,
+          body: req,
+        })
+        .then((r): ReactionToggleResponse => ({ messageId: r.messageId, reactions: reactionsFromWire(r.reactions) })),
     updateReadState: (req: ReadStateUpdateRequest) =>
       api.request<void>({ method: "POST", path: `${CHAT}/channels/${req.channelId}/read` as ApiPath, body: req }),
-    listUnread: () => api.request<UnreadSummary[]>({ method: "GET", path: `${CHAT}/unread` }),
+    listUnread: () =>
+      api.request<unknown>({ method: "GET", path: `${CHAT}/unread` }).then((r) => unwrapItems<UnreadSummary>(r)),
     getWsTicket: (id: common.ChannelId) =>
       api.request<WsTicketResponse>({ method: "GET", path: `${CHAT}/channels/${id}/ws-ticket` as ApiPath }),
     resolveUsers: (ids: common.UserId[]) => {
       if (ids.length === 0) return Promise.resolve([]);
       const batch = ids.slice(0, IDENTITY_BATCH_MAX);
-      return api.request<identity.UserSummary[]>({
-        method: "GET",
-        path: `${IDENTITY}/users`,
-        query: { ids: batch.join(",") },
-      });
+      return api
+        .request<unknown>({
+          method: "GET",
+          path: `${IDENTITY}/users`,
+          query: { ids: batch.join(",") },
+        })
+        .then((r) => unwrapItems<identity.UserSummary>(r));
     },
   };
 }

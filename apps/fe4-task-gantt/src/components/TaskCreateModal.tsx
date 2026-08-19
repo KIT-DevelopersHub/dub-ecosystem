@@ -13,6 +13,7 @@ export interface TaskDraft {
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  startAt: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
   /** WBS parent (親タスク). null = top-level. Chosen before the predecessors. */
   parentTaskId: common.TaskId | null;
@@ -29,7 +30,9 @@ export interface TaskCreateModalProps {
   /** every task in the event with its direct parent — predecessors are scoped to
    *  the chosen parent's siblings (判断10: 同一直接親のみ依存可). */
   scopeTasks: readonly ScopeTask[];
-  onCreate: (draft: TaskDraft) => Promise<void>;
+  /** Resolves `false` when the task was NOT created (keep the modal open so the
+   *  user can fix + retry); `true`/void on success (modal closes). */
+  onCreate: (draft: TaskDraft) => Promise<boolean | void>;
   /** date-input value (YYYY-MM-DD) preset when opened from a timeline cell. */
   initialDue?: string | null;
   /** parent id preset when opened via "ここから子タスクを作成". */
@@ -48,6 +51,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
+  const [start, setStart] = useState<string | null>(null);
   const [due, setDue] = useState<string | null>(null);
   const [parentId, setParentId] = useState<common.TaskId | null>(null);
   const [deps, setDeps] = useState<common.TaskId[]>([]);
@@ -73,6 +77,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     setPriority("medium");
     setAssigneeId(null);
     setTeamId(null);
+    setStart(null);
     setDue(null);
     setParentId(null);
     setDeps([]);
@@ -88,19 +93,24 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     if (!title.trim() || saving) return;
     setSaving(true);
     try {
-      await onCreate({
+      const ok = await onCreate({
         title: title.trim(),
         status,
         priority,
         assigneeId,
         teamId,
+        startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
         parentTaskId: parentId,
         dependsOnIds: deps,
       });
-      rememberPredecessors(deps);
-      reset();
-      onClose();
+      // Close ONLY on success — a failed create keeps the form (with its input) open
+      // so the user can retry after reading the error dialog. Success shows a toast.
+      if (ok !== false) {
+        rememberPredecessors(deps);
+        reset();
+        onClose();
+      }
     } finally {
       setSaving(false);
     }
@@ -176,11 +186,19 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-create-due">
-            期日
-          </label>
-          <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-create-start">
+              開始日
+            </label>
+            <DateField id="fe4-create-start" value={start} onChange={setStart} testId="fe4-create-start" />
+          </div>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-create-due">
+              期日
+            </label>
+            <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
+          </div>
         </div>
 
         {teams.length > 0 && (

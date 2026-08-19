@@ -82,6 +82,43 @@
   padding: var(--dub-space-2) 0;
 }
 
+/* チーム未割り当てのメンバー — 擬似チームカードではなく、控えめな「要対応」帯として
+   全幅で表示する。チーム色ドット・チーム操作を持たず、チームと視覚的に明確に区別する。 */
+/* 統合アプリ「運営メンバー・名簿」の共有サブナビ帯（運営メンバー/名簿/ロール/
+   アドレス/履歴 を横断）。ページ見出しの上に薄い区切りとして敷く。 */
+.rosterSubnav {
+  border-bottom: 1px solid var(--dub-color-border-default);
+  margin-bottom: var(--dub-space-4);
+  overflow-x: auto;
+}
+
+.unassignedSection {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-sunken);
+  padding: var(--dub-space-3) var(--dub-space-4);
+}
+.unassignedHead {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  margin-bottom: var(--dub-space-1);
+}
+.unassignedTitle {
+  font-weight: var(--dub-font-weight-medium);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+.unassignedHint {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.unassignedBody {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ══ 組織図ビュー — PDF「全体組織体制図」の構図を再現 ══════════════════════
    統括の横長ダークネイビー箱 → コネクタ線 → チーム色の縦カラム
    (オーガナイザー→リーダー→メンバー階層)。各カラムの --team アクセント色から
@@ -341,6 +378,38 @@
   text-align: center;
   margin-top: auto;
   padding-top: 4px;
+}
+/* 未所属メンバー — 体制図の下部に控えめに並べる注記（チーム列ではない）。 */
+.orgUnassigned {
+  margin: 14px auto 0;
+  max-width: 720px;
+  padding: 8px 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.orgUnassignedLabel {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 5px;
+}
+.orgUnassignedNames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.orgUnassignedName {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #334155;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px 8px;
 }
 .orgFoot {
   margin-top: var(--dub-space-4);

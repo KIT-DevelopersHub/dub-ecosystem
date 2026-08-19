@@ -21,13 +21,12 @@ import {
   checkIso,
   checkPriority,
   checkStatusValue,
+  checkOptString,
   normalizeLimit,
   assertValid,
   PROTECTED_ORIGIN_FIELDS,
 } from "./validate";
 import { decodeCursor, type ListFilter } from "./repo";
-
-const TASK_ID_PREFIX = "task_";
 
 function ctxOf(c: Context): RequestContext {
   return extractContext(c.req.raw.headers, { allowGenerate: true });
@@ -117,6 +116,7 @@ export function buildApp(deps: Deps): Hono {
 
     const eventId = c.req.query("eventId");
     const assigneeId = c.req.query("assigneeId");
+    const teamId = c.req.query("teamId");
     const createdById = c.req.query("createdById");
     const includeArchived = c.req.query("includeArchived") === "true";
     if (includeArchived) await deps.authz.require(ctx, principal, "task:delete");
@@ -144,6 +144,7 @@ export function buildApp(deps: Deps): Hono {
       limit: normalizeLimit(c.req.query("limit")),
       ...(eventId ? { eventId } : {}),
       ...(assigneeId ? { assigneeId } : {}),
+      ...(teamId ? { teamId } : {}),
       ...(createdById ? { createdById } : {}),
       ...(statusRaw.length > 0 ? { statuses: statusRaw as task.TaskStatus[] } : {}),
       ...(cursorRaw ? { cursorId: decodeCursor(cursorRaw) } : {}),
@@ -166,10 +167,14 @@ export function buildApp(deps: Deps): Hono {
       fe.push({ field: "description", reason: "invalid_type" });
     }
     checkPriority(body.priority, fe);
+    checkIso(body.startAt, "startAt", fe);
     checkIso(body.dueAt, "dueAt", fe);
     if (body.assigneeId !== undefined && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    checkOptString(body.teamId, "teamId", fe);
+    checkOptString(body.parentTaskId, "parentTaskId", fe);
+    checkOptString(body.wbs, "wbs", fe);
     // eventId is now OPTIONAL (判断44). If present it must be a string; when omitted the
     // task is issued unlinked to any event. Only validate against event-service when set.
     if (body.eventId !== undefined && body.eventId !== null && typeof body.eventId !== "string") {
@@ -204,6 +209,10 @@ export function buildApp(deps: Deps): Hono {
       status: "todo",
       priority: body.priority ?? "medium",
       assigneeId: body.assigneeId ?? null,
+      teamId: body.teamId ?? null,
+      parentId: body.parentTaskId ?? null,
+      wbs: body.wbs ?? null,
+      startAt: body.startAt ?? null,
       dueAt: body.dueAt ?? null,
       origin: (isServiceRole(principal) ? body.origin : undefined) ?? "internal",
       createdBy: actorId,
@@ -226,7 +235,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:read");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
     return c.json(found);
@@ -238,7 +246,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const body = await readJson<Partial<task.UpdateTaskRequest>>(c);
 
     if (typeof body.version !== "number") {
@@ -251,10 +258,14 @@ export function buildApp(deps: Deps): Hono {
     }
     checkPriority(body.priority, fe);
     checkStatusValue(body.status, fe);
+    checkIso(body.startAt, "startAt", fe);
     checkIso(body.dueAt, "dueAt", fe);
     if (body.assigneeId !== undefined && body.assigneeId !== null && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    checkOptString(body.teamId, "teamId", fe);
+    checkOptString(body.parentTaskId, "parentTaskId", fe);
+    checkOptString(body.wbs, "wbs", fe);
     assertValid(fe);
 
     const current = await deps.repo.getById(id);
@@ -292,6 +303,10 @@ export function buildApp(deps: Deps): Hono {
       status?: task.TaskStatus;
       priority?: task.TaskPriority;
       assigneeId?: common.UserId | null;
+      teamId?: common.TeamId | null;
+      parentId?: common.TaskId | null;
+      wbs?: string | null;
+      startAt?: common.ISODateTime | null;
       dueAt?: common.ISODateTime | null;
     } = {};
     if (body.title !== undefined) patch.title = body.title;
@@ -299,6 +314,10 @@ export function buildApp(deps: Deps): Hono {
     if (body.status !== undefined) patch.status = body.status;
     if (body.priority !== undefined) patch.priority = body.priority;
     if (body.assigneeId !== undefined) patch.assigneeId = body.assigneeId;
+    if (body.teamId !== undefined) patch.teamId = body.teamId;
+    if (body.parentTaskId !== undefined) patch.parentId = body.parentTaskId;
+    if (body.wbs !== undefined) patch.wbs = body.wbs;
+    if (body.startAt !== undefined) patch.startAt = body.startAt;
     if (body.dueAt !== undefined) patch.dueAt = body.dueAt;
 
     if (Object.keys(patch).length === 0) return c.json(current); // version-only no-op
@@ -314,7 +333,7 @@ export function buildApp(deps: Deps): Hono {
     const evt = current.eventId ? { eventId: current.eventId } : {};
     const specs: EventSpec[] = [];
     const changed: string[] = [];
-    for (const f of ["title", "description", "priority", "dueAt"] as const) {
+    for (const f of ["title", "description", "priority", "startAt", "dueAt"] as const) {
       if (patch[f] !== undefined && current[f] !== updated[f]) changed.push(f);
     }
     if (changed.length > 0) {
@@ -343,7 +362,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:delete");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
@@ -371,7 +389,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:read");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
     const items = await deps.repo.listAttachments(id);
@@ -388,7 +405,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
 
@@ -431,7 +447,6 @@ export function buildApp(deps: Deps): Hono {
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
     const attachmentId = c.req.param("attachmentId");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const ok = await deps.repo.archiveAttachment(id, attachmentId, nowIso());
     if (!ok) throw taskErrors.notFound(attachmentId);
     return c.json({ ok: true });
@@ -443,7 +458,6 @@ export function buildApp(deps: Deps): Hono {
     const principal = principalOf(c);
     await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
-    if (!id.startsWith(TASK_ID_PREFIX)) throw taskErrors.notFound(id);
     const body = await readJson<Partial<task.ReplaceDependenciesRequest>>(c);
 
     if (typeof body.version !== "number") {

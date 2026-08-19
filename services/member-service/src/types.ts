@@ -76,6 +76,7 @@ export interface ParticipationRow {
   note: string | null;
   status: "submitted";
   matchKind: member.ParticipationMatchKind;
+  reviewState: member.ParticipationReviewState;
   submittedBy: common.UserId;
   submittedAt: common.ISODateTime;
   createdAt: common.ISODateTime;
@@ -117,6 +118,7 @@ export interface MemberRepo {
 
   // participations (参加届)
   upsertParticipation(row: ParticipationRow): Promise<void>;
+  getParticipation(id: string): Promise<ParticipationRow | null>;
   getParticipationByNormalizedName(orgId: common.OrgId, normalizedName: string): Promise<ParticipationRow | null>;
   listParticipations(orgId: common.OrgId): Promise<ParticipationRow[]>;
 }
@@ -129,4 +131,12 @@ export interface AppDeps {
   newTeamId: () => string;
   newMemberId: () => string;
   newParticipationId: () => string;
+  /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
+   *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
+   *  without the binding, in which case the submission simply skips the notify. Must
+   *  never throw — the submission always succeeds regardless of notify outcome. */
+  notifyParticipationSubmitted?: (
+    ctx: { requestId: string; userId: string },
+    participation: member.Participation,
+  ) => Promise<void>;
 }

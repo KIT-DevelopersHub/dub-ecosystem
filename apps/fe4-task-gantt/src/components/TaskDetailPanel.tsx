@@ -39,6 +39,12 @@ export interface TaskDetailPanelProps {
   scopeTasks?: readonly ScopeTask[];
   /** This task's current predecessors (先行タスク＝依存元). */
   dependsOnIds?: readonly common.TaskId[];
+  /** The bar's DISPLAYED window (gantt row startsAt/endsAt). Seeds 開始日/期日 when the
+   *  task has no explicit startAt/dueAt column yet — the gantt read model derives a bar
+   *  window from dueAt (＋priority/CPM), so a task with only dueAt still SHOWS a start on
+   *  its bar while its startAt column is null. Seeding from here makes 値(詳細)=バー=横軸. */
+  barStartsAt?: common.ISODateTime | null;
+  barEndsAt?: common.ISODateTime | null;
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
@@ -58,6 +64,8 @@ export function TaskDetailPanel({
   parentTaskId = null,
   scopeTasks = [],
   dependsOnIds = [],
+  barStartsAt = null,
+  barEndsAt = null,
   fieldErrors,
   canWrite,
   canDelete,
@@ -67,7 +75,14 @@ export function TaskDetailPanel({
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
   const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
-  const [due, setDue] = useState<string | null>(dateInputFromIso(t.dueAt));
+  // Seed the date fields from the task's own columns, else the bar's displayed window,
+  // so 開始日/期日 always equal what the bar (and the axis) show — even for a task whose
+  // start is only derived (startAt column still null). Compared at the yyyy-mm-dd input
+  // level so a millisecond-format difference never counts as an edit.
+  const startInputSeed = dateInputFromIso(t.startAt ?? barStartsAt ?? null);
+  const dueInputSeed = dateInputFromIso(t.dueAt ?? barEndsAt ?? null);
+  const [start, setStart] = useState<string | null>(startInputSeed);
+  const [due, setDue] = useState<string | null>(dueInputSeed);
   // Relations (親子 / 先行タスク). Seeded from the gantt read model via props; the
   // panel is remounted per task (keyed on id) so these never go stale.
   const [parentId, setParentId] = useState<common.TaskId | null>(parentTaskId);
@@ -88,7 +103,10 @@ export function TaskDetailPanel({
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
+  const nextStartIso = isoFromDateInput(start);
   const nextDueIso = isoFromDateInput(due);
+  // A date edit relative to the seeded (displayed) window.
+  const datesChanged = start !== startInputSeed || due !== dueInputSeed;
   const curTeam = t.teamId ?? null;
   const parentChanged = parentId !== parentTaskId;
   const sameDeps =
@@ -100,7 +118,7 @@ export function TaskDetailPanel({
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
     teamId !== curTeam ||
-    nextDueIso !== t.dueAt ||
+    datesChanged ||
     parentChanged ||
     depsChanged;
 
@@ -111,7 +129,14 @@ export function TaskDetailPanel({
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
     if (teamId !== curTeam) patch.teamId = teamId;
-    if (nextDueIso !== t.dueAt) patch.dueAt = nextDueIso;
+    // Any 開始日/期日 change materialises BOTH edges (startsAt↔startAt, endsAt↔dueAt) so the
+    // saved task carries an explicit window. The gantt bar then equals the detail values
+    // exactly (no re-derivation drift when startAt was previously null), and the optimistic
+    // bar move matches the authoritative refetch — no post-save jump.
+    if (datesChanged) {
+      patch.startAt = nextStartIso;
+      patch.dueAt = nextDueIso;
+    }
     if (parentChanged) patch.parentTaskId = parentId;
     onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
   };
@@ -169,19 +194,27 @@ export function TaskDetailPanel({
           </div>
         </div>
 
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
+            担当
+          </label>
+          <Select
+            id="fe4-detail-assignee"
+            value={assigneeId ?? ""}
+            disabled={!canWrite}
+            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
+            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+            testId="fe4-detail-assignee"
+          />
+        </div>
+
+        {/* 開始日 / 期日: a task with both gets an exact gantt bar (arrow-linkable). */}
         <div className={styles.formRow}>
           <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
-              担当
+            <label className={styles.formLabel} htmlFor="fe4-detail-start">
+              開始日
             </label>
-            <Select
-              id="fe4-detail-assignee"
-              value={assigneeId ?? ""}
-              disabled={!canWrite}
-              onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-              options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
-              testId="fe4-detail-assignee"
-            />
+            <DateField id="fe4-detail-start" value={start} disabled={!canWrite} onChange={setStart} testId="fe4-detail-start" />
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-due">
@@ -233,15 +266,42 @@ export function TaskDetailPanel({
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
           />
+          {/* 関係タイプの変換: 親（親子）→ 先行（依存）。保存で親子/依存を一括反映。 */}
+          {canWrite && parentId && (
+            <button
+              type="button"
+              className={styles.relConvertBtn}
+              onClick={() => {
+                const p = parentId;
+                setParentId(null);
+                // detach to top-level, then keep p as a predecessor (same-scope only).
+                setDeps((d) => pruneToScope(scopeTasks, null, [...new Set([...d, p])]).filter((id) => id !== t.id));
+              }}
+              data-testid="fe4-detail-parent-to-dep"
+            >
+              ⇄ 先行タスク（依存）に変換
+            </button>
+          )}
         </div>
 
-        {/* 先行タスク（依存）: add/remove predecessors after the fact (same scope only). */}
+        {/* 先行タスク（依存）: add/remove predecessors after the fact (same scope only).
+            Each chip can be promoted to the 親タスク (依存→親子) via 「親に」. */}
         <div className={styles.formField}>
           <span className={styles.formLabel}>先行タスク（依存・同じ親のタスクのみ）</span>
           <PredecessorPicker
             options={canWrite ? depOptions : []}
             value={deps}
             onChange={(next) => canWrite && setDeps(next)}
+            {...(canWrite
+              ? {
+                  onPromoteToParent: (id: common.TaskId) => {
+                    // 依存 → 親子: this predecessor becomes the parent; drop it from deps,
+                    // and re-scope the rest to the new parent (保存で一括反映).
+                    setParentId(id);
+                    setDeps((d) => pruneToScope(scopeTasks, id, d.filter((x) => x !== id)).filter((x) => x !== t.id));
+                  },
+                }
+              : {})}
             testId="fe4-detail-deps"
           />
         </div>

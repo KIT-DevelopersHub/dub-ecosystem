@@ -88,11 +88,29 @@ describe("seedScenario", () => {
     // the reply threads onto the welcome message.
     const reply = raw.prepare("SELECT thread_root_id FROM chat_messages WHERE id = ?").get(SEED.messages.reply) as { thread_root_id: string };
     expect(reply.thread_root_id).toBe(SEED.messages.welcome);
-    // 3 primary users all become channel members with read states, admin is channel admin.
-    expect(count(raw, "chat_channel_members")).toBe(3);
+    // 3 primary users all become members of #general with read states, admin is channel admin.
+    const generalMembers = raw.prepare("SELECT COUNT(*) AS n FROM chat_channel_members WHERE channel_id = ?").get(SEED.channel.general) as { n: number };
+    expect(generalMembers.n).toBe(3);
     expect(count(raw, "chat_read_states")).toBe(3);
     const adminRole = raw.prepare("SELECT role FROM chat_channel_members WHERE channel_id = ? AND user_id = ?").get(SEED.channel.general, SEED.users.admin.id) as { role: string };
     expect(adminRole.role).toBe("admin");
+    expect(fkViolations(raw)).toEqual([]);
+  });
+
+  it("conference-demo seeds an enriched 全体/チーム別/役割別 channel set", async () => {
+    const { db, raw } = await migratedD1();
+    await seedScenario(db, "conference-demo");
+    // general (event) + 14 enriched topic channels = 15 public channels.
+    expect(count(raw, "chat_channels")).toBe(15);
+    // team channels mirror member-service's real 運営チーム (public/topic).
+    for (const key of ["announcements", "random", "team_soukatsu", "team_dev", "team_ops", "team_sponsor", "team_venue", "team_pr", "admin", "maintainers", "dev", "design", "pr_koho", "help"]) {
+      expect(exists(raw, "chat_channels", "id", `chan_${key}`)).toBe(true);
+    }
+    // every enriched channel is public/topic and has all 3 seeded users as members.
+    const topicCount = raw.prepare("SELECT COUNT(*) AS n FROM chat_channels WHERE type = 'topic' AND visibility = 'public'").get() as { n: number };
+    expect(topicCount.n).toBe(14);
+    const teamMembers = raw.prepare("SELECT COUNT(*) AS n FROM chat_channel_members WHERE channel_id = 'chan_team_dev'").get() as { n: number };
+    expect(teamMembers.n).toBe(3);
     expect(fkViolations(raw)).toEqual([]);
   });
 
@@ -159,5 +177,31 @@ describe("seedScenario", () => {
     );
     const missing = identity.PERMISSION_CATALOG.map((e) => e.key).filter((k) => !granted.has(k));
     expect(missing, `admin missing catalog perms: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  // Per-app access tier (0008): the previously-uncontrollable apps (gantt rode task:read,
+  // 参加届 rode identity:read) now have their OWN per-app keys granted to the roles that can
+  // already reach them — so an admin can toggle each app individually without breaking
+  // current access. Guards the non-breaking backfill mapping stays in lockstep.
+  it("system roles grant per-app access keys for the apps they can reach (0008)", async () => {
+    const { raw } = await migratedD1();
+    const has = (roleId: string, key: string): boolean =>
+      !!(raw
+        .prepare("SELECT 1 AS ok FROM identity_role_permissions WHERE role_id = ? AND permission_key = ?")
+        .get(roleId, key) as { ok: number } | undefined);
+
+    // headline: member (and everyone) can now open ガント and 参加届 via their OWN keys
+    for (const roleId of ["role_sys_admin", "role_sys_maintainer", "role_sys_organizer", "role_sys_member"]) {
+      expect(has(roleId, "app:gantt:view"), `${roleId} app:gantt:view`).toBe(true);
+      expect(has(roleId, "app:participation:view"), `${roleId} app:participation:view`).toBe(true);
+    }
+    // member can write tasks today ⇒ gets edit; cannot read mail ⇒ no mail app
+    expect(has("role_sys_member", "app:tasks:edit")).toBe(true);
+    expect(has("role_sys_member", "app:mail:view")).toBe(false);
+    expect(has("role_sys_member", "app:admin:view")).toBe(false);
+    // maintainer writes drive ⇒ driveshare edit; no identity:admin ⇒ members view-only, no 管理
+    expect(has("role_sys_maintainer", "app:driveshare:edit")).toBe(true);
+    expect(has("role_sys_maintainer", "app:members:edit")).toBe(false);
+    expect(has("role_sys_maintainer", "app:admin:view")).toBe(false);
   });
 });

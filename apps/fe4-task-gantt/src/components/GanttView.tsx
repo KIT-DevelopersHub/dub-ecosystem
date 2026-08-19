@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SegmentedControl } from "@dub/ui";
-import type { SegmentedOption } from "@dub/ui";
+import { SegmentedControl, Select, SortableList } from "@dub/ui";
+import type { SegmentedOption, SelectOption, SortableItemContext, SortableReorderEvent } from "@dub/ui";
+import type { GanttSortMode } from "../domain/row-sort";
+import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
+import { groupRuns, type RowGroup } from "../domain/row-groups";
+import { readableTextColor } from "../domain/color-contrast";
 import type { common, gantt, task } from "@dub/types";
+
+/** arrayMove — pure list move (kept local so fe4 needs no direct @dnd-kit/sortable dep;
+ *  the DnD itself lives in @dub/ui's SortableList). */
+function moveInList<T>(arr: readonly T[], from: number, to: number): T[] {
+  const copy = arr.slice();
+  const [moved] = copy.splice(from, 1);
+  if (moved !== undefined) copy.splice(to, 0, moved);
+  return copy;
+}
 import {
   type AxisWindow,
   type TimelineBar,
@@ -43,6 +56,23 @@ export interface GanttViewProps {
   /** Shift a work-package (parent) AND its whole subtree by whole days (parent
    *  drag-move: children follow). Falls back to onSchedule when absent. */
   onScheduleShift?: (taskId: common.TaskId, deltaDays: number) => void;
+  /** RESIZE a work-package (parent) bar by whole days at one edge. A parent's span is
+   *  DERIVED from its children (the read model returns the parent's own dates as null), so
+   *  persisting the parent's own row would be discarded on the next GET — the bar snaps
+   *  back ("親バーを伸ばしても反映されない"). Instead the container SCALES the children to fill
+   *  the new span, which persists and rolls the parent bar up to match. `edge`=which handle;
+   *  `deltaDays`=whole-day drag at that edge (＋ grows at that edge). Absent ⇒ parent resize
+   *  falls back to the (non-persisting) onSchedule. */
+  onParentResize?: (parentId: common.TaskId, edge: "start" | "end", deltaDays: number) => void;
+  /** Reorder rows by dragging in the left pane. `beforeTaskId` = the sibling the
+   *  dragged row should sit immediately before (null ⇒ move to the end of its
+   *  group). Only same-parent moves are applied by the container. Absent ⇒ no DnD. */
+  onReorder?: (draggedId: common.TaskId, beforeTaskId: common.TaskId | null) => void;
+  /** Current row 並び替え mode (手動/重要度/時期/チーム). The container owns the state
+   *  and applies the actual re-ordering to `dto.rows`; this view only renders the
+   *  selector and, in non-"manual" modes, hides the drag handles (auto-sorted). */
+  sortMode?: GanttSortMode;
+  onSortModeChange?: (mode: GanttSortMode) => void;
   /** Click a bar or row to open the detail panel. */
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
@@ -53,8 +83,15 @@ export interface GanttViewProps {
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> team accent colour, for the row stripe + bar cap (team grouping). */
   teamColorById?: ReadonlyMap<common.TaskId, string>;
+  /** taskId -> WBS number label (e.g. "AA-1-1"), shown as a badge before the title.
+   *  Computed by the container from the current row order + WBS tree; absent ⇒ no badge. */
+  numberById?: ReadonlyMap<common.TaskId, string>;
   /** ordered [teamId,{name,color}] for the legend under the toolbar. */
   teamLegend?: ReadonlyArray<{ id: string; name: string; color: string }>;
+  /** taskId -> its grouping descriptor for the current sort (チーム名/重要度ラベル…). When
+   *  present, contiguous same-group rows get a labelled bracket down the list's right
+   *  edge. Absent/empty (手動・時期) ⇒ no brackets. */
+  rowGroupById?: ReadonlyMap<common.TaskId, RowGroup>;
   canWrite?: boolean;
 }
 
@@ -84,6 +121,103 @@ interface DragState {
   dxPx: number;
 }
 
+/** One left-pane task row. Presentational: the DnD (reflow + floating clone) is owned
+ *  by @dub/ui's `SortableList`, which hands this row its `dragHandleProps` (spread on
+ *  the ⠿ handle — the ONLY drag surface, so the row's click-to-open is preserved) and
+ *  wraps it in the transform/opacity node. */
+function LeftPaneRow({
+  r,
+  isOpen,
+  dragEnabled,
+  grouped,
+  dragHandleProps,
+  number,
+  onSelect,
+  toggleParent,
+  statusById,
+  assigneeNameById,
+}: {
+  r: gantt.GanttRow;
+  isOpen: boolean;
+  dragEnabled: boolean;
+  /** true when the group-bracket rail is shown — reserves right padding for it. */
+  grouped: boolean;
+  /** from SortableList.renderItem — spread on the drag handle to arm pointer/keyboard. */
+  dragHandleProps: SortableItemContext["dragHandleProps"];
+  /** WBS number label (e.g. "AA-1-1"); absent ⇒ no badge. */
+  number?: string;
+  onSelect?: (taskId: common.TaskId) => void;
+  toggleParent: (id: common.TaskId) => void;
+  statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
+  assigneeNameById?: ReadonlyMap<common.TaskId, string>;
+}) {
+  const depth = r.depth ?? 0;
+  const style: React.CSSProperties = {
+    height: ROW_HEIGHT,
+    // Parent rows move the left indent INTO the toggle so the whole left gutter
+    // toggles — a much bigger hit target than the chevron glyph (feedback #39).
+    paddingLeft: r.hasChildren ? 0 : 12 + depth * 18,
+  };
+  return (
+    <button
+      type="button"
+      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""}`}
+      style={style}
+      title={r.title}
+      onClick={() => onSelect?.(r.taskId)}
+      data-testid={`fe4-gantt-row-${r.taskId}`}
+    >
+      {dragEnabled && (
+        <span
+          {...dragHandleProps}
+          className={styles.tlRowDrag}
+          aria-label="ドラッグして並べ替え"
+          title="ドラッグして並べ替え"
+          data-testid={`fe4-gantt-drag-${r.taskId}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          ⠿
+        </span>
+      )}
+      {r.hasChildren ? (
+        <span
+          className={styles.tlToggleWide}
+          style={{ paddingLeft: 12 + depth * 18 }}
+          role="button"
+          tabIndex={0}
+          aria-label={isOpen ? "子タスクを閉じる" : "子タスクを開く"}
+          aria-expanded={isOpen}
+          data-testid={`fe4-gantt-toggle-${r.taskId}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleParent(r.taskId);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleParent(r.taskId);
+            }
+          }}
+        >
+          <span className={styles.tlToggleGlyph} aria-hidden>{isOpen ? "▾" : "▸"}</span>
+        </span>
+      ) : (
+        depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
+      )}
+      {/* team accent is drawn as a fixed-x left rail (see tlTeamRail) — NOT inline —
+          so consecutive same-team rows form a straight vertical line regardless of
+          each row's WBS indent (the old in-flow stripe stepped with the indent). */}
+      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+      {number && (
+        <span className={styles.tlRowNum} data-testid={`fe4-gantt-num-${r.taskId}`}>{number}</span>
+      )}
+      <span className={styles.tlRowName}>{r.title}</span>
+      {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
+    </button>
+  );
+}
+
 export function GanttView({
   dto,
   zoom: zoomProp,
@@ -91,12 +225,18 @@ export function GanttView({
   truncated,
   onSchedule,
   onScheduleShift,
+  onParentResize,
+  onReorder,
+  sortMode = "manual",
+  onSortModeChange,
   onSelect,
   onCreateOnDate,
   statusById,
   assigneeNameById,
   teamColorById,
   teamLegend,
+  rowGroupById,
+  numberById,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -117,6 +257,45 @@ export function GanttView({
     });
   }, []);
 
+  // Row drag-reorder (left pane) via @dub/ui's SortableList — it owns the floating
+  // clone + neighbour reflow + keyboard a11y; this view only supplies the rows and
+  // commits the drop. Drag only makes sense in 手動 mode (an automatic sort would just
+  // overwrite the drop next render), so the handles are hidden when a sort is active.
+  const reorderEnabled = !!onReorder && canWrite && sortMode === "manual";
+  // The current visible rows, read inside the reorder handler (which is memoised
+  // before `rows` is derived). Kept fresh every render so the drop maps to the screen.
+  const visibleRowsRef = useRef<gantt.GanttRow[]>([]);
+  const onRowReorder = useCallback(
+    (e: SortableReorderEvent) => {
+      const activeId = e.activeId as common.TaskId;
+      const overId = e.overId as common.TaskId;
+      // Translate the drop into the container's "place before X" contract so the
+      // committed order equals the sortable PREVIEW (no post-drop jump). Same-parent
+      // only: move the sibling id list, then whichever id ends up right AFTER the
+      // dragged one is `beforeTaskId` (null ⇒ it became the group's last row). A
+      // cross-parent drop is forwarded as-is — the container rejects it (no-op).
+      const rows = visibleRowsRef.current;
+      const byId = new Map(rows.map((r) => [r.taskId, r] as const));
+      const parentOf = (id: common.TaskId) => byId.get(id)?.parentTaskId ?? null;
+      if (parentOf(activeId) === parentOf(overId)) {
+        const sibs = rows.filter((r) => (r.parentTaskId ?? null) === parentOf(activeId)).map((r) => r.taskId);
+        const from = sibs.indexOf(activeId);
+        const to = sibs.indexOf(overId);
+        if (from < 0 || to < 0) {
+          onReorder?.(activeId, overId);
+          return;
+        }
+        const moved = moveInList(sibs, from, to);
+        const pos = moved.indexOf(activeId);
+        const before = pos + 1 < moved.length ? moved[pos + 1]! : null;
+        onReorder?.(activeId, before);
+      } else {
+        onReorder?.(activeId, overId);
+      }
+    },
+    [onReorder],
+  );
+
   // Parent (work-package) bars always enclose their children: roll each parent's
   // span up to the union of its descendants before any geometry runs, so widening
   // a child auto-grows the parent bar (and, via the window effect, the axis).
@@ -127,6 +306,7 @@ export function GanttView({
     () => rolledRows.filter((r) => !(r.parentTaskId && !openParents.has(r.parentTaskId))),
     [rolledRows, openParents],
   );
+  visibleRowsRef.current = rows;
 
   // taskId -> true when the row is a WBS parent (its bar spans its children via
   // rollup). Parents are now draggable too — a move shifts the whole subtree.
@@ -178,23 +358,55 @@ export function GanttView({
   const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
+  // Every row (visible or hidden) by id — used to walk the WBS up to a visible anchor.
+  const rowByIdAll = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r] as const)), [dto.rows]);
+  // Resolve a dependency endpoint to the nearest row that is actually drawn: if the
+  // endpoint is hidden inside a collapsed parent, walk up to the visible ancestor so
+  // the edge renders as an AGGREGATE arrow on that parent instead of vanishing. A
+  // fully-visible endpoint resolves to itself. This is why top-level ↔ top-level and
+  // collapsed-subtree dependencies both show up now (判断: 折りたたみ中は集約表示).
+  const visibleAnchor = useMemo(() => {
+    return (taskId: common.TaskId): common.TaskId | null => {
+      let id: common.TaskId | null = taskId;
+      const guard = new Set<common.TaskId>();
+      while (id && !guard.has(id)) {
+        guard.add(id);
+        if (barById.has(id)) return id;
+        id = rowByIdAll.get(id)?.parentTaskId ?? null;
+      }
+      return null;
+    };
+  }, [barById, rowByIdAll]);
+
   const segs = useMemo(() => {
+    const seen = new Set<string>(); // dedup edges aggregated onto the same anchor pair
     return dto.dependencies
       .map((d) => {
-        const from = barById.get(d.fromTaskId);
-        const to = barById.get(d.toTaskId);
+        const fromId = visibleAnchor(d.fromTaskId);
+        const toId = visibleAnchor(d.toTaskId);
+        // both collapsed into the SAME visible ancestor → an internal edge, nothing to draw
+        if (!fromId || !toId || fromId === toId) return null;
+        const from = barById.get(fromId);
+        const to = barById.get(toId);
         if (!from || !to || !from.hasBar || !to.hasBar) return null;
+        const key = `${fromId}->${toId}`;
+        if (seen.has(key)) return null;
+        seen.add(key);
+        const aggregated = fromId !== d.fromTaskId || toId !== d.toTaskId;
         return {
           id: d.id,
           x1: from.x + from.width,
           y1: from.y + ROW_HEIGHT / 2,
           x2: to.x,
           y2: to.y + ROW_HEIGHT / 2,
-          tip: `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
+          aggregated,
+          tip: aggregated
+            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の依存を含む）`
+            : `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
-  }, [dto.dependencies, barById, titleById]);
+  }, [dto.dependencies, barById, titleById, visibleAnchor]);
 
   // Faint enclosing band drawn behind an open parent + its (contiguous) children,
   // so the parent-child grouping reads as a container — distinct from the arrows,
@@ -213,6 +425,25 @@ export function GanttView({
     });
     return bands;
   }, [rows, openParents]);
+
+  // Sort grouping brackets: collapse the (already sorted) visible rows into runs of
+  // rows that share a group key, so the list's right edge can draw one labelled
+  // bracket per range (チーム順 → 「統括チーム」…, 重要度順 → 「高」「中」…). Empty in
+  // 手動/時期 modes (no map passed), so the rail simply doesn't render there.
+  const groupRunList = useMemo(() => groupRuns(rows, rowGroupById), [rows, rowGroupById]);
+  const hasGroupRail = groupRunList.length > 0;
+
+  // Team accent as a fixed-x LEFT rail: collapse the visible rows into contiguous
+  // same-team runs and draw each as one straight 3px segment pinned to the pane's
+  // left edge. This replaces the old per-row inline stripe, whose x moved with each
+  // row's WBS indent and so stepped/zig-zagged between a parent and its child.
+  const teamRailById = useMemo(() => {
+    if (!teamColorById || teamColorById.size === 0) return undefined;
+    const m = new Map<common.TaskId, RowGroup>();
+    for (const [id, color] of teamColorById) m.set(id, { key: color, label: "", color });
+    return m;
+  }, [teamColorById]);
+  const teamRailRuns = useMemo(() => groupRuns(rows, teamRailById), [rows, teamRailById]);
 
   // ---- centre on today (initial + on zoom change) ----
   const scrollToToday = useCallback(
@@ -292,10 +523,15 @@ export function GanttView({
         // consistent — the parent bar stays the union of its shifted children).
         if (mode === "move" && parentIds.has(taskId) && onScheduleShift) {
           onScheduleShift(taskId, deltaDays);
+        } else if ((mode === "resize-start" || mode === "resize-end") && parentIds.has(taskId) && onParentResize) {
+          // Parent RESIZE: a work-package span is derived from its children, so persisting
+          // the parent's own row is discarded on the next GET (the bar snaps back). Instead
+          // SCALE the children to fill the new span — that persists and rolls the parent bar
+          // up to match. edge = which handle the user grabbed.
+          onParentResize(taskId, mode === "resize-start" ? "start" : "end", deltaDays);
         } else if (onSchedule) {
-          // Leaf move/resize, or a parent RESIZE: persist the row's own span. For a
-          // parent, rollup then unions it with the children — extending grows the
-          // bar, shrinking below the children is ignored (children never split).
+          // Leaf move/resize (persists its own row), or a parent op with no dedicated
+          // handler wired (falls back to the row write).
           const next = shiftBar(startsAt, endsAt, deltaDays, mode);
           onSchedule(taskId, next.startsAt, next.endsAt);
         }
@@ -366,6 +602,19 @@ export function GanttView({
           <span className={styles.tlCount}>{rows.length} 件</span>
         </div>
         <div className={styles.tlToolbarRight}>
+          {onSortModeChange && (
+            <label className={styles.tlSort}>
+              <span className={styles.tlSortLabel}>並び替え</span>
+              <Select<GanttSortMode>
+                id="fe4-gantt-sort"
+                value={sortMode}
+                onChange={onSortModeChange}
+                options={GANTT_SORT_OPTIONS as SelectOption<GanttSortMode>[]}
+                aria-label="タスクの並び替え"
+                testId="fe4-gantt-sort"
+              />
+            </label>
+          )}
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
             今日
           </button>
@@ -402,13 +651,13 @@ export function GanttView({
           まとめバー（親＝子の期間を合算）
         </span>
         <span className={styles.tlGuideItem}>
-          <svg className={styles.tlGuideDepIcon} width="26" height="10" aria-hidden>
+          <svg className={styles.tlGuideDepIcon} width="28" height="12" aria-hidden>
             <defs>
-              <marker id="fe4-legend-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                <path d="M0,0 L5,3 L0,6 Z" className={styles.tlDepArrow} />
+              <marker id="fe4-legend-arrow" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+                <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrow} />
               </marker>
             </defs>
-            <path d="M1,5 H20" fill="none" className={styles.tlDep} markerEnd="url(#fe4-legend-arrow)" />
+            <path d="M1,6 H20" fill="none" className={styles.tlDep} markerEnd="url(#fe4-legend-arrow)" />
           </svg>
           依存（前工程 → 後工程）
         </span>
@@ -438,57 +687,78 @@ export function GanttView({
                     ‹
                   </button>
                 </div>
-                {rows.map((r) => {
-                  const depth = r.depth ?? 0;
-                  const isOpen = openParents.has(r.taskId);
-                  return (
-                    <button
-                      key={r.taskId}
-                      type="button"
-                      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""}`}
-                      // Parent rows move the left indent INTO the toggle so the whole
-                      // left gutter (everything left of the team stripe) toggles — a
-                      // much bigger hit target than the chevron glyph (feedback #39).
-                      style={{ height: ROW_HEIGHT, paddingLeft: r.hasChildren ? 0 : 12 + depth * 18 }}
-                      title={r.title}
-                      onClick={() => onSelect?.(r.taskId)}
-                      data-testid={`fe4-gantt-row-${r.taskId}`}
-                    >
-                      {r.hasChildren ? (
-                        <span
-                          className={styles.tlToggleWide}
-                          style={{ paddingLeft: 12 + depth * 18 }}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={isOpen ? "子タスクを閉じる" : "子タスクを開く"}
-                          aria-expanded={isOpen}
-                          data-testid={`fe4-gantt-toggle-${r.taskId}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleParent(r.taskId);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              toggleParent(r.taskId);
-                            }
-                          }}
-                        >
-                          <span className={styles.tlToggleGlyph} aria-hidden>{isOpen ? "▾" : "▸"}</span>
-                        </span>
-                      ) : (
-                        depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
-                      )}
+                {/* Drag-to-reorder via the shared @dub/ui SortableList: the floating
+                    clone (renderOverlay), the neighbour reflow, and keyboard a11y all
+                    live there — this view supplies the rows and commits the drop. */}
+                <SortableList<gantt.GanttRow>
+                  items={rows}
+                  getItemId={(r) => r.taskId}
+                  disabled={!reorderEnabled}
+                  onReorder={onRowReorder}
+                  aria-label="タスクの並び替え"
+                  renderItem={(r, ctx) => (
+                    <LeftPaneRow
+                      r={r}
+                      isOpen={openParents.has(r.taskId)}
+                      dragEnabled={reorderEnabled}
+                      grouped={hasGroupRail}
+                      dragHandleProps={ctx.dragHandleProps}
+                      number={numberById?.get(r.taskId)}
+                      onSelect={onSelect}
+                      toggleParent={toggleParent}
+                      statusById={statusById}
+                      assigneeNameById={assigneeNameById}
+                    />
+                  )}
+                  renderOverlay={(r) => (
+                    <div className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }} data-testid="fe4-gantt-drag-overlay">
+                      <span className={styles.tlRowDrag} aria-hidden>⠿</span>
                       {teamColorById?.get(r.taskId) && (
                         <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
                       )}
                       <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+                      {numberById?.get(r.taskId) && (
+                        <span className={styles.tlRowNum}>{numberById.get(r.taskId)}</span>
+                      )}
                       <span className={styles.tlRowName}>{r.title}</span>
-                      {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
-                    </button>
-                  );
-                })}
+                    </div>
+                  )}
+                />
+                {/* team accent rail: fixed-x straight segments (one per contiguous team run) */}
+                {teamRailRuns.length > 0 && (
+                  <div className={styles.tlTeamRail} style={{ top: HEADER_H }} data-testid="fe4-gantt-team-rail" aria-hidden>
+                    {teamRailRuns.map((run) => (
+                      <div
+                        key={`${run.key}-${run.startIndex}`}
+                        className={styles.tlTeamRailSeg}
+                        style={{ top: run.startIndex * ROW_HEIGHT, height: run.length * ROW_HEIGHT, background: run.color }}
+                        data-testid={`fe4-gantt-team-seg-${run.startIndex}`}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* sort grouping brackets: one labelled bracket per contiguous same-group run */}
+                {hasGroupRail && (
+                  <div className={styles.tlGroupRail} style={{ top: HEADER_H }} data-testid="fe4-gantt-group-rail" aria-hidden>
+                    {groupRunList.map((run) => {
+                      const fill = run.color ?? "var(--dub-color-gray-500)";
+                      const text = readableTextColor(run.color);
+                      return (
+                        <div
+                          key={`${run.key}-${run.startIndex}`}
+                          className={styles.tlGroupBracket}
+                          style={{ top: run.startIndex * ROW_HEIGHT + 3, height: run.length * ROW_HEIGHT - 6, background: fill }}
+                          data-testid={`fe4-gantt-group-bracket-${run.key}`}
+                          title={run.label}
+                        >
+                          <span className={styles.tlGroupBracketLabel} style={{ color: text }}>
+                            {run.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 {canWrite && onCreateOnDate && (
                   <button type="button" className={styles.tlAddRow} style={{ height: ROW_HEIGHT }} onClick={() => onCreateOnDate(null)} data-testid="fe4-gantt-addrow">
                     ＋ 新規タスク
@@ -549,19 +819,28 @@ export function GanttView({
                   <div key={i} className={styles.tlRowLine} style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }} aria-hidden />
                 ))}
 
-                {/* dependency connectors (subtle) */}
+                {/* dependency connectors (前工程 → 後工程) */}
                 {segs.length > 0 && (
                   <svg width={width} height={rowsH} className={styles.tlSvg} aria-hidden>
                     <defs>
-                      <marker id="fe4-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                        <path d="M0,0 L5,3 L0,6 Z" className={styles.tlDepArrow} />
+                      <marker id="fe4-arrow" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+                        <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrow} />
                       </marker>
                     </defs>
                     {segs.map((s) => {
                       const midX = Math.max(s.x1 + 10, s.x2 - 10);
                       const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
+                      const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
                       return (
-                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`}>
+                        <path
+                          key={s.id}
+                          d={d}
+                          fill="none"
+                          className={cls}
+                          markerEnd="url(#fe4-arrow)"
+                          data-testid={`fe4-gantt-dep-${s.id}`}
+                          data-aggregated={s.aggregated ? "1" : undefined}
+                        >
                           <title>{s.tip}</title>
                         </path>
                       );

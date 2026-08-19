@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import type { ChatRealtimeEvent, Message } from "../api/contract";
 import {
   ackPending,
+  applyReactions,
+  reactionsFromWire,
   addPending,
   applyRealtimeEvent,
   failPending,
@@ -99,10 +101,20 @@ describe("applyRealtimeEvent", () => {
     expect(state.messages.map((m) => m.id)).toEqual(["msg_real"]);
   });
 
-  it("tombstones on message.deleted", () => {
+  it("tombstones on message.deleted (mode tombstone / legacy no-mode)", () => {
     let state = { ...emptyChannelView(CH), messages: [msg("msg_a", { body: "x" })] };
-    state = applyRealtimeEvent(state, { kind: "message.deleted", channelId: CH, messageId: "msg_a", at: "2026-08-09T03:00:00Z" }, ME);
+    state = applyRealtimeEvent(state, { kind: "message.deleted", channelId: CH, messageId: "msg_a", at: "2026-08-09T03:00:00Z", mode: "tombstone" }, ME);
     expect(state.messages[0]!.deletedAt).toBe("2026-08-09T03:00:00Z");
+    // legacy event without a mode still tombstones (backward-compat)
+    let legacy = { ...emptyChannelView(CH), messages: [msg("msg_b", { body: "y" })] };
+    legacy = applyRealtimeEvent(legacy, { kind: "message.deleted", channelId: CH, messageId: "msg_b", at: "2026-08-09T03:00:00Z" }, ME);
+    expect(legacy.messages[0]!.deletedAt).toBe("2026-08-09T03:00:00Z");
+  });
+
+  it("drops the row entirely on message.deleted with mode hard (no tombstone)", () => {
+    let state = { ...emptyChannelView(CH), messages: [msg("msg_a", { body: "x" }), msg("msg_b", { body: "y" })] };
+    state = applyRealtimeEvent(state, { kind: "message.deleted", channelId: CH, messageId: "msg_a", at: "2026-08-09T03:00:00Z", mode: "hard" }, ME);
+    expect(state.messages.map((m) => m.id)).toEqual(["msg_b"]);
   });
 
   it("leaves timeline unchanged for member events", () => {
@@ -154,5 +166,104 @@ describe("toggleReactionLocal", () => {
     let m = [msg("msg_a", { reactions: [{ emoji: "👍", userIds: [OTHER] }] })];
     m = toggleReactionLocal(m, "msg_a", "👍", ME);
     expect(m[0]!.reactions[0]!.userIds).toEqual([OTHER, ME]);
+  });
+});
+
+describe("normalizeMessage (wire -> client Message coercion)", () => {
+  it("upsertMessage coerces a chat-service wire message so render never sees undefined", () => {
+    // The server wire shape: attachmentFileIds + reactions-as-Record, no replyCount.
+    const wire = {
+      id: "msg_01",
+      channelId: CH,
+      authorId: OTHER,
+      body: "hi",
+      attachmentFileIds: ["file_a"],
+      reactions: { "🎉": ["usr_1", "usr_2"] },
+      version: 1,
+      editedAt: null,
+      deletedAt: null,
+      createdAt: "2026-08-18T00:00:00.000Z",
+    } as unknown as Message;
+    const m = upsertMessage([], wire)[0]!;
+    expect(Array.isArray(m.attachments)).toBe(true);
+    expect(m.attachments).toHaveLength(1);
+    expect(m.attachments[0]!.fileId).toBe("file_a");
+    expect(Array.isArray(m.reactions)).toBe(true);
+    expect(m.reactions).toEqual([{ emoji: "🎉", userIds: ["usr_1", "usr_2"] }]);
+    expect(m.replyCount).toBe(0);
+    expect(m.threadRootId).toBeNull();
+  });
+
+  it("is idempotent for an already client-shaped message", () => {
+    const m = msg("msg_02", { reactions: [{ emoji: "👍", userIds: [ME] }], attachments: [], replyCount: 3 });
+    const out = upsertMessage([], m)[0]!;
+    expect(out.reactions).toEqual([{ emoji: "👍", userIds: [ME] }]);
+    expect(out.attachments).toEqual([]);
+    expect(out.replyCount).toBe(3);
+  });
+});
+
+describe("applyReactions (reaction-toggle reconcile)", () => {
+  it("replaces the target message's reactions from the server's authoritative set", () => {
+    const base = upsertMessage([], msg("msg_r1", { reactions: [] }));
+    const out = applyReactions(base, "msg_r1", [{ emoji: "🎉", userIds: [ME, OTHER] }]);
+    expect(out[0]!.reactions).toEqual([{ emoji: "🎉", userIds: [ME, OTHER] }]);
+    // does not inject a phantom entry (bug: upsertMessage on { messageId, reactions })
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("msg_r1");
+  });
+
+  it("is a no-op when the message is not loaded", () => {
+    const base = upsertMessage([], msg("msg_r2"));
+    const out = applyReactions(base, "msg_absent", [{ emoji: "👍", userIds: [ME] }]);
+    expect(out).toBe(base);
+  });
+});
+
+describe("reactionsFromWire", () => {
+  it("converts a Record<emoji, userIds> to Reaction[]", () => {
+    expect(reactionsFromWire({ "🎉": ["u1"], "👍": ["u1", "u2"] })).toEqual([
+      { emoji: "🎉", userIds: ["u1"] },
+      { emoji: "👍", userIds: ["u1", "u2"] },
+    ]);
+  });
+  it("passes an array through and tolerates undefined", () => {
+    expect(reactionsFromWire([{ emoji: "🔥", userIds: ["u1"] }])).toEqual([{ emoji: "🔥", userIds: ["u1"] }]);
+    expect(reactionsFromWire(undefined)).toEqual([]);
+  });
+});
+
+describe("applyRealtimeEvent — thread replies stay out of the main timeline", () => {
+  it("a reply event bumps the root's replyCount and does NOT insert into main", () => {
+    const root = msg("msg_root", { replyCount: 0 });
+    const base = upsertMessage([], root);
+    const view = { ...emptyChannelView(CH), messages: base };
+    const ev: ChatRealtimeEvent = {
+      kind: "message.created",
+      channelId: CH as any,
+      messageId: "msg_reply" as any,
+      authorId: OTHER as any,
+      body: "a reply",
+      at: "2026-08-18T00:00:00.000Z" as any,
+      threadRootId: "msg_root" as any,
+    };
+    const next = applyRealtimeEvent(view, ev, ME as any);
+    expect(next.messages).toHaveLength(1); // reply not inserted into main
+    expect(next.messages[0]!.id).toBe("msg_root");
+    expect(next.messages[0]!.replyCount).toBe(1); // summary bumped live
+  });
+
+  it("a top-level event still inserts into main", () => {
+    const view = emptyChannelView(CH);
+    const ev: ChatRealtimeEvent = {
+      kind: "message.created",
+      channelId: CH as any,
+      messageId: "msg_top" as any,
+      authorId: OTHER as any,
+      body: "hi",
+      at: "2026-08-18T00:00:00.000Z" as any,
+    };
+    const next = applyRealtimeEvent(view, ev, ME as any);
+    expect(next.messages.map((m) => m.id)).toContain("msg_top");
   });
 });

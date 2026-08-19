@@ -12,6 +12,14 @@ export interface UpstreamPort {
   listDependencies(ctx: RequestContext, eventId: common.EventId): Promise<task.TaskDependency[]>;
   /** Existence / visibility check (404 + org-boundary transparency). */
   eventExists(ctx: RequestContext, eventId: common.EventId): Promise<boolean>;
+  /** Persist a row's window by writing the underlying task's startAt/dueAt (PATCH
+   *  /gantt/rows). Read-modify-write against task-service (optimistic version read
+   *  then patch); task-service enforces task:write on the propagated principal. */
+  updateTaskDates(
+    ctx: RequestContext,
+    taskId: common.TaskId,
+    dates: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+  ): Promise<task.Task>;
 }
 
 export interface ViewRepo {

@@ -103,6 +103,10 @@ export class InMemoryMemberRepo implements MemberRepo {
   async upsertParticipation(row: ParticipationRow): Promise<void> {
     this.participations.set(row.id, { ...row });
   }
+  async getParticipation(id: string): Promise<ParticipationRow | null> {
+    const r = this.participations.get(id);
+    return r ? { ...r } : null;
+  }
   async getParticipationByNormalizedName(orgId: common.OrgId, normalizedName: string): Promise<ParticipationRow | null> {
     for (const p of this.participations.values()) {
       if (p.orgId === orgId && p.normalizedName === normalizedName) return { ...p };

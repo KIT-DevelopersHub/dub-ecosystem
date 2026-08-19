@@ -2,8 +2,9 @@
 // apps are published to GENERAL MEMBERS. Any app NOT explicitly published here is
 // shown to members greyed-out in the launcher (消さない — never removed) so an app
 // that is merely deployed but not yet announced can't be mistaken for a released
-// feature and used by accident. Admins / maintainers bypass the gate entirely so
-// they can test & develop unreleased apps.
+// feature and used by accident. ONLY full admins (identity:admin) bypass the gate so
+// they can test & develop unreleased apps; non-admin operator roles (maintainer /
+// organizer) are gated like general members (社長決定 #255, 2026-08-17).
 //
 // Release lifecycle (3 steps): (1) demo env → (2) prod, deployed but member-hidden
 // = greyed, admin/dev only → (3) prod, member-published = greyed removed. Moving an
@@ -13,7 +14,7 @@
 // a server-backed per-app flag (e.g. an `apps.memberPublished` column surfaced on
 // /me) without touching the launcher/route call-sites: keep isAppPublished() as the
 // single lookup and swap its body for the fetched flag.
-import { identity } from "@dub/types";
+import { appRegistry, type identity } from "@dub/types";
 import type { FeatureModuleId } from "../modules/types.tsx";
 
 type PermissionKey = identity.PermissionKey;
@@ -38,19 +39,52 @@ export function isAppPublished(appId: FeatureModuleId | undefined): boolean {
   return appId === undefined || PUBLISHED_APPS.has(appId);
 }
 
-// Admin/maintainer bypass. There is no role field on MeResponse (only the resolved
-// permission set), so "privileged" (an operator/developer who may see every app) is
-// derived from the frozen RBAC catalog: holding ANY permission flagged `dangerous`
-// (identity:admin, *:admin, mail:send, infra:deploy, …) marks the admin & maintainer
-// tiers; the member tier (read-only perms) holds none. Self-maintaining: new catalog
-// keys are classified by their own `dangerous` flag.
-const PRIVILEGED_KEYS: readonly PermissionKey[] = identity.PERMISSION_CATALOG.filter(
-  (e) => e.dangerous,
-).map((e) => e.key);
+// Admin-only bypass (社長決定 #255, 2026-08-17). "Privileged" = a FULL admin who may
+// see every app while it is still member-hidden. Earlier this was derived from holding
+// ANY `dangerous` catalog permission, which wrongly let non-admin operator roles
+// (maintainer/organizer — they hold *:admin / *:send perms) bypass the gate too. The
+// bypass is now the single `identity:admin` capability, so the launcher, the dashboard
+// app grid and the route guard (all call isPrivilegedViewer) agree: only admins see
+// unpublished apps; everyone else is gated to member-published apps (メール).
+const ADMIN_PERMISSION: PermissionKey = "identity:admin";
 
-/** True when the viewer is an admin/maintainer (bypasses the member release gate).
+/** True when the viewer is a full admin (bypasses the member release gate).
  *  `can` is the shell's fail-closed permission check (false while /me loads), so a
  *  loading/unauthenticated viewer is treated as a non-privileged member. */
 export function isPrivilegedViewer(can: (p: PermissionKey) => boolean): boolean {
-  return PRIVILEGED_KEYS.some((k) => can(k));
+  return can(ADMIN_PERMISSION);
+}
+
+/**
+ * True when the viewer holds the app's EXPLICIT per-app access grant (app:<id>:view,
+ * #270). Granting a role an app in ロール管理 IS the decision to release that app to that
+ * role, so an explicit grant must override the coarse member-publish gate below.
+ * Fail-closed: false for an unknown app id or while /me loads (can() returns false).
+ */
+export function hasExplicitAppAccess(
+  appId: FeatureModuleId | undefined,
+  can: (p: PermissionKey) => boolean,
+): boolean {
+  if (!appId) return false;
+  const viewKey = appRegistry.appViewKey(appId);
+  return viewKey ? can(viewKey as PermissionKey) : false;
+}
+
+/**
+ * True when the member-publish release gate should GREY this app for the viewer.
+ *
+ * BUGFIX (#270 follow-up): the launcher/route used to grey any app that was not in
+ * PUBLISHED_APPS for every non-admin — even after ロール管理 granted the role app:<id>:view.
+ * That double-gated the per-app RBAC: a granted organizer still saw the tile disabled.
+ * The per-app grant is now authoritative — an app is RELEASED to a viewer who is (a) a
+ * full admin, (b) explicitly granted the app (hasExplicitAppAccess), or (c) globally
+ * member-published (PUBLISHED_APPS). Only an app with NONE of these (unannounced AND
+ * ungranted) stays greyed for general members, preserving the "don't surface unreleased
+ * apps by accident" intent for roles that were never granted them.
+ */
+export function isReleaseGatedFor(
+  appId: FeatureModuleId | undefined,
+  can: (p: PermissionKey) => boolean,
+): boolean {
+  return !isPrivilegedViewer(can) && !isAppPublished(appId) && !hasExplicitAppAccess(appId, can);
 }

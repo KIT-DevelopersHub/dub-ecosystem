@@ -45,6 +45,7 @@ function seedFiles(): MockFile[] {
     emailAddress: "hackit@gmail.com",
     displayName: "Hackit 運営",
     domain: null,
+    inherited: false,
   };
   const own = (id: string): SharePermission => ({ ...ownerPerm, id });
   return [
@@ -52,27 +53,31 @@ function seedFiles(): MockFile[] {
     //    予算管理 / toggles link sharing at the top level keeps working. ─────────────
     mk("fld_root", "Hackit 2026 共有", DRIVE_FOLDER_MIME, "2026-08-10T09:00:00Z", null, [
       { ...ownerPerm, id: "perm_1" },
-      { id: "perm_2", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null },
+      { id: "perm_2", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null, inherited: false },
     ]),
     mk("fld_designs", "デザイン素材", DRIVE_FOLDER_MIME, "2026-08-11T02:30:00Z", null, [{ ...ownerPerm, id: "perm_3" }]),
     mk("fil_budget", "予算管理.xlsx", "application/vnd.google-apps.spreadsheet", "2026-08-11T23:10:00Z", null, [
       { ...ownerPerm, id: "perm_4" },
-      { id: "perm_5", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null },
+      { id: "perm_5", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null, inherited: false },
     ]),
     mk("fil_flyer", "当日チラシ.pdf", "application/pdf", "2026-08-12T01:00:00Z", null, [
       { ...ownerPerm, id: "perm_6" },
-      { id: "perm_anyone_flyer", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null },
+      { id: "perm_anyone_flyer", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null, inherited: false },
     ]),
     mk("fil_runsheet", "進行台本.gdoc", "application/vnd.google-apps.document", "2026-08-12T03:45:00Z", null, [
       { ...ownerPerm, id: "perm_7" },
-      { id: "perm_8", type: "user", role: "commenter", emailAddress: "mc@example.com", displayName: "司会", domain: null },
+      { id: "perm_8", type: "user", role: "commenter", emailAddress: "mc@example.com", displayName: "司会", domain: null, inherited: false },
     ]),
 
     // ── children of fld_root (depth 1) ────────────────────────────────────────────
     mk("fld_sponsors", "スポンサー資料", DRIVE_FOLDER_MIME, "2026-08-11T05:00:00Z", "fld_root", [own("perm_10")]),
     mk("fil_schedule", "全体スケジュール.gsheet", "application/vnd.google-apps.spreadsheet", "2026-08-11T06:00:00Z", "fld_root", [
       own("perm_11"),
-      { id: "perm_12", type: "user", role: "reader", emailAddress: "ops@example.com", displayName: "運営", domain: null },
+      { id: "perm_12", type: "user", role: "reader", emailAddress: "ops@example.com", displayName: "運営", domain: null, inherited: false },
+      // Inherited from the parent folder (fld_root) — the manager must show this as
+      // read-only (継承) and refuse revoke/role-change, mirroring Drive's real
+      // `cannotDeletePermission`. Exercised by the local/preview E2E.
+      { id: "perm_inh_staffa", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null, inherited: true },
     ]),
     // ── children of fld_sponsors (depth 2 — proves nesting beyond one level) ───────
     mk("fil_contract", "協賛契約書.pdf", "application/pdf", "2026-08-11T07:00:00Z", "fld_sponsors", [own("perm_13")]),
@@ -158,6 +163,7 @@ export function createMockDriveShareClient(): DriveShareClient {
         emailAddress: p.emailAddress ?? null,
         displayName: p.emailAddress ? p.emailAddress.split("@")[0]! : null,
         domain: null,
+        inherited: false, // a freshly granted permission is always direct on this item
       };
       f.permissions.push(perm);
       return { ...perm };
@@ -168,6 +174,10 @@ export function createMockDriveShareClient(): DriveShareClient {
       const perm = f.permissions.find((x) => x.id === permissionId);
       if (!perm) throw errors.notFound("drivePermission", permissionId);
       if (perm.role === "owner") throw errors.forbidden("オーナー権限は変更できません");
+      if (perm.inherited)
+        throw errors.forbidden(
+          "この権限は親フォルダから継承されているため、このファイル単体では変更できません。親フォルダの共有設定で操作してください。",
+        );
       perm.role = role;
       return { ...perm };
     },
@@ -177,6 +187,10 @@ export function createMockDriveShareClient(): DriveShareClient {
       const idx = f.permissions.findIndex((x) => x.id === permissionId);
       if (idx === -1) return; // idempotent
       if (f.permissions[idx]!.role === "owner") throw errors.forbidden("オーナー権限は剥奪できません");
+      if (f.permissions[idx]!.inherited)
+        throw errors.forbidden(
+          "この権限は親フォルダから継承されているため、このファイル単体では剥奪できません。親フォルダの共有設定で操作してください。",
+        );
       f.permissions.splice(idx, 1);
     },
   };

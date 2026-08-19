@@ -21,6 +21,11 @@ export function useGanttData(eventId: common.EventId) {
    *  and overshoots — see the parent drag-shift undo bug. */
   const currentRows = (): gantt.GanttChartDTO["rows"] =>
     qc.getQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId))?.rows ?? [];
+  /** LIVE cached dependency lines (same rationale as currentRows). Used to snapshot
+   *  the before-state for an optimistic dependency edit so a failure can snap back
+   *  instantly instead of waiting on the reconciling refetch. */
+  const currentDependencies = (): gantt.GanttChartDTO["dependencies"] =>
+    qc.getQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId))?.dependencies ?? [];
   /** after an edit, refetch with Cache-Control: no-cache (design test 6). */
   const refetchFresh = async () => {
     const fresh = await getGanttFresh(client, eventId);
@@ -40,5 +45,69 @@ export function useGanttData(eventId: common.EventId) {
         : old,
     );
   };
-  return { ...query, currentRows, refetchFresh, setRowScheduleOptimistic };
+  /** Optimistically insert/replace a bar (used for optimistic create so a new task
+   *  appears on the timeline the same tick, before the POST resolves). */
+  const upsertRowOptimistic = (row: gantt.GanttRow) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
+      old
+        ? { ...old, rows: [...old.rows.filter((r) => r.taskId !== row.taskId), row] }
+        : old,
+    );
+  };
+  /** Optimistically drop a bar (optimistic delete, or discarding a provisional bar). */
+  const removeRowOptimistic = (taskId: common.TaskId) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
+      old ? { ...old, rows: old.rows.filter((r) => r.taskId !== taskId) } : old,
+    );
+  };
+  /** Optimistically re-parent (or detach with null) a row so the tree reflects the
+   *  change the same tick — the child leaves/joins a work-package immediately instead
+   *  of appearing stuck inside the old parent's toggle until the refetch lands. Depth
+   *  follows the new parent (null ⇒ top-level, depth 0); the old/new parents'
+   *  `hasChildren` is recomputed so an emptied parent loses its toggle at once. */
+  const setRowParentOptimistic = (taskId: common.TaskId, parentTaskId: common.TaskId | null) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) => {
+      if (!old) return old;
+      const parentDepth = parentTaskId ? old.rows.find((r) => r.taskId === parentTaskId)?.depth ?? 0 : -1;
+      const rows = old.rows.map((r) =>
+        r.taskId === taskId ? { ...r, parentTaskId, depth: parentDepth + 1 } : r,
+      );
+      // recompute hasChildren from the mutated parent links (an emptied parent drops its toggle)
+      const withKids = new Set(rows.map((r) => r.parentTaskId).filter((p): p is common.TaskId => !!p));
+      return { ...old, rows: rows.map((r) => ({ ...r, hasChildren: withKids.has(r.taskId) })) };
+    });
+  };
+  /** Optimistically set the predecessor (先行タスク＝依存) edges of ONE task so the
+   *  timeline's arrows appear/disappear the SAME tick the user saves — instead of
+   *  waiting for the persist + refetch round-trip (the "追加/削除しても時差があって
+   *  失敗したか不安" complaint). Edges point predecessor(from) → task(to); this
+   *  rebuilds exactly the `to === taskId` edges from `dependsOnIds` and leaves every
+   *  other task's edges untouched. Server dedup/format is mirrored (`${to}->${from}`). */
+  const setDependenciesOptimistic = (taskId: common.TaskId, dependsOnIds: readonly common.TaskId[]) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) => {
+      if (!old) return old;
+      const others = old.dependencies.filter((d) => d.toTaskId !== taskId);
+      const seen = new Set(others.map((d) => d.id));
+      const next = [...others];
+      for (const from of dependsOnIds) {
+        if (from === taskId) continue; // no self-edge
+        const id = `${taskId}->${from}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        next.push({ id, fromTaskId: from, toTaskId: taskId, type: "FS", lagDays: 0 });
+      }
+      return { ...old, dependencies: next };
+    });
+  };
+  return {
+    ...query,
+    currentRows,
+    currentDependencies,
+    refetchFresh,
+    setRowScheduleOptimistic,
+    upsertRowOptimistic,
+    removeRowOptimistic,
+    setRowParentOptimistic,
+    setDependenciesOptimistic,
+  };
 }

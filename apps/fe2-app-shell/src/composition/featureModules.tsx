@@ -14,7 +14,7 @@
 //      flatten() ANDs them onto every route (fail-closed authz).
 // The result is the array FE2's registerFeatureModules() consumes (main.tsx).
 import { createElement, type ComponentType, type ReactNode } from "react";
-import type { identity } from "@dub/types";
+import { appRegistry, type identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { eventFeatureModule, routePaths } from "@dub/fe3-event-action";
 import { notificationsModule } from "@dub/fe5-notification-inbox";
@@ -34,7 +34,8 @@ import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.ts
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
-import { participationRoutes, participationNav } from "../features/participation/index.tsx";
+import { MemberRosterNav } from "../features/members/MemberRosterNav.tsx";
+import { participationRoutes } from "../features/participation/index.tsx";
 import { ParticipationProvider } from "../features/participation/ParticipationProvider.tsx";
 import {
   ChatProviders,
@@ -100,6 +101,11 @@ function providerWrapper(Provider: ProviderComponent, api: ApiClient): ElementWr
   return (node) => createElement(Provider, { api, children: node });
 }
 
+/** 運営メンバー・名簿 統合アプリの共有サブナビ帯でセクション本体を包む（Provider の外側）。
+ *  members(member-service) と admin(identity-roster) の両セクションに同じ帯を敷き、
+ *  ランチャー 1 タイルの中で横断できるようにする（合体後も両ルート/Providerは維持）。 */
+const rosterChromeWrapper: ElementWrapper = (node) => createElement(MemberRosterNav, { children: node });
+
 /** Wrap a canonical `lazy` loader so the resolved Component mounts inside `wrap`. */
 function wrapLazy(lazy: FeatureRoute["lazy"], wrap: ElementWrapper): FeatureRoute["lazy"] {
   return () => lazy().then(({ Component }) => ({ Component: () => wrap(createElement(Component)) }));
@@ -140,12 +146,11 @@ function adaptEvents(api: ApiClient): FeatureModule {
     }
     return route;
   });
-  // イベントアプリはユーザー明示承認で launcher/ナビから外す（登録解除・非表示）。
-  // ただし FE3 のルート（/events, /events/:eventId とその配下に splice される FE4 の
-  // タスク/ガント routes）は保持する: ガント(/gantt)ランディングが
-  // `/events/:eventId/tasks/gantt` へ遷移し、マイタスクの event-scoped 動線もこの
-  // routes に依存するため。nav を空にするだけでタイルは消え、可逆（将来 nav を戻せば復活）。
-  const nav: NavEntry[] = [];
+  // FE3 declares its own /events nav (order 20); the shell owns top-level nav
+  // ordering and pins events first (order 10). イベントは誤って launcher/ナビから
+  // 外れていたためユーザー承認で復活（アプリを減らさない原則）。メールアドレス管理
+  // (/admin/email-routing) だけは意図的撤去のまま。
+  const nav: NavEntry[] = [{ label: "イベント", path: routePaths.list, icon: "calendar", order: 10 }];
   return withModulePerms(eventFeatureModule, { id: "events", routes, nav });
 }
 
@@ -255,9 +260,15 @@ function adaptGantt(api: ApiClient): FeatureModule {
 // rather than a separate FE package. Nav sits after usage (order 47), before admin.
 // Route gate = identity:read; write actions are re-authorized server-side (identity:admin).
 function adaptMembers(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(MembersProvider, api);
+  const provider = providerWrapper(MembersProvider, api);
+  // chrome(サブナビ) は Provider の外側: (node) => <MemberRosterNav>{<MembersProvider>node</MembersProvider>}</MemberRosterNav>
+  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = membersNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 47 }));
+  // 統合タイル「運営メンバー・名簿」。運営メンバー(member-service) と 名簿(FE7 /admin/users) と
+  // 参加届＋回答(participation) を同じアプリとして開く。名簿/参加届/回答 の個別タイルは廃止し、この
+  // タイル内の共有サブナビ(MemberRosterNav)から横断する。ロール管理(/admin/roles) だけは独立タイル
+  // として adaptAdmin が別に出す（ユーザー明示指示: ロールを外に括り出す）。
+  const nav: NavEntry[] = membersNav.map((n) => ({ label: "運営メンバー・名簿", path: n.path, icon: n.icon, order: 47 }));
   return { id: "members", routes, nav };
 }
 
@@ -269,16 +280,14 @@ function adaptMembers(api: ApiClient): FeatureModule {
 // authenticated user, so the launcher tile shows for everyone signed in; the roster
 // write is re-authorized server-side by member-service.
 function adaptParticipation(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(ParticipationProvider, api);
+  const provider = providerWrapper(ParticipationProvider, api);
+  // 参加届(提出) と 参加届の回答(管理) は「運営メンバー・名簿」統合アプリのセクションに畳む。
+  // 共有サブナビ(MemberRosterNav) を Provider の外側に敷き、名簿/運営メンバーと同じ帯で横断する。
+  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = participationNav.map((n, i) => {
-    // 参加届(提出)は全員に、回答一覧は identity:read を持つ運営だけにランチャー表示。
-    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 49 + i };
-    if (n.requiredPermissions && n.requiredPermissions.length > 0) {
-      e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
-    }
-    return e;
-  });
+  // 個別ランチャータイルは廃止（nav=[]）。参加届は運営メンバー・名簿タイル内のサブナビからのみ横断する
+  // （ユーザー明示指示: 参加届＋回答管理を運営メンバーにまとめる）。ルート/Provider は維持し deep-link も生存。
+  const nav: NavEntry[] = [];
   return { id: "participation", routes, nav };
 }
 
@@ -297,21 +306,20 @@ function adaptDriveShare(api: ApiClient): FeatureModule {
 
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(RosterProviders, api);
+  const provider = providerWrapper(RosterProviders, api);
+  // 名簿(/admin/users*) は「運営メンバー・名簿」統合タイルの一部 → 共有サブナビ(chrome)を Provider の
+  // 外側に敷き、そのタブから横断する（個別タイルは出さない）。ロール管理(/admin/roles*) はユーザー明示
+  // 指示で独立ランチャータイル「ロール管理」として単独で開く → chrome は敷かず単独アプリとして成立させる。
+  const rosterWrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const src = adminModule.routes as readonly SourceRoute[];
-  const routes = src.map((r) => wrapRoute(r, wrap));
-  // Map each admin route path -> its own requiredPermissions so the launcher can
-  // hide the admin tools (ユーザー名簿 / ロール管理) from non-admins, matching the route
-  // guard (defense in depth; a non-admin can neither see nor open them).
-  // メールアドレス管理・変更履歴 はユーザー明示承認で FE7 の routes/nav から登録解除済み
-  // （fe7-admin-roster/src/routes.tsx）。残る admin ツールは権限保持者に全て表示する。
-  const permByPath = new Map(src.map((r) => [r.path, r.requiredPermissions]));
-  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => {
-    const perms = permByPath.get(n.path);
-    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
-    if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
-    return e;
-  });
+  const routes = src.map((r) =>
+    r.path.startsWith("/admin/roles") ? wrapRoute(r, provider) : wrapRoute(r, rosterWrap),
+  );
+  // 独立ランチャータイルは「ロール管理」(/admin/roles) の 1 つだけ。名簿(/admin/users) は運営メンバー・
+  // 名簿タイル内の共有サブナビ(MemberRosterNav)から開くので個別タイルを出さない。変更履歴(/admin/history)
+  // の UI は撤去済み（ルート/コンポーネントごと削除・監査ログのデータ基盤は残置）。route ガード
+  // (requiredPermissions)・headerWidget は維持。app:admin:view が名簿タブとロール管理タイルの両方をガードする。
+  const nav: NavEntry[] = [{ label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50 }];
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 
@@ -320,6 +328,24 @@ function adaptAdmin(api: ApiClient): FeatureModule {
  *  than in each adaptX so the appId can never drift from the module it belongs to. */
 function withNavAppId(module: FeatureModule): FeatureModule {
   module.nav = module.nav.map((n) => ({ ...n, appId: module.id }));
+  return module;
+}
+
+/** AND the app's per-app `app:<id>:view` access key onto the module (so registry.flatten
+ *  gates every route — the deep-link 403) AND onto each nav entry (so the launcher greys
+ *  the tile for a role without it). This is the ACTUAL per-app gate: turning app:<id>:view
+ *  off for a role now hides+blocks exactly that one app (gantt/参加届 included), independent
+ *  of the shared domain permission it historically rode. Non-breaking: an additive backfill
+ *  (identity-roster) grants the key to every role that can reach the app today, so no one
+ *  loses access on rollout. Fail-closed: while /me loads, can() is false → gated. */
+function withAppAccessGate(module: FeatureModule): FeatureModule {
+  const viewKey = appRegistry.appViewKey(module.id);
+  if (!viewKey) return module; // unreachable: every module id is a canonical app
+  const add = (perms: readonly PermissionKey[] | undefined): PermissionKey[] => [
+    ...new Set([...(perms ?? []), viewKey]),
+  ];
+  module.requiredPermissions = add(module.requiredPermissions);
+  module.nav = module.nav.map((n) => ({ ...n, requiredPermissions: add(n.requiredPermissions) }));
   return module;
 }
 
@@ -342,7 +368,7 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptParticipation(api),
     adaptDriveShare(api),
     adaptAdmin(api),
-  ].map(withNavAppId);
+  ].map(withNavAppId).map(withAppAccessGate);
 }
 
 export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptAdmin, toIcon };

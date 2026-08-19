@@ -1,0 +1,113 @@
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Menu } from "../src/components/Menu";
+import type { MenuItem } from "../src/types";
+
+function items(onSelect = vi.fn()): MenuItem[] {
+  return [
+    { id: "change-password", label: "パスワード変更", icon: "lock", onSelect, testId: "cp" },
+  ];
+}
+
+describe("Menu (dropdown 設定/kebab primitive)", () => {
+  it("is closed initially and opens on the trigger", async () => {
+    render(<Menu label="設定" icon="settings" items={items()} testId="menu" />);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    expect(screen.getByRole("menu", { name: "設定" })).toBeInTheDocument();
+    expect(screen.getByText("パスワード変更")).toBeInTheDocument();
+  });
+
+  it("calls the item's onSelect and closes on select", async () => {
+    const onSelect = vi.fn();
+    render(<Menu label="設定" items={items(onSelect)} testId="menu" />);
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    await userEvent.click(screen.getByTestId("cp"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes on Escape", async () => {
+    render(<Menu label="設定" items={items()} testId="menu" />);
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes on outside click", async () => {
+    render(
+      <div>
+        <Menu label="設定" items={items()} testId="menu" />
+        <button type="button">外側</button>
+      </div>,
+    );
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await userEvent.click(screen.getByText("外側"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("iconOnly renders a labelled icon button (no visible text/chevron) that opens the menu", async () => {
+    render(<Menu label="設定" menuLabel="設定" icon="settings" iconOnly items={items()} testId="menu" />);
+    const trigger = screen.getByTestId("menu-trigger");
+    // Accessible via aria-label; the visual label text is gone.
+    expect(trigger).toHaveAttribute("aria-label", "設定");
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveTextContent(""); // no visible "設定" text
+    expect(trigger.querySelector('[data-icon="chevron-down"]')).toBeNull(); // no chevron
+    expect(trigger.querySelector('[data-icon="settings"]')).not.toBeNull(); // gear present
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu", { name: "設定" })).toBeInTheDocument();
+  });
+
+  it("renders a divider before an item and marks danger-toned items", async () => {
+    const onLogout = vi.fn();
+    render(
+      <Menu
+        label="設定"
+        icon="settings"
+        iconOnly
+        testId="menu"
+        items={[
+          { id: "password", label: "パスワード変更", icon: "lock", onSelect: () => {}, testId: "cp" },
+          {
+            id: "logout",
+            label: "ログアウト",
+            icon: "log-out",
+            tone: "danger",
+            dividerBefore: true,
+            onSelect: onLogout,
+            testId: "logout",
+          },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    const logout = screen.getByTestId("logout");
+    expect(logout).toHaveAttribute("data-tone", "danger");
+    // Safe item carries no danger tone.
+    expect(screen.getByTestId("cp")).not.toHaveAttribute("data-tone");
+    await userEvent.click(logout);
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire onSelect for a disabled item", async () => {
+    const onSelect = vi.fn();
+    render(
+      <Menu
+        label="設定"
+        testId="menu"
+        items={[{ id: "x", label: "近日公開", disabled: true, onSelect, testId: "x" }]}
+      />,
+    );
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    expect(screen.getByTestId("x")).toBeDisabled();
+    await userEvent.click(screen.getByTestId("x"));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});

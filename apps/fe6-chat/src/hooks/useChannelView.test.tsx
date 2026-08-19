@@ -99,6 +99,49 @@ describe("useChannelView integration", () => {
     expect(result.current.state.messages.some((m) => m.body === "live message")).toBe(true);
   });
 
+  it("optimistically removes a message the instant delete is called, before the DELETE resolves (hard)", async () => {
+    const { api, wrapper } = makeRuntime();
+    const { result } = renderHook(() => useChannelView(GENERAL), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const target = result.current.state.messages[result.current.state.messages.length - 1]!;
+    api.latencyMs = 60; // delay the server ack so we can observe the optimistic state
+
+    let p: Promise<void>;
+    act(() => {
+      p = result.current.deleteMessage(target.id, target.version);
+    });
+    // Immediately gone — no waiting on the network (default policy = hard).
+    expect(result.current.state.messages.some((m) => m.id === target.id)).toBe(false);
+
+    await act(async () => {
+      await p!;
+    });
+    // Stays gone after the server confirms (reconcile agrees).
+    expect(result.current.state.messages.some((m) => m.id === target.id)).toBe(false);
+  });
+
+  it("rolls back the optimistic delete on failure so the message reappears, and rejects", async () => {
+    const { api, wrapper } = makeRuntime();
+    const { result } = renderHook(() => useChannelView(GENERAL), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const target = result.current.state.messages[result.current.state.messages.length - 1]!;
+    const { ChatApiError } = await import("../api/client");
+    api.nextError = new ChatApiError(500, { error: { code: "INTERNAL", message: "boom", retryable: false } });
+
+    let rejected = false;
+    await act(async () => {
+      await result.current.deleteMessage(target.id, target.version).catch(() => {
+        rejected = true;
+      });
+    });
+
+    expect(rejected).toBe(true); // caller can surface an error toast
+    // Rolled back: the message is back in the timeline.
+    expect(result.current.state.messages.some((m) => m.id === target.id)).toBe(true);
+  });
+
   it("optimistically toggles a reaction and reconciles with the server", async () => {
     const { wrapper } = makeRuntime();
     const { result } = renderHook(() => useChannelView(GENERAL), { wrapper });

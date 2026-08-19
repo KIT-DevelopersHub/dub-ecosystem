@@ -69,18 +69,51 @@ describe("#39-2 parent bar is draggable: a move shifts the whole subtree", () =>
     expect(onSchedule).not.toHaveBeenCalled(); // parent move does NOT persist a single row
   });
 
-  it("resizing the parent edge persists the parent's own span via onSchedule", () => {
+  it("resizing a parent edge routes to onParentResize (scale children), NOT the doomed onSchedule row write", () => {
+    // A work-package span is derived from its children, so persisting the parent's own row
+    // is discarded on the next GET (the bar snaps back). When onParentResize is wired, the
+    // parent-edge drag reports (parentId, edge, deltaDays) so the container can scale the
+    // children instead — which persists. onSchedule (the doomed write) must NOT fire.
     const onSchedule = vi.fn();
     const onScheduleShift = vi.fn();
-    render(<GanttView dto={wbsDto} zoom="day" onSchedule={onSchedule} onScheduleShift={onScheduleShift} canWrite />);
+    const onParentResize = vi.fn();
+    render(
+      <GanttView
+        dto={wbsDto}
+        zoom="day"
+        onSchedule={onSchedule}
+        onScheduleShift={onScheduleShift}
+        onParentResize={onParentResize}
+        canWrite
+      />,
+    );
     const handle = screen.getByTestId("fe4-gantt-bar-p-rz-r");
+    const scroll = screen.getByTestId("fe4-gantt-scroll");
+    fireEvent.pointerDown(handle, { clientX: 200, pointerId: 1 });
+    fireEvent.pointerMove(scroll, { clientX: 300, pointerId: 1 }); // +100px ≈ +3 days
+    fireEvent.pointerUp(scroll, { clientX: 300, pointerId: 1 });
+    expect(onParentResize).toHaveBeenCalledTimes(1);
+    const [id, edge, delta] = onParentResize.mock.calls[0]!;
+    expect(id).toBe("p");
+    expect(edge).toBe("end");
+    expect(delta).toBeGreaterThan(0);
+    expect(onSchedule).not.toHaveBeenCalled();
+    expect(onScheduleShift).not.toHaveBeenCalled();
+  });
+
+  it("resizing a LEAF edge still persists its own row via onSchedule", () => {
+    const onSchedule = vi.fn();
+    const onParentResize = vi.fn();
+    render(<GanttView dto={wbsDto} zoom="day" onSchedule={onSchedule} onParentResize={onParentResize} canWrite />);
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p")); // reveal the leaves
+    const handle = screen.getByTestId("fe4-gantt-bar-c2-rz-r");
     const scroll = screen.getByTestId("fe4-gantt-scroll");
     fireEvent.pointerDown(handle, { clientX: 200, pointerId: 1 });
     fireEvent.pointerMove(scroll, { clientX: 300, pointerId: 1 });
     fireEvent.pointerUp(scroll, { clientX: 300, pointerId: 1 });
     expect(onSchedule).toHaveBeenCalledTimes(1);
-    expect(onSchedule.mock.calls[0]![0]).toBe("p");
-    expect(onScheduleShift).not.toHaveBeenCalled();
+    expect(onSchedule.mock.calls[0]![0]).toBe("c2");
+    expect(onParentResize).not.toHaveBeenCalled();
   });
 });
 

@@ -100,3 +100,11 @@
   min-width: 0;
   background: var(--dub-color-surface-sunken);
 }
+/* Full-bleed apps (Slack-style chat / Gmail-style mail) opt out of the content
+   gutter + sunken frame by rendering an element with [data-app-bleed]. Without
+   this the 24px padding boxes an edge-to-edge app, leaving a sunken border on all
+   four sides — jarring when the app has its own dark chrome. The app then spans the
+   canvas corner-to-corner (own scroll regions handle overflow). */
+.shellContent:has([data-app-bleed]) {
+  padding: 0;
+}
