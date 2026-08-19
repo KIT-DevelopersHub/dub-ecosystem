@@ -5,6 +5,12 @@
 // 自然幅がコンテナを超えたら DataTable の overflow-x:auto で横スクロールになり（ページ本体は
 // スクロールしない）、氏名やアカウント状態が 2〜3 行に折り返す崩れを防ぐ。長い値
 // （メール・連絡先・氏名）は <Truncate> で省略（…）＋ title ツールチップにして幅を暴走させない。
+//
+// さらに横スクロールを抑えるため DataTable の「表示列」ピッカー(columnHiding)を有効化する。
+// 既定 on = 主要列(氏名/担当・役割/ステータス/所属チーム/連絡先) と 操作列(hideable:false・常時表示)。
+// 情報過多で幅の広い列(ローマ字/学科/学年/アカウント/学校メール/Gmail)は defaultHidden で初期 off に
+// し、初期表示の横スクロールを最小化する。選択は localStorage にユーザー単位で保存され、全部 on に
+// すれば従来どおり全列表示。
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
@@ -56,9 +62,9 @@ export function ListView({
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
-    { key: "nameRomaji", header: "氏名（ローマ字）", minWidth: "11rem", noWrap: true, cell: (m) => <Truncate text={romajiName(m)} max="14rem" /> },
-    { key: "department", header: "学科", minWidth: "7rem", noWrap: true, cell: (m) => m.department ?? "—" },
-    { key: "grade", header: "学年", minWidth: "5rem", noWrap: true, cell: (m) => m.grade ?? "—" },
+    { key: "nameRomaji", header: "氏名（ローマ字）", minWidth: "11rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={romajiName(m)} max="14rem" /> },
+    { key: "department", header: "学科", minWidth: "7rem", noWrap: true, defaultHidden: true, cell: (m) => m.department ?? "—" },
+    { key: "grade", header: "学年", minWidth: "5rem", noWrap: true, defaultHidden: true, cell: (m) => m.grade ?? "—" },
     { key: "role", header: "担当・役割", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.roleTitle ?? "—"} max="12rem" /> },
     { key: "status", header: "ステータス", minWidth: "7rem", noWrap: true, cell: (m) => <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> },
     {
@@ -66,6 +72,7 @@ export function ListView({
       header: "アカウント",
       minWidth: "12rem",
       noWrap: true,
+      defaultHidden: true,
       cell: (m) =>
         m.identityUserId ? (
           <span style={{ display: "inline-flex", gap: "var(--dub-space-1)", alignItems: "center", maxWidth: "13rem" }} data-testid={`members-account-${m.id}`}>
@@ -98,14 +105,15 @@ export function ListView({
         ),
     },
     { key: "contact", header: "連絡先", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.contact ?? "—"} max="12rem" /> },
-    { key: "schoolEmail", header: "学校メール", minWidth: "13rem", noWrap: true, cell: (m) => <Truncate text={m.schoolEmail ?? "—"} max="16rem" /> },
-    { key: "gmail", header: "Gmail", minWidth: "13rem", noWrap: true, cell: (m) => <Truncate text={m.gmail ?? "—"} max="16rem" /> },
+    { key: "schoolEmail", header: "学校メール", minWidth: "13rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={m.schoolEmail ?? "—"} max="16rem" /> },
+    { key: "gmail", header: "Gmail", minWidth: "13rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={m.gmail ?? "—"} max="16rem" /> },
     {
       key: "actions",
       header: "操作",
       align: "right",
       minWidth: "6rem",
       noWrap: true,
+      hideable: false,
       cell: (m) => (
         <span style={{ display: "inline-flex", gap: "var(--dub-space-1)", justifyContent: "flex-end" }}>
           <IconButton name="edit" aria-label={`${m.name} を編集`} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />
@@ -127,6 +135,7 @@ export function ListView({
       rows={members}
       rowKey={(m) => m.id}
       testId="members-table"
+      columnHiding={{ storageKey: "dub.members.roster.columns.v1" }}
       emptyState={<EmptyState title="メンバーがいません" description="「メンバーを追加」から登録してください" icon="users" />}
     />
   );
