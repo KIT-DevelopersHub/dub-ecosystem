@@ -392,7 +392,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (path.endsWith("/chat/settings/deletion-policy")) {
       const req = body as chat.UpdateDeletionPolicyRequest;
       if (req.version !== chatPolicy.version) throw err("CHAT_VERSION_CONFLICT", "stale deletion-policy version");
-      chatPolicy = { policy: { member: req.policy.member, moderator: req.policy.moderator }, version: chatPolicy.version + 1 };
+      chatPolicy = { policy: { member: req.policy.member, moderator: req.policy.moderator, protectReacted: req.policy.protectReacted }, version: chatPolicy.version + 1 };
       return { policy: { ...chatPolicy.policy }, version: chatPolicy.version } as unknown as T;
     }
     const roleMatch = path.match(/\/identity\/roles\/([^/]+)$/);

@@ -19,6 +19,10 @@ export interface ChatDeletionControls {
   behavior: chat.MessageDeletionMode; // current mode for this role's tier (org policy)
   onBehaviorChange: (mode: chat.MessageDeletionMode) => void;
   behaviorDisabled?: boolean;
+  // 誤削除防止: workspace-wide flag — a reacted message can't be deleted by non-moderators.
+  protectReacted: boolean;
+  onProtectReactedChange: (next: boolean) => void;
+  protectDisabled?: boolean;
 }
 
 const DELETE_RIGHT_OPTIONS: { value: ChatDeleteRight; label: string }[] = [
@@ -225,6 +229,28 @@ export function AppAccessSection({
                               testId: `${idPrefix}-chatdel-mode-${o.value}`,
                             }))}
                             testId={`${idPrefix}-chatdel-mode`}
+                          />
+                        </div>
+                      ) : null}
+
+                      {/* 誤削除防止 = workspace-wide toggle. Shown once the role can delete;
+                          admins/moderators are exempt (they can still delete reacted messages). */}
+                      {chatDeletion && deleteRight !== "none" ? (
+                        <div style={{ marginTop: 8 }}>
+                          <Switch
+                            id={`${idPrefix}-chatdel-protect`}
+                            checked={chatDeletion.protectReacted}
+                            disabled={disabled || chatDeletion.protectDisabled}
+                            onChange={(next) => chatDeletion.onProtectReactedChange(next)}
+                            testId={`${idPrefix}-chatdel-protect`}
+                            label={
+                              <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                <span style={{ fontSize: 13 }}>リアクション付きメッセージは削除不可（adminは可）</span>
+                                <span style={nestLabelStyle}>
+                                  誤削除防止。リアクションが付いた投稿は一般ロールが削除できなくなります（ワークスペース共通・管理者は対象外）。
+                                </span>
+                              </span>
+                            }
                           />
                         </div>
                       ) : null}

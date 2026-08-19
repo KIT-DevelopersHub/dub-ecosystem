@@ -144,6 +144,9 @@ export class InMemoryChatRepo implements ChatRepo {
   async hasReaction(messageId: common.MessageId, emoji: string, userId: common.UserId): Promise<boolean> {
     return (this.reactions.get(messageId) ?? []).some((r) => r.emoji === emoji && r.userId === userId);
   }
+  async messageHasReactions(messageId: common.MessageId): Promise<boolean> {
+    return (this.reactions.get(messageId) ?? []).length > 0;
+  }
   async addReaction(messageId: common.MessageId, emoji: string, userId: common.UserId, at: string): Promise<void> {
     const list = this.reactions.get(messageId) ?? [];
     if (!list.some((r) => r.emoji === emoji && r.userId === userId)) list.push({ emoji, userId, at });

@@ -1003,7 +1003,7 @@ function createChatStore() {
   // In-session workspace message-deletion policy (RBAC-configurable). Default = all
   // hard, mirroring production; PATCH persists in-session so the ロール管理 挙動 toggle
   // reflects + saves in the demo. Nothing leaves the browser.
-  let delPolicy: chat.MessageDeletionPolicy = { member: "hard", moderator: "hard" };
+  let delPolicy: chat.MessageDeletionPolicy = { member: "hard", moderator: "hard", protectReacted: false };
   let delVersion = 0;
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
@@ -1012,7 +1012,7 @@ function createChatStore() {
       if (method === "PATCH") {
         const req = body as chat.UpdateDeletionPolicyRequest;
         if (req?.policy) {
-          delPolicy = { member: req.policy.member, moderator: req.policy.moderator };
+          delPolicy = { member: req.policy.member, moderator: req.policy.moderator, protectReacted: req.policy.protectReacted };
           delVersion += 1;
         }
         return json({ policy: { ...delPolicy }, version: delVersion });

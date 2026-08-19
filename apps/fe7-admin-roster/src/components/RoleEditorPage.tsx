@@ -50,6 +50,13 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
           updatePolicy.mutate({ policy: { ...cur.policy, [deleteTier]: mode }, version: cur.version });
         },
         behaviorDisabled: readOnly || updatePolicy.isPending,
+        protectReacted: policy.data.policy.protectReacted,
+        onProtectReactedChange: (next: boolean) => {
+          const cur = policy.data!;
+          if (cur.policy.protectReacted === next) return;
+          updatePolicy.mutate({ policy: { ...cur.policy, protectReacted: next }, version: cur.version });
+        },
+        protectDisabled: readOnly || updatePolicy.isPending,
       }
     : undefined;
 

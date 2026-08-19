@@ -69,7 +69,12 @@ describe("AppAccessSection — per-app enable + nested level", () => {
 });
 
 describe("AppAccessSection — チャット 削除権限 + 挙動", () => {
-  const behavior: ChatDeletionControls = { behavior: "hard", onBehaviorChange: vi.fn() };
+  const behavior: ChatDeletionControls = {
+    behavior: "hard",
+    onBehaviorChange: vi.fn(),
+    protectReacted: false,
+    onProtectReactedChange: vi.fn(),
+  };
 
   it("shows the 削除権限 3-choice only when chat is enabled", () => {
     setup([]); // chat off
@@ -105,9 +110,25 @@ describe("AppAccessSection — チャット 削除権限 + 挙動", () => {
 
     // own => toggle visible, reflects current value, drives onBehaviorChange
     const onBehaviorChange = vi.fn();
-    setup(["app:chat:view", "chat:delete"], { chatDeletion: { behavior: "hard", onBehaviorChange } });
+    setup(["app:chat:view", "chat:delete"], { chatDeletion: { ...behavior, onBehaviorChange } });
     expect(screen.getByTestId("fe7-chatdel-mode-hard")).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByTestId("fe7-chatdel-mode-tombstone"));
     expect(onBehaviorChange).toHaveBeenCalledWith("tombstone" satisfies chat.MessageDeletionMode);
+  });
+
+  it("shows the リアクション保護 toggle only when the role can delete, and drives it", () => {
+    // none => no protection toggle
+    setup(["app:chat:view"], { chatDeletion: behavior });
+    expect(screen.queryByTestId("fe7-chatdel-protect")).toBeNull();
+
+    // own => toggle visible, reflects value, drives onProtectReactedChange
+    const onProtectReactedChange = vi.fn();
+    setup(["app:chat:view", "chat:delete"], {
+      chatDeletion: { ...behavior, protectReacted: false, onProtectReactedChange },
+    });
+    const sw = screen.getByTestId("fe7-chatdel-protect") as HTMLInputElement;
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    expect(onProtectReactedChange).toHaveBeenCalledWith(true);
   });
 });

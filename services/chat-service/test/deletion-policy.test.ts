@@ -45,7 +45,7 @@ describe("deletion policy: read + write", () => {
     const app = createApp(makeDeps({ authz: tieredAuthz(new Set()) }));
     const res = await call(app, "GET", POLICY_PATH, { userId: "user_x" });
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ policy: { member: "hard", moderator: "hard" }, version: 0 });
+    expect(res.json).toEqual({ policy: { member: "hard", moderator: "hard", protectReacted: false }, version: 0 });
   });
 
   it("PUT requires chat:moderate (fail-close), validates modes, and is version-locked", async () => {
@@ -58,18 +58,18 @@ describe("deletion policy: read + write", () => {
     });
     expect(denied.status).toBe(403);
 
-    // moderator sets it (first write: version 0 -> 1)
+    // moderator sets it (first write: version 0 -> 1); protectReacted persists too
     const ok = await call(app, "PATCH", POLICY_PATH, {
       userId: "user_admin",
-      body: { version: 0, policy: { member: "tombstone", moderator: "hard" } },
+      body: { version: 0, policy: { member: "tombstone", moderator: "hard", protectReacted: true } },
     });
     expect(ok.status).toBe(200);
-    expect(ok.json).toEqual({ policy: { member: "tombstone", moderator: "hard" }, version: 1 });
+    expect(ok.json).toEqual({ policy: { member: "tombstone", moderator: "hard", protectReacted: true }, version: 1 });
 
     // stale version -> 409
     const stale = await call(app, "PATCH", POLICY_PATH, {
       userId: "user_admin",
-      body: { version: 0, policy: { member: "hard", moderator: "hard" } },
+      body: { version: 0, policy: { member: "hard", moderator: "hard", protectReacted: false } },
     });
     expect(stale.status).toBe(409);
     expect(stale.json.error.code).toBe("CHAT_VERSION_CONFLICT");
@@ -152,5 +152,51 @@ describe("deletion policy: resolved delete behaviour", () => {
     // others' -> forbidden (chat:delete is own-only; no chat:moderate)
     const other = await call(app, "POST", "/chat/messages", { userId: "user_none", body: { channelId: ch.json.id, body: "other" } });
     expect((await call(app, "DELETE", `/chat/messages/${other.json.id}`, { userId: "user_del" })).status).toBe(403);
+  });
+});
+
+describe("deletion policy: reaction protection (誤削除防止)", () => {
+  async function setup(protectReacted: boolean) {
+    // user_admin = moderator (chat:moderate); everyone can chat:delete their own.
+    const app = createApp(makeDeps({ authz: tieredAuthz(new Set(["user_admin"])) }));
+    // neutral owner creates the channel so user_member stays a plain member
+    const ch = await call(app, "POST", "/chat/channels", { userId: "user_owner", body: publicTopic });
+    await call(app, "PATCH", POLICY_PATH, {
+      userId: "user_admin",
+      body: { version: 0, policy: { member: "hard", moderator: "hard", protectReacted } },
+    });
+    // member posts a message and a reaction lands on it
+    const msg = await call(app, "POST", "/chat/messages", { userId: "user_member", body: { channelId: ch.json.id, body: "loved" } });
+    await call(app, "POST", `/chat/messages/${msg.json.id}/reactions`, { userId: "user_other", body: { emoji: "👍" } });
+    return { app, channelId: ch.json.id as string, msgId: msg.json.id as string };
+  }
+
+  it("blocks a non-moderator from deleting a reacted message (409), but a moderator may (exempt)", async () => {
+    const { app, msgId } = await setup(true);
+    // author (non-moderator) is blocked because the message has a reaction
+    const blocked = await call(app, "DELETE", `/chat/messages/${msgId}`, { userId: "user_member" });
+    expect(blocked.status).toBe(409);
+    expect(blocked.json.error.code).toBe("CHAT_MESSAGE_REACTED");
+    // moderator (admin) is exempt and can delete the reacted message
+    const modDel = await call(app, "DELETE", `/chat/messages/${msgId}`, { userId: "user_admin" });
+    expect(modDel.status).toBe(200);
+  });
+
+  it("does not block when protectReacted is off (a reacted message stays deletable)", async () => {
+    const { app, msgId } = await setup(false);
+    const del = await call(app, "DELETE", `/chat/messages/${msgId}`, { userId: "user_member" });
+    expect(del.status).toBe(200);
+  });
+
+  it("a message with NO reactions is deletable even when protection is on", async () => {
+    const app = createApp(makeDeps({ authz: tieredAuthz(new Set(["user_admin"])) }));
+    const ch = await call(app, "POST", "/chat/channels", { userId: "user_owner", body: publicTopic });
+    await call(app, "PATCH", POLICY_PATH, {
+      userId: "user_admin",
+      body: { version: 0, policy: { member: "hard", moderator: "hard", protectReacted: true } },
+    });
+    const msg = await call(app, "POST", "/chat/messages", { userId: "user_member", body: { channelId: ch.json.id, body: "plain" } });
+    const del = await call(app, "DELETE", `/chat/messages/${msg.json.id}`, { userId: "user_member" });
+    expect(del.status).toBe(200);
   });
 });
