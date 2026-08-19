@@ -108,6 +108,21 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res);
   });
 
+  // ---- GET /tasks/cross-links (LITERAL route registered before :id) ----
+  // The event's arrow-less cross-team links (送る・受け取る). Same wire shape as
+  // /tasks/dependencies; gantt/My Tasks read this to badge rows「お願いした/受け負った」
+  // WITHOUT drawing an arrow (these never enter task_dependencies / CPM).
+  app.get("/tasks/cross-links", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:read");
+    const eventId = c.req.query("eventId");
+    if (!eventId) throw errors.validationFailed([{ field: "eventId", reason: "required" }]);
+    const items = await deps.repo.listCrossLinksByEvent(eventId);
+    const res: task.ListTaskCrossLinksResponse = { items };
+    return c.json(res);
+  });
+
   // ---- GET /tasks (list; cursor paging) ----
   app.get("/tasks", async (c) => {
     const ctx = ctxOf(c);

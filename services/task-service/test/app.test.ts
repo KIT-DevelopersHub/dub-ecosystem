@@ -943,3 +943,43 @@ describe("POST /task-requests/:id/decline + /cancel", () => {
     expect(res.status).toBe(409);
   });
 });
+
+// GET /tasks/cross-links?eventId= — the event's arrow-less cross-team links.
+describe("GET /tasks/cross-links", () => {
+  const link = (h: TestHarness, id: string, eventId: string) =>
+    h.repo.insertCrossLink({
+      id,
+      requestId: `treq_${id}`,
+      requesterTaskId: `task_r_${id}`,
+      requesteeTaskId: `task_e_${id}`,
+      eventId,
+      now: "2026-08-20T00:00:00.000Z",
+    });
+
+  it("returns only the requested event's cross-links (same shape as /dependencies)", async () => {
+    const { h, app } = setup();
+    await link(h, "txl_1", "evt_1");
+    await link(h, "txl_2", "evt_1");
+    await link(h, "txl_3", "evt_2");
+    const res = await app.request("/tasks/cross-links?eventId=evt_1", userInit("GET"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.ListTaskCrossLinksResponse;
+    expect(body.items.map((c) => c.id).sort()).toEqual(["txl_1", "txl_2"]);
+    expect(body.items[0]).toHaveProperty("requesterTaskId");
+    expect(body.items[0]).toHaveProperty("requesteeTaskId");
+  });
+
+  it("400 when eventId is absent", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks/cross-links", userInit("GET"));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+  });
+
+  it("is a literal route — not captured by /tasks/:id", async () => {
+    const { app } = setup();
+    // A GET without eventId must be the cross-links 400, not a 404 for task id "cross-links".
+    const res = await app.request("/tasks/cross-links?eventId=evt_1", userInit("GET"));
+    expect(res.status).toBe(200);
+  });
+});
