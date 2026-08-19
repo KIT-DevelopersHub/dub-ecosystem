@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config.dart';
 import '../state/auth.dart';
 import 'inbox_view.dart';
+import 'mail_view.dart';
 
 /// One launchable app in the ecosystem (mirrors the web 9-dot launcher).
 class DubApp {
@@ -20,13 +22,13 @@ const _apps = <DubApp>[
   DubApp('chat', 'チャット', Icons.chat_bubble_outline),
   DubApp('tasks', 'タスク', Icons.check_circle_outline),
   DubApp('gantt', 'ガント', Icons.timeline),
-  DubApp('mail', 'メール', Icons.mail_outline),
+  DubApp('mail', 'メール', Icons.mail_outline, ready: true),
   DubApp('events', 'イベント', Icons.event_outlined),
   DubApp('roster', '名簿', Icons.groups_outlined),
   DubApp('drive', 'ドライブ', Icons.folder_outlined),
 ];
 
-final selectedAppProvider = StateProvider<String>((_) => 'notifications');
+final selectedAppProvider = StateProvider<String>((_) => AppConfig.initialApp);
 
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
@@ -112,6 +114,8 @@ class _AppBody extends StatelessWidget {
     switch (selectedId) {
       case 'notifications':
         return const InboxView();
+      case 'mail':
+        return const MailView();
       default:
         final app = _apps.firstWhere((a) => a.id == selectedId,
             orElse: () => _apps.first);

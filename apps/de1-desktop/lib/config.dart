@@ -24,4 +24,10 @@ class AppConfig {
       String.fromEnvironment('AUTO_LOGIN_EMAIL', defaultValue: '');
   static const String autoLoginPassword =
       String.fromEnvironment('AUTO_LOGIN_PASSWORD', defaultValue: '');
+
+  /// Which app the shell opens on (launcher id, e.g. `mail`). Defaults to
+  /// `notifications`. Used by the E2E/screenshot harness to boot straight into
+  /// a specific feature without driving the launcher.
+  static const String initialApp =
+      String.fromEnvironment('INITIAL_APP', defaultValue: 'notifications');
 }

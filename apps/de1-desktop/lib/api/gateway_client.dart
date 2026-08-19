@@ -47,6 +47,16 @@ class GatewayClient {
 
   String get _p => AppConfig.apiPrefix;
 
+  /// The authenticated, cookie-carrying dio instance, exposed so feature API
+  /// wrappers (e.g. `MailApi`) can issue their own typed calls against the same
+  /// shared gateway session without re-plumbing the cookie jar. Additive: does
+  /// not change any existing behaviour.
+  Dio get authedDio => _dio;
+
+  /// Maps a non-2xx gateway response to a [DubApiException]. Public so feature
+  /// API wrappers reuse the exact same `@dub/errors` envelope decoding.
+  void throwIfError(Response<dynamic> res) => _throwIfError(res);
+
   /// POST /api/v1/auth/password/login — company email + password.
   Future<TokenSessionResponse> login(String email, String password) async {
     final res = await _dio.post<Map<String, dynamic>>(

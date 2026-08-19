@@ -7,6 +7,11 @@
 //   GET  /api/v1/me                   -> MeResponse         (needs dub_session)
 //   GET  /api/v1/notifications/inbox  -> PaginatedInbox     (needs dub_session)
 //   POST /api/v1/auth/logout          -> {ok:true}
+//   GET  /api/v1/mail/messages        -> PaginatedMailMessages (needs dub_session)
+//   GET  /api/v1/mail/messages/{id}   -> MailMessage        (needs dub_session)
+//   GET  /api/v1/mail/threads/{id}    -> MailThread         (needs dub_session)
+//   GET  /api/v1/mail/mailboxes       -> MailboxList        (needs dub_session)
+//   POST /api/v1/mail/outbox          -> SendMailResponse (202) (needs dub_session)
 //
 // Run:  dart run tool/mock_gateway.dart [port]   (default port 8799)
 //
@@ -68,6 +73,32 @@ Future<void> _route(HttpRequest req) async {
   }
   if (method == 'GET' && path == '/api/v1/notifications/inbox') {
     return _json(req, 200, _inbox());
+  }
+
+  // --- Mail (mail-gateway external segment /api/v1/mail/...) ---
+  if (method == 'GET' && path == '/api/v1/mail/messages') {
+    final threadId = req.uri.queryParameters['threadId'];
+    return _json(req, 200, _mailMessages(threadId: threadId));
+  }
+  if (method == 'GET' && path == '/api/v1/mail/mailboxes') {
+    return _json(req, 200, _mailboxes());
+  }
+  if (method == 'POST' && path == '/api/v1/mail/outbox') {
+    return _compose(req);
+  }
+  if (method == 'GET' && path.startsWith('/api/v1/mail/messages/')) {
+    final id = path.substring('/api/v1/mail/messages/'.length);
+    final msg = _mailMessageById(id);
+    if (msg == null) {
+      return _json(req, 404, {
+        'error': {'code': 'NOT_FOUND', 'message': 'no message', 'retryable': false}
+      });
+    }
+    return _json(req, 200, msg);
+  }
+  if (method == 'GET' && path.startsWith('/api/v1/mail/threads/')) {
+    final id = path.substring('/api/v1/mail/threads/'.length);
+    return _json(req, 200, _mailThread(id));
   }
 
   _json(req, 404, {
@@ -139,7 +170,13 @@ Map<String, dynamic> _me() => {
         'avatarUrl': null,
       },
       'orgId': 'org_devhub',
-      'permissions': ['notif:inbox:self', 'chat:read'],
+      'permissions': [
+        'notif:inbox:self',
+        'chat:read',
+        'mail:read',
+        'mail:send',
+        'mail:admin',
+      ],
       'sessionExpiresAt':
           DateTime.now().add(const Duration(hours: 12)).millisecondsSinceEpoch,
     };
@@ -192,6 +229,117 @@ Map<String, dynamic> _inbox() {
     ],
     'nextCursor': null,
   };
+}
+
+// --- Mail fixtures (contract-faithful shapes from docs/openapi/mail-gateway.yaml) ---
+
+String _iso(Duration ago) =>
+    DateTime.now().toUtc().subtract(ago).toIso8601String();
+
+/// Every message in the inbox fixture, keyed by id.
+List<Map<String, dynamic>> _allMailMessages() => [
+      {
+        'id': 'mmsg_1',
+        'messageId': '<a1@developershub.jp>',
+        'threadId': 'mthr_1',
+        'from': {'email': 'sato@example.com', 'name': '佐藤 花子'},
+        'to': [
+          {'email': 'info@developershub.jp', 'name': 'DevHub 受付'}
+        ],
+        'subject': '北陸ITカンファレンスの協賛について',
+        'snippet':
+            'お世話になっております。北陸ITカンファレンスの協賛プランの詳細を'
+                'いただけますでしょうか。ゴールドプランを検討しております。',
+        'receivedAt': _iso(const Duration(minutes: 12)),
+      },
+      {
+        'id': 'mmsg_2',
+        'messageId': '<b2@developershub.jp>',
+        'threadId': 'mthr_2',
+        'from': {'email': 'noreply@cloudflare.com', 'name': 'Cloudflare'},
+        'to': [
+          {'email': 'ops@developershub.jp'}
+        ],
+        'subject': 'Email Routing のアドレス確認が必要です',
+        'snippet':
+            '転送先アドレスの検証を完了してください。24時間以内にリンクをクリックしてください。',
+        'receivedAt': _iso(const Duration(hours: 2)),
+      },
+      {
+        'id': 'mmsg_3',
+        'messageId': '<c3@developershub.jp>',
+        'threadId': 'mthr_1',
+        'from': {'email': 'sato@example.com', 'name': '佐藤 花子'},
+        'to': [
+          {'email': 'info@developershub.jp', 'name': 'DevHub 受付'}
+        ],
+        'subject': 'Re: 北陸ITカンファレンスの協賛について',
+        'snippet': '追加で、ブース出展の可否についても教えていただけると助かります。',
+        'receivedAt': _iso(const Duration(hours: 1)),
+      },
+      {
+        'id': 'mmsg_4',
+        'messageId': '<d4@developershub.jp>',
+        'threadId': 'mthr_3',
+        'from': {'email': 'team@github.com', 'name': 'GitHub'},
+        'to': [
+          {'email': 'dev@developershub.jp'}
+        ],
+        'subject': '[dub-ecosystem] 新しいプルリクエストのレビュー依頼',
+        'snippet': 'あなたに mail 機能追加の PR のレビューが割り当てられました。',
+        'receivedAt': _iso(const Duration(days: 1, hours: 3)),
+      },
+    ];
+
+Map<String, dynamic> _mailMessages({String? threadId}) {
+  final items = _allMailMessages()
+      .where((m) => threadId == null || m['threadId'] == threadId)
+      .toList();
+  return {'items': items, 'nextCursor': null};
+}
+
+Map<String, dynamic>? _mailMessageById(String id) {
+  for (final m in _allMailMessages()) {
+    if (m['id'] == id) return m;
+  }
+  return null;
+}
+
+Map<String, dynamic> _mailThread(String id) {
+  final messages =
+      _allMailMessages().where((m) => m['threadId'] == id).toList();
+  return {'id': id, 'messages': messages};
+}
+
+Map<String, dynamic> _mailboxes() => {
+      'items': [
+        {'address': 'info@developershub.jp'},
+        {'address': 'ops@developershub.jp'},
+        {'address': 'dev@developershub.jp'},
+      ],
+    };
+
+Future<void> _compose(HttpRequest req) async {
+  final body = await utf8.decoder.bind(req).join();
+  final data = body.isEmpty
+      ? <String, dynamic>{}
+      : jsonDecode(body) as Map<String, dynamic>;
+  final to = data['to'] as List<dynamic>? ?? const [];
+  final subject = data['subject'] as String? ?? '';
+  if (to.isEmpty || subject.isEmpty) {
+    return _json(req, 400, {
+      'error': {
+        'code': 'VALIDATION_FAILED',
+        'message': 'to and subject are required',
+        'retryable': false,
+      }
+    });
+  }
+  _json(req, 202, {
+    'messageId': 'sent_${DateTime.now().microsecondsSinceEpoch}',
+    'provider': 'ses',
+    'acceptedAt': DateTime.now().toUtc().toIso8601String(),
+  });
 }
 
 void _json(HttpRequest req, int status, Map<String, dynamic> body) {
