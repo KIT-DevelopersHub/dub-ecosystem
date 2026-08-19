@@ -83,6 +83,9 @@ export interface GanttViewProps {
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> team accent colour, for the row stripe + bar cap (team grouping). */
   teamColorById?: ReadonlyMap<common.TaskId, string>;
+  /** taskId -> WBS number label (e.g. "AA-1-1"), shown as a badge before the title.
+   *  Computed by the container from the current row order + WBS tree; absent ⇒ no badge. */
+  numberById?: ReadonlyMap<common.TaskId, string>;
   /** ordered [teamId,{name,color}] for the legend under the toolbar. */
   teamLegend?: ReadonlyArray<{ id: string; name: string; color: string }>;
   /** taskId -> its grouping descriptor for the current sort (チーム名/重要度ラベル…). When
@@ -126,6 +129,7 @@ function LeftPaneRow({
   isOpen,
   dragEnabled,
   grouped,
+  number,
   onSelect,
   toggleParent,
   statusById,
@@ -137,6 +141,8 @@ function LeftPaneRow({
   dragEnabled: boolean;
   /** true when the group-bracket rail is shown — reserves right padding for it. */
   grouped: boolean;
+  /** WBS number label (e.g. "AA-1-1"); absent ⇒ no badge. */
+  number?: string;
   onSelect?: (taskId: common.TaskId) => void;
   toggleParent: (id: common.TaskId) => void;
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
@@ -216,6 +222,9 @@ function LeftPaneRow({
         <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
       )}
       <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+      {number && (
+        <span className={styles.tlRowNum} data-testid={`fe4-gantt-num-${r.taskId}`}>{number}</span>
+      )}
       <span className={styles.tlRowName}>{r.title}</span>
       {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
     </button>
@@ -239,6 +248,7 @@ export function GanttView({
   teamColorById,
   teamLegend,
   rowGroupById,
+  numberById,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -706,6 +716,7 @@ export function GanttView({
                         isOpen={openParents.has(r.taskId)}
                         dragEnabled={reorderEnabled}
                         grouped={hasGroupRail}
+                        number={numberById?.get(r.taskId)}
                         onSelect={onSelect}
                         toggleParent={toggleParent}
                         statusById={statusById}
@@ -726,6 +737,9 @@ export function GanttView({
                           <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(activeRow.taskId) }} aria-hidden />
                         )}
                         <span className={`${styles.tlDot} ${statusById?.get(activeRow.taskId) ? STATUS_BAR_CLASS[statusById.get(activeRow.taskId)!] : ""}`} aria-hidden />
+                        {numberById?.get(activeRow.taskId) && (
+                          <span className={styles.tlRowNum}>{numberById.get(activeRow.taskId)}</span>
+                        )}
                         <span className={styles.tlRowName}>{activeRow.title}</span>
                       </div>
                     ) : null}

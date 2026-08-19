@@ -22,6 +22,8 @@ import { sortRows, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { useGanttSortMode } from "../domain/gantt-sort-pref";
+import { computeTaskNumbers } from "../domain/task-number";
+import { useTaskNumberPrefix } from "../domain/task-number-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
@@ -91,6 +93,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // Row 並び替え mode (手動/重要度/時期/チーム). Personal client-side view preference,
   // persisted per-event in localStorage; "手動" falls back to the drag order overlay.
   const [sortMode, setSortMode] = useGanttSortMode(eventId);
+  // Task-number prefix (e.g. "AA") — a personal view setting, persisted per event.
+  const [numberPrefix, setNumberPrefix] = useTaskNumberPrefix(eventId);
   const teams = useTeams().data ?? [];
   // Org member roster — the source for the assignee dropdown. Without it the only
   // options were users ALREADY assigned to a task, so a fresh event showed just
@@ -225,6 +229,15 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gantt.data, tasks, orderedTaskIds, sortMode, sortContext]);
+
+  // WBS task numbers (e.g. "AA-1-1"), derived from the CURRENT display order + the
+  // WBS tree on each row, so re-ordering / re-parenting re-numbers automatically. It
+  // is computed over the exact rows the gantt renders (filtered + sorted), so the
+  // badges match what's on screen. View-time only — nothing persisted.
+  const numberById = useMemo<ReadonlyMap<common.TaskId, string>>(
+    () => (filteredDto ? computeTaskNumbers(filteredDto.rows, numberPrefix) : new Map()),
+    [filteredDto, numberPrefix],
+  );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
 
@@ -733,6 +746,19 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onClear={() => setFilter(emptyFilter(eventId))}
           disabled={!caps.canRead}
         />
+        <label className={styles.numPrefix}>
+          <span className={styles.numPrefixLabel}>番号プレフィックス</span>
+          <input
+            type="text"
+            className={styles.numPrefixInput}
+            value={numberPrefix}
+            onChange={(e) => setNumberPrefix(e.target.value)}
+            maxLength={8}
+            placeholder="AA"
+            aria-label="タスク番号のプレフィックス"
+            data-testid="fe4-number-prefix"
+          />
+        </label>
       </div>
 
       {store.lastError && !showErrorDialog && (
@@ -757,6 +783,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           assigneeNameById={assigneeNameById}
           teamColorById={teamColorById}
           teamLegend={teamLegend}
+          numberById={numberById}
           {...(rowGroupById ? { rowGroupById } : {})}
           canWrite={caps.canWrite}
         />
