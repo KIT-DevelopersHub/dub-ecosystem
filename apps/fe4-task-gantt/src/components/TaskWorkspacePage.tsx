@@ -7,6 +7,7 @@ import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
 import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
+import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
 import { useRoster } from "../api/useRoster";
 import { useTaskStore } from "../store/useTaskStore";
@@ -16,6 +17,8 @@ import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
+import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
+import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
@@ -53,6 +56,7 @@ const FIELD_LABEL: Record<string, string> = {
 export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePageProps) {
   const client = useApiClient();
   const toast = useToast();
+  const feedback = useWriteFeedback();
   const store = useTaskStore();
   const [filter, setFilter] = useState<TaskFilterState>(() => emptyFilter(eventId));
   const [selected, setSelected] = useState<common.TaskId | null>(null);
@@ -66,6 +70,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
+  // Per-user view state — carries the personal manual row order (drag reorder).
+  const view = useGanttView(eventId);
+  const orderedTaskIds = useMemo(() => view.data?.orderedTaskIds ?? [], [view.data]);
   const teams = useTeams().data ?? [];
   // Org member roster — the source for the assignee dropdown. Without it the only
   // options were users ALREADY assigned to a task, so a fresh event showed just
@@ -154,14 +161,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const filteredDto = useMemo<ganttNs.GanttChartDTO | null>(() => {
     if (!gantt.data) return null;
     const visible = new Set(tasks.map((t) => t.id));
+    // Apply the per-user manual drag order as a pure overlay on the server rows
+    // (siblings only, parent→children contiguity preserved). Empty ⇒ server order.
+    const rows = applyManualOrder(gantt.data.rows.filter((r) => visible.has(r.taskId)), orderedTaskIds);
     return {
       ...gantt.data,
-      rows: gantt.data.rows.filter((r) => visible.has(r.taskId)),
+      rows,
       dependencies: gantt.data.dependencies.filter((d) => visible.has(d.fromTaskId) && visible.has(d.toTaskId)),
       criticalTaskIds: (gantt.data.criticalTaskIds ?? []).filter((id) => visible.has(id)),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gantt.data, tasks]);
+  }, [gantt.data, tasks, orderedTaskIds]);
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
 
@@ -223,7 +233,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return patchGanttRow(client, id, { startsAt, endsAt })
       .then(() => gantt.refetchFresh())
       .then(() => store.loadAll(client, query))
-      .catch(() => {
+      .catch((e) => {
+        // Previously swallowed — a failed bar move silently reverted with no reason.
+        // Surface it (error toast) and refetch to restore the true position.
+        feedback.failure(e, "予定の保存に失敗しました");
         void gantt.refetchFresh();
       });
   };
@@ -254,7 +267,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return Promise.all(shifts.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
       .then(() => gantt.refetchFresh())
       .then(() => store.loadAll(client, query))
-      .catch(() => {
+      .catch((e) => {
+        feedback.failure(e, "予定の保存に失敗しました");
         void gantt.refetchFresh();
       });
   };
@@ -274,7 +288,20 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     parentTaskId: common.TaskId | null | undefined,
     dependsOnIds: common.TaskId[] | undefined,
     fieldPatch?: task.UpdateTaskRequest,
-  ) => {
+  ): Promise<boolean> => {
+    // Snapshot the BEFORE state from the LIVE cache so a failure snaps back the same
+    // tick — no waiting on the reconciling refetch (the "追加/削除しても時差があって
+    // 失敗したか不安" complaint). undefined = "this facet is untouched, don't roll it".
+    const snapParent =
+      parentTaskId !== undefined ? gantt.currentRows().find((r) => r.taskId === id)?.parentTaskId ?? null : undefined;
+    const snapDeps =
+      dependsOnIds !== undefined
+        ? gantt.currentDependencies().filter((d) => d.toTaskId === id).map((d) => d.fromTaskId)
+        : undefined;
+    // Optimistic: reflect the parent (親子) AND the predecessor (先行＝依存) edges the
+    // SAME tick the user saves, before the persist round-trip resolves.
+    if (parentTaskId !== undefined) gantt.setRowParentOptimistic(id, parentTaskId);
+    if (dependsOnIds !== undefined) gantt.setDependenciesOptimistic(id, dependsOnIds);
     try {
       const cur = await getTask(client, id); // fresh version — the single source for this save
       let version = cur.version;
@@ -296,13 +323,19 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       if (dependsOnIds !== undefined) {
         await replaceDependencies(client, id, { version, dependsOnIds });
       }
-    } catch (e) {
-      // Previously this ran inside a `void (async …)()` with no catch, so a failed
-      // parent/dependency save vanished silently ("保存を押しても無反応"). Surface it.
-      store.reportError(e);
-    } finally {
+      // reconcile with authoritative state (confirms the optimistic change)
       await store.loadAll(client, query);
       await gantt.refetchFresh();
+      return true;
+    } catch (e) {
+      // Snap the optimistic parent/deps back at once, then surface the reason. Before
+      // this the change ran with no catch and vanished silently ("保存を押しても無反応").
+      if (snapParent !== undefined) gantt.setRowParentOptimistic(id, snapParent);
+      if (snapDeps !== undefined) gantt.setDependenciesOptimistic(id, snapDeps);
+      store.reportError(e);
+      // reconcile in the background so the cache re-converges on the server truth.
+      void store.loadAll(client, query).then(() => gantt.refetchFresh());
+      return false;
     }
   };
 
@@ -485,7 +518,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       void store
         .patchOptimistic(client, selectedTask.id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
         .then((ok) => {
-          if (ok) void gantt.refetchFresh();
+          if (ok) {
+            void gantt.refetchFresh();
+            feedback.success();
+          }
         });
       return;
     }
@@ -496,19 +532,22 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     const prevDeps = selectedDependsOn;
     const nextParent = relations.parentChanged ? relations.parentTaskId : undefined;
     const nextDeps = relations.depsChanged ? relations.dependsOnIds : undefined;
-    // Optimistic re-parent/detach: reflect the tree change the SAME tick so a child
-    // set to 「なし」 leaves its parent immediately (was stuck in the toggle until the
-    // server round-trip). applyRelationsRaw's refetch reconciles / restores on failure.
-    if (relations.parentChanged) gantt.setRowParentOptimistic(id, relations.parentTaskId);
     // Field + parent + deps go through ONE fresh-version save (applyRelationsRaw re-reads
     // the version), so a field change committed alongside a relation edit can't 409 on a
-    // stale panel version — the reparent→依存 failure class. (Field-ONLY edits keep the
-    // fast optimistic path above.)
-    void applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined);
+    // stale panel version — the reparent→依存 failure class. The optimistic parent + 依存
+    // reflection (and its rollback) now lives INSIDE applyRelationsRaw, so save + undo +
+    // redo all reflect instantly. On success we confirm with a success toast.
+    void applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined).then((ok) => {
+      if (ok) feedback.success();
+    });
     history.push({
       label: relations.depsChanged ? "先行タスク（依存）の変更" : "親タスク（親子）の変更",
-      undo: () => applyRelationsRaw(id, relations.parentChanged ? prevParent : undefined, relations.depsChanged ? prevDeps : undefined),
-      redo: () => applyRelationsRaw(id, nextParent, nextDeps),
+      undo: async () => {
+        await applyRelationsRaw(id, relations.parentChanged ? prevParent : undefined, relations.depsChanged ? prevDeps : undefined);
+      },
+      redo: async () => {
+        await applyRelationsRaw(id, nextParent, nextDeps);
+      },
     });
   };
 
@@ -521,12 +560,31 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     gantt.removeRowOptimistic(id);
     void store.removeTask(client, id).then(async (ok) => {
       if (ok) {
+        feedback.success("タスクを削除しました");
         await store.loadAll(client, query);
         await gantt.refetchFresh();
       } else {
-        void gantt.refetchFresh(); // delete failed — restore the bar from the server
+        void gantt.refetchFresh(); // delete failed — restore the bar (reason surfaced by the store)
       }
     });
+  };
+
+  // ---- drag reorder (左ペインのタスクをドラッグで並べ替え) ----
+  // A personal, per-user manual order persisted in the gantt view state
+  // (orderedTaskIds). Optimistic: the list re-sequences the same tick (the rows are
+  // re-derived from the view state — see filteredDto); success/failure toast; the
+  // view hook rolls the order back in cache on a failed PUT. Only same-parent moves
+  // are honoured (re-parenting stays an explicit detail-panel action).
+  const onReorder = (draggedId: common.TaskId, beforeTaskId: common.TaskId | null) => {
+    // Compute against the CURRENTLY DISPLAYED order (server rows + the manual overlay),
+    // so a second drag builds on the first rather than the raw server sequence.
+    const displayed = applyManualOrder(gantt.currentRows(), orderedTaskIds);
+    const nextOrder = reorderWithinSiblings(displayed, draggedId, beforeTaskId);
+    if (!nextOrder) return; // cross-parent drop or no-op
+    void view
+      .saveOrder(nextOrder)
+      .then(() => feedback.success("並び順を更新しました"))
+      .catch((e) => feedback.failure(e, "並び順の保存に失敗しました"));
   };
 
   return (
@@ -605,6 +663,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           truncated={filteredDto.rows.length >= 2000}
           onSchedule={caps.canWrite ? onSchedule : undefined}
           onScheduleShift={caps.canWrite ? onScheduleShift : undefined}
+          onReorder={caps.canWrite ? onReorder : undefined}
           onSelect={setSelected}
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}

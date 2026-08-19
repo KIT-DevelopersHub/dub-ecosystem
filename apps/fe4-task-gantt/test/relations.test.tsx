@@ -186,4 +186,18 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     // t1 -> t2 dependency now rendered on the timeline
     expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
   });
+
+  it("confirms a saved predecessor edit with a success toast (楽観的UIの成功フィードバック)", async () => {
+    render(<App client={wsClient()} eventId={EVENT} permissions={PERMS} />);
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t2"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    const input = within(panel).getByTestId("fe4-detail-deps-input");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "会場" } });
+    fireEvent.mouseDown(within(panel).getByTestId("fe4-detail-deps-opt-t1"));
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // the dependency arrow + a success toast both appear (no silent, latent save)
+    expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
+    expect(await screen.findByTestId("toast-success")).toBeInTheDocument();
+  });
 });

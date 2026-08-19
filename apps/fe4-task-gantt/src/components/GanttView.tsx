@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SegmentedControl } from "@dub/ui";
 import type { SegmentedOption } from "@dub/ui";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import type { common, gantt, task } from "@dub/types";
 import {
   type AxisWindow,
@@ -43,6 +52,10 @@ export interface GanttViewProps {
   /** Shift a work-package (parent) AND its whole subtree by whole days (parent
    *  drag-move: children follow). Falls back to onSchedule when absent. */
   onScheduleShift?: (taskId: common.TaskId, deltaDays: number) => void;
+  /** Reorder rows by dragging in the left pane. `beforeTaskId` = the sibling the
+   *  dragged row should sit immediately before (null ⇒ move to the end of its
+   *  group). Only same-parent moves are applied by the container. Absent ⇒ no DnD. */
+  onReorder?: (draggedId: common.TaskId, beforeTaskId: common.TaskId | null) => void;
   /** Click a bar or row to open the detail panel. */
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
@@ -84,6 +97,96 @@ interface DragState {
   dxPx: number;
 }
 
+/** One left-pane task row. When `dragEnabled`, it is a drop target (drop = place the
+ *  dragged row before this one) and carries a drag handle (⠿). The handle is the ONLY
+ *  draggable surface so the row's click-to-open affordance is preserved. */
+function LeftPaneRow({
+  r,
+  isOpen,
+  dragEnabled,
+  onSelect,
+  toggleParent,
+  statusById,
+  teamColorById,
+  assigneeNameById,
+}: {
+  r: gantt.GanttRow;
+  isOpen: boolean;
+  dragEnabled: boolean;
+  onSelect?: (taskId: common.TaskId) => void;
+  toggleParent: (id: common.TaskId) => void;
+  statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
+  teamColorById?: ReadonlyMap<common.TaskId, string>;
+  assigneeNameById?: ReadonlyMap<common.TaskId, string>;
+}) {
+  const depth = r.depth ?? 0;
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: r.taskId, disabled: !dragEnabled });
+  const { setNodeRef: setDragRef, listeners, attributes, isDragging } = useDraggable({
+    id: r.taskId,
+    disabled: !dragEnabled,
+  });
+  return (
+    <button
+      ref={setDropRef}
+      type="button"
+      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${isOver ? styles.tlRowDropOver : ""} ${isDragging ? styles.tlRowDragging : ""}`}
+      // Parent rows move the left indent INTO the toggle so the whole left gutter
+      // toggles — a much bigger hit target than the chevron glyph (feedback #39).
+      style={{ height: ROW_HEIGHT, paddingLeft: r.hasChildren ? 0 : 12 + depth * 18 }}
+      title={r.title}
+      onClick={() => onSelect?.(r.taskId)}
+      data-testid={`fe4-gantt-row-${r.taskId}`}
+    >
+      {dragEnabled && (
+        <span
+          ref={setDragRef}
+          {...attributes}
+          {...listeners}
+          className={styles.tlRowDrag}
+          aria-label="ドラッグして並べ替え"
+          title="ドラッグして並べ替え"
+          data-testid={`fe4-gantt-drag-${r.taskId}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          ⠿
+        </span>
+      )}
+      {r.hasChildren ? (
+        <span
+          className={styles.tlToggleWide}
+          style={{ paddingLeft: 12 + depth * 18 }}
+          role="button"
+          tabIndex={0}
+          aria-label={isOpen ? "子タスクを閉じる" : "子タスクを開く"}
+          aria-expanded={isOpen}
+          data-testid={`fe4-gantt-toggle-${r.taskId}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleParent(r.taskId);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleParent(r.taskId);
+            }
+          }}
+        >
+          <span className={styles.tlToggleGlyph} aria-hidden>{isOpen ? "▾" : "▸"}</span>
+        </span>
+      ) : (
+        depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
+      )}
+      {teamColorById?.get(r.taskId) && (
+        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
+      )}
+      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
+      <span className={styles.tlRowName}>{r.title}</span>
+      {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
+    </button>
+  );
+}
+
 export function GanttView({
   dto,
   zoom: zoomProp,
@@ -91,6 +194,7 @@ export function GanttView({
   truncated,
   onSchedule,
   onScheduleShift,
+  onReorder,
   onSelect,
   onCreateOnDate,
   statusById,
@@ -116,6 +220,21 @@ export function GanttView({
       return next;
     });
   }, []);
+
+  // Row drag-reorder (left pane). A 4px activation distance keeps a plain click on
+  // the handle from starting a drag. Dropping onto a row places the dragged row
+  // immediately before it; the container ignores cross-parent drops.
+  const reorderEnabled = !!onReorder && canWrite;
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const onRowDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      const activeId = e.active?.id as common.TaskId | undefined;
+      const overId = e.over?.id as common.TaskId | undefined;
+      if (!activeId || !overId || activeId === overId) return;
+      onReorder?.(activeId, overId);
+    },
+    [onReorder],
+  );
 
   // Parent (work-package) bars always enclose their children: roll each parent's
   // span up to the union of its descendants before any geometry runs, so widening
@@ -470,57 +589,21 @@ export function GanttView({
                     ‹
                   </button>
                 </div>
-                {rows.map((r) => {
-                  const depth = r.depth ?? 0;
-                  const isOpen = openParents.has(r.taskId);
-                  return (
-                    <button
+                <DndContext sensors={sensors} onDragEnd={onRowDragEnd}>
+                  {rows.map((r) => (
+                    <LeftPaneRow
                       key={r.taskId}
-                      type="button"
-                      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""}`}
-                      // Parent rows move the left indent INTO the toggle so the whole
-                      // left gutter (everything left of the team stripe) toggles — a
-                      // much bigger hit target than the chevron glyph (feedback #39).
-                      style={{ height: ROW_HEIGHT, paddingLeft: r.hasChildren ? 0 : 12 + depth * 18 }}
-                      title={r.title}
-                      onClick={() => onSelect?.(r.taskId)}
-                      data-testid={`fe4-gantt-row-${r.taskId}`}
-                    >
-                      {r.hasChildren ? (
-                        <span
-                          className={styles.tlToggleWide}
-                          style={{ paddingLeft: 12 + depth * 18 }}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={isOpen ? "子タスクを閉じる" : "子タスクを開く"}
-                          aria-expanded={isOpen}
-                          data-testid={`fe4-gantt-toggle-${r.taskId}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleParent(r.taskId);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              toggleParent(r.taskId);
-                            }
-                          }}
-                        >
-                          <span className={styles.tlToggleGlyph} aria-hidden>{isOpen ? "▾" : "▸"}</span>
-                        </span>
-                      ) : (
-                        depth === 0 && <span className={styles.tlToggleSpacer} aria-hidden />
-                      )}
-                      {teamColorById?.get(r.taskId) && (
-                        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
-                      )}
-                      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
-                      <span className={styles.tlRowName}>{r.title}</span>
-                      {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
-                    </button>
-                  );
-                })}
+                      r={r}
+                      isOpen={openParents.has(r.taskId)}
+                      dragEnabled={reorderEnabled}
+                      onSelect={onSelect}
+                      toggleParent={toggleParent}
+                      statusById={statusById}
+                      teamColorById={teamColorById}
+                      assigneeNameById={assigneeNameById}
+                    />
+                  ))}
+                </DndContext>
                 {canWrite && onCreateOnDate && (
                   <button type="button" className={styles.tlAddRow} style={{ height: ROW_HEIGHT }} onClick={() => onCreateOnDate(null)} data-testid="fe4-gantt-addrow">
                     ＋ 新規タスク
