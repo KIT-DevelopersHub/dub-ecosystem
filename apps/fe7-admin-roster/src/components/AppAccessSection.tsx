@@ -1,5 +1,6 @@
-import type { identity } from "@dub/types";
+import type { identity, chat } from "@dub/types";
 import { Badge, SegmentedControl, Switch } from "@dub/ui";
+import type { SegmentedOption } from "@dub/ui";
 import {
   appAccessRows,
   appAccessLevel,
@@ -9,6 +10,26 @@ import {
   type AppAccessLevel,
   type AppAccessRow,
 } from "../lib/appAccessMatrix";
+import { chatDeleteRight, setChatDeleteRight, type ChatDeleteRight } from "../lib/chatDeleteRight";
+
+// Chat-only extras folded into the チャット row: the 削除権限 3-choice (owns
+// chat:delete / chat:moderate in `selected`) + the 削除時の挙動 toggle (org-wide policy,
+// tier-bound — passed in because it is NOT a role permission key).
+export interface ChatDeletionControls {
+  behavior: chat.MessageDeletionMode; // current mode for this role's tier (org policy)
+  onBehaviorChange: (mode: chat.MessageDeletionMode) => void;
+  behaviorDisabled?: boolean;
+}
+
+const DELETE_RIGHT_OPTIONS: { value: ChatDeleteRight; label: string }[] = [
+  { value: "none", label: "削除権限なし" },
+  { value: "own", label: "削除あり" },
+  { value: "any", label: "複数削除あり" },
+];
+const DELETE_MODE_OPTIONS: { value: chat.MessageDeletionMode; label: string }[] = [
+  { value: "tombstone", label: "痕跡を残す" },
+  { value: "hard", label: "完全に消す" },
+];
 
 // PER-APP access tier of the role matrix (catalog domain "app"). Instead of showing
 // the 22 flat app:<id>:view / app:<id>:edit toggles, this folds them into the product
@@ -84,6 +105,7 @@ export function AppAccessSection({
   onChange,
   idPrefix = "fe7",
   lockedKeys = [],
+  chatDeletion,
 }: {
   selected: readonly identity.PermissionKey[];
   disabled?: boolean;
@@ -92,13 +114,17 @@ export function AppAccessSection({
   // Per-app access keys that must stay granted (e.g. app:admin:view/edit on the admin
   // role) — the enable toggle + level selector are frozen ON to prevent self-lockout.
   lockedKeys?: readonly identity.PermissionKey[];
+  // Chat-only: the 削除時の挙動 toggle (org-wide policy). Omit to hide it (e.g. no policy loaded).
+  chatDeletion?: ChatDeletionControls;
 }) {
   const rows = appAccessRows();
   const locked = new Set(lockedKeys);
   const summary = appAccessSummary(selected);
+  const deleteRight = chatDeleteRight(selected);
 
   const setLevel = (row: AppAccessRow, level: AppAccessLevel) => onChange(setAppAccessLevel(selected, row, level));
   const setEnabled = (row: AppAccessRow, enabled: boolean) => onChange(toggleAppEnabled(selected, row, enabled));
+  const setDeleteRight = (right: ChatDeleteRight) => onChange(setChatDeleteRight(selected, right));
 
   return (
     <fieldset style={cardStyle} data-testid={`${idPrefix}-app-access-section`}>
@@ -163,6 +189,47 @@ export function AppAccessSection({
                     }))}
                     testId={`${idPrefix}-app-level-seg-${row.id}`}
                   />
+                  {row.id === "chat" ? (
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }} data-testid={`${idPrefix}-chatdel`}>
+                      <span style={nestLabelStyle}>削除権限</span>
+                      <SegmentedControl<ChatDeleteRight>
+                        size="sm"
+                        aria-label="チャットの削除権限"
+                        value={deleteRight}
+                        onChange={(next) => setDeleteRight(next)}
+                        options={DELETE_RIGHT_OPTIONS.map((o): SegmentedOption<ChatDeleteRight> => ({
+                          value: o.value,
+                          label: o.label,
+                          disabled,
+                          testId: `${idPrefix}-chatdel-right-${o.value}`,
+                        }))}
+                        testId={`${idPrefix}-chatdel-right`}
+                      />
+                      {/* 削除時の挙動 = org-wide policy (tier-bound). Only meaningful once the
+                          role can delete something; hidden for 削除権限なし. */}
+                      {chatDeletion && deleteRight !== "none" ? (
+                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                          <span style={nestLabelStyle}>
+                            削除時の挙動
+                            <span style={{ marginLeft: 6, opacity: 0.8 }}>（ワークスペース共通）</span>
+                          </span>
+                          <SegmentedControl<chat.MessageDeletionMode>
+                            size="sm"
+                            aria-label="削除時の挙動"
+                            value={chatDeletion.behavior}
+                            onChange={(next) => chatDeletion.onBehaviorChange(next)}
+                            options={DELETE_MODE_OPTIONS.map((o): SegmentedOption<chat.MessageDeletionMode> => ({
+                              value: o.value,
+                              label: o.label,
+                              disabled: disabled || chatDeletion.behaviorDisabled,
+                              testId: `${idPrefix}-chatdel-mode-${o.value}`,
+                            }))}
+                            testId={`${idPrefix}-chatdel-mode`}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

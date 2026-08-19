@@ -8,11 +8,13 @@ import { useState } from "react";
 import type { identity } from "@dub/types";
 import { TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { PermissionMatrix } from "./PermissionMatrix";
-import { usePermissionCatalog, useUpdateRole } from "../hooks/useRosterApi";
+import { usePermissionCatalog, useUpdateRole, useChatDeletionPolicy, useUpdateChatDeletionPolicy } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
+import { chatDeleteRight, chatDeletionTier } from "../lib/chatDeleteRight";
 import { errorMessage } from "../lib/errorDisplay";
+import type { chat } from "@dub/types";
 
 const noteStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, marginTop: 8 };
 const actionsStyle: React.CSSProperties = { marginTop: 12 };
@@ -20,6 +22,8 @@ const actionsStyle: React.CSSProperties = { marginTop: 12 };
 export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   const catalog = usePermissionCatalog();
   const update = useUpdateRole(role.id);
+  const policy = useChatDeletionPolicy();
+  const updatePolicy = useUpdateChatDeletionPolicy();
   const { can } = usePermissions();
   const { toast } = useToast();
 
@@ -36,6 +40,22 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   const lockedKeys = lockedKeysForRole(role);
   // testid namespace so multiple accordions never collide (matrix keys are shared).
   const ns = `fe7-role-${role.id}`;
+
+  // 削除時の挙動 (org-wide policy) is bound to the tier this role's 削除権限 maps to
+  // (複数削除 → moderator, otherwise → member). Editing it saves the workspace policy
+  // optimistically — independent of the role's 保存 button (different scope).
+  const deleteTier = chatDeletionTier(chatDeleteRight(perms));
+  const chatDeletion = policy.data
+    ? {
+        behavior: policy.data.policy[deleteTier],
+        onBehaviorChange: (mode: chat.MessageDeletionMode) => {
+          const cur = policy.data!;
+          if (cur.policy[deleteTier] === mode) return;
+          updatePolicy.mutate({ policy: { ...cur.policy, [deleteTier]: mode }, version: cur.version });
+        },
+        behaviorDisabled: readOnly || updatePolicy.isPending,
+      }
+    : undefined;
 
   function save() {
     setConfirmSave(false);
@@ -63,7 +83,7 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
         </FormField>
       ) : null}
       {catalog.data ? (
-        <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
+        <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} {...(chatDeletion ? { chatDeletion } : {})} />
       ) : (
         <p>権限カタログを読み込み中…</p>
       )}

@@ -109,7 +109,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & {
   const fileClient = new FakeFileClient();
   const deps: AppDeps = {
     repo,
-    authz: fakeAuthz(new Set<identity.PermissionKey>(["chat:create", "chat:moderate"])),
+    authz: fakeAuthz(new Set<identity.PermissionKey>(["chat:create", "chat:delete", "chat:moderate"])),
     publisher,
     audit,
     realtime,
