@@ -3,10 +3,16 @@
 // can't point at one Gantt directly; this screen lists the user's events (from the
 // same /bff/home aggregate the Home screen uses) and opens the chosen event's
 // Gantt. No new backend — reuses useBffHome + @dub/ui.
+import { useEffect, useRef } from "react";
 import { Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { useBffHome } from "../../bff/useBffHome.tsx";
 import { useGanttApi } from "./GanttProvider.tsx";
+
+// Shared with fe4's useSelectedEvent (keep in sync) — remembers the last event the
+// user worked in so the launcher can skip this picker and jump straight to its
+// gantt. The gantt header's イベント dropdown handles switching from there.
+const SELECTED_EVENT_STORAGE_KEY = "fe4:selected-event";
 
 export function GanttLandingScreen(): JSX.Element {
   const api = useGanttApi();
@@ -14,6 +20,23 @@ export function GanttLandingScreen(): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
   const eventsError = errorFor("event-service");
   const events = data?.upcomingEvents ?? [];
+
+  // Resume the last-selected event once (first visit / no pick still shows the
+  // picker below). Guarded so it only redirects a single time per mount.
+  const redirected = useRef(false);
+  useEffect(() => {
+    if (redirected.current) return;
+    let last: string | null = null;
+    try {
+      last = globalThis.localStorage?.getItem(SELECTED_EVENT_STORAGE_KEY) ?? null;
+    } catch {
+      last = null;
+    }
+    if (last && last.trim()) {
+      redirected.current = true;
+      void navigate({ to: `/events/${last}/tasks/gantt`, replace: true });
+    }
+  }, [navigate]);
 
   return (
     <main data-testid="fe2-gantt-landing" className="fe2-page">

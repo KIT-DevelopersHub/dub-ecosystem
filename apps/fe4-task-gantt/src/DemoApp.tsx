@@ -5,6 +5,7 @@ import type { ApiClient } from "./contracts/spa-shell";
 import { ApiClientProvider } from "./api/client-context";
 import { TaskWorkspacePage } from "./components/TaskWorkspacePage";
 import { MeTasksRoute, TaskRouteProvider } from "./routes/taskRoutes";
+import { loadSelectedEvent } from "./domain/selected-event";
 import { DEMO_EVENT_ID, DEMO_PERMISSIONS, DEMO_CURRENT_USER } from "./dev-seed";
 import styles from "./styles/app.module.css";
 
@@ -57,7 +58,11 @@ export function DemoApp({ client }: DemoAppProps) {
                   <MeTasksRoute />
                 </TaskRouteProvider>
               ) : (
-                <TaskWorkspacePage eventId={DEMO_EVENT_ID} permissions={DEMO_PERMISSIONS} />
+                // Standalone demo has no URL router, so resume the last-selected event
+                // from storage here (production does this via fe2's ガント landing
+                // redirect) — proving the header switcher's choice survives navigating
+                // away and back.
+                <TaskWorkspacePage eventId={loadSelectedEvent() ?? DEMO_EVENT_ID} permissions={DEMO_PERMISSIONS} />
               )}
             </main>
           </div>

@@ -19,10 +19,19 @@
 //    dates in-repo (WBS 3.4, 2026-08-16 → 2026-09-15) keep those exact dates.
 //  - Dependencies encode the real phase spine + a handful of the real cross-section
 //    edges; the critical path is the F1→F3→F4→F5→F6→F7 governance backbone.
-import type { task, identity, gantt, common, team } from "@dub/types";
+import type { task, identity, gantt, common, team, event } from "@dub/types";
 import { MockApiClient } from "./api/mock-client";
 
 export const DEMO_EVENT_ID = "evt_hokuriku_conf_2027";
+// A second, smaller event so the header イベント switcher has something to switch
+// TO in the standalone demo (mirrors the user's "Hackit ↔ カンファ" real workflow).
+export const DEMO_EVENT_ID_2 = "evt_hackit_2026";
+
+/** Event summaries the mock returns from GET /events — feeds the header switcher. */
+export const DEMO_EVENTS: event.EventSummary[] = [
+  { id: DEMO_EVENT_ID, title: "北陸ITカンファレンス 2027", phase: "preparing", startsAt: "2027-07-15T00:00:00.000Z" },
+  { id: DEMO_EVENT_ID_2, title: "Hackit 2026", phase: "open", startsAt: "2026-09-20T00:00:00.000Z" },
+];
 /** signed-in user for the standalone My Tasks demo (createdBy stamp + /me scope).
  *  Points at a real conference owner (高岡/本部) so the マイタスク tab is populated
  *  with real roadmap tasks rather than empty. Prod uses the real /me user, not this. */
@@ -340,8 +349,51 @@ type MockSeedRowDates = Record<
   { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }
 >;
 
+/** A handful of top-level Hackit tasks so switching to the 2nd event visibly
+ *  changes the timeline (distinct titles/teams/dates from the conference). */
+function buildHackit(): { tasks: task.Task[]; rowDates: MockSeedRowDates } {
+  const now = "2026-07-01T00:00:00.000Z";
+  const rows: Array<{ id: string; title: string; team: string; start: string; end: string; status: task.TaskStatus }> = [
+    { id: "hk_1", title: "Hackit: 会場・日程確定", team: "会場", start: "2026-08-01", end: "2026-08-20", status: "done" },
+    { id: "hk_2", title: "Hackit: 協賛・賞品調整", team: "スポンサー", start: "2026-08-10", end: "2026-09-05", status: "in_progress" },
+    { id: "hk_3", title: "Hackit: 募集LP・告知", team: "集客告知", start: "2026-08-15", end: "2026-09-10", status: "in_progress" },
+    { id: "hk_4", title: "Hackit: 運営マニュアル・審査基準", team: "本部", start: "2026-09-01", end: "2026-09-18", status: "todo" },
+    { id: "hk_5", title: "Hackit: 本番（当日運営）", team: "全体進行", start: "2026-09-20", end: "2026-09-21", status: "todo" },
+  ];
+  const tasks: task.Task[] = [];
+  const rowDates: MockSeedRowDates = {};
+  for (const r of rows) {
+    const startAt = iso(r.start);
+    const dueAt = iso(r.end);
+    tasks.push({
+      id: r.id,
+      eventId: DEMO_EVENT_ID_2,
+      title: r.title,
+      description: null,
+      status: r.status,
+      priority: "medium",
+      assigneeId: OWNER[r.team] ?? null,
+      teamId: TEAM_ID[r.team] ?? null,
+      startAt,
+      dueAt,
+      origin: "internal",
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    } as task.Task);
+    rowDates[r.id] = { startsAt: startAt, endsAt: dueAt };
+  }
+  return { tasks, rowDates };
+}
+
 export function createDevClient(opts: { padTo?: number } = {}): MockApiClient {
   const { tasks, rowDates, deps, hierarchy } = build();
+  // Fold in the 2nd event's tasks so the header switcher demonstrably reloads the
+  // timeline (the mock filters gantt rows by eventId).
+  const hackit = buildHackit();
+  tasks.push(...hackit.tasks);
+  Object.assign(rowDates, hackit.rowDates);
   // Dev/E2E only: pad the event with extra top-level tasks so the timeline can be
   // exercised past the 200-per-page ceiling (F3 — verify all rows load & render).
   if (opts.padTo && opts.padTo > tasks.length) {
@@ -372,6 +424,7 @@ export function createDevClient(opts: { padTo?: number } = {}): MockApiClient {
     users,
     teams,
     tasks,
+    events: DEMO_EVENTS,
     dependencies: deps,
     rowDates,
     hierarchy,

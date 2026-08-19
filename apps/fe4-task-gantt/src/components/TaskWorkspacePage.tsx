@@ -5,7 +5,8 @@ import { Button, ErrorDialog, useToast } from "@dub/ui";
 import type { ErrorDialogDetail } from "@dub/ui";
 import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
-import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
+import { getTask, listEvents, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
+import { useSelectedEvent } from "../domain/selected-event";
 import { useGanttData } from "../api/useGanttData";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
@@ -29,6 +30,7 @@ import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
+import { EventSwitcher, type EventChoice } from "./EventSwitcher";
 import { GanttView } from "./GanttView";
 import { TaskDetailPanel, type RelationEdit } from "./TaskDetailPanel";
 import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
@@ -72,11 +74,40 @@ const FIELD_LABEL: Record<string, string> = {
  * edit/delete) wired through the optimistic store. The former list/board view
  * switch was removed — the gantt is the one canvas.
  */
-export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePageProps) {
+export function TaskWorkspacePage({ eventId: initialEventId, permissions }: TaskWorkspacePageProps) {
   const client = useApiClient();
   const toast = useToast();
   const feedback = useWriteFeedback();
   const store = useTaskStore();
+  // GCP-style event selection: the header dropdown drives which event the whole
+  // workspace renders. Seeded from the route (initialEventId) and persisted so a
+  // revisit resumes the last event. Every eventId-keyed hook below reloads when it
+  // changes, so switching events re-reads the gantt automatically.
+  const [eventId, switchEvent] = useSelectedEvent(initialEventId);
+  // Live event list for the switcher (event-service). Optional: until it resolves
+  // the switcher shows the current event's id, and if it fails the dropdown just
+  // offers the one active event so the workspace never breaks.
+  const [eventOptions, setEventOptions] = useState<readonly EventChoice[]>([]);
+  useEffect(() => {
+    let live = true;
+    void listEvents(client)
+      .then((res) => {
+        if (live) setEventOptions(res.items.map((e) => ({ id: e.id, title: e.title })));
+      })
+      .catch(() => {
+        /* event list is optional — the switcher falls back to the active event */
+      });
+    return () => {
+      live = false;
+    };
+  }, [client]);
+  // Always offer at least the active event so the dropdown label is never blank
+  // (e.g. list still loading, or the active event isn't in the returned page).
+  const switcherEvents = useMemo<readonly EventChoice[]>(() => {
+    if (eventOptions.some((e) => e.id === eventId)) return eventOptions;
+    return [{ id: eventId, title: eventOptions.find((e) => e.id === eventId)?.title ?? eventId }, ...eventOptions];
+  }, [eventOptions, eventId]);
+
   const [filter, setFilter] = useState<TaskFilterState>(() => emptyFilter(eventId));
   const [selected, setSelected] = useState<common.TaskId | null>(null);
   const [creating, setCreating] = useState(false);
@@ -87,6 +118,16 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // ("先行タスクを作成" from the detail panel).
   const [createPredecessorFor, setCreatePredecessorFor] = useState<common.TaskId | null>(null);
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
+  // On event switch, drop the previous event's filter (it carries the eventId +
+  // status narrowing) and any open selection so the new event loads clean. Skip the
+  // initial mount — filter is already seeded for the starting event.
+  const prevEventRef = useRef(eventId);
+  useEffect(() => {
+    if (prevEventRef.current === eventId) return;
+    prevEventRef.current = eventId;
+    setFilter(emptyFilter(eventId));
+    setSelected(null);
+  }, [eventId]);
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
   // Per-user view state — carries the personal manual row order (drag reorder).
@@ -878,6 +919,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     <div className={styles.workspace} data-testid="fe4-workspace">
       <header className={styles.pageHeader}>
         <div className={styles.pageHeaderText}>
+          <EventSwitcher
+            events={switcherEvents}
+            value={eventId}
+            onSelect={switchEvent}
+            loading={eventOptions.length === 0}
+            testId="fe4-event-switcher"
+          />
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
           <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
