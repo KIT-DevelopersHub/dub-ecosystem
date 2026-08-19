@@ -1074,6 +1074,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}
+          onDeleteBlocked={(n) =>
+            toast.show({
+              kind: "warning",
+              title: "削除できません",
+              description: `子タスクが${n}件あるため削除できません。先に子タスクを削除するか、別の親へ移動してください。`,
+            })
+          }
           onCreateChild={onCreateChild}
           onCreatePredecessor={onCreatePredecessor}
           onClose={() => setSelected(null)}

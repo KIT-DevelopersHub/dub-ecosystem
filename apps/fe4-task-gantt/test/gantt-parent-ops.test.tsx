@@ -164,8 +164,9 @@ describe("#39-3 parent detail shows the child count", () => {
 });
 
 describe("delete is blocked when the task has children (no re-parenting)", () => {
-  it("削除 on a parent shows the block message and never calls onDelete", () => {
+  it("削除 on a parent reports the block to the host (toast) and never calls onDelete (#375)", () => {
     const onDelete = vi.fn();
+    const onDeleteBlocked = vi.fn();
     render(
       <TaskDetailPanel
         task={mkParent("p")}
@@ -174,19 +175,21 @@ describe("delete is blocked when the task has children (no re-parenting)", () =>
         canDelete
         onSave={() => {}}
         onDelete={onDelete}
+        onDeleteBlocked={onDeleteBlocked}
         onClose={() => {}}
         scopeTasks={[
           { id: "p", title: "親", parentTaskId: null },
           { id: "c1", title: "子1", parentTaskId: "p" },
+          { id: "c2", title: "子2", parentTaskId: "p" },
         ]}
       />,
     );
     fireEvent.click(screen.getByTestId("fe4-detail-delete"));
-    // No delete confirm — the child-block message is shown instead.
+    // No delete confirm, no inline block — the host is asked to surface a toast instead.
     expect(screen.queryByTestId("fe4-confirm-delete")).toBeNull();
-    const blocked = screen.getByTestId("fe4-delete-blocked");
-    expect(blocked.textContent).toMatch(/子タスク/);
-    expect(blocked.textContent).toMatch(/削除できません/);
+    expect(screen.queryByTestId("fe4-delete-blocked")).toBeNull();
+    expect(onDeleteBlocked).toHaveBeenCalledTimes(1);
+    expect(onDeleteBlocked).toHaveBeenCalledWith(2); // child count passed through
     expect(onDelete).not.toHaveBeenCalled();
   });
 
