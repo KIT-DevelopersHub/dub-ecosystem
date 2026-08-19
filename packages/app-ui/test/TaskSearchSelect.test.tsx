@@ -75,13 +75,43 @@ describe("TaskSearchSelect — multi mode (先行タスク) + recents", () => {
     expect(onChange).toHaveBeenCalledWith(["t1", "t3"]);
   });
 
-  it("surfaces recents from its recentKey when the query is empty", () => {
-    rememberTaskSearch("parents", ["t2"]);
+  it("on focus (empty query) suggests only the latest 2 recents", () => {
+    // stored order (most-recent first): t3, t2, t1
+    rememberTaskSearch("parents", ["t3", "t2", "t1"]);
     render(
       <TaskSearchSelect value={null} options={OPTS} onChange={() => {}} recentKey="parents" testId="p" />,
     );
     fireEvent.focus(screen.getByTestId("p-input"));
     expect(screen.getByText("最近選んだタスク")).toBeInTheDocument();
+    // exactly 2 suggestions, the two most-recent — the 3rd (t1) is not shown
+    const suggestions = screen.getAllByTestId(/^p-opt-/);
+    expect(suggestions).toHaveLength(2);
+    expect(screen.getByTestId("p-opt-t3")).toBeInTheDocument();
     expect(screen.getByTestId("p-opt-t2")).toBeInTheDocument();
+    expect(screen.queryByTestId("p-opt-t1")).toBeNull();
+  });
+
+  it("clicking a recent suggestion selects it", () => {
+    const onChange = vi.fn();
+    rememberTaskSearch("parents", ["t2"]);
+    render(
+      <TaskSearchSelect value={null} options={OPTS} onChange={onChange} recentKey="parents" testId="p" />,
+    );
+    fireEvent.focus(screen.getByTestId("p-input"));
+    fireEvent.mouseDown(screen.getByTestId("p-opt-t2"));
+    expect(onChange).toHaveBeenCalledWith("t2");
+  });
+
+  it("typing switches from recents to search results (history hidden)", () => {
+    rememberTaskSearch("parents", ["t3", "t2"]);
+    render(
+      <TaskSearchSelect value={null} options={OPTS} onChange={() => {}} recentKey="parents" testId="p" />,
+    );
+    const input = screen.getByTestId("p-input");
+    fireEvent.focus(input);
+    expect(screen.getByText("最近選んだタスク")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "会場" } }); // t1 = 会場予約
+    expect(screen.queryByText("最近選んだタスク")).toBeNull(); // history gone
+    expect(screen.getByTestId("p-opt-t1")).toBeInTheDocument(); // search result shown
   });
 });

@@ -59,7 +59,10 @@ export type TaskSearchSelectProps<Id extends string> =
   | TaskSearchSelectSingleProps<Id>
   | TaskSearchSelectMultiProps<Id>;
 
-const RECENT_MAX = 4;
+// On focus (empty query) we suggest at most this many recently-chosen tasks — a
+// short「最近選んだタスク」shortlist, not a full history dump. Fixed at 2 so the
+// suggestion never crowds the field; typing switches to full search results.
+const RECENT_MAX = 2;
 const RECENT_STORE_MAX = 12;
 
 function readRecent(key: string): string[] {
