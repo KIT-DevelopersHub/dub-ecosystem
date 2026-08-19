@@ -882,3 +882,64 @@ describe("POST /task-requests/:id/accept (受け取る)", () => {
     expect((await app.request("/task-requests/treq_missing/accept", userInit("POST", { version: 1 }, { userId: "usr_bob" }))).status).toBe(404);
   });
 });
+
+// POST /task-requests/:id/decline (receiver) + /cancel (requester).
+describe("POST /task-requests/:id/decline + /cancel", () => {
+  const seedReq = (h: TestHarness, id: string) =>
+    h.repo.insertRequest({
+      id,
+      eventId: "evt_1",
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+      fromTeamId: "team_dev",
+      toTeamId: "team_sponsor",
+      title: id,
+      description: null,
+      priority: "medium",
+      dueAt: null,
+      sourceTaskId: null,
+      now: "2026-08-20T00:00:00.000Z",
+    });
+
+  it("decline: receiver rejects with a reason, no task/cross-link, emits task.request.declined", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_d");
+    const res = await app.request("/task-requests/treq_d/decline", userInit("POST", { version: 1, reason: "多忙" }, { userId: "usr_bob" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.TaskRequest;
+    expect(body).toMatchObject({ state: "declined", declineReason: "多忙" });
+    expect(h.events.byName("task.request.declined")).toHaveLength(1);
+    expect(h.events.byName("task.created")).toHaveLength(0);
+  });
+
+  it("decline: 403 when a non-receiver tries", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_d2");
+    const res = await app.request("/task-requests/treq_d2/decline", userInit("POST", { version: 1 })); // usr_alice
+    expect(res.status).toBe(403);
+  });
+
+  it("cancel: requester withdraws, emits task.request.cancelled", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_c");
+    const res = await app.request("/task-requests/treq_c/cancel", userInit("POST", { version: 1 })); // usr_alice = from
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as task.TaskRequest).state).toBe("cancelled");
+    expect(h.events.byName("task.request.cancelled")).toHaveLength(1);
+  });
+
+  it("cancel: 403 when the receiver (not the requester) tries", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_c2");
+    const res = await app.request("/task-requests/treq_c2/cancel", userInit("POST", { version: 1 }, { userId: "usr_bob" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("409 when declining/cancelling a non-pending request", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_x");
+    await app.request("/task-requests/treq_x/cancel", userInit("POST", { version: 1 }));
+    const res = await app.request("/task-requests/treq_x/decline", userInit("POST", { version: 2 }, { userId: "usr_bob" }));
+    expect(res.status).toBe(409);
+  });
+});
