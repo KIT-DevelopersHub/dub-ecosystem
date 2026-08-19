@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
-import { Button, ErrorDialog, useToast } from "@dub/ui";
+import { Button, ErrorDialog, Skeleton, useToast } from "@dub/ui";
 import type { ErrorDialogDetail } from "@dub/ui";
 import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
@@ -65,6 +65,31 @@ const FIELD_LABEL: Record<string, string> = {
   period: "期間",
 };
 
+/** Loading placeholder shown while the detail panel force-refetches the task on open.
+ *  Reuses the panel's scrim + aside shell so the fresh values slot in without a jump,
+ *  and guarantees a stale schedule is never rendered — not even for one frame. */
+function DetailPanelSkeleton({ onClose }: { onClose: () => void }) {
+  return (
+    <>
+      <div className={styles.panelScrim} onClick={onClose} data-testid="fe4-detail-scrim" aria-hidden />
+      <aside className={styles.panel} data-testid="fe4-detail-panel-skeleton" aria-label="タスク詳細を読み込み中" aria-busy="true">
+        <header className={styles.panelHeader}>
+          <div className={styles.panelHeadInfo}>
+            <h2 className={styles.panelTitle}>タスクの詳細</h2>
+          </div>
+        </header>
+        <div style={{ display: "grid", gap: 16, padding: 16 }}>
+          <Skeleton variant="text" width="60%" height={20} />
+          <Skeleton variant="rect" height={36} radius="8px" />
+          <Skeleton variant="rect" height={36} radius="8px" />
+          <Skeleton variant="rect" height={36} radius="8px" />
+          <Skeleton variant="rect" height={72} radius="8px" />
+        </div>
+      </aside>
+    </>
+  );
+}
+
 /**
  * Gantt-only task workspace: a single self-drawn timeline with day/week/month
  * zoom, a working status filter, and full CRUD (create modal + detail-panel
@@ -78,6 +103,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const store = useTaskStore();
   const [filter, setFilter] = useState<TaskFilterState>(() => emptyFilter(eventId));
   const [selected, setSelected] = useState<common.TaskId | null>(null);
+  // The detail panel must ALWAYS show the server-confirmed schedule. After a bar
+  // drag/resize (or another user's edit) the cached task can lag, so the panel would
+  // seed 開始日/期日 from a stale value. On every open we force-refetch the task (getTask,
+  // uncached) into the store and only reveal the panel once that fresh value has landed
+  // — a skeleton shows meanwhile so a stale value is never rendered, even for one frame.
+  const [detailReady, setDetailReady] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createPresetDue, setCreatePresetDue] = useState<string | null>(null);
   const [createPresetParent, setCreatePresetParent] = useState<common.TaskId | null>(null);
@@ -160,6 +191,36 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   }, [query]);
 
   const tasks = store.list();
+
+  // Force-refresh the selected task on EVERY detail open (or selection change) so the
+  // panel binds the server-confirmed schedule, never a stale cache. We refetch getTask
+  // (uncached) into the store AND the gantt (fresh bar window), holding `detailReady`
+  // false until the fresh task lands so the panel opens on a skeleton, not a stale value
+  // ("移動してから詳細を開くと古い日程が出る" の恒久修正). A refetch failure keeps the cached task
+  // as a fallback so the panel still opens.
+  useEffect(() => {
+    if (!selected) {
+      setDetailReady(false);
+      return;
+    }
+    let cancelled = false;
+    setDetailReady(false);
+    void gantt.refetchFresh().catch(() => {});
+    getTask(client, selected)
+      .then((fresh) => {
+        if (!cancelled) store.hydrate(fresh);
+      })
+      .catch(() => {
+        /* keep the cached task as a fallback so the panel still opens */
+      })
+      .finally(() => {
+        if (!cancelled) setDetailReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, client]);
 
   // batch-resolve assignee display names (N+1 avoided — one request per new set)
   useEffect(() => {
@@ -958,7 +1019,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         onCreate={onCreate}
       />
 
-      {selectedTask && (
+      {/* On open we hold a skeleton until getTask lands, so the panel never seeds its
+          開始日/期日 from a stale cached value (post-drag) — see the refetch effect above. */}
+      {selected && !detailReady && <DetailPanelSkeleton onClose={() => setSelected(null)} />}
+
+      {selected && detailReady && selectedTask && (
         <TaskDetailPanel
           key={selectedTask.id}
           task={selectedTask}
