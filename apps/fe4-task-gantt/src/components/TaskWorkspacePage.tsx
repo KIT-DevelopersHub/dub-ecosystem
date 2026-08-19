@@ -303,6 +303,49 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return rollupRowDates(gantt.data.rows).find((r) => r.taskId === selected) ?? null;
   }, [selected, gantt.data]);
 
+  // 症状#7: opening a task's 詳細 must ALWAYS reflect server truth, never a stale cache.
+  // A parent-bar drag scales/rolls its children server-side; a child (or the parent)
+  // opened afterwards previously showed the pre-drag value because both the gantt read
+  // model and the task store were still holding the cached copy (a leaf's panel prefers
+  // its own start_at/due_at column, which the drag never refreshed in the store). So on
+  // every open of a task (`selected` transitions to a new id) we force a fresh, no-cache
+  // refetch of BOTH sources — the gantt rollup (barStartsAt/barEndsAt) and the task store
+  // (own start_at/due_at column). Both refetches are non-fatal (a failed reconciling read
+  // must never be mistaken for a save error). When the fresh data has landed we bump
+  // `detailFresh`, which is part of the panel key (see key= below) so the panel remounts
+  // ONCE and re-seeds its fields from the now-authoritative values — but not on later
+  // saves, so a multi-edit session keeps the same panel instance.
+  const [detailFresh, setDetailFresh] = useState(0);
+  useEffect(() => {
+    if (!selected) return;
+    let live = true;
+    const id = selected;
+    // Snapshot what the panel is about to seed from (render-time cache).
+    const prevVer = tasks.find((t) => t.id === id)?.version ?? -1;
+    const prevStart = selectedRow?.startsAt ?? null;
+    const prevEnd = selectedRow?.endsAt ?? null;
+    void Promise.allSettled([gantt.refetchFresh(), store.reconcile(client, query)]).then((res) => {
+      if (!live) return;
+      const freshGantt = res[0].status === "fulfilled" ? res[0].value : null;
+      const freshRow = freshGantt ? rollupRowDates(freshGantt.rows).find((r) => r.taskId === id) ?? null : null;
+      const freshTask = store.list().find((t) => t.id === id) ?? null;
+      // Remount the panel (bump the key nonce) ONLY when the authoritative values actually
+      // moved — the stale case (症状#7). When the server confirms the cached values, nothing
+      // changes, so no remount: an in-progress edit or a fresh open never flickers or loses
+      // keystrokes.
+      const changed =
+        (freshTask?.version ?? prevVer) !== prevVer ||
+        (freshRow?.startsAt ?? prevStart) !== prevStart ||
+        (freshRow?.endsAt ?? prevEnd) !== prevEnd;
+      if (changed) setDetailFresh((n) => n + 1);
+    });
+    return () => {
+      live = false;
+    };
+    // Fire once per open (on the selected-id change), not on every gantt/store tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
   // Hierarchy/scope model over ALL rows (unfiltered by status) so parents and
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
@@ -1058,7 +1101,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
       {selectedTask && (
         <TaskDetailPanel
-          key={selectedTask.id}
+          // Keyed on the task id AND the freshness nonce bumped by the refetch-on-open
+          // (症状#7). The panel seeds its field state on mount only, so it must remount
+          // once when the open's fresh, no-cache refetch has replaced the stale cache —
+          // the nonce changes exactly then (and only then), not on every later save, so
+          // in-progress multi-edit sessions keep the same panel instance.
+          key={`${selectedTask.id}:${detailFresh}`}
           task={selectedTask}
           users={assignableUsers}
           teams={teams}
