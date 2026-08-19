@@ -820,5 +820,73 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res);
   });
 
+  // ---- POST /task-requests/:id/decline (receiver rejects a pending request) ----
+  app.post("/task-requests/:id/decline", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    const body = await readJson<Partial<task.DeclineTaskRequestBody>>(c);
+    if (typeof body.version !== "number") {
+      throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    }
+    if (body.reason !== undefined && typeof body.reason !== "string") {
+      throw errors.validationFailed([{ field: "reason", reason: "invalid_type" }]);
+    }
+    const req = await deps.repo.getRequestById(id);
+    if (!req) throw taskErrors.requestNotFound(id);
+    if (principal.kind === "user" && principal.userId !== req.toUserId) {
+      throw taskErrors.requestForbiddenRole("decline");
+    }
+    if (req.state !== "pending") throw taskErrors.requestInvalidState(req.state, "decline");
+    if (body.version !== req.version) throw taskErrors.versionConflict();
+
+    const now = nowIso();
+    const actorId = actorIdOf(principal);
+    const moved = await deps.repo.decideRequest(id, { state: "declined", declineReason: body.reason ?? null }, req.version, now);
+    if (!moved) throw taskErrors.requestInvalidState("declined", "decline");
+    const evt = req.eventId ? { eventId: req.eventId } : {};
+    await emit(deps.events, { requestId: ctx.requestId, actorId }, [
+      { name: "task.request.declined", payload: { requestId: id, ...evt } },
+    ]);
+    await deps.audit.record(
+      auditRecord("task.request.declined", actorId, config.orgId, ctx.requestId, id, { eventId: req.eventId ?? null }),
+    );
+    return c.json((await deps.repo.getRequestById(id))!);
+  });
+
+  // ---- POST /task-requests/:id/cancel (requester withdraws a pending request) ----
+  app.post("/task-requests/:id/cancel", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    const body = await readJson<Partial<task.CancelTaskRequestBody>>(c);
+    if (typeof body.version !== "number") {
+      throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    }
+    const req = await deps.repo.getRequestById(id);
+    if (!req) throw taskErrors.requestNotFound(id);
+    // Only the requester may cancel their own request.
+    if (principal.kind === "user" && principal.userId !== req.fromUserId) {
+      throw taskErrors.requestForbiddenRole("cancel");
+    }
+    if (req.state !== "pending") throw taskErrors.requestInvalidState(req.state, "cancel");
+    if (body.version !== req.version) throw taskErrors.versionConflict();
+
+    const now = nowIso();
+    const actorId = actorIdOf(principal);
+    const moved = await deps.repo.decideRequest(id, { state: "cancelled" }, req.version, now);
+    if (!moved) throw taskErrors.requestInvalidState("cancelled", "cancel");
+    const evt = req.eventId ? { eventId: req.eventId } : {};
+    await emit(deps.events, { requestId: ctx.requestId, actorId }, [
+      { name: "task.request.cancelled", payload: { requestId: id, ...evt } },
+    ]);
+    await deps.audit.record(
+      auditRecord("task.request.cancelled", actorId, config.orgId, ctx.requestId, id, { eventId: req.eventId ?? null }),
+    );
+    return c.json((await deps.repo.getRequestById(id))!);
+  });
+
   return app;
 }
