@@ -14,6 +14,7 @@ export const TaskErrorCodes = {
   REQUEST_NOT_FOUND: "TASK_REQUEST_NOT_FOUND", // 404 missing task request (send-receive)
   REQUEST_FORBIDDEN_ROLE: "TASK_REQUEST_FORBIDDEN_ROLE", // 403 not the receiver/requester for this action
   REQUEST_INVALID_STATE: "TASK_REQUEST_INVALID_STATE", // 409 not pending (accept/decline/cancel of a decided request)
+  CROSS_TEAM_ASSIGNEE: "TASK_CROSS_TEAM_ASSIGNEE", // 422 direct cross-team assignee (use the request flow)
 } as const;
 
 export const taskErrors = {
@@ -68,6 +69,13 @@ export const taskErrors = {
       TaskErrorCodes.REQUEST_INVALID_STATE,
       `Cannot ${action} a request in state '${state}' (must be pending)`,
       { status: 409, details: { state, action } },
+    );
+  },
+  crossTeamAssignee(assigneeId: string, teamId: string): DubError {
+    return new DubError(
+      TaskErrorCodes.CROSS_TEAM_ASSIGNEE,
+      "Cannot directly assign a task to someone on another team — use a task request (送る) instead",
+      { status: 422, details: { assigneeId, teamId } },
     );
   },
 };
