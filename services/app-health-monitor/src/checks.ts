@@ -41,6 +41,11 @@ async function timedFetch(
 export interface ProbeOpts {
   expectStatus?: number;
   bodyIncludes?: string; // when set (and method !== HEAD), the body must contain this substring
+  // when set, the response content-type must include this token (case-insensitive). CRITICAL for
+  // the fe2 assets worker: not_found_handling=single-page-application serves index.html (200,
+  // text/html) for a MISSING chunk, so status alone can't detect it — a present .js chunk is
+  // text/javascript, a missing one is text/html. Works with HEAD (header-only, no body download).
+  expectContentTypeIncludes?: string;
   method?: "GET" | "HEAD";
   timeoutMs?: number;
 }
@@ -68,6 +73,13 @@ export async function probeBinding(fetcher: Fetcher | undefined, path: string, o
       timeoutMs,
     );
     if (res.status !== expect) return { ok: false, detail: `HTTP ${res.status} (expected ${expect}) ${path}` };
+    if (opts.expectContentTypeIncludes) {
+      const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+      if (!ct.includes(opts.expectContentTypeIncludes.toLowerCase())) {
+        // A chunk that resolves to text/html is the SPA fallback = the chunk is MISSING.
+        return { ok: false, detail: `content-type "${ct || "(none)"}" not "${opts.expectContentTypeIncludes}" (SPA-fallback => missing) ${path}` };
+      }
+    }
     if (opts.bodyIncludes && opts.method !== "HEAD") {
       const text = await res.text();
       if (!text.includes(opts.bodyIncludes)) return { ok: false, detail: `body missing marker "${opts.bodyIncludes}" ${path}` };

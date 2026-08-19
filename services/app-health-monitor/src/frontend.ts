@@ -54,10 +54,15 @@ export async function sweepAssets(fe: Fetcher): Promise<AssetSweep> {
   const missing: string[] = [];
   for (const asset of chunks) {
     const path = asset.startsWith("/") ? asset : `/${asset}`;
-    // HEAD first (cheap); some asset servers 405 HEAD, so fall back to GET on non-200/404.
-    let out = await probeBinding(fe, path, { method: "HEAD" });
-    if (!out.ok && !/HTTP 404/.test(out.detail)) out = await probeBinding(fe, path, { method: "GET" });
-    if (!out.ok) missing.push(`${asset} (${out.detail.match(/HTTP \d+/)?.[0] ?? "fail"})`);
+    // The assets worker's SPA fallback returns index.html (200, text/html) for a MISSING chunk,
+    // so we assert the content-type is the chunk's real type (.css => css, else javascript). HEAD
+    // is enough (content-type is in the headers) and avoids downloading the (large) chunk body.
+    const expectType = path.endsWith(".css") ? "css" : "javascript";
+    const out = await probeBinding(fe, path, { method: "HEAD", expectContentTypeIncludes: expectType });
+    if (!out.ok) {
+      const reason = /content-type/.test(out.detail) ? "missing(SPA-fallback)" : (out.detail.match(/HTTP \d+/)?.[0] ?? "fail");
+      missing.push(`${asset} (${reason})`);
+    }
   }
   if (missing.length > 0) {
     return { ok: false, detail: `${missing.length}/${chunks.length} chunk(s) missing: ${missing.slice(0, 5).join(", ")}` };

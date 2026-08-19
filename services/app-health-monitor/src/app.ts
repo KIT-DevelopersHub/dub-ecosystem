@@ -40,7 +40,9 @@ async function syntheticTarget(env: Env, mode: "down" | "up"): Promise<TargetRes
   const label = "(合成テスト) 死活監視パイプライン";
   if (!fe) return { id: "synthetic:probe", kind: "service", label, status: "down", detail: "合成: SVC_FE 未bind" };
   if (mode === "down") {
-    const out = await probeBinding(fe, "/__healthmonitor_synthetic_missing_chunk__.js", { expectStatus: 200 });
+    // A missing chunk resolves to the SPA fallback (200 text/html), so require javascript type —
+    // this fails exactly as a real stale/missing chunk would (the "something went wrong" case).
+    const out = await probeBinding(fe, "/__healthmonitor_synthetic_missing_chunk__.js", { method: "HEAD", expectContentTypeIncludes: "javascript" });
     return { id: "synthetic:probe", kind: "service", label, status: out.ok ? "ok" : "down", detail: `合成: 存在しないチャンクの模擬 -> ${out.detail}` };
   }
   const out = await probeBinding(fe, "/", { expectStatus: 200, bodyIncludes: `id="root"` });
