@@ -18,6 +18,7 @@ import {
   shiftBar,
   floorDayUtc,
   rollupRowDates,
+  scaleChildrenForParentResize,
 } from "../src/domain/timeline-axis";
 
 const row = (id: string, s: string | null, e: string | null, pct = 0): gantt.GanttRow => ({
@@ -135,6 +136,34 @@ describe("timeline-axis — bars & drag", () => {
     // resize-start cannot cross the end (min 1 day)
     const clamped = shiftBar(s, e, 99, "resize-start");
     expect(Date.parse(clamped.startsAt)).toBe(Date.parse(e) - MS_PER_DAY);
+  });
+
+  it("scaleChildrenForParentResize: dragging the END edge stretches children about the start", () => {
+    // parent span = [08-10, 08-20] (10 days), two children filling it.
+    const parentSpan = { startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" };
+    const kids = [
+      { taskId: "c1", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-15T00:00:00Z" },
+      { taskId: "c2", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" },
+    ];
+    // grow the end by +10 days → span doubles (f=2), anchored at 08-10.
+    const out = scaleChildrenForParentResize(parentSpan, kids, "end", 10);
+    const byId = Object.fromEntries(out.map((o) => [o.taskId, o])) as Record<string, { startsAt: string; endsAt: string }>;
+    expect(byId.c1!.startsAt).toBe("2026-08-10T00:00:00.000Z"); // start anchor unchanged
+    expect(byId.c1!.endsAt).toBe("2026-08-20T00:00:00.000Z"); // 5d → 10d
+    expect(byId.c2!.startsAt).toBe("2026-08-20T00:00:00.000Z");
+    expect(byId.c2!.endsAt).toBe("2026-08-30T00:00:00.000Z"); // last child end reaches the new parent end
+  });
+
+  it("scaleChildrenForParentResize: dragging the START edge scales about the end; min 1-day span; no-op safe", () => {
+    const parentSpan = { startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" };
+    const kids = [{ taskId: "c1", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" }];
+    // pull the start earlier by 10 days → span doubles about the end (08-20).
+    const grown = scaleChildrenForParentResize(parentSpan, kids, "start", -10);
+    expect(grown[0]!.startsAt).toBe("2026-07-31T00:00:00.000Z"); // 08-20 − 20d
+    expect(grown[0]!.endsAt).toBe("2026-08-20T00:00:00.000Z"); // end anchor unchanged
+    // deltaDays 0 and dateless children → no changes.
+    expect(scaleChildrenForParentResize(parentSpan, kids, "end", 0)).toEqual([]);
+    expect(scaleChildrenForParentResize(parentSpan, [{ taskId: "x", startsAt: null, endsAt: null }], "end", 5)).toEqual([]);
   });
 });
 

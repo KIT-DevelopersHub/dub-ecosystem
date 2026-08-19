@@ -347,3 +347,71 @@ export function shiftBar(
   }
   return { startsAt: new Date(ns).toISOString(), endsAt: new Date(ne).toISOString() };
 }
+
+export interface ChildSchedule {
+  taskId: string;
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
+/**
+ * Resizing a work-package (parent) BAR at one edge, expressed as child moves.
+ *
+ * A parent's span is the rollup of its children — the read model returns the parent's OWN
+ * dates as null — so we cannot persist the parent's own row (the next GET discards it and
+ * the bar snaps back). Instead we SCALE every dated descendant proportionally about the
+ * OPPOSITE edge so the rolled span reaches the dragged edge; those child writes persist and
+ * roll the parent bar up to match. Whole-day arithmetic, minimum 1-day child span.
+ *
+ * `edge` = the handle grabbed; `deltaDays` = whole-day drag at that edge (＋ grows the span
+ * there). Returns only the descendants whose [start,end] actually changes. Pure.
+ */
+export function scaleChildrenForParentResize(
+  parentSpan: { startsAt: string; endsAt: string },
+  descendants: readonly ChildSchedule[],
+  edge: "start" | "end",
+  deltaDays: number,
+): { taskId: string; startsAt: string; endsAt: string }[] {
+  const pStart = Date.parse(parentSpan.startsAt);
+  const pEnd = Date.parse(parentSpan.endsAt);
+  const span = pEnd - pStart;
+  if (!(span > 0) || deltaDays === 0) return [];
+  const dated = descendants.filter(
+    (d): d is { taskId: string; startsAt: string; endsAt: string } => !!d.startsAt && !!d.endsAt,
+  );
+  if (dated.length === 0) return [];
+
+  // Anchor at the opposite edge; f = newSpan / oldSpan (clamped so the span never inverts).
+  let anchor: number;
+  let f: number;
+  if (edge === "end") {
+    const newEnd = Math.max(pEnd + deltaDays * MS_PER_DAY, pStart + MS_PER_DAY);
+    anchor = pStart;
+    f = (newEnd - anchor) / span;
+  } else {
+    const newStart = Math.min(pStart + deltaDays * MS_PER_DAY, pEnd - MS_PER_DAY);
+    anchor = pEnd;
+    f = (anchor - newStart) / span;
+  }
+  const roundDay = (ms: number) => Math.round(ms / MS_PER_DAY) * MS_PER_DAY;
+
+  const out: { taskId: string; startsAt: string; endsAt: string }[] = [];
+  for (const c of dated) {
+    const cs = Date.parse(c.startsAt);
+    const ce = Date.parse(c.endsAt);
+    let ns: number;
+    let ne: number;
+    if (edge === "end") {
+      ns = anchor + roundDay((cs - anchor) * f);
+      ne = anchor + roundDay((ce - anchor) * f);
+    } else {
+      ns = anchor - roundDay((anchor - cs) * f);
+      ne = anchor - roundDay((anchor - ce) * f);
+    }
+    if (ne <= ns) ne = ns + MS_PER_DAY; // keep at least a 1-day child span
+    const nsIso = new Date(ns).toISOString();
+    const neIso = new Date(ne).toISOString();
+    if (nsIso !== c.startsAt || neIso !== c.endsAt) out.push({ taskId: c.taskId, startsAt: nsIso, endsAt: neIso });
+  }
+  return out;
+}

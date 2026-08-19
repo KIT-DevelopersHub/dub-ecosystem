@@ -56,6 +56,14 @@ export interface GanttViewProps {
   /** Shift a work-package (parent) AND its whole subtree by whole days (parent
    *  drag-move: children follow). Falls back to onSchedule when absent. */
   onScheduleShift?: (taskId: common.TaskId, deltaDays: number) => void;
+  /** RESIZE a work-package (parent) bar by whole days at one edge. A parent's span is
+   *  DERIVED from its children (the read model returns the parent's own dates as null), so
+   *  persisting the parent's own row would be discarded on the next GET — the bar snaps
+   *  back ("親バーを伸ばしても反映されない"). Instead the container SCALES the children to fill
+   *  the new span, which persists and rolls the parent bar up to match. `edge`=which handle;
+   *  `deltaDays`=whole-day drag at that edge (＋ grows at that edge). Absent ⇒ parent resize
+   *  falls back to the (non-persisting) onSchedule. */
+  onParentResize?: (parentId: common.TaskId, edge: "start" | "end", deltaDays: number) => void;
   /** Reorder rows by dragging in the left pane. `beforeTaskId` = the sibling the
    *  dragged row should sit immediately before (null ⇒ move to the end of its
    *  group). Only same-parent moves are applied by the container. Absent ⇒ no DnD. */
@@ -217,6 +225,7 @@ export function GanttView({
   truncated,
   onSchedule,
   onScheduleShift,
+  onParentResize,
   onReorder,
   sortMode = "manual",
   onSortModeChange,
@@ -514,10 +523,15 @@ export function GanttView({
         // consistent — the parent bar stays the union of its shifted children).
         if (mode === "move" && parentIds.has(taskId) && onScheduleShift) {
           onScheduleShift(taskId, deltaDays);
+        } else if ((mode === "resize-start" || mode === "resize-end") && parentIds.has(taskId) && onParentResize) {
+          // Parent RESIZE: a work-package span is derived from its children, so persisting
+          // the parent's own row is discarded on the next GET (the bar snaps back). Instead
+          // SCALE the children to fill the new span — that persists and rolls the parent bar
+          // up to match. edge = which handle the user grabbed.
+          onParentResize(taskId, mode === "resize-start" ? "start" : "end", deltaDays);
         } else if (onSchedule) {
-          // Leaf move/resize, or a parent RESIZE: persist the row's own span. For a
-          // parent, rollup then unions it with the children — extending grows the
-          // bar, shrinking below the children is ignored (children never split).
+          // Leaf move/resize (persists its own row), or a parent op with no dedicated
+          // handler wired (falls back to the row write).
           const next = shiftBar(startsAt, endsAt, deltaDays, mode);
           onSchedule(taskId, next.startsAt, next.endsAt);
         }
