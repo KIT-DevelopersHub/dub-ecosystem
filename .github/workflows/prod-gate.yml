@@ -1,0 +1,52 @@
+name: Prod gate (確認した)
+
+# Gate #1 of the two-layer production gate: a PR may only be merged to `main`
+# (= deployed to production) once the owner has verified it on STAGING and marked it
+# with the green `確認した` label.
+#
+# This workflow contributes the REQUIRED STATUS CHECK `confirm-gate`:
+#   * PR carries `確認した`      -> check is GREEN  -> merge allowed
+#   * PR does NOT carry it       -> check is RED    -> merge blocked (once branch
+#                                                      protection requires this check)
+#
+# It re-runs on `labeled`/`unlabeled`, so adding the label flips the check green and
+# removing it flips it red — no re-push needed. Branch protection on `main` must list
+# `confirm-gate` under required checks for the block to bite (applied at CUTOVER; see
+# docs/runbooks/04-staging-label-gate.md). Until then this check is informational
+# (visible red on unlabeled PRs) and never blocks — that is the intended "standby".
+#
+# Gate #2 (defence in depth, fail-close) lives in deploy.yml: even a commit that
+# reaches `main` is re-checked for the label before deploy-prod.sh runs.
+
+on:
+  pull_request:
+    branches: [main]
+    # labeled/unlabeled so toggling `確認した` re-evaluates the gate without a re-push.
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+# One in-flight evaluation per PR; a newer label/push event supersedes the older run.
+concurrency:
+  group: prod-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  confirm-gate:
+    name: confirm-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require 「確認した」 label
+        env:
+          # Evaluated by the Actions expression engine from the PR payload — no API call,
+          # so it cannot be spoofed by PR content and needs no token.
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, '確認した') }}
+        run: |
+          if [ "${HAS_LABEL}" = "true" ]; then
+            echo "✅ 「確認した」 label present — production merge is allowed for this PR."
+            exit 0
+          fi
+          echo "::error title=確認した ラベルが必要です::この PR はまだ本番マージできません。① 「stagingへ」ラベルで staging にデプロイ ② staging URL で動作確認 ③ 「確認した」ラベルを付与 — の順で進めてください。詳細: docs/runbooks/04-staging-label-gate.md"
+          exit 1
