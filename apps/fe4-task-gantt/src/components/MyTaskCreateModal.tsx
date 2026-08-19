@@ -60,6 +60,10 @@ export interface MyTaskCreateModalProps {
   onCreate: (draft: MyTaskDraft) => Promise<void>;
   /** preselect the requester's own name in the header hint. */
   requesterName?: string;
+  /** Modal heading (default「タスクを発行」). The send/receive flow passes「タスクを依頼」. */
+  title?: string;
+  /** Primary button label (default「発行する」). Send/receive passes「依頼する」. */
+  submitLabel?: string;
 }
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -73,7 +77,17 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
  */
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({
+  open,
+  onClose,
+  events,
+  people,
+  teams,
+  onCreate,
+  requesterName,
+  title: modalTitle = "タスクを発行",
+  submitLabel = "発行する",
+}: MyTaskCreateModalProps) {
   const [eventId, setEventId] = useState<common.EventId | "">(NO_EVENT);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
@@ -165,7 +179,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     <Modal
       open={open}
       onClose={close}
-      title="タスクを発行"
+      title={modalTitle}
       testId="fe4-mytask-create-modal"
       footer={
         <div className={styles.modalFooter}>
@@ -173,7 +187,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             キャンセル
           </Button>
           <Button onClick={submit} loading={saving} disabled={!canSubmit} testId="fe4-mytask-create-submit">
-            発行する
+            {submitLabel}
           </Button>
         </div>
       }
