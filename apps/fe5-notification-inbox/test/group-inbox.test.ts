@@ -14,37 +14,52 @@ function item(over: Partial<InboxItem> & Pick<InboxItem, "id" | "type">): InboxI
   } as InboxItem;
 }
 
-describe("groupInboxItems", () => {
-  it("groups by app and orders sections release → task → event → system", () => {
+describe("groupInboxItems (by category)", () => {
+  it("groups by category and orders sections app_update → mail → participation → other", () => {
     const groups = groupInboxItems([
-      item({ id: "n1", type: "task.assigned" }),
-      item({ id: "n2", type: "release" }),
-      item({ id: "n3", type: "event.invited" }),
-      item({ id: "n4", type: "system.announcement" }),
+      item({ id: "n1", type: "task.assigned" }), // other
+      item({ id: "n2", type: "release" }), // app_update
+      item({ id: "n3", type: "mail.message.received" }), // mail
+      item({ id: "n4", type: "member.participation.submitted" }), // participation
     ]);
-    expect(groups.map((g) => g.group)).toEqual(["release", "task", "event", "system"]);
+    expect(groups.map((g) => g.group)).toEqual(["app_update", "mail", "participation", "other"]);
+  });
+
+  it("treats deploy.* and release/release.* as the same app_update section", () => {
+    const groups = groupInboxItems([
+      item({ id: "n1", type: "deploy.deployment.status_changed" }),
+      item({ id: "n2", type: "release.notes" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.group).toBe("app_update");
+    expect(groups[0]!.items.map((i) => i.id)).toEqual(["n1", "n2"]);
   });
 
   it("drops empty sections and preserves per-section incoming order", () => {
     const groups = groupInboxItems([
-      item({ id: "n1", type: "task.due_soon" }),
-      item({ id: "n2", type: "task.assigned" }),
+      item({ id: "n1", type: "mail.message.sent" }),
+      item({ id: "n2", type: "mail.message.received" }),
     ]);
     expect(groups).toHaveLength(1);
-    expect(groups[0]!.group).toBe("task");
+    expect(groups[0]!.group).toBe("mail");
     expect(groups[0]!.items.map((i) => i.id)).toEqual(["n1", "n2"]);
   });
 
   it("counts unread per section for header emphasis", () => {
     const groups = groupInboxItems([
-      item({ id: "n1", type: "task.assigned", readAt: null }),
-      item({ id: "n2", type: "task.completed", readAt: "2026-08-12T01:00:00.000Z" }),
+      item({ id: "n1", type: "mail.message.received", readAt: null }),
+      item({ id: "n2", type: "mail.message.sent", readAt: "2026-08-12T01:00:00.000Z" }),
     ]);
     expect(groups[0]!.unread).toBe(1);
   });
 
-  it("routes unknown types into the system section (never crashes)", () => {
-    const groups = groupInboxItems([item({ id: "n1", type: "weird.unknown" })]);
-    expect(groups[0]!.group).toBe("system");
+  it("routes tasks/events/unknown types into the その他 (other) section (never crashes)", () => {
+    const groups = groupInboxItems([
+      item({ id: "n1", type: "task.assigned" }),
+      item({ id: "n2", type: "event.invited" }),
+      item({ id: "n3", type: "weird.unknown" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.group).toBe("other");
   });
 });

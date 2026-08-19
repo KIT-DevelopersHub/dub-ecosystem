@@ -7,8 +7,8 @@
 // (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
 // with no nested/double sidebar.
 import { useState, type ComponentType, type ReactNode } from "react";
-import { AppShell, PageHeader, AppLauncher, Button, Icon, Menu } from "@dub/ui";
-import type { AppLauncherItem } from "@dub/ui";
+import { AppShell, PageHeader, AppLauncher, Menu } from "@dub/ui";
+import type { AppLauncherItem, MenuItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
@@ -121,6 +121,33 @@ export function AppShellLayout({
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
+  const authed = auth.status === "authenticated";
+
+  // The ⚙ menu's contents. パスワード変更 needs the api-client; ログアウト only needs the
+  // onLogout handler, so logout stays available to any signed-in viewer even if no
+  // api is wired. Logout sits last, under a divider, danger-toned — a 離脱/destructive
+  // action set apart from the safe settings above it.
+  const settingsItems: MenuItem[] = [];
+  if (showAccount) {
+    settingsItems.push({
+      id: "change-password",
+      label: "パスワード変更",
+      icon: "lock",
+      onSelect: () => setPwOpen(true),
+      testId: "fe2-change-password-open",
+    });
+  }
+  if (authed && onLogout) {
+    settingsItems.push({
+      id: "logout",
+      label: "ログアウト",
+      icon: "log-out",
+      tone: "danger",
+      dividerBefore: settingsItems.length > 0,
+      onSelect: onLogout,
+      testId: "fe2-logout",
+    });
+  }
 
   const email = accountEmail(auth);
   // Brand-first header: "DevHub" (bold, primary) is the app label AND the home导线
@@ -165,11 +192,12 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
-          {showAccount ? (
+          {settingsItems.length > 0 ? (
             // Settings (⚙) dropdown — the account self-service container. Password
-            // change (#155) now lives INSIDE it instead of being exposed bare in the
-            // header; future self settings (display name / theme …) become extra
-            // items here. Behaviour/API/authz of パスワード変更 are unchanged.
+            // change (#155) and ログアウト both live INSIDE it now, so the header is
+            // just 9-dot / bell / ⚙ (uniform icon row, no bare buttons). Future self
+            // settings (display name / theme …) become extra items here. Behaviour/
+            // API/authz of パスワード変更 and the logout flow are unchanged.
             <Menu
               testId="fe2-settings-menu"
               label="設定"
@@ -177,25 +205,9 @@ export function AppShellLayout({
               icon="settings"
               align="end"
               iconOnly
-              items={[
-                {
-                  id: "change-password",
-                  label: "パスワード変更",
-                  icon: "lock",
-                  onSelect: () => setPwOpen(true),
-                  testId: "fe2-change-password-open",
-                },
-              ]}
+              items={settingsItems}
             />
           ) : null}
-          <Button
-            testId="fe2-logout"
-            variant="secondary"
-            iconLeft={<Icon name="log-out" />}
-            onClick={onLogout}
-          >
-            ログアウト
-          </Button>
         </>
       }
     />

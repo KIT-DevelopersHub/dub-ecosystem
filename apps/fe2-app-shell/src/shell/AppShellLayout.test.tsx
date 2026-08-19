@@ -133,6 +133,33 @@ describe("AppShellLayout", () => {
     expect(await screen.findByTestId("fe2-change-password")).toBeInTheDocument();
   });
 
+  it("puts ログアウト inside the 設定 menu as a danger item below パスワード変更", async () => {
+    const shellApi = {
+      auth: { me: () => Promise.resolve(ME), changePassword: vi.fn(() => Promise.resolve()) },
+    } as unknown as ApiClient;
+    const onLogout = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={shellApi}>
+          <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={onLogout}>
+            <div data-testid="outlet">content</div>
+          </AppShellLayout>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
+    // Both items present; logout is danger-toned and ordered AFTER password change.
+    const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
+    expect(items).toEqual(["fe2-change-password-open", "fe2-logout"]);
+    const logout = screen.getByTestId("fe2-logout");
+    expect(logout).toHaveAttribute("data-tone", "danger");
+    // A separator divides the safe settings from the 離脱 action.
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    await userEvent.click(logout);
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
   it("renders injected nav badge from badgeSource inside the launcher", async () => {
     renderShell();
     await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
@@ -140,13 +167,16 @@ describe("AppShellLayout", () => {
     expect(screen.getByText("5")).toBeInTheDocument();
   });
 
-  it("calls onNavigate on launcher tile click and onLogout on logout", async () => {
+  it("calls onNavigate on launcher tile click and onLogout from the 設定 menu", async () => {
     const onNavigate = vi.fn();
     const onLogout = vi.fn();
     renderShell(onNavigate, onLogout);
     await userEvent.click(screen.getByTestId("fe2-app-launcher-trigger"));
     await userEvent.click(screen.getByText("Events"));
     expect(onNavigate).toHaveBeenCalledWith("/events");
+    // ログアウトはヘッダに剥き出しではなく設定(⚙)メニュー内に移動した。開いてから押す。
+    expect(screen.queryByTestId("fe2-logout")).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
     await userEvent.click(screen.getByTestId("fe2-logout"));
     expect(onLogout).toHaveBeenCalledTimes(1);
   });

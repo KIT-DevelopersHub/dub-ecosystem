@@ -41,6 +41,9 @@ if (!live && api instanceof MockChatClient) {
   const p = new URLSearchParams(window.location.search).get("deletionPolicy");
   if (p === "tombstone") api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone" });
   else if (p === "hard") api.setDeletionPolicy({ member: "hard", moderator: "hard" });
+  // Standalone/E2E hook (dev only): lets tests inject latency / a one-shot error to
+  // exercise the optimistic-delete immediacy and failure-rollback paths.
+  (window as unknown as { __chatApi?: MockChatClient }).__chatApi = api;
 }
 
 const createRealtimeClient: () => ChatRealtimeClient = live

@@ -4,8 +4,7 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { Badge } from "@dub/ui";
 import type { InboxItem } from "../contracts/notification-api";
-import { NotificationTypeLabel } from "./NotificationTypeLabel";
-import { resolveTypeDisplay } from "../lib/type-dictionary";
+import { resolveCategory, NOTIFICATION_CATEGORY_META } from "../lib/type-dictionary";
 import { formatRelativeTime } from "../lib/relative-time";
 import styles from "./NotificationListItem.module.css";
 
@@ -32,7 +31,8 @@ export function itemLinkUrl(item: InboxItem): string | null {
 export function NotificationListItem(props: NotificationListItemProps): ReactNode {
   const { item, onActivate } = props;
   const unread = item.readAt === null;
-  const isRelease = resolveTypeDisplay(item.type).group === "release";
+  const category = resolveCategory(item.type);
+  const categoryMeta = NOTIFICATION_CATEGORY_META[category];
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -54,13 +54,12 @@ export function NotificationListItem(props: NotificationListItemProps): ReactNod
         <div className={styles.title}>{item.title}</div>
         <div className={styles.snippet}>{item.body}</div>
         <div className={styles.meta}>
-          {isRelease ? (
-            <Badge tone="brand" testId="fe5-inbox-release-badge">
-              🎉 新機能
-            </Badge>
-          ) : (
-            <NotificationTypeLabel type={item.type} />
-          )}
+          <Badge
+            tone={categoryMeta.tone}
+            testId={`fe5-inbox-cat-badge-${category}`}
+          >
+            {categoryMeta.label}
+          </Badge>
           <span>{formatRelativeTime(item.createdAt)}</span>
         </div>
       </div>
