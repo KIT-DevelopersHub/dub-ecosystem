@@ -137,7 +137,9 @@ export function createRosterApi(client: ResourceClient): RosterApi {
       client.get<auditLog.AuditLogPage>(`${BASE}/audit/logs`, { ...buildAuditQuery(filters) }),
     mailStatus: () => client.get<MailStatusResponse>(`${BASE}/mail/status`),
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/addresses`),
-    createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses`, req),
+    // Issue a receiving address bound to the shared Email Worker (no forward destination):
+    // the server picks the same Worker existing rules use, so the request is localPart-only.
+    createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses/issue`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/addresses/${id}`),
     getChatDeletionPolicy: () => client.get<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`),
     updateChatDeletionPolicy: (req) => client.patch<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`, req),
