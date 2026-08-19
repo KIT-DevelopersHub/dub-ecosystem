@@ -33,8 +33,11 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + �
         onCreate={async () => {}}
       />,
     );
-    // choose parent P
-    fireEvent.change(screen.getByTestId("fe4-create-parent"), { target: { value: "P" } });
+    // choose parent P via the searchable selector (type its name → pick)
+    const parentInput = screen.getByTestId("fe4-create-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "親P" } });
+    fireEvent.mouseDown(screen.getByTestId("fe4-create-parent-opt-P"));
     const depInput = screen.getByTestId("fe4-create-deps-input");
     fireEvent.focus(depInput);
     fireEvent.change(depInput, { target: { value: "子" } }); // matches 子1/子2/子D by title
@@ -58,7 +61,10 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + �
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-create-title"), { target: { value: "新タスク" } });
-    fireEvent.change(screen.getByTestId("fe4-create-parent"), { target: { value: "P" } });
+    const parentInput = screen.getByTestId("fe4-create-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "親P" } });
+    fireEvent.mouseDown(screen.getByTestId("fe4-create-parent-opt-P"));
     fireEvent.click(screen.getByTestId("fe4-create-submit"));
     await waitFor(() => expect(onCreate).toHaveBeenCalled());
     expect(onCreate.mock.calls[0]![0].parentTaskId).toBe("P");
@@ -109,7 +115,10 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null }, { id: "P", title: "親P", parentTaskId: null }]}
       />,
     );
-    fireEvent.change(screen.getByTestId("fe4-detail-parent"), { target: { value: "P" } });
+    const parentInput = screen.getByTestId("fe4-detail-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "親P" } });
+    fireEvent.mouseDown(screen.getByTestId("fe4-detail-parent-opt-P"));
     fireEvent.click(screen.getByTestId("fe4-detail-save"));
     expect(onSave).toHaveBeenCalled();
     const [patch, relations] = onSave.mock.calls[0]!;
@@ -165,7 +174,10 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.click(screen.getByTestId("fe4-create-open"));
     const modal = await screen.findByTestId("fe4-create-modal");
     fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "小タスク" } });
-    fireEvent.change(within(modal).getByTestId("fe4-create-parent"), { target: { value: "t1" } });
+    const parentInput = within(modal).getByTestId("fe4-create-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "会場" } }); // t1 = 会場予約
+    fireEvent.mouseDown(within(modal).getByTestId("fe4-create-parent-opt-t1"));
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     // t1 now owns a child → renders the expand/collapse toggle
     expect(await screen.findByTestId("fe4-gantt-toggle-t1")).toBeInTheDocument();

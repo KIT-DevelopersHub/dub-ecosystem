@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
+import { TaskSearchSelect, rememberTaskSearch } from "@dub/app-ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
@@ -160,6 +161,8 @@ export function TaskDetailPanel({
       patch.dueAt = nextDueIso;
     }
     if (parentChanged) patch.parentTaskId = parentId;
+    // Surface a newly-chosen parent in the「最近選んだタスク」suggestions next time.
+    if (parentChanged && parentId) rememberTaskSearch("fe4:recent-parents", [parentId]);
     onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
   };
 
@@ -275,17 +278,20 @@ export function TaskDetailPanel({
           </div>
         )}
 
-        {/* 親子（親タスク）: change/detach which work-package this task hangs under. */}
+        {/* 親子（親タスク）: change/detach which work-package this task hangs under.
+            タスク名の検索で選択（＝親あり）。空欄のまま（chip なし）なら親なし＝トップレベル。 */}
         <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-detail-parent">
-            親タスク（親子関係）
-          </label>
-          <Select
-            id="fe4-detail-parent"
-            value={parentId ?? ""}
+          <span className={styles.formLabel}>親タスク（親子関係）</span>
+          <TaskSearchSelect<common.TaskId>
+            value={parentId}
+            options={canWrite ? parentOptions : []}
+            placeholder="タスク名で検索して親に設定…"
+            emptyOptionsLabel="親にできるタスクがありません"
+            hint="空欄のままなら親なし（トップレベル）"
+            recentKey="fe4:recent-parents"
             disabled={!canWrite}
-            onChange={(v) => {
-              const next = v ? (v as common.TaskId) : null;
+            onChange={(next) => {
+              if (!canWrite) return;
               setParentId(next);
               // dependencies must stay within the new scope — drop out-of-scope ones.
               setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
@@ -293,7 +299,6 @@ export function TaskDetailPanel({
               // チームが食い違う状態を作らせない）。トップレベルへ分離（next=null）ならチームは維持。
               if (next) setTeamId(teamOf(scopeTasks, next));
             }}
-            options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
           />
           {/* 関係タイプの変換: 親（親子）→ 先行（依存）。保存で親子/依存を一括反映。 */}

@@ -22,6 +22,16 @@ export {
 } from "./hooks/useEmailAddressInput";
 
 export { RolePicker, type RolePickerProps, type RoleOption } from "./components/RolePicker";
+
+export {
+  TaskSearchSelect,
+  rememberTaskSearch,
+  type TaskSearchOption,
+  type TaskChipAction,
+  type TaskSearchSelectProps,
+  type TaskSearchSelectSingleProps,
+  type TaskSearchSelectMultiProps,
+} from "./components/TaskSearchSelect";
 export { DialogActions, type DialogActionsProps } from "./components/DialogActions";
 export { FormError, type FormErrorProps } from "./components/FormError";
 
