@@ -5,6 +5,7 @@ import { isOverdue } from "../domain/my-tasks";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { FromToCell } from "./FromToCell";
 import { TaskStatusBadge } from "./TaskStatusBadge";
+import { CrossTeamRoleBadge } from "./CrossTeamRoleBadge";
 import styles from "../styles/app.module.css";
 
 const PRIORITY_TONE: Record<task.TaskPriority, BadgeTone> = {
@@ -25,6 +26,8 @@ export interface MyTaskListProps {
   loading?: boolean;
   /** open the task detail dialog (feedback #2 — row click shows 内容, not navigate). */
   onSelect: (task: task.Task) => void;
+  /** 送る・受け取る: taskId → cross-team role (お願いした/受け負った) for the status badge. */
+  roleByTask?: ReadonlyMap<common.TaskId, task.TaskCrossRole>;
   /** number of rows currently revealed (windowing for large lists). */
   visibleCount: number;
   onShowMore: () => void;
@@ -43,6 +46,7 @@ export function MyTaskList({
   teamNames,
   loading,
   onSelect,
+  roleByTask,
   visibleCount,
   onShowMore,
   now = Date.now(),
@@ -103,7 +107,14 @@ export function MyTaskList({
                 <td className={styles.colFromTo}>
                   <FromToCell fromId={t.createdBy ?? null} toId={t.assigneeId} users={users} testId={`fe4-fromto-${t.id}`} />
                 </td>
-                <td className={styles.cellTitle}>{t.title}</td>
+                <td className={styles.cellTitle}>
+                  <span className={styles.cellTitleRow}>
+                    {t.title}
+                    {roleByTask?.get(t.id) && (
+                      <CrossTeamRoleBadge role={roleByTask.get(t.id)!} testId={`fe4-mytask-role-${t.id}`} />
+                    )}
+                  </span>
+                </td>
                 <td>{team ? <Badge tone="info">{team}</Badge> : <span className={styles.muted}>―</span>}</td>
                 <td>
                   <TaskStatusBadge status={t.status} />

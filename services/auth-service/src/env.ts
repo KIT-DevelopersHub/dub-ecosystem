@@ -17,6 +17,11 @@ export interface Env {
   // --- vars ---
   ENVIRONMENT?: string; // "local" | "preview" | "production" (default production)
   DUB_TEST_LOGIN?: string; // "1" enables /auth/test-login (local/preview only)
+  // STAGING ONLY. "1" registers POST /auth/demo-login — a password-less one-click
+  // sign-in as the fixed demo account for reviewers on the shared staging URL. MUST NEVER
+  // be set in production: when unset the route is not registered at all (no backdoor).
+  DEMO_AUTOLOGIN?: string;
+  DEMO_AUTOLOGIN_EMAIL?: string; // demo account for /auth/demo-login (default demo-admin@developershub.jp)
   COOKIE_DOMAIN?: string; // unset/empty -> host-only cookie (no Domain attr; required on *.workers.dev)
   ALLOWED_LOGIN_DOMAIN?: string; // OPTIONAL extra filter; empty (default) => no domain restriction, roster allowlist is authoritative
   SESSION_ACCESS_TTL_SEC?: string; // access lifetime (default 3600 = 1h)
@@ -59,6 +64,8 @@ export interface AppConfig {
   environment: string;
   isProduction: boolean;
   testLoginEnabled: boolean;
+  demoAutologin: boolean; // STAGING ONLY: register the password-less /auth/demo-login route
+  demoAutologinEmail: string; // fixed demo account for /auth/demo-login
   cookieName: string;
   cookieDomain: string;
   allowedLoginDomain: string; // "" => domain gate disabled (roster allowlist authoritative)
@@ -92,6 +99,13 @@ export function configFromEnv(env: Env): AppConfig {
     isProduction,
     // test-login is compiled everywhere but hard-gated OFF in production (theme8).
     testLoginEnabled: env.DUB_TEST_LOGIN === "1" && !isProduction,
+    // Demo one-click login: gated PURELY by the explicit DEMO_AUTOLOGIN flag (staging
+    // runs with ENVIRONMENT=production, so it can't key off !isProduction). The flag is
+    // set ONLY in the staging auth-service config; production never sets it ⇒ the route
+    // is not registered. A distinct flag (not DUB_TEST_LOGIN) keeps this a deliberate,
+    // single-account demo door rather than the arbitrary-userId test-login.
+    demoAutologin: env.DEMO_AUTOLOGIN === "1",
+    demoAutologinEmail: (env.DEMO_AUTOLOGIN_EMAIL ?? "demo-admin@developershub.jp").trim().toLowerCase(),
     cookieName: "dub_session",
     cookieDomain: env.COOKIE_DOMAIN ?? DEFAULTS.cookieDomain,
     allowedLoginDomain: (env.ALLOWED_LOGIN_DOMAIN ?? DEFAULTS.allowedLoginDomain).trim().toLowerCase(),

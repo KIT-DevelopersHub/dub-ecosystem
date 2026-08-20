@@ -8,9 +8,11 @@ import { createD1TaskRepo, type TaskRepo } from "./repo";
 import {
   createServiceBindingEventClient,
   createServiceBindingIdentityClient,
+  createServiceBindingMemberClient,
   createIdentityAuthorizer,
   type EventClient,
   type IdentityClient,
+  type MemberClient,
   type Authorizer,
 } from "./clients";
 import {
@@ -31,6 +33,7 @@ export interface Deps {
   authz: Authorizer;
   eventClient: EventClient;
   identity: IdentityClient;
+  member: MemberClient;
   idempotency: IdempotencyStore;
 }
 
@@ -46,6 +49,7 @@ export function buildDeps(env: Env): Deps {
     authz: createIdentityAuthorizer(env.SVC_IDENTITY, config.orgId),
     eventClient: createServiceBindingEventClient(env.SVC_EVENT),
     identity: createServiceBindingIdentityClient(env.SVC_IDENTITY),
+    member: createServiceBindingMemberClient(env.SVC_MEMBER),
     idempotency: createD1IdempotencyStore(db),
   };
 }

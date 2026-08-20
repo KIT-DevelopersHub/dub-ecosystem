@@ -194,3 +194,47 @@ describe("startAt/dueAt bar derivation (PR-C: real dates win)", () => {
     }
   });
 });
+
+// 送る・受け取る (ADR-0007): cross-links project a role badge onto rows but NEVER an arrow.
+describe("buildGanttChartDTO — cross-team links (crossTeamRole projection)", () => {
+  const xlink = (over: Partial<task.TaskCrossLink> & { id: string; requesterTaskId: string; requesteeTaskId: string }): task.TaskCrossLink => ({
+    id: over.id,
+    requestId: over.requestId ?? "treq_1",
+    requesterTaskId: over.requesterTaskId,
+    requesteeTaskId: over.requesteeTaskId,
+    eventId: over.eventId ?? "event_1",
+    createdAt: over.createdAt ?? "2026-08-01T00:00:00Z",
+  });
+
+  it("projects requester→'requested' / requestee→'accepted' onto rows, and echoes crossLinks", () => {
+    const dto = buildGanttChartDTO(
+      "event_1",
+      [mkTask({ id: "task_req" }), mkTask({ id: "task_acc" })],
+      [],
+      [xlink({ id: "txl_1", requesterTaskId: "task_req", requesteeTaskId: "task_acc" })],
+    );
+    const byId = new Map(dto.rows.map((r) => [r.taskId, r]));
+    expect(byId.get("task_req")!.crossTeamRole).toBe("requested");
+    expect(byId.get("task_acc")!.crossTeamRole).toBe("accepted");
+    expect(dto.crossLinks).toHaveLength(1);
+    // The cross-link adds NO dependency arrow (separate channel; CPM untouched).
+    expect(dto.dependencies).toHaveLength(0);
+  });
+
+  it("has no crossTeamRole / crossLinks when there are none (byte-compatible default)", () => {
+    const dto = buildGanttChartDTO("event_1", [mkTask({ id: "a" })], []);
+    expect(dto.rows[0]!.crossTeamRole).toBeUndefined();
+    expect(dto.crossLinks).toBeUndefined();
+  });
+
+  it("drops a dangling cross-link (an endpoint not in the live row set)", () => {
+    const dto = buildGanttChartDTO(
+      "event_1",
+      [mkTask({ id: "task_req" })], // task_acc is archived / absent
+      [],
+      [xlink({ id: "txl_1", requesterTaskId: "task_req", requesteeTaskId: "task_gone" })],
+    );
+    expect(dto.crossLinks).toBeUndefined();
+    expect(dto.rows[0]!.crossTeamRole).toBeUndefined();
+  });
+});

@@ -45,12 +45,15 @@ done
 bash infra/deploy/gen-staging-configs.sh
 
 deploy() {
-  local config="$1"
+  local config="$1"; shift
+  # Any remaining args are passed straight to `wrangler deploy` (e.g. staging-only
+  # --var overrides that must NOT live in the committed prod/free config).
+  local extra=("$@")
   if [ ! -f "$config" ]; then echo "::error::missing $config" >&2; exit 1; fi
-  echo "::group::deploy ${config}"
-  if ! $WRANGLER deploy --config "$config"; then
+  echo "::group::deploy ${config} ${extra[*]:-}"
+  if ! $WRANGLER deploy --config "$config" "${extra[@]}"; then
     echo "first attempt failed, retrying in 8s..." >&2; sleep 8
-    $WRANGLER deploy --config "$config"
+    $WRANGLER deploy --config "$config" "${extra[@]}"
   fi
   echo "::endgroup::"
 }
@@ -125,7 +128,12 @@ bootstrap_missing_workers
 # the public faces — same fail-fast placement as prod.
 GW="https://dub-api-gateway-staging.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
 for dir in "${STAGING_WORKER_DIRS[@]}"; do
-  deploy "${dir}/wrangler.staging.toml"
+  # STAGING ONLY: enable the one-click demo login on the auth-service. This --var is set
+  # here (never in a committed wrangler config) so it can NEVER leak into a prod/free
+  # deploy — production's auth-service has no DEMO_AUTOLOGIN, so /auth/demo-login 404s.
+  extra_args=()
+  if [ "${dir}" = "services/auth-service" ]; then extra_args=(--var "DEMO_AUTOLOGIN:1"); fi
+  deploy "${dir}/wrangler.staging.toml" "${extra_args[@]}"
   if [ "${dir}" = "services/api-gateway" ] && [ "${SKIP_HEALTHCHECK:-0}" != "1" ]; then
     check "staging gateway /healthz" "${GW}/healthz" 200
     check "staging gateway /api/v1/me" "${GW}/api/v1/me" 401
