@@ -277,6 +277,242 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /task-requests:
+    post:
+      operationId: issueTaskRequest
+      summary: Issue a task request (send / 送る)
+      tags:
+        - task-requests
+      description: >-
+        Requires task:write. The server resolves the destination's team
+        membership: self / same-team → a task is created immediately
+        ({kind:"task"}); other team → a pending TaskRequest is created and the
+        receiver is notified ({kind:"request"}).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueTaskRequestBody'
+      responses:
+        '201':
+          description: A task (self/same-team) or a pending request (other team).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueTaskRequestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      operationId: listTaskRequests
+      summary: List my incoming/outgoing task requests
+      tags:
+        - task-requests
+      description: Requires task:read. box=incoming → to_user=self; box=outgoing → from_user=self.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: box
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - incoming
+              - outgoing
+        - name: state
+          in: query
+          description: Repeatable; any of the TaskRequestState values.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/TaskRequestState'
+          style: form
+          explode: true
+        - name: eventId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of task requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTaskRequests'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /task-requests/{id}:
+    get:
+      operationId: getTaskRequest
+      summary: Get one task request
+      tags:
+        - task-requests
+      description: Requires task:read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The task request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /task-requests/{id}/accept:
+    post:
+      operationId: acceptTaskRequest
+      summary: Accept a task request (受け取る)
+      tags:
+        - task-requests
+      description: >-
+        Requires task:write (receiver only → 403 otherwise). Only a pending
+        request may be accepted (else 409). Creates the receiver's task, the
+        requester's tracking task, and the arrow-less cross-link joining them.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptTaskRequestBody'
+      responses:
+        '200':
+          description: The accepted request + created task + cross-link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptTaskRequestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /task-requests/{id}/decline:
+    post:
+      operationId: declineTaskRequest
+      summary: Decline a task request
+      tags:
+        - task-requests
+      description: Requires task:write (receiver only → 403 otherwise). Pending only (else 409).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclineTaskRequestBody'
+      responses:
+        '200':
+          description: The declined request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /task-requests/{id}/cancel:
+    post:
+      operationId: cancelTaskRequest
+      summary: Cancel a task request
+      tags:
+        - task-requests
+      description: Requires task:write (requester only → 403 otherwise). Pending only (else 409).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTaskRequestBody'
+      responses:
+        '200':
+          description: The cancelled request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /tasks/cross-links:
+    get:
+      operationId: listTaskCrossLinks
+      summary: List an event's cross-team links (arrow-less)
+      tags:
+        - tasks
+      description: Requires task:read. Same shape as /tasks/dependencies; eventId required.
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cross-team links for the event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTaskCrossLinksResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /tasks/{id}/attachments:
     get:
       operationId: listTaskAttachments
@@ -442,6 +678,234 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskAttachment'
+    TaskRequestState:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - declined
+        - cancelled
+    TaskRequest:
+      type: object
+      required:
+        - id
+        - fromUserId
+        - toUserId
+        - title
+        - description
+        - priority
+        - dueAt
+        - state
+        - version
+        - createdAt
+        - decidedAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        eventId:
+          type:
+            - string
+            - 'null'
+        fromUserId:
+          type: string
+        toUserId:
+          type: string
+        fromTeamId:
+          type:
+            - string
+            - 'null'
+        toTeamId:
+          type:
+            - string
+            - 'null'
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        priority:
+          $ref: '#/components/schemas/TaskPriority'
+        dueAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        sourceTaskId:
+          type:
+            - string
+            - 'null'
+        state:
+          $ref: '#/components/schemas/TaskRequestState'
+        declineReason:
+          type:
+            - string
+            - 'null'
+        createdTaskId:
+          type:
+            - string
+            - 'null'
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    IssueTaskRequestBody:
+      type: object
+      required:
+        - toUserId
+        - title
+      properties:
+        toUserId:
+          type: string
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        priority:
+          $ref: '#/components/schemas/TaskPriority'
+        dueAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        eventId:
+          type:
+            - string
+            - 'null'
+        sourceTaskId:
+          type:
+            - string
+            - 'null'
+        targetTeamId:
+          type:
+            - string
+            - 'null'
+    IssueTaskRequestResponse:
+      oneOf:
+        - type: object
+          required:
+            - kind
+            - task
+          properties:
+            kind:
+              type: string
+              enum:
+                - task
+            task:
+              $ref: '#/components/schemas/Task'
+        - type: object
+          required:
+            - kind
+            - request
+          properties:
+            kind:
+              type: string
+              enum:
+                - request
+            request:
+              $ref: '#/components/schemas/TaskRequest'
+    AcceptTaskRequestBody:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+        targetTeamId:
+          type:
+            - string
+            - 'null'
+    DeclineTaskRequestBody:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+        reason:
+          type: string
+    CancelTaskRequestBody:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+    AcceptTaskRequestResponse:
+      type: object
+      required:
+        - request
+        - createdTask
+        - crossLink
+      properties:
+        request:
+          $ref: '#/components/schemas/TaskRequest'
+        createdTask:
+          $ref: '#/components/schemas/Task'
+        crossLink:
+          $ref: '#/components/schemas/TaskCrossLink'
+    PaginatedTaskRequests:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskRequest'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: null = end of results.
+    TaskCrossLink:
+      type: object
+      required:
+        - id
+        - requestId
+        - requesterTaskId
+        - requesteeTaskId
+        - createdAt
+      properties:
+        id:
+          type: string
+        requestId:
+          type: string
+        requesterTaskId:
+          type: string
+          description: お願いした側 (role=requested).
+        requesteeTaskId:
+          type: string
+          description: 受け負った側 (role=accepted).
+        eventId:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
+    ListTaskCrossLinksResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskCrossLink'
     Error:
       type: object
       description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
