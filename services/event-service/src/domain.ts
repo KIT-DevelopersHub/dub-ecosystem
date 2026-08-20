@@ -3,7 +3,14 @@
 // imported via the namespace value to keep a single source of truth.
 import { event as eventNs } from "@dub/types";
 import type { event } from "@dub/types";
-import type { EventRow, ActionRow, Keyset } from "./types";
+import type {
+  EventRow,
+  ActionRow,
+  Keyset,
+  EventDetailsData,
+  EventDetailLink,
+  EventDetailContact,
+} from "./types";
 
 // Linear phase order (forward = higher index). Back-transition or ->closed = admin.
 const PHASE_ORDER: readonly event.EventPhase[] = [
@@ -88,3 +95,47 @@ export const DEFAULT_LIMIT = 50;
 export const MAX_LIMIT = 200;
 export const INCLUDE_ACTIONS_CAP = 200;
 export const SORT_ORDER_GAP = 1024;
+
+// ---- event details (free-form store) ----
+export const EMPTY_EVENT_DETAILS: EventDetailsData = {
+  overview: "",
+  memo: "",
+  venue: "",
+  links: [],
+  contacts: [],
+};
+
+// Bounds keep a single row from growing unbounded (the store is convenient, not a CMS).
+const MAX_TEXT = 20_000; // overview / memo / venue
+const MAX_LIST = 100; // links / contacts
+const MAX_FIELD = 500; // per label / url / value
+
+function str(v: unknown, cap: number): string {
+  return typeof v === "string" ? v.slice(0, cap) : "";
+}
+
+/** Coerce arbitrary client input into a well-formed, bounded EventDetailsData.
+ *  Missing keys fall back to the empty defaults so PATCH-like partial saves work. */
+export function normalizeEventDetails(input: Partial<EventDetailsData> | undefined): EventDetailsData {
+  const links: EventDetailLink[] = Array.isArray(input?.links)
+    ? input!.links
+        .filter((l): l is EventDetailLink => !!l && typeof l === "object")
+        .map((l) => ({ label: str(l.label, MAX_FIELD), url: str(l.url, MAX_FIELD) }))
+        .filter((l) => l.label !== "" || l.url !== "")
+        .slice(0, MAX_LIST)
+    : [];
+  const contacts: EventDetailContact[] = Array.isArray(input?.contacts)
+    ? input!.contacts
+        .filter((c): c is EventDetailContact => !!c && typeof c === "object")
+        .map((c) => ({ label: str(c.label, MAX_FIELD), value: str(c.value, MAX_FIELD) }))
+        .filter((c) => c.label !== "" || c.value !== "")
+        .slice(0, MAX_LIST)
+    : [];
+  return {
+    overview: str(input?.overview, MAX_TEXT),
+    memo: str(input?.memo, MAX_TEXT),
+    venue: str(input?.venue, MAX_TEXT),
+    links,
+    contacts,
+  };
+}
