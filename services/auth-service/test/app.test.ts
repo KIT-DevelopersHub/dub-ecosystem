@@ -116,6 +116,38 @@ describe("POST /auth/test-login", () => {
   });
 });
 
+// STAGING-ONLY one-click demo login. The route is REGISTERED only when DEMO_AUTOLOGIN=1,
+// so with the flag off (production) it does not exist at all (404) — no backdoor.
+describe("POST /auth/demo-login (staging-only)", () => {
+  it("mints a session for the fixed demo account (no password) when DEMO_AUTOLOGIN=1", async () => {
+    // Note: staging runs ENVIRONMENT=production, so the flag alone must enable it.
+    const h = makeHarness({ ENVIRONMENT: "production", DEMO_AUTOLOGIN: "1", DEMO_AUTOLOGIN_EMAIL: "demo-admin@developershub.jp" });
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({}));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { token: string; session: { userId: string } };
+    expect(body.token).toBeTruthy();
+    expect(res.headers.get("set-cookie")).toContain("dub_session=");
+    // it resolved via the roster allowlist for the configured demo email
+    expect(h.identity.lookupCalls).toContain("demo-admin@developershub.jp");
+  });
+
+  it("does NOT exist (404) when DEMO_AUTOLOGIN is unset — production has no backdoor", async () => {
+    const h = makeHarness({ ENVIRONMENT: "production" }); // DEMO_AUTOLOGIN not set
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({}));
+    expect(res.status).toBe(404);
+  });
+
+  it("still rejects when the demo account is not an active roster user", async () => {
+    const h = makeHarness({ DEMO_AUTOLOGIN: "1" });
+    h.identity.lookupUser = null; // demo email not on the allowlist
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({}));
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("POST /mobile/exchange (internal)", () => {
   it("requires x-dub-internal", async () => {
     const h = makeHarness();
