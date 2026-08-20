@@ -329,6 +329,17 @@ export class MockApiClient implements ApiClient {
   private deleteTask(id: string): void {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
+    // Mirror task-service: a task with live children cannot be deleted (else the children
+    // are orphaned and the read model silently re-parents them). Block with 409.
+    const liveChildren = [...this.taskById.values()].filter(
+      (t) => t.archivedAt === null && (this.hierarchy[t.id]?.parentTaskId ?? null) === id,
+    ).length;
+    if (liveChildren > 0) {
+      throw err(409, "TASK_HAS_CHILDREN", `task has ${liveChildren} child task(s): ${id}`, {
+        taskId: id,
+        childCount: liveChildren,
+      });
+    }
     this.taskById.set(id, { ...cur, archivedAt: new Date().toISOString(), version: cur.version + 1 });
   }
 
