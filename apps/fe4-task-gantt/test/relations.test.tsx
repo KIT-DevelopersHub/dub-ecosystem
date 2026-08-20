@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import type { identity, task } from "@dub/types";
+import type { identity, task, team } from "@dub/types";
 import { TaskCreateModal, type TaskDraft } from "../src/components/TaskCreateModal";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
@@ -9,39 +9,67 @@ import { MockApiClient } from "../src/api/mock-client";
 
 beforeEach(() => localStorage.clear());
 
-// P(top) ┐ Q(top) ┐
-//   c1,c2┘   d1   ┘
+// Cross-scope deps (ADR-0006): dependencies are scoped by TEAM, not by direct parent.
+// team_dev:  P(top) ┐         X(top, different scope from c1/c2 but same team)
+//              c1,c2┘
+// team_ops:  Q(top) ┐
+//              d1   ┘
+const TEAMS: team.Team[] = [
+  { id: "team_dev", key: "dev", name: "開発", color: "#3358e8" },
+  { id: "team_ops", key: "ops", name: "運営", color: "#27ae60" },
+];
 const SCOPE: ScopeTask[] = [
-  { id: "P", title: "親P", parentTaskId: null },
-  { id: "Q", title: "親Q", parentTaskId: null },
-  { id: "c1", title: "子1", parentTaskId: "P" },
-  { id: "c2", title: "子2", parentTaskId: "P" },
-  { id: "d1", title: "子D", parentTaskId: "Q" },
+  { id: "P", title: "親P", parentTaskId: null, teamId: "team_dev" },
+  { id: "Q", title: "親Q", parentTaskId: null, teamId: "team_ops" },
+  { id: "c1", title: "子1", parentTaskId: "P", teamId: "team_dev" },
+  { id: "c2", title: "子2", parentTaskId: "P", teamId: "team_dev" },
+  { id: "d1", title: "子D", parentTaskId: "Q", teamId: "team_ops" },
+  { id: "X", title: "別Xタスク", parentTaskId: null, teamId: "team_dev" },
 ];
 const PARENT_OPTS = SCOPE.map((s) => ({ id: s.id, title: s.title }));
 
-describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + 判断10 scope)", () => {
-  it("selecting a parent scopes the predecessor options to that parent's children", () => {
+describe("TaskCreateModal — team-scoped 先行タスク (ADR-0006 cross-scope deps)", () => {
+  it("scopes predecessor options to the chosen TEAM, excluding other teams (別チーム不可)", () => {
     render(
       <TaskCreateModal
         open
         onClose={() => {}}
         users={[]}
-        teams={[]}
+        teams={TEAMS}
         parentOptions={PARENT_OPTS}
         scopeTasks={SCOPE}
         onCreate={async () => {}}
       />,
     );
-    // choose parent P
-    fireEvent.change(screen.getByTestId("fe4-create-parent"), { target: { value: "P" } });
+    // choose team 開発 (team_dev)
+    fireEvent.change(screen.getByTestId("fe4-create-team"), { target: { value: "team_dev" } });
     const depInput = screen.getByTestId("fe4-create-deps-input");
     fireEvent.focus(depInput);
-    fireEvent.change(depInput, { target: { value: "子" } }); // matches 子1/子2/子D by title
-    // only P's children are offered; d1 (under Q) is out of scope
+    fireEvent.change(depInput, { target: { value: "子" } }); // matches 子1/子2 (dev) and 子D (ops)
+    // same team offered; d1 (team_ops) excluded even though it matches the text
     expect(screen.getByTestId("fe4-create-deps-opt-c1")).toBeInTheDocument();
     expect(screen.getByTestId("fe4-create-deps-opt-c2")).toBeInTheDocument();
     expect(screen.queryByTestId("fe4-create-deps-opt-d1")).toBeNull();
+  });
+
+  it("offers same-team tasks from a DIFFERENT scope/hierarchy level (別階層OK)", () => {
+    render(
+      <TaskCreateModal
+        open
+        onClose={() => {}}
+        users={[]}
+        teams={TEAMS}
+        parentOptions={PARENT_OPTS}
+        scopeTasks={SCOPE}
+        onCreate={async () => {}}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("fe4-create-team"), { target: { value: "team_dev" } });
+    const depInput = screen.getByTestId("fe4-create-deps-input");
+    fireEvent.focus(depInput);
+    // X is a top-level task; c1/c2 are nested — a different scope, but the same team.
+    fireEvent.change(depInput, { target: { value: "別X" } });
+    expect(screen.getByTestId("fe4-create-deps-opt-X")).toBeInTheDocument();
   });
 
   it("submits the chosen parent as draft.parentTaskId", async () => {
@@ -106,7 +134,7 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         onClose={() => {}}
         parentOptions={[{ id: "P", title: "親P" }, { id: "Q", title: "親Q" }]}
         parentTaskId={null}
-        scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null }, { id: "P", title: "親P", parentTaskId: null }]}
+        scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null, teamId: null }, { id: "P", title: "親P", parentTaskId: null, teamId: null }]}
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-detail-parent"), { target: { value: "P" } });
@@ -132,8 +160,8 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         parentTaskId={null}
         dependsOnIds={[]}
         scopeTasks={[
-          { id: "self", title: "対象タスク", parentTaskId: null },
-          { id: "sib", title: "兄弟タスク", parentTaskId: null },
+          { id: "self", title: "対象タスク", parentTaskId: null, teamId: null },
+          { id: "sib", title: "兄弟タスク", parentTaskId: null, teamId: null },
         ]}
       />,
     );
@@ -184,7 +212,7 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     const panel = await screen.findByTestId("fe4-detail-panel");
     const input = within(panel).getByTestId("fe4-detail-deps-input");
     fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: "会場" } }); // t1 = 会場予約 (same top-level scope)
+    fireEvent.change(input, { target: { value: "会場" } }); // t1 = 会場予約 (same team ⇒ same scope)
     fireEvent.mouseDown(within(panel).getByTestId("fe4-detail-deps-opt-t1"));
     fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
     // t1 -> t2 dependency now rendered on the timeline

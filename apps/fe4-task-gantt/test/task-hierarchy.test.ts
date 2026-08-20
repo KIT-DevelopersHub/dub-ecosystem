@@ -11,19 +11,19 @@ import { MockApiClient } from "../src/api/mock-client";
 import { isApiError } from "../src/contracts/spa-shell";
 import * as api from "../src/api/endpoints";
 
-// Scope model: P and Q are top-level parents; c1,c2 are P's children; d1 is Q's.
-//   P (null)   Q (null)
-//   ├ c1        └ d1
-//   └ c2
+// Scope model (ADR-0006: dependency boundary = TEAM, spans WBS scopes freely).
+//   team_dev:  P ├ c1 ├ c2 , X (top-level, different scope)
+//   team_ops:  Q └ d1
 const ROWS: gantt.GanttRow[] = [
-  { taskId: "P", title: "親P", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, parentTaskId: null, hasChildren: true },
-  { taskId: "Q", title: "親Q", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, parentTaskId: null, hasChildren: true },
-  { taskId: "c1", title: "子1", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, parentTaskId: "P" },
-  { taskId: "c2", title: "子2", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, parentTaskId: "P" },
-  { taskId: "d1", title: "子D", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, parentTaskId: "Q" },
+  { taskId: "P", title: "親P", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, teamId: "team_dev", parentTaskId: null, hasChildren: true },
+  { taskId: "Q", title: "親Q", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, teamId: "team_ops", parentTaskId: null, hasChildren: true },
+  { taskId: "c1", title: "子1", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, teamId: "team_dev", parentTaskId: "P" },
+  { taskId: "c2", title: "子2", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, teamId: "team_dev", parentTaskId: "P" },
+  { taskId: "d1", title: "子D", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, teamId: "team_ops", parentTaskId: "Q" },
+  { taskId: "X", title: "別X", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, teamId: "team_dev", parentTaskId: null },
 ];
 
-describe("task-hierarchy scope rules (判断10: 同一直接親のみ依存可)", () => {
+describe("task-hierarchy scope rules (ADR-0006: 同一チーム内なら別スコープも依存可)", () => {
   const st = scopeTasksFromRows(ROWS);
 
   it("directParentOf reads the row's direct parent (null = top-level)", () => {
@@ -31,25 +31,34 @@ describe("task-hierarchy scope rules (判断10: 同一直接親のみ依存可)"
     expect(directParentOf(st, "P")).toBeNull();
   });
 
-  it("sameScope: siblings yes, parent-child no, cross-scope no, top-level parents yes", () => {
-    expect(sameScope(st, "c1", "c2")).toBe(true); // 兄弟 OK
-    expect(sameScope(st, "c1", "P")).toBe(false); // 親子 NG
-    expect(sameScope(st, "c1", "d1")).toBe(false); // スコープまたぎ NG
-    expect(sameScope(st, "P", "Q")).toBe(true); // 親同士(トップレベル) OK
+  it("sameScope is now team-based: same team yes (any level), cross-team no", () => {
+    expect(sameScope(st, "c1", "c2")).toBe(true); // 兄弟(同チーム) OK
+    expect(sameScope(st, "c1", "P")).toBe(true); // 親子(同チーム) OK — 判断10から緩和
+    expect(sameScope(st, "c1", "X")).toBe(true); // 別スコープ/別階層(同チーム) OK — 今回の主眼
+    expect(sameScope(st, "c1", "d1")).toBe(false); // 別チーム NG
+    expect(sameScope(st, "P", "Q")).toBe(false); // 別チーム NG
   });
 
-  it("dependencyScopeOptions offers only same-parent siblings, excluding self", () => {
-    // for a task under P (e.g. c1), only c2 is offered — not P (parent) nor d1 (other scope)
-    const forC1 = dependencyScopeOptions(st, "P", "c1").map((o) => o.id);
-    expect(forC1).toEqual(["c2"]);
-    // for a top-level task, only the other top-level tasks
-    const forTop = dependencyScopeOptions(st, null, "P").map((o) => o.id);
-    expect(forTop).toEqual(["Q"]);
+  it("dependencyScopeOptions offers all same-team tasks across scopes, excluding self", () => {
+    // for c1 (team_dev): every other team_dev task — P (parent), c2 (sibling), X (other scope)
+    const forC1 = dependencyScopeOptions(st, "team_dev", "c1").map((o) => o.id).sort();
+    expect(forC1).toEqual(["P", "X", "c2"]);
+    // team_ops sees only its own tasks
+    const forOps = dependencyScopeOptions(st, "team_ops", "d1").map((o) => o.id);
+    expect(forOps).toEqual(["Q"]);
   });
 
-  it("pruneToScope drops ids that are not in the target scope", () => {
-    // moving c1 under Q: its old sibling c2 is no longer in-scope and is dropped
-    expect(pruneToScope(st, "Q", ["c2", "d1"])).toEqual(["d1"]);
+  it("pruneToScope drops ids that belong to another team", () => {
+    // for a team_dev task: c2/X kept (team_dev), d1 dropped (team_ops)
+    expect(pruneToScope(st, "team_dev", ["c2", "X", "d1"])).toEqual(["c2", "X"]);
+  });
+
+  it("null team is its own bucket (back-compat): only other null-team tasks are offered", () => {
+    const nullSt = scopeTasksFromRows([
+      { taskId: "n1", title: "n1", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, parentTaskId: null },
+      { taskId: "n2", title: "n2", startsAt: null, endsAt: null, progressPercent: 0, assigneeId: null, parentTaskId: null },
+    ]);
+    expect(dependencyScopeOptions(nullSt, null, "n1").map((o) => o.id)).toEqual(["n2"]);
   });
 });
 
@@ -59,9 +68,17 @@ const mkTask = (id: string, over: Partial<task.Task> = {}): task.Task => ({
   archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1, ...over,
 });
 
+// team_dev: P ├ c1 ├ c2 , X(top) ;  team_ops: Q └ d1
 function scopedClient(): MockApiClient {
   return new MockApiClient({
-    tasks: [mkTask("P"), mkTask("Q"), mkTask("c1"), mkTask("c2"), mkTask("d1")],
+    tasks: [
+      mkTask("P", { teamId: "team_dev" }),
+      mkTask("Q", { teamId: "team_ops" }),
+      mkTask("c1", { teamId: "team_dev" }),
+      mkTask("c2", { teamId: "team_dev" }),
+      mkTask("d1", { teamId: "team_ops" }),
+      mkTask("X", { teamId: "team_dev" }),
+    ],
     hierarchy: {
       c1: { parentTaskId: "P", depth: 1 },
       c2: { parentTaskId: "P", depth: 1 },
@@ -70,8 +87,8 @@ function scopedClient(): MockApiClient {
   });
 }
 
-describe("replaceDependencies enforces the same-scope rule (判断10)", () => {
-  it("allows a dependency between siblings (同じ直接親)", async () => {
+describe("replaceDependencies enforces the same-team rule (ADR-0006)", () => {
+  it("allows a dependency between siblings of the same team", async () => {
     const c = scopedClient();
     // Response is the wire shape { taskId, dependsOnIds } — NOT a Task with `version`
     // (F1: matches the real task-service; the old mock returned a Task and hid the bug).
@@ -80,23 +97,24 @@ describe("replaceDependencies enforces the same-scope rule (判断10)", () => {
     expect((res as { version?: number }).version).toBeUndefined();
   });
 
-  it("allows a dependency between two top-level parents (親同士)", async () => {
+  it("allows a same-team parent↔child dependency (判断10から緩和)", async () => {
     const c = scopedClient();
-    const res = await api.replaceDependencies(c, "P", { version: 1, dependsOnIds: ["Q"] });
-    expect(res).toEqual({ taskId: "P", dependsOnIds: ["Q"] });
+    // c1 (team_dev, child of P) depends on P (team_dev) — same team, so now allowed.
+    const res = await api.replaceDependencies(c, "c1", { version: 1, dependsOnIds: ["P"] });
+    expect(res).toEqual({ taskId: "c1", dependsOnIds: ["P"] });
   });
 
-  it("rejects a parent↔child dependency (親子間 NG)", async () => {
+  it("allows a same-team dependency across DIFFERENT scopes (別スコープ/別階層 OK)", async () => {
     const c = scopedClient();
-    await expect(api.replaceDependencies(c, "c1", { version: 1, dependsOnIds: ["P"] })).rejects.toSatisfy(
-      (e: unknown) => isApiError(e) && e.status === 409 && e.body.error.code === "TASK_DEPENDENCY_SCOPE",
-    );
+    // c1 is nested under P; X is top-level — different scope, same team_dev.
+    const res = await api.replaceDependencies(c, "c1", { version: 1, dependsOnIds: ["X"] });
+    expect(res).toEqual({ taskId: "c1", dependsOnIds: ["X"] });
   });
 
-  it("rejects a cross-scope dependency (スコープまたぎ NG)", async () => {
+  it("rejects a cross-team dependency (別チーム NG)", async () => {
     const c = scopedClient();
     await expect(api.replaceDependencies(c, "c1", { version: 1, dependsOnIds: ["d1"] })).rejects.toSatisfy(
-      (e: unknown) => isApiError(e) && e.body.error.code === "TASK_DEPENDENCY_SCOPE",
+      (e: unknown) => isApiError(e) && e.status === 409 && e.body.error.code === "TASK_DEPENDENCY_SCOPE",
     );
   });
 });

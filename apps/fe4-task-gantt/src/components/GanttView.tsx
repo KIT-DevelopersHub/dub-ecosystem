@@ -448,9 +448,8 @@ export function GanttView({
   const rowByIdAll = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r] as const)), [dto.rows]);
   // Resolve a dependency endpoint to the nearest row that is actually drawn: if the
   // endpoint is hidden inside a collapsed parent, walk up to the visible ancestor so
-  // the edge renders as an AGGREGATE arrow on that parent instead of vanishing. A
-  // fully-visible endpoint resolves to itself. This is why top-level ↔ top-level and
-  // collapsed-subtree dependencies both show up now (判断: 折りたたみ中は集約表示).
+  // the edge renders on that parent instead of vanishing (既存の折りたたみ集約). A
+  // fully-visible endpoint resolves to itself.
   const visibleAnchor = useMemo(() => {
     return (taskId: common.TaskId): common.TaskId | null => {
       let id: common.TaskId | null = taskId;
@@ -478,16 +477,26 @@ export function GanttView({
         const key = `${fromId}->${toId}`;
         if (seen.has(key)) return null;
         seen.add(key);
-        const aggregated = fromId !== d.fromTaskId || toId !== d.toTaskId;
+        // ADR-0006: when an endpoint was folded UP to a parent, the real endpoint is that
+        // parent's child — point the arrow at the parent bar's MIDDLE (an arrowhead into
+        // the middle of a 2nd-level bar reads as "a dependency to a child under it"),
+        // rather than the bar edge. Visual anchor only — CPM/前後関係 is over the real
+        // child tasks (dto.criticalTaskIds), never derived from these coordinates.
+        const fromAgg = fromId !== d.fromTaskId;
+        const toAgg = toId !== d.toTaskId;
+        const mid = fromAgg || toAgg;
         return {
           id: d.id,
-          x1: from.x + from.width,
+          // predecessor: right edge normally; parent-bar middle when folded up.
+          x1: fromAgg ? from.x + from.width / 2 : from.x + from.width,
           y1: from.y + ROW_HEIGHT / 2,
-          x2: to.x,
+          // successor: left edge normally; parent-bar middle when folded up (arrowhead → middle).
+          x2: toAgg ? to.x + to.width / 2 : to.x,
           y2: to.y + ROW_HEIGHT / 2,
-          aggregated,
-          tip: aggregated
-            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の依存を含む）`
+          aggregated: mid,
+          mid,
+          tip: mid
+            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の子タスク・親バー中間を指しています）`
             : `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
@@ -996,6 +1005,7 @@ export function GanttView({
                           markerEnd="url(#fe4-arrow)"
                           data-testid={`fe4-gantt-dep-${s.id}`}
                           data-aggregated={s.aggregated ? "1" : undefined}
+                          data-mid-anchor={s.mid ? "true" : undefined}
                         >
                           <title>{s.tip}</title>
                         </path>

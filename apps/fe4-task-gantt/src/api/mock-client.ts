@@ -352,15 +352,17 @@ export class MockApiClient implements ApiClient {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     if (body.version !== cur.version) throw err(409, "TASK_VERSION_CONFLICT", "version conflict");
-    // scope rule (判断10): a dependency may only connect same-direct-parent siblings.
-    // parent↔child and cross-scope edges are rejected; parent↔parent (both top-level
-    // or both under the same grandparent) is allowed by the same test.
-    const myParent = this.hierarchy[id]?.parentTaskId ?? null;
+    // scope rule (ADR-0006, supersedes 判断10): a dependency may connect tasks across
+    // DIFFERENT hierarchy levels (別スコープ/別階層) as long as they share the SAME TEAM.
+    // Cross-team edges are rejected (that work goes through the request/approval flow).
+    // `teamId === null` is one shared "no team" bucket; a one-sided null is a mismatch.
+    // Mirrors the backend门番 (`cross_team_not_allowed`).
+    const myTeam = cur.teamId ?? null;
     for (const dep of body.dependsOnIds) {
       if (dep === id) throw err(409, "TASK_DEPENDENCY_CYCLE", "self dependency", { taskId: id });
-      const depParent = this.hierarchy[dep]?.parentTaskId ?? null;
-      if (depParent !== myParent)
-        throw err(409, "TASK_DEPENDENCY_SCOPE", "dependency must stay within the same parent scope", {
+      const depTeam = this.taskById.get(dep)?.teamId ?? null;
+      if (depTeam !== myTeam)
+        throw err(409, "TASK_DEPENDENCY_SCOPE", "dependency must stay within the same team", {
           taskId: id,
           dependsOnId: dep,
         });

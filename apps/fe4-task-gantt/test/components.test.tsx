@@ -108,6 +108,31 @@ describe("GanttView render (design test 4/7)", () => {
     expect(pBox.style.background).toContain("var(--dub-color-brand-500) 15%");
   });
 
+  // Cross-scope deps / ADR-0006: an arrow to a task hidden inside a collapsed parent is
+  // re-anchored to the MIDDLE of that parent bar (data-mid-anchor), so the dependency edge
+  // stays visible even while the child is folded. Expanding the parent restores the direct
+  // edge anchor.
+  const midAnchorDto: gantt.GanttChartDTO = {
+    eventId: "evt_1",
+    rows: [
+      { taskId: "s", title: "先行", startsAt: "2026-08-04T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 0, assigneeId: null, depth: 0 },
+      { taskId: "p", title: "親", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 0, assigneeId: null, depth: 0, hasChildren: true },
+      { taskId: "c1", title: "子1", startsAt: "2026-08-12T00:00:00Z", endsAt: "2026-08-16T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 1 },
+    ],
+    dependencies: [{ id: "s->c1", fromTaskId: "s", toTaskId: "c1", type: "FS", lagDays: 0 }],
+  };
+
+  it("arrow to a collapsed child mid-anchors on the parent bar, and un-anchors when expanded", () => {
+    render(<GanttView dto={midAnchorDto} zoom="week" />);
+    // p is collapsed by default → c1 hidden → the s→c1 arrow points at p's middle.
+    const dep = screen.getByTestId("fe4-gantt-dep-s->c1");
+    expect(dep).toBeInTheDocument();
+    expect(dep).toHaveAttribute("data-mid-anchor", "true");
+    // expand p → c1 gets its own bar → the arrow anchors on the child directly (no mid).
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p"));
+    expect(screen.getByTestId("fe4-gantt-dep-s->c1")).not.toHaveAttribute("data-mid-anchor");
+  });
+
   it("parent bar is now draggable/resizable too (feedback #39: exposes resize handles)", () => {
     const onSchedule = vi.fn();
     render(<GanttView dto={wbsDto} zoom="week" onSchedule={onSchedule} canWrite />);

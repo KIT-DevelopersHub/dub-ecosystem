@@ -107,11 +107,11 @@ export function TaskDetailPanel({
   const [deps, setDeps] = useState<common.TaskId[]>([...dependsOnIds]);
   const [confirming, setConfirming] = useState(false);
 
-  // Predecessors are limited to this task's siblings under its (possibly changed)
-  // parent — same scope only (判断10). Excludes self.
+  // Predecessors are limited to this task's TEAM (ADR-0006): same-team tasks across any
+  // hierarchy level, minus self. Cross-team tasks are excluded. Recomputes on team change.
   const depOptions = useMemo(
-    () => dependencyScopeOptions(scopeTasks, parentId, t.id),
-    [scopeTasks, parentId, t.id],
+    () => dependencyScopeOptions(scopeTasks, teamId, t.id),
+    [scopeTasks, teamId, t.id],
   );
   // How many tasks hang directly under this one (親タスクなら子の数を明示・feedback #39).
   const childCount = useMemo(
@@ -251,7 +251,13 @@ export function TaskDetailPanel({
               id="fe4-detail-team"
               value={teamId ?? ""}
               disabled={!canWrite}
-              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
+              onChange={(v) => {
+                const next = v ? (v as common.TeamId) : null;
+                setTeamId(next);
+                // dependencies are same-team only (ADR-0006) — drop predecessors that are
+                // now on another team.
+                setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
+              }}
               options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
               testId="fe4-detail-team"
             />
@@ -276,10 +282,9 @@ export function TaskDetailPanel({
             value={parentId ?? ""}
             disabled={!canWrite}
             onChange={(v) => {
-              const next = v ? (v as common.TaskId) : null;
-              setParentId(next);
-              // dependencies must stay within the new scope — drop out-of-scope ones.
-              setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
+              // Re-parenting no longer changes the dependency scope (deps are team-scoped,
+              // ADR-0006), so predecessors are preserved across a parent change.
+              setParentId(v ? (v as common.TaskId) : null);
             }}
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
@@ -292,8 +297,9 @@ export function TaskDetailPanel({
               onClick={() => {
                 const p = parentId;
                 setParentId(null);
-                // detach to top-level, then keep p as a predecessor (same-scope only).
-                setDeps((d) => pruneToScope(scopeTasks, null, [...new Set([...d, p])]).filter((id) => id !== t.id));
+                // detach to top-level, then keep p as a predecessor — deps are team-scoped
+                // (ADR-0006), so re-scope to THIS task's team (drops p if it's another team).
+                setDeps((d) => pruneToScope(scopeTasks, teamId, [...new Set([...d, p])]).filter((id) => id !== t.id));
               }}
               data-testid="fe4-detail-parent-to-dep"
             >
@@ -302,10 +308,10 @@ export function TaskDetailPanel({
           )}
         </div>
 
-        {/* 先行タスク（依存）: add/remove predecessors after the fact (same scope only).
+        {/* 先行タスク（依存）: add/remove predecessors after the fact (same team only).
             Each chip can be promoted to the 親タスク (依存→親子) via 「親に」. */}
         <div className={styles.formField}>
-          <span className={styles.formLabel}>先行タスク（依存・同じ親のタスクのみ）</span>
+          <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク）</span>
           <PredecessorPicker
             options={canWrite ? depOptions : []}
             value={deps}
@@ -313,10 +319,11 @@ export function TaskDetailPanel({
             {...(canWrite
               ? {
                   onPromoteToParent: (id: common.TaskId) => {
-                    // 依存 → 親子: this predecessor becomes the parent; drop it from deps,
-                    // and re-scope the rest to the new parent (保存で一括反映).
+                    // 依存 → 親子: this predecessor becomes the parent; drop it from deps.
+                    // Deps are team-scoped (ADR-0006) and re-parenting keeps the team, so the
+                    // remaining deps stay valid — re-scope to THIS task's team.
                     setParentId(id);
-                    setDeps((d) => pruneToScope(scopeTasks, id, d.filter((x) => x !== id)).filter((x) => x !== t.id));
+                    setDeps((d) => pruneToScope(scopeTasks, teamId, d.filter((x) => x !== id)).filter((x) => x !== t.id));
                   },
                 }
               : {})}
