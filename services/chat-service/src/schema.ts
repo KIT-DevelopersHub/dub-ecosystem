@@ -110,3 +110,16 @@ CREATE TABLE chat_settings (
 );
 `.trim(),
 };
+
+// Forward-only add-on: reaction-protection flag on the deletion policy (誤削除防止 —
+// a reacted message can't be deleted by non-moderators when ON). Additive column with a
+// non-datetime DEFAULT (0), so existing rows read as "protection off" (backward-compatible)
+// and the earlier 0003 ledger hash is untouched. Physical mirror lives in
+// infra/d1/migrations/chat/0004_protect_reacted.sql.
+export const CHAT_SETTINGS_PROTECT_REACTED_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0004_protect_reacted",
+  up: `
+ALTER TABLE chat_settings ADD COLUMN protect_reacted INTEGER NOT NULL DEFAULT 0;
+`.trim(),
+};

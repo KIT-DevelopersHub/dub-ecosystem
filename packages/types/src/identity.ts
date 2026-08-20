@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (57 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (58 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -48,6 +48,7 @@ export const PERMISSION_CATALOG = [
   { key: "mail:read_all", name: "Read all mail", description: "View every user's mail (oversight/archive)", domain: "mail", dangerous: true },
   { key: "mail:admin", name: "Administer mail", description: "Manage mailbox/watch/rules", domain: "mail", dangerous: true },
   { key: "chat:create", name: "Create channels", description: "Create chat channels", domain: "chat", dangerous: false },
+  { key: "chat:delete", name: "Delete own messages", description: "Delete one's own chat messages", domain: "chat", dangerous: false },
   { key: "chat:moderate", name: "Moderate chat", description: "Manage channels and delete others' messages", domain: "chat", dangerous: true },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
   { key: "infra:read", name: "Read infra", description: "View sites/deployments/dns/domains", domain: "infra", dangerous: false },
@@ -87,7 +88,7 @@ export const PERMISSION_CATALOG = [
   { key: "app:admin:edit", name: "Edit in 管理 app", description: "Act inside the 管理 app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 57 keys (open `${string}:${string}` template retired).
+// Closed union of the 58 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

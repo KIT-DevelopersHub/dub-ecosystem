@@ -46,12 +46,21 @@ export interface MessageDeletionPolicy {
   member: MessageDeletionMode;
   /** Behaviour when a moderator (holds `chat:moderate`: admin / maintainer) deletes. */
   moderator: MessageDeletionMode;
+  /**
+   * 誤削除防止: when true, a message that already has ≥1 reaction CANNOT be deleted by
+   * a non-moderator (the delete is rejected 409). Moderators (`chat:moderate`, i.e.
+   * admin / maintainer) are always exempt and may delete a reacted message. Default
+   * false = no protection (unchanged behaviour), so this is backward-compatible.
+   */
+  protectReacted: boolean;
 }
 
-/** Product default: everyone's delete is a hard erase (no tombstone). */
+/** Product default: everyone's delete is a hard erase (no tombstone), reaction
+ *  protection OFF (nobody is blocked from deleting a reacted message until enabled). */
 export const DEFAULT_MESSAGE_DELETION_POLICY: MessageDeletionPolicy = {
   member: "hard",
   moderator: "hard",
+  protectReacted: false,
 };
 
 /** GET /chat/settings/deletion-policy. `version` is 0 when no override row exists
