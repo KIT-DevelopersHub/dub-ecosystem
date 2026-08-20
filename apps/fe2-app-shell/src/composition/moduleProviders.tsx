@@ -7,9 +7,18 @@
 // live shell state via hooks (auth, toast, router) rather than props, so a
 // single wrapper instance stays correct as the session/route changes.
 import { useMemo, useEffect, type ReactNode } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import type { gateway } from "@dub/types";
-import { EventApiProvider, RegistryProvider, actionTypeRegistry, useAuthStore } from "@dub/fe3-event-action";
+import {
+  EventApiProvider,
+  RegistryProvider,
+  actionTypeRegistry,
+  useAuthStore,
+  NavigationProvider as EventNavigationProvider,
+  useCurrentEventStore,
+  type NavigationApi as EventNavigationApi,
+} from "@dub/fe3-event-action";
+import { loadSelectedEvent, saveSelectedEvent } from "../features/gantt/selectedEventStore.ts";
 import { NotificationProvider, type NotificationDeps } from "@dub/fe5-notification-inbox";
 import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
@@ -31,7 +40,8 @@ function useMe(): gateway.MeResponse | null {
   return auth.status === "authenticated" ? auth.me : null;
 }
 
-/** FE3 events: EventApi injection + the app-global ActionTypeRegistry. */
+/** FE3 events: EventApi injection + the app-global ActionTypeRegistry + the FE3
+ *  NavigationProvider (fed from the shell router) + the current-event bridge. */
 export function EventProviders({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const eventApi = useMemo(() => createEventApi(api), [api]);
   // Bridge the shell's resolved /me into FE3's auth store so its event-scoped
@@ -41,9 +51,53 @@ export function EventProviders({ api, children }: { api: ApiClient; children: Re
   useEffect(() => {
     useAuthStore.getState().setMe(me);
   }, [me]);
+
+  // FE3 owns no router — it navigates through its NavigationProvider contract. The
+  // shell must feed that from its TanStack Router or FE3's pages fall back to the
+  // no-op shim: the hub's アクション/タスク/チャット buttons and the /events list
+  // filters (setSearch) silently do nothing, and detail/settings routes read empty
+  // params. (Only FE7 got this wiring before; FE3 was missing it.)
+  const navigate = useNavigate();
+  const params = useParams({ strict: false }) as Record<string, string>;
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchStr = useRouterState({ select: (s) => s.location.searchStr });
+  const navigation = useMemo<EventNavigationApi>(
+    () => ({
+      navigate: (to: string) => {
+        void navigate({ to });
+      },
+      params,
+      search: (searchStr ?? "").replace(/^\?/, ""),
+      setSearch: (query: string) => {
+        void navigate({ to: `${pathname}${query ? `?${query}` : ""}` });
+      },
+    }),
+    [navigate, params, pathname, searchStr],
+  );
+
+  // Bridge the globally-selected event (the shell header switcher's memory,
+  // localStorage key `dub:selected-event`) into FE3's current-event store so the
+  // 詳細ハブ opens on the event shown as selected in the header instead of an empty
+  // "イベントを選択してください" prompt. Two-way so the header label follows an
+  // in-hub pick too: seed FE3 from the global memory when FE3 has none, and mirror
+  // FE3's selection back to the global memory whenever it changes.
+  const currentEventId = useCurrentEventStore((s) => s.eventId);
+  const setCurrentEventId = useCurrentEventStore((s) => s.setEventId);
+  useEffect(() => {
+    if (!currentEventId) {
+      const globalSelected = loadSelectedEvent();
+      if (globalSelected) setCurrentEventId(globalSelected as typeof currentEventId);
+    }
+  }, [currentEventId, setCurrentEventId]);
+  useEffect(() => {
+    if (currentEventId) saveSelectedEvent(currentEventId);
+  }, [currentEventId]);
+
   return (
     <EventApiProvider api={eventApi}>
-      <RegistryProvider registry={actionTypeRegistry}>{children}</RegistryProvider>
+      <RegistryProvider registry={actionTypeRegistry}>
+        <EventNavigationProvider value={navigation}>{children}</EventNavigationProvider>
+      </RegistryProvider>
     </EventApiProvider>
   );
 }

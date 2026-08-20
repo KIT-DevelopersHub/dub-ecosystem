@@ -169,7 +169,11 @@ function adaptEvents(api: ApiClient): FeatureModule {
   // ordering and pins events first (order 10). イベントは誤って launcher/ナビから
   // 外れていたためユーザー承認で復活（アプリを減らさない原則）。メールアドレス管理
   // (/admin/email-routing) だけは意図的撤去のまま。
-  const nav: NavEntry[] = [{ label: "イベント", path: routePaths.list, icon: "calendar", order: 10 }];
+  // ランチャーのイベントタイルは「イベント詳細ハブ」(routePaths.hub=/event-hub) を開く。
+  // 以前は routePaths.list(/events=一覧) を指しており、④で増補した詳細ハブではなく
+  // イベントカード一覧が既定表示になって「一覧に戻った」状態だった（本 fix の根因）。
+  // ヘッダー(EventAppHeader / 全体スイッチャ)で選択中のイベントの詳細をハブが主表示する。
+  const nav: NavEntry[] = [{ label: "イベント", path: routePaths.hub, icon: "calendar", order: 10 }];
   return withModulePerms(eventFeatureModule, { id: "events", routes, nav });
 }
 

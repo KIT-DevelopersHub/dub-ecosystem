@@ -3,6 +3,12 @@
 // api-client (the adapters translate onto ApiClient.request).
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { gateway } from "@dub/types";
@@ -119,8 +125,9 @@ describe("assembleFeatureModules", () => {
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const labels = registry.nav.map((n) => n.path);
-    // イベント(order 10)を先頭に固定。
-    expect(labels[0]).toBe("/events");
+    // イベント(order 10)を先頭に固定。ランチャータイルは詳細ハブ(/event-hub)を開く
+    // （/events 一覧ではない）。
+    expect(labels[0]).toBe("/event-hub");
     // every nav icon resolved to a valid IconName (no crash-on-unknown)
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
@@ -148,10 +155,10 @@ describe("assembleFeatureModules", () => {
     expect(navPaths).not.toContain("/participation");
     expect(navPaths).not.toContain("/participation/list");
     expect(navPaths).not.toContain("/admin/email-routing");
-    // 他アプリは絶対に減らさない
+    // 他アプリは絶対に減らさない（イベントタイルは詳細ハブ /event-hub を開く）
     expect(navPaths).toEqual(
       expect.arrayContaining([
-        "/events",
+        "/event-hub",
         "/me/tasks",
         "/gantt",
         "/notifications",
@@ -310,14 +317,32 @@ describe("app client adapters feed ApiClient.request", () => {
 });
 
 describe("runtime providers wrap their routes", () => {
-  it("EventProviders mounts and passes children through", () => {
+  it("EventProviders mounts and passes children through", async () => {
     const { api } = fakeApi();
+    // EventProviders reads the shell auth (useMe) AND the shell router
+    // (useNavigate/useParams/useRouterState → the FE3 NavigationProvider it now
+    // injects), so it must mount under both, exactly like the real shell path.
+    const authApi = { auth: { me: () => Promise.resolve(TASK_ME) } } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const rootRoute = createRootRoute({
+      component: () => (
+        <EventProviders api={api}>
+          <div data-testid="child">events-child</div>
+        </EventProviders>
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/event-hub"] }),
+    });
     render(
-      <EventProviders api={api}>
-        <div data-testid="child">events-child</div>
-      </EventProviders>,
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={authApi}>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </QueryClientProvider>,
     );
-    expect(screen.getByTestId("child")).toHaveTextContent("events-child");
+    await waitFor(() => expect(screen.getByTestId("child")).toHaveTextContent("events-child"));
   });
 
   it("TaskProviders mounts and passes children through", async () => {
