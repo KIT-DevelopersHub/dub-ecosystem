@@ -398,6 +398,36 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res);
   });
 
+  // ---- POST /auth/demo-login (STAGING ONLY — registered only when DEMO_AUTOLOGIN=1) ----
+  // A one-click reviewer sign-in on the shared staging URL: mints a web session for the
+  // FIXED demo account WITHOUT a password (no password on the frontend, no shared secret
+  // in the bundle). SECURITY: this route is registered ONLY when the server-side
+  // DEMO_AUTOLOGIN flag is on, which is set exclusively on the staging auth-service. In
+  // production the flag is unset ⇒ the route does not exist (404) ⇒ there is no backdoor
+  // and no code path that logs anyone in without a credential. The demo account must
+  // still be an ACTIVE roster user (the allowlist gate is unchanged), so a disabled /
+  // removed demo account can't be used either.
+  if (config.demoAutologin) {
+    app.post("/auth/demo-login", async (c) => {
+      const ctx = ctxOf(c);
+      const email = config.demoAutologinEmail;
+      const { user } = await deps.identity.lookupByEmail(ctx, email);
+      if (!user || user.status !== "active") throw authErrors.notOnAllowlist();
+      const created = await deps.sessions.create(user.id, "web");
+      await deps.audit.record({
+        action: "auth.session.login",
+        actorId: user.id,
+        result: "success",
+        requestId: ctx.requestId,
+        details: { client: "web", method: "demo_autologin" },
+      });
+      const maxAge = Math.ceil((created.absoluteExpiresAt - Date.now()) / 1000);
+      c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
+      const res: TokenSessionResponse = { token: created.token, session: created.session };
+      return c.json(res);
+    });
+  }
+
   // ---- POST /mobile/exchange (internal: MO3 only — theme8) ----
   // Mobile-client login track (native Google sign-in via MO3). Intentionally kept:
   // the web-console Google removal does not touch the mobile exchange contract.
