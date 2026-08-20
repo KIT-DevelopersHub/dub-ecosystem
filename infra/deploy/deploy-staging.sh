@@ -51,9 +51,12 @@ deploy() {
   local extra=("$@")
   if [ ! -f "$config" ]; then echo "::error::missing $config" >&2; exit 1; fi
   echo "::group::deploy ${config} ${extra[*]:-}"
-  if ! $WRANGLER deploy --config "$config" "${extra[@]}"; then
+  # macOS ships bash 3.2, where `"${arr[@]}"` on an EMPTY array under `set -u` (nounset)
+  # aborts with "unbound variable". The `${arr[@]+…}` form expands to nothing when empty
+  # and to the quoted elements otherwise — safe on both bash 3.2 and 4+.
+  if ! $WRANGLER deploy --config "$config" ${extra[@]+"${extra[@]}"}; then
     echo "first attempt failed, retrying in 8s..." >&2; sleep 8
-    $WRANGLER deploy --config "$config" "${extra[@]}"
+    $WRANGLER deploy --config "$config" ${extra[@]+"${extra[@]}"}
   fi
   echo "::endgroup::"
 }
@@ -136,7 +139,9 @@ for dir in "${STAGING_WORKER_DIRS[@]}"; do
   # deploy — production's auth-service has no DEMO_AUTOLOGIN, so /auth/demo-login 404s.
   extra_args=()
   if [ "${dir}" = "services/auth-service" ]; then extra_args=(--var "DEMO_AUTOLOGIN:1"); fi
-  deploy "${dir}/wrangler.staging.toml" "${extra_args[@]}"
+  # bash-3.2-safe empty-array expansion (see deploy() note): plain "${extra_args[@]}" would
+  # abort under `set -u` when no extra --var is set for this worker.
+  deploy "${dir}/wrangler.staging.toml" ${extra_args[@]+"${extra_args[@]}"}
   if [ "${dir}" = "services/api-gateway" ] && [ "${SKIP_HEALTHCHECK:-0}" != "1" ]; then
     check "staging gateway /healthz" "${GW}/healthz" 200
     check "staging gateway /api/v1/me" "${GW}/api/v1/me" 401
