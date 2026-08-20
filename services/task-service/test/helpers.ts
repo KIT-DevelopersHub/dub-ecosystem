@@ -133,10 +133,12 @@ export class InMemoryTaskRepo implements TaskRepo {
       .map((d) => ({ ...d }));
   }
 
-  async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
+  async listLiveTasksByEvent(
+    eventId: string | null,
+  ): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>> {
     return [...this.rows.values()]
       .filter((r) => (r.eventId ?? null) === eventId && r.archivedAt === null)
-      .map((r) => r.id);
+      .map((r) => ({ id: r.id, teamId: r.teamId ?? null }));
   }
 
   async replaceDependencies(

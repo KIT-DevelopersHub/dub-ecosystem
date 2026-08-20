@@ -148,3 +148,21 @@ export interface CreateTaskAttachmentRequest {
 export interface ListTaskAttachmentsResponse {
   items: TaskAttachment[];
 }
+
+// ── dependency rejection reasons (cross-scope deps / ADR-0007) ────────────────
+/**
+ * Reason codes a `PUT /tasks/:id/dependencies` rejection can carry in the
+ * VALIDATION_FAILED FieldError[]. `cross_team_not_allowed` = a dependsOn target whose
+ * `teamId` differs from the current task's (both `null` counts as the same "no team"
+ * bucket; one-sided null is a mismatch). Dependencies may now span different WBS scopes
+ * (別階層) freely — the TEAM is the only boundary. Server门番 and its regression test
+ * derive the literal from here so neither can drift (no duplicate string).
+ * `self_dependency`/`unknown_task_ref` are the pre-existing reasons.
+ */
+export const DEPENDENCY_REJECT_REASONS = {
+  crossTeamNotAllowed: "cross_team_not_allowed",
+  selfDependency: "self_dependency",
+  unknownTaskRef: "unknown_task_ref",
+} as const;
+export type DependencyRejectReason =
+  (typeof DEPENDENCY_REJECT_REASONS)[keyof typeof DEPENDENCY_REJECT_REASONS];
