@@ -19,6 +19,8 @@ import {
   floorDayUtc,
   rollupRowDates,
   scaleChildrenForParentResize,
+  parentEnclosures,
+  ROW_HEIGHT,
 } from "../src/domain/timeline-axis";
 
 const row = (id: string, s: string | null, e: string | null, pct = 0): gantt.GanttRow => ({
@@ -122,6 +124,30 @@ describe("timeline-axis — bars & drag", () => {
     expect(bars[0]!.width).toBeGreaterThan(0);
     expect(bars[1]!.hasBar).toBe(false);
     expect(bars[1]!.width).toBe(0);
+  });
+
+  it("bar span is INCLUSIVE of both endpoints (no off-by-one)", () => {
+    const w = withGranularity(initialWindow(rows, "day", NOW), "day");
+    // 08-05 → 08-08 covers 4 calendar days (5,6,7,8) → 4 cells, not 3.
+    const multi = timelineBars(
+      [row("m", "2026-08-05T00:00:00Z", "2026-08-08T00:00:00Z", 0)],
+      w,
+    );
+    expect(multi[0]!.width).toBeCloseTo(PX_PER_DAY.day * 4, 5);
+
+    // A same-day task fills exactly one cell.
+    const single = timelineBars(
+      [row("s", "2026-08-05T00:00:00Z", "2026-08-05T00:00:00Z", 0)],
+      w,
+    );
+    expect(single[0]!.width).toBeCloseTo(PX_PER_DAY.day, 5);
+
+    // Crossing a month boundary still counts inclusively (07-30 → 08-02 = 4 days).
+    const crossing = timelineBars(
+      [row("x", "2026-07-30T00:00:00Z", "2026-08-02T00:00:00Z", 0)],
+      w,
+    );
+    expect(crossing[0]!.width).toBeCloseTo(PX_PER_DAY.day * 4, 5);
   });
 
   it("shiftBar: move slides both edges; resize slides one and keeps >=1 day", () => {
@@ -230,5 +256,42 @@ describe("rollupRowDates — parent bars enclose their children (feedback #2)", 
   it("flat lists (no hierarchy) pass through unchanged", () => {
     const rows = [row("a", "2026-08-05T00:00:00Z", "2026-08-08T00:00:00Z")];
     expect(rollupRowDates(rows)).toBe(rows);
+  });
+});
+
+describe("parentEnclosures — 内包バー vertical containment geometry", () => {
+  const wbs = (id: string, depth: number, hasChildren: boolean, parent: string | null): gantt.GanttRow => ({
+    taskId: id, title: id, startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-05T00:00:00Z",
+    progressPercent: 0, assigneeId: null, depth, hasChildren, parentTaskId: parent,
+  });
+
+  it("returns nothing for a flat list (no parents)", () => {
+    expect(parentEnclosures([wbs("a", 0, false, null), wbs("b", 0, false, null)])).toEqual([]);
+  });
+
+  it("wraps an open parent + its two visible children into one box (3 rows tall)", () => {
+    const rows = [wbs("p", 0, true, null), wbs("c1", 1, false, "p"), wbs("c2", 1, false, "p")];
+    const encl = parentEnclosures(rows);
+    expect(encl).toHaveLength(1);
+    expect(encl[0]).toMatchObject({ taskId: "p", depth: 0, rowStart: 0, rowCount: 3, top: 0, height: 3 * ROW_HEIGHT });
+  });
+
+  it("emits a NESTED box per level for a 3-level WBS (grandparent covers through the inner parent's kids)", () => {
+    // gp > p > (g1,g2)  — visible order is depth-first: gp,p,g1,g2
+    const rows = [wbs("gp", 0, true, null), wbs("p", 1, true, "gp"), wbs("g1", 2, false, "p"), wbs("g2", 2, false, "p")];
+    const encl = parentEnclosures(rows);
+    expect(encl).toHaveLength(2);
+    // grandparent spans ALL 4 rows (depth-based walk continues through the inner parent's children)
+    expect(encl.find((e) => e.taskId === "gp")).toMatchObject({ rowStart: 0, rowCount: 4, height: 4 * ROW_HEIGHT });
+    // inner parent spans its own 3 rows, nested inside
+    expect(encl.find((e) => e.taskId === "p")).toMatchObject({ rowStart: 1, rowCount: 3, height: 3 * ROW_HEIGHT });
+  });
+
+  it("a collapsed parent (no visible descendants following) yields no box — falls back to a 1-row bar", () => {
+    // parent present but its children are hidden (not in the visible rows)
+    const rows = [wbs("p", 0, true, null), wbs("q", 0, true, null), wbs("qc", 1, false, "q")];
+    const encl = parentEnclosures(rows);
+    // only q (which has a visible child) gets a box; p (collapsed) does not
+    expect(encl.map((e) => e.taskId)).toEqual(["q"]);
   });
 });

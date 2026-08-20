@@ -44,6 +44,8 @@ export function mapError(e: DisplayableError): ErrorUx {
       return { action: "dependency_cycle_inline", message: "依存関係が循環しています" };
     case "TASK_INVALID_STATUS_TRANSITION":
       return { action: "rollback_transition", message: "その状態へは移動できません" };
+    case "TASK_HAS_CHILDREN":
+      return { action: "toast_generic", message: "子タスクがあるため削除できません。先に子タスクを削除または移動してください" };
     case "GANTT_DEPENDENCY_CYCLE":
       return { action: "gantt_cycle_banner", message: "依存関係に循環があります" };
     case CommonErrorCodes.RATE_LIMITED:

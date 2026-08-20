@@ -642,9 +642,12 @@
 }
 .tlGuideSummary {
   width: 24px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--dub-color-brand-500);
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--dub-color-brand-500) 34%, var(--dub-color-border-default));
+  border-left: 3px solid var(--dub-color-brand-500);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
 }
 .tlGuideDepIcon { display: inline-block; vertical-align: middle; }
 /* thin team-coloured cap at the left edge of each bar. */
@@ -740,17 +743,42 @@
    "8月 / 2026年" labels (vertical-overlay fix). Ordering is guaranteed at the
    component level, not by tuning individual bar z-indexes. */
 .tlBody { position: relative; z-index: 1; isolation: isolate; }
-/* faint enclosure behind an open parent + its children — reads as "these rows
-   belong together" (parent-child), visually separate from dependency arrows. */
-.tlGroupBand {
+/* 内包ゾーン: an open parent's bar grows into a rounded CARD that ENCLOSES its
+   subtree — the parent period runs horizontally, its descendant rows are wrapped
+   vertically, so「ここが親ゾーン」reads straight off the chart. Redesign (#369):
+   the old 1px/34% border + 5% fill was too faint to see. Now the zone is a crisp
+   solid brand border + a header-lane gradient fill (親行が濃く子が淡い) + a bold
+   left accent rail + a soft card shadow — the boundary and "どこからどこまでが親"
+   are unmistakable, and nested boxes step up in tint to read as "inside". Purely
+   visual (pointer-events:none) so drag/resize/toggle/deps are untouched. */
+.tlEncl {
   position: absolute;
-  left: 0;
   box-sizing: border-box;
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md, 8px);
-  background: color-mix(in srgb, var(--dub-color-brand-500) 5%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--dub-color-brand-500) 58%, var(--dub-color-border-default));
+  border-radius: var(--dub-radius-lg, 10px);
+  /* header-lane gradient fill is set inline; this is the fallback. */
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
+  /* crisp inner hairline + a soft card lift so the zone边界 separates from the grid. */
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--dub-color-brand-500) 20%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 3px 10px color-mix(in srgb, var(--dub-color-brand-500) 14%, transparent);
+  overflow: hidden;
   z-index: 0;
   pointer-events: none;
+}
+/* Left accent rail — the「ここが親ゾーン」anchor. A solid brand spine down the zone's
+   left edge, inset top/bottom so it reads as a rounded handle rather than a plain
+   border, and thick enough to catch the eye immediately. */
+.tlEncl::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 var(--dub-radius-sm, 4px) var(--dub-radius-sm, 4px) 0;
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
 }
 .tlWeekend { position: absolute; top: 0; background: var(--dub-color-gray-50); z-index: 0; }
 .tlRowLine {
@@ -761,7 +789,10 @@
   border-bottom: 1px solid var(--dub-color-border-default);
   z-index: 0;
 }
-.tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+/* Dependency connectors sit ABOVE the bars (z-index 4 > .bar's 3) so an arrow is never
+   hidden behind a bar it crosses — part of the correct gantt overlay order:
+   weekend/grid → 親ゾーン塗り+枠(.tlEncl z0) → バー(.bar z3) → コネクタ/当日ライン(front). */
+.tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 /* dependency connectors: a distinct indigo (not the gray gridline colour), so a
    dependency arrow never reads as a border. Paired with the legend + a hover
    tooltip so the meaning is unambiguous vs the parent-child grouping. */
@@ -781,7 +812,9 @@
   background: var(--dub-color-brand-500);
   opacity: 0.7;
   pointer-events: none;
-  z-index: 2;
+  /* Today line is the FRONTMOST timeline marker (above bars z3 and connectors z4) so it
+     reads as one continuous vertical line, never chopped by the bars it crosses. */
+  z-index: 5;
 }
 
 /* ---- bars (soft, rounded, Notion-style) ---- */

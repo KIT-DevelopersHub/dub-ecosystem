@@ -291,14 +291,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
-  // The selected task's DISPLAYED bar window (derived by the gantt read model). Seeds the
-  // detail 開始日/期日 when the task's own startAt/dueAt columns are null, so the panel value
-  // equals the bar and the axis (値=バー=横軸) even for a derived-start task (real data
-  // seeds only dueAt — start_at is null until first edited).
-  const selectedRow = useMemo(
-    () => (selected ? gantt.data?.rows.find((r) => r.taskId === selected) ?? null : null),
-    [selected, gantt.data],
-  );
+  // The selected task's DISPLAYED bar window. Read it from the ROLLED-UP rows (the same
+  // transform the gantt bars use), NOT the raw read-model rows. This matters for a WBS
+  // PARENT: the read model returns a parent's own startsAt/endsAt as null (its span is a
+  // rollup of its children), so the raw row carries null and the detail panel would fall
+  // back to the parent's STALE own start_at/due_at column — a value that no longer matches
+  // the children (症状#7 親子の値ズレ). Rolling here makes barStartsAt/barEndsAt the parent's
+  // TRUE child-derived span, so 値(詳細)=バー=横軸 holds for parents too, not just leaves.
+  const selectedRow = useMemo(() => {
+    if (!selected || !gantt.data) return null;
+    return rollupRowDates(gantt.data.rows).find((r) => r.taskId === selected) ?? null;
+  }, [selected, gantt.data]);
 
   // Hierarchy/scope model over ALL rows (unfiltered by status) so parents and
   // same-scope siblings stay selectable even when a status filter hides some rows.
@@ -848,6 +851,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const onDeleteDetail = () => {
     if (!selectedTask) return;
     const id = selectedTask.id;
+    // Guard (defense-in-depth over the panel's own block): never delete a task that
+    // still has live children. Deleting it would orphan the children and the read model
+    // would silently re-parent them under the previous row. Block + explain instead of
+    // optimistically removing then rolling back on the server 409.
+    const hasChildren = scopeTasks.some((s) => s.parentTaskId === id);
+    if (hasChildren) {
+      toast.show({
+        kind: "error",
+        title: "子タスクがあるため削除できません。先に子タスクを削除または移動してください",
+      });
+      return;
+    }
     // Optimistic: close the panel + drop the bar instantly; the store removes the
     // row immediately and restores it on failure (with the reason surfaced).
     setSelected(null);
@@ -1055,9 +1070,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           dependsOnIds={selectedDependsOn}
           barStartsAt={selectedRow?.startsAt ?? null}
           barEndsAt={selectedRow?.endsAt ?? null}
+          hasChildren={selectedRow?.hasChildren ?? false}
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}
+          onDeleteBlocked={(n) =>
+            toast.show({
+              kind: "warning",
+              title: "削除できません",
+              description: `子タスクが${n}件あるため削除できません。先に子タスクを削除するか、別の親へ移動してください。`,
+            })
+          }
           onCreateChild={onCreateChild}
           onCreatePredecessor={onCreatePredecessor}
           onClose={() => setSelected(null)}

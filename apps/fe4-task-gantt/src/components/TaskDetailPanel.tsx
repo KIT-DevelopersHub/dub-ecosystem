@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, IconButton, TextField, Select } from "@dub/ui";
+import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -25,6 +25,10 @@ export interface TaskDetailPanelProps {
   teams?: readonly team.Team[];
   onSave: (patch: task.UpdateTaskRequest, relations: RelationEdit) => void;
   onDelete: () => void;
+  /** Called instead of opening the delete confirm when the task still has children
+   *  (deleting would orphan them). The host surfaces this as a bottom-right warning
+   *  toast (#375) — the old inline block message under the button was hard to notice. */
+  onDeleteBlocked?: (childCount: number) => void;
   onClose: () => void;
   /** "ここから子タスクを作成": open the create modal with this task preset as the parent. */
   onCreateChild?: (parentId: common.TaskId) => void;
@@ -45,6 +49,10 @@ export interface TaskDetailPanelProps {
    *  its bar while its startAt column is null. Seeding from here makes 値(詳細)=バー=横軸. */
   barStartsAt?: common.ISODateTime | null;
   barEndsAt?: common.ISODateTime | null;
+  /** True when this task is a WBS parent (work-package). A parent's bar span is the
+   *  ROLLUP of its children, so the rolled bar window — not the parent's own (possibly
+   *  stale) start_at/due_at column — is the authoritative value to show (症状#7 値ズレ). */
+  hasChildren?: boolean;
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
@@ -57,6 +65,7 @@ export function TaskDetailPanel({
   teams = [],
   onSave,
   onDelete,
+  onDeleteBlocked,
   onClose,
   onCreateChild,
   onCreatePredecessor,
@@ -66,6 +75,7 @@ export function TaskDetailPanel({
   dependsOnIds = [],
   barStartsAt = null,
   barEndsAt = null,
+  hasChildren = false,
   fieldErrors,
   canWrite,
   canDelete,
@@ -75,12 +85,20 @@ export function TaskDetailPanel({
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
   const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
-  // Seed the date fields from the task's own columns, else the bar's displayed window,
-  // so 開始日/期日 always equal what the bar (and the axis) show — even for a task whose
-  // start is only derived (startAt column still null). Compared at the yyyy-mm-dd input
-  // level so a millisecond-format difference never counts as an edit.
-  const startInputSeed = dateInputFromIso(t.startAt ?? barStartsAt ?? null);
-  const dueInputSeed = dateInputFromIso(t.dueAt ?? barEndsAt ?? null);
+  // Seed the date fields so 開始日/期日 always equal what the bar (and the axis) show.
+  //  - LEAF task: prefer its own start_at/due_at column, falling back to the bar's derived
+  //    window when the column is still null (real seed sets only due_at).
+  //  - PARENT (work-package): its bar is the ROLLUP of its children, and its own
+  //    start_at/due_at column is authoritatively null in the read model — but a stale value
+  //    can linger in the task row from before it had children. The rolled bar window is the
+  //    single source of truth, so it WINS over the stored column (症状#7 親子の値ズレ: detail
+  //    /save must never show a parent date that disagrees with its children's rollup).
+  const startInputSeed = dateInputFromIso(
+    hasChildren ? barStartsAt ?? t.startAt ?? null : t.startAt ?? barStartsAt ?? null,
+  );
+  const dueInputSeed = dateInputFromIso(
+    hasChildren ? barEndsAt ?? t.dueAt ?? null : t.dueAt ?? barEndsAt ?? null,
+  );
   const [start, setStart] = useState<string | null>(startInputSeed);
   const [due, setDue] = useState<string | null>(dueInputSeed);
   // Relations (親子 / 先行タスク). Seeded from the gantt read model via props; the
@@ -328,26 +346,38 @@ export function TaskDetailPanel({
             保存
           </Button>
           {canDelete && !confirming && (
-            <Button variant="danger" onClick={() => setConfirming(true)} testId="fe4-detail-delete">
+            <Button
+              variant="danger"
+              // A task with children cannot be deleted (deleting it would orphan the
+              // children and the read model would silently re-parent them). Instead of the
+              // old inline block message (hard to notice under the button, #375), hand the
+              // block to the host, which shows a bottom-right warning toast.
+              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
+              testId="fe4-detail-delete"
+            >
               削除
             </Button>
           )}
         </div>
 
-        {confirming && (
-          <div className={styles.confirmBox} data-testid="fe4-confirm-delete">
-            <p className={styles.confirmText}>このタスクを削除しますか？この操作は取り消せません。</p>
-            <div className={styles.panelActions}>
-              <Button variant="danger" onClick={onDelete} testId="fe4-confirm-yes">
-                削除する
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirming(false)} testId="fe4-confirm-no">
-                やめる
-              </Button>
-            </div>
-          </div>
-        )}
       </aside>
+
+      {/* Leaf (no children) delete confirm — a centered MODAL dialog (@dub/ui ConfirmDialog),
+          unified with 運営メンバー削除 etc. The old inline box under the button was easy to
+          miss and kept regressing on merges; a modal is unmissable and lives outside the
+          panel <aside>. A parent-with-children NEVER reaches here — its 削除 fires
+          onDeleteBlocked (bottom-right warning toast), never a confirm. */}
+      <ConfirmDialog
+        open={confirming}
+        title="タスクを削除しますか？"
+        message="このタスクを削除します。この操作は取り消せません。"
+        confirmLabel="削除する"
+        cancelLabel="やめる"
+        danger
+        onConfirm={onDelete}
+        onCancel={() => setConfirming(false)}
+        testId="fe4-confirm-delete"
+      />
     </>
   );
 }
