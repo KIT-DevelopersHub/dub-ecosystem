@@ -201,10 +201,10 @@ export function TaskDetailPanel({
           )}
         </div>
 
-        {/* メモ / 詳細: free-text notes captured on the task (optimistic save + toast). */}
+        {/* 内容: free-text body/notes captured on the task (optimistic save + toast). */}
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-detail-description">
-            メモ / 詳細
+            内容
           </label>
           <Textarea
             id="fe4-detail-description"
