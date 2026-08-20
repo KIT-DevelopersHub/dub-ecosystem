@@ -1,0 +1,120 @@
+/* Skeleton family (FE1 §5 loading principle). Token-only, light/dark safe.
+   A skeleton stands in for content that is loading, so the user can tell
+   "loading" apart from "empty". Never render a bare blank while fetching. */
+
+.block {
+  display: block;
+  background: var(--dub-color-surface-sunken);
+  border-radius: var(--dub-radius-sm);
+}
+
+/* shimmer: sweeping highlight (default) */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--dub-color-surface-sunken) 25%,
+    var(--dub-color-gray-200) 37%,
+    var(--dub-color-surface-sunken) 63%
+  );
+  background-size: 400% 100%;
+  animation: dub-skeleton-shimmer var(--dub-motion-slow) ease-in-out infinite;
+}
+
+/* pulse: opacity breathing (calmer alternative) */
+.pulse {
+  animation: dub-skeleton-pulse var(--dub-motion-slow) ease-in-out infinite;
+}
+
+.text {
+  height: var(--dub-font-size-md);
+  border-radius: var(--dub-radius-sm);
+}
+
+.circle {
+  border-radius: var(--dub-radius-full);
+}
+
+.rect {
+  border-radius: var(--dub-radius-md);
+}
+
+/* composites */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  width: 100%;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  width: 100%;
+}
+
+.rowBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  flex: 1;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-base);
+  width: 100%;
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  width: 100%;
+}
+
+.tableRow {
+  display: grid;
+  gap: var(--dub-space-3);
+  align-items: center;
+}
+
+.tableHeader {
+  padding-bottom: var(--dub-space-2);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+
+@keyframes dub-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+@keyframes dub-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Respect reduced-motion: keep a static placeholder, drop the animation. */
+@media (prefers-reduced-motion: reduce) {
+  .shimmer,
+  .pulse {
+    animation: none;
+  }
+  .shimmer {
+    background: var(--dub-color-surface-sunken);
+  }
+}

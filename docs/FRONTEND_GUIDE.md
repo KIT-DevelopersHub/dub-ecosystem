@@ -11,6 +11,9 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 - [3. 新しいコンポーネントの足し方](#3-新しいコンポーネントの足し方)
 - [4. スタイル規約 (トークン必須 / bespoke 禁止)](#4-スタイル規約-トークン必須--bespoke-禁止)
 - [5. 状態の扱い (loading / empty / error)](#5-状態の扱い-loading--empty--error)
+  - [5.1 ローディングとスケルトン UI（原則・必須）](#51-ローディングとスケルトン-ui原則必須)
+  - [5.2 Skeleton コンポーネント API](#52-skeleton-コンポーネント-api)
+  - [5.3 楽観的 UI（optimistic update）](#53-楽観的-uioptimistic-update)
 - [6. アクセシビリティ最低限](#6-アクセシビリティ最低限)
 - [7. 命名規約](#7-命名規約)
 - [8. チェックリスト](#8-チェックリスト)
@@ -118,12 +121,39 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
   inline で組まない**——それは CSS Modules か②に出す。
 - **Tailwind / ランタイム CSS-in-JS は不採用**（凍結）。
 - **ライト/ダーク両対応**: 色は必ずトークン経由。生 hex を置くと片テーマで破綻する。
+- **排他選択（segment / tab strip）UI はコアで組む**: 「同格の少数択一を1つ選ぶ」UI
+  （ビュー切替・粒度・スコープ・モード切替など）は `@dub/ui` の **`SegmentedControl`**
+  を使う。`role="tablist"` + アクティブ class の手組みや、スライドするインジケータの再実装を
+  しない（a11y・`prefers-reduced-motion`・折返し追従がブレる）。画面の主セクション切替（下線
+  タブ）は既存 `Tabs`。既存の手組み箇所と寄せ替え順は
+  [選択UIの統一プラン](./segmented-control-unification.md) を参照。
+- **並べ替え（ドラッグ&ドロップ）UI はコアで組む**: リストの手動並べ替えは `@dub/ui` の
+  **`SortableList`** を使う。`@dnd-kit` を各画面で直接組んで「浮遊オーバーレイ・周辺行の
+  reflow（場所を空ける）・ドロップのコミット・キーボード操作/aria」を再実装しない
+  （体験と a11y がブレる）。コンポーネントが「掴んだ行が浮くクローン＋隣接行が滑らかにずれて
+  ギャップを開ける＋`prefers-reduced-motion` 尊重＋Space/矢印でのキーボード並べ替え＋
+  ライブリージョン通知」を一括で提供する。`items`／`getItemId`／`renderItem(item, {dragHandleProps})`／
+  `renderOverlay?`／`onReorder(event)` を渡し、**並び順の確定ロジック（フラットな `arrayMove`か、
+  ツリーの兄弟内移動か）は呼び出し側が `onReorder` で持つ**（例: `apps/fe4-task-gantt` のガントは
+  兄弟スコープに写像して既存の順序 API に渡す）。ドラッグの見た目/操作は変えず、確定だけ差し替える。
+- **モーダル（ダイアログ）はコアで組む**: 画面に重ねて出す確認・フォーム・詳細などの
+  モーダルは `@dub/ui` の **`Modal`**（汎用）・**`ConfirmDialog`**（破壊的操作の確認ゲート）・
+  **`ErrorDialog`**（失敗理由の明示）・**`Drawer`**（横から出るパネル）を使う。**独自の
+  overlay/portal を手組みしない・`role="dialog"` を自前で書かない**（scrim・フォーカストラップ・
+  Esc/オーバーレイクリックで閉じる・スクロールロック・フォーカス復帰・`aria-modal`・
+  トークン準拠の見た目を一括で提供する）。とくに **`window.confirm` / `window.alert` /
+  `window.prompt` などブラウザ標準ダイアログを破壊的操作の確認に使わない**（OS 依存の見た目で
+  統一が崩れ、テーマにも追従しない）。確認は `ConfirmDialog`（`onConfirm` は async 可・保留中は
+  ボタンがローディング）に寄せる。ボタン行は `Modal` の `footer` か `ConfirmDialog` に任せ、
+  末尾ボタンを `justifyContent: flex-end` の inline `style` で手組みしない。確認ダイアログと
+  楽観的 UI は両立する（§7）——確認を閉じた瞬間に楽観反映してよい。既存の手組み箇所と
+  寄せ替え順は [ダイアログの統一プラン](./dialog-unification.md) を参照。
 
 ## 5. 状態の扱い (loading / empty / error)
 
 データを表示する画面は 3 状態を必ず用意する（①のコンポーネントを使う）:
 
-- **loading**: `SkeletonLoader` / `Spinner`。
+- **loading**: **スケルトン**（`SkeletonList` / `SkeletonTable` / `SkeletonCard` / `Skeleton` / `SkeletonLoader`）。§5.1 参照。
 - **empty**: `EmptyState`（0 件時。「データがありません」を各自で組まない）。
 - **error**: `ErrorState`（`DisplayableError` を渡す。retry があれば `onRetry`）。
 
@@ -131,7 +161,103 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 
 - **フィールド単位** = `FormField` の `error` prop（`aria-invalid` が付く）。
 - **フォーム全体** = `@dub/app-ui` の `FormError`（`role="alert"`）。
-- 楽観的更新の原則は memory `[[optimistic-ui-principle]]`（先に反映 → 失敗でロールバック）。
+
+### 5.1 ローディングとスケルトン UI（原則・必須）
+
+> **【デザインシステム原則】読み込み中は必ずスケルトン UI を出す。素の空表示を禁止する。**
+> データ取得を伴う UI は、データ到着前に**必ずスケルトン**（実際に出る要素の形を模したプレースホルダ）を描く。
+> 「空データ (0 件)」と「読み込み中」は**別物**として必ず描き分ける。
+
+**なぜ**: ローディング中に何も出さない／プレーンな空表示のままだと、ユーザーは「**データが無い**のか
+**読み込み中**なのか判別できない」。空表示は「0 件」だけを意味させ、読み込み中はスケルトンで「これから何か出る」
+ことを形で示す。これで体感速度も上がる（レイアウトが先に埋まり、ガタつき＝CLS が減る）。
+
+**ルール**:
+
+1. **リスト / カード / テーブル / 詳細パネルなど、データ取得を伴う UI は初期状態でスケルトンを出す。**
+   `isLoading` / `isPending` の分岐で**最初に**スケルトンを返す（`empty` / `error` より先に判定する）。
+2. **素の空表示・プレーンな「読み込み中…」テキスト・レイアウトの無い `Spinner` 単体は不可**
+   （リスト/テーブル/カードでは）。スケルトンは**実際のレイアウトの形**に寄せる（行数・カラム数・カードの
+   メディア枠を近似する）。
+3. **空データは明示的な `EmptyState`** で表す。**読み込み中に `EmptyState` へ落とさない**
+   （「データがありません」を一瞬見せない）。この 2 つを必ず描き分ける。
+4. **`Spinner` を使ってよいのは**、レイアウトを占有しない小さな箇所（ボタン内・トグル・インライン処理中）だけ。
+   一覧そのものの初期ロードには使わない。
+5. スケルトンは `role="status" aria-label="読み込み中"` を**1 つ**持つ（合成コンポーネントが自動で付ける）。
+   個々のブロックは `aria-hidden`。
+
+分岐の定石（**loading を最優先で判定**する）:
+
+```tsx
+{query.isLoading ? (
+  <SkeletonList rows={5} />          // 必ずスケルトン（素の空表示にしない）
+) : query.isError ? (
+  <ErrorState error={displayError(query.error)} onRetry={() => query.refetch()} />
+) : items.length === 0 ? (
+  <EmptyState title="イベントがありません" />   // 0 件のときだけ
+) : (
+  <div className={styles.grid}>{items.map(/* ... */)}</div>
+)}
+```
+
+### 5.2 Skeleton コンポーネント API
+
+`@dub/ui`（①）が提供する。ドメイン知識ゼロ・トークンのみ・ライト/ダーク両対応・`prefers-reduced-motion`
+尊重（アニメを止めて静的プレースホルダにフォールバック）。
+
+| 物 | 用途 | 主な props |
+|---|---|---|
+| `Skeleton` | 単一プレースホルダ（自分で並べる用）。**装飾なので `aria-hidden`** | `variant`=`text`\|`circle`\|`rect` / `width` / `height`（number=px）/ `radius` / `animation`=`shimmer`\|`pulse`\|`none` |
+| `SkeletonList` | 一覧のロード中。`role="status"` を内包 | `rows`(=3) / `avatar`(先頭に丸) / `animation` |
+| `SkeletonTable` | テーブルのロード中。ヘッダ＋セル格子 | `rows`(=5) / `columns`(=4) / `header`(=true) |
+| `SkeletonCard` | カードのロード中。メディア枠＋タイトル＋本文行 | `media`(先頭に矩形) / `lines`(=2) |
+| `SkeletonLoader` | 汎用の n 行スケルトン（既存・後方互換） | `lines`(=3) / `width` |
+
+使い分け: **一覧＝`SkeletonList`** / **表＝`SkeletonTable`** / **カードグリッド＝`SkeletonCard` を実カード枚数ぶん** /
+それ以外の任意形状は `Skeleton` を自分で compose。合成物（List/Table/Card）は `role="status"` を持つので、
+1 画面で複数出す時は**代表 1 つに testId** を付ける程度でよい。
+
+### 5.3 楽観的 UI（optimistic update）
+
+> **すべてのミューテーションは楽観的 UI にする（例外なし）**。操作した瞬間に UI へ反映 → 裏で確定 →
+> 失敗したときだけロールバック。毎回サーバ往復のローディングを待たせない。原則の背景は memory
+> `[[optimistic-ui-principle]]`。
+
+> **【対象＝全ミューテーション・例外なし】作成 / 更新（インライン編集）/ **削除** / トグル / 並べ替え（D&D）/
+> 紐付け（親子・依存・リンク）/ ステータス変更 —— これら書き込み操作はすべて楽観的 UI 必須。**
+> とくに **削除（delete）も楽観的にする**：クリック（＝確認ダイアログを閉じた）瞬間に一覧から消す
+> （物理削除＝即時に行を除去 / 論理削除・トゥームストーン＝即時に「削除されました」表示に差し替え）→ 裏で
+> DELETE を確定 → **失敗時のみ元に戻す＋エラートースト**。「削除を押したのに残っている／消えるまで待つ」を
+> 二度と出さない。
+
+> **【必須・3 点セット】** どのミューテーションも「①楽観的 UI ＋ ②（必要なら）成功トースト ＋
+> ③エラートースト＋ロールバック」をセットで実装する。①か③が欠けた書き込み UI は不可（レビューで差し戻す）。
+
+- **やり方（共通）**: 現在値を snapshot → UI を**先に**新値へ更新して即描画 → サーバ確定 → 成功したら
+  reconcile（サーバ正で整合）→ **失敗したら snapshot に**ロールバック**＋エラートースト**（握り潰さない）。
+  実装は各 feature の楽観ランナーに寄せる：
+  - TanStack Query 系（fe4/fe7 等）: `onMutate` で `qc.setQueryData` を先に更新 → `onError` でロールバック →
+    `onSettled` で `invalidate`/refetch。トースト＋エラー文言は共通フックへ（fe4 `useWriteFeedback()`
+    = `success(msg?)` / `failure(err, fallback?)`）。
+  - ローカルストア系（fe6 チャット等）: `runOptimistic(box, { apply, mutate, reconcile, rollback })`
+    （`store/optimistic.ts`）。`apply` が即時反映、`reconcile` がサーバ正、`rollback` は既定でスナップショット復元。
+- **delete の型（必ずこの形）**: `apply` で行を除去（or トゥームストーン化）→ `mutate` で DELETE →
+  `reconcile` でサーバの確定結果に整合（例: サーバが返す mode に合わせて hard=除去 / tombstone=差し替え）→
+  失敗時は既定ロールバックで**行を復活**させ、呼び出し側でエラートースト。実例: fe6 chat
+  `useChannelView.deleteMessage`（`runOptimistic` + 予測モードで即時反映、RT エコー/レスポンスで reconcile）。
+- **確認ダイアログと楽観的 UI は両立する**: 破壊的操作は確認ダイアログを出してよいが、それは**楽観的 UI を
+  やらない理由にはならない**。ユーザーが確認した後の状態変更は楽観的に反映する（confirm → 即時反映 →
+  裏で確定 → 失敗でロールバック）。
+- **ローディングとの関係**: 楽観的更新できた操作では、その部分に**スピナー/スケルトンを出さない**
+  （既に反映済みだから）。スケルトンは「まだ手元に無いデータの**初期取得**」に使い、楽観的 UI は
+  「既にあるデータの**変更**」に使う——役割を混同しない。
+- **成功トーストの調整**: バー移動・削除など**視覚的変化そのものがフィードバックになる操作**は成功トーストを
+  省いてよい（連打でトーストが溢れる／変化が自明なため）。ただし**失敗時のエラートースト＋ロールバックは
+  省略不可**。
+- **唯一の但し書き（楽観化しない例外ではない）**: 外部的に不可逆で結果をクライアントで予測できない操作
+  （実決済の確定など）に限り、実ローディング表示を併用してよい。それでも③（失敗トースト＋整合）は必須。
+  上記の全ミューテーション（作成/更新/削除/トグル/並べ替え/紐付け/ステータス変更）は**この但し書きに該当しない**
+  ＝必ず楽観的にする。
 
 ## 6. アクセシビリティ最低限
 
@@ -141,6 +267,25 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 - フォーカス: `:focus-visible` のアウトラインを潰さない（global.css が既定を持つ）。
 - 状態: 選択中は `aria-current` / 展開は `aria-expanded` / エラーは `role="alert"`。
 - コントラスト: テキストは `--dub-color-text-*`、薄字でも `text-muted` 止まり（さらに薄くしない）。
+
+### 6.1 テキスト入力の Enter は IME 安全に（必須）
+
+日本語などの IME で変換候補を確定する Enter（変換確定 Enter）は、`keydown` が
+`isComposing === true`（旧ブラウザは `keyCode === 229`）の状態で発火する。**Enter で送信/確定する
+テキスト入力を自作するときは、必ず `@dub/ui` の共有プリミティブを通す**。これを踏まないと、
+チャット送信欄などで「変換を確定しただけ」なのに送信されてしまう。
+
+- 送信専用の欄（Enter で送信 / Shift+Enter で改行）は `useEnterToSubmit(onSubmit)` を使い、
+  返ってくる `{ onKeyDown, onCompositionStart, onCompositionEnd }` を入力要素にそのまま展開する。
+- `keydown` で送信以外の処理も分岐する複雑な欄（メンション候補・整形ショートカット等）は、
+  ハンドラ先頭で `if (isImeComposing(e)) return;` を必ず入れる（＋堅牢性のため composition ref も併用）。
+- ネイティブ `<form>` の Enter 送信（`<Form onSubmit>`）はブラウザが変換確定 Enter を送信しないので追加対応は不要。
+
+```tsx
+import { useEnterToSubmit } from "@dub/ui";
+const enter = useEnterToSubmit(send);        // Enter=送信 / Shift+Enter=改行 / 変換確定 Enter=何もしない
+<textarea value={text} onChange={...} {...enter} />
+```
 
 ## 7. 命名規約
 
@@ -160,6 +305,12 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 - [ ] 生値（hex/px/rgba）を直書きしていないか（トークンのみか）
 - [ ] 静的スタイルを inline `style` で書いていないか（CSS Modules / ②か）
 - [ ] loading / empty / error の 3 状態を用意したか
+- [ ] **ローディングがスケルトンになっているか**（素の空表示・プレーンな「読み込み中…」・一覧の `Spinner`
+      単体は不可）。**loading を最優先で判定**し、読み込み中に `EmptyState` へ落としていないか（§5.1）
+- [ ] **空データを `EmptyState` で明示**し、「読み込み中」と描き分けているか（§5.1）
+- [ ] **すべてのミューテーション**（作成/更新/**削除**/トグル/並べ替え/紐付け/ステータス変更）を**楽観的 UI**に
+      したか（例外なし・先に反映 → 失敗でロールバック＋エラートースト）。**特に delete も即時反映**したか（§5.3）
 - [ ] `aria-label` / `label`+`htmlFor` / フォーカスリングを満たすか
+- [ ] Enter で送信/確定する自作テキスト入力は `useEnterToSubmit` / `isImeComposing` を通したか（§6.1・変換確定 Enter で誤送信しない）
 - [ ] `testId` を既存から変えていないか
 - [ ] `typecheck` 緑 / 単体テスト緑（重い実ブラウザ E2E は別工程）

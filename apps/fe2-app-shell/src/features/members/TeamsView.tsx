@@ -1,5 +1,6 @@
-// チーム別ビュー: one Card per team, members grouped under it. Also surfaces members
-// not assigned to any team, and per-team edit/delete.
+// チーム別ビュー: one Card per team, members grouped under it. Members not yet
+// assigned to any team are surfaced in a distinct, muted "要対応" section — NOT a
+// pseudo-team card — so the view never invents a team called 未所属.
 import { Card, Badge, IconButton, EmptyState } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
@@ -19,6 +20,9 @@ function MemberRow({
       <div className={styles.memberMain}>
         <span className={styles.memberName}>{m.name}</span>
         {m.roleTitle ? <span className={styles.memberRole}>{m.roleTitle}</span> : null}
+        {m.department || m.grade ? (
+          <span className={styles.memberRole}>{[m.department, m.grade].filter(Boolean).join(" ")}</span>
+        ) : null}
       </div>
       <MemberStatusBadge status={m.status} />
       <div className={styles.rowSpacer} />
@@ -81,11 +85,18 @@ export function TeamsView({
       })}
 
       {unassigned.length > 0 ? (
-        <Card testId="members-teamcard-unassigned" header={<div className={styles.teamHeader}><span className={styles.teamName}>未所属</span><Badge tone="warning">{unassigned.length}</Badge></div>}>
-          {unassigned.map((m) => (
-            <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} />
-          ))}
-        </Card>
+        <section className={styles.unassignedSection} data-testid="members-unassigned-section" aria-label="チーム未割り当てのメンバー">
+          <div className={styles.unassignedHead}>
+            <span className={styles.unassignedTitle}>チーム未割り当て</span>
+            <Badge tone="neutral">{unassigned.length}</Badge>
+            <span className={styles.unassignedHint}>編集からチームに割り当ててください</span>
+          </div>
+          <div className={styles.unassignedBody}>
+            {unassigned.map((m) => (
+              <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} />
+            ))}
+          </div>
+        </section>
       ) : null}
     </div>
   );

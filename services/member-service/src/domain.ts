@@ -1,13 +1,61 @@
 // Pure domain helpers: DTO mappers (row -> canonical @dub/types wire) + slug/validation.
-import type { member } from "@dub/types";
-import type { MemberStatus, PersonRow, TeamRow } from "./types";
+import { member } from "@dub/types";
+import type { MemberStatus, ParticipationRow, PersonRow, TeamRow } from "./types";
 import { MEMBER_STATUSES } from "./types";
 
 export const SORT_ORDER_GAP = 1024;
 export const MAX_NAME_LEN = 200;
 
+/** Pragmatic email shape check (same class as the gateway's public-inquiry guard):
+ *  one @, no whitespace, a dotted domain. Not RFC-exhaustive — just rejects obvious
+ *  non-addresses so a 参加届's two required emails are well-formed before persisting. */
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+export function isEmail(v: unknown): v is string {
+  return typeof v === "string" && EMAIL_RE.test(v.trim());
+}
+
+/** Loose 電話番号 shape: digits with optional separators (space, hyphen, parens, +).
+ *  Intentionally permissive (任意フィールド) — just rejects obvious non-numbers. */
+const PHONE_RE = /^[0-9+\-()\s]{6,20}$/;
+export function isPhone(v: unknown): v is string {
+  return typeof v === "string" && PHONE_RE.test(v.trim());
+}
+
+/** ローマ字 (氏名のアルファベット表記) shape: starts with a Latin letter, then letters /
+ *  spaces / hyphens / apostrophes (e.g. "Yamada", "O'Brien", "Van Dyke"). 任意フィールド
+ *  なので緩め — アルファベットのメール発行に使う前提で、非ラテン文字だけ弾く。 */
+const ROMAJI_RE = /^[A-Za-z][A-Za-z\s'-]*$/;
+export function isRomaji(v: unknown): v is string {
+  return typeof v === "string" && ROMAJI_RE.test(v.trim());
+}
+
+/** Compose "姓 名" from the split fields, skipping empty parts. Used to keep the legacy
+ *  single `name` / `name_kana` columns in sync so every existing reader keeps working. */
+export function composeName(last: string | null, first: string | null): string {
+  return [last, first].filter((x): x is string => typeof x === "string" && x.length > 0).join(" ");
+}
+
 export function isMemberStatus(v: unknown): v is MemberStatus {
   return typeof v === "string" && (MEMBER_STATUSES as readonly string[]).includes(v);
+}
+
+export function isGrade(v: unknown): v is member.Grade {
+  return typeof v === "string" && (member.GRADES as readonly string[]).includes(v);
+}
+
+export function isDesiredActivity(v: unknown): v is member.DesiredActivity {
+  return typeof v === "string" && (member.DESIRED_ACTIVITIES as readonly string[]).includes(v);
+}
+
+/** Fold a personal name to a stable matching key that absorbs 表記ゆれ: strips all
+ *  whitespace (half/full-width incl. the ideographic space U+3000), lowercases ASCII,
+ *  and NFKC-normalizes so full-width latin/space variants collapse. Non-destructive:
+ *  used only for comparison/dedupe, never shown. */
+export function normalizeName(raw: string): string {
+  return raw
+    .normalize("NFKC")
+    .replace(/[\s　]+/g, "")
+    .toLowerCase();
 }
 
 /** URL-safe slug from a team name. ASCII names slugify; non-ASCII (e.g. Japanese)
@@ -32,10 +80,55 @@ export function toMember(r: PersonRow, teamIds: string[]): member.Member {
     roleTitle: r.roleTitle,
     status: r.status,
     teamIds,
+    department: r.department,
+    grade: r.grade,
+    identityUserId: r.identityUserId,
     contact: r.contact,
+    schoolEmail: r.schoolEmail,
+    gmail: r.gmail,
+    lastName: r.lastName,
+    firstName: r.firstName,
+    lastNameKana: r.lastNameKana,
+    firstNameKana: r.firstNameKana,
+    lastNameRomaji: r.lastNameRomaji,
+    firstNameRomaji: r.firstNameRomaji,
+    phone: r.phone,
     note: r.note,
     sortOrder: r.sortOrder,
     version: r.version,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+export function toParticipation(r: ParticipationRow): member.Participation {
+  return {
+    id: r.id,
+    orgId: r.orgId,
+    memberId: r.memberId,
+    name: r.name,
+    lastName: r.lastName,
+    firstName: r.firstName,
+    nameKana: r.nameKana,
+    lastNameKana: r.lastNameKana,
+    firstNameKana: r.firstNameKana,
+    nameRomaji: r.nameRomaji,
+    lastNameRomaji: r.lastNameRomaji,
+    firstNameRomaji: r.firstNameRomaji,
+    grade: r.grade,
+    department: r.department,
+    contact: r.contact,
+    phone: r.phone,
+    schoolEmail: r.schoolEmail,
+    gmail: r.gmail,
+    desiredTeamId: r.desiredTeamId,
+    desiredActivity: r.desiredActivity,
+    note: r.note,
+    status: r.status,
+    matchKind: r.matchKind,
+    reviewState: r.reviewState,
+    submittedBy: r.submittedBy,
+    submittedAt: r.submittedAt,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };

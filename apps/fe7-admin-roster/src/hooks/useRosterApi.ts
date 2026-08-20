@@ -3,7 +3,7 @@
 // roll back on error; revoke / permission-bundle save / status change wait for the
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import type { identity, common, auditLog, auth } from "@dub/types";
+import type { identity, common, auditLog, auth, chat, member } from "@dub/types";
 import { isErrorResponse } from "@dub/errors";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
@@ -12,7 +12,8 @@ import { type UserListFilters } from "../lib/listUsersQuery";
 import { type AuditFilters } from "../lib/auditQuery";
 import { type MailStatusResponse } from "../lib/mailStatus";
 import { presentError } from "../lib/errorDisplay";
-import { applyRoleGrant, makePendingAssignment } from "../lib/optimistic";
+import { applyRoleGrant, makePendingAssignment, addUserRoleId, removeUserRoleId } from "../lib/optimistic";
+import { runOffboard } from "../lib/offboard";
 import type {
   CreateRoleRequest,
   UpdateRoleRequest,
@@ -20,9 +21,8 @@ import type {
   RoleAssignment,
   RosterUser,
   SyncEmailRoutingResult,
-  EmailRoutingAddress,
+  EmailRoutingSyncPreview,
   CreateEmailAddressRequest,
-  UpdateEmailAddressRequest,
 } from "../contracts/pending";
 
 /** The mail-gateway proxy answers 503 with this code when the CF token is unset.
@@ -176,6 +176,85 @@ export function useRevokeRole(userId: common.UserId) {
   });
 }
 
+/** Partial key matching EVERY cached roster list query (all filter/cursor variants),
+ *  so an inline role edit reflects in the ロール column regardless of active filters. */
+const USERS_LIST_KEY = [queryKeys.root[0], "users", "list"] as const;
+
+/** OPTIMISTIC inline (roster list): grant an ORG-WIDE role straight from the ロール
+ *  column. Reuses the audited assign endpoint but reflects the change instantly in the
+ *  list's `roleIds` (and the per-user roles cache), rolling back on error. */
+export function useAssignRoleInline(userId: common.UserId, grantedBy: common.UserId) {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (input: { roleId: common.RoleId; roleName: string }) =>
+      api.assignRole(userId, { roleId: input.roleId }),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: USERS_LIST_KEY });
+      await qc.cancelQueries({ queryKey: queryKeys.userRoles(userId) });
+      const prevLists = qc.getQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY });
+      const prevRoles = qc.getQueryData<RoleAssignment[]>(queryKeys.userRoles(userId)) ?? [];
+      qc.setQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY }, (page) =>
+        addUserRoleId(page, userId, input.roleId),
+      );
+      const pending = makePendingAssignment({
+        userId, roleId: input.roleId, roleName: input.roleName,
+        grantedBy, now: new Date().toISOString(),
+      });
+      qc.setQueryData(queryKeys.userRoles(userId), applyRoleGrant(prevRoles, pending));
+      return { prevLists, prevRoles };
+    },
+    onError: (err, _input, ctx) => {
+      ctx?.prevLists?.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx) qc.setQueryData(queryKeys.userRoles(userId), ctx.prevRoles);
+      const p = presentError(err);
+      toast({ kind: "error", title: "ロール付与に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: USERS_LIST_KEY });
+      qc.invalidateQueries({ queryKey: queryKeys.userRoles(userId) });
+    },
+  });
+}
+
+/** OPTIMISTIC inline (roster list): revoke an ORG-WIDE role straight from the ロール
+ *  column. The caller resolves the assignment id (from the per-user roles cache); the
+ *  server still enforces the last-admin guard and rejects with a rollback + toast. */
+export function useRevokeRoleInline(userId: common.UserId) {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (input: { assignmentId: string; roleId: common.RoleId }) =>
+      api.revokeRole(userId, input.assignmentId),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: USERS_LIST_KEY });
+      await qc.cancelQueries({ queryKey: queryKeys.userRoles(userId) });
+      const prevLists = qc.getQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY });
+      const prevRoles = qc.getQueryData<RoleAssignment[]>(queryKeys.userRoles(userId)) ?? [];
+      qc.setQueriesData<common.Paginated<RosterUser>>({ queryKey: USERS_LIST_KEY }, (page) =>
+        removeUserRoleId(page, userId, input.roleId),
+      );
+      qc.setQueryData(
+        queryKeys.userRoles(userId),
+        prevRoles.filter((a) => a.id !== input.assignmentId),
+      );
+      return { prevLists, prevRoles };
+    },
+    onError: (err, _input, ctx) => {
+      ctx?.prevLists?.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx) qc.setQueryData(queryKeys.userRoles(userId), ctx.prevRoles);
+      const p = presentError(err);
+      toast({ kind: "error", title: "剥奪に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: USERS_LIST_KEY });
+      qc.invalidateQueries({ queryKey: queryKeys.userRoles(userId) });
+    },
+  });
+}
+
 /** NON-optimistic: role create. */
 export function useCreateRole() {
   const { api } = useRosterContext();
@@ -209,6 +288,33 @@ export function useDeleteRole() {
   });
 }
 
+/** #2: one-shot退任 (offboard). Runs the identity one-shot + member在籍更新 + Email
+ *  Routing削除, then refreshes the affected caches. Returns the per-step OffboardOutcome
+ *  so the caller can render partial success. NON-optimistic (destructive, after confirm). */
+export function useOffboardUser() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (user: { id: common.UserId; email: string }) => runOffboard(api, user),
+    onSuccess: (outcome) => {
+      qc.invalidateQueries({ queryKey: [queryKeys.root[0], "users"] });
+      qc.invalidateQueries({ queryKey: queryKeys.user(outcome.identity!.user.id) });
+      qc.invalidateQueries({ queryKey: queryKeys.userRoles(outcome.identity!.user.id) });
+      qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() });
+      toast(
+        outcome.ok
+          ? { kind: "success", title: "オフボードが完了しました" }
+          : { kind: "error", title: "一部の処理が失敗しました", description: "詳細を確認してください" },
+      );
+    },
+    onError: (err) => {
+      const p = presentError(err);
+      toast({ kind: "error", title: "オフボードに失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
+}
+
 /** NON-optimistic: invite. */
 export function useInviteUser() {
   const { api } = useRosterContext();
@@ -226,6 +332,28 @@ export function useInviteUser() {
  * it rejects with EMAIL_ROUTING_UNCONFIGURED — the caller reads `mutation.error`
  * (isEmailRoutingUnconfigured) to render the "未接続" notice instead of a toast.
  */
+/**
+ * #5: PREVIEW the Email Routing sync. Reads the @developershub.jp addresses through the
+ * proxy (needs mail:admin), then asks identity for the read-only diff (needs
+ * identity:admin) WITHOUT applying it. Surfaces EMAIL_ROUTING_UNCONFIGURED the same way
+ * as the apply, so the caller reuses isEmailRoutingUnconfigured for the "未接続" notice.
+ */
+export function usePreviewEmailRouting() {
+  const { api } = useRosterContext();
+  const { toast } = useToast();
+  return useMutation<EmailRoutingSyncPreview>({
+    mutationFn: async () => {
+      const { items } = await api.listRosterEmailAddresses();
+      return api.previewEmailRouting(items);
+    },
+    onError: (err) => {
+      if (isEmailRoutingUnconfigured(err)) return; // inline notice, not a toast
+      const p = presentError(err);
+      toast({ kind: "error", title: "プレビューの取得に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
+}
+
 export function useSyncEmailRouting() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
@@ -254,14 +382,10 @@ export function useSyncEmailRouting() {
   });
 }
 
-// ---- Email Routing (@developershub.jp address management) ----
+// ---- Email Routing (@developershub.jp address issuance, used by the roster) ----
 
-export function useEmailAddresses(): UseQueryResult<common.Paginated<EmailRoutingAddress>> {
-  const { api } = useRosterContext();
-  return useQuery({ queryKey: queryKeys.emailAddresses(), queryFn: () => api.listEmailAddresses() });
-}
-
-/** NON-optimistic: issue a new @developershub.jp address (create Email Routing rule). */
+/** NON-optimistic: issue a new @developershub.jp address (create Email Routing rule).
+ *  Used by the roster's NewEmailAddressDialog (name-book), which re-syncs after issue. */
 export function useCreateEmailAddress() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
@@ -271,35 +395,111 @@ export function useCreateEmailAddress() {
   });
 }
 
-/** NON-optimistic: enable/disable or re-point an address (patch the rule). */
-export function useUpdateEmailAddress() {
+// ---- 運営メンバー紐付け (メール名簿 ↔ 運営メンバー) --------------------------------
+// The メール名簿 (identity_users) side links each @developershub.jp account to an existing
+// 運営メンバー — the REVERSE direction of fe2's member→account LinkIdentityDialog. Both write
+// the SAME `member.identityUserId` bridge (single source of truth); the server enforces the
+// 1:1 constraint (MEMBER_IDENTITY_ALREADY_LINKED 409). Optimistic per [[optimistic-ui-principle]].
+
+/** 運営メンバー一覧 (member-service overview). Read to show which member each email row is
+ *  linked to, and to power the「運営メンバーと紐付け」picker. Needs identity:read (gateway). */
+export function useMembersOverview(): UseQueryResult<member.MembersOverview> {
+  const { api } = useRosterContext();
+  return useQuery({ queryKey: queryKeys.membersOverview(), queryFn: () => api.listMembersOverview(), staleTime: 60_000 });
+}
+
+/** Patch the members-overview cache so a link/unlink reflects instantly (shared helper). */
+function setMemberIdentityInCache(
+  qc: ReturnType<typeof useQueryClient>,
+  memberId: string,
+  identityUserId: string | null,
+): member.MembersOverview | undefined {
+  const key = queryKeys.membersOverview();
+  const prev = qc.getQueryData<member.MembersOverview>(key);
+  if (prev) {
+    qc.setQueryData<member.MembersOverview>(key, {
+      ...prev,
+      members: prev.members.map((m) =>
+        m.id === memberId ? { ...m, identityUserId, version: m.version + 1 } : m,
+      ),
+    });
+  }
+  return prev;
+}
+
+/** OPTIMISTIC: link an 運営メンバー to a developershub.jp/identity account (メール名簿側)。 */
+export function useLinkMemberIdentity() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
   const { toast } = useToast();
-  return useMutation({
-    mutationFn: (input: { id: string; req: UpdateEmailAddressRequest }) => api.updateEmailAddress(input.id, input.req),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
-    onError: (err) => {
-      const p = presentError(err);
-      toast({ kind: "error", title: "更新に失敗しました", description: "message" in p ? p.message : undefined });
+  return useMutation<member.Member, unknown, { member: member.Member; identityUserId: common.UserId }, { prev: member.MembersOverview | undefined }>({
+    mutationFn: ({ member: m, identityUserId }) =>
+      api.linkMemberIdentity(m.id, { identityUserId, version: m.version }),
+    onMutate: async ({ member: m, identityUserId }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.membersOverview() });
+      const prev = setMemberIdentityInCache(qc, m.id, identityUserId);
+      return { prev };
     },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKeys.membersOverview(), ctx.prev);
+      const p = presentError(err);
+      toast({ kind: "error", title: "運営メンバーと紐付けできませんでした", description: "message" in p ? p.message : undefined });
+    },
+    onSuccess: () => toast({ kind: "success", title: "運営メンバーと紐付けました" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.membersOverview() }),
   });
 }
 
-/** NON-optimistic: delete an address (destructive; called after ConfirmDialog). */
-export function useDeleteEmailAddress() {
+/** OPTIMISTIC: unlink an 運営メンバー from its account (メール名簿側)。identityUserId=null via PATCH. */
+export function useUnlinkMemberIdentity() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation<member.Member, unknown, { member: member.Member }, { prev: member.MembersOverview | undefined }>({
+    mutationFn: ({ member: m }) => api.patchMember(m.id, { identityUserId: null, version: m.version }),
+    onMutate: async ({ member: m }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.membersOverview() });
+      const prev = setMemberIdentityInCache(qc, m.id, null);
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKeys.membersOverview(), ctx.prev);
+      const p = presentError(err);
+      toast({ kind: "error", title: "紐付けを解除できませんでした", description: "message" in p ? p.message : undefined });
+    },
+    onSuccess: () => toast({ kind: "success", title: "紐付けを解除しました" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.membersOverview() }),
+  });
+}
+
+// ---- チャット: メッセージ削除ポリシー (RBAC-configurable delete behaviour) ----
+
+/** The workspace chat message-deletion policy (per privilege tier). Any authenticated
+ *  admin may read it; the section stays read-only unless can("chat:moderate"). */
+export function useChatDeletionPolicy(): UseQueryResult<chat.DeletionPolicyResponse> {
+  const { api } = useRosterContext();
+  return useQuery({
+    queryKey: queryKeys.chatDeletionPolicy(),
+    queryFn: () => api.getChatDeletionPolicy(),
+    staleTime: 60_000,
+  });
+}
+
+/** NON-optimistic: save the deletion policy (ConfirmDialog upstream). Version-locked —
+ *  the server 409s on a stale `version`; the caller re-reads and retries. */
+export function useUpdateChatDeletionPolicy() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (id: string) => api.deleteEmailAddress(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() });
-      toast({ kind: "success", title: "アドレスを削除しました" });
+    mutationFn: (req: chat.UpdateDeletionPolicyRequest) => api.updateChatDeletionPolicy(req),
+    onSuccess: (res) => {
+      qc.setQueryData(queryKeys.chatDeletionPolicy(), res);
+      toast({ kind: "success", title: "メッセージ削除ポリシーを保存しました" });
     },
     onError: (err) => {
       const p = presentError(err);
-      toast({ kind: "error", title: "削除に失敗しました", description: "message" in p ? p.message : undefined });
+      toast({ kind: "error", title: "保存に失敗しました", description: "message" in p ? p.message : undefined });
     },
   });
 }

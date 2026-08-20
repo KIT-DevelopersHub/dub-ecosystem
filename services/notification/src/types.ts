@@ -5,6 +5,7 @@ import type { notification } from "@dub/types";
 
 export type NotificationChannel = notification.NotificationChannel;
 export type NotificationType = notification.NotificationType;
+export type NotificationAudience = notification.NotificationAudience;
 
 // urgent is an internal signal (frozen NotifyRequest has no priority field): it is
 // derived from the EventMappingRule for lane-A events and defaults to "normal" for
@@ -31,6 +32,10 @@ export interface IngestInput {
   title: string;
   body: string | null;
   priority: NotificationPriority;
+  // Audience gate (defaults to 'members' when unset, preserving legacy visibility). The
+  // admin-facing update notifications set 'admin' so members never see them until an
+  // admin publishes them as a members broadcast.
+  audience?: NotificationAudience;
   channels?: NotificationChannel[]; // desired; preferences decide the final set
   dedupKey?: string;
   resourceType?: string | null;
@@ -78,6 +83,9 @@ export interface EventMappingRule {
   type: NotificationType;
   channels: NotificationChannel[];
   priority: NotificationPriority;
+  // Optional audience for the mapped notification (defaults to 'members'). Admin-only
+  // operational events (deploy / github / inquiry) set 'admin'.
+  audience?: NotificationAudience;
   buildRecipients(payload: unknown): NotifyRecipients;
   buildContent(payload: unknown): { title: string; body?: string; resourceType?: string; resourceId?: string };
   buildDedupKey?(payload: unknown): string;

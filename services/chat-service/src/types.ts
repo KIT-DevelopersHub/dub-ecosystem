@@ -52,6 +52,7 @@ export interface Message {
   body: string; // logically-deleted messages return a redacted body
   attachmentFileIds: common.FileId[];
   reactions: Record<string, common.UserId[]>; // emoji -> userId[]
+  replyCount: number; // thread replies to this message (top-level list only; 0 otherwise)
   version: number;
   editedAt: common.ISODateTime | null;
   deletedAt: common.ISODateTime | null;
@@ -118,6 +119,52 @@ export interface ReactionToggleRequest {
 export interface ReactionToggleResponse {
   messageId: common.MessageId;
   reactions: Record<string, common.UserId[]>;
+}
+
+// ---- search (Slack-parity workspace/channel search) ----
+export interface SearchMessagesQuery {
+  q: string;
+  channelId?: common.ChannelId; // scope to one channel; omit = all readable channels
+  limit?: number;
+}
+// A search match: the message + enough channel context for the FE to render/navigate.
+export interface SearchHit {
+  message: Message;
+  channelId: common.ChannelId;
+  channelName: string;
+  channelType: ChannelType;
+}
+
+// ---- message deletion policy (RBAC-configurable delete behaviour) ----
+// The policy shape + default are frozen in @dub/types (single source of truth);
+// re-export under local names so the service reads one contract.
+export type MessageDeletionMode = chat.MessageDeletionMode;
+export type MessageDeletionPolicy = chat.MessageDeletionPolicy;
+export type DeletionPolicyResponse = chat.DeletionPolicyResponse;
+export type UpdateDeletionPolicyRequest = chat.UpdateDeletionPolicyRequest;
+
+// DELETE /chat/messages/:id envelope. `mode` = how the policy resolved the delete;
+// `message` = the redacted tombstone (mode="tombstone") or null (mode="hard").
+export interface DeleteMessageResult {
+  mode: MessageDeletionMode;
+  message: Message | null;
+}
+
+// The stored policy plus its optimistic-concurrency version (0 = no row yet / default).
+export interface DeletionPolicyRow {
+  policy: MessageDeletionPolicy;
+  version: number;
+}
+
+// ---- pins (Slack-parity pinned messages) ----
+export interface PinToggleRequest {
+  messageId: common.MessageId;
+}
+// A message row joined with its channel context, as returned by repo.searchMessages.
+export interface SearchRow {
+  message: MessageRow;
+  channelName: string;
+  channelType: ChannelType;
 }
 
 // WsTicketResponse is frozen in @dub/types (chat); re-export under the local name.
@@ -240,6 +287,8 @@ export interface ChatRepo {
     beforeId?: string; // cursor: id < beforeId, desc
     limit: number;
   }): Promise<MessageRow[]>;
+  /** Count non-deleted thread replies per root message id (for the top-level list summary). */
+  replyCounts(rootIds: common.MessageId[]): Promise<Map<string, number>>;
   updateMessage(next: MessageRow, expectedVersion: number): Promise<boolean>;
 
   // reactions
@@ -252,6 +301,37 @@ export interface ChatRepo {
   setReadState(channelId: common.ChannelId, userId: common.UserId, lastReadMessageId: common.MessageId, at: string): Promise<void>;
   getReadState(channelId: common.ChannelId, userId: common.UserId): Promise<{ lastReadMessageId: common.MessageId | null } | null>;
   countUnread(channelId: common.ChannelId, userId: common.UserId, lastReadMessageId: common.MessageId | null): Promise<number>;
+
+  // pins (channel-scoped; newest-pinned message first, tombstones excluded)
+  listPinnedMessages(channelId: common.ChannelId): Promise<MessageRow[]>;
+  isPinned(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean>;
+  addPin(channelId: common.ChannelId, messageId: common.MessageId, userId: common.UserId, at: string): Promise<void>;
+  removePin(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean>;
+
+  // search: substring match over readable channels (public OR the caller is a member),
+  // tombstones excluded, newest-first, bounded by limit.
+  searchMessages(q: {
+    userId: common.UserId;
+    text: string;
+    channelId?: common.ChannelId;
+    limit: number;
+  }): Promise<SearchRow[]>;
+
+  // deletion policy (org-scoped; null = no override row yet -> in-code default)
+  getDeletionPolicy(orgId: common.OrgId): Promise<DeletionPolicyRow | null>;
+  /** Upsert with optimistic-concurrency on `expectedVersion` (0 = insert first row).
+   *  Returns the new version on success, or null on a version conflict. */
+  setDeletionPolicy(input: {
+    orgId: common.OrgId;
+    policy: MessageDeletionPolicy;
+    expectedVersion: number;
+    updatedBy: common.UserId | null;
+    at: common.ISODateTime;
+  }): Promise<{ version: number } | null>;
+
+  /** Physically remove a message and its dependent rows (reactions, pins, and any
+   *  thread replies rooted at it) — the `hard` delete path. Idempotent. */
+  hardDeleteMessage(id: common.MessageId): Promise<void>;
 }
 
 export interface AppDeps {

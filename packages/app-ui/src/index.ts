@@ -24,3 +24,12 @@ export {
 export { RolePicker, type RolePickerProps, type RoleOption } from "./components/RolePicker";
 export { DialogActions, type DialogActionsProps } from "./components/DialogActions";
 export { FormError, type FormErrorProps } from "./components/FormError";
+
+export {
+  useUndoRedo,
+  useUndoRedoHotkeys,
+  type UndoableCommand,
+  type UndoRedo,
+  type UseUndoRedoOptions,
+  type UndoRedoHotkeysOptions,
+} from "./hooks/useUndoRedo";

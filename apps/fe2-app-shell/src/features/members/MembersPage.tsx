@@ -1,20 +1,20 @@
-// 運営メンバー管理 top screen. Hosts the three views (一覧 / チーム別 / 組織図) behind
-// Tabs, plus the toolbar (search, メンバー追加 / チーム追加 / 印刷) and the shared
-// create/edit dialogs + destructive ConfirmDialog. Read = identity:read (route gate);
-// write actions are re-authorized server-side (identity:admin).
+// 運営メンバー管理 top screen. Hosts the two views (チーム別 / 組織図) behind Tabs,
+// plus the toolbar (メンバー追加 / チーム追加 / 印刷) and the shared create/edit dialogs
+// + destructive ConfirmDialog. Read = identity:read (route gate); write actions are
+// re-authorized server-side (identity:admin).
+// NOTE: the flat 一覧 tab was removed — the per-person list (氏名/ロール/アドレス/ログイン
+// 紐付け) is owned by the ユーザー名簿 side, which the members app is being merged into.
 import { useMemo, useState } from "react";
 import {
   PageHeader,
   Button,
   Tabs,
-  TextField,
   ConfirmDialog,
   SkeletonLoader,
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
-import { ListView } from "./ListView.tsx";
 import { TeamsView } from "./TeamsView.tsx";
 import { OrgChartView } from "./OrgChartView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
@@ -22,15 +22,14 @@ import { TeamFormDialog } from "./TeamFormDialog.tsx";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import styles from "./members.module.css";
 
-type TabId = "list" | "teams" | "org";
+type TabId = "teams" | "org";
 
 export function MembersPage(): JSX.Element {
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
 
-  const [tab, setTab] = useState<TabId>("list");
-  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<TabId>("teams");
   const [memberDialog, setMemberDialog] = useState<{ open: boolean; editing: OrgMember | null }>({ open: false, editing: null });
   const [teamDialog, setTeamDialog] = useState<{ open: boolean; editing: MemberTeam | null }>({ open: false, editing: null });
   const [confirm, setConfirm] = useState<
@@ -41,15 +40,6 @@ export function MembersPage(): JSX.Element {
 
   const teams = overview.data?.teams ?? [];
   const members = overview.data?.members ?? [];
-  const teamsById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
-
-  const filteredMembers = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return members;
-    return members.filter(
-      (m) => m.name.toLowerCase().includes(q) || (m.roleTitle ?? "").toLowerCase().includes(q),
-    );
-  }, [members, search]);
 
   const openAddMember = () => setMemberDialog({ open: true, editing: null });
   const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: m });
@@ -92,7 +82,6 @@ export function MembersPage(): JSX.Element {
         <div className={styles.toolbar}>
           <Tabs
             items={[
-              { id: "list", label: "一覧" },
               { id: "teams", label: "チーム別" },
               { id: "org", label: "組織図" },
             ]}
@@ -101,11 +90,6 @@ export function MembersPage(): JSX.Element {
             testId="members-tabs"
           />
           <div className={styles.toolbarSpacer} />
-          {tab === "list" ? (
-            <div className={styles.searchField}>
-              <TextField id="members-search" value={search} onChange={setSearch} placeholder="氏名・役割で検索" testId="members-search" />
-            </div>
-          ) : null}
           {tab === "org" ? (
             <Button variant="secondary" onClick={() => window.print()} testId="members-print">
               印刷 / PNG
@@ -114,9 +98,6 @@ export function MembersPage(): JSX.Element {
         </div>
       </div>
 
-      {tab === "list" ? (
-        <ListView members={filteredMembers} teamsById={teamsById} onEdit={openEditMember} onDelete={(m) => setConfirm({ kind: "member", target: m })} />
-      ) : null}
       {tab === "teams" ? (
         <TeamsView
           teams={teams}

@@ -8,9 +8,13 @@
 // other code changes. Authz is the identity-roster /authz/check (drive:read / write).
 import type { ExecutionContext, Fetcher } from "@cloudflare/workers-types";
 import { createServiceClient, newRequestId } from "@dub/http";
-import type { identity } from "@dub/types";
+import { createDbClient, newId, nowIso } from "@dub/db";
+import { common, type identity } from "@dub/types";
 import { createApp } from "./app";
 import { createDriveShareService } from "./service";
+import { createRoleGrantsService } from "./role-grants-service";
+import { createD1RoleGrantStore } from "./role-grants-store";
+import { createIdentityRoleMembership } from "./role-membership";
 import { createMockDriveShareClient } from "./mock-client";
 import { createGoogleDriveShareClient } from "./google/client";
 import { createTokenProvider } from "./google/token";
@@ -52,15 +56,41 @@ function buildDriveClient(env: Env): DriveShareClient {
   return createGoogleDriveShareClient({ token });
 }
 
-function buildApp(env: Env): ReturnType<typeof createApp> {
+/** Per-request request context (from the trusted x-dub-* headers). The role-membership
+ *  client needs the acting user id so identity can resolve /identity/roles (identity:read),
+ *  so the app is built per request — mirrors member-service's buildDeps(env, requestId). */
+interface ReqCtx {
+  requestId: string;
+  userId?: string;
+}
+
+function buildApp(env: Env, reqCtx: ReqCtx): ReturnType<typeof createApp> {
   const client = buildDriveClient(env);
   const service = createDriveShareService({ client, config: parseConfig(env) });
   const authz = createIdentityAuthz(env.SVC_IDENTITY);
-  return createApp({ service, authz });
+  const orgId = common.DUB_DEFAULT_ORG_ID;
+
+  const store = createD1RoleGrantStore(createDbClient(env.DB, { namespace: "driveshare", requestId: reqCtx.requestId }));
+  const roster = createIdentityRoleMembership(env.SVC_IDENTITY, {
+    requestId: reqCtx.requestId,
+    ...(reqCtx.userId ? { userId: reqCtx.userId } : {}),
+  });
+  const roleGrants = createRoleGrantsService({
+    drive: client,
+    roster,
+    store,
+    orgId,
+    now: nowIso,
+    newId: () => newId("dsg"),
+  });
+
+  return createApp({ service, roleGrants, authz });
 }
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
-    return buildApp(env).fetch(request, env, ctx);
+    const requestId = request.headers.get("x-dub-request-id") ?? newRequestId();
+    const userId = request.headers.get("x-dub-user-id") ?? undefined;
+    return buildApp(env, { requestId, ...(userId ? { userId } : {}) }).fetch(request, env, ctx);
   },
 };

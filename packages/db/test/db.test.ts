@@ -63,8 +63,8 @@ function fakeD1() {
 }
 
 describe("@dub/db namespaces + ids", () => {
-  it("freezes 18 namespaces and resolves longest-prefix", () => {
-    expect(NAMESPACES.length).toBe(18);
+  it("freezes 19 namespaces and resolves longest-prefix", () => {
+    expect(NAMESPACES.length).toBe(19);
     expect(namespaceOf("file_meta_files")).toBe("file_meta");
     expect(namespaceOf("task_dependencies")).toBe("task");
     expect(namespaceOf("unknown_table")).toBe(null);
@@ -77,6 +77,19 @@ describe("@dub/db namespaces + ids", () => {
     expect(t).toContain("task_tasks");
     expect(t).toContain("task_deps");
     expect(t).toContain("task_archive");
+  });
+
+  it("does not mis-parse the ON CONFLICT DO UPDATE SET keyword as a table (regression)", () => {
+    // `... DO UPDATE SET` (upsert) trails "SET" after "UPDATE"; it must NOT be captured
+    // as a table, or every upsert raises a spurious DB_NAMESPACE_VIOLATION.
+    const t = tablesOf(
+      "INSERT INTO member_participations (id, name) VALUES (?, ?) " +
+        "ON CONFLICT(org_id, normalized_name) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at",
+    );
+    expect(t).toEqual(["member_participations"]);
+    expect(t).not.toContain("SET");
+    // A genuine cross-table UPDATE still resolves its real table.
+    expect(tablesOf("UPDATE member_people SET archived_at = ? WHERE id = ?")).toEqual(["member_people"]);
   });
 
   it("newId is prefixed + lexicographically time-ordered; nowIso is UTC ISO", () => {
@@ -103,6 +116,20 @@ describe("@dub/db client enforcement", () => {
     const c = createDbClient(d1, { namespace: "task" });
     await c.run("INSERT INTO task_tasks (id) VALUES (?)", "t1");
     expect(executed.some((s) => s.includes("task_tasks"))).toBe(true);
+  });
+
+  it("allows a same-namespace ON CONFLICT DO UPDATE SET upsert (regression)", async () => {
+    // Reproduces the participation 500: strict enforcement must NOT reject an own-namespace
+    // upsert just because it contains `DO UPDATE SET`.
+    const { d1, executed } = fakeD1();
+    const c = createDbClient(d1, { namespace: "member" });
+    await c.run(
+      "INSERT INTO member_participations (id, name) VALUES (?, ?) " +
+        "ON CONFLICT(org_id, normalized_name) DO UPDATE SET name = excluded.name",
+      "p1",
+      "山田 太郎",
+    );
+    expect(executed.some((s) => s.includes("member_participations"))).toBe(true);
   });
 
   it("forbids runtime DDL via the client (raw() only)", async () => {

@@ -2,6 +2,7 @@ import type { identity } from "@dub/types";
 import { Badge, Switch } from "@dub/ui";
 import { groupByDomain, toggleDomain, togglePermission, domainSelectionState, type CatalogEntry } from "../lib/permissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../lib/permissionLabels";
+import { AppAccessSection } from "./AppAccessSection";
 
 // Design-system tokens (@dub/tokens) with literal fallbacks so the matrix still
 // reads correctly if a token is ever absent. Each permission is an on/off toggle
@@ -18,6 +19,16 @@ const cardStyle: React.CSSProperties = {
 const legendRowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", width: "100%" };
 const groupTitleStyle: React.CSSProperties = { fontWeight: 700, fontSize: 15 };
 const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 13 };
+// Two-column grid for the permission rows: halves the vertical scroll length vs the
+// old single full-width column. The min track width (460px) is wide enough that only
+// two columns fit a normal admin panel, so it stays a true 2-column layout instead of
+// packing 3–4 columns on wide screens; `min(100%, …)` lets it collapse to a single
+// full-width column on a narrow (mobile) viewport without overflowing.
+const gridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
+  gap: 4,
+};
 const rowBaseStyle: React.CSSProperties = {
   display: "flex",
   gap: 10,
@@ -65,6 +76,21 @@ export function PermissionMatrix({
   return (
     <div data-testid={`${idPrefix}-permission-matrix`}>
       {groups.map((g) => {
+        // The per-app access tier (domain "app") renders as a 2-tier accordion (有効化
+        // トグル → ネストした 閲覧/編集作成 セレクタ) instead of the flat per-key grid, so every
+        // app gets one clean on/off row. All other domains keep the standard grid.
+        if (g.domain === "app") {
+          return (
+            <AppAccessSection
+              key={g.domain}
+              selected={selected}
+              disabled={disabled}
+              onChange={onChange}
+              idPrefix={idPrefix}
+              lockedKeys={lockedKeys}
+            />
+          );
+        }
         const state = domainSelectionState(selected, g.entries);
         const onCount = g.entries.reduce((n, e) => n + (selected.includes(e.key as identity.PermissionKey) ? 1 : 0), 0);
         return (
@@ -86,6 +112,7 @@ export function PermissionMatrix({
                 </span>
               </span>
             </legend>
+            <div style={gridStyle} data-testid={`${idPrefix}-matrix-grid-${g.domain}`}>
             {g.entries.map((e) => {
               const key = e.key as identity.PermissionKey;
               const checked = selected.includes(key);
@@ -126,6 +153,7 @@ export function PermissionMatrix({
                 </div>
               );
             })}
+            </div>
           </fieldset>
         );
       })}

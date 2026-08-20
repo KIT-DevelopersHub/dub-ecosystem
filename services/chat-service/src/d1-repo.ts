@@ -3,7 +3,7 @@
 // No cross-namespace joins (chat is the DB-split first candidate).
 import type { DbClient } from "@dub/db";
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind, MessageDeletionMode } from "./types";
 
 interface ChannelDbRow {
   id: string;
@@ -185,6 +185,10 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       if (q.threadRootId !== undefined) {
         where.push("thread_root_id = ?");
         binds.push(q.threadRootId);
+      } else {
+        // Main timeline = top-level messages only; replies live in the thread pane
+        // (Slack-parity). Fetched via threadRootId above.
+        where.push("thread_root_id IS NULL");
       }
       let order: string;
       if (q.afterMessageId !== undefined) {
@@ -204,6 +208,19 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
         ...binds,
       );
       return rows.map(toMessageRow);
+    },
+    async replyCounts(rootIds): Promise<Map<string, number>> {
+      const out = new Map<string, number>();
+      if (rootIds.length === 0) return out;
+      const placeholders = rootIds.map(() => "?").join(", ");
+      const rows = await db.all<{ root: string; n: number }>(
+        `SELECT thread_root_id AS root, COUNT(*) AS n FROM chat_messages
+          WHERE thread_root_id IN (${placeholders}) AND deleted_at IS NULL
+          GROUP BY thread_root_id`,
+        ...rootIds,
+      );
+      for (const r of rows) out.set(r.root, Number(r.n));
+      return out;
     },
     async updateMessage(next: MessageRow, expectedVersion: number): Promise<boolean> {
       const res = await db.run(
@@ -281,6 +298,132 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       const binds: unknown[] = lastReadMessageId === null ? [channelId, userId] : [channelId, userId, lastReadMessageId];
       const r = await db.first<{ n: number }>(sql, ...binds);
       return r?.n ?? 0;
+    },
+
+    // ---- pins ----
+    async listPinnedMessages(channelId: common.ChannelId): Promise<MessageRow[]> {
+      // Join pins -> messages; exclude tombstones; newest-pinned message first (id desc).
+      const rows = await db.all<MessageDbRow>(
+        `SELECT m.* FROM chat_pins p
+           JOIN chat_messages m ON m.id = p.message_id
+          WHERE p.channel_id = ? AND m.deleted_at IS NULL
+          ORDER BY m.id DESC`,
+        channelId,
+      );
+      return rows.map(toMessageRow);
+    },
+    async isPinned(channelId: common.ChannelId, messageId: common.MessageId): Promise<boolean> {
+      const r = await db.first<{ one: number }>(
+        `SELECT 1 AS one FROM chat_pins WHERE channel_id = ? AND message_id = ?`,
+        channelId, messageId,
+      );
+      return r !== null;
+    },
+    async addPin(channelId, messageId, userId, at): Promise<void> {
+      await db.run(
+        `INSERT INTO chat_pins (channel_id, message_id, pinned_by, pinned_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(channel_id, message_id) DO NOTHING`,
+        channelId, messageId, userId, at,
+      );
+    },
+    async removePin(channelId, messageId): Promise<boolean> {
+      const res = await db.run(`DELETE FROM chat_pins WHERE channel_id = ? AND message_id = ?`, channelId, messageId);
+      return res.meta.changes > 0;
+    },
+
+    // ---- search ----
+    async searchMessages(q): Promise<SearchRow[]> {
+      // Substring (case-insensitive over ASCII via lower(); CJK unaffected on both sides),
+      // scoped to readable channels (public OR caller is a member). Newest-first, bounded.
+      const where: string[] = [
+        "m.deleted_at IS NULL",
+        "instr(lower(m.body), ?) > 0",
+        "(c.visibility = 'public' OR EXISTS (SELECT 1 FROM chat_channel_members mm WHERE mm.channel_id = c.id AND mm.user_id = ?))",
+      ];
+      const binds: unknown[] = [q.text.toLowerCase(), q.userId];
+      if (q.channelId) {
+        where.push("m.channel_id = ?");
+        binds.push(q.channelId);
+      }
+      binds.push(q.limit);
+      const rows = await db.all<MessageDbRow & { channel_name: string; channel_type: string }>(
+        `SELECT m.*, c.name AS channel_name, c.type AS channel_type
+           FROM chat_messages m
+           JOIN chat_channels c ON c.id = m.channel_id
+          WHERE ${where.join(" AND ")}
+          ORDER BY m.id DESC LIMIT ?`,
+        ...binds,
+      );
+      return rows.map((r) => ({
+        message: toMessageRow(r),
+        channelName: r.channel_name,
+        channelType: r.channel_type as ChannelType,
+      }));
+    },
+
+    // ---- deletion policy (org-scoped) ----
+    async getDeletionPolicy(orgId): Promise<{ policy: { member: MessageDeletionMode; moderator: MessageDeletionMode }; version: number } | null> {
+      let r: { deletion_member: string; deletion_moderator: string; version: number } | null;
+      try {
+        r = await db.first<{ deletion_member: string; deletion_moderator: string; version: number }>(
+          `SELECT deletion_member, deletion_moderator, version FROM chat_settings WHERE org_id = ?`,
+          orgId,
+        );
+      } catch (err) {
+        // Resilience: if the chat_settings migration (0003) has not been applied to
+        // this D1 yet (migrations run out-of-band, see deploy.yml), treat it exactly
+        // like "no override row" -> the in-code default (all hard) is in effect.
+        // Deletion must never 500 just because the settings table is missing. Any
+        // OTHER error propagates (never silently change delete behaviour).
+        if (/no such table/i.test(String((err as Error)?.message ?? err))) return null;
+        throw err;
+      }
+      if (!r) return null;
+      return {
+        policy: { member: r.deletion_member as MessageDeletionMode, moderator: r.deletion_moderator as MessageDeletionMode },
+        version: r.version,
+      };
+    },
+    async setDeletionPolicy(input): Promise<{ version: number } | null> {
+      // UPDATE-then-INSERT upsert with optimistic-concurrency (mirrors addMember /
+      // setReadState — "DO UPDATE SET" trips the @dub/db strict namespace guard).
+      if (input.expectedVersion === 0) {
+        // First write: insert only if no row exists yet. A pre-existing row => conflict.
+        const ins = await db.run(
+          `INSERT OR IGNORE INTO chat_settings
+             (org_id, deletion_member, deletion_moderator, version, updated_at, updated_by)
+           VALUES (?, ?, ?, 1, ?, ?)`,
+          input.orgId, input.policy.member, input.policy.moderator, input.at, input.updatedBy,
+        );
+        return ins.meta.changes > 0 ? { version: 1 } : null;
+      }
+      const nextVersion = input.expectedVersion + 1;
+      const upd = await db.run(
+        `UPDATE chat_settings
+            SET deletion_member = ?, deletion_moderator = ?, version = ?, updated_at = ?, updated_by = ?
+          WHERE org_id = ? AND version = ?`,
+        input.policy.member, input.policy.moderator, nextVersion, input.at, input.updatedBy,
+        input.orgId, input.expectedVersion,
+      );
+      return upd.meta.changes > 0 ? { version: nextVersion } : null;
+    },
+
+    // ---- hard delete (physical removal + dependent-row cascade) ----
+    async hardDeleteMessage(id: common.MessageId): Promise<void> {
+      // Remove reactions/pins for the message AND any thread replies rooted at it,
+      // then the replies, then the message itself. Same-namespace only; idempotent.
+      await db.run(
+        `DELETE FROM chat_reactions
+          WHERE message_id = ? OR message_id IN (SELECT id FROM chat_messages WHERE thread_root_id = ?)`,
+        id, id,
+      );
+      await db.run(
+        `DELETE FROM chat_pins
+          WHERE message_id = ? OR message_id IN (SELECT id FROM chat_messages WHERE thread_root_id = ?)`,
+        id, id,
+      );
+      await db.run(`DELETE FROM chat_messages WHERE thread_root_id = ?`, id);
+      await db.run(`DELETE FROM chat_messages WHERE id = ?`, id);
     },
   } satisfies ChatRepo;
 }

@@ -20,6 +20,12 @@
   padding: var(--dub-space-2) var(--dub-space-3);
   color: var(--dub-color-text-primary);
   border-bottom: 1px solid var(--dub-color-border-default);
+  vertical-align: middle;
+}
+/* Opt-in single-line cells (ColumnDef.noWrap) — keeps values that must not wrap
+ * on one line; the wide table then scrolls in .wrap's overflow-x:auto. */
+.td.noWrap {
+  white-space: nowrap;
 }
 .tr.clickable {
   cursor: pointer;
@@ -48,4 +54,62 @@
   padding: var(--dub-space-6);
   text-align: center;
   color: var(--dub-color-text-muted);
+}
+
+/* ── 表示列 picker (ColumnDef hiding / DataTableProps.columnHiding) ───────── */
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--dub-space-2);
+}
+/* The picker trigger sits at the right edge, so anchor its Popover panel to the
+ * right instead of Popover's default left:0 — keeps it on-screen (no clip). */
+.toolbar :global([role="dialog"]) {
+  left: auto;
+  right: 0;
+}
+.pickerTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-raised);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+}
+.pickerCount {
+  color: var(--dub-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.pickerPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  min-width: 12rem;
+}
+.pickerHeading {
+  margin: 0;
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+}
+.pickerList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+.pickerFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--dub-space-1);
+  padding-top: var(--dub-space-1);
+  border-top: 1px solid var(--dub-color-border-default);
+}
+.pickerFooter button {
+  white-space: nowrap;
 }

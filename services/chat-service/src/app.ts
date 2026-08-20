@@ -1,7 +1,10 @@
 // Hono app — a thin HTTP adapter over ChatService. Routing matches the gateway
-// mount: /api/v1/chat/* targets this Worker (gateway strips API_PREFIX + /chat).
-// WS is NOT served here (DO-direct, gateway-bypassing); clients use the doUrl from
-// GET /channels/:id/ws-ticket. POST /internal/system-messages is internal-only.
+// mount: api-gateway strips ONLY API_PREFIX (/api/v1) and PRESERVES the segment, so
+// /api/v1/chat/* reaches this Worker as /chat/* — the user-facing routes therefore live
+// under /chat (mirrors identity-roster's /identity, member-service's /members). /health
+// and the internal service-binding surface (/internal/system-messages) stay at bare paths
+// (addressed directly by callers, NOT through the gateway). WS is NOT served here
+// (DO-direct, gateway-bypassing); clients use the doUrl from GET /chat/channels/:id/ws-ticket.
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { dubContext, DUB_HEADERS, INTERNAL_MARKER, type RequestContext } from "@dub/http";
@@ -10,11 +13,13 @@ import type {
   AppDeps,
   AddMemberRequest,
   CreateChannelRequest,
+  PinToggleRequest,
   PostMessageRequest,
   PostSystemMessageRequest,
   ReactionToggleRequest,
   ReadStateUpdateRequest,
   UpdateChannelRequest,
+  UpdateDeletionPolicyRequest,
 } from "./types";
 import { ChatService, type ReqCtx } from "./service";
 
@@ -68,15 +73,19 @@ export function createApp(deps: AppDeps): Hono {
 
   const { authz } = deps;
 
-  // Auth on all user-facing groups (internal + health excluded).
-  app.use("/channels", authz.requireAuth());
-  app.use("/channels/*", authz.requireAuth());
-  app.use("/messages", authz.requireAuth());
-  app.use("/messages/*", authz.requireAuth());
-  app.use("/unread", authz.requireAuth());
+  // Auth on all user-facing groups (internal + health excluded). These live under
+  // /chat because the gateway preserves the segment (see file header).
+  app.use("/chat/channels", authz.requireAuth());
+  app.use("/chat/channels/*", authz.requireAuth());
+  app.use("/chat/messages", authz.requireAuth());
+  app.use("/chat/messages/*", authz.requireAuth());
+  app.use("/chat/unread", authz.requireAuth());
+  app.use("/chat/search", authz.requireAuth());
+  app.use("/chat/settings", authz.requireAuth());
+  app.use("/chat/settings/*", authz.requireAuth());
 
   // ---- channels ----
-  app.get("/channels", async (c) => {
+  app.get("/chat/channels", async (c) => {
     const q = c.req.query();
     return c.json(
       await svc.listChannels(reqCtx(c), {
@@ -87,43 +96,69 @@ export function createApp(deps: AppDeps): Hono {
     );
   });
 
-  app.post("/channels", authz.requirePermission("chat:create"), async (c) => {
+  app.post("/chat/channels", authz.requirePermission("chat:create"), async (c) => {
     const body = await readJson<CreateChannelRequest>(c);
     return c.json(await svc.createChannel(reqCtx(c), body), 201);
   });
 
-  app.get("/channels/:id", async (c) => {
+  app.get("/chat/channels/:id", async (c) => {
     return c.json(await svc.getChannel(reqCtx(c), c.req.param("id")));
   });
 
-  app.patch("/channels/:id", async (c) => {
+  app.patch("/chat/channels/:id", async (c) => {
     const body = await readJson<UpdateChannelRequest>(c);
     return c.json(await svc.updateChannel(reqCtx(c), c.req.param("id"), body));
   });
 
-  app.post("/channels/:id/members", async (c) => {
+  app.get("/chat/channels/:id/members", async (c) => {
+    return c.json(await svc.listMembers(reqCtx(c), c.req.param("id")));
+  });
+
+  app.post("/chat/channels/:id/members", async (c) => {
     const body = await readJson<AddMemberRequest>(c);
     await svc.addMember(reqCtx(c), c.req.param("id"), body);
     return c.body(null, 204);
   });
 
-  app.delete("/channels/:id/members/:userId", async (c) => {
+  app.delete("/chat/channels/:id/members/:userId", async (c) => {
     await svc.removeMember(reqCtx(c), c.req.param("id"), c.req.param("userId"));
     return c.body(null, 204);
   });
 
-  app.post("/channels/:id/read", async (c) => {
+  // ---- pins (Slack-parity) ----
+  app.get("/chat/channels/:id/pins", async (c) => {
+    return c.json(await svc.listPins(reqCtx(c), c.req.param("id")));
+  });
+
+  app.post("/chat/channels/:id/pins", async (c) => {
+    const body = await readJson<PinToggleRequest>(c);
+    return c.json(await svc.togglePin(reqCtx(c), c.req.param("id"), body.messageId));
+  });
+
+  app.post("/chat/channels/:id/read", async (c) => {
     const body = await readJson<ReadStateUpdateRequest>(c);
     // path id is authoritative for the channel scope
     return c.json(await svc.updateReadState(reqCtx(c), c.req.param("id"), { ...body, channelId: c.req.param("id") }));
   });
 
-  app.get("/channels/:id/ws-ticket", async (c) => {
+  app.get("/chat/channels/:id/ws-ticket", async (c) => {
     return c.json(await svc.issueWsTicket(reqCtx(c), c.req.param("id")));
   });
 
+  // ---- search (Slack-parity workspace / channel search) ----
+  app.get("/chat/search", async (c) => {
+    const q = c.req.query();
+    return c.json(
+      await svc.search(reqCtx(c), {
+        ...(q.q !== undefined ? { q: q.q } : {}),
+        ...(q.channelId ? { channelId: q.channelId } : {}),
+        ...(q.limit !== undefined ? { limit: qNum(q.limit) } : {}),
+      }),
+    );
+  });
+
   // ---- messages ----
-  app.get("/messages", async (c) => {
+  app.get("/chat/messages", async (c) => {
     const q = c.req.query();
     const channelId = q.channelId;
     if (!channelId) throw errors.validationFailed([{ field: "channelId", reason: "required" }]);
@@ -138,29 +173,41 @@ export function createApp(deps: AppDeps): Hono {
     );
   });
 
-  app.post("/messages", async (c) => {
+  app.post("/chat/messages", async (c) => {
     const body = await readJson<PostMessageRequest>(c);
     return c.json(await svc.postMessage(reqCtx(c), body), 201);
   });
 
-  app.patch("/messages/:id", async (c) => {
+  app.patch("/chat/messages/:id", async (c) => {
     const body = await readJson<{ version?: number; body?: string }>(c);
     return c.json(await svc.editMessage(reqCtx(c), c.req.param("id"), body));
   });
 
-  app.delete("/messages/:id", async (c) => {
-    await svc.deleteMessage(reqCtx(c), c.req.param("id"));
-    return c.body(null, 204);
+  app.delete("/chat/messages/:id", async (c) => {
+    // Returns { mode, message }: `hard` -> message null (row gone, client drops it);
+    // `tombstone` -> the redacted message (client renders "削除されました").
+    return c.json(await svc.deleteMessage(reqCtx(c), c.req.param("id")));
   });
 
-  app.post("/messages/:id/reactions", async (c) => {
+  app.post("/chat/messages/:id/reactions", async (c) => {
     const body = await readJson<ReactionToggleRequest>(c);
     return c.json(await svc.toggleReaction(reqCtx(c), c.req.param("id"), body.emoji));
   });
 
   // ---- unread (caller-scoped; no userId param, design §2) ----
-  app.get("/unread", async (c) => {
+  app.get("/chat/unread", async (c) => {
     return c.json(await svc.unread(reqCtx(c)));
+  });
+
+  // ---- settings: message deletion policy (RBAC-configurable delete behaviour) ----
+  // Reading is open to any authenticated member (the FE needs it to render the policy
+  // section); writing requires chat:moderate (admin/maintainer) — enforced fail-close.
+  app.get("/chat/settings/deletion-policy", async (c) => {
+    return c.json(await svc.getDeletionPolicy(reqCtx(c)));
+  });
+  app.patch("/chat/settings/deletion-policy", authz.requirePermission("chat:moderate"), async (c) => {
+    const body = await readJson<UpdateDeletionPolicyRequest>(c);
+    return c.json(await svc.updateDeletionPolicy(reqCtx(c), body));
   });
 
   return app;

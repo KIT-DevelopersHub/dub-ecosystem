@@ -40,6 +40,13 @@ export function checkIso(value: unknown, field: string, out: FieldError[]): void
   }
 }
 
+/** Optional free-string column (teamId / parentTaskId / wbs): undefined skips,
+ *  null clears, anything non-string is rejected. */
+export function checkOptString(value: unknown, field: string, out: FieldError[]): void {
+  if (value === undefined || value === null) return;
+  if (typeof value !== "string") out.push({ field, reason: "invalid_type" });
+}
+
 export function checkPriority(value: unknown, out: FieldError[]): void {
   if (value === undefined) return;
   if (typeof value !== "string" || !PRIORITIES.has(value)) {

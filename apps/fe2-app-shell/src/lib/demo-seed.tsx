@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues } from "@dub/types";
+import { identity as identityValues, appRegistry } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 
 const ORG = "org_demo";
@@ -43,11 +43,17 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "file:read",
   "notif:inbox:self",
   "notif:prefs:self",
+  "notif:broadcast_publish",
   "mail:read",
   "mail:send",
   "mail:admin",
   "chat:create",
   "audit:read",
+  // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
+  // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
+  // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
+  // covered automatically.
+  ...appRegistry.allAppAccessKeys(),
 ];
 
 const DEMO_ME: gateway.MeResponse = {
@@ -112,26 +118,62 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
 };
 
 // ── tasks ───────────────────────────────────────────────────────────────────
+// teamId is seeded here so the gantt's 並び替え→チーム順 groups these rows into
+// colour-coded team brackets (統括/開発/当日進行 …) — the same team ids/colours the
+// member roster seeds (createMembersStore). Two tasks per team so each bracket spans
+// a legible range.
 const TASKS: task.Task[] = [
   {
     version: 2, id: "tsk_1", eventId: "evt_1", title: "登壇者スケジュール確定", description: "全12セッションの時間割を確定する",
-    status: "in_progress", priority: "high", assigneeId: ME_ID, dueAt: "2026-08-03T09:00:00Z", origin: "internal",
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_hq", dueAt: "2026-08-03T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
   },
   {
     version: 1, id: "tsk_2", eventId: "evt_1", title: "会場レイアウト図作成", description: null,
-    status: "todo", priority: "medium", assigneeId: ME_ID, dueAt: "2026-08-04T09:00:00Z", origin: "internal",
+    status: "todo", priority: "medium", assigneeId: ME_ID, teamId: "team_dev", dueAt: "2026-08-04T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-05T00:00:00Z", updatedAt: "2026-07-20T00:00:00Z",
   },
   {
     version: 1, id: "tsk_3", eventId: "evt_1", title: "スポンサー請求書送付", description: "確定した3社へ請求",
-    status: "done", priority: "urgent", assigneeId: "usr_bob", dueAt: "2026-07-25T09:00:00Z", origin: "internal",
+    status: "done", priority: "urgent", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-07-25T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-02T00:00:00Z", updatedAt: "2026-07-24T00:00:00Z",
   },
   {
     version: 1, id: "tsk_4", eventId: "evt_1", title: "受付システム連携確認", description: null,
-    status: "blocked", priority: "medium", assigneeId: null, dueAt: null, origin: "github",
+    status: "blocked", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: null, origin: "github",
     archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_5", eventId: "evt_1", title: "運営ツール名簿連携", description: "名簿とタスクの連携確認",
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_dev", dueAt: "2026-08-06T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-12T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_6", eventId: "evt_1", title: "当日タイムテーブル作成", description: null,
+    status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
+  },
+  // ── evt_3 (学生ハッカソン Hackit 秋) — a 2nd event WITH a gantt so the global
+  //    header イベント switcher demonstrably reloads the timeline on switch. ──
+  {
+    version: 1, id: "hk_1", eventId: "evt_3", title: "Hackit: 会場・日程確定", description: null,
+    status: "done", priority: "high", assigneeId: ME_ID, teamId: "team_ops", startAt: "2026-08-01T00:00:00Z", dueAt: "2026-08-20T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_2", eventId: "evt_3", title: "Hackit: 協賛・賞品調整", description: null,
+    status: "in_progress", priority: "medium", assigneeId: "usr_bob", teamId: "team_ops", startAt: "2026-08-10T00:00:00Z", dueAt: "2026-09-05T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_3", eventId: "evt_3", title: "Hackit: 募集LP・告知", description: null,
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_dev", startAt: "2026-08-15T00:00:00Z", dueAt: "2026-09-10T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-15T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_4", eventId: "evt_3", title: "Hackit: 当日運営・審査", description: null,
+    status: "todo", priority: "urgent", assigneeId: ME_ID, teamId: "team_hq", startAt: "2026-09-20T00:00:00Z", dueAt: "2026-09-21T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-20T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
   },
 ];
 
@@ -139,16 +181,75 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID },
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
+      // contiguous; used to prove the team rail stays straight across an indented child.
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
       { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
       { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
     ],
   },
+  evt_3: {
+    eventId: "evt_3",
+    rows: [
+      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
+      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
+      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+    ],
+    dependencies: [
+      { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },
+    ],
+  },
 };
+
+// Serve the gantt DTO the way gantt-service does: a work-package (hasChildren) row's OWN
+// startsAt/endsAt are NULL — the span is DERIVED from its children (the client rolls it up
+// for the bar AND the parent's detail 開始/終了). Echoing a parent's stored dates here would
+// diverge from prod (the exact mock/prod drift that shipped a broken build), so we null
+// them on read. Leaves keep their dates. This makes the demo reproduce prod faithfully.
+function ganttDtoFor(ev: string): gantt.GanttChartDTO {
+  const dto = GANTT[ev];
+  if (!dto) return { eventId: ev as gantt.GanttChartDTO["eventId"], rows: [], dependencies: [] };
+  const rows = dto.rows.map((r) => (r.hasChildren ? { ...r, startsAt: null, endsAt: null } : r));
+  return { ...dto, rows };
+}
+
+/** Persist a bar's window (leaf move/resize) or a detail date edit onto BOTH the task
+ *  columns and the gantt row, so a reload / refetch reflects it. Mirrors gantt-service +
+ *  task-service (startsAt↔startAt, endsAt↔dueAt). */
+function applyScheduleToDemo(taskId: string, startsAt: string | null, endsAt: string | null): task.Task | null {
+  const t = TASKS.find((x) => x.id === taskId);
+  if (!t) return null;
+  t.startAt = startsAt;
+  t.dueAt = endsAt;
+  t.updatedAt = new Date().toISOString();
+  t.version += 1;
+  for (const dto of Object.values(GANTT)) {
+    const row = dto.rows.find((r) => r.taskId === taskId);
+    if (row) {
+      row.startsAt = startsAt;
+      row.endsAt = endsAt;
+    }
+  }
+  return t;
+}
+
+// Per-user gantt view state (zoom / collapsed / manual drag order). Mutable in-session
+// so a drag-reorder PERSISTS across the round-trip — otherwise the reorder would snap
+// back (the SortableList's optimistic override releases once the persisted order fails
+// to return). Keyed by eventId; seeded lazily on first GET.
+const GANTT_VIEWS: Record<string, gantt.GanttViewState> = {};
+function ganttViewFor(eventId: string): gantt.GanttViewState {
+  const ev = eventId as gantt.GanttViewState["eventId"];
+  if (!GANTT_VIEWS[eventId]) GANTT_VIEWS[eventId] = { eventId: ev, zoom: "week", collapsedTaskIds: [], orderedTaskIds: [] };
+  return GANTT_VIEWS[eventId]!;
+}
 
 // ── notifications ─────────────────────────────────────────────────────────────
 const NOTIFICATIONS: notification.InboxItem[] = [
@@ -156,6 +257,56 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
 ];
+
+// audience='admin' notifications powering the Notification管理 screen
+// (/notifications/manage, gated on notif:broadcast_publish). Mutable in-session so
+// the "メンバーへ公開" action persists (row stays 公開済み on reload) and the
+// optimistic UI is confirmed by the (demo) server. Mirrors the three auto-admin
+// notification kinds: deploy done / feature published / feedback.
+const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
+  { id: "ntfn_adm_0001", type: "deploy.deployment.status_changed", title: "デプロイ完了: dub-ecosystem", body: "本番へのデプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T03:00:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0002", type: "release", title: "🎉 ガントチャートをメンバー公開しました", body: "タスクの期間・進捗・依存をタイムラインで確認できます。", audience: "admin", createdAt: "2026-08-02T02:30:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0003", type: "feedback", title: "新しいフィードバック: 検索が遅い", body: "カテゴリ: idea\n送信ユーザー: usr_alice\n\n検索ページが重いです", audience: "admin", createdAt: "2026-08-02T02:00:00Z", publishedBroadcastId: null },
+  // Extra rows so the genre filter (新機能 / システム) and bulk select-all are demonstrable.
+  { id: "ntfn_adm_0004", type: "release", title: "🎉 メール添付ファイルに対応しました", body: "メールの送受信で添付ファイルを扱えるようになりました。", audience: "admin", createdAt: "2026-08-02T01:45:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0005", type: "release", title: "🎉 使用量ダッシュボードを公開しました", body: "各サービスの無料枠の使用状況を確認できます。", audience: "admin", createdAt: "2026-08-02T01:30:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0006", type: "deploy.deployment.status_changed", title: "デプロイ完了: fe2-app-shell", body: "SPA シェルの本番デプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T01:15:00Z", publishedBroadcastId: null },
+  { id: "ntfn_adm_0007", type: "feedback", title: "新しいフィードバック: 通知の一括操作がほしい", body: "カテゴリ: idea\n送信ユーザー: usr_bob\n\n大量に公開する時に一括操作がほしいです", audience: "admin", createdAt: "2026-08-02T01:00:00Z", publishedBroadcastId: null },
+];
+
+// Publish one admin notification to members (idempotent). Flips the source row to 公開済み
+// in-session and fans a single members broadcast into the inbox. Returns null on an unknown
+// id. Shared by the single + bulk (publish-batch) demo endpoints.
+function publishAdminNotificationDemo(id: string): notification.PublishBroadcastResponse | null {
+  const adminItem = ADMIN_NOTIFICATIONS.find((a) => a.id === id);
+  if (!adminItem) return null;
+  if (adminItem.publishedBroadcastId) {
+    return { notificationId: adminItem.publishedBroadcastId, deduplicated: true, publishedBroadcastId: adminItem.publishedBroadcastId };
+  }
+  const broadcastId = `ntf_bcast_${Math.random().toString(36).slice(2, 8)}`;
+  adminItem.publishedBroadcastId = broadcastId;
+  NOTIFICATIONS.unshift({ id: broadcastId, type: adminItem.type, title: adminItem.title, body: adminItem.body, readAt: null, createdAt: new Date().toISOString(), resourceType: "notification", resourceId: adminItem.id });
+  return { notificationId: broadcastId, deduplicated: false, publishedBroadcastId: broadcastId };
+}
+
+// Unpublish (retract) one admin notification's members broadcast (idempotent — the inverse
+// of publishAdminNotificationDemo). Flips the source row back to unpublished in-session and
+// removes the broadcast from the member inbox. Returns null on an unknown id; retracted=false
+// when it was never published (no-op). Shared by the single + bulk (unpublish-batch) endpoints.
+function unpublishAdminNotificationDemo(id: string): notification.UnpublishBroadcastResponse | null {
+  const adminItem = ADMIN_NOTIFICATIONS.find((a) => a.id === id);
+  if (!adminItem) return null;
+  const broadcastId = adminItem.publishedBroadcastId;
+  if (!broadcastId) return { notificationId: id, retracted: false, removedBroadcastId: null };
+  adminItem.publishedBroadcastId = null;
+  for (let i = NOTIFICATIONS.length - 1; i >= 0; i--) {
+    const n = NOTIFICATIONS[i]!;
+    if (n.id === broadcastId || (n.resourceType === "notification" && n.resourceId === adminItem.id)) {
+      NOTIFICATIONS.splice(i, 1);
+    }
+  }
+  return { notificationId: id, retracted: true, removedBroadcastId: broadcastId };
+}
 
 // ── mail ────────────────────────────────────────────────────────────────────
 // Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
@@ -165,6 +316,18 @@ function seedMailBlob(id: string, filename: string, contentType: string, text: s
   DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
   return { id, filename, contentType, sizeBytes: bytes.byteLength };
 }
+// Seed an image attachment from base64 bytes so the reading pane can show a real inline
+// thumbnail (Gmail-style) in the demo/E2E — images render inline, other files download.
+function seedMailImageBlob(id: string, filename: string, contentType: string, base64: string): mail.MailAttachment {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  DEMO_MAIL_BLOBS.set(id, { filename, contentType, bytes });
+  return { id, filename, contentType, sizeBytes: bytes.byteLength };
+}
+// A tiny (8x8) solid-blue PNG — enough to render a visible inline thumbnail in the demo.
+const DEMO_PNG_8x8 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR4nGNkYPhfz0AEYBpVSF+FAP7pAv4prsMnAAAAAElFTkSuQmCC";
 
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
@@ -185,11 +348,20 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
 ];
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
-  msg_1: { ...MAIL_LIST[0]!, textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。\n\nよろしくお願いいたします。" },
+  msg_1: {
+    ...MAIL_LIST[0]!,
+    textBody: "お世話になっております。山田です。\n\nカンファレンスでの登壇について相談させてください。テーマは『Cloudflare Workers 実践』を考えています。登壇資料のイメージ画像を添付します。\n\nよろしくお願いいたします。",
+    attachments: [seedMailImageBlob("mailatt_demo_slide", "登壇イメージ.png", "image/png", DEMO_PNG_8x8)],
+  },
   msg_2: {
     ...MAIL_LIST[1]!,
-    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。",
-    attachments: [seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…")],
+    textBody: "ACME株式会社の佐藤です。\n\nスポンサー契約書を送付いたします。ご確認のうえ、ご署名をお願いいたします。動画も添付しましたが容量が大きすぎたようです。",
+    attachments: [
+      seedMailBlob("mailatt_demo_contract", "スポンサー契約書.txt", "text/plain", "スポンサー契約書（デモ用サンプル）\n本契約は…"),
+      // 改善#2: an over-ceiling attachment surfaces as a disabled chip with a reason,
+      // instead of silently disappearing (no bytes stored; download would 409).
+      { id: "mailatt_demo_big", filename: "会場紹介動画.mp4", contentType: "video/mp4", sizeBytes: 41943040, status: "dropped_too_large" },
+    ],
   },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
 };
@@ -235,10 +407,26 @@ const DEMO_ARCHIVE_CC = "archive@developershub.jp";
 // the two personal accounts above, which each see only their own mail.
 const OVERSIGHT_PERMISSIONS: identity.PermissionKey[] = [...DEMO_PERMISSIONS, "mail:read_all"];
 
+// A general MEMBER account (no dangerous permissions → not privileged) so a viewer /
+// the E2E can prove the member release gate: only member-published apps (メール) are
+// active in the launcher, every other app is greyed-out. mail:read is granted so the
+// one published app actually opens; no *:admin / *:send etc. so isPrivilegedViewer()
+// stays false and the gate applies.
+const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "file:read",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "mail:read",
+];
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+  { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
 ];
 
 /** True when the account holds the mail:read_all oversight permission. */
@@ -436,10 +624,50 @@ function createMailStore() {
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
+    // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
+    // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
+    if (method === "GET" && pathname === "/api/v1/mail/flags") {
+      return json({ items: loadFlags() });
+    }
+    if (method === "POST") {
+      const m = /^\/api\/v1\/mail\/flags\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const threadId = decodeURIComponent(m[1]!);
+        const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
+        const flags = loadFlags();
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false };
+        const next: mail.MailThreadFlags = {
+          threadId,
+          starred: patch.starred ?? prev.starred,
+          archived: patch.archived ?? prev.archived,
+          trashed: patch.trashed ?? prev.trashed,
+        };
+        saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
+        return json(next);
+      }
+    }
     return null;
   }
 
   return { handle };
+}
+
+// Thread-flags persistence for the demo (localStorage; survives reload).
+const FLAGS_KEY = "dub-demo-mail-flags";
+function loadFlags(): mail.MailThreadFlags[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(FLAGS_KEY);
+    return raw ? (JSON.parse(raw) as mail.MailThreadFlags[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveFlags(flags: mail.MailThreadFlags[]): void {
+  try {
+    globalThis.localStorage?.setItem(FLAGS_KEY, JSON.stringify(flags));
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── identity / roster (admin RBAC console) ────────────────────────────────────
@@ -736,6 +964,100 @@ function createRosterStore() {
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
+// ── chat (FE6) ────────────────────────────────────────────────────────────────
+// Read-mostly chat seed for the demo transport: a full Slack-style channel set so
+// the sidebar renders 全体 / チーム別 / 役割別 channels out of the box. Channel names
+// stay romaji for consistency (#7); Japanese topics describe each one. Team channels
+// mirror member-service's real 運営チーム (統括/開発/当日進行/スポンサー/会場/集客広報)
+// — no invented teams. Messages/WS are not seeded (no WS in demo): channels open to a
+// clean empty timeline; the sidebar list is the enriched surface.
+interface DemoChatChannel {
+  id: string;
+  type: "topic" | "event" | "dm";
+  name: string;
+  topic: string | null;
+  eventId: string | null;
+  memberCount: number;
+}
+
+function createChatStore() {
+  const CH_TS = "2026-08-01T00:00:00.000Z";
+  // 全体: everyone. announcements is the read-mostly 全体周知 channel.
+  const overall: DemoChatChannel[] = [
+    { id: "chn_general", type: "topic", name: "general", topic: "全体連絡・雑多な共有 📣", eventId: null, memberCount: 24 },
+    { id: "chn_announcements", type: "topic", name: "announcements", topic: "運営からのお知らせ・全体周知（重要連絡）", eventId: null, memberCount: 24 },
+    { id: "chn_random", type: "topic", name: "random", topic: "雑談なんでも ☕", eventId: null, memberCount: 21 },
+  ];
+  // チーム別: one per real member-service 運営チーム (key / 表示名 / 説明はロスター準拠).
+  const teamChannels: DemoChatChannel[] = [
+    { id: "chn_team_soukatsu", type: "topic", name: "team-soukatsu", topic: "統括チーム — 全体意思決定・進行統制・チーム間調整", eventId: null, memberCount: 3 },
+    { id: "chn_team_dev", type: "topic", name: "team-dev", topic: "開発チーム — 運営ツール内製・名簿・当日連絡基盤", eventId: null, memberCount: 3 },
+    { id: "chn_team_ops", type: "topic", name: "team-ops", topic: "当日進行チーム — 進行管理・タイムテーブル・人員配置", eventId: null, memberCount: 2 },
+    { id: "chn_team_sponsor", type: "topic", name: "team-sponsor", topic: "スポンサーチーム — 協賛打診・メニュー設計・契約", eventId: null, memberCount: 2 },
+    { id: "chn_team_venue", type: "topic", name: "team-venue", topic: "会場チーム — 会場・設営・ネットワーク／配信", eventId: null, memberCount: 2 },
+    { id: "chn_team_pr", type: "topic", name: "team-pr", topic: "集客広報チーム — LP・SNS・デザイン・広報／集客", eventId: null, memberCount: 3 },
+  ];
+  // 役割/目的別: cross-cutting roles & workstreams that span teams.
+  const roleChannels: DemoChatChannel[] = [
+    { id: "chn_admin", type: "topic", name: "admin", topic: "管理者運用・権限管理・全体統制（admin 向け）", eventId: null, memberCount: 4 },
+    { id: "chn_maintainers", type: "topic", name: "maintainers", topic: "メンテナ調整・リリース判断・レビュー割当", eventId: null, memberCount: 5 },
+    { id: "chn_dev", type: "topic", name: "dev", topic: "開発・デプロイ・コードレビュー", eventId: null, memberCount: 8 },
+    { id: "chn_design", type: "topic", name: "design", topic: "UI/UX・デザインレビュー", eventId: null, memberCount: 6 },
+    { id: "chn_pr", type: "topic", name: "pr-koho", topic: "広報・集客・SNS 運用（目的別）", eventId: null, memberCount: 6 },
+    { id: "chn_help", type: "topic", name: "help", topic: "質問・困りごと・サポート", eventId: null, memberCount: 24 },
+  ];
+  // イベント: the conference operations channel (grouped under イベント in the sidebar).
+  const eventChannels: DemoChatChannel[] = [
+    { id: "chn_evt_conf", type: "event", name: "北陸itカンファレンス", topic: "北陸ITカンファレンス2026 運営チャネル", eventId: "evt_1", memberCount: 18 },
+  ];
+  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels];
+
+  const toWire = (c: DemoChatChannel) => ({
+    id: c.id,
+    orgId: ORG,
+    type: c.type,
+    name: c.name,
+    topic: c.topic,
+    eventId: c.eventId,
+    archived: false,
+    memberCount: c.memberCount,
+    version: 1,
+    createdAt: CH_TS,
+    updatedAt: CH_TS,
+  });
+  const byId = new Map(all.map((c) => [c.id, c]));
+
+  function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
+    if (method === "GET" && pathname === "/api/v1/chat/channels") {
+      // Optional ?eventId= filter (contract): event channels for that event only.
+      const eventId = url.searchParams.get("eventId");
+      const list = eventId ? all.filter((c) => c.eventId === eventId) : all;
+      return json(list.map(toWire)); // raw array (not Paginated) per fe6 contract
+    }
+    if (method === "GET" && pathname === "/api/v1/chat/unread") {
+      return json([]); // no unread badges in demo
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
+      if (m && method === "GET") {
+        const c = byId.get(decodeURIComponent(m[1]!));
+        if (!c) return notFound(`GET ${pathname}`);
+        return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "member", joinedAt: CH_TS } });
+      }
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/read$/.exec(pathname);
+      if (m && method === "POST") return json(null, 204);
+    }
+    if (method === "GET" && pathname === "/api/v1/chat/messages") {
+      return json(page([])); // empty timeline (Paginated envelope)
+    }
+    return null;
+  }
+
+  return { handle };
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -748,11 +1070,28 @@ function page<T>(items: T[]): { items: T[]; nextCursor: string | null } {
 }
 
 /** Match a demo feature route; return a Response or null to fall through to boot. */
-function matchDemoRoute(method: string, pathname: string, url: URL): Response | null {
+function matchDemoRoute(method: string, pathname: string, url: URL, body?: unknown): Response | null {
   const seg = (re: RegExp): string | null => {
     const m = re.exec(pathname);
     return m ? decodeURIComponent(m[1]!) : null;
   };
+
+  // Persist the per-user gantt view state (manual drag order) so a reorder sticks
+  // across the round-trip (LWW, no version — a personal setting). Without this the
+  // demo would snap the order back after the optimistic override releases.
+  if (method === "PUT" && pathname === "/api/v1/gantt/views") {
+    const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
+    const b = (body ?? {}) as Partial<gantt.PutGanttViewRequest>;
+    const cur = ganttViewFor(ev);
+    const next: gantt.GanttViewState = {
+      eventId: cur.eventId,
+      zoom: b.zoom ?? cur.zoom,
+      collapsedTaskIds: b.collapsedTaskIds ?? cur.collapsedTaskIds,
+      orderedTaskIds: b.orderedTaskIds ?? cur.orderedTaskIds ?? [],
+    };
+    GANTT_VIEWS[ev] = next;
+    return json(next);
+  }
 
   if (method === "GET") {
     // events
@@ -774,14 +1113,21 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
         return t ? json(t) : notFound(`GET ${pathname}`);
       }
     }
-    // gantt
+    // gantt — the wire key is `eventId` (@dub/types); read it first (the old `event`
+    // fallback stays only so a hand-written key never 500s the demo). Parent rows are
+    // served with null own-dates (see ganttDtoFor) to mirror gantt-service.
     if (pathname === "/api/v1/gantt") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
-      return json(GANTT[ev] ?? { eventId: ev, rows: [], dependencies: [] });
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
+      return json(ganttDtoFor(ev));
     }
     if (pathname === "/api/v1/gantt/dependencies") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
       return json(GANTT[ev]?.dependencies ?? []);
+    }
+    // per-user view state (zoom / collapsed / manual drag order)
+    if (pathname === "/api/v1/gantt/views") {
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
+      return json(ganttViewFor(ev));
     }
     // notifications
     if (pathname === "/api/v1/notifications/inbox") {
@@ -790,6 +1136,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
     }
     if (pathname === "/api/v1/notifications/inbox/unread-count") {
       return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
+    }
+    // admin: Notification管理 list (audience='admin' notifications to publish).
+    if (pathname === "/api/v1/notifications/manage") {
+      return json(page(ADMIN_NOTIFICATIONS.map((a) => ({ ...a }))));
     }
     // mail: received list / detail + the Sent folder are served by the stateful mail
     // store (createMailStore) so read-state and sends persist in-session; only the
@@ -801,19 +1151,144 @@ function matchDemoRoute(method: string, pathname: string, url: URL): Response | 
     // identity / roster (users, roles, assignments, catalog, audit, mail-status)
     // are served by the stateful roster store (createRosterStore) so the admin
     // console's mutations persist — see createDemoFetch below.
-    // chat: seed empty so the screen renders its empty state (no WS in demo).
-    if (pathname === "/api/v1/chat/channels") return json([]);
-    if (pathname === "/api/v1/chat/unread") return json([]);
+    // chat channels/messages/unread are served by the stateful chat store
+    // (createChatStore) so the sidebar renders a full 全体/チーム別/役割別 channel set
+    // — mirrors member-service's real 運営チーム names. See createDemoFetch below.
   }
 
   if (method === "POST") {
     // mail read + send are served by the stateful mail store (createMailStore).
-    if (pathname === "/api/v1/notifications/inbox/read-all") return json(null, 204);
+    if (pathname === "/api/v1/notifications/inbox/read-all") {
+      const now = new Date().toISOString();
+      for (const n of NOTIFICATIONS) if (n.readAt === null) n.readAt = now;
+      return json(null, 204);
+    }
+    // admin: bulk publish a selection in one request (idempotent, per-item outcomes).
+    if (pathname === "/api/v1/notifications/manage/publish-batch") {
+      const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
+      const seen = new Set<string>();
+      const results: notification.PublishBroadcastBatchItem[] = [];
+      let publishedCount = 0, deduplicatedCount = 0, failedCount = 0;
+      for (const id of ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const r = publishAdminNotificationDemo(id);
+        if (!r) { results.push({ id, ok: false, code: "NOTIF_NOTIFICATION_NOT_FOUND" }); failedCount++; continue; }
+        results.push({ id, ok: true, deduplicated: r.deduplicated, publishedBroadcastId: r.publishedBroadcastId });
+        if (r.deduplicated) deduplicatedCount++; else publishedCount++;
+      }
+      return json({ results, publishedCount, deduplicatedCount, failedCount });
+    }
+    // admin: bulk unpublish a selection in one request (idempotent, per-item outcomes).
+    if (pathname === "/api/v1/notifications/manage/unpublish-batch") {
+      const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
+      const seen = new Set<string>();
+      const results: notification.UnpublishBroadcastBatchItem[] = [];
+      let retractedCount = 0, noopCount = 0, failedCount = 0;
+      for (const id of ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const r = unpublishAdminNotificationDemo(id);
+        if (!r) { results.push({ id, ok: false, code: "NOTIF_NOTIFICATION_NOT_FOUND" }); failedCount++; continue; }
+        const item: notification.UnpublishBroadcastBatchItem = { id, ok: true, retracted: r.retracted };
+        if (r.removedBroadcastId) item.removedBroadcastId = r.removedBroadcastId;
+        results.push(item);
+        if (r.retracted) retractedCount++; else noopCount++;
+      }
+      return json({ results, retractedCount, noopCount, failedCount });
+    }
+    // admin: unpublish (retract) one admin notification's broadcast (idempotent). Flips the
+    // source row back to unpublished in-session and removes the broadcast from the member
+    // inbox, so the optimistic UI is confirmed and a reload keeps the unpublished state.
+    {
+      const uid = seg(/^\/api\/v1\/notifications\/manage\/([^/]+)\/unpublish$/);
+      if (uid) {
+        const r = unpublishAdminNotificationDemo(uid);
+        return r ? json(r) : notFound(`POST ${pathname}`);
+      }
+    }
+    // admin: publish one admin notification to all members (idempotent). Flips the
+    // source row to 公開済み in-session and fans a single members broadcast into the
+    // inbox, so the optimistic UI is confirmed and a reload keeps the published state.
+    {
+      const id = seg(/^\/api\/v1\/notifications\/manage\/([^/]+)\/publish$/);
+      if (id) {
+        const r = publishAdminNotificationDemo(id);
+        return r ? json(r) : notFound(`POST ${pathname}`);
+      }
+    }
   }
 
   if (method === "PATCH") {
-    if (/^\/api\/v1\/notifications\/inbox\/[^/]+\/read$/.test(pathname)) return json(null, 204);
+    // Mark one inbox row read — mutate the seed so GET unread-count (polled every 60s)
+    // stays consistent with the optimistic badge.
+    {
+      const m = /^\/api\/v1\/notifications\/inbox\/([^/]+)\/read$/.exec(pathname);
+      if (m) {
+        const n = NOTIFICATIONS.find((x) => x.id === m[1]);
+        if (n && n.readAt === null) n.readAt = new Date().toISOString();
+        return json(null, 204);
+      }
+    }
+    // Restore one inbox row to unread (inverse of /read) — same seed mutation so the
+    // demo's "未読に戻す → 未読バッジ復活" survives a poll/reload.
+    {
+      const m = /^\/api\/v1\/notifications\/inbox\/([^/]+)\/unread$/.exec(pathname);
+      if (m) {
+        const n = NOTIFICATIONS.find((x) => x.id === m[1]);
+        if (n) n.readAt = null;
+        return json(null, 204);
+      }
+    }
     if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
+    // Persist a bar's window after a leaf move/resize (Notion-style edit). Mutates the task
+    // columns + the gantt row so the change survives a refetch/reload (in-session). Returns
+    // the updated GanttRow. Parents never reach here (the client blocks a parent resize).
+    {
+      const rowId = seg(/^\/api\/v1\/gantt\/rows\/([^/]+)$/);
+      if (rowId) {
+        const b = (body ?? {}) as { startsAt?: string | null; endsAt?: string | null };
+        const t = applyScheduleToDemo(rowId, b.startsAt ?? null, b.endsAt ?? null);
+        if (!t) return notFound(`PATCH ${pathname}`);
+        const row = ganttDtoFor(String(t.eventId)).rows.find((r) => r.taskId === rowId);
+        return json(
+          row ?? {
+            taskId: rowId,
+            title: t.title,
+            startsAt: b.startsAt ?? null,
+            endsAt: b.endsAt ?? null,
+            progressPercent: t.status === "done" ? 100 : 0,
+            assigneeId: t.assigneeId,
+            teamId: t.teamId ?? null,
+          },
+        );
+      }
+    }
+    // Detail-panel edit (title/status/priority/担当/チーム/開始日/期日). Updates the task and,
+    // when the dates change, mirrors them onto the gantt row so the BAR moves immediately.
+    {
+      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      if (id) {
+        const t = TASKS.find((x) => x.id === id);
+        if (!t) return notFound(`PATCH ${pathname}`);
+        const b = (body ?? {}) as Partial<task.UpdateTaskRequest>;
+        if (b.title !== undefined) t.title = b.title;
+        if (b.status !== undefined) t.status = b.status;
+        if (b.priority !== undefined) t.priority = b.priority;
+        if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
+        if (b.teamId !== undefined) t.teamId = b.teamId;
+        const datesChanged = b.startAt !== undefined || b.dueAt !== undefined;
+        if (datesChanged) {
+          const nextStart = b.startAt !== undefined ? b.startAt : t.startAt ?? null;
+          const nextDue = b.dueAt !== undefined ? b.dueAt : t.dueAt ?? null;
+          applyScheduleToDemo(id, nextStart ?? null, nextDue ?? null); // bumps version + mirrors row
+        } else {
+          t.version += 1;
+        }
+        t.updatedAt = new Date().toISOString();
+        return json(t);
+      }
+    }
   }
 
   return null;
@@ -831,6 +1306,10 @@ interface DemoDrivePermission {
   emailAddress: string | null;
   displayName: string | null;
   domain: string | null;
+  /** Inherited from an ancestor folder → Drive refuses to change/remove it on this
+   *  item (403 cannotDeletePermission); the manager shows it read-only. Optional in the
+   *  seed literals (defaults to false in permsView). */
+  inherited?: boolean;
 }
 interface DemoDriveFile {
   id: string;
@@ -839,6 +1318,9 @@ interface DemoDriveFile {
   ownerName: string;
   modifiedTime: string;
   webViewLink: string;
+  /** Parent folder id (null at the shared-drive root). Drives the lazy tree: a
+   *  GET /driveshare/files?folderId=X returns exactly the direct children of X. */
+  parentId: string | null;
   permissions: DemoDrivePermission[];
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
@@ -854,46 +1336,209 @@ function createDriveShareStore() {
   });
   const link = (id: string) => `https://drive.google.com/file/d/${id}/view`;
   const files: DemoDriveFile[] = [
+    // ── root (parentId=null): the pre-existing five, unchanged (existing E2E depends on
+    //    予算管理 / チラシ being at the top level). ─────────────────────────────────
     {
       id: "fld_root", name: "Hackit 2026 共有", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-10T09:00:00Z", webViewLink: link("fld_root"),
+      modifiedTime: "2026-08-10T09:00:00Z", webViewLink: link("fld_root"), parentId: null,
       permissions: [owner("perm_1"), { id: "perm_2", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null }],
     },
     {
       id: "fld_designs", name: "デザイン素材", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-11T02:30:00Z", webViewLink: link("fld_designs"), permissions: [owner("perm_3")],
+      modifiedTime: "2026-08-11T02:30:00Z", webViewLink: link("fld_designs"), parentId: null, permissions: [owner("perm_3")],
     },
     {
       id: "fil_budget", name: "予算管理.xlsx", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-11T23:10:00Z", webViewLink: link("fil_budget"),
+      modifiedTime: "2026-08-11T23:10:00Z", webViewLink: link("fil_budget"), parentId: null,
       permissions: [owner("perm_4"), { id: "perm_5", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null }],
     },
     {
       id: "fil_flyer", name: "当日チラシ.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-12T01:00:00Z", webViewLink: link("fil_flyer"),
+      modifiedTime: "2026-08-12T01:00:00Z", webViewLink: link("fil_flyer"), parentId: null,
       permissions: [owner("perm_6"), { id: "perm_anyone_flyer", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null }],
     },
     {
       id: "fil_runsheet", name: "進行台本.gdoc", mimeType: "application/vnd.google-apps.document", ownerName: "Hackit 運営",
-      modifiedTime: "2026-08-12T03:45:00Z", webViewLink: link("fil_runsheet"),
+      modifiedTime: "2026-08-12T03:45:00Z", webViewLink: link("fil_runsheet"), parentId: null,
       permissions: [owner("perm_7"), { id: "perm_8", type: "user", role: "commenter", emailAddress: "mc@example.com", displayName: "司会", domain: null }],
+    },
+
+    // ── children of fld_root (depth 1) ────────────────────────────────────────────
+    {
+      id: "fld_sponsors", name: "スポンサー資料", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T05:00:00Z", webViewLink: link("fld_sponsors"), parentId: "fld_root", permissions: [owner("perm_10")],
+    },
+    {
+      id: "fil_schedule", name: "全体スケジュール.gsheet", mimeType: "application/vnd.google-apps.spreadsheet", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T06:00:00Z", webViewLink: link("fil_schedule"), parentId: "fld_root",
+      permissions: [
+        owner("perm_11"),
+        { id: "perm_12", type: "user", role: "reader", emailAddress: "ops@example.com", displayName: "運営", domain: null },
+        // Inherited from the parent folder (fld_root): the manager must show these as
+        // read-only (継承) and refuse revoke/role-change / link-off, mirroring Drive's
+        // real cannotDeletePermission. Drives the drive-revoke-fix E2E.
+        { id: "perm_inh_staffa", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null, inherited: true },
+        { id: "perm_inh_anyone", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null, inherited: true },
+      ],
+    },
+    // ── children of fld_sponsors (depth 2 — proves nesting beyond one level) ───────
+    {
+      id: "fil_contract", name: "協賛契約書.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T07:00:00Z", webViewLink: link("fil_contract"), parentId: "fld_sponsors", permissions: [owner("perm_13")],
+    },
+    {
+      id: "fil_sponsor_deck", name: "協賛メニュー.pdf", mimeType: "application/pdf", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T07:30:00Z", webViewLink: link("fil_sponsor_deck"), parentId: "fld_sponsors", permissions: [owner("perm_14")],
+    },
+
+    // ── children of fld_designs (depth 1) ─────────────────────────────────────────
+    {
+      id: "fld_banners", name: "バナー", mimeType: DRIVE_FOLDER_MIME_DEMO, ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T03:00:00Z", webViewLink: link("fld_banners"), parentId: "fld_designs", permissions: [owner("perm_15")],
+    },
+    {
+      id: "fil_poster", name: "ポスター.png", mimeType: "image/png", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T03:30:00Z", webViewLink: link("fil_poster"), parentId: "fld_designs", permissions: [owner("perm_16")],
+    },
+    // ── children of fld_banners (depth 2) ─────────────────────────────────────────
+    {
+      id: "fil_web_banner", name: "Webバナー.png", mimeType: "image/png", ownerName: "Hackit 運営",
+      modifiedTime: "2026-08-11T04:00:00Z", webViewLink: link("fil_web_banner"), parentId: "fld_banners", permissions: [owner("perm_17")],
     },
   ];
   const byId = new Map(files.map((f) => [f.id, f]));
   let seq = 100;
+
+  // ── role-based grants (identity roles → whole-role Drive sharing) ─────────────
+  // Mirrors drive-share-service's role-grants fan-out: granting a role to a file
+  // expands to a Drive permission per role member (memberCount), tracked so revoke
+  // can undo them and re-apply can re-sync. roleMembers / ROLE_NAME mirror the
+  // identity roster's roles (GET /identity/roles: admin / maintainer / member).
+  const ROLE_NAME: Record<string, string> = { role_admin: "admin", role_maintainer: "maintainer", role_member: "member" };
+  const roleMembers: Record<string, string[]> = {
+    // info@/admin@ are Cloudflare Email-Routing aliases with NO Google account (mirrors
+    // the real bug): they ARE shared, but only via an invite, so their access is pending.
+    role_admin: ["info@developershub.jp", "admin@developershub.jp"],
+    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp"],
+    // The last address has no Google account AND is invalid: the fan-out applies the
+    // others and reports this one as skipped, instead of failing the whole role.
+    role_member: ["ichiro@developershub.jp", "jiro@developershub.jp", "ghost-no-account@example.invalid"],
+  };
+  // Addresses that have no backing Google account → shareable only via an invite
+  // (pending). Mirrors real Email-Routing aliases like info@/admin@developershub.jp.
+  const NO_GOOGLE_ACCOUNT = new Set(["info@developershub.jp", "admin@developershub.jp"]);
+  interface DemoRoleGrant {
+    id: string;
+    fileId: string;
+    roleId: string;
+    roleName: string;
+    driveRole: "reader" | "commenter" | "writer";
+    memberCount: number;
+    appliedCount: number;
+    grantedBy: string;
+    grantedAt: string;
+    permIds: string[]; // internal: the fanned-out Drive permission ids on the file
+  }
+  const roleGrants: DemoRoleGrant[] = [];
+  type FanResult = { skipped: { email: string; reason: string }[]; invited: { email: string }[] };
+  const grantView = (g: DemoRoleGrant, extra: Partial<FanResult> = {}) => ({
+    id: g.id, fileId: g.fileId, roleId: g.roleId, roleName: g.roleName, driveRole: g.driveRole,
+    memberCount: g.memberCount, appliedCount: g.appliedCount, grantedBy: g.grantedBy, grantedAt: g.grantedAt,
+    ...(extra.skipped && extra.skipped.length > 0 ? { skipped: extra.skipped } : {}),
+    ...(extra.invited && extra.invited.length > 0 ? { invited: extra.invited } : {}),
+  });
+  // Fan a role's members out onto a file as individual Drive permissions. Mirrors the
+  // real service: a malformed email is skipped with a reason; a no-Google-account address
+  // is applied but flagged `invited` (pending); the rest apply normally — a partial
+  // success, never an all-or-nothing failure.
+  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant): FanResult => {
+    const emails = roleMembers[g.roleId] ?? [];
+    const skipped: { email: string; reason: string }[] = [];
+    const invited: { email: string }[] = [];
+    let applied = 0;
+    for (const email of emails) {
+      if (!EMAIL_RE.test(email) || email.endsWith(".invalid")) {
+        skipped.push({ email, reason: "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。" });
+        continue;
+      }
+      const id = `perm_role_${seq++}`;
+      g.permIds.push(id);
+      f.permissions.push({ id, type: "user", role: g.driveRole, emailAddress: email, displayName: email.split("@")[0]!, domain: null });
+      applied++;
+      if (NO_GOOGLE_ACCOUNT.has(email)) invited.push({ email }); // shared via invite → pending
+    }
+    g.appliedCount = applied;
+    return { skipped, invited };
+  };
+  const clearFan = (f: DemoDriveFile, g: DemoRoleGrant): void => {
+    f.permissions = f.permissions.filter((p) => !g.permIds.includes(p.id));
+    g.permIds = [];
+  };
 
   const fileView = (f: DemoDriveFile) => ({
     id: f.id, name: f.name, mimeType: f.mimeType, isFolder: f.mimeType === DRIVE_FOLDER_MIME_DEMO,
     ownerName: f.ownerName, modifiedTime: f.modifiedTime, webViewLink: f.webViewLink,
     linkShared: f.permissions.some((p) => p.type === "anyone"),
   });
-  const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p })) });
+  const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p, inherited: p.inherited ?? false })) });
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    // ── role-based grants (matched before the generic file routes) ─────────────
+    if (method === "GET" && pathname === "/api/v1/driveshare/role-grants") {
+      return json({ items: roleGrants.map((g) => grantView(g)) });
+    }
+    const reapplyMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)\/reapply$/.exec(pathname);
+    if (reapplyMatch && method === "POST") {
+      const f = byId.get(reapplyMatch[1]!);
+      const g = roleGrants.find((x) => x.fileId === reapplyMatch[1]! && x.roleId === decodeURIComponent(reapplyMatch[2]!));
+      if (!f || !g) return notFound(`${method} ${pathname}`);
+      clearFan(f, g);
+      const result = fanOut(f, g);
+      return json(grantView(g, result));
+    }
+    const roleGrantItemMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)$/.exec(pathname);
+    if (roleGrantItemMatch && method === "DELETE") {
+      const f = byId.get(roleGrantItemMatch[1]!);
+      const roleId = decodeURIComponent(roleGrantItemMatch[2]!);
+      const idx = roleGrants.findIndex((x) => x.fileId === roleGrantItemMatch[1]! && x.roleId === roleId);
+      if (!f || idx === -1) return notFound(`${method} ${pathname}`);
+      clearFan(f, roleGrants[idx]!);
+      roleGrants.splice(idx, 1);
+      return json({ ok: true });
+    }
+    const roleGrantsMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants$/.exec(pathname);
+    if (roleGrantsMatch) {
+      const f = byId.get(roleGrantsMatch[1]!);
+      if (!f) return notFound(`${method} ${pathname}`);
+      if (method === "GET") return json({ items: roleGrants.filter((g) => g.fileId === f.id).map((g) => grantView(g)) });
+      if (method === "POST") {
+        const req = body as { roleId?: string; driveRole?: DemoRoleGrant["driveRole"] };
+        const roleId = req.roleId ?? "";
+        if (!roleId || !(roleId in ROLE_NAME)) return problem("VALIDATION", "unknown roleId", 400);
+        if (roleGrants.some((g) => g.fileId === f.id && g.roleId === roleId)) {
+          return problem("CONFLICT", "role already granted on this file", 409);
+        }
+        const emails = roleMembers[roleId] ?? [];
+        const g: DemoRoleGrant = {
+          id: `rg_${seq++}`, fileId: f.id, roleId, roleName: ROLE_NAME[roleId]!, driveRole: req.driveRole ?? "reader",
+          memberCount: emails.length, appliedCount: 0, grantedBy: "demo@developershub.jp", grantedAt: new Date().toISOString(), permIds: [],
+        };
+        const result = fanOut(f, g);
+        roleGrants.push(g);
+        return json(grantView(g, result), 201);
+      }
+    }
     if (method === "GET" && pathname === "/api/v1/driveshare/files") {
       const needle = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-      const matched = files
-        .filter((f) => (needle ? f.name.toLowerCase().includes(needle) : true))
+      const folderId = url.searchParams.get("folderId");
+      // search (q) → GLOBAL flat match (parent ignored); else folderId → direct
+      // children; else the root level (parentId === null). Mirrors mock-client.ts.
+      const scope = needle
+        ? files.filter((f) => f.name.toLowerCase().includes(needle))
+        : folderId
+          ? files.filter((f) => f.parentId === folderId)
+          : files.filter((f) => f.parentId === null);
+      const matched = scope
         .slice()
         .sort((a, b) => {
           const af = a.mimeType === DRIVE_FOLDER_MIME_DEMO ? 0 : 1;
@@ -924,10 +1569,17 @@ function createDriveShareStore() {
       const perm = f.permissions.find((p) => p.id === permMatch[2]!);
       if (method === "PATCH") {
         if (!perm) return notFound(`${method} ${pathname}`);
+        if (perm.inherited)
+          return problem("FORBIDDEN", "この権限は親フォルダから継承されているため、このファイル単体では変更できません。親フォルダの共有設定で操作してください。", 403);
         perm.role = (body as { role?: DemoDrivePermission["role"] }).role ?? perm.role;
         return json({ permission: { ...perm } });
       }
       if (method === "DELETE") {
+        // Mirror Drive's 403 cannotDeletePermission: an inherited permission cannot be
+        // removed on this item. (The manager hides the revoke for these rows, so this
+        // is defence-in-depth / fidelity for anything that hits the endpoint directly.)
+        if (perm?.inherited)
+          return problem("FORBIDDEN", "この権限は親フォルダから継承されているため、このファイル単体では剥奪できません。親フォルダの共有設定で操作してください。", 403);
         if (perm) f.permissions = f.permissions.filter((p) => p.id !== perm.id);
         return json({ revoked: true });
       }
@@ -938,6 +1590,9 @@ function createDriveShareStore() {
       if (!f) return notFound(`${method} ${pathname}`);
       const req = body as { enabled?: boolean; role?: DemoDrivePermission["role"] };
       const existing = f.permissions.find((p) => p.type === "anyone");
+      // An inherited anyone (link) permission can't be toggled off on this item.
+      if (!req.enabled && existing?.inherited)
+        return problem("FORBIDDEN", "リンク共有は親フォルダから継承されているため、このファイル単体ではオフにできません。親フォルダの共有設定で操作してください。", 403);
       if (req.enabled) {
         if (existing) existing.role = req.role ?? "reader";
         else f.permissions.push({ id: `perm_anyone_${seq++}`, type: "anyone", role: req.role ?? "reader", emailAddress: null, displayName: null, domain: null });
@@ -971,7 +1626,19 @@ interface DemoMember {
   roleTitle: string | null;
   status: "added" | "invited" | "considering" | "declined";
   teamIds: string[];
+  department: string | null;
+  grade: string | null;
+  identityUserId: string | null;
   contact: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  lastNameRomaji: string | null;
+  firstNameRomaji: string | null;
+  phone: string | null;
   note: string | null;
   sortOrder: number;
   version: number;
@@ -991,33 +1658,92 @@ function createMembersStore() {
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
   ];
-  const mk = (id: string, name: string, roleTitle: string | null, status: DemoMember["status"], teamIds: string[], i: number, contact: string | null = null): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, contact, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+  const mk = (
+    id: string,
+    name: string,
+    roleTitle: string | null,
+    status: DemoMember["status"],
+    teamIds: string[],
+    i: number,
+    contact: string | null = null,
+    department: string | null = null,
+    grade: string | null = null,
+    identityUserId: string | null = null,
+  ): DemoMember => ({
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   const members: DemoMember[] = [
-    // 統括
-    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp"),
-    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1),
-    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2),
+    // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
+    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1, null, "情報工学科", "3年"),
+    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年"),
     // 開発
-    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3),
-    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4),
-    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5),
+    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
+    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年"),
+    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年"),
     // 当日進行
-    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6),
-    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7),
+    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6, null, "機械工学科", "3年"),
+    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7, null, "経営情報学科", "2年"),
     // スポンサー
-    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8),
-    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9),
-    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10),
+    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8, null, "経営情報学科", "3年"),
+    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9, null, "情報工学科", "2年"),
+    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10, null, "電気電子工学科", "1年"),
     // 会場
-    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11),
-    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12),
+    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11, null, "建築学科", "3年"),
+    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12, null, "建築学科", "2年"),
     // 集客広報
-    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13),
-    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14),
-    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com"),
+    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13, null, "メディア情報学科", "3年"),
+    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+    // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
+    mk("member_6", "田村 未", "メンバー", "invited", [], 17, null, "情報工学科", "1年"),
+  ];
+
+  // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
+  // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
+  const participations: any[] = [
+    {
+      // 反映済み（過去に管理者が既存に紐付け）— 一覧で「追加済（既存に紐付け）」表示。
+      id: "part_seed_1", orgId: ORG, memberId: "member_h2", name: "黒川", normalizedName: "黒川",
+      lastName: "黒川", firstName: null, nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
+      nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null,
+      grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
+      schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
+      desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
+      matchKind: "linked_existing", reviewState: "added", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      // 未処理・招待中に該当なし → 「追加する」で新規追加フローを確認できる。
+      id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
+      lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
+      nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
+      grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "event", note: null, status: "submitted",
+      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      // 未処理・招待中の「田村 未」(member_6) と氏名一致 → 「追加する」で候補提示→結合(link)を確認できる。
+      id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
+      lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
+      nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
+      grade: "1", department: "情報工学科", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
+      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      // 未処理・招待中「鈴木 一郎」(member_3) の漢字違い「一朗」＋別メール → 自動一致には出ない。
+      // 「名簿から手動で紐付け」で検索→選択→link を確認できるユースケース。
+      id: "part_seed_4", orgId: ORG, memberId: null, name: "鈴木 一朗", normalizedName: "鈴木一朗",
+      lastName: "鈴木", firstName: "一朗", nameKana: "すずき いちろう", lastNameKana: "すずき", firstNameKana: "いちろう",
+      nameRomaji: "Suzuki Ichiro", lastNameRomaji: "Suzuki", firstNameRomaji: "Ichiro",
+      grade: "1", department: "メディア情報学科", contact: "suzuki.i@school.ac.jp", phone: "070-7777-8888",
+      schoolEmail: "suzuki.i@school.ac.jp", gmail: "suzuki.ichiro@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "event", note: "広報を手伝いたいです。", status: "submitted",
+      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
   ];
 
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
@@ -1059,11 +1785,41 @@ function createMembersStore() {
       const mem: DemoMember = {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
-        contact: body?.contact ?? null, note: body?.note ?? null, sortOrder: (members.length + 1) * 1024, version: 1,
+        department: body?.department ?? null, grade: body?.grade ?? null,
+        identityUserId: null,
+        contact: body?.contact ?? null, schoolEmail: null, gmail: null,
+        lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: body?.note ?? null,
+        sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
       return json(mem, 201);
+    }
+    // reverse lookup: member linked to an identity user (offboarding fan-out, #1/#2).
+    m = /^\/api\/v1\/members\/people\/by-identity\/([^/]+)$/.exec(pathname);
+    if (m && method === "GET") {
+      const iid = decodeURIComponent(m[1]!);
+      const mem = members.find((x) => x.identityUserId === iid);
+      return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
+    }
+    // link / unlink to an identity account (#1).
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      const target = body?.identityUserId ?? null;
+      if (target !== null && members.some((x) => x.id !== mem.id && x.identityUserId === target)) {
+        const err: ErrorResponse = { error: { code: "MEMBER_IDENTITY_ALREADY_LINKED", message: "この account は既に別のメンバーに紐付いています", retryable: false } };
+        return json(err, 409);
+      }
+      mem.identityUserId = target;
+      mem.version += 1;
+      mem.updatedAt = isoNow();
+      return json({ ...mem, teamIds: [...mem.teamIds] });
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
@@ -1078,6 +1834,9 @@ function createMembersStore() {
         if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
         if (body?.status !== undefined) mem.status = body.status;
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+        if (body?.department !== undefined) mem.department = body.department ?? null;
+        if (body?.grade !== undefined) mem.grade = body.grade ?? null;
+        if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
         if (body?.note !== undefined) mem.note = body.note ?? null;
         if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;
@@ -1089,6 +1848,132 @@ function createMembersStore() {
         members.splice(members.indexOf(mem), 1);
         return json({ ok: true });
       }
+    }
+
+    // 参加届 (participation): B案 — 提出は記録するだけで名簿へは反映しない (reviewState=
+    // "pending")。名簿への反映は管理者が回答一覧で確定する (candidates/resolve)。これは
+    // member-service の挙動と一致する。
+    const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+    const recordParticipation = (): { participation: any } => {
+      const compose = (a: unknown, b: unknown): string =>
+        [a, b].map((x) => (typeof x === "string" ? x.trim() : "")).filter((x) => x.length > 0).join(" ");
+      const lastName: string | null = body?.lastName ?? null;
+      const firstName: string | null = body?.firstName ?? null;
+      const lastNameKana: string | null = body?.lastNameKana ?? null;
+      const firstNameKana: string | null = body?.firstNameKana ?? null;
+      const lastNameRomaji: string | null = body?.lastNameRomaji ?? null;
+      const firstNameRomaji: string | null = body?.firstNameRomaji ?? null;
+      const name = (compose(lastName, firstName) || String(body?.name ?? "")).trim();
+      const nameKana: string | null = compose(lastNameKana, firstNameKana) || body?.nameKana || null;
+      const nameRomaji: string | null = compose(lastNameRomaji, firstNameRomaji) || body?.nameRomaji || null;
+      const target = norm(name);
+      const existing = participations.find((p) => p.normalizedName === target);
+      const participation = {
+        id: existing?.id ?? nid("part"), orgId: ORG, memberId: existing?.memberId ?? null, name, normalizedName: target,
+        lastName, firstName, nameKana, lastNameKana, firstNameKana,
+        nameRomaji, lastNameRomaji, firstNameRomaji,
+        grade: body?.grade ?? null, department: body?.department ?? null,
+        contact: body?.contact ?? null, phone: body?.phone ?? null,
+        schoolEmail: String(body?.schoolEmail ?? ""), gmail: String(body?.gmail ?? ""),
+        desiredTeamId: body?.desiredTeamId ?? null, desiredActivity: body?.desiredActivity ?? null, note: body?.note ?? null,
+        status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
+        submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
+      };
+      if (existing) participations[participations.indexOf(existing)] = participation;
+      else participations.unshift(participation);
+      return { participation };
+    };
+
+    // PUBLIC (unauthenticated) submit — the form posts here. 記録のみ・最小応答。
+    if (method === "POST" && pathname === "/api/v1/public/participation") {
+      const school = String(body?.schoolEmail ?? "").trim();
+      const gm = String(body?.gmail ?? "").trim();
+      const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+      const composedName = [body?.lastName, body?.firstName]
+        .map((x) => (typeof x === "string" ? x.trim() : ""))
+        .filter((x) => x.length > 0)
+        .join(" ");
+      const hasName = composedName.length > 0 || String(body?.name ?? "").trim().length > 0;
+      if (!hasName || !emailRe.test(school) || !emailRe.test(gm)) {
+        const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
+        return json(err, 400);
+      }
+      recordParticipation();
+      return json({ accepted: true }, 200);
+    }
+
+    // Authenticated submit (back-compat): participation echo, member は反映前なので null。
+    if (method === "POST" && pathname === "/api/v1/members/participation") {
+      const { participation } = recordParticipation();
+      return json({ participation, member: null, matchKind: participation.matchKind }, 201);
+    }
+
+    // 運営専用の回答一覧 (identity:read はデモでは全許可)。最新順で返す。
+    if (method === "GET" && pathname === "/api/v1/members/participation") {
+      return json({ participations: participations.map((p) => ({ ...p })) });
+    }
+
+    // 突合候補 (招待中/検討中で 氏名正規化 or 学校メール/Gmail 一致)。
+    const candMatch = pathname.match(/^\/api\/v1\/members\/participation\/([^/]+)\/candidates$/);
+    if (method === "GET" && candMatch) {
+      const p = participations.find((x) => x.id === decodeURIComponent(candMatch[1]!));
+      if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      const wantEmails = new Set([p.schoolEmail, p.gmail].filter(Boolean).map((e: string) => e.trim().toLowerCase()));
+      const candidates = members
+        .filter((m) => m.status === "invited" || m.status === "considering")
+        .map((m) => {
+          const emails = [m.schoolEmail, m.gmail, m.contact].filter(Boolean).map((e) => String(e).trim().toLowerCase());
+          const matchedBy: Array<"email" | "name"> = [];
+          if (emails.some((e) => wantEmails.has(e))) matchedBy.push("email");
+          if (norm(m.name) === p.normalizedName) matchedBy.push("name");
+          return { memberId: m.id, name: m.name, status: m.status, schoolEmail: m.schoolEmail, gmail: m.gmail, version: m.version, matchedBy };
+        })
+        .filter((c) => c.matchedBy.length > 0)
+        .sort((a, b) => (b.matchedBy.includes("email") ? 2 : 0) + (b.matchedBy.includes("name") ? 1 : 0) - ((a.matchedBy.includes("email") ? 2 : 0) + (a.matchedBy.includes("name") ? 1 : 0)));
+      return json({ candidates });
+    }
+
+    // 反映確定 (link/create/skip) — roster を書き換え、組織図に重複なく反映する。
+    const resMatch = pathname.match(/^\/api\/v1\/members\/participation\/([^/]+)\/resolve$/);
+    if (method === "POST" && resMatch) {
+      const p = participations.find((x) => x.id === decodeURIComponent(resMatch[1]!));
+      if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      const action = body?.action;
+      if (action === "skip") {
+        p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: null });
+      }
+      if (action === "link") {
+        const mem = members.find((m) => m.id === body?.memberId);
+        if (!mem) return json({ error: { code: "MEMBER_NOT_FOUND", message: "not found", retryable: false } }, 404);
+        // 二重紐付け防止: 同一メンバーが別の参加届に反映済みなら 409。
+        const clash = participations.find((o) => o.id !== p.id && o.memberId === mem.id && o.reviewState === "added");
+        if (clash) return json({ error: { code: "MEMBER_PARTICIPATION_ALREADY_LINKED", message: "already linked", retryable: false } }, 409);
+        if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
+        if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
+        if (mem.contact === null) mem.contact = p.schoolEmail;
+        if (mem.schoolEmail === null && p.schoolEmail) mem.schoolEmail = p.schoolEmail;
+        if (mem.gmail === null && p.gmail) mem.gmail = p.gmail;
+        if (mem.department === null && p.department) mem.department = p.department;
+        if (mem.grade === null && p.grade) mem.grade = p.grade;
+        mem.version += 1; mem.updatedAt = isoNow();
+        p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
+      }
+      if (action === "create") {
+        const created: DemoMember = {
+          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null,
+          department: p.department, grade: p.grade, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
+          contact: p.contact ?? p.schoolEmail, schoolEmail: p.schoolEmail || null, gmail: p.gmail || null,
+          lastName: p.lastName, firstName: p.firstName, lastNameKana: p.lastNameKana, firstNameKana: p.firstNameKana,
+          lastNameRomaji: p.lastNameRomaji, firstNameRomaji: p.firstNameRomaji, phone: p.phone, note: p.note,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(created);
+        p.memberId = created.id; p.matchKind = "created_new"; p.reviewState = "added"; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
+      }
+      return json({ error: { code: "VALIDATION_FAILED", message: "invalid action", retryable: false } }, 400);
     }
 
     return null;
@@ -1105,6 +1990,30 @@ export function createDemoFetch(): typeof fetch {
     home: {
       upcomingEvents: EVENTS.slice(0, 2),
       unreadCount: NOTIFICATIONS.filter((n) => n.readAt === null).length,
+      // Task breakdown derived from the seeded task list (same shape the gateway BFF
+      // aggregates from task-service), so the demo dashboard reads like live data.
+      taskSummary: {
+        total: TASKS.length,
+        byStatus: TASKS.reduce(
+          (acc, t) => {
+            acc[t.status] += 1;
+            return acc;
+          },
+          { todo: 0, in_progress: 0, blocked: 0, done: 0, cancelled: 0 } as Record<task.TaskStatus, number>,
+        ),
+      },
+      // Illustrative free-tier snapshot (same projection the BFF derives from usage-meter).
+      usageSummary: {
+        metrics: [
+          { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 58.2 },
+          { key: "d1_rows_read_day", label: "D1 行読み取り(日)", pct: 41.0 },
+          { key: "workers_requests_day", label: "Workers リクエスト(日)", pct: 9.4 },
+          { key: "emails_month", label: "メール送信(月)", pct: 22.5 },
+        ],
+        worst: { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 58.2 },
+      },
+      // 運営メンバー / チーム — matches the seeded roster below (6 teams, 17 members).
+      orgStats: { members: 17, teams: 6 },
       partialErrors: [],
     },
   });
@@ -1116,6 +2025,8 @@ export function createDemoFetch(): typeof fetch {
   const driveShareStore = createDriveShareStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
+  // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
+  const chatStore = createChatStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -1133,13 +2044,18 @@ export function createDemoFetch(): typeof fetch {
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
     // and reloading re-scopes the whole shell — the header title, permissions and mail.
     if (method === "GET" && url.pathname === "/api/v1/me") return json(currentMe());
+    // Self password change (#155): demo accepts any current password and reports
+    // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
+    // Nothing is persisted — the demo session is stateless for credentials.
+    if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
-      matchDemoRoute(method, url.pathname, url);
+      chatStore.handle(method, url.pathname, url, parsedBody) ??
+      matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.
     return boot(input, init);

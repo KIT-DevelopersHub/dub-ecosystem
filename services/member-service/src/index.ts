@@ -7,6 +7,7 @@ import { common } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1MemberRepo } from "./d1-repo";
+import { notifyAdminsOfParticipation } from "./participationNotify";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -31,6 +32,10 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     now: nowIso,
     newTeamId: () => newId("team"),
     newMemberId: () => newId("member"),
+    newParticipationId: () => newId("part"),
+    // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
+    notifyParticipationSubmitted: (ctx, participation) =>
+      notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),
   };
 }
 
@@ -46,5 +51,12 @@ export { createApp } from "./app";
 export { MemberService } from "./service";
 export { createD1MemberRepo } from "./d1-repo";
 export { InMemoryMemberRepo } from "./memory-repo";
-export { MEMBER_SCHEMA_MIGRATION } from "./schema";
+export {
+  MEMBER_SCHEMA_MIGRATION,
+  MEMBER_IDENTITY_LINK_MIGRATION,
+  MEMBER_PERSON_COLS_MIGRATION,
+  MEMBER_PARTICIPATION_MIGRATION,
+  MEMBER_PARTICIPATION_EMAILS_MIGRATION,
+  MEMBER_MIGRATIONS,
+} from "./schema";
 export type { AppDeps } from "./types";

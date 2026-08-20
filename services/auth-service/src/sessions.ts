@@ -15,6 +15,12 @@ interface StoredSession {
   issuedAt: number; // epoch ms
   accessExpiresAt: number; // epoch ms (issued + access TTL)
   absoluteExpiresAt: number; // epoch ms (refresh impossible past this)
+  // Set on the PRE-rotation record once refresh() mints a successor. Its presence
+  // marks this token as "already rotated": it no longer authenticates API calls
+  // (verify => revoked), but a duplicate/concurrent refresh that still carries it
+  // resolves idempotently to `rotatedTo` instead of hard-failing. The record is
+  // written with a short grace TTL so it self-evicts shortly after rotation.
+  rotatedTo?: string;
 }
 
 const SESSION_PREFIX = "session:";
@@ -78,6 +84,9 @@ export class SessionService {
     if (!token || !looksLikeToken(token)) return this.invalid("malformed");
     const stored = await this.read(token);
     if (!stored) return this.invalid("revoked"); // absent = logged out or absolute-expired (evicted)
+    // A rotated token never authenticates API calls, even inside its grace window:
+    // the grace only lets /auth/refresh converge on the successor (see refresh()).
+    if (stored.rotatedTo) return this.invalid("revoked");
     if (await this.isUserRevoked(stored.userId)) return this.invalid("revoked");
     const now = this.now();
     if (now >= stored.absoluteExpiresAt) return this.invalid("revoked");
@@ -85,13 +94,38 @@ export class SessionService {
     return { valid: true, userId: stored.userId, session: toSessionInfo(stored), reason: null };
   }
 
-  /** Rotate the token, preserving the original absolute deadline. Old token dies immediately. */
+  /**
+   * Rotate the token, preserving the original absolute deadline.
+   *
+   * Rotation is race-safe. Rather than deleting the old token outright, we overwrite
+   * it with a short-lived GRACE record pointing at the successor (`rotatedTo`). A
+   * duplicate refresh that still carries the pre-rotation token — a multi-tab page
+   * load, a Promise.all burst that 401s several requests at once, or a retry sent
+   * before the rotated Set-Cookie was applied — then resolves idempotently to the
+   * SAME successor instead of hard-failing with "Invalid token". After the grace TTL
+   * the old record self-evicts, so genuine reuse much later still resolves to revoked.
+   */
   async refresh(token: string): Promise<RefreshedSession | { error: auth.AuthVerifyReason }> {
     if (!token || !looksLikeToken(token)) return { error: "malformed" };
     const stored = await this.read(token);
-    if (!stored) return { error: "revoked" }; // absent old token = logout / reuse of rotated token
+    if (!stored) return { error: "revoked" }; // absent old token = logout / reuse past grace
     if (await this.isUserRevoked(stored.userId)) return { error: "revoked" };
     const now = this.now();
+
+    // Already rotated (concurrent/duplicate refresh within the grace window):
+    // return the successor idempotently so every caller ends up on one token.
+    if (stored.rotatedTo) {
+      const successor = await this.read(stored.rotatedTo);
+      if (!successor || now >= successor.absoluteExpiresAt || successor.rotatedTo) {
+        return { error: "revoked" }; // successor gone / expired / itself rotated
+      }
+      return {
+        token: stored.rotatedTo,
+        session: toSessionInfo(successor),
+        absoluteExpiresAt: successor.absoluteExpiresAt,
+      };
+    }
+
     if (now >= stored.absoluteExpiresAt) return { error: "revoked" };
     // access-expired IS allowed here — that is the whole point of refresh.
 
@@ -102,7 +136,11 @@ export class SessionService {
     const newToken = newSessionToken();
     const remainingSec = Math.max(1, Math.ceil((stored.absoluteExpiresAt - now) / 1000));
     await this.kv.put(sessionKey(newToken), JSON.stringify(rotated), { expirationTtl: remainingSec });
-    await this.kv.delete(sessionKey(token)); // reuse of the old token now resolves to "revoked"
+    // Grace: keep the old token briefly as a pointer to the successor instead of
+    // deleting it. TTL is capped by whatever absolute lifetime remains.
+    const graceSec = Math.min(this.config.refreshGraceSec, remainingSec);
+    const graceRecord: StoredSession = { ...stored, rotatedTo: newToken };
+    await this.kv.put(sessionKey(token), JSON.stringify(graceRecord), { expirationTtl: graceSec });
     return {
       token: newToken,
       session: toSessionInfo(rotated),

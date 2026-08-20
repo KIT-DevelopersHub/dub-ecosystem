@@ -152,19 +152,32 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     );
   }
 
-  async function attemptRefresh(): Promise<boolean> {
-    // Browser path: empty body {}, cookie-derived; Set-Cookie rotation server-side.
-    try {
-      const res = await fetchImpl(buildUrl(config.baseUrl, "/api/v1/auth/refresh"), {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+  // Single-flight refresh: when several requests 401 at once (e.g. /me + /bff/home
+  // + chat all firing on a fresh mount past the access TTL), they must NOT each POST
+  // /auth/refresh. Concurrent refreshes race the server-side token rotation and one
+  // would come back "Invalid token", tearing down the shell. Instead they all await
+  // the SAME in-flight refresh and then retry against the single rotated cookie.
+  let refreshInFlight: Promise<boolean> | null = null;
+
+  function attemptRefresh(): Promise<boolean> {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async (): Promise<boolean> => {
+      // Browser path: empty body {}, cookie-derived; Set-Cookie rotation server-side.
+      try {
+        const res = await fetchImpl(buildUrl(config.baseUrl, "/api/v1/auth/refresh"), {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
   }
 
   async function requestOnce<TRes, TBody>(input: RequestInput<TBody>): Promise<TRes> {

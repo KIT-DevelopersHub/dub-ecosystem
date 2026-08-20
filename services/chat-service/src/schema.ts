@@ -69,3 +69,44 @@ CREATE TABLE chat_read_states (
 );
 `.trim(),
 };
+
+// Forward-only add-on (Slack-parity: pinned messages). Additive only — no change to
+// 0001 tables, so the existing ledger hash is untouched. Physical mirror lives in
+// infra/d1/migrations/chat/0002_pins.sql. A pin is (channel, message) unique; pinned_by
+// / pinned_at are app-supplied (no DDL DEFAULT for datetime, D2). Same-namespace FKs only.
+export const CHAT_PINS_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0002_pins",
+  up: `
+CREATE TABLE chat_pins (
+  channel_id TEXT NOT NULL REFERENCES chat_channels(id),
+  message_id TEXT NOT NULL REFERENCES chat_messages(id),
+  pinned_by  TEXT NOT NULL,
+  pinned_at  TEXT NOT NULL,
+  PRIMARY KEY (channel_id, message_id)
+);
+CREATE INDEX idx_chat_pins_channel ON chat_pins(channel_id, message_id DESC);
+`.trim(),
+};
+
+// Forward-only add-on: the org-scoped message deletion policy (RBAC-configurable
+// delete behaviour). Additive only — no change to earlier tables, so their ledger
+// hashes are untouched. Physical mirror lives in
+// infra/d1/migrations/chat/0003_settings.sql. One row per org (org_id PK); the two
+// mode columns are CHECK-guarded to the closed { hard, tombstone } set. `version`
+// backs optimistic-concurrency on PUT; updated_at/updated_by are app-supplied (no
+// DDL DEFAULT for datetime, D2). Absence of a row = the in-code default (all `hard`).
+export const CHAT_SETTINGS_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0003_settings",
+  up: `
+CREATE TABLE chat_settings (
+  org_id             TEXT PRIMARY KEY,
+  deletion_member    TEXT NOT NULL CHECK (deletion_member IN ('hard','tombstone')),
+  deletion_moderator TEXT NOT NULL CHECK (deletion_moderator IN ('hard','tombstone')),
+  version            INTEGER NOT NULL,
+  updated_at         TEXT NOT NULL,
+  updated_by         TEXT
+);
+`.trim(),
+};

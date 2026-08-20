@@ -66,6 +66,21 @@ describe("POST /auth/refresh", () => {
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_SESSION_REVOKED");
   });
+
+  it("duplicate refresh with the same cookie both return 200 (no spurious Invalid token)", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_1", "web");
+    const app = buildApp(h.deps);
+    const cookie = `dub_session=${created.token}`;
+    const first = await app.request("/auth/refresh", jsonInit({}, { cookie }));
+    // A second refresh still carrying the pre-rotation cookie (multi-tab / retry
+    // before the rotated Set-Cookie applied) must not 401.
+    const second = await app.request("/auth/refresh", jsonInit({}, { cookie }));
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect((await first.json() as { session?: unknown }).session).toBeTruthy();
+    expect((await second.json() as { session?: unknown }).session).toBeTruthy();
+  });
 });
 
 describe("POST /auth/logout", () => {

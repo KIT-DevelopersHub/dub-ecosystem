@@ -12,11 +12,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import {
   createDriveShareApi,
+  driveRoleLabel,
   isValidEmail,
+  roleGrantChipLabel,
   roleLabel,
   type DriveShareApi,
   type ListFilesResult,
   type ListPermissionsResult,
+  type ListRoleGrantsResult,
+  type ListRolesResult,
+  type RoleFileGrant,
   type SharePermission,
 } from "./driveShareApi.tsx";
 import { DriveShareApiProvider } from "./DriveShareProvider.tsx";
@@ -42,8 +47,9 @@ function wrap(ui: ReactNode, api: DriveShareApi): JSX.Element {
   );
 }
 
-const OWNER: SharePermission = { id: "p_owner", type: "user", role: "owner", emailAddress: "hackit@gmail.com", displayName: "Hackit 運営", domain: null };
-const READER: SharePermission = { id: "p_reader", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null };
+const OWNER: SharePermission = { id: "p_owner", type: "user", role: "owner", emailAddress: "hackit@gmail.com", displayName: "Hackit 運営", domain: null, inherited: false };
+const READER: SharePermission = { id: "p_reader", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null, inherited: false };
+const INHERITED: SharePermission = { id: "p_inh", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null, inherited: true };
 
 const FILES: ListFilesResult = {
   files: [
@@ -54,14 +60,33 @@ const FILES: ListFilesResult = {
 };
 const PERMS: ListPermissionsResult = { fileId: "fil_budget", permissions: [OWNER, READER] };
 
+const ROLES: ListRolesResult = {
+  items: [
+    { id: "role_dev", orgId: "org_1", name: "開発", permissions: ["drive:read"], isSystem: false },
+    { id: "role_venue", orgId: "org_1", name: "会場", permissions: ["drive:read"], isSystem: false },
+  ],
+  nextCursor: null,
+};
+const DEV_GRANT: RoleFileGrant = {
+  id: "rg_dev", fileId: "fil_budget", roleId: "role_dev", roleName: "開発", driveRole: "writer",
+  memberCount: 5, appliedCount: 5, grantedBy: "hackit@gmail.com", grantedAt: "2026-08-12T00:00:00Z",
+};
+const ROLE_GRANTS: ListRoleGrantsResult = { items: [DEV_GRANT] };
+
 function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
   return {
     listFiles: () => Promise.resolve(FILES),
     listPermissions: () => Promise.resolve(PERMS),
-    grant: (_f, req) => Promise.resolve({ permission: { id: "p_new", type: "user", role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null } }),
+    grant: (_f, req) => Promise.resolve({ permission: { id: "p_new", type: "user", role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null, inherited: false } }),
     updateRole: (_f, id, role) => Promise.resolve({ permission: { ...READER, id, role } }),
     revoke: () => Promise.resolve({ revoked: true }),
-    setLinkSharing: (_f, req) => Promise.resolve({ fileId: "fil_budget", permissions: req.enabled ? [OWNER, READER, { id: "p_anyone", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null }] : [OWNER, READER] }),
+    setLinkSharing: (_f, req) => Promise.resolve({ fileId: "fil_budget", permissions: req.enabled ? [OWNER, READER, { id: "p_anyone", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null, inherited: false }] : [OWNER, READER] }),
+    listRoles: () => Promise.resolve(ROLES),
+    listAllRoleGrants: () => Promise.resolve(ROLE_GRANTS),
+    listRoleGrants: () => Promise.resolve(ROLE_GRANTS),
+    grantRole: (fileId, req) => Promise.resolve({ id: "rg_new", fileId, roleId: req.roleId, roleName: "会場", driveRole: req.driveRole, memberCount: 3, appliedCount: 3, grantedBy: "hackit@gmail.com", grantedAt: "2026-08-13T00:00:00Z" }),
+    revokeRoleGrant: () => Promise.resolve(),
+    reapplyRoleGrant: (fileId, roleId) => Promise.resolve({ ...DEV_GRANT, fileId, roleId }),
     ...over,
   };
 }
@@ -105,6 +130,32 @@ describe("createDriveShareApi", () => {
     await createDriveShareApi(api).setLinkSharing("fil_budget", { enabled: true, role: "reader" });
     expect(calls[0]).toMatchObject({ method: "PUT", path: "/api/v1/driveshare/files/fil_budget/link", body: { enabled: true, role: "reader" } });
   });
+
+  it("listRoles GETs identity roles via the gateway", async () => {
+    const { api, calls } = fakeApi(ROLES);
+    await createDriveShareApi(api).listRoles();
+    expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/identity/roles" });
+  });
+
+  it("listAllRoleGrants + listRoleGrants GET the right paths", async () => {
+    const { api, calls } = fakeApi(ROLE_GRANTS);
+    const d = createDriveShareApi(api);
+    await d.listAllRoleGrants();
+    expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/driveshare/role-grants" });
+    await d.listRoleGrants("fil_budget");
+    expect(calls[1]).toMatchObject({ method: "GET", path: "/api/v1/driveshare/files/fil_budget/role-grants" });
+  });
+
+  it("grantRole POSTs roleId + driveRole; reapply/revoke hit the sub-paths", async () => {
+    const { api, calls } = fakeApi(DEV_GRANT);
+    const d = createDriveShareApi(api);
+    await d.grantRole("fil_budget", { roleId: "role_dev", driveRole: "writer" });
+    expect(calls[0]).toMatchObject({ method: "POST", path: "/api/v1/driveshare/files/fil_budget/role-grants", body: { roleId: "role_dev", driveRole: "writer" } });
+    await d.reapplyRoleGrant("fil_budget", "role_dev");
+    expect(calls[1]).toMatchObject({ method: "POST", path: "/api/v1/driveshare/files/fil_budget/role-grants/role_dev/reapply" });
+    await d.revokeRoleGrant("fil_budget", "role_dev");
+    expect(calls[2]).toMatchObject({ method: "DELETE", path: "/api/v1/driveshare/files/fil_budget/role-grants/role_dev" });
+  });
 });
 
 describe("helpers", () => {
@@ -117,6 +168,15 @@ describe("helpers", () => {
     expect(roleLabel("owner")).toBe("オーナー");
     expect(roleLabel("writer")).toBe("編集者");
     expect(roleLabel("reader")).toBe("閲覧者");
+  });
+  it("driveRoleLabel maps reader/commenter/writer to short labels", () => {
+    expect(driveRoleLabel("reader")).toBe("閲覧");
+    expect(driveRoleLabel("commenter")).toBe("コメント");
+    expect(driveRoleLabel("writer")).toBe("編集");
+  });
+  it("roleGrantChipLabel formats as `<roleName>: <driveRole>`", () => {
+    expect(roleGrantChipLabel({ roleName: "開発", driveRole: "writer" })).toBe("開発: 編集");
+    expect(roleGrantChipLabel({ roleName: "会場", driveRole: "reader" })).toBe("会場: 閲覧");
   });
 });
 
@@ -144,7 +204,7 @@ describe("DriveShareScreen", () => {
   it("grant is disabled for an invalid email and calls grant for a valid one", async () => {
     const user = userEvent.setup();
     const grant = vi.fn((_f: string, req: { emailAddress: string; role: "reader" | "commenter" | "writer" }) =>
-      Promise.resolve({ permission: { id: "p_new", type: "user" as const, role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null } }),
+      Promise.resolve({ permission: { id: "p_new", type: "user" as const, role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null, inherited: false } }),
     );
     render(wrap(<DriveShareScreen />, stubApi({ grant })));
     await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
@@ -186,6 +246,38 @@ describe("DriveShareScreen", () => {
     expect(revoke).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "剥奪する" }));
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("fil_budget", "p_reader"));
+  });
+
+  it("an inherited permission is read-only: shows the 継承 badge + reason, no role select or revoke", async () => {
+    const user = userEvent.setup();
+    const revoke = vi.fn(() => Promise.resolve({ revoked: true }));
+    const listPermissions = () => Promise.resolve({ fileId: "fil_budget", permissions: [OWNER, READER, INHERITED] });
+    render(wrap(<DriveShareScreen />, stubApi({ revoke, listPermissions })));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
+    await user.click(screen.getByRole("button", { name: /予算管理/ }));
+    const rows = await screen.findAllByTestId("fe2-driveshare-permission");
+    // rows: [OWNER, READER(direct), INHERITED]
+    const inheritedRow = rows[2]!;
+    expect(within(inheritedRow).getByTestId("fe2-driveshare-inherited-badge")).toBeInTheDocument();
+    expect(within(inheritedRow).getByTestId("fe2-driveshare-inherited-reason")).toBeInTheDocument();
+    // no actionable controls on the inherited row
+    expect(within(inheritedRow).queryByTestId("fe2-driveshare-revoke")).toBeNull();
+    expect(within(inheritedRow).queryByTestId("fe2-driveshare-role-select")).toBeNull();
+    // the direct (non-inherited) READER row still has its controls
+    expect(within(rows[1]!).getByTestId("fe2-driveshare-revoke")).toBeInTheDocument();
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it("link sharing is locked off when the anyone permission is inherited", async () => {
+    const user = userEvent.setup();
+    const inheritedAnyone: SharePermission = { id: "p_anyone_inh", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null, inherited: true };
+    const listPermissions = () => Promise.resolve({ fileId: "fil_budget", permissions: [OWNER, inheritedAnyone] });
+    render(wrap(<DriveShareScreen />, stubApi({ listPermissions })));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
+    await user.click(screen.getByRole("button", { name: /予算管理/ }));
+    const sw = await screen.findByTestId("fe2-driveshare-link-switch");
+    expect(sw).toBeDisabled();
+    expect(screen.getByTestId("fe2-driveshare-link-inherited-reason")).toBeInTheDocument();
   });
 
   it("toggling link sharing calls setLinkSharing", async () => {

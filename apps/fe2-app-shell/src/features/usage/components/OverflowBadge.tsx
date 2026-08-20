@@ -1,8 +1,10 @@
-// OverflowBadge — a @dub/ui Badge stating what happens on quota overflow.
-//   halt → "超過すると停止(429)・自動課金なし" (Cloudflare free: stops, never bills)
-//   bill → "超過すると課金"
-// Reusable/atomic: it only needs the behavior. Copy + tone come from overflowMeta.
-import { Badge } from "@dub/ui";
+// OverflowBadge — the halt/bill distinction as a @dub/ui Badge with a leading icon.
+//   halt → shield / info tone / "上限で自動停止（課金なし）" (Cloudflare free: stops, never bills)
+//   bill → alert / danger tone / "上限超で課金発生"
+// This is the single most important clarity signal on a card: whether hitting 100%
+// costs money or just stops. Reusable/atomic — copy, tone and icon come from
+// overflowMeta so the card and the top summary never drift apart.
+import { Badge, Icon } from "@dub/ui";
 import { overflowMeta } from "../usageStatus.ts";
 import type { OverflowBehavior } from "../types.ts";
 
@@ -15,7 +17,10 @@ export function OverflowBadge({ behavior, testId }: OverflowBadgeProps): JSX.Ele
   const meta = overflowMeta(behavior);
   return (
     <Badge tone={meta.tone} testId={testId ?? `fe2-usage-overflow-${behavior}`}>
-      {meta.label}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+        <Icon name={meta.icon} size="sm" />
+        {meta.label}
+      </span>
     </Badge>
   );
 }

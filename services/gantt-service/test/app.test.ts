@@ -47,6 +47,16 @@ describe("gantt-service HTTP", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /gantt reads ONLY the SoT key `eventId`; the drifted `?event=` alias is rejected", async () => {
+    // The wire contract (gantt.GetGanttQuery) makes `eventId` the single query key. The
+    // server must not read the old `?event=` alias — doing so is the exact drift the
+    // wire-params contract test forbids. `?event=` therefore reads as "no eventId" -> 400.
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a" })] });
+    const res = await createApp(deps({ upstream: up })).request("/gantt?event=event_1", { headers: AUTHED }, ENV);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+  });
+
   it("GET /gantt for an unknown event -> 404 GANTT_EVENT_NOT_FOUND", async () => {
     const up = fakeUpstream({ eventExists: false });
     const res = await createApp(deps({ upstream: up })).request("/gantt?eventId=missing", { headers: AUTHED }, ENV);
@@ -172,5 +182,49 @@ describe("gantt-service POST /internal/events-async (free-tier consumer)", () =>
   it("malformed envelope (no name/id) -> 400", async () => {
     const res = await post(createApp(deps({})), INTERNAL, { foo: "bar" });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("PATCH /gantt/rows/:taskId (persist a bar window)", () => {
+  const patch = (app: ReturnType<typeof createApp>, id: string, body: unknown, headers = AUTHED) =>
+    app.request(`/gantt/rows/${id}`, { method: "PATCH", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) }, ENV);
+
+  it("writes startsAt→startAt / endsAt→dueAt, purges the event cache, echoes the row", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a", eventId: "event_1", title: "会場" })] });
+    const cache = fakeCache();
+    const res = await patch(createApp(deps({ upstream: up, cache })), "task_a", {
+      startsAt: "2026-08-15T00:00:00.000Z",
+      endsAt: "2026-08-18T00:00:00.000Z",
+    });
+    expect(res.status).toBe(200);
+    const row = (await res.json()) as gantt.GanttRow;
+    expect(row.taskId).toBe("task_a");
+    expect(row.startsAt).toBe("2026-08-15T00:00:00.000Z");
+    expect(row.endsAt).toBe("2026-08-18T00:00:00.000Z");
+    expect(up.calls.updateTaskDates).toBe(1);
+    expect(cache.purges).toEqual(["event_1"]); // next read is fresh
+  });
+
+  it("requires auth (401 without x-dub-user-id) and does NOT need event:read scope", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a" })] });
+    const res401 = await patch(createApp(deps({ upstream: up })), "task_a", { startsAt: null, endsAt: null }, H());
+    expect(res401.status).toBe(401);
+    // event:read denied by the authz layer, but the row path is task-scoped → still 200
+    // (task:write is enforced downstream in task-service, not here).
+    const res200 = await patch(createApp(deps({ upstream: up, allow: false })), "task_a", { startsAt: null, endsAt: null });
+    expect(res200.status).toBe(200);
+  });
+
+  it("400 on a non-ISO schedule value", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a" })] });
+    const res = await patch(createApp(deps({ upstream: up })), "task_a", { startsAt: "not-a-date", endsAt: null });
+    expect(res.status).toBe(400);
+    expect(up.calls.updateTaskDates).toBe(0);
+  });
+
+  it("404 for an unknown task (propagated from task-service)", async () => {
+    const up = fakeUpstream({ tasks: [] });
+    const res = await patch(createApp(deps({ upstream: up })), "task_missing", { startsAt: null, endsAt: null });
+    expect(res.status).toBe(404);
   });
 });

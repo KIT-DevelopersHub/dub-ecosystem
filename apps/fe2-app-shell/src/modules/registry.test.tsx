@@ -63,6 +63,18 @@ describe("buildRegistry", () => {
     const Widget = () => <span />;
     const reg = buildRegistry([mod({ id: "notifications", headerWidget: Widget })]);
     expect(reg.headerWidgets).toEqual([Widget]);
+    expect(reg.leadingHeaderWidgets).toEqual([]);
+  });
+
+  it("routes a leading headerWidget into leadingHeaderWidgets (left of the AppLauncher)", () => {
+    const Bell = () => <span />;
+    const Switcher = () => <span />;
+    const reg = buildRegistry([
+      mod({ id: "gantt", headerWidget: Switcher, headerWidgetPlacement: "leading" }),
+      mod({ id: "notifications", headerWidget: Bell }), // default trailing
+    ]);
+    expect(reg.leadingHeaderWidgets).toEqual([Switcher]);
+    expect(reg.headerWidgets).toEqual([Bell]);
   });
 
   it("collects homeWidgets in module registration order", () => {

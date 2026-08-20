@@ -22,6 +22,8 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0004_send_body.sql"),
   join(HERE, "../db/0005_attachments.sql"),
   join(HERE, "../db/0006_owner_scope.sql"),
+  join(HERE, "../db/0007_attachment_status.sql"),
+  join(HERE, "../db/0008_user_flags.sql"),
 ];
 
 function norm(v: unknown): unknown {

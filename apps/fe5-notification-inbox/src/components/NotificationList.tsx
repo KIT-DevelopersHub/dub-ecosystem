@@ -1,11 +1,15 @@
-// NotificationList — renders InboxItem[] with LoadMore paging (no auto-fire),
-// skeleton on first load, and empty/error states (FE5 §2-2, tests 1,2,14).
+// NotificationList — renders InboxItem[] as a FLAT, chronological (newest-first) stream:
+// no in-list genre grouping/headers. Genre separation is done by the tabs (すべて / per
+// category) in NotificationFilterBar; the "すべて" tab shows every genre interleaved in
+// time order. LoadMore paging (no auto-fire), skeleton on first load, and empty/error
+// states (FE5 §2-2, tests 1,2,14). Every item stays a role="listitem".
 
 import type { ReactNode } from "react";
 import { Button, EmptyState, LoadMore, SkeletonLoader } from "@dub/ui";
 import type { ApiError } from "../contracts/fe2";
 import type { InboxItem } from "../contracts/notification-api";
-import { NotificationListItem } from "./NotificationListItem";
+import { NotificationCard } from "./NotificationCard";
+import styles from "./NotificationList.module.css";
 
 export interface NotificationListProps {
   items: InboxItem[];
@@ -13,6 +17,8 @@ export interface NotificationListProps {
   loading: boolean;
   error: ApiError | null;
   onActivate: (item: InboxItem) => void;
+  /** Optional: restore a read item to unread (passed through to each row). */
+  onMarkUnread?: (item: InboxItem) => void;
   onLoadMore: () => void;
   onRetry: () => void;
 }
@@ -48,10 +54,14 @@ export function NotificationList(props: NotificationListProps): ReactNode {
   }
 
   return (
-    <div role="list" data-testid="fe5-inbox-list">
+    <div role="list" className={styles.list} data-testid="fe5-inbox-list">
       {items.map((item) => (
-        <div role="listitem" key={item.id}>
-          <NotificationListItem item={item} onActivate={props.onActivate} />
+        <div role="listitem" className={styles.rowItem} key={item.id}>
+          <NotificationCard
+            item={item}
+            onActivate={props.onActivate}
+            {...(props.onMarkUnread ? { onMarkUnread: props.onMarkUnread } : {})}
+          />
         </div>
       ))}
       <LoadMore

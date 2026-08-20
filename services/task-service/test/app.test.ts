@@ -184,6 +184,41 @@ describe("PUT /tasks/:id/dependencies", () => {
     expect(h.audit.records.some((r) => r.action === "task.dependency.replaced")).toBe(true);
   });
 
+  it("supports seeded task ids without the task_ prefix (GET + first dependency add persists) [regression]", async () => {
+    // Real conference data was seeded with human-readable ids (e.g. "lmbconf-wp-01"),
+    // NOT the task_<ULID> the API mints. A premature `id.startsWith("task_")` guard
+    // 404'd every single-item route on those tasks, so 「先行タスクを保存」 silently
+    // failed for 212/215 conference tasks. Ids are opaque; the DB is the source of truth.
+    const { h, app } = setup();
+    const now = "2026-08-19T00:00:00.000Z";
+    const base = {
+      eventId: "evt_1",
+      description: null,
+      status: "todo" as const,
+      priority: "medium" as const,
+      assigneeId: null,
+      dueAt: null,
+      origin: "internal" as const,
+      createdBy: "usr_alice",
+      now,
+    };
+    const pred = await h.repo.insert({ ...base, id: "lmbconf-wp-00", title: "会計: 法人設立" });
+    const succ = await h.repo.insert({ ...base, id: "lmbconf-wp-01", title: "会計: 設立後の届出" });
+
+    // GET on a non-task_ id must resolve (was 404 via the prefix guard).
+    const got = await app.request(`/tasks/${succ.id}`, userInit("GET"));
+    expect(got.status).toBe(200);
+
+    // First dependency add on a task that had none must persist.
+    const res = await app.request(
+      `/tasks/${succ.id}/dependencies`,
+      userInit("PUT", { version: succ.version, dependsOnIds: [pred.id] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await h.repo.getDependsOn(succ.id)).toEqual([pred.id]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(1);
+  });
+
   it("409 TASK_DEPENDENCY_CYCLE (A->B->C->A); dependencies unchanged, no event", async () => {
     const { h, app } = setup();
     const a = await create(app, { title: "A" });
@@ -292,6 +327,39 @@ describe("GET /tasks (list + paging)", () => {
     await create(app, { assigneeId: "usr_alice" });
     const res = await app.request(`/tasks?assigneeId=usr_alice`, userInit("GET", undefined, { userId: "usr_alice" }));
     expect(res.status).toBe(200);
+  });
+
+  it("exposes createdBy (the requester / from) on created + listed tasks", async () => {
+    const { app } = setup();
+    const t = await create(app, { assigneeId: "usr_bob" }); // creator = usr_alice (userInit default)
+    expect(t.createdBy).toBe("usr_alice");
+    const res = await app.request(`/tasks?eventId=evt_1`, userInit("GET"));
+    const body = (await res.json()) as task.ListTasksResponse;
+    expect(body.items[0]!.createdBy).toBe("usr_alice");
+  });
+
+  it("allows omitting eventId for tasks the caller issued (createdById=self, 依頼 lens)", async () => {
+    const { app } = setup();
+    // usr_alice issues a task assigned to someone else.
+    await create(app, { assigneeId: "usr_bob" }, (m, b) => userInit(m, b, { userId: "usr_alice" }));
+    const res = await app.request(
+      `/tasks?createdById=usr_alice`,
+      userInit("GET", undefined, { userId: "usr_alice" }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.ListTasksResponse;
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.assigneeId).toBe("usr_bob");
+    expect(body.items[0]!.createdBy).toBe("usr_alice");
+  });
+
+  it("400 when eventId omitted and createdById is another user (no cross-user leak)", async () => {
+    const { app } = setup();
+    const res = await app.request(
+      `/tasks?createdById=usr_other`,
+      userInit("GET", undefined, { userId: "usr_alice" }),
+    );
+    expect(res.status).toBe(400);
   });
 });
 
@@ -448,5 +516,151 @@ describe("contract branches — validation + guards", () => {
     expect(e.code).toBe("VALIDATION_FAILED");
     expect(hasFieldReason(e.details, "dependsOnIds", "self_dependency")).toBe(true);
     expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+  });
+});
+
+describe("task attachments", () => {
+  it("POST adds a url attachment (201, fileId null) and GET lists it", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "資料リンク", url: "https://example.com/doc" }),
+    );
+    expect(res.status).toBe(201);
+    const att = (await res.json()) as task.TaskAttachment;
+    expect(att.kind).toBe("url");
+    expect(att.fileId).toBeNull();
+    expect(att.taskId).toBe(t.id);
+
+    const list = await app.request(`/tasks/${t.id}/attachments`, userInit("GET"));
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as task.ListTaskAttachmentsResponse;
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.name).toBe("資料リンク");
+  });
+
+  it("POST adds a file attachment carrying fileId + display meta", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", {
+        kind: "file",
+        name: "図.png",
+        url: "/api/v1/files/file_1/download",
+        fileId: "file_1",
+        mimeType: "image/png",
+        sizeBytes: 1234,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const att = (await res.json()) as task.TaskAttachment;
+    expect(att.fileId).toBe("file_1");
+    expect(att.mimeType).toBe("image/png");
+    expect(att.sizeBytes).toBe(1234);
+  });
+
+  it("400 on a url-kind attachment whose url is not http(s) (no javascript: etc.)", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "javascript:alert(1)" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("404 when attaching to a task that does not exist", async () => {
+    const { app } = setup();
+    const res = await app.request(
+      `/tasks/task_missing/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "https://example.com" }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE soft-removes an attachment so it drops out of the list", async () => {
+    const { app } = setup();
+    const t = await create(app);
+    const add = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "https://example.com" }),
+    );
+    const att = (await add.json()) as task.TaskAttachment;
+    const del = await app.request(`/tasks/${t.id}/attachments/${att.id}`, userInit("DELETE"));
+    expect(del.status).toBe(200);
+    const list = await app.request(`/tasks/${t.id}/attachments`, userInit("GET"));
+    const body = (await list.json()) as task.ListTaskAttachmentsResponse;
+    expect(body.items).toHaveLength(0);
+  });
+
+  it("403 when the caller lacks task:write", async () => {
+    const { h, app } = setup();
+    const t = await create(app);
+    h.authz.denied.add("task:write");
+    const res = await app.request(
+      `/tasks/${t.id}/attachments`,
+      userInit("POST", { kind: "url", name: "x", url: "https://example.com" }),
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory repo dropped them)", () => {
+  async function get(app: Hono, id: string) {
+    const res = await app.request(`/tasks/${id}`, userInit("GET"));
+    return { status: res.status, body: (await res.json()) as task.Task & { parentTaskId?: string | null; teamId?: string | null; wbs?: string | null } };
+  }
+
+  it("persists parentTaskId/teamId/wbs on create and echoes them on read", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親" });
+    const child = await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev", wbs: "1.2.3" } as Partial<task.CreateTaskRequest>);
+    const read = await get(app, child.id);
+    expect(read.status).toBe(200);
+    expect(read.body.parentTaskId).toBe(parent.id);
+    expect(read.body.teamId).toBe("team_dev");
+    expect(read.body.wbs).toBe("1.2.3");
+  });
+
+  it("re-parents and detaches via PATCH parentTaskId", async () => {
+    const { app } = setup();
+    const a = await create(app, { title: "A" });
+    const b = await create(app, { title: "B" });
+    const c = await create(app, { title: "C" });
+    // attach C under A
+    let res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version, parentTaskId: a.id }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(a.id);
+    // move C under B
+    res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version + 1, parentTaskId: b.id }));
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(b.id);
+    // detach to top-level
+    res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version + 2, parentTaskId: null }));
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBeNull();
+  });
+
+  it("persists startAt on create, updates + clears it via PATCH, and echoes it on read (PR-C)", async () => {
+    const { h, app } = setup();
+    const t = await create(app, { startAt: "2026-08-05T00:00:00Z", dueAt: "2026-08-10T00:00:00Z" } as Partial<task.CreateTaskRequest>);
+    expect((await get(app, t.id)).body.startAt).toBe("2026-08-05T00:00:00Z");
+
+    // move the start; task.updated must report startAt as a changed field (→ gantt cache purge)
+    let res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1, startAt: "2026-08-07T00:00:00Z" }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as task.Task).startAt).toBe("2026-08-07T00:00:00Z");
+    expect(h.events.byName("task.updated").at(-1)!.payload).toMatchObject({ changed: ["startAt"] });
+
+    // clear it (null)
+    res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 2, startAt: null }));
+    expect(((await res.json()) as task.Task).startAt).toBeNull();
+  });
+
+  it("400 on a non-ISO startAt", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", startAt: "nope" }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
 });

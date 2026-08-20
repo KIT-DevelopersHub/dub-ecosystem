@@ -277,10 +277,75 @@ components:
             $ref: '#/components/schemas/EventSummary'
         unreadCount:
           type: integer
+        taskSummary:
+          $ref: '#/components/schemas/HomeTaskSummary'
+        usageSummary:
+          $ref: '#/components/schemas/HomeUsageSummary'
+        orgStats:
+          $ref: '#/components/schemas/HomeOrgStats'
         partialErrors:
           type: array
           items:
             $ref: '#/components/schemas/UpstreamPartialError'
+    HomeTaskSummary:
+      type: object
+      required:
+        - total
+        - byStatus
+      properties:
+        total:
+          type: integer
+        byStatus:
+          type: object
+          properties:
+            todo:
+              type: integer
+            in_progress:
+              type: integer
+            blocked:
+              type: integer
+            done:
+              type: integer
+            cancelled:
+              type: integer
+    HomeUsageMetric:
+      type: object
+      required:
+        - key
+        - label
+        - pct
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        pct:
+          type: number
+          nullable: true
+    HomeUsageSummary:
+      type: object
+      required:
+        - metrics
+        - worst
+      properties:
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeUsageMetric'
+        worst:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HomeUsageMetric'
+    HomeOrgStats:
+      type: object
+      required:
+        - members
+        - teams
+      properties:
+        members:
+          type: integer
+        teams:
+          type: integer
     PublicInquiryRequest:
       type: object
       required:

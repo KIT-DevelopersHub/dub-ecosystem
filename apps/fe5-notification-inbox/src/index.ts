@@ -15,6 +15,8 @@ export { useUnreadCount } from "./hooks/useUnreadCount";
 export type { UseUnreadCountResult } from "./hooks/useUnreadCount";
 export { useInbox } from "./hooks/useInbox";
 export type { UseInboxOptions, UseInboxResult } from "./hooks/useInbox";
+export { useAdminNotifications, PENDING_BROADCAST_ID } from "./hooks/useAdminNotifications";
+export type { UseAdminNotificationsResult } from "./hooks/useAdminNotifications";
 export { usePreferences } from "./hooks/usePreferences";
 export type { UsePreferencesResult } from "./hooks/usePreferences";
 export { useUnreadStore, getUnreadCount } from "./store/unread-store";
@@ -22,11 +24,17 @@ export { useUnreadStore, getUnreadCount } from "./store/unread-store";
 // ---- Components ----
 export { NotificationInboxPage } from "./components/NotificationInboxPage";
 export { NotificationPreferencesPage } from "./components/NotificationPreferencesPage";
+export { NotificationManagePage } from "./components/NotificationManagePage";
 export { NotificationBell } from "./components/NotificationBell";
+export { NotificationDialog } from "./components/NotificationDialog";
+export {
+  useNotificationDialogStore,
+  openNotificationDialog,
+} from "./store/dialog-store";
 export { ReleasePublishForm } from "./components/ReleasePublishForm";
 export type { ReleasePublishFormProps } from "./components/ReleasePublishForm";
 export { NotificationList } from "./components/NotificationList";
-export { NotificationListItem, itemLinkUrl } from "./components/NotificationListItem";
+export { NotificationCard, itemLinkUrl } from "./components/NotificationCard";
 export { NotificationFilterBar } from "./components/NotificationFilterBar";
 export { NotificationTypeLabel } from "./components/NotificationTypeLabel";
 export { PreferenceMatrix } from "./components/PreferenceMatrix";
@@ -77,7 +85,9 @@ export * as routes from "./lib/routes";
 export {
   ROUTE_INBOX,
   ROUTE_PREFERENCES,
+  ROUTE_MANAGE,
   PERM_INBOX,
   PERM_PREFS,
+  PERM_BROADCAST_PUBLISH,
   resolveLinkUrl,
 } from "./lib/routes";

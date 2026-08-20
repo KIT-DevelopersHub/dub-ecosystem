@@ -21,18 +21,27 @@ import {
   Stack,
   Switch,
   TextField,
+  Tooltip,
   useToast,
 } from "@dub/ui";
+import { RolePicker } from "@dub/app-ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { createOptimisticMutation } from "../../lib/optimistic.tsx";
 import { useDriveShareApi } from "./DriveShareProvider.tsx";
+import { DriveTree } from "./DriveTree.tsx";
 import {
+  driveRoleLabel,
+  driveRoleTone,
   isValidEmail,
+  roleGrantChipLabel,
   roleLabel,
   type AssignableRole,
   type DriveFile,
+  type DriveRole,
   type ListPermissionsResult,
+  type ListRoleGrantsResult,
+  type RoleFileGrant,
   type ShareRole,
   type SharePermission,
 } from "./driveShareApi.tsx";
@@ -43,13 +52,49 @@ const ASSIGNABLE_OPTIONS: { value: AssignableRole; label: string }[] = [
   { value: "writer", label: "編集者" },
 ];
 
+// Role grants offer 閲覧(reader)/編集(writer) as the two primary choices; コメント is optional.
+const DRIVE_ROLE_OPTIONS: { value: DriveRole; label: string }[] = [
+  { value: "reader", label: "閲覧（reader）" },
+  { value: "writer", label: "編集（writer）" },
+  { value: "commenter", label: "コメント（commenter）" },
+];
+
+function roleGrantsKey(fileId: string): readonly unknown[] {
+  return queryKeys.feature("driveshare", "role-grants", fileId);
+}
+const ALL_ROLE_GRANTS_KEY = queryKeys.feature("driveshare", "role-grants");
+
 function formatUpdated(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("ja-JP");
 }
 
-function FileRow({ file, active, onSelect }: { file: DriveFile; active: boolean; onSelect: () => void }): JSX.Element {
+/** Color chips summarising a file's role grants (e.g. 「開発: 編集」「会場: 閲覧」). */
+function RoleGrantChips({ grants }: { grants: readonly RoleFileGrant[] }): JSX.Element | null {
+  if (grants.length === 0) return null;
+  return (
+    <Stack direction="row" gap={1} align="center" wrap testId="fe2-driveshare-file-chips">
+      {grants.map((g) => (
+        <Badge key={g.id} tone={driveRoleTone(g.driveRole)} testId="fe2-driveshare-file-chip">
+          {roleGrantChipLabel(g)}
+        </Badge>
+      ))}
+    </Stack>
+  );
+}
+
+function FileRow({
+  file,
+  active,
+  grants,
+  onSelect,
+}: {
+  file: DriveFile;
+  active: boolean;
+  grants: readonly RoleFileGrant[];
+  onSelect: () => void;
+}): JSX.Element {
   return (
     <button
       type="button"
@@ -62,7 +107,7 @@ function FileRow({ file, active, onSelect }: { file: DriveFile; active: boolean;
       <Card>
         <Stack gap={1}>
           <Stack direction="row" gap={2} align="center">
-            <Icon name={file.isFolder ? "list" : "file"} />
+            <Icon name={file.isFolder ? "folder" : "file"} />
             <strong style={{ fontWeight: active ? 700 : 500 }}>{file.name}</strong>
             {file.linkShared ? (
               <Badge tone="info" testId="fe2-driveshare-linkbadge">
@@ -70,6 +115,7 @@ function FileRow({ file, active, onSelect }: { file: DriveFile; active: boolean;
               </Badge>
             ) : null}
           </Stack>
+          <RoleGrantChips grants={grants} />
           <small>
             {file.ownerName ? `オーナー: ${file.ownerName}` : ""}
             {file.modifiedTime ? ` ・ 更新 ${formatUpdated(file.modifiedTime)}` : ""}
@@ -94,6 +140,7 @@ function PermissionRow({
   const toast = useToast();
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const isOwner = permission.role === "owner";
+  const isInherited = !isOwner && permission.inherited;
   const grantee = permission.type === "anyone" ? "リンクを知っている全員" : permission.emailAddress ?? permission.displayName ?? "(不明)";
 
   // Optimistic role change: patch the cached permissions list immediately.
@@ -129,10 +176,24 @@ function PermissionRow({
         <Stack gap={1}>
           <strong>{grantee}</strong>
           {permission.displayName && permission.type !== "anyone" ? <small>{permission.displayName}</small> : null}
+          {isInherited ? (
+            <small data-testid="fe2-driveshare-inherited-reason" style={{ color: "var(--dub-color-fg-muted, #667)" }}>
+              親フォルダから継承された権限のため、このファイル単体では変更・剥奪できません。親フォルダの共有設定で操作してください。
+            </small>
+          ) : null}
         </Stack>
         <Stack direction="row" gap={2} align="center">
           {isOwner ? (
             <Badge tone="neutral">{roleLabel(permission.role)}</Badge>
+          ) : isInherited ? (
+            <Stack direction="row" gap={2} align="center">
+              <Badge tone="neutral">{roleLabel(permission.role)}</Badge>
+              <Tooltip content="親フォルダから継承された権限です。このファイル単体では変更・剥奪できません。親フォルダの共有設定で操作してください。">
+                <Badge tone="warning" testId="fe2-driveshare-inherited-badge">
+                  継承
+                </Badge>
+              </Tooltip>
+            </Stack>
           ) : (
             <>
               <Select<AssignableRole>
@@ -233,10 +294,14 @@ function LinkSharingToggle({
   file,
   permsKey,
   linkShared,
+  linkInherited,
 }: {
   file: DriveFile;
   permsKey: readonly unknown[];
   linkShared: boolean;
+  /** The existing `anyone` permission is inherited from a parent folder → it cannot be
+   *  removed on this item, so the toggle is locked on with an explanation. */
+  linkInherited: boolean;
 }): JSX.Element {
   const driveApi = useDriveShareApi();
   const queryClient = useQueryClient();
@@ -264,15 +329,301 @@ function LinkSharingToggle({
         <Stack gap={1}>
           <strong>リンクを知っている全員</strong>
           <small>{linkShared ? "オン（閲覧者としてリンク共有中）" : "オフ"}</small>
+          {linkInherited ? (
+            <small data-testid="fe2-driveshare-link-inherited-reason" style={{ color: "var(--dub-color-fg-muted, #667)" }}>
+              リンク共有は親フォルダから継承されています。このファイル単体ではオフにできません。親フォルダの共有設定で操作してください。
+            </small>
+          ) : null}
         </Stack>
         <Switch
           id={`fe2-driveshare-link-${file.id}`}
           testId="fe2-driveshare-link-switch"
           checked={linkShared}
-          disabled={toggle.isPending}
+          disabled={toggle.isPending || linkInherited}
           label="リンク共有"
           onChange={(enabled) => toggle.mutate(enabled)}
         />
+      </Stack>
+    </Card>
+  );
+}
+
+const joinEmails = (list: { email: string }[], n = 4): string => {
+  const shown = list.slice(0, n).map((m) => m.email).join(" / ");
+  return list.length > n ? `${shown} 他${list.length - n}件` : shown;
+};
+
+/** Report a role apply/reapply outcome as a single toast:
+ *  - skipped members (Drive refused: invalid email) → WARNING with per-member reason;
+ *  - invited members (no Google account → invite sent, access PENDING) → WARNING that
+ *    names them and suggests sharing with a real Google account instead;
+ *  - otherwise → success (or silent for a clean reapply).
+ *  Nothing ever fails silently, so the operator always knows who did / didn't get access. */
+function showRoleGrantOutcome(
+  toast: ReturnType<typeof useToast>,
+  grant: RoleFileGrant,
+  okTitle: string,
+  opts: { silentOnSuccess?: boolean } = {},
+): void {
+  const skipped = grant.skipped ?? [];
+  const invited = grant.invited ?? [];
+
+  if (skipped.length > 0) {
+    const shown = skipped.slice(0, 4).map((s) => `${s.email}（${s.reason}）`).join(" / ");
+    const more = skipped.length > 4 ? ` 他${skipped.length - 4}件` : "";
+    const invitedNote = invited.length > 0 ? `。招待のみ ${invited.length}人: ${joinEmails(invited)}（Googleアカウント未連携）` : "";
+    toast.show({
+      kind: "warning",
+      title: `${okTitle}（${skipped.length}人はスキップ）`,
+      description: `付与 ${grant.appliedCount}人・スキップ ${skipped.length}人: ${shown}${more}${invitedNote}`,
+    });
+    return;
+  }
+
+  if (invited.length > 0) {
+    toast.show({
+      kind: "warning",
+      title: `${okTitle}（${invited.length}人は招待のみ）`,
+      description: `${joinEmails(invited)} はGoogleアカウントが無いため招待メールを送信しました。本人がGoogleでサインインするまで編集できません。実際のGoogleアカウント（または転送先のアカウント）で共有してください。`,
+    });
+    return;
+  }
+
+  if (!opts.silentOnSuccess) toast.show({ kind: "success", title: okTitle });
+}
+
+function RoleGrantRow({
+  fileId,
+  grant,
+  grantsKey,
+}: {
+  fileId: string;
+  grant: RoleFileGrant;
+  grantsKey: readonly unknown[];
+}): JSX.Element {
+  const driveApi = useDriveShareApi();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+
+  // Re-apply is optimistic: assume the sync reaches every member (appliedCount → memberCount).
+  const reapply = useMutation(
+    createOptimisticMutation<RoleFileGrant, void, ListRoleGrantsResult>(queryClient, {
+      mutationFn: () => driveApi.reapplyRoleGrant(fileId, grant.roleId),
+      cacheKey: grantsKey,
+      applyOptimistic: (prev) => ({
+        ...prev,
+        items: prev.items.map((g) => (g.roleId === grant.roleId ? { ...g, appliedCount: g.memberCount } : g)),
+      }),
+      onErrorToast: (err) => toast.show({ kind: "error", title: "再適用できませんでした", description: err.message }),
+    }),
+  );
+
+  // Revoke is destructive → non-optimistic behind ConfirmDialog (optimistic.tsx convention).
+  const revoke = useMutation({
+    mutationFn: () => driveApi.revokeRoleGrant(fileId, grant.roleId),
+    onSuccess: () => {
+      toast.show({ kind: "success", title: "ロールの割り当てを解除しました", description: `${grant.roleName}` });
+      void queryClient.invalidateQueries({ queryKey: grantsKey });
+      void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY });
+    },
+    onError: (err) =>
+      toast.show({
+        kind: "error",
+        title: "解除できませんでした",
+        description: ApiError.isApiError(err) ? err.message : undefined,
+      }),
+  });
+
+  const reapplyThenSyncChips = (): void => {
+    reapply.mutate(undefined, {
+      // Silent on a clean reapply (it was already optimistic); warn only if Drive refused some members.
+      onSuccess: (result) => showRoleGrantOutcome(toast, result, "再適用しました", { silentOnSuccess: true }),
+      onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }),
+    });
+  };
+
+  return (
+    <Card testId="fe2-driveshare-role-grant">
+      <Stack direction="row" gap={2} align="center" justify="between">
+        <Stack gap={1}>
+          <Stack direction="row" gap={2} align="center">
+            <strong>{grant.roleName}</strong>
+            <Badge tone={driveRoleTone(grant.driveRole)} testId="fe2-driveshare-role-grant-badge">
+              {driveRoleLabel(grant.driveRole)}
+            </Badge>
+          </Stack>
+          <small data-testid="fe2-driveshare-role-grant-members">{grant.memberCount}人に展開</small>
+        </Stack>
+        <Stack direction="row" gap={2} align="center">
+          <Button
+            variant="secondary"
+            testId="fe2-driveshare-role-grant-reapply"
+            loading={reapply.isPending}
+            onClick={reapplyThenSyncChips}
+          >
+            再適用
+          </Button>
+          <Button
+            variant="danger"
+            testId="fe2-driveshare-role-grant-revoke"
+            loading={revoke.isPending}
+            onClick={() => setConfirmRevoke(true)}
+          >
+            解除
+          </Button>
+        </Stack>
+      </Stack>
+      <ConfirmDialog
+        open={confirmRevoke}
+        testId="fe2-driveshare-role-grant-revoke-confirm"
+        title="ロールの割り当てを解除しますか？"
+        message={`「${grant.roleName}」の${driveRoleLabel(grant.driveRole)}権限（${grant.memberCount}人）を解除します。`}
+        confirmLabel="解除する"
+        danger
+        onConfirm={() => {
+          setConfirmRevoke(false);
+          revoke.mutate();
+        }}
+        onCancel={() => setConfirmRevoke(false)}
+      />
+    </Card>
+  );
+}
+
+function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: readonly unknown[] }): JSX.Element {
+  const driveApi = useDriveShareApi();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [roleId, setRoleId] = useState("");
+  const [driveRole, setDriveRole] = useState<DriveRole>("reader");
+
+  const rolesQuery = useQuery({
+    queryKey: queryKeys.feature("driveshare", "roles"),
+    queryFn: () => driveApi.listRoles(),
+  });
+  const grantsQuery = useQuery({
+    queryKey: grantsKey,
+    queryFn: () => driveApi.listRoleGrants(file.id),
+  });
+
+  const roles = rolesQuery.data?.items ?? [];
+  const grants = grantsQuery.data?.items ?? [];
+  const alreadyGranted = new Set(grants.map((g) => g.roleId));
+
+  // Optimistic grant: insert a placeholder grant (memberCount unknown until refetch).
+  const grantRole = useMutation(
+    createOptimisticMutation<RoleFileGrant, { roleId: string; driveRole: DriveRole }, ListRoleGrantsResult>(queryClient, {
+      mutationFn: (req) => driveApi.grantRole(file.id, req),
+      cacheKey: grantsKey,
+      applyOptimistic: (prev, req) => {
+        const roleName = roles.find((r) => r.id === req.roleId)?.name ?? req.roleId;
+        const optimistic: RoleFileGrant = {
+          id: `optimistic-${req.roleId}`,
+          fileId: file.id,
+          roleId: req.roleId,
+          roleName,
+          driveRole: req.driveRole,
+          memberCount: 0,
+          appliedCount: 0,
+          grantedBy: "",
+          grantedAt: new Date().toISOString(),
+        };
+        const withoutDup = prev.items.filter((g) => g.roleId !== req.roleId);
+        return { ...prev, items: [...withoutDup, optimistic] };
+      },
+      onErrorToast: (err) => toast.show({ kind: "error", title: "ロールに振れませんでした", description: err.message }),
+    }),
+  );
+
+  const submit = (): void => {
+    if (!roleId) return;
+    const roleName = roles.find((r) => r.id === roleId)?.name ?? roleId;
+    grantRole.mutate(
+      { roleId, driveRole },
+      {
+        onSuccess: (result) => {
+          showRoleGrantOutcome(toast, result, `${roleName} を${driveRoleLabel(driveRole)}に設定`);
+          setRoleId("");
+          setDriveRole("reader");
+        },
+        onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }),
+      },
+    );
+  };
+
+  const canSubmit = roleId.length > 0 && !alreadyGranted.has(roleId) && !grantRole.isPending;
+
+  let grantList: JSX.Element;
+  if (grantsQuery.isPending) {
+    grantList = <SkeletonLoader lines={2} />;
+  } else if (grantsQuery.isError) {
+    const display = ApiError.isApiError(grantsQuery.error)
+      ? toDisplayableError(grantsQuery.error)
+      : { code: "INTERNAL", message: "ロール権限を読み込めませんでした。" };
+    grantList = <ErrorState testId="fe2-driveshare-role-grants-error" error={display} onRetry={() => void grantsQuery.refetch()} />;
+  } else if (grants.length === 0) {
+    grantList = (
+      <EmptyState
+        testId="fe2-driveshare-role-grants-empty"
+        title="ロール権限はまだありません"
+        description="ロールを選んで「このロールに振る」と、そのロールのメンバー全員へ一括で権限が展開されます。"
+        icon="users"
+      />
+    );
+  } else {
+    grantList = (
+      <Stack gap={2}>
+        {grants.map((g) => (
+          <RoleGrantRow key={g.id} fileId={file.id} grant={g} grantsKey={grantsKey} />
+        ))}
+      </Stack>
+    );
+  }
+
+  return (
+    <Card testId="fe2-driveshare-role-panel">
+      <Stack gap={3}>
+        <strong>ロールで共有を追加</strong>
+        {rolesQuery.isPending ? (
+          <SkeletonLoader lines={2} />
+        ) : rolesQuery.isError ? (
+          <ErrorState
+            testId="fe2-driveshare-roles-error"
+            error={
+              ApiError.isApiError(rolesQuery.error)
+                ? toDisplayableError(rolesQuery.error)
+                : { code: "INTERNAL", message: "ロールを読み込めませんでした。" }
+            }
+            onRetry={() => void rolesQuery.refetch()}
+          />
+        ) : (
+          <Stack direction="row" gap={2} align="end">
+            <RolePicker
+              id="fe2-driveshare-role-picker"
+              testId="fe2-driveshare-role-picker"
+              value={roleId}
+              onChange={setRoleId}
+              roles={roles}
+              includeNone
+              noneLabel="ロールを選択"
+            />
+            <Select<DriveRole>
+              id="fe2-driveshare-role-driverole"
+              testId="fe2-driveshare-role-driverole"
+              value={driveRole}
+              options={DRIVE_ROLE_OPTIONS}
+              onChange={setDriveRole}
+            />
+            <Button testId="fe2-driveshare-role-submit" disabled={!canSubmit} loading={grantRole.isPending} onClick={submit}>
+              このロールに振る
+            </Button>
+          </Stack>
+        )}
+        {roleId && alreadyGranted.has(roleId) ? (
+          <small style={{ color: "var(--dub-color-danger-fg, #b00)" }}>このロールには既に権限が設定されています</small>
+        ) : null}
+        {grantList}
       </Stack>
     </Card>
   );
@@ -295,11 +646,14 @@ function PermissionsPanel({ file }: { file: DriveFile }): JSX.Element {
       : { code: "INTERNAL", message: "権限を読み込めませんでした。" };
     body = <ErrorState testId="fe2-driveshare-perms-error" error={display} onRetry={() => void query.refetch()} />;
   } else {
-    const linkShared = query.data.permissions.some((p) => p.type === "anyone");
+    const anyonePerm = query.data.permissions.find((p) => p.type === "anyone");
+    const linkShared = anyonePerm !== undefined;
+    const linkInherited = anyonePerm?.inherited ?? false;
     body = (
       <Stack gap={3}>
         <GrantForm fileId={file.id} permsKey={permsKey} />
-        <LinkSharingToggle file={file} permsKey={permsKey} linkShared={linkShared} />
+        <RolePermissionPanel file={file} grantsKey={roleGrantsKey(file.id)} />
+        <LinkSharingToggle file={file} permsKey={permsKey} linkShared={linkShared} linkInherited={linkInherited} />
         <Stack gap={2}>
           {query.data.permissions.map((p) => (
             <PermissionRow key={p.id} fileId={file.id} permission={p} permsKey={permsKey} />
@@ -320,15 +674,32 @@ function PermissionsPanel({ file }: { file: DriveFile }): JSX.Element {
 export function DriveShareScreen(): JSX.Element {
   const driveApi = useDriveShareApi();
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The selected node's full DriveFile (not just an id): a nested child lives in a
+  // per-folder cache, not the root list, so the panel must hold the object itself.
+  const [selected, setSelected] = useState<DriveFile | null>(null);
+  const trimmed = search.trim();
+  const searching = trimmed.length > 0;
   const filesKey = queryKeys.feature("driveshare", "files", search);
   const query = useQuery({
     queryKey: filesKey,
-    queryFn: () => driveApi.listFiles(search.trim() ? { q: search.trim(), limit: 50 } : { limit: 50 }),
+    queryFn: () => driveApi.listFiles(searching ? { q: trimmed, limit: 50 } : { limit: 50 }),
   });
 
+  // Fetch every role grant once and index by fileId so each row can show its chips.
+  const allGrantsQuery = useQuery({
+    queryKey: ALL_ROLE_GRANTS_KEY,
+    queryFn: () => driveApi.listAllRoleGrants(),
+  });
+  const grantsByFile = new Map<string, RoleFileGrant[]>();
+  for (const g of allGrantsQuery.data?.items ?? []) {
+    const list = grantsByFile.get(g.fileId);
+    if (list) list.push(g);
+    else grantsByFile.set(g.fileId, [g]);
+  }
+  const grantsFor = (fileId: string): RoleFileGrant[] => grantsByFile.get(fileId) ?? [];
+
   const files = query.data?.files ?? [];
-  const selected = files.find((f) => f.id === selectedId) ?? null;
+  const selectedId = selected?.id ?? null;
 
   let list: JSX.Element;
   if (query.isPending) {
@@ -347,14 +718,19 @@ export function DriveShareScreen(): JSX.Element {
         icon="file"
       />
     );
-  } else {
+  } else if (searching) {
+    // While searching we show a FLAT substring result across every depth (folders are
+    // not expandable here). Auto-expanding the tree to each hit is a future improvement.
     list = (
       <Stack gap={2}>
         {files.map((f) => (
-          <FileRow key={f.id} file={f} active={f.id === selectedId} onSelect={() => setSelectedId(f.id)} />
+          <FileRow key={f.id} file={f} active={f.id === selectedId} grants={grantsFor(f.id)} onSelect={() => setSelected(f)} />
         ))}
       </Stack>
     );
+  } else {
+    // Default view: the lazy, expandable hierarchy.
+    list = <DriveTree files={files} selectedId={selectedId} onSelect={setSelected} grantsFor={grantsFor} />;
   }
 
   return (

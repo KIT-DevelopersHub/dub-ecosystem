@@ -1,0 +1,13 @@
+/* Flat inbox stream: compact cards stacked with a tight gap (no genre grouping/headers
+   — the tabs do genre separation). Tokens only (FRONTEND_GUIDE §4). */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+
+/* Row wrapper keeps each card a real list item without adding its own box. */
+.rowItem {
+  display: block;
+}

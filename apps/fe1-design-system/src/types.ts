@@ -43,6 +43,7 @@ export type IconName =
   | "menu"
   | "log-out"
   | "shield"
+  | "lock"
   // P1 additions (fe2〜fe7 needs beyond the original 20; keep closed, additive-only)
   | "task"
   | "list"
@@ -64,7 +65,26 @@ export type IconName =
   | "check"
   | "check-all"
   | "bell-off"
-  | "archive";
+  | "archive"
+  | "folder"
+  | "folder-open"
+  // chat + rich-text formatting (fe6). Additive, closed-union preserved.
+  | "bold"
+  | "italic"
+  | "underline"
+  | "strikethrough"
+  | "code"
+  | "code-block"
+  | "quote"
+  | "list-ordered"
+  | "link"
+  | "smile"
+  | "at-sign"
+  | "paperclip"
+  | "send"
+  | "reply"
+  | "pin"
+  | "hash";
 
 export interface IconProps extends TestableProps {
   name: IconName;
@@ -221,8 +241,40 @@ export interface ColumnDef<Row> {
   header: ReactNode;
   cell: (row: Row) => ReactNode;
   width?: string;
+  /**
+   * Minimum column width (any CSS length, e.g. "12rem"). Applied to both the
+   * header and body cells so a wide table keeps its natural width and scrolls
+   * horizontally inside DataTable's `overflow-x:auto` wrapper instead of
+   * squeezing columns until their text wraps (多列テーブルの折り返し崩れ対策).
+   */
+  minWidth?: string;
+  /**
+   * Keep this column's cells on a single line (`white-space: nowrap`). Header
+   * cells are already nowrap; opt body cells in for values that must not wrap
+   * (氏名・ステータス・操作ボタン等). Chip/tag columns can leave this off to wrap.
+   */
+  noWrap?: boolean;
   sortable?: boolean;
   align?: "left" | "center" | "right";
+  /**
+   * Whether this column can be toggled off from the「表示列」picker (see
+   * DataTableProps.columnHiding). Defaults to `true`. Set `false` for anchor /
+   * action columns that must always render (氏名の行を識別する列・操作ボタン列など);
+   * they stay visible and are omitted from the picker.
+   */
+  hideable?: boolean;
+  /**
+   * When column hiding is enabled, start this column hidden until the user turns
+   * it on. Lets a 多列テーブル open with only its主要列 (横スクロール最小) while the
+   * rest stay one checkbox away. Ignored unless `columnHiding` is set.
+   */
+  defaultHidden?: boolean;
+  /**
+   * Plain-text label for this column in the「表示列」picker. Falls back to
+   * `header` when it is a string, otherwise to `key`. Provide it when `header`
+   * is a ReactNode (icon 等) so the picker checkbox still reads clearly.
+   */
+  pickerLabel?: string;
 }
 export interface SortState {
   key: string;
@@ -238,6 +290,15 @@ export interface DataTableProps<Row> extends TestableProps {
   onSortChange?: (sort: SortState) => void;
   onRowClick?: (row: Row) => void;
   selection?: { selectedKeys: string[]; onChange: (keys: string[]) => void };
+  /**
+   * Opt-in「表示列」picker: a toolbar button above the table lets the user choose
+   * which columns show (checkbox per hideable column). The選択 is persisted per
+   * user in `localStorage` under `storageKey`, so a reload keeps it. Columns with
+   * `defaultHidden` start off; `hideable === false` columns are always shown and
+   * excluded from the picker. Toggling is optimistic (即 UI 反映). Omit to keep the
+   * table exactly as before (all columns always visible, no toolbar).
+   */
+  columnHiding?: { storageKey: string; label?: string };
 }
 
 // offset paging — only for totalCount APIs (凍結案 1-6-3). cursor lists use LoadMore.
@@ -277,6 +338,36 @@ export interface ConfirmDialogProps extends TestableProps {
   onCancel: () => void;
 }
 
+/** One line of a validation breakdown shown inside an ErrorDialog (400 details). */
+export interface ErrorDialogDetail {
+  /** field / cause key (e.g. "dueAt"). Optional — a bare message line is fine. */
+  label?: string;
+  message: string;
+}
+
+/**
+ * Blocking error surface: a modal that makes a failed action's REASON impossible
+ * to miss (the counterpart to the quiet inline field error). Reusable across apps
+ * — feed it any `DisplayableError`; optionally list the validation `details` and a
+ * `retry`. Use for failures the user cannot otherwise see (save silently dropped,
+ * permission denied, dependency cycle, "期間未入力", server/network errors).
+ */
+export interface ErrorDialogProps extends TestableProps {
+  open: boolean;
+  /** Short dialog heading (default "処理できませんでした"). */
+  title?: string;
+  error: DisplayableError;
+  /** Optional per-field / per-cause breakdown (from a 400 validation response). */
+  details?: readonly ErrorDialogDetail[];
+  /** Optional guidance line under the message (how to fix it). */
+  hint?: ReactNode;
+  onClose: () => void;
+  closeLabel?: string; // default "閉じる"
+  /** When provided, shows a 再試行 button that re-runs the failed action. */
+  onRetry?: () => void;
+  retryLabel?: string; // default "再試行"
+}
+
 export interface DrawerProps extends TestableProps {
   open: boolean;
   onClose: () => void;
@@ -291,6 +382,32 @@ export interface PopoverProps extends TestableProps {
   onOpenChange?: (open: boolean) => void;
   placement?: "top" | "bottom" | "left" | "right";
   children: ReactNode;
+}
+
+// Menu (dropdown): a trigger button + a flat list of action items. The generic
+// disclosure primitive for header "設定"/kebab menus. Router-free — each item
+// carries `onSelect`; the panel closes on select, outside-click and Escape.
+export interface MenuItem {
+  id: string;
+  label: string;
+  icon?: IconName;
+  disabled?: boolean;
+  onSelect: () => void;
+  testId?: string;
+  tone?: "default" | "danger"; // "danger" styles destructive/離脱 actions (e.g. logout)
+  dividerBefore?: boolean; // render a separator above this item (group離脱 actions)
+}
+export interface MenuProps extends TestableProps {
+  label: string; // trigger button text (also the aria-label when iconOnly)
+  items: MenuItem[];
+  icon?: IconName; // trigger leading icon (e.g. "settings")
+  variant?: Variant; // trigger button variant (default "ghost")
+  align?: "start" | "end"; // panel horizontal alignment (default "end")
+  menuLabel?: string; // aria-label for the panel (defaults to `label`)
+  // Icon-only trigger: renders a 40px square icon button (matching the header
+  // AppLauncher/bell controls) instead of a labelled Button. `icon` is required
+  // and `label` becomes the button's aria-label; the chevron is dropped.
+  iconOnly?: boolean;
 }
 
 // Toast contract is authoritative here (凍結案 1-4-3). FE2 re-exports useToast;
@@ -327,6 +444,12 @@ export interface AppLauncherItem {
   icon?: IconName; // resolved via FE1 Icon
   href?: string; // consumer's renderLink/onSelect maps this to router navigation
   badgeCount?: number;
+  // Release-gating: a tile the current viewer may NOT open yet is kept in the grid
+  // (never removed — 消さない) but rendered greyed-out, non-clickable and with a
+  // tooltip. Visibility/eligibility is decided upstream by whoever builds `items`;
+  // this component only renders the disabled state and suppresses onSelect.
+  disabled?: boolean;
+  disabledReason?: string; // tooltip text shown on the greyed tile (e.g. 準備中)
 }
 export interface AppLauncherProps extends TestableProps {
   items: AppLauncherItem[];
@@ -351,7 +474,10 @@ export interface SidebarProps extends TestableProps {
 }
 
 export interface PageHeaderProps extends TestableProps {
-  title: string;
+  // ReactNode (not just string) so composers can supply a rich title — e.g. FE2's
+  // brand lockup (bold "DevHub" home link + a small muted account email). Still
+  // rendered inside the <h1>, so plain strings keep working unchanged.
+  title: ReactNode;
   description?: string;
   actions?: ReactNode;
   breadcrumbs?: ReactNode;
@@ -390,6 +516,36 @@ export interface TabsProps extends TestableProps {
   onChange: (id: string) => void;
 }
 
+// SegmentedControl — a row of mutually-exclusive options (segmented / pill / tab
+// strip) with a highlight that slides under the selected one. Use this instead of
+// hand-rolling `role="tablist"` + active-class button strips (FRONTEND_GUIDE §4).
+// `V` is the value union, so `value` / `onChange` stay type-safe per call site.
+export interface SegmentedOption<V extends string = string> {
+  value: V;
+  label: ReactNode;
+  icon?: IconName; // optional leading icon (decorative)
+  disabled?: boolean;
+  testId?: string; // data-testid on this segment's button
+  // When set, the segment declares it controls a disclosure/panel element: the
+  // button gets `aria-controls={controls}` and reflects `aria-expanded`. Omit for
+  // pure tab semantics (aria-selected only).
+  controls?: string;
+}
+export interface SegmentedControlProps<V extends string = string> extends TestableProps {
+  options: SegmentedOption<V>[];
+  // Controlled selection. Provide `value` + `onChange` to control; otherwise the
+  // control is uncontrolled and seeds from `defaultValue` (or the first enabled
+  // option, so the strip is never blank on mount).
+  value?: V | null;
+  defaultValue?: V;
+  onChange?: (value: V) => void;
+  caption?: ReactNode; // label rendered above the strip
+  captionTestId?: string; // data-testid on the caption element
+  size?: Size; // default "md"
+  "aria-label"?: string; // labels the tablist (recommended when no caption)
+  className?: string; // extra class on the tablist (composition escape hatch)
+}
+
 export interface DividerProps extends TestableProps {
   orientation?: "horizontal" | "vertical";
 }
@@ -416,6 +572,43 @@ export interface ErrorStateProps extends TestableProps {
 export interface SkeletonLoaderProps extends TestableProps {
   lines?: number; // default 3
   width?: string;
+}
+
+// Skeleton family (FE1 §5 loading principle). A loading UI MUST render a
+// skeleton, never a bare blank, so the user can tell "loading" from "empty".
+export type SkeletonVariant = "text" | "circle" | "rect";
+export type SkeletonAnimation = "shimmer" | "pulse" | "none";
+
+/** A single placeholder block. Presentational (aria-hidden); wrap groups in a
+ *  composite or a role="status" region so loading is announced once. */
+export interface SkeletonProps extends TestableProps {
+  variant?: SkeletonVariant; // default "text"
+  width?: string | number; // number = px
+  height?: string | number; // number = px
+  radius?: string; // override border-radius (else per-variant default)
+  animation?: SkeletonAnimation; // default "shimmer"
+}
+
+/** Placeholder for a loading list: `rows` line rows, optional leading avatar. */
+export interface SkeletonListProps extends TestableProps {
+  rows?: number; // default 3
+  avatar?: boolean; // default false
+  animation?: SkeletonAnimation;
+}
+
+/** Placeholder for a loading table: optional header + `rows` × `columns` cells. */
+export interface SkeletonTableProps extends TestableProps {
+  rows?: number; // default 5
+  columns?: number; // default 4
+  header?: boolean; // default true
+  animation?: SkeletonAnimation;
+}
+
+/** Placeholder for a loading card: optional media block + title + `lines`. */
+export interface SkeletonCardProps extends TestableProps {
+  media?: boolean; // default false
+  lines?: number; // default 2
+  animation?: SkeletonAnimation;
 }
 
 // Rate-limit banner (FE1 §6 states family). Domain-agnostic: the consumer supplies the

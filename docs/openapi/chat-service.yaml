@@ -52,12 +52,20 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
       security: []
-  /channels:
+  /chat/channels:
     get:
       operationId: listChannels
       summary: List channels the caller can see
       tags:
         - chat
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: eventId
+          in: query
+          description: Scope channels to an event.
+          schema:
+            type: string
       responses:
         '200':
           description: Channels
@@ -92,7 +100,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
-  /channels/{id}:
+  /chat/channels/{id}:
     get:
       operationId: getChannel
       summary: Get a channel
@@ -148,7 +156,32 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /channels/{id}/members:
+  /chat/channels/{id}/members:
+    get:
+      operationId: listMembers
+      summary: List channel members
+      description: Roster for the members popover (presence / admin badge). Readable scope — any member, or any caller for a public channel; a private channel is hidden (404) from non-members.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Member roster
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChannelMember'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
     post:
       operationId: addMember
       summary: Add a member
@@ -177,7 +210,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /channels/{id}/members/{userId}:
+  /chat/channels/{id}/members/{userId}:
     delete:
       operationId: removeMember
       summary: Remove a member
@@ -203,7 +236,70 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /channels/{id}/read:
+  /chat/channels/{id}/pins:
+    get:
+      operationId: listPins
+      summary: List pinned messages
+      description: Pinned messages for the channel (Slack-parity), newest-pinned message first, tombstones excluded. Readable scope.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pinned messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatMessage'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: togglePin
+      summary: Pin or unpin a message
+      description: Toggles the pin for the given message (any channel member may pin/unpin). Returns the updated pinned-message list so the client reconciles in one round-trip.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinRequest'
+      responses:
+        '200':
+          description: Updated pinned-message list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /chat/channels/{id}/read:
     post:
       operationId: updateReadState
       summary: Update the caller's read state
@@ -237,7 +333,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
-  /channels/{id}/ws-ticket:
+  /chat/channels/{id}/ws-ticket:
     get:
       operationId: issueWsTicket
       summary: Issue a WebSocket ticket for the ChatRoom DO
@@ -263,7 +359,92 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /messages:
+  /chat/search:
+    get:
+      operationId: searchMessages
+      summary: Search messages (Slack-parity workspace/channel search)
+      tags:
+        - chat
+      parameters:
+        - name: q
+          in: query
+          description: Search text.
+          schema:
+            type: string
+        - name: channelId
+          in: query
+          description: Restrict the search to one channel.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Search results
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /chat/unread:
+    get:
+      operationId: listUnread
+      summary: Unread counts for the caller (no query params)
+      tags:
+        - chat
+      responses:
+        '200':
+          description: Unread counts
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /chat/settings/deletion-policy:
+    get:
+      operationId: getDeletionPolicy
+      summary: Get the workspace message deletion policy (RBAC-configurable delete behaviour)
+      tags:
+        - chat
+      responses:
+        '200':
+          description: The current deletion policy (version 0 = in-code default in effect)
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    patch:
+      operationId: updateDeletionPolicy
+      summary: Update the workspace message deletion policy (requires chat:moderate)
+      tags:
+        - chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy, version]
+              properties:
+                version:
+                  type: integer
+                  description: Optimistic-concurrency guard; 0 for the first write.
+                policy:
+                  type: object
+                  required: [member, moderator]
+                  properties:
+                    member:
+                      type: string
+                      enum: [hard, tombstone]
+                    moderator:
+                      type: string
+                      enum: [hard, tombstone]
+      responses:
+        '200':
+          description: The updated deletion policy
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /chat/messages:
     get:
       operationId: listMessages
       summary: List messages in a channel
@@ -275,6 +456,16 @@ paths:
         - name: channelId
           in: query
           required: true
+          schema:
+            type: string
+        - name: threadRootId
+          in: query
+          description: List the replies of this thread root.
+          schema:
+            type: string
+        - name: afterMessageId
+          in: query
+          description: Catch-up fetch of messages after this id.
           schema:
             type: string
       responses:
@@ -316,7 +507,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /messages/{id}:
+  /chat/messages/{id}:
     patch:
       operationId: editMessage
       summary: Edit a message
@@ -364,7 +555,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /messages/{id}/reactions:
+  /chat/messages/{id}/reactions:
     post:
       operationId: toggleReaction
       summary: Toggle a reaction
@@ -395,7 +586,43 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
-  /unread:
+  /chat/search:
+    get:
+      operationId: searchMessages
+      summary: Search messages
+      description: Substring match over messages in channels the caller can read (public, or channels the caller belongs to). Tombstones excluded; newest-first; bounded by limit. An empty query returns an empty list.
+      tags:
+        - chat
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search text (case-insensitive substring). Empty/whitespace -> [].
+        - name: channelId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Scope to a single channel; omit for workspace-wide.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Search hits (newest-first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchHit'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /chat/unread:
     get:
       operationId: chatUnread
       summary: Caller-scoped unread total
@@ -531,6 +758,48 @@ components:
       properties:
         userId:
           type: string
+    ChannelMember:
+      type: object
+      required:
+        - channelId
+        - userId
+        - role
+        - joinedAt
+      properties:
+        channelId:
+          type: string
+        userId:
+          type: string
+        role:
+          type: string
+          enum: [admin, member]
+        joinedAt:
+          type: string
+          format: date-time
+    PinRequest:
+      type: object
+      required:
+        - messageId
+      properties:
+        messageId:
+          type: string
+    SearchHit:
+      type: object
+      required:
+        - message
+        - channelId
+        - channelName
+        - channelType
+      properties:
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+        channelId:
+          type: string
+        channelName:
+          type: string
+        channelType:
+          type: string
+          enum: [event, topic, dm]
     PostMessageRequest:
       type: object
       required:

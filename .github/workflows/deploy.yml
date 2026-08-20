@@ -30,6 +30,9 @@ concurrency:
 
 permissions:
   contents: read
+  # read-only: resolve the merged PR (title/number/url) behind the deploy for the
+  # post-deploy Admin notification. No write scopes.
+  pull-requests: read
 
 env:
   TURBO_TELEMETRY_DISABLED: 1
@@ -52,9 +55,48 @@ jobs:
       # Public origins used by the post-deploy smoke checks.
       GATEWAY_HEALTH_URL: ${{ vars.GATEWAY_HEALTH_URL || 'https://dub-api-gateway.developershub-site.workers.dev' }}
       MOBILE_BFF_HEALTH_URL: ${{ vars.MOBILE_BFF_HEALTH_URL }}
+      # Optional: when set, deploy-prod.sh arms the app-health-monitor hourly alarm after deploy
+      # (POST /internal/monitor/kick, gated by this shared token). Unset => armed manually once.
+      MONITOR_ADMIN_TOKEN: ${{ secrets.MONITOR_ADMIN_TOKEN }}
+      MONITOR_HEALTH_URL: ${{ vars.MONITOR_HEALTH_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # --- Gate #2 (fail-close): production label gate ---------------------------------
+      # Defence in depth for prod-gate.yml (which enforces the `確認した` label at MERGE
+      # time via branch protection). This re-verifies, at DEPLOY time, that the merged PR
+      # behind this commit actually carried `確認した` — catching direct pushes, admin
+      # merge-without-check bypasses, and label races. If the label is absent the deploy
+      # ABORTS (exit 1) before deploy-prod.sh runs.
+      #
+      # STANDBY BY DEFAULT: gated on the repo variable PROD_LABEL_GATE (mirrors the
+      # DEPLOY_APPLY_MIGRATIONS / DEPLOY_ADMIN_NOTIFY pattern). While unset/false this is a
+      # no-op, so in-flight prod-direct work keeps deploying under the old rules. At CUTOVER
+      # the owner sets PROD_LABEL_GATE=true. `workflow_dispatch` (manual owner deploy) is
+      # intentionally exempt — the manual run IS the confirmation. See
+      # docs/runbooks/04-staging-label-gate.md.
+      - name: Enforce 「確認した」 label (fail-close)
+        if: ${{ vars.PROD_LABEL_GATE == 'true' && github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Resolve the merged PR behind this commit (same mechanism as the admin-notify step).
+          PR_NUM="$(gh pr list --repo "${REPO}" --search "${SHA}" --state merged \
+            --json number --jq '.[0].number' 2>/dev/null || echo '')"
+          if [ -z "${PR_NUM}" ] || [ "${PR_NUM}" = "null" ]; then
+            echo "::error title=本番ゲート::この commit (${SHA}) に対応する merged PR が見つかりません。ラベルゲートを機械判定できないため fail-close します。「確認した」ラベル付きの PR 経由でマージするか、workflow_dispatch で手動デプロイしてください。"
+            exit 1
+          fi
+          HAS_LABEL="$(gh pr view "${PR_NUM}" --repo "${REPO}" \
+            --json labels --jq '[.labels[].name] | index("確認した") != null')"
+          if [ "${HAS_LABEL}" != "true" ]; then
+            echo "::error title=本番ゲート::PR #${PR_NUM} に「確認した」ラベルがありません。staging 確認 → 「確認した」付与の手順を踏んでから本番へ。deploy を abort します。"
+            exit 1
+          fi
+          echo "✅ PR #${PR_NUM} は「確認した」済み — 本番デプロイを続行します。"
 
       - name: Preflight — required secret present
         run: |
@@ -114,3 +156,42 @@ jobs:
         run: bash infra/deploy/deploy-prod.sh
         env:
           SKIP_HEALTHCHECK: ${{ inputs.skip_healthcheck && '1' || '0' }}
+
+      # --- Auto Admin notification (every successful prod deploy) ---
+      # Records ONE idempotent audience='admin' notification in dub-core D1 describing the
+      # deployed change (merged PR title/number/url + SHA + services + time). Admins see it
+      # in their inbox (notification-service materializes audience='admin' rows lazily on
+      # read); members do NOT. dedupKey=deploy:<sha> → re-deploys never double-notify.
+      #
+      # GUARDED OFF by default: set the repo VARIABLE DEPLOY_ADMIN_NOTIFY=true to enable
+      # (mirrors the DEPLOY_APPLY_MIGRATIONS pattern) so it can be reviewed before it starts
+      # writing to prod. best-effort (continue-on-error) — a notify hiccup never fails a
+      # successful deploy.
+      - name: Notify admins of deploy
+        if: ${{ vars.DEPLOY_ADMIN_NOTIFY == 'true' }}
+        continue-on-error: true
+        working-directory: infra/d1
+        # CLOUDFLARE_API_TOKEN is inherited from the job env (used by --apply → wrangler).
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${GITHUB_SHA}"
+          # Best-effort: resolve the merged PR behind this commit (title/number/url).
+          PR_JSON="$(gh pr list --repo "${GITHUB_REPOSITORY}" --search "${SHA}" --state merged --json number,title,url --jq '.[0]' 2>/dev/null || echo '')"
+          if [ -n "${PR_JSON}" ] && [ "${PR_JSON}" != "null" ]; then
+            TITLE="$(printf '%s' "${PR_JSON}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).title||"")}catch{console.log("")}})')"
+            PRNUM="$(printf '%s' "${PR_JSON}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).number||"")}catch{console.log("")}})')"
+            URL="$(printf '%s' "${PR_JSON}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).url||"")}catch{console.log("")}})')"
+          else
+            # Fallback: first line of the deployed commit subject.
+            TITLE="$(git log -1 --pretty=%s "${SHA}" 2>/dev/null || echo 'production deploy')"
+            PRNUM=""; URL=""
+          fi
+          node --import tsx scripts/admin-notify.ts --apply \
+            --sha "${SHA}" \
+            --title "${TITLE}" \
+            ${PRNUM:+--pr "${PRNUM}"} \
+            ${URL:+--url "${URL}"} \
+            --services "全Worker + fe2 + mo3 (deploy-prod.sh)" \
+            --ref "${GITHUB_REF}"
+

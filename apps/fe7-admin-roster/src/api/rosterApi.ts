@@ -2,7 +2,7 @@
 // `/api/v1/*` boundary (design §2-4). This unit implements against the contract
 // types only; the concrete transport (auth cookie, base URL, error reconstruction)
 // is FE2's ResourceClient.
-import type { identity, common, auditLog, auth } from "@dub/types";
+import type { identity, common, auditLog, auth, member, chat } from "@dub/types";
 import type { ResourceClient } from "../shell/contract";
 import type {
   CreateRoleRequest,
@@ -11,7 +11,8 @@ import type {
   RoleAssignment,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
-  UpdateEmailAddressRequest,
+  EmailRoutingSyncPreview,
+  OffboardUserResult,
   RosterUser,
   SyncEmailRoutingAddress,
   SyncEmailRoutingResult,
@@ -28,6 +29,11 @@ const ADMIN = `${BASE}/admin`;
 // mail-gateway registers the Email Routing admin surface under its `/mail` gateway
 // segment, so the external path is /api/v1/mail/admin/email-routing/* (not /admin/*).
 const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
+// 運営メンバー管理 (member-service) — reverse lookup + 在籍更新 during offboarding.
+const MEMBERS = `${BASE}/members`;
+// chat-service — the message deletion policy (RBAC-configurable delete behaviour) is a
+// chat-owned setting; the admin console reaches it through the gateway `/chat` segment.
+const CHAT = `${BASE}/chat`;
 
 export interface RosterApi {
   listUsers(filters: UserListFilters): Promise<common.Paginated<RosterUser>>;
@@ -38,9 +44,25 @@ export interface RosterApi {
     patch: { displayName?: string; status?: identity.UserStatus; githubLogin?: string | null },
   ): Promise<identity.IdentityUser>;
   inviteUser(req: identity.InviteUserRequest): Promise<identity.IdentityUser>;
+  /** One-shot退任: identity-local revoke sessions + strip roles + disable (#2). The
+   *  cross-service steps are orchestrated by useOffboardUser around this call. */
+  offboardUser(userId: common.UserId): Promise<OffboardUserResult>;
+  /** Reverse lookup: the 運営メンバー linked to an identity account, or null (#1/#2). */
+  getMemberByIdentity(identityUserId: common.UserId): Promise<{ member: member.Member | null }>;
+  /** Update a linked member's在籍status during offboarding (member-service). */
+  patchMember(memberId: string, patch: member.UpdateMemberRequest): Promise<member.Member>;
+  /** 運営メンバー一覧 (member-service overview). Powers the「運営メンバーと紐付け」picker:
+   *  the メール名簿 shows which member each @developershub.jp identity is linked to. */
+  listMembersOverview(): Promise<member.MembersOverview>;
+  /** Link a 運営メンバー to a developershub.jp/identity account from the メール名簿 side.
+   *  Reuses the SAME `member.identityUserId` bridge as fe2 (single source of truth) — the
+   *  server 409s (MEMBER_IDENTITY_ALREADY_LINKED) on a double link. Version-locked. */
+  linkMemberIdentity(memberId: string, req: member.LinkIdentityRequest): Promise<member.Member>;
   /** Roster sync SOURCE: the @developershub.jp RECEIVING addresses (routing rules,
    *  zone-scoped), i.e. every issued address — not the ~1 account-scoped destination. */
   listRosterEmailAddresses(): Promise<{ items: SyncEmailRoutingAddress[] }>;
+  /** #5: read-only diff of what a sync WOULD change (no writes) — shown before apply. */
+  previewEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<EmailRoutingSyncPreview>;
   /** Reconcile the roster with the @developershub.jp Email Routing addresses. */
   syncEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<SyncEmailRoutingResult>;
   listRoles(): Promise<common.Paginated<identity.Role>>;
@@ -63,8 +85,10 @@ export interface RosterApi {
   // ---- Email Routing (@developershub.jp address management) ----
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
-  updateEmailAddress(id: string, req: UpdateEmailAddressRequest): Promise<EmailRoutingAddress>;
   deleteEmailAddress(id: string): Promise<void>;
+  // ---- チャット: メッセージ削除ポリシー (RBAC-configurable delete behaviour) ----
+  getChatDeletionPolicy(): Promise<chat.DeletionPolicyResponse>;
+  updateChatDeletionPolicy(req: chat.UpdateDeletionPolicyRequest): Promise<chat.DeletionPolicyResponse>;
 }
 
 export function createRosterApi(client: ResourceClient): RosterApi {
@@ -81,8 +105,17 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     getUser: (id) => client.get<identity.IdentityUserDetail>(`${IDENTITY}/users/${id}`),
     patchUser: (id, patch) => client.patch<identity.IdentityUser>(`${IDENTITY}/users/${id}`, patch),
     inviteUser: (req) => client.post<identity.IdentityUser>(`${IDENTITY}/users/invite`, req),
+    offboardUser: (userId) => client.post<OffboardUserResult>(`${IDENTITY}/users/${userId}/offboard`, {}),
+    getMemberByIdentity: (identityUserId) =>
+      client.get<{ member: member.Member | null }>(`${MEMBERS}/people/by-identity/${identityUserId}`),
+    patchMember: (memberId, patch) => client.patch<member.Member>(`${MEMBERS}/people/${memberId}`, patch),
+    listMembersOverview: () => client.get<member.MembersOverview>(`${MEMBERS}/overview`),
+    linkMemberIdentity: (memberId, req) =>
+      client.post<member.Member>(`${MEMBERS}/people/${memberId}/identity-link`, req),
     listRosterEmailAddresses: () =>
       client.get<{ items: SyncEmailRoutingAddress[] }>(`${EMAIL_ROUTING}/roster-addresses`),
+    previewEmailRouting: (addresses) =>
+      client.post<EmailRoutingSyncPreview>(`${IDENTITY}/users/sync-email-routing/preview`, { addresses }),
     syncEmailRouting: (addresses) =>
       client.post<SyncEmailRoutingResult>(`${IDENTITY}/users/sync-email-routing`, { addresses }),
     listRoles: () => client.get<common.Paginated<identity.Role>>(`${IDENTITY}/roles`),
@@ -105,7 +138,8 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     mailStatus: () => client.get<MailStatusResponse>(`${BASE}/mail/status`),
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses`, req),
-    updateEmailAddress: (id, req) => client.patch<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses/${id}`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/addresses/${id}`),
+    getChatDeletionPolicy: () => client.get<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`),
+    updateChatDeletionPolicy: (req) => client.patch<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`, req),
   };
 }

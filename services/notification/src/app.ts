@@ -6,7 +6,7 @@ import { dubContext } from "@dub/http";
 import type { RequestContext } from "@dub/http";
 import { createAuthClient, getUserId } from "@dub/auth-client";
 import { HEADERS } from "@dub/observability";
-import type { notification } from "@dub/types";
+import { common, type notification } from "@dub/types";
 import type { AppBindings } from "./env";
 import { SERVICE_NAME, CHANNELS } from "./config";
 import { buildDb, buildIngestDeps } from "./deps";
@@ -15,13 +15,17 @@ import {
   listInbox,
   unreadCount,
   markRead,
+  markUnread,
   markAllRead,
+  backfillBroadcastInbox,
+  backfillAdminAudienceInbox,
   listPreferenceOverrides,
   upsertPreference,
   deletePreference,
   insertFeedback,
   listFeedback,
   markFeedbackRead,
+  listAdminNotifications,
 } from "./repo";
 import { mergedView, defaultEnabled } from "./preferences";
 import {
@@ -31,12 +35,26 @@ import {
   parsePreferencesUpdate,
   parseCreateFeedback,
   parseListFeedbackQuery,
+  parseListManageQuery,
+  parsePublishBatch,
+  parseUnpublishBatch,
   parseReleaseRequest,
 } from "./validation";
 import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
 import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
 import { publishRelease, seedInitialReleases } from "./release";
-import { FEEDBACK_ADMIN_PERMISSION, RELEASE_ADMIN_PERMISSION } from "./config";
+import {
+  publishBroadcastFromNotification,
+  publishBroadcastBatch,
+  unpublishBroadcastFromNotification,
+  unpublishBroadcastBatch,
+} from "./broadcast";
+import {
+  FEEDBACK_ADMIN_PERMISSION,
+  RELEASE_ADMIN_PERMISSION,
+  BROADCAST_PUBLISH_PERMISSION,
+  ADMIN_VIEWER_PERMISSION,
+} from "./config";
 import type { IngestInput } from "./types";
 
 interface GetPreferencesResponse {
@@ -70,125 +88,236 @@ export function createApp(options: CreateAppOptions = {}) {
   const ingestDepsOf = (c: Context<AppBindings>, ctx: RequestContext) =>
     buildIngestDeps(c.env, ctx, options.identity ? { identity: options.identity } : {});
 
+  // Is the signed-in user an admin viewer (sees BOTH audiences)? Backed by the per-request
+  // auth client set by authOnly (notif:admin => admin/maintainer). Fail-closed: any error
+  // (identity unreachable) is treated as a member, so admin-audience rows stay hidden.
+  const isAdminViewer = async (c: Context<AppBindings>, userId: string): Promise<boolean> => {
+    try {
+      const client = c.get("authClient");
+      if (!client) return false;
+      return await client.hasPermission(userId, common.DUB_DEFAULT_ORG_ID, {
+        permission: ADMIN_VIEWER_PERMISSION,
+      });
+    } catch {
+      return false;
+    }
+  };
+
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
 
-  // ---- POST /notify: internal binding only (design §2/§6). Receiving-side gate:
-  // x-dub-internal absent -> 403 FORBIDDEN (gateway also 404s via internalOnlyPaths).
-  app.post("/notify", async (c) => {
-    if (!c.req.header(HEADERS.internal)) throw errors.forbidden("POST /notify is internal-only");
-    const parsed = parseNotifyRequest(await c.req.json().catch(() => null));
-    const ctx = ctxOf(c);
-    const actorId = c.req.header(HEADERS.userId) ?? null;
-    const input: IngestInput = {
-      type: parsed.type,
-      recipients: { userIds: parsed.recipientIds },
-      title: parsed.title,
-      body: parsed.body,
-      priority: "normal",
-      source: "api",
-      actorId,
-      requestId: ctx.requestId,
-      resourceType: parsed.resourceType ?? null,
-      resourceId: parsed.resourceId ?? null,
-      ...(parsed.channels ? { channels: parsed.channels } : {}),
-      ...(parsed.dedupKey ? { dedupKey: parsed.dedupKey } : {}),
-    };
-    const deps = buildIngestDeps(c.env, ctx);
-    const result = await ingest(deps, input);
-    const res: NotifyResponse = result;
-    return c.json(res, 202);
-  });
+  // ---- notification-domain routes (notify / release / inbox / preferences).
+  // Mounted under BOTH the bare root ("" -> /notify, /inbox, /preferences, /release) AND
+  // the "/notifications" segment. WHY both:
+  //   • Internal service bindings (mobile BFF, usage-meter) call the bare root paths
+  //     directly (SVC_NOTIFICATION.fetch("/inbox"), "/notify", …) — kept working as-is.
+  //   • The api-gateway is a transparent proxy: it strips ONLY the API_PREFIX and forwards
+  //     the rest verbatim, so external "/api/v1/notifications/inbox" arrives here as
+  //     "/notifications/inbox". This service must therefore serve the "/notifications"
+  //     prefix too — matching event-service ("/events") and task-service ("/tasks").
+  // This closes GAP-2: previously the service only mounted at "/inbox", so every proxied
+  // external "/notifications/*" request 404'd (prod 通知ダイアログ "Couldn't load"). The
+  // integration harness masked it because its notification STUB accepted both prefixes.
+  const mountNotif = (p: string) => {
+    // ---- POST /notify: internal binding only (design §2/§6). Receiving-side gate:
+    // x-dub-internal absent -> 403 FORBIDDEN (gateway also 404s via internalOnlyPaths).
+    app.post(`${p}/notify`, async (c) => {
+      if (!c.req.header(HEADERS.internal)) throw errors.forbidden("POST /notify is internal-only");
+      const parsed = parseNotifyRequest(await c.req.json().catch(() => null));
+      const ctx = ctxOf(c);
+      const actorId = c.req.header(HEADERS.userId) ?? null;
+      const input: IngestInput = {
+        type: parsed.type,
+        // Role fan-out (mirrors feedback): the resolver unions userIds + roles -> user ids.
+        recipients: {
+          userIds: parsed.recipientIds,
+          ...(parsed.recipientRoles && parsed.recipientRoles.length > 0 ? { roles: parsed.recipientRoles } : {}),
+        },
+        title: parsed.title,
+        body: parsed.body,
+        priority: "normal",
+        source: "api",
+        actorId,
+        requestId: ctx.requestId,
+        resourceType: parsed.resourceType ?? null,
+        resourceId: parsed.resourceId ?? null,
+        ...(parsed.channels ? { channels: parsed.channels } : {}),
+        ...(parsed.dedupKey ? { dedupKey: parsed.dedupKey } : {}),
+      };
+      const deps = buildIngestDeps(c.env, ctx);
+      const result = await ingest(deps, input);
+      const res: NotifyResponse = result;
+      return c.json(res, 202);
+    });
 
-  // ---- POST /release: admin-published "🎉 new feature" release note, broadcast to
-  // EVERY active user's inbox (in_app, forced on). External surface (gateway does NOT
-  // 404 it); admin gate is enforced in-service via notif:admin. Idempotent per dedupKey.
-  app.use("/release", authOnly);
-  app.post("/release", requireReleaseAdmin, async (c) => {
-    const parsed = parseReleaseRequest(await c.req.json().catch(() => null));
-    const ctx = ctxOf(c);
-    const actorId = c.req.header(HEADERS.userId) ?? null;
-    const result = await publishRelease(ingestDepsOf(c, ctx), ctx, parsed, actorId);
-    return c.json(result satisfies NotifyResponse, 202);
-  });
+    // ---- POST /release: admin-published "🎉 new feature" release note, broadcast to
+    // EVERY active user's inbox (in_app, forced on). External surface (gateway does NOT
+    // 404 it); admin gate is enforced in-service via notif:admin. Idempotent per dedupKey.
+    app.use(`${p}/release`, authOnly);
+    app.post(`${p}/release`, requireReleaseAdmin, async (c) => {
+      const parsed = parseReleaseRequest(await c.req.json().catch(() => null));
+      const ctx = ctxOf(c);
+      const actorId = c.req.header(HEADERS.userId) ?? null;
+      const result = await publishRelease(ingestDepsOf(c, ctx), ctx, parsed, actorId);
+      return c.json(result satisfies NotifyResponse, 202);
+    });
 
-  // ---- POST /internal/seed-releases: internal-only (x-dub-internal). (Re)publishes the
-  // curated release back-catalog idempotently — the automation seam a deploy hook can
-  // call so new releases surface without a manual admin publish.
-  app.post("/internal/seed-releases", async (c) => {
-    if (!c.req.header(HEADERS.internal)) throw errors.forbidden("seed-releases is internal-only");
-    const ctx = ctxOf(c);
-    const actorId = c.req.header(HEADERS.userId) ?? null;
-    const result = await seedInitialReleases(ingestDepsOf(c, ctx), ctx, actorId);
-    return c.json(result, 202);
-  });
+    // ---- POST /internal/seed-releases: internal-only (x-dub-internal). (Re)publishes the
+    // curated release back-catalog idempotently — the automation seam a deploy hook can
+    // call so new releases surface without a manual admin publish.
+    app.post(`${p}/internal/seed-releases`, async (c) => {
+      if (!c.req.header(HEADERS.internal)) throw errors.forbidden("seed-releases is internal-only");
+      const ctx = ctxOf(c);
+      const actorId = c.req.header(HEADERS.userId) ?? null;
+      const result = await seedInitialReleases(ingestDepsOf(c, ctx), ctx, actorId);
+      return c.json(result, 202);
+    });
 
-  // ---- self-scoped routes: requireAuth (trusted header -> x-dub-user-id = 本人).
-  // No requirePermission: notif:inbox:self / notif:prefs:self are not in the frozen
-  // PERMISSION_CATALOG; self-access is enforced by scoping every query to userId.
-  app.use("/inbox/*", authOnly);
-  app.use("/inbox", authOnly);
-  app.use("/preferences", authOnly);
+    // ---- Notification management (admin). GET /manage lists audience='admin'
+    // notifications (deploy done / feedback / ops alerts) with their published-broadcast
+    // state; POST /manage/:id/publish republishes one to ALL members as a single
+    // broadcast. Both gated by notif:broadcast_publish (admin + maintainer). External
+    // surface (proxied verbatim by the gateway).
+    app.use(`${p}/manage`, authOnly);
+    app.use(`${p}/manage/*`, authOnly);
 
-  app.get("/inbox", async (c) => {
-    const userId = getUserId(c);
-    const q = parseListInboxQuery(c.req.query());
-    const page = await listInbox(dbOf(c), userId, q);
-    return c.json(page satisfies notification.ListInboxResponse);
-  });
+    app.get(`${p}/manage`, requireBroadcastPublish, async (c) => {
+      const q = parseListManageQuery(c.req.query());
+      const page = await listAdminNotifications(dbOf(c), q);
+      return c.json(page satisfies notification.ListAdminNotificationsResponse);
+    });
 
-  app.get("/inbox/unread-count", async (c) => {
-    const userId = getUserId(c);
-    const count = await unreadCount(dbOf(c), userId);
-    return c.json({ count } satisfies notification.UnreadCountResponse);
-  });
+    app.post(`${p}/manage/:id/publish`, requireBroadcastPublish, async (c) => {
+      const ctx = ctxOf(c);
+      const actorId = c.req.header(HEADERS.userId) ?? null;
+      const result = await publishBroadcastFromNotification(
+        ingestDepsOf(c, ctx),
+        ctx,
+        c.req.param("id"),
+        actorId,
+      );
+      return c.json(result satisfies notification.PublishBroadcastResponse, 202);
+    });
 
-  app.patch("/inbox/:id/read", async (c) => {
-    const userId = getUserId(c);
-    const ok = await markRead(dbOf(c), userId, c.req.param("id"));
-    if (!ok) {
-      throw new DubError("NOTIF_INBOX_ITEM_NOT_FOUND", `inbox item not found: ${c.req.param("id")}`, { status: 404 });
-    }
-    return c.json({ ok: true });
-  });
+    // Bulk publish: one round trip for a whole selection. Each id is independent +
+    // idempotent (see publishBroadcastBatch); partial failures are reported per item.
+    app.post(`${p}/manage/publish-batch`, requireBroadcastPublish, async (c) => {
+      const { ids } = parsePublishBatch(await c.req.json().catch(() => null));
+      const ctx = ctxOf(c);
+      const actorId = c.req.header(HEADERS.userId) ?? null;
+      const result = await publishBroadcastBatch(ingestDepsOf(c, ctx), ctx, ids, actorId);
+      return c.json(result satisfies notification.PublishBroadcastBatchResponse, 202);
+    });
 
-  app.post("/inbox/read-all", async (c) => {
-    const userId = getUserId(c);
-    const { type } = parseReadAll(await c.req.json().catch(() => null));
-    const updated = await markAllRead(dbOf(c), userId, type);
-    return c.json({ updated });
-  });
+    // Unpublish (retract): removes the members broadcast derived from an admin notification
+    // so members no longer see it. Idempotent (no-op when not published). Inverse of publish.
+    app.post(`${p}/manage/:id/unpublish`, requireBroadcastPublish, async (c) => {
+      const result = await unpublishBroadcastFromNotification(dbOf(c), c.req.param("id"));
+      return c.json(result satisfies notification.UnpublishBroadcastResponse, 202);
+    });
 
-  app.get("/preferences", async (c) => {
-    const userId = getUserId(c);
-    const overrides = await listPreferenceOverrides(dbOf(c), userId);
-    const res: GetPreferencesResponse = { userId, entries: mergedView(overrides) };
-    return c.json(res);
-  });
+    // Bulk unpublish: retract a whole selection in one round trip. Each id is independent +
+    // idempotent (see unpublishBroadcastBatch); partial failures are reported per item.
+    app.post(`${p}/manage/unpublish-batch`, requireBroadcastPublish, async (c) => {
+      const { ids } = parseUnpublishBatch(await c.req.json().catch(() => null));
+      const result = await unpublishBroadcastBatch(dbOf(c), ids);
+      return c.json(result satisfies notification.UnpublishBroadcastBatchResponse, 202);
+    });
 
-  app.patch("/preferences", async (c) => {
-    const userId = getUserId(c);
-    const entries = parsePreferencesUpdate(await c.req.json().catch(() => null));
-    const db = dbOf(c);
-    for (const entry of entries) {
-      for (const channel of CHANNELS) {
-        const enabled = entry.channels.includes(channel);
-        // Drop the override row when it equals the system default (design §2).
-        if (enabled === defaultEnabled(entry.type, channel, "normal")) {
-          await deletePreference(db, userId, entry.type, channel);
-        } else {
-          await upsertPreference(db, userId, entry.type, channel, enabled);
+    // ---- self-scoped routes: requireAuth (trusted header -> x-dub-user-id = 本人).
+    // No requirePermission: notif:inbox:self / notif:prefs:self are not in the frozen
+    // PERMISSION_CATALOG; self-access is enforced by scoping every query to userId.
+    app.use(`${p}/inbox/*`, authOnly);
+    app.use(`${p}/inbox`, authOnly);
+    app.use(`${p}/preferences`, authOnly);
+
+    app.get(`${p}/inbox`, async (c) => {
+      const userId = getUserId(c);
+      const db = dbOf(c);
+      // Backfill broadcast rows this user is missing (late-join safety) before listing, so
+      // release notes always appear regardless of when the user was created (bugfix).
+      await backfillBroadcastInbox(db, userId);
+      const q = parseListInboxQuery(c.req.query());
+      const admin = await isAdminViewer(c, userId);
+      // Admins additionally get every audience='admin' notification lazily materialized
+      // (feedback / deploy / ops / CI-written rows) so nothing addressed to admins is
+      // ever missed — the "Admin には例外なく全部届く" guarantee.
+      if (admin) await backfillAdminAudienceInbox(db, userId);
+      const page = await listInbox(db, userId, q, admin);
+      return c.json(page satisfies notification.ListInboxResponse);
+    });
+
+    app.get(`${p}/inbox/unread-count`, async (c) => {
+      const userId = getUserId(c);
+      const db = dbOf(c);
+      // Same backfill as GET /inbox so the header unread badge counts broadcasts a late-join
+      // user never received a fan-out row for.
+      await backfillBroadcastInbox(db, userId);
+      const admin = await isAdminViewer(c, userId);
+      if (admin) await backfillAdminAudienceInbox(db, userId);
+      const count = await unreadCount(db, userId, admin);
+      return c.json({ count } satisfies notification.UnreadCountResponse);
+    });
+
+    app.patch(`${p}/inbox/:id/read`, async (c) => {
+      const userId = getUserId(c);
+      const ok = await markRead(dbOf(c), userId, c.req.param("id"));
+      if (!ok) {
+        throw new DubError("NOTIF_INBOX_ITEM_NOT_FOUND", `inbox item not found: ${c.req.param("id")}`, { status: 404 });
+      }
+      return c.json({ ok: true });
+    });
+
+    app.patch(`${p}/inbox/:id/unread`, async (c) => {
+      const userId = getUserId(c);
+      const ok = await markUnread(dbOf(c), userId, c.req.param("id"));
+      if (!ok) {
+        throw new DubError("NOTIF_INBOX_ITEM_NOT_FOUND", `inbox item not found: ${c.req.param("id")}`, { status: 404 });
+      }
+      return c.json({ ok: true });
+    });
+
+    app.post(`${p}/inbox/read-all`, async (c) => {
+      const userId = getUserId(c);
+      const { type } = parseReadAll(await c.req.json().catch(() => null));
+      const updated = await markAllRead(dbOf(c), userId, type);
+      return c.json({ updated });
+    });
+
+    app.get(`${p}/preferences`, async (c) => {
+      const userId = getUserId(c);
+      const overrides = await listPreferenceOverrides(dbOf(c), userId);
+      const res: GetPreferencesResponse = { userId, entries: mergedView(overrides) };
+      return c.json(res);
+    });
+
+    app.patch(`${p}/preferences`, async (c) => {
+      const userId = getUserId(c);
+      const entries = parsePreferencesUpdate(await c.req.json().catch(() => null));
+      const db = dbOf(c);
+      for (const entry of entries) {
+        for (const channel of CHANNELS) {
+          const enabled = entry.channels.includes(channel);
+          // Drop the override row when it equals the system default (design §2).
+          if (enabled === defaultEnabled(entry.type, channel, "normal")) {
+            await deletePreference(db, userId, entry.type, channel);
+          } else {
+            await upsertPreference(db, userId, entry.type, channel, enabled);
+          }
         }
       }
-    }
-    const overrides = await listPreferenceOverrides(db, userId);
-    const res: GetPreferencesResponse = { userId, entries: mergedView(overrides) };
-    return c.json(res);
-  });
+      const overrides = await listPreferenceOverrides(db, userId);
+      const res: GetPreferencesResponse = { userId, entries: mergedView(overrides) };
+      return c.json(res);
+    });
+  };
+  mountNotif(""); // legacy bare-root paths (internal service bindings)
+  mountNotif("/notifications"); // gateway segment (external /api/v1/notifications/*)
 
   // ---- in-app feedback (widget). POST is any authenticated user; GET/PATCH are the
   // admin read surface (notif:admin). The gateway routes /api/v1/feedback -> here via
-  // the "feedback" segment bound to SVC_NOTIFICATION.
+  // the "feedback" segment bound to SVC_NOTIFICATION (its own top-level segment, so the
+  // bare "/feedback" path already aligns — no "/notifications" prefix needed).
   app.use("/feedback", authOnly); // requireAuth for POST + GET (permission on GET below)
   app.use("/feedback/*", authOnly);
 
@@ -250,4 +379,12 @@ const requireFeedbackAdmin: MiddlewareHandler<AppBindings> = async (c, next) => 
 const requireReleaseAdmin: MiddlewareHandler<AppBindings> = async (c, next) => {
   const client = c.get("authClient");
   return client.requirePermission(RELEASE_ADMIN_PERMISSION)(c, next);
+};
+
+// Gate for the Notification management surface (GET /manage, POST /manage/:id/publish).
+// Runs AFTER authOnly, reusing its per-request auth client to check
+// notif:broadcast_publish (admin + maintainer hold it).
+const requireBroadcastPublish: MiddlewareHandler<AppBindings> = async (c, next) => {
+  const client = c.get("authClient");
+  return client.requirePermission(BROADCAST_PUBLISH_PERMISSION)(c, next);
 };

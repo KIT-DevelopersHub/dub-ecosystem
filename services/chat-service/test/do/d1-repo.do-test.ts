@@ -13,7 +13,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
 import { createDbClient, applyMigrations, assertAllApplied } from "@dub/db";
 import { createD1ChatRepo } from "../../src/d1-repo";
-import { CHAT_SCHEMA_MIGRATION } from "../../src/schema";
+import { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION } from "../../src/schema";
 import type { ChatRepo, ChannelRow, MemberRow, MessageRow } from "../../src/types";
 
 const AT = "2026-08-10T05:00:00.000Z";
@@ -70,7 +70,7 @@ function message(over: Partial<MessageRow> & Pick<MessageRow, "id" | "channelId"
 
 beforeAll(async () => {
   // Apply the chat DDL to the empty miniflare D1 (idempotent via the ledger).
-  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION]);
+  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION]);
   assertAllApplied(results);
 });
 
@@ -240,21 +240,26 @@ describe("d1-repo: messages", () => {
     const threadReply = message({ id: id.msg(4), channelId: chan.id, authorId: id.user(1), threadRootId: m1.id });
     for (const m of [m1, m2, m3, threadReply]) await repo.createMessage(m);
 
-    // default desc history (newest id first)
+    // default desc history (newest id first) — main list is TOP-LEVEL only (reply excluded)
     const desc = await repo.listMessages({ channelId: chan.id, limit: 10 });
-    expect(desc.map((m) => m.id)).toEqual([threadReply.id, m3.id, m2.id, m1.id]);
+    expect(desc.map((m) => m.id)).toEqual([m3.id, m2.id, m1.id]);
 
     // cursor: id < beforeId, still desc
     const page = await repo.listMessages({ channelId: chan.id, beforeId: m3.id, limit: 10 });
     expect(page.map((m) => m.id)).toEqual([m2.id, m1.id]);
 
-    // asc gap-fill: id > afterMessageId, ascending
+    // asc gap-fill: id > afterMessageId, ascending (still top-level only)
     const asc = await repo.listMessages({ channelId: chan.id, afterMessageId: m1.id, limit: 10 });
-    expect(asc.map((m) => m.id)).toEqual([m2.id, m3.id, threadReply.id]);
+    expect(asc.map((m) => m.id)).toEqual([m2.id, m3.id]);
 
-    // thread filter
+    // thread filter returns the reply
     const thread = await repo.listMessages({ channelId: chan.id, threadRootId: m1.id, limit: 10 });
     expect(thread.map((m) => m.id)).toEqual([threadReply.id]);
+
+    // replyCounts: m1 has one reply; others have none
+    const counts = await repo.replyCounts([m1.id, m2.id, m3.id]);
+    expect(counts.get(m1.id)).toBe(1);
+    expect(counts.get(m2.id)).toBeUndefined();
 
     // LIMIT is honored
     expect((await repo.listMessages({ channelId: chan.id, limit: 2 })).length).toBe(2);
@@ -336,5 +341,116 @@ describe("d1-repo: read state + unread", () => {
     await repo.setReadState(chan.id, me, m2.id, AT);
     expect((await repo.getReadState(chan.id, me))?.lastReadMessageId).toBe(m2.id);
     expect(await repo.countUnread(chan.id, me, m2.id)).toBe(0);
+  });
+});
+
+describe("d1-repo: pins", () => {
+  it("addPin is idempotent; listPinnedMessages excludes tombstones, newest-first; removePin reports change", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    await repo.createChannel(chan);
+    const m1 = message({ id: id.msg(1), channelId: chan.id, authorId: id.user(1), body: "first" });
+    const m2 = message({ id: id.msg(2), channelId: chan.id, authorId: id.user(1), body: "second" });
+    const gone = message({ id: id.msg(3), channelId: chan.id, authorId: id.user(1), body: "deleted", deletedAt: AT });
+    for (const m of [m1, m2, gone]) await repo.createMessage(m);
+
+    expect(await repo.isPinned(chan.id, m1.id)).toBe(false);
+    await repo.addPin(chan.id, m1.id, id.user(1), AT);
+    await repo.addPin(chan.id, m1.id, id.user(1), AT); // ON CONFLICT DO NOTHING
+    await repo.addPin(chan.id, m2.id, id.user(1), AT);
+    await repo.addPin(chan.id, gone.id, id.user(1), AT); // pinned but tombstoned -> hidden
+    expect(await repo.isPinned(chan.id, m1.id)).toBe(true);
+
+    const pinned = await repo.listPinnedMessages(chan.id);
+    expect(pinned.map((m) => m.id)).toEqual([m2.id, m1.id]); // id desc, tombstone excluded
+
+    expect(await repo.removePin(chan.id, m1.id)).toBe(true);
+    expect(await repo.removePin(chan.id, m1.id)).toBe(false); // already gone
+    expect((await repo.listPinnedMessages(chan.id)).map((m) => m.id)).toEqual([m2.id]);
+  });
+});
+
+describe("d1-repo: search", () => {
+  it("matches body substring case-insensitively, scopes to readable channels, newest-first, bounded", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const me = id.user(1);
+    const pub = channel({ id: id.chan(1), visibility: "public", name: "general", createdBy: id.user(2) });
+    const priv = channel({ id: id.chan(2), visibility: "private", name: "secret", createdBy: id.user(2) });
+    await repo.createChannel(pub);
+    await repo.createChannel(priv);
+    // caller is a member of neither; public is still readable, private is not.
+    const inPub = message({ id: id.msg(1), channelId: pub.id, authorId: id.user(2), body: "Deploy the ROCKET" });
+    const inPubOther = message({ id: id.msg(2), channelId: pub.id, authorId: id.user(2), body: "lunch?" });
+    const inPriv = message({ id: id.msg(3), channelId: priv.id, authorId: id.user(2), body: "rocket launch codes" });
+    const tomb = message({ id: id.msg(4), channelId: pub.id, authorId: id.user(2), body: "rocket", deletedAt: AT });
+    for (const m of [inPub, inPubOther, inPriv, tomb]) await repo.createMessage(m);
+
+    // case-insensitive substring; private channel excluded; tombstone excluded
+    const hits = await repo.searchMessages({ userId: me, text: "rocket", limit: 50 });
+    expect(hits.map((h) => h.message.id)).toEqual([inPub.id]);
+    expect(hits[0]!.channelName).toBe("general");
+    expect(hits[0]!.channelType).toBe("topic");
+
+    // when the caller joins the private channel it becomes searchable
+    await repo.addMember(member(priv.id, me));
+    const hits2 = await repo.searchMessages({ userId: me, text: "rocket", limit: 50 });
+    expect(hits2.map((h) => h.message.id)).toEqual([inPriv.id, inPub.id]); // id desc
+
+    // channelId scope + limit
+    const scoped = await repo.searchMessages({ userId: me, text: "rocket", channelId: pub.id, limit: 50 });
+    expect(scoped.map((h) => h.message.id)).toEqual([inPub.id]);
+    const bounded = await repo.searchMessages({ userId: me, text: "rocket", limit: 1 });
+    expect(bounded).toHaveLength(1);
+  });
+});
+
+describe("d1-repo: deletion policy + hard delete", () => {
+  it("getDeletionPolicy is null until set; setDeletionPolicy is version-locked (real SQL)", async () => {
+    const repo = makeRepo();
+    const org = `org_${caseSeq}_${Date.now()}`;
+
+    expect(await repo.getDeletionPolicy(org)).toBeNull();
+
+    // first write requires expectedVersion 0
+    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "tombstone", moderator: "hard" }, expectedVersion: 5, updatedBy: "u1", at: AT })).toBeNull();
+    const first = await repo.setDeletionPolicy({ orgId: org, policy: { member: "tombstone", moderator: "hard" }, expectedVersion: 0, updatedBy: "u1", at: AT });
+    expect(first).toEqual({ version: 1 });
+    expect(await repo.getDeletionPolicy(org)).toEqual({ policy: { member: "tombstone", moderator: "hard" }, version: 1 });
+
+    // a second write with expectedVersion 0 conflicts (row already exists)
+    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "hard" }, expectedVersion: 0, updatedBy: "u1", at: AT })).toBeNull();
+    // stale version conflicts
+    expect(await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "hard" }, expectedVersion: 9, updatedBy: "u1", at: AT })).toBeNull();
+    // correct version advances
+    const second = await repo.setDeletionPolicy({ orgId: org, policy: { member: "hard", moderator: "tombstone" }, expectedVersion: 1, updatedBy: "u2", at: AT });
+    expect(second).toEqual({ version: 2 });
+    expect(await repo.getDeletionPolicy(org)).toEqual({ policy: { member: "hard", moderator: "tombstone" }, version: 2 });
+  });
+
+  it("hardDeleteMessage physically removes the message, its reactions/pins and thread replies", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    await repo.createChannel(chan);
+    const root = message({ id: id.msg(1), channelId: chan.id, authorId: id.user(1) });
+    const reply = message({ id: id.msg(2), channelId: chan.id, authorId: id.user(1), threadRootId: root.id });
+    const other = message({ id: id.msg(3), channelId: chan.id, authorId: id.user(1) });
+    for (const m of [root, reply, other]) await repo.createMessage(m);
+    await repo.addReaction(root.id, "👍", id.user(2), AT);
+    await repo.addReaction(reply.id, "🎉", id.user(2), AT);
+    await repo.addPin(chan.id, root.id, id.user(1), AT);
+
+    await repo.hardDeleteMessage(root.id);
+
+    expect(await repo.getMessage(root.id)).toBeNull();
+    expect(await repo.getMessage(reply.id)).toBeNull(); // thread reply cascaded
+    expect(await repo.getMessage(other.id)).not.toBeNull(); // unrelated message intact
+    expect((await repo.reactionsFor([root.id, reply.id])).size).toBe(0);
+    expect(await repo.isPinned(chan.id, root.id)).toBe(false);
+    // gone from the timeline entirely (no tombstone row)
+    const list = await repo.listMessages({ channelId: chan.id, limit: 50 });
+    expect(list.map((m) => m.id)).toEqual([other.id]);
   });
 });

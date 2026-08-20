@@ -26,8 +26,14 @@ export type MailIconName =
   | "refresh"
   | "tag"
   | "paperclip"
+  | "alert"
   | "chevron-down"
-  | "check";
+  | "chevron-left"
+  | "chevron-right"
+  | "check"
+  | "image"
+  | "file"
+  | "download";
 
 const PATHS: Record<MailIconName, JSX.Element> = {
   inbox: (
@@ -129,8 +135,37 @@ const PATHS: Record<MailIconName, JSX.Element> = {
     </>
   ),
   paperclip: <path d="M20 11l-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7" />,
+  alert: (
+    <>
+      <path d="M12 4l9 16H3z" />
+      <path d="M12 10v4" />
+      <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none" />
+    </>
+  ),
   "chevron-down": <path d="M6 9l6 6 6-6" />,
+  "chevron-left": <path d="M15 6l-6 6 6 6" />,
+  "chevron-right": <path d="M9 6l6 6-6 6" />,
   check: <path d="M5 12l5 5 9-11" />,
+  image: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9" r="1.5" />
+      <path d="M4 17l5-5 4 4 3-3 4 4" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M6 3h9l3 3v15H6z" />
+      <path d="M14 3v4h4" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 4v10" />
+      <path d="M8 11l4 4 4-4" />
+      <path d="M5 19h14" />
+    </>
+  ),
 };
 
 export function MailIcon({

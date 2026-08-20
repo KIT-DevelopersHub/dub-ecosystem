@@ -35,6 +35,15 @@ importers:
 
   apps/fe1-design-system:
     dependencies:
+      '@dnd-kit/core':
+        specifier: ^6.1.0
+        version: 6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@dnd-kit/sortable':
+        specifier: ^8.0.0
+        version: 8.0.0(@dnd-kit/core@6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react@18.3.1)
+      '@dnd-kit/utilities':
+        specifier: ^3.2.2
+        version: 3.2.2(react@18.3.1)
       '@dub/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
@@ -242,6 +251,9 @@ importers:
       '@dnd-kit/core':
         specifier: ^6.1.0
         version: 6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@dub/app-ui':
+        specifier: workspace:*
+        version: link:../../packages/app-ui
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors
@@ -450,6 +462,9 @@ importers:
         specifier: ^5.0.2
         version: 5.0.14(@types/react@18.3.31)(react@18.3.1)(use-sync-external-store@1.6.0(react@18.3.1))
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.49.0
+        version: 1.62.1
       '@testing-library/dom':
         specifier: ^10.4.0
         version: 10.4.1
@@ -799,6 +814,34 @@ importers:
         specifier: ^4
         version: 4.13.1
 
+  services/app-health-monitor:
+    dependencies:
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+      '@dub/http':
+        specifier: workspace:*
+        version: link:../../packages/http
+      '@dub/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      hono:
+        specifier: ^4.6.14
+        version: 4.13.1
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20241127.0
+        version: 4.20260702.1
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
+
   services/audit-log:
     dependencies:
       '@dub/auth-client':
@@ -981,6 +1024,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4
         version: 4.20260702.1
+      '@dub/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors

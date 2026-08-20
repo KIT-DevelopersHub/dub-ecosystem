@@ -27,6 +27,18 @@ const OK_HOME: gateway.BffHomeResponse = {
     { id: "evt_2", title: "Meetup", phase: "preparing", startsAt: null },
   ],
   unreadCount: 4,
+  taskSummary: {
+    total: 20,
+    byStatus: { todo: 4, in_progress: 3, blocked: 1, done: 12, cancelled: 0 },
+  },
+  usageSummary: {
+    metrics: [
+      { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 82.0 },
+      { key: "emails_month", label: "メール送信(月)", pct: 20.0 },
+    ],
+    worst: { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 82.0 },
+  },
+  orgStats: { members: 12, teams: 4 },
   partialErrors: [],
 };
 
@@ -38,6 +50,35 @@ describe("HomeScreen", () => {
     expect(screen.getByTestId("fe2-home-unread-count")).toHaveTextContent("未読 4 件");
   });
 
+  it("renders the live task / free-tier / member aggregates from /bff/home", async () => {
+    render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+    // タスク完了率 = done 12 / total 20 = 60%.
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-tasks-value")).toHaveTextContent("60%"));
+    // 無料枠 最逼迫 = worst metric pct.
+    expect(screen.getByTestId("fe2-kpi-freetier-value")).toHaveTextContent("82%");
+    // 運営メンバー count.
+    expect(screen.getByTestId("fe2-kpi-members-value")).toHaveTextContent("12");
+    // No "デモ" tag remains on the now-live tiles.
+    expect(screen.queryByTestId("fe2-kpi-tasks-demo")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-kpi-freetier-demo")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-kpi-members-demo")).not.toBeInTheDocument();
+    // The visualization cards render from live data.
+    expect(screen.getByTestId("fe2-usage-kv_reads_day")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-home-task-segbar")).toBeInTheDocument();
+  });
+
+  it("surfaces the free-tier partial error in-frame without dropping the task card", async () => {
+    const home: gateway.BffHomeResponse = {
+      ...OK_HOME,
+      partialErrors: [{ source: "usage-meter", code: "UPSTREAM_TIMEOUT" }],
+    };
+    render(wrap(<HomeScreen api={makeApi(home)} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-home-usage-error")).toBeInTheDocument());
+    // The 無料枠 KPI degrades to a dash; the task card still renders its breakdown.
+    expect(screen.getByTestId("fe2-kpi-freetier-value")).toHaveTextContent("—");
+    expect(screen.getByTestId("fe2-home-task-segbar")).toBeInTheDocument();
+  });
+
   it("shows the empty state when there are no unread notifications", async () => {
     render(wrap(<HomeScreen api={makeApi({ ...OK_HOME, unreadCount: 0 })} />));
     await waitFor(() => expect(screen.getByTestId("fe2-home-unread-empty")).toBeInTheDocument());
@@ -47,13 +88,31 @@ describe("HomeScreen", () => {
   it("surfaces per-frame partial errors without dropping the other card", async () => {
     const home: gateway.BffHomeResponse = {
       ...OK_HOME,
-      partialErrors: [{ source: "notification", code: "UPSTREAM_TIMEOUT" }],
+      partialErrors: [{ source: "notification-service", code: "UPSTREAM_TIMEOUT" }],
     };
     render(wrap(<HomeScreen api={makeApi(home)} />));
     // Notifications frame shows its error; events frame still renders its list.
     await waitFor(() => expect(screen.getByTestId("fe2-home-notifications-error")).toBeInTheDocument());
     expect(screen.getByText("Conf")).toBeInTheDocument();
     expect(screen.queryByTestId("fe2-home-unread-count")).not.toBeInTheDocument();
+  });
+
+  it("keeps the notification dialog reachable from Home even on a partial error", async () => {
+    // Regression: a /bff/home partial error on the notification aggregate must
+    // NOT remove the Home entry point to the shared dialog. When onOpenNotifications
+    // is wired (the real shell always wires it), the card stays an openable button
+    // that fires the handler — the dialog itself re-fetches the inbox as the retry.
+    const home: gateway.BffHomeResponse = {
+      ...OK_HOME,
+      partialErrors: [{ source: "notification-service", code: "UPSTREAM_TIMEOUT" }],
+    };
+    const opened: number[] = [];
+    render(wrap(<HomeScreen api={makeApi(home)} onOpenNotifications={() => opened.push(1)} />));
+    const btn = await screen.findByTestId("fe2-home-open-notifications");
+    // The inline retry card (no dialog entry point) must NOT be used here.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    btn.click();
+    expect(opened).toHaveLength(1);
   });
 
   it("renders feature-contributed home widgets in titled frames", async () => {

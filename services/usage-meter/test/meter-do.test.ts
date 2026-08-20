@@ -33,8 +33,11 @@ function fakeState(): { state: DurableObjectState; getAlarm: () => number | null
 describe("MeterDO.alarm (collect + upsert + self-reschedule)", () => {
   it("collects usage into usage_snapshot and rearms the next daily alarm", async () => {
     const { d1, raw } = makeD1();
-    seedSend(raw, "s1", "2026-08-12T01:00:00.000Z");
-    seedSend(raw, "s2", "2026-08-12T02:00:00.000Z");
+    // alarm() collects against the real clock (startOfUtcDay(now)), so seed sends on the
+    // CURRENT UTC day — a fixed calendar date made this assertion flake once the day rolled.
+    const today = new Date().toISOString().slice(0, 10);
+    seedSend(raw, "s1", `${today}T01:00:00.000Z`);
+    seedSend(raw, "s2", `${today}T02:00:00.000Z`);
     const env = { DB: d1 } as unknown as Env; // no CF token -> CF metrics unknown, Resend measured
     const fs = fakeState();
     const before = Date.now();

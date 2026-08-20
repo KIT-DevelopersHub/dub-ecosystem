@@ -26,6 +26,8 @@ export function MemberFormDialog({
   const [roleTitle, setRoleTitle] = useState("");
   const [status, setStatus] = useState<MemberStatus>("considering");
   const [teamIds, setTeamIds] = useState<string[]>([]);
+  const [department, setDepartment] = useState("");
+  const [grade, setGrade] = useState("");
   const [contact, setContact] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +39,8 @@ export function MemberFormDialog({
     setRoleTitle(editing?.roleTitle ?? "");
     setStatus(editing?.status ?? "considering");
     setTeamIds(editing?.teamIds ?? []);
+    setDepartment(editing?.department ?? "");
+    setGrade(editing?.grade ?? "");
     setContact(editing?.contact ?? "");
     setNote(editing?.note ?? "");
   }, [open, editing]);
@@ -56,6 +60,8 @@ export function MemberFormDialog({
       roleTitle: roleTitle.trim() || null,
       status,
       teamIds,
+      department: department.trim() || null,
+      grade: grade.trim() || null,
       contact: contact.trim() || null,
       note: note.trim() || null,
     };
@@ -91,6 +97,12 @@ export function MemberFormDialog({
           </FormField>
           <FormField label="担当・役割" htmlFor="member-role" help="例: 会場リーダー">
             <TextField id="member-role" value={roleTitle} onChange={setRoleTitle} />
+          </FormField>
+          <FormField label="学科" htmlFor="member-department" help="任意 (例: 情報工学科)">
+            <TextField id="member-department" value={department} onChange={setDepartment} testId="members-form-department" />
+          </FormField>
+          <FormField label="学年" htmlFor="member-grade" help="任意 (例: 3年 / M1)">
+            <TextField id="member-grade" value={grade} onChange={setGrade} testId="members-form-grade" />
           </FormField>
           <FormField label="ステータス" htmlFor="member-status" required>
             <Select<MemberStatus>

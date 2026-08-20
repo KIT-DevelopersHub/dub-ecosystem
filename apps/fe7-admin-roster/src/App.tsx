@@ -37,10 +37,19 @@ const MOCK_ME: gateway.MeResponse = {
   user: { id: "user_alice", displayName: "Alice Admin", avatarUrl: null },
   orgId: "org_devhub",
   // mail:admin lets the harness exercise the Email Routing surfaces (roster sync,
-  // address issue) — the mock admin role grants it in production too.
-  permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"],
+  // address issue); chat:moderate lets it edit the メッセージ削除ポリシー section — the
+  // mock admin role grants both in production too.
+  permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "chat:moderate"],
   sessionExpiresAt: Date.now() + 3600_000,
 };
+
+// Harness-only: `?readonly=1` drops identity:admin so the read-only roster (no inline
+// role edit / invite) can be exercised in a real browser without a live gateway.
+function harnessMe(): gateway.MeResponse {
+  const readonly = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("readonly") === "1";
+  if (!readonly) return MOCK_ME;
+  return { ...MOCK_ME, permissions: ["identity:read", "audit:read", "event:read"] };
+}
 
 function Sidebar({ navigate }: { navigate: (p: string) => void }) {
   const { canAll } = usePermissions();
@@ -66,9 +75,12 @@ export function App() {
   // (e.g. "http://localhost:8787") to exercise the real fetch client against a
   // live/stub gateway — the same createHttpClient FE2 wires in production.
   const apiBase = import.meta.env.VITE_ROSTER_API_BASE as string | undefined;
+  const me = useMemo(() => harnessMe(), []);
+  // Dev-only: VITE_MOCK_LATENCY (ms) previews loading/skeleton states (FRONTEND_GUIDE §5).
+  const latency = Number(import.meta.env.VITE_MOCK_LATENCY ?? 0);
   const client = useMemo(
-    () => (apiBase ? createHttpClient({ baseUrl: apiBase }) : createMockClient({ me: MOCK_ME })),
-    [apiBase],
+    () => (apiBase ? createHttpClient({ baseUrl: apiBase }) : createMockClient({ me }, latency)),
+    [apiBase, me, latency],
   );
   const qc = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }), []);
   const [path, setPath] = useState("/admin/users");
@@ -85,7 +97,7 @@ export function App() {
 
   return (
     <QueryClientProvider client={qc}>
-      <RosterProvider client={client} me={MOCK_ME}>
+      <RosterProvider client={client} me={me}>
         <NavigationProvider value={navigation}>
           {/* Persistent rate-limit banner pinned to the top of the admin shell. */}
           <div style={{ padding: "24px 24px 0", fontFamily: "var(--dub-font-family-sans)" }} data-testid="fe7-shell-top">

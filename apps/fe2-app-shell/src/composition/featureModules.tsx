@@ -13,25 +13,33 @@
 //   4. carry each feature's module-level requiredPermissions so registry
 //      flatten() ANDs them onto every route (fail-closed authz).
 // The result is the array FE2's registerFeatureModules() consumes (main.tsx).
-import { createElement, type ComponentType, type ReactNode } from "react";
-import type { identity } from "@dub/types";
+import { createElement, useMemo, type ComponentType, type ReactNode } from "react";
+import { useParams } from "@tanstack/react-router";
+import { appRegistry, type identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { eventFeatureModule, routePaths } from "@dub/fe3-event-action";
 import { notificationsModule } from "@dub/fe5-notification-inbox";
 import { adminModule } from "@dub/admin-roster";
 // FE4/FE6 have no package export map yet — reached via the single deep-import
 // boundary (featureEntries.tsx), never directly.
-import { taskModule, eventTaskRoutes, chatFeature } from "./featureEntries.tsx";
+import { taskModule, eventTaskRoutes, chatFeature, TaskRouteProvider, useTaskRoute } from "./featureEntries.tsx";
+import type { TaskRouteContextValue } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { FeatureModule, FeatureRoute, NavEntry } from "../modules/types.tsx";
 import { mailRoutes, mailNav } from "../features/mail/index.tsx";
 import { MailProvider } from "../features/mail/MailProvider.tsx";
 import { usageRoutes, usageNav } from "../features/usage/index.tsx";
 import { UsageProvider } from "../features/usage/UsageProvider.tsx";
+import { ganttRoutes, ganttNav } from "../features/gantt/index.tsx";
+import { GanttProvider } from "../features/gantt/GanttProvider.tsx";
+import { GlobalEventSwitcher } from "../features/gantt/GlobalEventSwitcher.tsx";
 import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
+import { MemberRosterNav } from "../features/members/MemberRosterNav.tsx";
+import { participationRoutes } from "../features/participation/index.tsx";
+import { ParticipationProvider } from "../features/participation/ParticipationProvider.tsx";
 import {
   ChatProviders,
   EventProviders,
@@ -96,6 +104,11 @@ function providerWrapper(Provider: ProviderComponent, api: ApiClient): ElementWr
   return (node) => createElement(Provider, { api, children: node });
 }
 
+/** 運営メンバー・名簿 統合アプリの共有サブナビ帯でセクション本体を包む（Provider の外側）。
+ *  members(member-service) と admin(identity-roster) の両セクションに同じ帯を敷き、
+ *  ランチャー 1 タイルの中で横断できるようにする（合体後も両ルート/Providerは維持）。 */
+const rosterChromeWrapper: ElementWrapper = (node) => createElement(MemberRosterNav, { children: node });
+
 /** Wrap a canonical `lazy` loader so the resolved Component mounts inside `wrap`. */
 function wrapLazy(lazy: FeatureRoute["lazy"], wrap: ElementWrapper): FeatureRoute["lazy"] {
   return () => lazy().then(({ Component }) => ({ Component: () => wrap(createElement(Component)) }));
@@ -121,11 +134,27 @@ function withModulePerms(source: { requiredPermissions?: readonly string[] }, mo
   return module;
 }
 
+/** Bridge the REACTIVE `:eventId` route param into FE4's TaskRouteContext, on top
+ *  of the currentUserId/permissions TaskProviders already set. Only the event-scoped
+ *  task routes carry an eventId, so the injection lives here (not in TaskProviders,
+ *  which also serves the paramless マイタスク route and must stay router-context-free
+ *  for its isolated unit test). A same-route param change (the header switcher
+ *  navigating evt_A→evt_B) re-runs useParams here → new eventId → the gantt reloads. */
+function TaskEventIdBridge({ children }: { children: ReactNode }): JSX.Element {
+  const params = useParams({ strict: false }) as Record<string, string>;
+  const base = useTaskRoute();
+  const eventId = (params.eventId ?? null) as TaskRouteContextValue["eventId"];
+  const value = useMemo<TaskRouteContextValue>(() => ({ ...base, eventId }), [base, eventId]);
+  return createElement(TaskRouteProvider, { value, children });
+}
+
 // ── events (FE3) + delegated tasks (FE4 nested under /events/:eventId) ─────────
 function adaptEvents(api: ApiClient): FeatureModule {
   const wEvent = providerWrapper(EventProviders, api);
   const wTask = providerWrapper(TaskProviders, api);
-  const wEventTask: ElementWrapper = (node) => wEvent(wTask(node));
+  // EventProviders → TaskProviders → TaskEventIdBridge(reactive eventId) → route.
+  const wEventTask: ElementWrapper = (node) =>
+    wEvent(wTask(createElement(TaskEventIdBridge, { children: node })));
   const src = eventFeatureModule.routes as readonly SourceRoute[];
   const routes: FeatureRoute[] = src.map((r) => {
     const route = wrapRoute(r, wEvent);
@@ -137,7 +166,9 @@ function adaptEvents(api: ApiClient): FeatureModule {
     return route;
   });
   // FE3 declares its own /events nav (order 20); the shell owns top-level nav
-  // ordering and pins events first (order 10).
+  // ordering and pins events first (order 10). イベントは誤って launcher/ナビから
+  // 外れていたためユーザー承認で復活（アプリを減らさない原則）。メールアドレス管理
+  // (/admin/email-routing) だけは意図的撤去のまま。
   const nav: NavEntry[] = [{ label: "イベント", path: routePaths.list, icon: "calendar", order: 10 }];
   return withModulePerms(eventFeatureModule, { id: "events", routes, nav });
 }
@@ -223,16 +254,67 @@ function adaptUsage(api: ApiClient): FeatureModule {
   return { id: "usage", routes, nav };
 }
 
+// ── gantt (FE2-local feature module) ──────────────────────────────────────────
+// The task Gantt is event-scoped (`/events/:eventId/tasks/gantt`, owned by FE4),
+// so there is no top-level Gantt route to point a launcher tile at. This shell-local
+// feature adds a "ガントチャート" landing (`/gantt`) that lists the user's events and
+// opens the chosen event's Gantt — a proper Gantt entry point in the 9-dot launcher
+// without hiding or removing any existing app. nav sits right after マイタスク
+// (order 21) and carries task:read so the tile shows only for users who can open a
+// Gantt (matching FE4's event-scoped Gantt route gate).
+function adaptGantt(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(GanttProvider, api);
+  const routes = (ganttRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = ganttNav.map((n) => {
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 21 };
+    if (n.requiredPermissions) e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
+    return e;
+  });
+  const module: FeatureModule = { id: "gantt", routes, nav };
+  // Global イベント header selector (GCP-style). Wrapped in GanttProvider (for the
+  // api-client) like FE5's bell; it self-gates to gantt/tasks routes and navigates
+  // the event param on select. Placed "leading" = LEFT of the 9-dot AppLauncher (the
+  // context selector precedes the app/utility icon cluster; the bell stays trailing).
+  module.headerWidget = () => wrap(createElement(GlobalEventSwitcher));
+  module.headerWidgetPlacement = "leading";
+  return module;
+}
+
 // ── members (FE2-local feature module) ────────────────────────────────────────
 // 運営メンバー管理 (invite status + team membership; the GUI replacement for the
 // hand-maintained 組織図 PDF). Like mail/usage it lives in the shell (features/members)
 // rather than a separate FE package. Nav sits after usage (order 47), before admin.
 // Route gate = identity:read; write actions are re-authorized server-side (identity:admin).
 function adaptMembers(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(MembersProvider, api);
+  const provider = providerWrapper(MembersProvider, api);
+  // chrome(サブナビ) は Provider の外側: (node) => <MemberRosterNav>{<MembersProvider>node</MembersProvider>}</MemberRosterNav>
+  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
-  const nav: NavEntry[] = membersNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 47 }));
+  // 統合タイル「運営メンバー・名簿」。運営メンバー(member-service) と 名簿(FE7 /admin/users) と
+  // 参加届＋回答(participation) を同じアプリとして開く。名簿/参加届/回答 の個別タイルは廃止し、この
+  // タイル内の共有サブナビ(MemberRosterNav)から横断する。ロール管理(/admin/roles) だけは独立タイル
+  // として adaptAdmin が別に出す（ユーザー明示指示: ロールを外に括り出す）。
+  const nav: NavEntry[] = membersNav.map((n) => ({ label: "運営メンバー・名簿", path: n.path, icon: n.icon, order: 47 }));
   return { id: "members", routes, nav };
+}
+
+// ── participation (FE2-local feature module) ──────────────────────────────────
+// 参加届: a signed-in 運営 files their own 参加届, which member-service reflects onto
+// the roster (招待中→追加済, or a new 追加済 member). Like mail/members it lives in the
+// shell (features/participation) and rides the one api-client. Nav sits after members
+// (order 49), before admin. No requiredPermissions — the submit endpoint is open to any
+// authenticated user, so the launcher tile shows for everyone signed in; the roster
+// write is re-authorized server-side by member-service.
+function adaptParticipation(api: ApiClient): FeatureModule {
+  const provider = providerWrapper(ParticipationProvider, api);
+  // 参加届(提出) と 参加届の回答(管理) は「運営メンバー・名簿」統合アプリのセクションに畳む。
+  // 共有サブナビ(MemberRosterNav) を Provider の外側に敷き、名簿/運営メンバーと同じ帯で横断する。
+  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
+  const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  // 個別ランチャータイルは廃止（nav=[]）。参加届は運営メンバー・名簿タイル内のサブナビからのみ横断する
+  // （ユーザー明示指示: 参加届＋回答管理を運営メンバーにまとめる）。ルート/Provider は維持し deep-link も生存。
+  const nav: NavEntry[] = [];
+  return { id: "participation", routes, nav };
 }
 
 // ── driveshare (FE2-local feature module) ─────────────────────────────────────
@@ -250,27 +332,52 @@ function adaptDriveShare(api: ApiClient): FeatureModule {
 
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(RosterProviders, api);
+  const provider = providerWrapper(RosterProviders, api);
+  // 名簿(/admin/users*) は「運営メンバー・名簿」統合タイルの一部 → 共有サブナビ(chrome)を Provider の
+  // 外側に敷き、そのタブから横断する（個別タイルは出さない）。ロール管理(/admin/roles*) はユーザー明示
+  // 指示で独立ランチャータイル「ロール管理」として単独で開く → chrome は敷かず単独アプリとして成立させる。
+  const rosterWrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
   const src = adminModule.routes as readonly SourceRoute[];
-  const routes = src.map((r) => wrapRoute(r, wrap));
-  // Map each admin route path -> its own requiredPermissions so the launcher can
-  // hide the admin tools (ユーザー名簿 / ロール管理 / 変更履歴) from non-admins, matching
-  // the route guard (defense in depth; a non-admin can neither see nor open them).
-  // 社長要望: admin ツール（ユーザー名簿・ロール管理・変更履歴）は全てナビ/ランチャーに表示する。
-  // 権限を持つユーザーには全て出す（アプリは減らさない）。
-  const permByPath = new Map(src.map((r) => [r.path, r.requiredPermissions]));
-  const nav: NavEntry[] = (adminModule.nav as readonly SourceNav[]).map((n, i) => {
-    const perms = permByPath.get(n.path);
-    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon as IconName, order: 50 + i };
-    if (perms && perms.length > 0) e.requiredPermissions = [...perms] as PermissionKey[];
-    return e;
-  });
+  const routes = src.map((r) =>
+    r.path.startsWith("/admin/roles") ? wrapRoute(r, provider) : wrapRoute(r, rosterWrap),
+  );
+  // 独立ランチャータイルは「ロール管理」(/admin/roles) の 1 つだけ。名簿(/admin/users) は運営メンバー・
+  // 名簿タイル内の共有サブナビ(MemberRosterNav)から開くので個別タイルを出さない。変更履歴(/admin/history)
+  // の UI は撤去済み（ルート/コンポーネントごと削除・監査ログのデータ基盤は残置）。route ガード
+  // (requiredPermissions)・headerWidget は維持。app:admin:view が名簿タブとロール管理タイルの両方をガードする。
+  const nav: NavEntry[] = [{ label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50 }];
   return withModulePerms(adminModule, { id: "admin", routes, nav });
+}
+
+/** Stamp the owning module id onto every nav entry so the launcher/route guard can
+ *  look up the app's member-release status (lib/releaseGate). Done once here rather
+ *  than in each adaptX so the appId can never drift from the module it belongs to. */
+function withNavAppId(module: FeatureModule): FeatureModule {
+  module.nav = module.nav.map((n) => ({ ...n, appId: module.id }));
+  return module;
+}
+
+/** AND the app's per-app `app:<id>:view` access key onto the module (so registry.flatten
+ *  gates every route — the deep-link 403) AND onto each nav entry (so the launcher greys
+ *  the tile for a role without it). This is the ACTUAL per-app gate: turning app:<id>:view
+ *  off for a role now hides+blocks exactly that one app (gantt/参加届 included), independent
+ *  of the shared domain permission it historically rode. Non-breaking: an additive backfill
+ *  (identity-roster) grants the key to every role that can reach the app today, so no one
+ *  loses access on rollout. Fail-closed: while /me loads, can() is false → gated. */
+function withAppAccessGate(module: FeatureModule): FeatureModule {
+  const viewKey = appRegistry.appViewKey(module.id);
+  if (!viewKey) return module; // unreachable: every module id is a canonical app
+  const add = (perms: readonly PermissionKey[] | undefined): PermissionKey[] => [
+    ...new Set([...(perms ?? []), viewKey]),
+  ];
+  module.requiredPermissions = add(module.requiredPermissions);
+  module.nav = module.nav.map((n) => ({ ...n, requiredPermissions: add(n.requiredPermissions) }));
+  return module;
 }
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, mail, usage, members, driveshare, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, usage, members, participation, driveshare, admin]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
@@ -278,14 +385,16 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
   return [
     adaptEvents(api),
     adaptTasks(api),
+    adaptGantt(api),
     adaptNotifications(api),
     adaptChat(api),
     adaptMail(api),
     adaptUsage(api),
     adaptMembers(api),
+    adaptParticipation(api),
     adaptDriveShare(api),
     adaptAdmin(api),
-  ];
+  ].map(withNavAppId).map(withAppAccessGate);
 }
 
-export { adaptEvents, adaptTasks, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptDriveShare, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptAdmin, toIcon };

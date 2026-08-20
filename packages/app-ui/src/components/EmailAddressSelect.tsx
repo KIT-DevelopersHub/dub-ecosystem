@@ -3,7 +3,8 @@
 // (useEmailAddressInput) + token-driven CSS. Domain-free: the caller injects the
 // address `parse` fn and any `candidates` (e.g. from the roster / Email Routing),
 // so the same component serves FE2 mail compose and FE7 roster address fields.
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { isImeComposing } from "@dub/ui";
 import {
   useEmailAddressInput,
   defaultFormatToken,
@@ -60,6 +61,8 @@ export function EmailAddressSelect({
     format,
   });
   const [focused, setFocused] = useState(false);
+  // Don't commit a chip on the 変換確定 Enter/"," while an IME is composing.
+  const composingRef = useRef(false);
 
   const invalidSet = useMemo(() => new Set(invalid.map((t) => t.trim())), [invalid]);
   const selected = useMemo(() => new Set(recipients.map((r) => r.email)), [recipients]);
@@ -119,7 +122,14 @@ export function EmailAddressSelect({
           window.setTimeout(() => setFocused(false), 120);
           commit();
         }}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+        }}
         onKeyDown={(e) => {
+          if (composingRef.current || isImeComposing(e)) return;
           if (e.key === "Enter" || e.key === "," || e.key === ";") {
             e.preventDefault();
             commit();

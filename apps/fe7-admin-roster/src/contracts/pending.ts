@@ -89,8 +89,36 @@ export interface SyncEmailRoutingResult {
   total: number;
 }
 
-// PATCH sends only the changed fields (enable/disable toggle, or new destination).
-export interface UpdateEmailAddressRequest {
+// #5: read-only diff preview of a sync (owned by identity-roster; modeled locally).
+export interface EmailRoutingDiffRow {
+  email: string;
+  userId?: string;
   enabled?: boolean;
-  destination?: string;
+}
+export interface EmailRoutingSyncPreview {
+  toAdd: EmailRoutingDiffRow[];
+  toReactivate: EmailRoutingDiffRow[];
+  toRelink: EmailRoutingDiffRow[];
+  toDeactivate: EmailRoutingDiffRow[];
+  adminKept: EmailRoutingDiffRow[];
+  projected: SyncEmailRoutingResult;
+}
+
+
+// ---- Offboarding (退任) one-shot (#2) ----
+// The identity-LOCAL result returned by POST /identity/users/:id/offboard (owned by
+// identity-roster; modeled locally until it publishes into @dub/types). The FE
+// orchestrator wraps this with the cross-service steps (member在籍更新・Email Routing削除)
+// into a full OffboardOutcome for partial-success display.
+export type OffboardStepStatus = "done" | "skipped" | "failed";
+export interface OffboardStepResult {
+  step: "revoke-sessions" | "revoke-roles" | "disable-account";
+  status: OffboardStepStatus;
+  detail?: string;
+}
+export interface OffboardUserResult {
+  user: identity.IdentityUser;
+  revokedAssignments: number;
+  alreadyDisabled: boolean;
+  steps: OffboardStepResult[];
 }

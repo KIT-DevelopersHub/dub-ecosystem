@@ -7,7 +7,7 @@ import type { IconName } from "@dub/ui";
 
 type PermissionKey = identity.PermissionKey;
 
-export type FeatureModuleId = "events" | "tasks" | "notifications" | "chat" | "mail" | "usage" | "members" | "driveshare" | "admin";
+export type FeatureModuleId = "events" | "tasks" | "gantt" | "notifications" | "chat" | "mail" | "usage" | "members" | "participation" | "driveshare" | "admin";
 
 export interface FeatureRoute {
   path: `/${string}`;
@@ -22,6 +22,11 @@ export interface NavEntry {
   path: string;
   icon: IconName;
   order: number;
+  // Owning feature module id. Set by composition so the launcher can look up the
+  // app's member-release status (see lib/releaseGate). Optional so unit tests may
+  // build bare nav entries; when omitted the release gate treats the tile as
+  // published (never accidentally greys a test fixture).
+  appId?: FeatureModuleId;
   badgeSource?: () => number; // hook injection: FE5 useUnreadCount / FE6 useChatUnreadTotal
   // Permissions the viewer must hold for this launcher item to be shown (AND
   // semantics; omitted = visible to any authed user). The shell filters the
@@ -36,6 +41,11 @@ export interface FeatureModule {
   nav: NavEntry[];
   requiredPermissions?: PermissionKey[]; // applies to all module routes; fail-closed while /me loading
   headerWidget?: ComponentType; // e.g. FE5 NotificationBell
+  // Where headerWidget sits in the header actions row. "trailing" (default) renders
+  // it in the right-hand icon group (after the 9-dot AppLauncher) — the bell. "leading"
+  // renders it BEFORE the AppLauncher — used by the gantt event switcher so the context
+  // selector sits left of the 9-dot (GCP-style), while the bell stays right of it.
+  headerWidgetPlacement?: "leading" | "trailing";
   homeWidget?: HomeWidget; // dashboard body a feature contributes to HomeScreen (design 2-1)
 }
 
@@ -64,6 +74,7 @@ export interface Registry {
   modules: FeatureModule[];
   nav: NavEntry[]; // sorted by order asc
   routes: ResolvedRoute[]; // flattened (children included)
-  headerWidgets: ComponentType[];
+  headerWidgets: ComponentType[]; // trailing widgets (right icon group, after the AppLauncher)
+  leadingHeaderWidgets: ComponentType[]; // rendered BEFORE the AppLauncher (e.g. event switcher)
   homeWidgets: HomeWidget[]; // dashboard cards, in module registration order
 }

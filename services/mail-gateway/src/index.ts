@@ -58,9 +58,14 @@ const handler = {
     // otherwise keep the original headers-only cap. rawText (snippet/body) stays the first
     // INBOUND_RAW_READ_BYTES so existing body/snippet extraction is byte-for-byte unchanged.
     const hasR2 = Boolean(env.R2_MAIL);
-    const bytes = await readRawBytes(message.raw, hasR2 ? INBOUND_ATTACHMENT_READ_BYTES : INBOUND_RAW_READ_BYTES);
+    const cap = hasR2 ? INBOUND_ATTACHMENT_READ_BYTES : INBOUND_RAW_READ_BYTES;
+    const bytes = await readRawBytes(message.raw, cap);
     const decoder = new TextDecoder();
     const rawText = decoder.decode(bytes.subarray(0, INBOUND_RAW_READ_BYTES));
+    // The message was larger than the buffer we read: any attachment past the cap was cut
+    // off. Flag it so ingest records a visible "truncated" stub rather than losing it
+    // silently (改善#2). rawSize is Email Routing's authoritative full byte size.
+    const truncated = message.rawSize > cap;
     const raw: RawInbound = {
       from: message.from,
       to: message.to,
@@ -68,6 +73,7 @@ const handler = {
       rawText,
       rawSize: message.rawSize,
       ...(hasR2 ? { rawFull: decoder.decode(bytes) } : {}),
+      ...(truncated ? { truncated: true } : {}),
     };
     await handleInbound(buildInboundDeps(env, ctx), raw);
   },

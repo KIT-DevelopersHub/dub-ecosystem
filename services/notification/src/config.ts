@@ -29,6 +29,38 @@ export const MAX_QUERY_LIMIT = 200;
 // The 4 frozen channels (theme4). slack is intentionally excluded.
 export const CHANNELS = ["in_app", "email", "chat", "push"] as const;
 
+// Broadcast (org-wide) notification types. Two invariants ride on this list:
+//   1) forced into every recipient's in_app inbox at publish time regardless of prefs
+//      (design §3 — nobody misses a release / system announcement), and
+//   2) lazily backfilled on inbox read (repo.backfillBroadcastInbox) so a user created
+//      AFTER a broadcast was published (e.g. info@ / admin@ individualized later) still
+//      sees it — fan-out is write-time only, so late joiners would otherwise miss them.
+export const BROADCAST_IN_APP_TYPES = ["system.announcement", "release"] as const;
+
+// ---- audience gating (Notification management) ----
+// Every notification carries an audience (@dub/types NotificationAudience). The DB
+// column defaults to 'members' so every pre-existing / direct notification stays visible
+// to the user it targets; the admin-facing update notifications (feedback / deploy / ops
+// alerts) explicitly ride as 'admin' and are only visible to admins until published.
+export const AUDIENCE_ADMIN = "admin" as const;
+export const AUDIENCE_MEMBERS = "members" as const;
+export const DEFAULT_AUDIENCE = AUDIENCE_MEMBERS;
+
+// Permission gate for the "publish to members" action (POST /manage/:id/publish) and the
+// admin notification list (GET /manage). Held by admin (all catalog keys) + maintainer.
+export const BROADCAST_PUBLISH_PERMISSION = "notif:broadcast_publish" as const;
+// "admin viewer" gate for inbox audience filtering: holders see BOTH audiences. Members
+// (who lack it) are filtered to audience='members' rows only.
+export const ADMIN_VIEWER_PERMISSION = "notif:admin" as const;
+
+// The type a member broadcast is published under. Reuses the existing broadcast machinery
+// (forced in_app + late-join backfill) so every member — including late joiners — sees it.
+export const MEMBER_BROADCAST_TYPE = "system.announcement";
+// dedup-key prefix that links a members broadcast back to its source admin notification.
+// `broadcast:from:<sourceId>` makes publishing idempotent and lets the admin list detect
+// the "already published" state via a self-join.
+export const BROADCAST_FROM_PREFIX = "broadcast:from:";
+
 // ---- in-app feedback (widget -> admin) ----
 // Closed category vocabulary (mirrors notification.FeedbackCategory).
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "question", "other"] as const;

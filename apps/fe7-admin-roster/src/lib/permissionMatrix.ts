@@ -80,7 +80,12 @@ export function domainSelectionState(
  * from it would leave nobody able to manage roles/permissions, locking everyone out.
  */
 export function lockedKeysForRole(role: { name: string; isSystem: boolean }): identity.PermissionKey[] {
-  return role.isSystem && role.name === "admin" ? ["identity:admin"] : [];
+  // The admin role also keeps the 管理 app's per-app access keys: now that opening the
+  // 管理 app is gated on app:admin:view (route guard + launcher), stripping it would lock
+  // admins out of the very screen that manages roles. Freeze both view+edit ON.
+  return role.isSystem && role.name === "admin"
+    ? ["identity:admin", "app:admin:view", "app:admin:edit"]
+    : [];
 }
 
 /** True if selecting `key` requires an extra confirmation (dangerous flag). */

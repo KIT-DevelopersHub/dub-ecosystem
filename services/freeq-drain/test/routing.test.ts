@@ -20,10 +20,11 @@ describe("routeFor (single source of truth; default = defer)", () => {
     expect(routeFor("evt.file-meta")).toMatchObject({ kind: "deliver", binding: "SVC_FILE_META" });
     expect(routeFor("evt.github-sync")).toMatchObject({ kind: "deliver", binding: "SVC_GITHUB_SYNC" });
     expect(routeFor("evt.mobile-bff")).toMatchObject({ kind: "deliver", binding: "SVC_MOBILE_BFF" });
+    // 改善#5: mail-automation now has a live /internal/events-async landing route.
+    expect(routeFor("evt.mail-automation")).toMatchObject({ kind: "deliver", binding: "SVC_MAIL_AUTOMATION" });
   });
   it("defers topics with no live route and ANY unknown topic (never ack)", () => {
     expect(routeFor("evt.notification").kind).toBe("defer");
-    expect(routeFor("evt.mail-automation").kind).toBe("defer");
     expect(routeFor("deploy.job").kind).toBe("defer");
     expect(routeFor("foo.bar").kind).toBe("defer"); // default
     expect(routeFor("").kind).toBe("defer");
@@ -76,6 +77,30 @@ describe("deliver (audit.record + live evt.*)", () => {
     expect(res.delivered).toBe(1);
     expect(gh.calls[0]!.url).toBe("https://github-sync/internal/events-async");
     expect(readRow(raw, "r3")).toMatchObject({ status: "done" });
+  });
+
+  it("POSTs evt.mail-automation to SVC_MAIL_AUTOMATION /internal/events-async; row -> done (改善#5)", async () => {
+    const { d1, raw } = makeD1();
+    const auto = fakeSvc(200);
+    const env = { SVC_MAIL_AUTOMATION: auto.svc } as unknown as Env;
+    const envelope = { id: "evt_m1", name: "mail.message.received", payload: { messageId: "<m@x>", threadId: "<m@x>" } };
+    seed(raw, "r4", "evt.mail-automation", envelope);
+
+    const res = await drain(d1, makeDeliver(env), OPTS);
+
+    expect(res.delivered).toBe(1);
+    expect(auto.calls[0]!.url).toBe("https://mail-automation/internal/events-async");
+    expect(auto.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
+    expect(auto.calls[0]!.body).toEqual(envelope);
+    expect(readRow(raw, "r4")).toMatchObject({ status: "done" });
+  });
+
+  it("keeps evt.mail-automation PENDING (retries) when the binding is absent — never acked (改善#5)", async () => {
+    const { d1, raw } = makeD1();
+    seed(raw, "r5", "evt.mail-automation", { id: "evt_m2", name: "mail.message.received", payload: {} });
+    const res = await drain(d1, makeDeliver({} as unknown as Env), OPTS);
+    expect(res).toMatchObject({ delivered: 0, retried: 1, failed: 0 });
+    expect(readRow(raw, "r5")).toMatchObject({ status: "pending" });
   });
 });
 

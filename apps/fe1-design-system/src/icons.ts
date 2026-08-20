@@ -22,6 +22,7 @@ import {
   Menu,
   LogOut,
   Shield,
+  Lock,
   // P1 additions (fe2〜fe7 icon needs beyond the original 20)
   ListChecks,
   List,
@@ -41,6 +42,25 @@ import {
   CheckCheck,
   BellOff,
   Archive,
+  Folder,
+  FolderOpen,
+  // chat + rich-text formatting (fe6)
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  Code,
+  SquareCode,
+  Quote,
+  ListOrdered,
+  Link,
+  Smile,
+  AtSign,
+  Paperclip,
+  Send,
+  Reply,
+  Pin,
+  Hash,
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "./types";
@@ -68,6 +88,7 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   menu: Menu,
   "log-out": LogOut,
   shield: Shield,
+  lock: Lock,
   // P1 additions — aliases share the same Lucide glyph where semantics match.
   task: ListChecks,
   list: List,
@@ -90,6 +111,25 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   "check-all": CheckCheck,
   "bell-off": BellOff,
   archive: Archive,
+  folder: Folder,
+  "folder-open": FolderOpen,
+  // chat + rich-text formatting (fe6)
+  bold: Bold,
+  italic: Italic,
+  underline: Underline,
+  strikethrough: Strikethrough,
+  code: Code,
+  "code-block": SquareCode,
+  quote: Quote,
+  "list-ordered": ListOrdered,
+  link: Link,
+  smile: Smile,
+  "at-sign": AtSign,
+  paperclip: Paperclip,
+  send: Send,
+  reply: Reply,
+  pin: Pin,
+  hash: Hash,
 };
 
 // Direct re-export of Lucide for advanced callers (still tree-shakable).

@@ -11,6 +11,7 @@ DevHub (Dub) エコシステムの運用手順書。**手順のみ** をまと�
 | [01-deploy.md](./01-deploy.md) | 本番/preview デプロイ。CF トークン要件・D1 作成/migration・サービス依存順・Secret 一覧・スモーク |
 | [02-local-dev.md](./02-local-dev.md) | ローカル開発。D1 reset/seed・各サービス起動・e2e スモーク |
 | [03-oncall.md](./03-oncall.md) | オンコール/障害対応の初動。ログ・health/ready・レート制限 |
+| [04-staging-label-gate.md](./04-staging-label-gate.md) | 3環境デプロイ。staging 全複製・「stagingへ」/「確認した」ラベル運用・二重ゲート・無料枠実数・カットオーバー |
 
 ## 前提知識（3 runbook 共通）
 

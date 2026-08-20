@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
+import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
@@ -12,7 +13,10 @@ export interface TaskDraft {
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  startAt: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
+  /** WBS parent (親タスク). null = top-level. Chosen before the predecessors. */
+  parentTaskId: common.TaskId | null;
   dependsOnIds: common.TaskId[];
 }
 
@@ -21,12 +25,19 @@ export interface TaskCreateModalProps {
   onClose: () => void;
   users: readonly identity.UserSummary[];
   teams: readonly team.Team[];
-  /** existing tasks in the event, offered as predecessors (dependencies). */
-  dependencyOptions: readonly { id: common.TaskId; title: string }[];
-  onCreate: (draft: TaskDraft) => Promise<void>;
+  /** existing tasks in the event, offered as WBS parents (親タスク). */
+  parentOptions: readonly { id: common.TaskId; title: string }[];
+  /** every task in the event with its direct parent — predecessors are scoped to
+   *  the chosen parent's siblings (判断10: 同一直接親のみ依存可). */
+  scopeTasks: readonly ScopeTask[];
+  /** Resolves `false` when the task was NOT created (keep the modal open so the
+   *  user can fix + retry); `true`/void on success (modal closes). */
+  onCreate: (draft: TaskDraft) => Promise<boolean | void>;
   /** date-input value (YYYY-MM-DD) preset when opened from a timeline cell. */
   initialDue?: string | null;
-  /** predecessor ids preset when opened via "create child task" (feature #4). */
+  /** parent id preset when opened via "ここから子タスクを作成". */
+  initialParentId?: common.TaskId | null;
+  /** predecessor ids preset when opened with a dependency already in mind. */
   initialDependsOn?: readonly common.TaskId[];
 }
 
@@ -34,23 +45,31 @@ export interface TaskCreateModalProps {
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, teams, dependencyOptions, onCreate, initialDue, initialDependsOn }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn }: TaskCreateModalProps) {
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<task.TaskStatus>("todo");
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
+  const [start, setStart] = useState<string | null>(null);
   const [due, setDue] = useState<string | null>(null);
+  const [parentId, setParentId] = useState<common.TaskId | null>(null);
   const [deps, setDeps] = useState<common.TaskId[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // seed the due date + predecessors when (re)opened from a timeline cell / child-create.
+  // Predecessors are scoped to the chosen parent's siblings (判断10). Recomputes
+  // whenever the parent changes so the picker only offers same-scope tasks.
+  const depOptions = useMemo(() => dependencyScopeOptions(scopeTasks, parentId), [scopeTasks, parentId]);
+
+  // seed the due date + parent + predecessors when (re)opened (timeline cell /
+  // "ここから子タスクを作成" preset the parent, etc.).
   useEffect(() => {
     if (open) {
       setDue(initialDue ?? null);
+      setParentId(initialParentId ?? null);
       setDeps(initialDependsOn ? [...initialDependsOn] : []);
     }
-  }, [open, initialDue, initialDependsOn]);
+  }, [open, initialDue, initialParentId, initialDependsOn]);
 
   const reset = () => {
     setTitle("");
@@ -58,7 +77,9 @@ export function TaskCreateModal({ open, onClose, users, teams, dependencyOptions
     setPriority("medium");
     setAssigneeId(null);
     setTeamId(null);
+    setStart(null);
     setDue(null);
+    setParentId(null);
     setDeps([]);
   };
 
@@ -72,18 +93,24 @@ export function TaskCreateModal({ open, onClose, users, teams, dependencyOptions
     if (!title.trim() || saving) return;
     setSaving(true);
     try {
-      await onCreate({
+      const ok = await onCreate({
         title: title.trim(),
         status,
         priority,
         assigneeId,
         teamId,
+        startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
+        parentTaskId: parentId,
         dependsOnIds: deps,
       });
-      rememberPredecessors(deps);
-      reset();
-      onClose();
+      // Close ONLY on success — a failed create keeps the form (with its input) open
+      // so the user can retry after reading the error dialog. Success shows a toast.
+      if (ok !== false) {
+        rememberPredecessors(deps);
+        reset();
+        onClose();
+      }
     } finally {
       setSaving(false);
     }
@@ -159,11 +186,19 @@ export function TaskCreateModal({ open, onClose, users, teams, dependencyOptions
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-create-due">
-            期日
-          </label>
-          <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-create-start">
+              開始日
+            </label>
+            <DateField id="fe4-create-start" value={start} onChange={setStart} testId="fe4-create-start" />
+          </div>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-create-due">
+              期日
+            </label>
+            <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
+          </div>
         </div>
 
         {teams.length > 0 && (
@@ -181,9 +216,29 @@ export function TaskCreateModal({ open, onClose, users, teams, dependencyOptions
           </div>
         )}
 
+        {/* 親タスク → then 先行タスク: choose the WBS parent first, then dependencies.
+            Predecessors are limited to the chosen parent's siblings (same scope). */}
         <div className={styles.formFieldFull}>
-          <span className={styles.formLabel}>先行タスク（依存）</span>
-          <PredecessorPicker options={dependencyOptions} value={deps} onChange={setDeps} testId="fe4-create-deps" />
+          <label className={styles.formLabel} htmlFor="fe4-create-parent">
+            親タスク（任意・未選択でトップレベル）
+          </label>
+          <Select
+            id="fe4-create-parent"
+            value={parentId ?? ""}
+            onChange={(v) => {
+              const next = v ? (v as common.TaskId) : null;
+              setParentId(next);
+              // dependencies must stay within the new scope — drop the out-of-scope ones.
+              setDeps((d) => pruneToScope(scopeTasks, next, d));
+            }}
+            options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
+            testId="fe4-create-parent"
+          />
+        </div>
+
+        <div className={styles.formFieldFull}>
+          <span className={styles.formLabel}>先行タスク（依存・同じ親のタスクのみ）</span>
+          <PredecessorPicker options={depOptions} value={deps} onChange={setDeps} testId="fe4-create-deps" />
         </div>
       </div>
     </Modal>

@@ -29,8 +29,18 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
-        - name: parentId
+        - name: folderId
           in: query
+          description: Folder whose direct children to list (canonical; the server reads folderId).
+          schema:
+            type: string
+        - name: kind
+          in: query
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: Free-text search.
           schema:
             type: string
       responses:

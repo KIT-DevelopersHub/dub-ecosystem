@@ -80,6 +80,8 @@ describe("[case12] CORS", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("https://app.developershub.jp");
     expect(res.headers.get("access-control-allow-credentials")).toBe("true");
     expect(res.headers.get("access-control-allow-methods")).toContain("POST");
+    // PUT must be allowed — the SPA saves gantt deps / view state / drive links with it.
+    expect(res.headers.get("access-control-allow-methods")).toContain("PUT");
   });
 
   it("actual response echoes ACAO for allowed origin, omits it for a disallowed one", async () => {

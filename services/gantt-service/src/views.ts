@@ -18,11 +18,27 @@ function defaultState(eventId: common.EventId): gantt.GanttViewState {
 }
 
 /** Coerce a persisted/incoming state into a valid frozen GanttViewState. */
+/** Keep only string ids and drop duplicates (order preserved). */
+function cleanIds(raw: unknown): common.TaskId[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: common.TaskId[] = [];
+  for (const x of raw) {
+    if (typeof x !== "string" || seen.has(x)) continue;
+    seen.add(x);
+    out.push(x as common.TaskId);
+  }
+  return out;
+}
+
 function normalize(eventId: common.EventId, raw: unknown): gantt.GanttViewState {
   const o = (raw ?? {}) as Partial<gantt.GanttViewState>;
   const zoom = ZOOMS.includes(o.zoom as gantt.GanttZoom) ? (o.zoom as gantt.GanttZoom) : DEFAULT_ZOOM;
-  const collapsed = Array.isArray(o.collapsedTaskIds) ? o.collapsedTaskIds.filter((x): x is string => typeof x === "string") : [];
-  return { eventId, zoom, collapsedTaskIds: collapsed };
+  const collapsed = cleanIds(o.collapsedTaskIds);
+  const ordered = cleanIds(o.orderedTaskIds);
+  // Only attach orderedTaskIds when non-empty so default states stay byte-identical
+  // to the frozen `{ eventId, zoom, collapsedTaskIds }` shape (back-compat).
+  return { eventId, zoom, collapsedTaskIds: collapsed, ...(ordered.length > 0 ? { orderedTaskIds: ordered } : {}) };
 }
 
 /** Validate the PUT body against the frozen contract (400 on violation). */
@@ -40,7 +56,18 @@ export function validatePutBody(body: unknown): gantt.PutGanttViewRequest {
       details: [{ field: "collapsedTaskIds", reason: "invalid_type" }],
     });
   }
-  return { zoom: o.zoom as gantt.GanttZoom, collapsedTaskIds: o.collapsedTaskIds };
+  // orderedTaskIds is additive/optional; when present it must be string[].
+  if (o.orderedTaskIds !== undefined && (!Array.isArray(o.orderedTaskIds) || !o.orderedTaskIds.every((x) => typeof x === "string"))) {
+    throw new DubError(CommonErrorCodes.VALIDATION_FAILED, "orderedTaskIds must be string[]", {
+      status: 400,
+      details: [{ field: "orderedTaskIds", reason: "invalid_type" }],
+    });
+  }
+  return {
+    zoom: o.zoom as gantt.GanttZoom,
+    collapsedTaskIds: o.collapsedTaskIds,
+    ...(o.orderedTaskIds !== undefined ? { orderedTaskIds: o.orderedTaskIds } : {}),
+  };
 }
 
 export function createViewRepo(db: DbClient): ViewRepo {

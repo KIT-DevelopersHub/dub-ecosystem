@@ -4,6 +4,7 @@
 import { createContext, useContext, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { appRegistry } from "@dub/types";
 import type { gateway, identity } from "@dub/types";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
@@ -73,6 +74,23 @@ export function useAuth(): AuthState {
 export function usePermissions(): { can(p: PermissionKey): boolean } {
   const { can } = useAuthCtx();
   return { can };
+}
+
+/**
+ * Per-app access for the current viewer, resolved from the app's `app:<id>:view` /
+ * `app:<id>:edit` keys (APP_MANIFEST). `canView` gates opening the app (the launcher +
+ * route guard already enforce it); `canEdit` is the hook a feature's write UI consumes to
+ * show/hide create/edit affordances for the 「編集・作成まで」 tier. Fail-closed: both are
+ * false while /me loads or for an unknown app id.
+ */
+export function useAppCan(appId: string): { canView: boolean; canEdit: boolean } {
+  const { can } = useAuthCtx();
+  const view = appRegistry.appViewKey(appId);
+  const edit = appRegistry.appEditKey(appId);
+  return {
+    canView: view ? can(view) : false,
+    canEdit: edit ? can(edit) : false,
+  };
 }
 
 /** Returns the resolved MeResponse or throws when not authenticated. */

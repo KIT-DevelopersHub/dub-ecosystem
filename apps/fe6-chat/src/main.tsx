@@ -8,6 +8,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import cssText from "@dub/tokens/css";
+import "@dub/ui/style.css"; // @dub/ui component CSS (Modal overlay, Avatar, etc.) — standalone only
 import type { identity } from "@dub/types";
 import { ChatRuntimeProvider, type ChatRuntime } from "./context";
 import { ChatApp } from "./components/ChatApp";
@@ -32,6 +33,18 @@ const grants: identity.PermissionKey[] = ["chat:create", "chat:moderate"];
 const api: ChatApiClient = live
   ? new HttpChatClient({ baseUrl: import.meta.env.VITE_CHAT_API_BASE ?? "" })
   : new MockChatClient(demoSeed());
+
+// Standalone/E2E affordance: `?deletionPolicy=tombstone` flips the mock's message
+// deletion policy so the tombstone path is previewable without a live backend (the
+// default mock policy mirrors production: all `hard`). No effect in live mode.
+if (!live && api instanceof MockChatClient) {
+  const p = new URLSearchParams(window.location.search).get("deletionPolicy");
+  if (p === "tombstone") api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone" });
+  else if (p === "hard") api.setDeletionPolicy({ member: "hard", moderator: "hard" });
+  // Standalone/E2E hook (dev only): lets tests inject latency / a one-shot error to
+  // exercise the optimistic-delete immediacy and failure-rollback paths.
+  (window as unknown as { __chatApi?: MockChatClient }).__chatApi = api;
+}
 
 const createRealtimeClient: () => ChatRealtimeClient = live
   ? () => new WsChatClient({ getTicket: (channelId) => api.getWsTicket(channelId) })

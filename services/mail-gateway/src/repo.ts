@@ -63,6 +63,7 @@ export interface AttachmentRow {
   size_bytes: number;
   r2_key: string;
   created_at: string;
+  status: "stored" | "dropped_too_large" | "dropped_truncated"; // 0007: 'stored' default
 }
 
 // ---- opaque cursor codec (base64url of the row id; D3) ----
@@ -280,6 +281,43 @@ export async function findInboundByMessageId(db: DbClient, messageId: string): P
   return db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE message_id = ?`, messageId);
 }
 
+/** One send-log row by its internal id (= the local-part of our RFC Message-Id
+ *  `<send-log id>@domain`). Backs thread normalization when a reply references one of
+ *  OUR earlier sends rather than a received message. */
+export async function findSendLogById(db: DbClient, id: string): Promise<SendLogRow | null> {
+  return db.first<SendLogRow>(`SELECT * FROM mail_send_log WHERE id = ?`, id);
+}
+
+/**
+ * Resolve the canonical (root) thread id for a message from the RFC Message-Ids it
+ * references (References tokens + In-Reply-To, most-ancestral first). Walks each candidate
+ * against known messages and adopts the FIRST match's thread:
+ *   - a received message (mail_inbound.message_id) -> its thread_id
+ *   - one of OUR sent messages (RFC id = "<send-log id>@domain") -> that send's thread_id,
+ *     or the candidate itself when that send OPENED the conversation (thread_id NULL)
+ * Returns null when no candidate is known, so the caller keeps its own fallback (a fresh
+ * thread). This is the normalization that keeps a 3+ message conversation on ONE thread id
+ * even when a client trims its References chain to just the immediate parent, or when we
+ * reply to our own thread (改善#3 スレッドID正規化 / #4 送信返信の連結). Read-only: it never
+ * mutates existing rows, so already-stored threads are untouched (後方互換).
+ */
+export async function resolveThreadId(db: DbClient, candidateIds: string[]): Promise<string | null> {
+  const seen = new Set<string>();
+  for (const raw of candidateIds) {
+    const ref = raw.trim().replace(/^<|>$/g, "").trim();
+    if (!ref || seen.has(ref)) continue;
+    seen.add(ref);
+    const inbound = await findInboundByMessageId(db, ref);
+    if (inbound) return inbound.thread_id;
+    const localPart = ref.split("@")[0] ?? "";
+    if (localPart.startsWith("maillog_")) {
+      const sent = await findSendLogById(db, localPart);
+      if (sent) return sent.thread_id ?? ref;
+    }
+  }
+  return null;
+}
+
 /** Persist a normalized inbound message. INSERT OR IGNORE on message_id makes an
  *  Email-Routing redelivery a no-op; returns changes (0 = duplicate). */
 export async function insertInbound(
@@ -469,12 +507,16 @@ export async function insertAttachment(
     sizeBytes: number;
     r2Key: string;
     createdAt: string;
+    // 0007: persistence status. Defaults to 'stored' (bytes in R2). A 'dropped_*' stub
+    // carries r2Key='' and records an attachment we could NOT persist so the UI can
+    // surface it instead of the file vanishing silently (改善#2).
+    status?: AttachmentRow["status"];
   },
 ): Promise<void> {
   await db.run(
     `INSERT OR IGNORE INTO mail_attachments
-       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.messageKind,
     row.messageId,
@@ -483,6 +525,7 @@ export async function insertAttachment(
     row.sizeBytes,
     row.r2Key,
     row.createdAt,
+    row.status ?? "stored",
   );
 }
 
@@ -515,6 +558,68 @@ export async function attachmentKeysOlderThan(db: DbClient, sendCutoff: string, 
     inboundCutoff,
   );
   return rows.map((r) => r.r2_key);
+}
+
+// ---- per-user thread flags (改善#8: star/archive/trash persisted server-side) ----
+export interface UserFlagRow {
+  owner_user_id: string;
+  thread_id: string;
+  starred: number;
+  archived: number;
+  trashed: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToFlags(r: UserFlagRow): mail.MailThreadFlags {
+  return { threadId: r.thread_id, starred: r.starred === 1, archived: r.archived === 1, trashed: r.trashed === 1 };
+}
+
+/** Every flag row for one user (absent thread = all-false default; not returned). Only rows
+ *  with at least one non-default flag matter to the client, but we return all stored rows. */
+export async function listUserFlags(db: DbClient, ownerUserId: string): Promise<mail.MailThreadFlags[]> {
+  const rows = await db.all<UserFlagRow>(`SELECT * FROM mail_user_flags WHERE owner_user_id = ?`, ownerUserId);
+  return rows.map(rowToFlags);
+}
+
+/** Upsert one thread's flags for a user (PATCH semantics: only provided flags change; a
+ *  first write defaults the others to false). Returns the resulting full flag state.
+ *  Read-modify-write with INSERT OR REPLACE (the @dub/db namespace guard rejects
+ *  `ON CONFLICT ... DO UPDATE SET`, reading "SET" as a foreign table). Flag toggles are
+ *  per-user + low-contention, so the non-atomic read→write is acceptable; created_at is
+ *  preserved from the existing row so the first-seen timestamp is stable. */
+export async function upsertUserFlags(
+  db: DbClient,
+  ownerUserId: string,
+  threadId: string,
+  patch: mail.MailThreadFlagsPatch,
+): Promise<mail.MailThreadFlags> {
+  const now = nowIso();
+  const existing = await db.first<UserFlagRow>(
+    `SELECT * FROM mail_user_flags WHERE owner_user_id = ? AND thread_id = ?`,
+    ownerUserId,
+    threadId,
+  );
+  const cur = existing ? rowToFlags(existing) : { threadId, starred: false, archived: false, trashed: false };
+  const merged: mail.MailThreadFlags = {
+    threadId,
+    starred: patch.starred ?? cur.starred,
+    archived: patch.archived ?? cur.archived,
+    trashed: patch.trashed ?? cur.trashed,
+  };
+  await db.run(
+    `INSERT OR REPLACE INTO mail_user_flags
+       (owner_user_id, thread_id, starred, archived, trashed, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ownerUserId,
+    threadId,
+    merged.starred ? 1 : 0,
+    merged.archived ? 1 : 0,
+    merged.trashed ? 1 : 0,
+    existing?.created_at ?? now,
+    now,
+  );
+  return merged;
 }
 
 // ---- retention purge (scheduled) ----

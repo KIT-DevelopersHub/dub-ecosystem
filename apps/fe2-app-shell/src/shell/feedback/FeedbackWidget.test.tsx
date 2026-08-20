@@ -42,7 +42,7 @@ describe("FeedbackWidget", () => {
     expect(screen.getByText("内容を入力してください。")).toBeInTheDocument();
   });
 
-  it("POSTs message + category + auto page context and shows the thanks state", async () => {
+  it("POSTs message + category + nested page context (backend wire shape) and shows the thanks state", async () => {
     const request = vi.fn().mockResolvedValue({ id: "fb_1" });
     render(<FeedbackWidget api={apiWith(request)} />);
     await userEvent.click(screen.getByTestId("fe2-feedback-fab"));
@@ -54,13 +54,30 @@ describe("FeedbackWidget", () => {
     expect(request).toHaveBeenCalledTimes(1);
     const arg = request.mock.calls[0]![0];
     expect(arg).toMatchObject({ method: "POST", path: "/api/v1/feedback" });
+    // Backend expects a NESTED `page: { url, name }` (flat pageUrl/screenName are ignored
+    // and were previously dropped, losing the originating page in the admin notification).
     expect(arg.body).toMatchObject({
       message: "並び順を直してほしい",
       category: "bug",
-      pagePath: "/events",
-      screenName: "テスト画面",
+      page: { name: "テスト画面" },
     });
-    expect(typeof arg.body.pageUrl).toBe("string");
+    expect(typeof arg.body.page.url).toBe("string");
+    // No flat page fields leak into the wire body.
+    expect(arg.body).not.toHaveProperty("pageUrl");
+    expect(arg.body).not.toHaveProperty("pagePath");
+  });
+
+  it("maps the 改善要望 option to the backend enum value 'idea' (not the rejected 'request')", async () => {
+    const request = vi.fn().mockResolvedValue({ id: "fb_2" });
+    render(<FeedbackWidget api={apiWith(request)} />);
+    await userEvent.click(screen.getByTestId("fe2-feedback-fab"));
+    await userEvent.type(screen.getByTestId("fe2-feedback-message"), "改善してほしい点");
+    await userEvent.selectOptions(screen.getByTestId("fe2-feedback-category"), "idea");
+    await userEvent.click(screen.getByTestId("fe2-feedback-submit"));
+
+    await waitFor(() => expect(screen.getByTestId("fe2-feedback-success")).toBeInTheDocument());
+    const arg = request.mock.calls[0]![0];
+    expect(arg.body.category).toBe("idea");
   });
 
   it("surfaces a localized error and keeps the form when the POST fails", async () => {

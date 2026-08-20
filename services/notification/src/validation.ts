@@ -55,6 +55,23 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
     if (!recipientIds.every((r) => typeof r === "string" && r.length > 0)) fe.push({ field: "recipientIds", reason: "invalid_type" });
   }
 
+  // Optional role fan-out: expanded to user ids by the ingest recipient resolver. When
+  // present + non-empty, recipientIds may be empty (at least one of the two must resolve).
+  const recipientRoles = b.recipientRoles;
+  let hasRoles = false;
+  if (recipientRoles !== undefined) {
+    if (!Array.isArray(recipientRoles) || !recipientRoles.every((r) => typeof r === "string" && r.length > 0)) {
+      fe.push({ field: "recipientRoles", reason: "invalid_type" });
+    } else {
+      if (recipientRoles.length > MAX_DIRECT_RECIPIENTS) fe.push({ field: "recipientRoles", reason: "too_long", message: `<= ${MAX_DIRECT_RECIPIENTS}` });
+      hasRoles = recipientRoles.length > 0;
+    }
+  }
+  // Require at least one recipient source (ids or roles).
+  if (Array.isArray(recipientIds) && recipientIds.length === 0 && !hasRoles) {
+    fe.push({ field: "recipientIds", reason: "required", message: "recipientIds or recipientRoles must be non-empty" });
+  }
+
   const title = b.title;
   if (typeof title !== "string" || title.length < TITLE_MIN || title.length > TITLE_MAX) {
     fe.push({ field: "title", reason: "invalid_length", message: `${TITLE_MIN}..${TITLE_MAX}` });
@@ -86,6 +103,7 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
     title: title as string,
     body: bodyText as string,
   };
+  if (hasRoles) out.recipientRoles = recipientRoles as string[];
   if (channels !== undefined) out.channels = channels as NotificationChannel[];
   if (dedupKey !== undefined) out.dedupKey = dedupKey as string;
   if (resourceType !== undefined) out.resourceType = resourceType as string;
@@ -282,6 +300,47 @@ export function parseListFeedbackQuery(q: Record<string, string | undefined>): n
 
   if (fe.length > 0) throw notifValidationFailed(fe);
   return out;
+}
+
+/** Validate GET /manage query params (admin notification list; CursorQuery only). */
+export function parseListManageQuery(
+  q: Record<string, string | undefined>,
+): notification.ListAdminNotificationsQuery & { limit: number } {
+  const fe: FieldError[] = [];
+  const out: notification.ListAdminNotificationsQuery & { limit: number } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
+
+  if (q.limit !== undefined && q.limit !== "") {
+    const n = Number(q.limit);
+    if (!Number.isInteger(n) || n < 1) fe.push({ field: "limit", reason: "invalid_range" });
+    else if (n > MAX_QUERY_LIMIT) fe.push({ field: "limit", reason: "too_large", message: `<= ${MAX_QUERY_LIMIT}` });
+    else out.limit = n;
+  }
+
+  if (fe.length > 0) throw notifValidationFailed(fe);
+  return out;
+}
+
+/** Validate POST /manage/publish-batch body ({ ids: string[] }, 1..MAX_DIRECT_RECIPIENTS). */
+export function parsePublishBatch(body: unknown): notification.PublishBroadcastBatchRequest {
+  if (!isPlainObject(body)) throw notifValidationFailed([{ field: "(root)", reason: "invalid_type" }]);
+  const ids = body.ids;
+  if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string" && i.length > 0)) {
+    throw notifValidationFailed([{ field: "ids", reason: "invalid_type", message: "non-empty string array" }]);
+  }
+  if (ids.length === 0) {
+    throw notifValidationFailed([{ field: "ids", reason: "required", message: "at least one id" }]);
+  }
+  if (ids.length > MAX_DIRECT_RECIPIENTS) {
+    throw notifValidationFailed([{ field: "ids", reason: "too_long", message: `<= ${MAX_DIRECT_RECIPIENTS}` }]);
+  }
+  return { ids: ids as string[] };
+}
+
+/** Validate POST /manage/unpublish-batch body ({ ids: string[] }, same shape as publish). */
+export function parseUnpublishBatch(body: unknown): notification.UnpublishBroadcastBatchRequest {
+  return parsePublishBatch(body) as notification.UnpublishBroadcastBatchRequest;
 }
 
 export { notifValidationFailed };

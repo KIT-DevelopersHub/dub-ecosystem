@@ -11,14 +11,14 @@ import type { mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import {
   decodeHeaderWord,
-  extractAttachments,
+  extractAttachmentsDetailed,
   extractBody,
   extractSnippet,
   parseAddress,
   parseAddressList,
 } from "./mime";
-import { insertInbound, newInboundId, seenInbound } from "./repo";
-import { persistAttachments } from "./attachments";
+import { insertInbound, newInboundId, resolveThreadId, seenInbound } from "./repo";
+import { persistAttachments, persistDroppedAttachments, type DroppedReason } from "./attachments";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
 import type { InboundDeps, ParsedInbound } from "./types";
@@ -33,6 +33,17 @@ function firstRef(value: string | undefined): string | null {
   if (m && m[1]) return m[1].trim();
   const token = value.split(/\s+/)[0];
   return token ? stripAngle(token) || null : null;
+}
+/** All Message-Ids in a References/In-Reply-To header value, in order (angle-bracketed
+ *  tokens preferred; falls back to whitespace-split bare tokens). */
+function allRefs(value: string | undefined): string[] {
+  if (!value) return [];
+  const bracketed = [...value.matchAll(/<([^>]+)>/g)].map((m) => m[1]!.trim()).filter(Boolean);
+  if (bracketed.length > 0) return bracketed;
+  return value
+    .split(/\s+/)
+    .map((t) => stripAngle(t))
+    .filter(Boolean);
 }
 function localPart(address: string): string | null {
   const email = parseAddress(address).email;
@@ -69,10 +80,14 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
   if (h["auto-submitted"]) loop["auto-submitted"] = h["auto-submitted"];
   if (h["x-dub-mail-loop"]) loop["x-dub-mail-loop"] = h["x-dub-mail-loop"];
 
+  // Ancestral Message-Ids (References first, then In-Reply-To) used to normalize the
+  // thread id against messages we already have on record (改善#3).
+  const references = [...allRefs(h["references"]), ...allRefs(h["in-reply-to"])];
+
   // Body is persisted for the inbox detail view (frozen MailMessage still carries only
   // the snippet). Email Routing hands us the raw RFC822 as text; we keep the plain-text
   // body. HTML-part extraction is out of this slice's scope → htmlBody stays null.
-  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null };
+  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null, references };
 }
 
 /**
@@ -81,7 +96,14 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw);
-  const { message, loop, mailbox, bodyText, htmlBody } = parsed;
+  const { message, loop, mailbox, bodyText, htmlBody, references } = parsed;
+
+  // Normalize the thread id against messages we already have (改善#3): if any referenced
+  // ancestor is a known inbound/sent message, adopt ITS thread so a trimmed References
+  // chain (or a reply to our own send) still joins the root conversation instead of
+  // forking a new thread. Falls back to parseInbound's firstRef when nothing is known.
+  const resolvedThread = await resolveThreadId(deps.db, references);
+  if (resolvedThread) message.threadId = resolvedThread;
 
   if (await seenInbound(deps.db, message.messageId)) {
     return { processed: false, message };
@@ -108,7 +130,7 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   // is bound) and persist bytes->R2 + metadata->D1, keyed to this inbound message row.
   // Best-effort (persistAttachments logs per-file failures); ingest already succeeded.
   if (deps.blobs && raw.rawFull) {
-    const extracted = extractAttachments(raw.rawFull, {
+    const { attachments: extracted, dropped } = extractAttachmentsDetailed(raw.rawFull, {
       maxCount: MAX_ATTACHMENTS_PER_MESSAGE,
       maxBytesPerFile: MAX_ATTACHMENT_BYTES,
       maxTotalBytes: MAX_ATTACHMENTS_TOTAL_BYTES,
@@ -120,6 +142,18 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
         message.id,
         extracted,
       );
+    }
+    // 改善#2: make unstorable attachments VISIBLE instead of silently dropping them.
+    //  - parts over the per-file / per-message ceiling -> dropped_too_large stubs
+    //  - a message larger than our read buffer (tail cut off) -> one dropped_truncated stub
+    const stubs: { filename: string; contentType: string; sizeBytes: number; reason: DroppedReason }[] = dropped.map(
+      (d) => ({ filename: d.filename, contentType: d.contentType, sizeBytes: d.sizeBytes, reason: d.reason }),
+    );
+    if (raw.truncated) {
+      stubs.push({ filename: "添付ファイル（サイズ超過）", contentType: "application/octet-stream", sizeBytes: raw.rawSize, reason: "dropped_truncated" });
+    }
+    if (stubs.length > 0) {
+      await persistDroppedAttachments({ db: deps.db, ctx: deps.ctx }, "inbound", message.id, stubs);
     }
   }
 
