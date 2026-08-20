@@ -36,11 +36,16 @@ describe("createKvCache — best-effort (KV failure never fails the caller)", ()
     warn.mockRestore();
   });
 
-  it("purge() swallows a KV delete failure (the PATCH /gantt/rows write must not 500)", async () => {
+  it("purge() is a no-op — no KV delete at all (#399 write-budget fix), so it never throws", async () => {
+    // Purge no longer issues a KV delete (TTL handles freshness on the free plan), so even a
+    // KV whose delete would reject cannot make the triggering PATCH /gantt/rows write 500.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const cache = createKvCache(throwingKv());
+    const del = vi.fn(() => Promise.reject(new Error("KV delete() limit exceeded")));
+    const kv = { get: () => Promise.resolve(null), put: () => Promise.resolve(), delete: del } as unknown as KVNamespace;
+    const cache = createKvCache(kv);
     await expect(cache.purge("event_1")).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledOnce();
+    expect(del).not.toHaveBeenCalled(); // eager delete removed
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 
@@ -60,7 +65,9 @@ describe("createKvCache — best-effort (KV failure never fails the caller)", ()
     const cache = createKvCache(kv);
     await cache.put("event_1", { eventId: "event_1", rows: [], dependencies: [] });
     await expect(cache.get("event_1")).resolves.toEqual({ eventId: "event_1", rows: [], dependencies: [] });
+    // purge is a no-op (#399): the key is NOT evicted eagerly — it self-expires via the 60s
+    // TTL, so an immediate re-read still round-trips the stored DTO.
     await cache.purge("event_1");
-    await expect(cache.get("event_1")).resolves.toBeNull();
+    await expect(cache.get("event_1")).resolves.toEqual({ eventId: "event_1", rows: [], dependencies: [] });
   });
 });
