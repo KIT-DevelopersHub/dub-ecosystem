@@ -137,22 +137,42 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
   const totalTent = active.length - totalConfirmed;
   const hqColor = hq?.color ?? HQ_NAVY;
 
+  // 役割別の在籍人数（辞退除く・組織図に出ている区分と同じ tierOf で数える）。
+  const roleCounts: Array<{ key: Tier; label: string; count: number }> = [
+    { key: "organizer", label: "オーガナイザー", count: active.filter((m) => tierOf(m) === "organizer").length },
+    { key: "leader", label: "リーダー", count: active.filter((m) => tierOf(m) === "leader").length },
+    { key: "member", label: "メンバー", count: active.filter((m) => tierOf(m) === "member").length },
+  ];
+
   return (
     <div className={styles.orgChart} data-testid="members-orgchart">
       <div className={styles.orgHead}>
-        <div className={styles.orgTitle}>全体組織体制図</div>
-        <div className={styles.orgSub}>
-          統括チーム → オーガナイザー（チーム長）→ リーダー →（副リーダー・メンバー）の階層
+        <div className={styles.orgHeadMain}>
+          <div className={styles.orgTitle}>全体組織体制図</div>
+          <div className={styles.orgSub}>
+            統括チーム → オーガナイザー（チーム長）→ リーダー →（副リーダー・メンバー）の階層
+          </div>
+          <div className={styles.orgLegend}>
+            <span className={styles.li}>
+              <span className={styles.legendSw} />
+              確定
+            </span>
+            <span className={styles.li}>
+              <span className={`${styles.legendSw} ${styles.tent}`} />
+              打診中（淡色・破線）
+            </span>
+          </div>
         </div>
-        <div className={styles.orgLegend}>
-          <span className={styles.li}>
-            <span className={styles.legendSw} />
-            確定
-          </span>
-          <span className={styles.li}>
-            <span className={`${styles.legendSw} ${styles.tent}`} />
-            打診中（淡色・破線）
-          </span>
+        <div className={styles.roleCounts} data-testid="members-orgchart-rolecounts">
+          {roleCounts.map((r) => (
+            <span key={r.key} className={styles.roleCount} data-testid={`members-orgchart-rolecount-${r.key}`}>
+              {r.label}
+              <span className={styles.num} data-testid={`members-orgchart-rolecount-${r.key}-num`}>
+                {r.count}
+              </span>
+              <span className={styles.unit}>人</span>
+            </span>
+          ))}
         </div>
       </div>
 

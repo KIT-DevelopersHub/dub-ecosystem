@@ -129,6 +129,41 @@
 }
 .orgHead {
   margin-bottom: var(--dub-space-3);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+}
+.orgHeadMain {
+  min-width: 0;
+}
+/* 役割別の在籍人数サマリー（印刷ボタン近く・組織図の右上） */
+.roleCounts {
+  display: flex;
+  gap: var(--dub-space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.roleCount {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+  color: #55637a;
+  white-space: nowrap;
+}
+.roleCount .num {
+  font-size: 16px;
+  font-weight: var(--dub-font-weight-bold);
+  color: #0f2436;
+}
+.roleCount .unit {
+  font-size: 11px;
 }
 .orgTitle {
   font-size: var(--dub-font-size-lg);
