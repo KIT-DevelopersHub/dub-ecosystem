@@ -234,6 +234,17 @@ export function listRosterUsers(
   });
 }
 
+/** List the 運営メンバー roster (no `ids` filter ⇒ the full member list) — powers the
+ *  「タスクを発行」 依頼先(担当者) dropdown so a requester can pick any member, not just
+ *  those already referenced by existing tasks. Degrades gracefully: callers fall back
+ *  to the task-derived people when this yields nothing / is unsupported. */
+export function listRoster(client: ApiClient): Promise<common.Paginated<identity.UserSummary>> {
+  return client.request<common.Paginated<identity.UserSummary>>({
+    method: "GET",
+    path: `${P}/identity/users`,
+  });
+}
+
 // ---- event-service (event picker for タスク発行 + create/edit form choices) ----
 // The マイタスク hub needs the live event list so 「タスクを発行」 can pick a 対象
 // イベント (task-service requires a real eventId on POST /tasks). Default page is

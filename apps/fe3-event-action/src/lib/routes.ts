@@ -25,6 +25,7 @@ export function chatHref(eventId: Eid): string {
 
 // Route path patterns (as registered in the FeatureModule; FE2 owns the router).
 export const routePaths = {
+  hub: "/event-hub", // イベント詳細ハブ (current-event switcher + free-form detail store)
   list: "/events",
   detail: "/events/:eventId",
   action: "/events/:eventId/actions/:actionId",

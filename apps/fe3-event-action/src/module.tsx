@@ -17,6 +17,12 @@ export const eventFeatureModule: FeatureModule = {
   requiredPermissions: ["event:read"], // module-level; fail-closed while /me loading
   nav: [
     {
+      label: "イベント詳細",
+      path: routePaths.hub,
+      icon: "calendar",
+      order: 19,
+    },
+    {
       label: "イベント",
       path: routePaths.list,
       icon: "calendar",
@@ -24,6 +30,13 @@ export const eventFeatureModule: FeatureModule = {
     },
   ],
   routes: [
+    {
+      // イベント詳細ハブ: 現在イベント切替(ヘッダー) + free-form 詳細ストア。
+      path: routePaths.hub,
+      lazy: () => import("./pages/EventHubPage").then((m) => ({ Component: m.EventHubPage })),
+      auth: "required",
+      requiredPermissions: ["event:read"],
+    },
     {
       path: routePaths.list,
       lazy: () => import("./pages/EventListPage").then((m) => ({ Component: m.EventListPage })),

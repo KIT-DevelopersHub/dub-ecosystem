@@ -9,6 +9,7 @@ import { createOptimisticMutation } from "./useOptimisticMutation";
 import { eventKeys } from "../lib/queryKeys";
 import { normalizeError } from "../lib/errorMap";
 import type { CreateActionRequest, ListActionsResponse, UpdateActionRequest } from "../api/actionContracts";
+import type { EventDetails, EventDetailsData } from "../api/detailsContracts";
 
 // ---- Event: create (non-optimistic; server mints id) ----
 export function useCreateEvent() {
@@ -41,6 +42,27 @@ export function useUpdateEvent(eventId: common.EventId) {
         startsAt: vars.startsAt !== undefined ? vars.startsAt : prev.startsAt,
         endsAt: vars.endsAt !== undefined ? vars.endsAt : prev.endsAt,
       };
+    },
+    successMessage: "保存しました",
+  });
+}
+
+// ---- Event details: save the free-form store (optimistic on the details cache) ----
+// The whole document is saved at once. The panel passes the next `data` plus the
+// `version` it read, so the optimistic patch swaps data + bumps version pending the
+// server echo, and a stale version yields EVENT_VERSION_CONFLICT (rollback+refetch).
+export interface SaveDetailsVars {
+  data: EventDetailsData;
+  version: number;
+}
+export function useSaveEventDetails(eventId: common.EventId) {
+  const api = useEventApi();
+  return createOptimisticMutation<EventDetails, SaveDetailsVars, EventDetails>({
+    mutationFn: ({ data, version }) => api.saveEventDetails(eventId, { data, version }),
+    queryKey: eventKeys.eventDetails(eventId),
+    optimisticUpdate: (prev, { data }) => {
+      if (!prev) return prev;
+      return { ...prev, data, version: prev.version + 1 };
     },
     successMessage: "保存しました",
   });

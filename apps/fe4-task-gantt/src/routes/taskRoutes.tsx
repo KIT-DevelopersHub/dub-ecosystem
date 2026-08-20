@@ -10,7 +10,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTeams, listEvents, toDomainTeams } from "../api/endpoints";
+import { listTeams, listEvents, listRoster, toDomainTeams } from "../api/endpoints";
+import { getCurrentEventId, setCurrentEventId } from "../domain/current-event";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
 import type { EventOption } from "../components/MyTaskCreateModal";
@@ -62,6 +63,11 @@ export function TaskWorkspaceRoute() {
   // window.location parse for standalone mounts / shells that don't feed it.
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
   const eventId = ctxEventId ?? parseEventIdFromPath(pathname);
+  // Entering an event's workspace makes it the globally-selected event, so the next
+  // 「タスクを発行」 in マイタスク defaults its 対象イベント to this one.
+  useEffect(() => {
+    if (eventId) setCurrentEventId(eventId);
+  }, [eventId]);
   if (!eventId) return <p className={styles.banner}>イベントが指定されていません。</p>;
   return <TaskWorkspacePage eventId={eventId} permissions={permissions} />;
 }
@@ -79,6 +85,10 @@ export function MeTasksRoute() {
   const { currentUserId } = useTaskRoute();
   const [teams, setTeams] = useState<readonly team.Team[]>([]);
   const [events, setEvents] = useState<readonly EventOption[]>([]);
+  const [people, setPeople] = useState<readonly identity.UserSummary[]>([]);
+  // 対象イベントの初期値 = the globally-selected event (グローバルなイベント選択状態),
+  // read once on mount. null ⇒ the create modal starts unlinked (紐付けない).
+  const [initialEventId] = useState<common.EventId | null>(() => getCurrentEventId());
 
   useEffect(() => {
     let live = true;
@@ -88,6 +98,16 @@ export function MeTasksRoute() {
       })
       .catch(() => {
         /* teams are optional; the hub degrades gracefully without them */
+      });
+    // Load the 運営メンバー roster so 依頼先(担当者) is a real member dropdown rather
+    // than only the people already referenced by existing tasks. Degrades gracefully:
+    // on failure/empty, MyTasksPage falls back to the task-derived people.
+    void listRoster(client)
+      .then((res) => {
+        if (live) setPeople(res.items);
+      })
+      .catch(() => {
+        /* roster is optional; the hub falls back to task-derived people */
       });
     // Supply the real event list so 「タスクを発行」 is enabled and can target a
     // live event. Without this the button stayed disabled for admins who had no
@@ -108,7 +128,13 @@ export function MeTasksRoute() {
 
   return (
     <ToastProvider>
-      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} events={events} />
+      <MyTasksPage
+        currentUserId={currentUserId}
+        people={people}
+        teams={teams}
+        events={events}
+        initialEventId={initialEventId}
+      />
     </ToastProvider>
   );
 }

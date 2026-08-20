@@ -5,6 +5,7 @@ import type { ApiClient } from "./contracts/spa-shell";
 import { ApiClientProvider } from "./api/client-context";
 import { TaskWorkspacePage } from "./components/TaskWorkspacePage";
 import { MeTasksRoute, TaskRouteProvider } from "./routes/taskRoutes";
+import { setCurrentEventId } from "./domain/current-event";
 import { DEMO_EVENT_ID, DEMO_PERMISSIONS, DEMO_CURRENT_USER } from "./dev-seed";
 import styles from "./styles/app.module.css";
 
@@ -22,7 +23,13 @@ export interface DemoAppProps {
  * removed. Both share one MockApiClient (dev-seed).
  */
 export function DemoApp({ client }: DemoAppProps) {
-  const [view, setView] = useState<DemoView>("mytasks");
+  // This single-event demo treats the conference as the globally-selected event, so
+  // the マイタスク「タスクを発行」 modal defaults 対象イベント to it. Seeded before the
+  // child routes mount (useState initializer) so MeTasksRoute reads it on first render.
+  const [view, setView] = useState<DemoView>(() => {
+    setCurrentEventId(DEMO_EVENT_ID);
+    return "mytasks";
+  });
   return (
     <QueryClientProvider client={qc}>
       <ApiClientProvider client={client}>

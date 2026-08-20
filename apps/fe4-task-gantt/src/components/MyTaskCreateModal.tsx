@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
 import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
@@ -28,7 +28,12 @@ export interface MyTaskDraft {
   eventId: common.EventId | null;
   title: string;
   description: string | null;
-  priority: task.TaskPriority;
+  /** null = 優先度未設定 — the requester left it blank. The server defaults an
+   *  omitted priority to "medium" (CreateTaskRequest contract); both the マイタスク
+   *  list and the ガント read that same resulting task, so the two views stay in
+   *  sync. Kept nullable here (not in @dub/types) so the initial value can be blank
+   *  without touching the shared Task contract. */
+  priority: task.TaskPriority | null;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
   dueAt: common.ISODateTime | null;
@@ -61,6 +66,11 @@ export interface MyTaskCreateModalProps {
   onCreate: (draft: MyTaskDraft) => Promise<void>;
   /** preselect the requester's own name in the header hint. */
   requesterName?: string;
+  /** 対象イベントの初期値 — the event currently selected in the global header
+   *  (グローバルなイベント選択状態). Each time the modal opens it seeds 対象イベント
+   *  to this (when it is one of `events`); the requester can still change it. Null /
+   *  unknown ⇒ start unlinked (「紐付けない」). */
+  defaultEventId?: common.EventId | null;
 }
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -73,12 +83,18 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
  * field is needed for it.
  */
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
+const NO_PRIORITY = ""; // sentinel for the "未設定" priority Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName }: MyTaskCreateModalProps) {
-  const [eventId, setEventId] = useState<common.EventId | "">(NO_EVENT);
+export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId }: MyTaskCreateModalProps) {
+  // The header-selected event is the initial 対象イベント, but only when it is a real
+  // option in `events` (guards against a stale/foreign id) — otherwise start unlinked.
+  const seedEventId = (): common.EventId | "" =>
+    defaultEventId && events.some((e) => e.id === defaultEventId) ? defaultEventId : NO_EVENT;
+
+  const [eventId, setEventId] = useState<common.EventId | "">(seedEventId);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
-  const [priority, setPriority] = useState<task.TaskPriority>("medium");
+  const [priority, setPriority] = useState<task.TaskPriority | "">(NO_PRIORITY);
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
   const [due, setDue] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -87,11 +103,19 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [attachError, setAttachError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Re-seed 対象イベント to the current header selection each time the modal opens,
+  // so it always reflects the latest グローバルなイベント選択状態 (the user can then
+  // still change it). Only the event field is re-seeded — the rest keeps its state.
+  useEffect(() => {
+    if (open) setEventId(seedEventId());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultEventId]);
+
   const reset = () => {
-    setEventId(NO_EVENT);
+    setEventId(seedEventId());
     setTitle("");
     setAssigneeId(null);
-    setPriority("medium");
+    setPriority(NO_PRIORITY);
     setTeamId(null);
     setDue(null);
     setDescription("");
@@ -148,7 +172,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         eventId: eventId === NO_EVENT ? null : (eventId as common.EventId),
         title: title.trim(),
         description: description.trim() ? description.trim() : null,
-        priority,
+        priority: priority === NO_PRIORITY ? null : (priority as task.TaskPriority),
         assigneeId,
         teamId,
         dueAt: isoFromDateInput(due),
@@ -233,8 +257,11 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           <Select
             id="fe4-mytask-priority"
             value={priority}
-            onChange={(v) => setPriority(v as task.TaskPriority)}
-            options={PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABEL[p] }))}
+            onChange={(v) => setPriority(v as task.TaskPriority | "")}
+            options={[
+              { value: NO_PRIORITY, label: "未設定" },
+              ...PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABEL[p] })),
+            ]}
             testId="fe4-mytask-create-priority"
           />
         </div>

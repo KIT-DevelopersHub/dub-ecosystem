@@ -14,12 +14,24 @@ export {
 
 // Shared components/hooks for other units
 export { EventPicker, type EventPickerProps } from "./components/EventPicker";
+export { EventAppHeader } from "./components/EventAppHeader";
+export { EventDetailsPanel } from "./components/EventDetailsPanel";
+export {
+  useCurrentEventId,
+  useSetCurrentEventId,
+  useCurrentEventStore,
+} from "./lib/currentEvent";
 export {
   EventContextProvider,
   useEventContext,
   type EventContextValue,
 } from "./context/EventContext";
 export { EventApiProvider, RegistryProvider } from "./context/ApiContext";
+
+// Auth store bridge — FE3's event-scoped permissions (EventContext → EventDetailsPanel
+// 編集 gate) read `me` from this store. The FE2 shell owns auth, so it must push its
+// resolved `me` in via setMe; without it FE3 fails closed (DENY_ALL / read-only).
+export { useAuthStore, type AuthState } from "./contracts/fe2";
 
 // Navigation contract — FE2 owns the router; it wraps FE3's pages with
 // NavigationProvider fed from its TanStack Router (navigate/useParams/useSearch),
@@ -45,6 +57,13 @@ export type {
   ListActionsQuery,
   ListActionsResponse,
 } from "./api/actionContracts";
+export type {
+  EventDetails,
+  EventDetailsData,
+  EventDetailLink,
+  EventDetailContact,
+  SaveEventDetailsRequest,
+} from "./api/detailsContracts";
 
 // Pure helpers other units may reuse
 export {
@@ -58,6 +77,7 @@ export { eventKeys } from "./lib/queryKeys";
 export { EventErrorCodes, classifyError } from "./lib/errorMap";
 
 // Pages (FE2 registers these via eventFeatureModule; re-exported for direct mount)
+export { EventHubPage } from "./pages/EventHubPage";
 export { EventListPage } from "./pages/EventListPage";
 export { EventDetailPage } from "./pages/EventDetailPage";
 export { ActionDetailPage } from "./pages/ActionDetailPage";

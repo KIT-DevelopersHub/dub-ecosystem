@@ -90,6 +90,34 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
       { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
     ],
   },
+  evt_2: {
+    version: 1,
+    id: "evt_2",
+    orgId: ORG,
+    title: "運営定例ミーティング",
+    description: "運営コアの週次定例。進捗共有・課題出し・次アクション決定。",
+    phase: "planning",
+    startsAt: "2026-08-12T09:00:00Z",
+    endsAt: "2026-08-12T10:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-07-01T00:00:00Z",
+    updatedAt: "2026-08-10T00:00:00Z",
+    actions: [],
+  },
+  evt_3: {
+    version: 1,
+    id: "evt_3",
+    orgId: ORG,
+    title: "学生ハッカソン Hackit 秋",
+    description: "学生向け1日ハッカソン。チーム開発とLT発表。",
+    phase: "open",
+    startsAt: "2026-09-01T00:00:00Z",
+    endsAt: "2026-09-01T09:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-06-15T00:00:00Z",
+    updatedAt: "2026-08-11T00:00:00Z",
+    actions: [],
+  },
 };
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
@@ -233,6 +261,164 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
 // data: URLs (same $0 storage path the real feature ships).
 const TASK_ATTACHMENTS: Record<string, task.TaskAttachment[]> = {};
 let attSeq = 0;
+
+// In-session per-event detail store (イベント詳細ハブの "何でも貯める" — overview/memo/venue
+// /links/contacts). GET returns defaults (version 0) until first save; PUT bumps version.
+// Mirrors event-service /events/:id/details. A reload resets it (demo transport).
+interface DemoEventDetailsData {
+  overview: string;
+  venue: string;
+  access: string;
+  capacity: string;
+  belongings: string;
+  budget: string;
+  operations: string;
+  memo: string;
+  schedule: { time: string; title: string; note: string }[];
+  speakers: { name: string; role: string; topic: string }[];
+  sponsors: { name: string; tier: string; status: string }[];
+  checklist: { label: string; done: boolean }[];
+  links: { label: string; url: string }[];
+  contacts: { label: string; value: string }[];
+}
+interface DemoEventDetails {
+  eventId: string;
+  data: DemoEventDetailsData;
+  version: number;
+  updatedAt: string | null;
+}
+const emptyDetailsData = (): DemoEventDetailsData => ({
+  overview: "",
+  venue: "",
+  access: "",
+  capacity: "",
+  belongings: "",
+  budget: "",
+  operations: "",
+  memo: "",
+  schedule: [],
+  speakers: [],
+  sponsors: [],
+  checklist: [],
+  links: [],
+  contacts: [],
+});
+const emptyEventDetails = (eventId: string): DemoEventDetails => ({
+  eventId,
+  data: emptyDetailsData(),
+  version: 0,
+  updatedAt: null,
+});
+// Pre-seeded rich details so the demo shows a fully-populated event ops hub (北陸IT
+// カンファレンス). evt_2/evt_3 carry lighter but non-empty details so switching the
+// header event visibly swaps content. A PUT overwrites these in-session.
+const EVENT_DETAILS: Record<string, DemoEventDetails> = {
+  evt_1: {
+    eventId: "evt_1",
+    version: 4,
+    updatedAt: "2026-08-02T10:30:00Z",
+    data: {
+      overview:
+        "北陸最大級の技術カンファレンス。約400名の来場を想定し、基調講演・技術セッション・スポンサーブース・懇親会を1日で運営する。運営コアは20名、当日ボランティア30名。",
+      venue: "金沢市文化ホール 大ホール（石川県金沢市高岡町15-1）",
+      access:
+        "JR金沢駅からバス10分「南町・尾山神社」下車 徒歩3分 / 北陸自動車道 金沢西ICから車15分。専用駐車場なし、近隣コインパーキング利用。",
+      capacity: "来場 定員400名（事前申込制）/ 運営コア20名 / 当日ボランティア30名",
+      belongings:
+        "運営: スタッフパーカー・名札・モバイルバッテリー・筆記用具。登壇者: 発表用PC・HDMI変換アダプタ。来場者: 参加証（QR）。",
+      budget:
+        "総予算 180万円。会場費60万 / 配信・音響40万 / 懇親会45万 / ノベルティ・印刷20万 / 予備15万。協賛収入で約120万を充当予定。",
+      operations:
+        "08:00 スタッフ集合・設営 / 09:00 受付開始（QRチェックイン2レーン）/ 09:30 開場 / 10:00 開演 / 12:00 昼休憩（ブース誘導）/ 17:30 本編終了 / 18:00 懇親会 / 20:00 撤収・原状復帰。緊急連絡は運営Slack #当日オペ。",
+      memo:
+        "・配信はYouTube Live（限定公開）。\n・登壇者控室は301会議室。\n・雨天時は駅からのシャトル増便を検討。\n・アンケートは退場時にQRで回収。",
+      schedule: [
+        { time: "09:00", title: "受付開始・開場", note: "QRチェックイン2レーン / 誘導3名" },
+        { time: "10:00", title: "オープニング・基調講演", note: "大ホール / 登壇: 井上さん" },
+        { time: "11:00", title: "技術セッション A/B 並行", note: "A=大ホール B=中会議室" },
+        { time: "12:00", title: "昼休憩・スポンサーブース", note: "ホワイエ / 弁当引換" },
+        { time: "13:30", title: "LTセッション", note: "公募10本 × 5分" },
+        { time: "15:00", title: "パネルディスカッション", note: "テーマ: 北陸のエンジニア採用" },
+        { time: "17:00", title: "クロージング・表彰", note: "ベストLT発表" },
+        { time: "18:00", title: "懇親会", note: "同ホール ホワイエ / 立食" },
+      ],
+      speakers: [
+        { name: "井上 健太", role: "基調講演 / Speee CTO", topic: "スケールする開発組織の作り方" },
+        { name: "大石 美咲", role: "セッションA / SRE", topic: "小さく始める可観測性" },
+        { name: "籾井 亮", role: "セッションB / フルスタック", topic: "Cloudflare Workers 実践投入" },
+        { name: "興津 直樹", role: "パネル司会", topic: "北陸のエンジニア採用のリアル" },
+      ],
+      sponsors: [
+        { name: "株式会社アルファオメガ", tier: "Gold", status: "契約済" },
+        { name: "Speee", tier: "Silver", status: "契約済" },
+        { name: "サイボウズ", tier: "Silver", status: "調整中" },
+        { name: "地元IT企業有志", tier: "Bronze", status: "打診中" },
+      ],
+      checklist: [
+        { label: "会場本契約・鍵の受け取り", done: true },
+        { label: "登壇者への機材アンケート送付", done: true },
+        { label: "配信リハーサル（音響・回線）", done: false },
+        { label: "弁当・ケータリング最終数量確定", done: false },
+        { label: "当日ボランティアのシフト表確定", done: false },
+        { label: "ノベルティ・名札の印刷入稿", done: true },
+      ],
+      links: [
+        { label: "公式サイト", url: "https://example.com/hokuriku-it-conf" },
+        { label: "運営Driveフォルダ", url: "https://drive.google.com/drive/folders/xxxx" },
+        { label: "タイムテーブル（Sheets）", url: "https://docs.google.com/spreadsheets/xxxx" },
+        { label: "参加申込フォーム", url: "https://example.com/apply" },
+      ],
+      contacts: [
+        { label: "運営事務局", value: "conf-ops@developershub.jp" },
+        { label: "会場担当（当日）", value: "090-0000-0000" },
+        { label: "運営Slack", value: "#当日オペ" },
+      ],
+    },
+  },
+  evt_2: {
+    eventId: "evt_2",
+    version: 1,
+    updatedAt: "2026-08-10T09:00:00Z",
+    data: {
+      ...emptyDetailsData(),
+      overview: "運営コアの週次定例。進捗共有・課題出し・次アクション決定を行う。",
+      venue: "オンライン（Google Meet）",
+      operations: "19:00 進捗共有 / 19:20 課題議論 / 19:45 次アクション確認 / 20:00 終了",
+      schedule: [
+        { time: "19:00", title: "進捗共有", note: "各チームリード" },
+        { time: "19:20", title: "課題議論", note: "" },
+        { time: "19:45", title: "次アクション確認", note: "担当・期日を明確化" },
+      ],
+      checklist: [
+        { label: "アジェンダを事前共有", done: true },
+        { label: "議事録テンプレ準備", done: false },
+      ],
+      links: [{ label: "議事録", url: "https://docs.google.com/document/xxxx" }],
+      contacts: [{ label: "進行", value: "#運営定例" }],
+    },
+  },
+  evt_3: {
+    eventId: "evt_3",
+    version: 1,
+    updatedAt: "2026-08-11T12:00:00Z",
+    data: {
+      ...emptyDetailsData(),
+      overview: "学生向け1日ハッカソン。チーム開発とLT発表を通じて実践力を養う。",
+      venue: "DevelopersHub 拠点スペース",
+      access: "最寄り駅から徒歩7分。当日は入口で受付。",
+      capacity: "参加学生 定員40名 / メンター8名",
+      belongings: "ノートPC・充電器・学生証",
+      speakers: [{ name: "メンター陣", role: "技術サポート", topic: "各チーム伴走" }],
+      checklist: [
+        { label: "会場Wi-Fi・電源の確認", done: true },
+        { label: "審査基準の共有", done: false },
+        { label: "昼食の手配", done: false },
+      ],
+      links: [{ label: "エントリーフォーム", url: "https://example.com/hackit-entry" }],
+      contacts: [{ label: "運営", value: "hackit@developershub.jp" }],
+    },
+  },
+};
 
 // Serve the gantt DTO the way gantt-service does: a work-package (hasChildren) row's OWN
 // startsAt/endsAt are NULL — the span is DERIVED from its children (the client rolls it up
@@ -1203,6 +1389,66 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const aid = decodeURIComponent(delMatch[2]!);
       TASK_ATTACHMENTS[tid] = (TASK_ATTACHMENTS[tid] ?? []).filter((a) => a.id !== aid);
       return json(null, 204);
+    }
+  }
+
+  // Issue (create) a task — マイタスク「タスクを発行」(POST /tasks). Adds to the task store
+  // AND, when linked to an event that has a gantt, appends a gantt row so 発行→ガント同期 が
+  // その場で見える (③). createdBy = デモ管理者 so the 依頼 lens shows it.
+  if (method === "POST" && pathname === "/api/v1/tasks") {
+    const bd = (body ?? {}) as Partial<task.CreateTaskRequest>;
+    const id = `tsk_demo_${++attSeq}`;
+    const now = new Date().toISOString();
+    const evId = (bd.eventId ?? null) as string | null;
+    const created: task.Task = {
+      id,
+      eventId: evId,
+      title: bd.title ?? "無題タスク",
+      description: bd.description ?? null,
+      status: "todo",
+      priority: bd.priority ?? "medium",
+      assigneeId: bd.assigneeId ?? null,
+      teamId: bd.teamId ?? null,
+      startAt: bd.dueAt ?? now,
+      dueAt: bd.dueAt ?? now,
+      origin: "internal",
+      createdBy: ME_ID,
+      version: 1,
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as task.Task;
+    TASKS.unshift(created);
+    if (evId && GANTT[evId]) {
+      GANTT[evId].rows.push({
+        taskId: id,
+        title: created.title,
+        startsAt: created.startAt ?? now,
+        endsAt: created.dueAt ?? now,
+        progressPercent: 0,
+        assigneeId: created.assigneeId,
+        teamId: created.teamId ?? null,
+      } as gantt.GanttRow);
+    }
+    return json(created, 201);
+  }
+
+  // Event detail store (イベント詳細ハブ): GET returns the free-form store (defaults until
+  // saved), PUT persists it (LWW version bump). "何でも貯める" per-event notes.
+  {
+    const evId = seg(/^\/api\/v1\/events\/([^/]+)\/details$/);
+    if (evId && method === "GET") return json(EVENT_DETAILS[evId] ?? emptyEventDetails(evId));
+    if (evId && method === "PUT") {
+      const b = (body ?? {}) as { data?: DemoEventDetailsData; version?: number };
+      const cur = EVENT_DETAILS[evId] ?? emptyEventDetails(evId);
+      const next: DemoEventDetails = {
+        eventId: evId,
+        data: b.data ?? cur.data,
+        version: cur.version + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      EVENT_DETAILS[evId] = next;
+      return json(next);
     }
   }
 
