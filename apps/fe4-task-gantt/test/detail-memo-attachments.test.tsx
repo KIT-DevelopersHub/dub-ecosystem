@@ -30,9 +30,9 @@ describe("TaskDetailPanel (modal) — メモ/詳細 + 添付", () => {
     render(<App client={seed()} eventId={EVENT} permissions={PERMS} />);
     const panel = await openDetail();
     expect(within(panel).getByTestId("fe4-detail-description")).toBeInTheDocument();
-    expect(within(panel).getByTestId("fe4-detail-attachments")).toBeInTheDocument();
+    expect(within(panel).getByTestId("fe4-detail-attach-section")).toBeInTheDocument();
     // empty state until anything is attached
-    expect(within(panel).getByTestId("fe4-detail-attachments-empty")).toBeInTheDocument();
+    expect(within(panel).getByTestId("fe4-detail-attach-empty")).toBeInTheDocument();
   });
 
   it("saves an edited メモ/詳細 through an optimistic PATCH", async () => {
@@ -55,6 +55,8 @@ describe("TaskDetailPanel (modal) — メモ/詳細 + 添付", () => {
   it("adds a URL attachment, lists it, then deletes it", async () => {
     render(<App client={seed()} eventId={EVENT} permissions={PERMS} />);
     const panel = await openDetail();
+    // URL inputs live behind the compact 🔗 toggle now — open it first.
+    fireEvent.click(within(panel).getByTestId("fe4-detail-attach-url-toggle"));
     fireEvent.change(within(panel).getByTestId("fe4-detail-attach-url-name"), { target: { value: "議事録" } });
     fireEvent.change(within(panel).getByTestId("fe4-detail-attach-url"), { target: { value: "https://example.com/minutes" } });
     fireEvent.click(within(panel).getByTestId("fe4-detail-attach-url-add"));
@@ -70,6 +72,7 @@ describe("TaskDetailPanel (modal) — メモ/詳細 + 添付", () => {
   it("rejects a non-http URL with an inline error", async () => {
     render(<App client={seed()} eventId={EVENT} permissions={PERMS} />);
     const panel = await openDetail();
+    fireEvent.click(within(panel).getByTestId("fe4-detail-attach-url-toggle"));
     fireEvent.change(within(panel).getByTestId("fe4-detail-attach-url"), { target: { value: "ftp://nope" } });
     fireEvent.click(within(panel).getByTestId("fe4-detail-attach-url-add"));
     expect(await within(panel).findByTestId("fe4-detail-attach-error")).toBeInTheDocument();
