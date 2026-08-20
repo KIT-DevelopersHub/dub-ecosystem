@@ -185,6 +185,14 @@ const SECTION_LEAVES: Record<string, string[]> = {
   "7.5": ["7.5.1", "7.5.2", "7.5.3", "7.5.4"],
 };
 
+/** 3-level demo overlay: designated leaves (WBS keys above) that themselves get a
+ *  set of sub-leaves (depth 2), so the timeline shows a genuine 3-level WBS nest
+ *  and the 内包バー's nested containers are demonstrable. Dev/E2E seed only. */
+const DEEP_DEMO_LEAVES: Record<string, string[]> = {
+  "1.1.0": ["1.1.0.1", "1.1.0.2", "1.1.0.3"],
+  "1.1.1": ["1.1.1.1", "1.1.1.2"],
+};
+
 const secId = (wbs: string): common.TaskId => `task_${wbs.replace(/\./g, "_")}`;
 
 /** Short process label for a leaf row: the section title without its team prefix
@@ -233,7 +241,7 @@ function defaultStatus(phase: Phase, end: number): task.TaskStatus {
 /** Build the work-package (parent) + WBS-leaf (child) tasks and their derived
  *  bars. Parents are staggered within each phase; each parent's leaves are then
  *  sliced across the parent's own bar so a waterfall reads under it when opened. */
-function build(): {
+function build(deepNest = false): {
   tasks: task.Task[];
   rowDates: MockSeedRowDates;
   deps: gantt.GanttDependencyLine[];
@@ -324,6 +332,42 @@ function build(): {
         });
         rowDates[cid] = { startsAt: cStartIso, endsAt: cDue };
         hierarchy[cid] = { parentTaskId: id, depth: 1, wbs: w };
+
+        // ---- grandchildren (depth 2) for one designated leaf, so the demo shows a
+        //      3-level WBS nest and the 内包バー's nested containment is visible. This
+        //      turns `w` into a mid-level parent (hasChildren derived) with its own
+        //      sub-leaves sliced across its bar. Dev/E2E only; harmless elsewhere.
+        const grand = deepNest ? DEEP_DEMO_LEAVES[w] : undefined;
+        if (grand && grand.length > 0) {
+          const gk = grand.length;
+          const gSlot = (cEnd - cStart) / gk;
+          grand.forEach((gw, gj) => {
+            const gid = secId(gw);
+            const gStart = cStart + gj * gSlot;
+            const gEnd = gj === gk - 1 ? cEnd : cStart + (gj + 1) * gSlot;
+            const gStartIso = new Date(gStart).toISOString();
+            const gDueIso = new Date(gEnd).toISOString();
+            pushTask({
+              id: gid,
+              eventId: DEMO_EVENT_ID,
+              title: `${proc} ${gw}`,
+              description: `WBS ${gw} ・ ${phase} ・ ${s.team}`,
+              status: defaultStatus(phase, gEnd),
+              priority: "medium",
+              assigneeId: OWNER[s.team] ?? null,
+              teamId: TEAM_ID[s.team] ?? null,
+              startAt: gStartIso,
+              dueAt: gDueIso,
+              origin: "internal",
+              archivedAt: null,
+              createdAt: now,
+              updatedAt: now,
+              version: 1,
+            });
+            rowDates[gid] = { startsAt: gStartIso, endsAt: gDueIso };
+            hierarchy[gid] = { parentTaskId: cid, depth: 2, wbs: gw };
+          });
+        }
       });
     });
   }
@@ -340,8 +384,10 @@ type MockSeedRowDates = Record<
   { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }
 >;
 
-export function createDevClient(opts: { padTo?: number } = {}): MockApiClient {
-  const { tasks, rowDates, deps, hierarchy } = build();
+export function createDevClient(opts: { padTo?: number; deepNest?: boolean } = {}): MockApiClient {
+  // `deepNest` (demo/E2E only) adds a 3rd WBS level under two leaves so the 内包バー's
+  // nested containers are demonstrable; the locked "real LMB data" tests keep it off.
+  const { tasks, rowDates, deps, hierarchy } = build(opts.deepNest ?? false);
   // Dev/E2E only: pad the event with extra top-level tasks so the timeline can be
   // exercised past the 200-per-page ceiling (F3 — verify all rows load & render).
   if (opts.padTo && opts.padTo > tasks.length) {

@@ -78,7 +78,7 @@ describe("TaskWorkspacePage — gantt-only workspace", () => {
     renderApp();
     fireEvent.click(await screen.findByTestId("fe4-gantt-row-t2"));
     fireEvent.click(await screen.findByTestId("fe4-detail-delete"));
-    fireEvent.click(await screen.findByTestId("fe4-confirm-yes"));
+    fireEvent.click(await screen.findByRole("button", { name: "削除する" })); // ConfirmDialog modal (#375)
     await waitFor(() => expect(screen.queryByTestId("fe4-gantt-row-t2")).toBeNull());
     expect(screen.getByTestId("fe4-gantt-row-t1")).toBeInTheDocument();
   });

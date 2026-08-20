@@ -56,6 +56,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars & { authn: unkn
     await next();
   });
 
+  // ---- liveness (internal-marker gated by the guard above; app-health-monitor probes it). ----
+  app.get("/internal/health", (c) => c.json({ status: "ok", service: "github-sync" }));
+
   // ---- POST /internal/events-async (free-tier domain-event consumer landing route) ----
   // Free-plan replacement for the dub-q-evt-github-sync Queue consumer: task-service /
   // event-service forward each due task.*/event.archived envelope from their @dub/freeq

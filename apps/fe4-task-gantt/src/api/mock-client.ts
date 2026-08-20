@@ -329,6 +329,17 @@ export class MockApiClient implements ApiClient {
   private deleteTask(id: string): void {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
+    // Mirror task-service: a task with live children cannot be deleted (else the children
+    // are orphaned and the read model silently re-parents them). Block with 409.
+    const liveChildren = [...this.taskById.values()].filter(
+      (t) => t.archivedAt === null && (this.hierarchy[t.id]?.parentTaskId ?? null) === id,
+    ).length;
+    if (liveChildren > 0) {
+      throw err(409, "TASK_HAS_CHILDREN", `task has ${liveChildren} child task(s): ${id}`, {
+        taskId: id,
+        childCount: liveChildren,
+      });
+    }
     this.taskById.set(id, { ...cur, archivedAt: new Date().toISOString(), version: cur.version + 1 });
   }
 
@@ -371,8 +382,18 @@ export class MockApiClient implements ApiClient {
     return [...this.taskById.values()]
       .filter((t) => t.eventId === eventId && t.archivedAt === null)
       .map((t): gantt.GanttRow => {
-        const schedule = deriveSchedule(t, this.rowDates[t.id]);
         const h = this.hierarchy[t.id];
+        // Mirror gantt-service dto.toRow: a work-package (hasChildren) row carries NO own
+        // dates — the read model returns startsAt/endsAt null and the client rolls the span
+        // up from the children. The mock previously echoed a parent's stored rowDates, so a
+        // parent bar resize appeared to persist in dev but was DISCARDED in prod on the next
+        // GET, and the parent's detail 開始/終了 looked populated in dev while blank in prod.
+        // Null the parent here so dev/tests reproduce prod exactly (the client rolls the
+        // span/detail dates up from the children).
+        const isParent = parents.has(t.id);
+        const schedule = isParent
+          ? { startsAt: null, endsAt: null }
+          : deriveSchedule(t, this.rowDates[t.id]);
         return {
           taskId: t.id,
           title: t.title,

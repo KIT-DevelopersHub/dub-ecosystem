@@ -51,6 +51,13 @@ export interface RosterApi {
   getMemberByIdentity(identityUserId: common.UserId): Promise<{ member: member.Member | null }>;
   /** Update a linked member's在籍status during offboarding (member-service). */
   patchMember(memberId: string, patch: member.UpdateMemberRequest): Promise<member.Member>;
+  /** 運営メンバー一覧 (member-service overview). Powers the「運営メンバーと紐付け」picker:
+   *  the メール名簿 shows which member each @developershub.jp identity is linked to. */
+  listMembersOverview(): Promise<member.MembersOverview>;
+  /** Link a 運営メンバー to a developershub.jp/identity account from the メール名簿 side.
+   *  Reuses the SAME `member.identityUserId` bridge as fe2 (single source of truth) — the
+   *  server 409s (MEMBER_IDENTITY_ALREADY_LINKED) on a double link. Version-locked. */
+  linkMemberIdentity(memberId: string, req: member.LinkIdentityRequest): Promise<member.Member>;
   /** Roster sync SOURCE: the @developershub.jp RECEIVING addresses (routing rules,
    *  zone-scoped), i.e. every issued address — not the ~1 account-scoped destination. */
   listRosterEmailAddresses(): Promise<{ items: SyncEmailRoutingAddress[] }>;
@@ -102,6 +109,9 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     getMemberByIdentity: (identityUserId) =>
       client.get<{ member: member.Member | null }>(`${MEMBERS}/people/by-identity/${identityUserId}`),
     patchMember: (memberId, patch) => client.patch<member.Member>(`${MEMBERS}/people/${memberId}`, patch),
+    listMembersOverview: () => client.get<member.MembersOverview>(`${MEMBERS}/overview`),
+    linkMemberIdentity: (memberId, req) =>
+      client.post<member.Member>(`${MEMBERS}/people/${memberId}/identity-link`, req),
     listRosterEmailAddresses: () =>
       client.get<{ items: SyncEmailRoutingAddress[] }>(`${EMAIL_ROUTING}/roster-addresses`),
     previewEmailRouting: (addresses) =>

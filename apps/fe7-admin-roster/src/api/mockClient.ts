@@ -66,8 +66,11 @@ function seedState(seed?: MockSeed): MockState {
     { id: "eml_bob", localPart: "bob", address: `bob@${EMAIL_ROUTING_DOMAIN}`, destination: "bob@example.com", enabled: true, createdAt: now() },
   ];
   // 運営メンバー: 佐藤 太郎 is linked to user_bob (#1) so退任 fans out to the org-chart.
+  // 山田 花子 / 鈴木 一郎 are UNLINKED so the メール名簿「運営メンバーと紐付け」flow has candidates.
   const members: member.Member[] = [
     { id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
+    { id: "member_hanako", orgId: ORG, name: "山田 花子", roleTitle: "広報担当", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2048, version: 1, createdAt: now(), updatedAt: now() },
+    { id: "member_ichiro", orgId: ORG, name: "鈴木 一郎", roleTitle: "開発リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3072, version: 1, createdAt: now(), updatedAt: now() },
   ];
   const me: gateway.MeResponse = seed?.me ?? {
     user: { id: "user_alice", displayName: "Alice Admin", avatarUrl: null },
@@ -125,6 +128,10 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (byIdentity) {
       const m = s.members.find((x) => x.identityUserId === byIdentity[1]!) ?? null;
       return { member: m } as unknown as T;
+    }
+    if (path.endsWith("/members/overview")) {
+      // 運営メンバー overview — powers the メール名簿「運営メンバー」列 + 紐付けピッカー.
+      return { teams: [], members: [...s.members] } as unknown as T;
     }
     if (path.endsWith("/admin/email-routing/roster-addresses")) {
       // roster sync source: the RECEIVING addresses (one per issued rule), not destinations.
@@ -312,6 +319,30 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       };
       s.emailAddresses.push(addr);
       return addr as unknown as T;
+    }
+    const linkMatch = path.match(/\/members\/people\/([^/]+)\/identity-link$/);
+    if (linkMatch) {
+      const idx = s.members.findIndex((m) => m.id === linkMatch[1]!);
+      if (idx === -1) throw err("NOT_FOUND", "member not found");
+      const cur = s.members[idx]!;
+      const req = (body ?? {}) as { identityUserId?: string | null; version?: number };
+      if (typeof req.version !== "number") {
+        throw err("VALIDATION_FAILED", "version required", [{ field: "version", reason: "required" }]);
+      }
+      if (req.version !== cur.version) throw err("MEMBER_VERSION_CONFLICT", "version conflict");
+      const target = req.identityUserId ?? null;
+      if (target) {
+        // 1:1 guard mirrors member-service resolveIdentityLink (MEMBER_IDENTITY_ALREADY_LINKED).
+        const other = s.members.find((m) => m.identityUserId === target && m.id !== cur.id);
+        if (other) {
+          throw err("MEMBER_IDENTITY_ALREADY_LINKED", `identity user ${target} is already linked to another member`, [
+            { field: "identityUserId", reason: "already_linked", message: other.id },
+          ]);
+        }
+      }
+      const updated: member.Member = { ...cur, identityUserId: target, version: cur.version + 1, updatedAt: now() };
+      s.members[idx] = updated;
+      return updated as unknown as T;
     }
     const offboardMatch = path.match(/\/identity\/users\/([^/]+)\/offboard$/);
     if (offboardMatch) {

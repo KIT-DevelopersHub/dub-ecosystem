@@ -1,0 +1,129 @@
+# Free-tier deploy of app-health-monitor as `dub-app-health-monitor`.
+# Hourly死活監視 runs on a Durable Object ALARM (MonitorDO) — NO cron, so it does not touch the
+# Workers Free plan's full 5-cron account cap (same pattern as usage-meter / freeq-drain).
+#
+# workers.dev IS enabled here (unlike the pure-internal services) so CI can arm + trigger the
+# monitor over its public origin after deploy. Because the origin is public, the x-dub-internal
+# marker is NOT a trust signal here (anyone can send it) — so the /internal/monitor/* control
+# routes are gated ONLY by a matching `x-monitor-token` (MONITOR_ADMIN_TOKEN secret; fail-closed
+# when unset). Only GET /internal/health + GET / are public.
+#
+# Deploy (LAST in deploy-prod.sh — it binds every upstream it probes):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: create the monitor tables on dub-core (idempotent)
+#   npx wrangler d1 execute dub-core --remote --file services/app-health-monitor/db/0001_monitor.sql
+#   npx wrangler deploy --config services/app-health-monitor/wrangler.free.toml
+#   # one-time secret so CI/ops can arm + trigger over the public origin:
+#   npx wrangler secret put MONITOR_ADMIN_TOKEN --config services/app-health-monitor/wrangler.free.toml
+#   # then arm the hourly alarm loop once (over the public origin):
+#   curl -X POST -H "x-monitor-token: <token>" \
+#     https://dub-app-health-monitor.developershub-site.workers.dev/internal/monitor/kick
+name = "dub-app-health-monitor"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[observability]
+enabled = true
+
+# --- hourly-poll Durable Object (SQLite-backed = free plan) ---
+[[durable_objects.bindings]]
+name = "MONITOR_DO"
+class_name = "MonitorDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MonitorDO"]
+
+# --- shared core D1 (monitor_status + monitor_incident, un-namespaced) ---
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+# --- notification fan-out (admin in-app alert via POST /notify, recipientRoles=[admin]) ---
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
+
+# --- fe2 admin SPA (assets worker) — "can each app page open?" probed over this binding ---
+[[services]]
+binding = "SVC_FE"
+service = "dub-fe2-app-shell"
+
+# --- backend services probed over /health (or /internal/health) via Service Binding ---
+[[services]]
+binding = "SVC_GATEWAY"
+service = "dub-api-gateway"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"
+
+[[services]]
+binding = "SVC_AUTH"
+service = "dub-auth-service"
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"
+
+[[services]]
+binding = "SVC_TASK"
+service = "dub-task-service"
+
+[[services]]
+binding = "SVC_GANTT"
+service = "dub-gantt-service"
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "dub-mail-gateway"
+
+[[services]]
+binding = "SVC_CHAT"
+service = "dub-chat-service"
+
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"
+
+[[services]]
+binding = "SVC_USAGE"
+service = "dub-usage-meter"
+
+[[services]]
+binding = "SVC_FILE_META"
+service = "dub-file-meta"
+
+[[services]]
+binding = "SVC_AUDIT"
+service = "dub-audit-log"
+
+[[services]]
+binding = "SVC_DEPLOY"
+service = "dub-deploy-service"
+
+[[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "dub-drive-share-service"
+
+[[services]]
+binding = "SVC_DRIVE_PROXY"
+service = "dub-drive-proxy"
+
+[[services]]
+binding = "SVC_GITHUB_SYNC"
+service = "dub-github-sync"
+
+[[services]]
+binding = "SVC_WEBHOOK"
+service = "dub-webhook-ingest"
+
+# --- NO cron trigger. The MonitorDO alarm drives the hourly poll. ---
+
+[vars]
+ENVIRONMENT = "production"
+# FE_ORIGIN / GATEWAY_ORIGIN default to the workers.dev origins in code; override here to point
+# at a custom domain (e.g. https://app.developershub.jp / https://api.developershub.jp).

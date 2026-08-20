@@ -81,6 +81,24 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Destructive / 離脱 action (e.g. logout): danger-tinted text + hover, so it reads
+ * as set-apart from the safe items above the divider. */
+.item[data-tone="danger"] {
+  color: var(--dub-color-danger-600, var(--dub-color-danger-500));
+}
+.item[data-tone="danger"] .itemIcon {
+  color: var(--dub-color-danger-600, var(--dub-color-danger-500));
+}
+.item[data-tone="danger"]:hover:not(:disabled) {
+  background: var(--dub-color-danger-50, var(--dub-color-surface-sunken));
+}
+
+/* Groups離脱/destructive items below the safe ones. */
+.separator {
+  height: 1px;
+  margin: var(--dub-space-1) 0;
+  background: var(--dub-color-border-default);
+}
 .item:focus-visible {
   outline: 2px solid var(--dub-color-border-focus);
   outline-offset: -2px;

@@ -153,6 +153,28 @@ const TASKS: task.Task[] = [
     status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
   },
+  // ── evt_3 (学生ハッカソン Hackit 秋) — a 2nd event WITH a gantt so the global
+  //    header イベント switcher demonstrably reloads the timeline on switch. ──
+  {
+    version: 1, id: "hk_1", eventId: "evt_3", title: "Hackit: 会場・日程確定", description: null,
+    status: "done", priority: "high", assigneeId: ME_ID, teamId: "team_ops", startAt: "2026-08-01T00:00:00Z", dueAt: "2026-08-20T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_2", eventId: "evt_3", title: "Hackit: 協賛・賞品調整", description: null,
+    status: "in_progress", priority: "medium", assigneeId: "usr_bob", teamId: "team_ops", startAt: "2026-08-10T00:00:00Z", dueAt: "2026-09-05T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_3", eventId: "evt_3", title: "Hackit: 募集LP・告知", description: null,
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_dev", startAt: "2026-08-15T00:00:00Z", dueAt: "2026-09-10T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-15T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "hk_4", eventId: "evt_3", title: "Hackit: 当日運営・審査", description: null,
+    status: "todo", priority: "urgent", assigneeId: ME_ID, teamId: "team_hq", startAt: "2026-09-20T00:00:00Z", dueAt: "2026-09-21T00:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-20T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+  },
 ];
 
 const GANTT: Record<string, gantt.GanttChartDTO> = {
@@ -172,7 +194,51 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
     ],
   },
+  evt_3: {
+    eventId: "evt_3",
+    rows: [
+      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
+      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
+      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+    ],
+    dependencies: [
+      { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },
+    ],
+  },
 };
+
+// Serve the gantt DTO the way gantt-service does: a work-package (hasChildren) row's OWN
+// startsAt/endsAt are NULL — the span is DERIVED from its children (the client rolls it up
+// for the bar AND the parent's detail 開始/終了). Echoing a parent's stored dates here would
+// diverge from prod (the exact mock/prod drift that shipped a broken build), so we null
+// them on read. Leaves keep their dates. This makes the demo reproduce prod faithfully.
+function ganttDtoFor(ev: string): gantt.GanttChartDTO {
+  const dto = GANTT[ev];
+  if (!dto) return { eventId: ev as gantt.GanttChartDTO["eventId"], rows: [], dependencies: [] };
+  const rows = dto.rows.map((r) => (r.hasChildren ? { ...r, startsAt: null, endsAt: null } : r));
+  return { ...dto, rows };
+}
+
+/** Persist a bar's window (leaf move/resize) or a detail date edit onto BOTH the task
+ *  columns and the gantt row, so a reload / refetch reflects it. Mirrors gantt-service +
+ *  task-service (startsAt↔startAt, endsAt↔dueAt). */
+function applyScheduleToDemo(taskId: string, startsAt: string | null, endsAt: string | null): task.Task | null {
+  const t = TASKS.find((x) => x.id === taskId);
+  if (!t) return null;
+  t.startAt = startsAt;
+  t.dueAt = endsAt;
+  t.updatedAt = new Date().toISOString();
+  t.version += 1;
+  for (const dto of Object.values(GANTT)) {
+    const row = dto.rows.find((r) => r.taskId === taskId);
+    if (row) {
+      row.startsAt = startsAt;
+      row.endsAt = endsAt;
+    }
+  }
+  return t;
+}
 
 // Per-user gantt view state (zoom / collapsed / manual drag order). Mutable in-session
 // so a drag-reorder PERSISTS across the round-trip — otherwise the reorder would snap
@@ -1047,13 +1113,15 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         return t ? json(t) : notFound(`GET ${pathname}`);
       }
     }
-    // gantt
+    // gantt — the wire key is `eventId` (@dub/types); read it first (the old `event`
+    // fallback stays only so a hand-written key never 500s the demo). Parent rows are
+    // served with null own-dates (see ganttDtoFor) to mirror gantt-service.
     if (pathname === "/api/v1/gantt") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
-      return json(GANTT[ev] ?? { eventId: ev, rows: [], dependencies: [] });
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
+      return json(ganttDtoFor(ev));
     }
     if (pathname === "/api/v1/gantt/dependencies") {
-      const ev = url.searchParams.get("event") ?? "evt_1";
+      const ev = url.searchParams.get("eventId") ?? url.searchParams.get("event") ?? "evt_1";
       return json(GANTT[ev]?.dependencies ?? []);
     }
     // per-user view state (zoom / collapsed / manual drag order)
@@ -1090,7 +1158,11 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
 
   if (method === "POST") {
     // mail read + send are served by the stateful mail store (createMailStore).
-    if (pathname === "/api/v1/notifications/inbox/read-all") return json(null, 204);
+    if (pathname === "/api/v1/notifications/inbox/read-all") {
+      const now = new Date().toISOString();
+      for (const n of NOTIFICATIONS) if (n.readAt === null) n.readAt = now;
+      return json(null, 204);
+    }
     // admin: bulk publish a selection in one request (idempotent, per-item outcomes).
     if (pathname === "/api/v1/notifications/manage/publish-batch") {
       const ids = Array.isArray((body as { ids?: unknown })?.ids) ? ((body as { ids: string[] }).ids) : [];
@@ -1148,8 +1220,75 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   }
 
   if (method === "PATCH") {
-    if (/^\/api\/v1\/notifications\/inbox\/[^/]+\/read$/.test(pathname)) return json(null, 204);
+    // Mark one inbox row read — mutate the seed so GET unread-count (polled every 60s)
+    // stays consistent with the optimistic badge.
+    {
+      const m = /^\/api\/v1\/notifications\/inbox\/([^/]+)\/read$/.exec(pathname);
+      if (m) {
+        const n = NOTIFICATIONS.find((x) => x.id === m[1]);
+        if (n && n.readAt === null) n.readAt = new Date().toISOString();
+        return json(null, 204);
+      }
+    }
+    // Restore one inbox row to unread (inverse of /read) — same seed mutation so the
+    // demo's "未読に戻す → 未読バッジ復活" survives a poll/reload.
+    {
+      const m = /^\/api\/v1\/notifications\/inbox\/([^/]+)\/unread$/.exec(pathname);
+      if (m) {
+        const n = NOTIFICATIONS.find((x) => x.id === m[1]);
+        if (n) n.readAt = null;
+        return json(null, 204);
+      }
+    }
     if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
+    // Persist a bar's window after a leaf move/resize (Notion-style edit). Mutates the task
+    // columns + the gantt row so the change survives a refetch/reload (in-session). Returns
+    // the updated GanttRow. Parents never reach here (the client blocks a parent resize).
+    {
+      const rowId = seg(/^\/api\/v1\/gantt\/rows\/([^/]+)$/);
+      if (rowId) {
+        const b = (body ?? {}) as { startsAt?: string | null; endsAt?: string | null };
+        const t = applyScheduleToDemo(rowId, b.startsAt ?? null, b.endsAt ?? null);
+        if (!t) return notFound(`PATCH ${pathname}`);
+        const row = ganttDtoFor(String(t.eventId)).rows.find((r) => r.taskId === rowId);
+        return json(
+          row ?? {
+            taskId: rowId,
+            title: t.title,
+            startsAt: b.startsAt ?? null,
+            endsAt: b.endsAt ?? null,
+            progressPercent: t.status === "done" ? 100 : 0,
+            assigneeId: t.assigneeId,
+            teamId: t.teamId ?? null,
+          },
+        );
+      }
+    }
+    // Detail-panel edit (title/status/priority/担当/チーム/開始日/期日). Updates the task and,
+    // when the dates change, mirrors them onto the gantt row so the BAR moves immediately.
+    {
+      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      if (id) {
+        const t = TASKS.find((x) => x.id === id);
+        if (!t) return notFound(`PATCH ${pathname}`);
+        const b = (body ?? {}) as Partial<task.UpdateTaskRequest>;
+        if (b.title !== undefined) t.title = b.title;
+        if (b.status !== undefined) t.status = b.status;
+        if (b.priority !== undefined) t.priority = b.priority;
+        if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
+        if (b.teamId !== undefined) t.teamId = b.teamId;
+        const datesChanged = b.startAt !== undefined || b.dueAt !== undefined;
+        if (datesChanged) {
+          const nextStart = b.startAt !== undefined ? b.startAt : t.startAt ?? null;
+          const nextDue = b.dueAt !== undefined ? b.dueAt : t.dueAt ?? null;
+          applyScheduleToDemo(id, nextStart ?? null, nextDue ?? null); // bumps version + mirrors row
+        } else {
+          t.version += 1;
+        }
+        t.updatedAt = new Date().toISOString();
+        return json(t);
+      }
+    }
   }
 
   return null;
@@ -1565,22 +1704,45 @@ function createMembersStore() {
   // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
   const participations: any[] = [
     {
+      // 反映済み（過去に管理者が既存に紐付け）— 一覧で「追加済（既存に紐付け）」表示。
       id: "part_seed_1", orgId: ORG, memberId: "member_h2", name: "黒川", normalizedName: "黒川",
       lastName: "黒川", firstName: null, nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
       nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null,
       grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
       schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
       desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
-      matchKind: "linked_existing", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      matchKind: "linked_existing", reviewState: "added", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
     {
-      id: "part_seed_2", orgId: ORG, memberId: "member_demo_new", name: "田中 実", normalizedName: "田中実",
+      // 未処理・招待中に該当なし → 「追加する」で新規追加フローを確認できる。
+      id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
       grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
-      matchKind: "created_new", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      // 未処理・招待中の「田村 未」(member_6) と氏名一致 → 「追加する」で候補提示→結合(link)を確認できる。
+      id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
+      lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
+      nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
+      grade: "1", department: "情報工学科", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
+      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+    },
+    {
+      // 未処理・招待中「鈴木 一郎」(member_3) の漢字違い「一朗」＋別メール → 自動一致には出ない。
+      // 「名簿から手動で紐付け」で検索→選択→link を確認できるユースケース。
+      id: "part_seed_4", orgId: ORG, memberId: null, name: "鈴木 一朗", normalizedName: "鈴木一朗",
+      lastName: "鈴木", firstName: "一朗", nameKana: "すずき いちろう", lastNameKana: "すずき", firstNameKana: "いちろう",
+      nameRomaji: "Suzuki Ichiro", lastNameRomaji: "Suzuki", firstNameRomaji: "Ichiro",
+      grade: "1", department: "メディア情報学科", contact: "suzuki.i@school.ac.jp", phone: "070-7777-8888",
+      schoolEmail: "suzuki.i@school.ac.jp", gmail: "suzuki.ichiro@gmail.com", desiredTeamId: "team_pr",
+      desiredActivity: "event", note: "広報を手伝いたいです。", status: "submitted",
+      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
   ];
 
@@ -1688,12 +1850,11 @@ function createMembersStore() {
       }
     }
 
-    // 参加届 (participation): submit reflects onto the roster exactly like member-service
-    // — name match (space/width-folded) promotes 招待中/検討中 → 追加済 (merging the desired
-    // team, non-destructive contact + the two emails), else creates a new 追加済 member.
-    // Both endpoints share this reflect: the PUBLIC one (unauthenticated) returns a minimal
-    // { accepted, matchKind }; the authenticated one returns the full participation + member.
-    const reflectParticipation = (): { participation: unknown; member: DemoMember; matchKind: "linked_existing" | "created_new" } => {
+    // 参加届 (participation): B案 — 提出は記録するだけで名簿へは反映しない (reviewState=
+    // "pending")。名簿への反映は管理者が回答一覧で確定する (candidates/resolve)。これは
+    // member-service の挙動と一致する。
+    const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+    const recordParticipation = (): { participation: any } => {
       const compose = (a: unknown, b: unknown): string =>
         [a, b].map((x) => (typeof x === "string" ? x.trim() : "")).filter((x) => x.length > 0).join(" ");
       const lastName: string | null = body?.lastName ?? null;
@@ -1702,73 +1863,32 @@ function createMembersStore() {
       const firstNameKana: string | null = body?.firstNameKana ?? null;
       const lastNameRomaji: string | null = body?.lastNameRomaji ?? null;
       const firstNameRomaji: string | null = body?.firstNameRomaji ?? null;
-      // 分割入力を優先し "姓 名" を合成。旧単一 name も後方互換で受ける。
       const name = (compose(lastName, firstName) || String(body?.name ?? "")).trim();
       const nameKana: string | null = compose(lastNameKana, firstNameKana) || body?.nameKana || null;
       const nameRomaji: string | null = compose(lastNameRomaji, firstNameRomaji) || body?.nameRomaji || null;
-      const phone: string | null = body?.phone ?? null;
-      const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
       const target = norm(name);
-      const desiredTeamId: string | null = body?.desiredTeamId ?? null;
-      const contact: string | null = body?.contact ?? null;
-      const schoolEmail: string = String(body?.schoolEmail ?? "");
-      const gmail: string = String(body?.gmail ?? "");
-      const note: string | null = body?.note ?? null;
-      const department: string | null = body?.department ?? null;
-      const grade: string | null = body?.grade ?? null;
-      const existing = members.find((mem) => norm(mem.name) === target);
-      let matchKind: "linked_existing" | "created_new";
-      let resolved: DemoMember;
-      if (existing) {
-        if (existing.status === "invited" || existing.status === "considering") existing.status = "added";
-        if (desiredTeamId && !existing.teamIds.includes(desiredTeamId)) existing.teamIds.push(desiredTeamId);
-        if (existing.contact === null) existing.contact = contact ?? schoolEmail;
-        if (existing.department === null && department) existing.department = department;
-        if (existing.grade === null && grade) existing.grade = grade;
-        if (existing.schoolEmail === null && schoolEmail) existing.schoolEmail = schoolEmail;
-        if (existing.gmail === null && gmail) existing.gmail = gmail;
-        if (existing.lastName === null && lastName) existing.lastName = lastName;
-        if (existing.firstName === null && firstName) existing.firstName = firstName;
-        if (existing.lastNameKana === null && lastNameKana) existing.lastNameKana = lastNameKana;
-        if (existing.firstNameKana === null && firstNameKana) existing.firstNameKana = firstNameKana;
-        if (existing.lastNameRomaji === null && lastNameRomaji) existing.lastNameRomaji = lastNameRomaji;
-        if (existing.firstNameRomaji === null && firstNameRomaji) existing.firstNameRomaji = firstNameRomaji;
-        if (existing.phone === null && phone) existing.phone = phone;
-        if (existing.note === null && note) existing.note = note;
-        existing.version += 1;
-        existing.updatedAt = isoNow();
-        resolved = existing;
-        matchKind = "linked_existing";
-      } else {
-        resolved = {
-          id: nid("member"), orgId: ORG, name, roleTitle: null, status: "added", identityUserId: null,
-          department, grade,
-          teamIds: desiredTeamId ? [desiredTeamId] : [], contact: contact ?? schoolEmail,
-          schoolEmail: schoolEmail || null, gmail: gmail || null,
-          lastName, firstName, lastNameKana, firstNameKana, lastNameRomaji, firstNameRomaji, phone, note,
-          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
-        };
-        members.push(resolved);
-        matchKind = "created_new";
-      }
+      const existing = participations.find((p) => p.normalizedName === target);
       const participation = {
-        id: nid("part"), orgId: ORG, memberId: resolved.id, name, normalizedName: target,
+        id: existing?.id ?? nid("part"), orgId: ORG, memberId: existing?.memberId ?? null, name, normalizedName: target,
         lastName, firstName, nameKana, lastNameKana, firstNameKana,
         nameRomaji, lastNameRomaji, firstNameRomaji,
         grade: body?.grade ?? null, department: body?.department ?? null,
-        contact, phone, schoolEmail, gmail, desiredTeamId, desiredActivity: body?.desiredActivity ?? null, note,
-        status: "submitted", matchKind, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+        contact: body?.contact ?? null, phone: body?.phone ?? null,
+        schoolEmail: String(body?.schoolEmail ?? ""), gmail: String(body?.gmail ?? ""),
+        desiredTeamId: body?.desiredTeamId ?? null, desiredActivity: body?.desiredActivity ?? null, note: body?.note ?? null,
+        status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
+        submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
       };
-      participations.unshift(participation);
-      return { participation, member: resolved, matchKind };
+      if (existing) participations[participations.indexOf(existing)] = participation;
+      else participations.unshift(participation);
+      return { participation };
     };
 
-    // PUBLIC (unauthenticated) submit — the form posts here. Minimal response (no member echo).
+    // PUBLIC (unauthenticated) submit — the form posts here. 記録のみ・最小応答。
     if (method === "POST" && pathname === "/api/v1/public/participation") {
       const school = String(body?.schoolEmail ?? "").trim();
       const gm = String(body?.gmail ?? "").trim();
       const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-      // 姓/名 の分割入力 or 旧単一 name のどちらかで氏名が揃えば OK。
       const composedName = [body?.lastName, body?.firstName]
         .map((x) => (typeof x === "string" ? x.trim() : ""))
         .filter((x) => x.length > 0)
@@ -1778,19 +1898,82 @@ function createMembersStore() {
         const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
         return json(err, 400);
       }
-      const { matchKind } = reflectParticipation();
-      return json({ accepted: true, matchKind }, 200);
+      recordParticipation();
+      return json({ accepted: true }, 200);
     }
 
-    // Authenticated submit (back-compat): full participation + member echo.
+    // Authenticated submit (back-compat): participation echo, member は反映前なので null。
     if (method === "POST" && pathname === "/api/v1/members/participation") {
-      const { participation, member, matchKind } = reflectParticipation();
-      return json({ participation, member: { ...member, teamIds: [...member.teamIds] }, matchKind }, 201);
+      const { participation } = recordParticipation();
+      return json({ participation, member: null, matchKind: participation.matchKind }, 201);
     }
 
     // 運営専用の回答一覧 (identity:read はデモでは全許可)。最新順で返す。
     if (method === "GET" && pathname === "/api/v1/members/participation") {
       return json({ participations: participations.map((p) => ({ ...p })) });
+    }
+
+    // 突合候補 (招待中/検討中で 氏名正規化 or 学校メール/Gmail 一致)。
+    const candMatch = pathname.match(/^\/api\/v1\/members\/participation\/([^/]+)\/candidates$/);
+    if (method === "GET" && candMatch) {
+      const p = participations.find((x) => x.id === decodeURIComponent(candMatch[1]!));
+      if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      const wantEmails = new Set([p.schoolEmail, p.gmail].filter(Boolean).map((e: string) => e.trim().toLowerCase()));
+      const candidates = members
+        .filter((m) => m.status === "invited" || m.status === "considering")
+        .map((m) => {
+          const emails = [m.schoolEmail, m.gmail, m.contact].filter(Boolean).map((e) => String(e).trim().toLowerCase());
+          const matchedBy: Array<"email" | "name"> = [];
+          if (emails.some((e) => wantEmails.has(e))) matchedBy.push("email");
+          if (norm(m.name) === p.normalizedName) matchedBy.push("name");
+          return { memberId: m.id, name: m.name, status: m.status, schoolEmail: m.schoolEmail, gmail: m.gmail, version: m.version, matchedBy };
+        })
+        .filter((c) => c.matchedBy.length > 0)
+        .sort((a, b) => (b.matchedBy.includes("email") ? 2 : 0) + (b.matchedBy.includes("name") ? 1 : 0) - ((a.matchedBy.includes("email") ? 2 : 0) + (a.matchedBy.includes("name") ? 1 : 0)));
+      return json({ candidates });
+    }
+
+    // 反映確定 (link/create/skip) — roster を書き換え、組織図に重複なく反映する。
+    const resMatch = pathname.match(/^\/api\/v1\/members\/participation\/([^/]+)\/resolve$/);
+    if (method === "POST" && resMatch) {
+      const p = participations.find((x) => x.id === decodeURIComponent(resMatch[1]!));
+      if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      const action = body?.action;
+      if (action === "skip") {
+        p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: null });
+      }
+      if (action === "link") {
+        const mem = members.find((m) => m.id === body?.memberId);
+        if (!mem) return json({ error: { code: "MEMBER_NOT_FOUND", message: "not found", retryable: false } }, 404);
+        // 二重紐付け防止: 同一メンバーが別の参加届に反映済みなら 409。
+        const clash = participations.find((o) => o.id !== p.id && o.memberId === mem.id && o.reviewState === "added");
+        if (clash) return json({ error: { code: "MEMBER_PARTICIPATION_ALREADY_LINKED", message: "already linked", retryable: false } }, 409);
+        if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
+        if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
+        if (mem.contact === null) mem.contact = p.schoolEmail;
+        if (mem.schoolEmail === null && p.schoolEmail) mem.schoolEmail = p.schoolEmail;
+        if (mem.gmail === null && p.gmail) mem.gmail = p.gmail;
+        if (mem.department === null && p.department) mem.department = p.department;
+        if (mem.grade === null && p.grade) mem.grade = p.grade;
+        mem.version += 1; mem.updatedAt = isoNow();
+        p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
+      }
+      if (action === "create") {
+        const created: DemoMember = {
+          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null,
+          department: p.department, grade: p.grade, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
+          contact: p.contact ?? p.schoolEmail, schoolEmail: p.schoolEmail || null, gmail: p.gmail || null,
+          lastName: p.lastName, firstName: p.firstName, lastNameKana: p.lastNameKana, firstNameKana: p.firstNameKana,
+          lastNameRomaji: p.lastNameRomaji, firstNameRomaji: p.firstNameRomaji, phone: p.phone, note: p.note,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(created);
+        p.memberId = created.id; p.matchKind = "created_new"; p.reviewState = "added"; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
+      }
+      return json({ error: { code: "VALIDATION_FAILED", message: "invalid action", retryable: false } }, 400);
     }
 
     return null;

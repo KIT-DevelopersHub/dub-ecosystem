@@ -137,8 +137,16 @@ export const DESIRED_ACTIVITIES: readonly DesiredActivity[] = ["event", "dev", "
 export type Grade = "1" | "2" | "3" | "4" | "graduate";
 export const GRADES: readonly Grade[] = ["1", "2", "3", "4", "graduate"];
 
-/** How a submitted 参加届 resolved against the existing roster. */
+/** How a submitted 参加届 resolved against the existing roster. Meaningful only once
+ *  an admin has reviewed the submission (`reviewState === "added"`); while `pending`
+ *  it carries an inert placeholder and is not surfaced. */
 export type ParticipationMatchKind = "linked_existing" | "created_new";
+
+/** Admin review state of a 参加届 (運営メンバーへの反映は管理者が確定する).
+ *  - `pending`  : 提出済・未処理（名簿には未反映）。
+ *  - `added`    : 管理者が「運営メンバーに追加」を確定（`matchKind` で結合/新規を区別）。
+ *  - `skipped`  : 管理者が「追加しない（対象外）」を選択。 */
+export type ParticipationReviewState = "pending" | "added" | "skipped";
 
 /** A stored 参加届 submission (admin-visible). `memberId` is the resolved 運営メンバー. */
 export interface Participation {
@@ -180,6 +188,9 @@ export interface Participation {
   note: string | null;
   status: "submitted";
   matchKind: ParticipationMatchKind;
+  /** 管理者レビュー状態. 提出時は "pending"（名簿未反映）。管理者が確定した時のみ
+   *  "added"/"skipped" になる (additive; 既存の自動反映済みデータは移行で "added")。 */
+  reviewState: ParticipationReviewState;
   submittedBy: UserId;
   submittedAt: ISODateTime;
   createdAt: ISODateTime;
@@ -225,16 +236,54 @@ export interface SubmitParticipationRequest {
   note?: string | null;
 }
 
-/** Response of a submit: the stored 参加届 + the resolved member + how it matched. */
+/** Response of a submit: the stored 参加届. 提出時は名簿へ反映しない（管理者が一覧で
+ *  確定する）ので `reviewState` は "pending"。`member` は反映されるまで null。
+ *  `matchKind` は未処理時の placeholder（互換のため残置・意味を持たない）。 */
 export interface SubmitParticipationResponse {
   participation: Participation;
-  member: Member;
+  member: Member | null;
   matchKind: ParticipationMatchKind;
 }
 
 /** GET /api/v1/members/participation — admin list of submissions. */
 export interface ListParticipationsResponse {
   participations: Participation[];
+}
+
+/** A roster member proposed as the same person behind a 参加届 (突合候補). Surfaced so
+ *  the admin can confirm "招待中のこの人と同一人物" before promoting (link) instead of
+ *  creating a duplicate. Ranked server-side by どの手掛かりで一致したか (email > name). */
+export interface ParticipationCandidate {
+  memberId: string;
+  name: string;
+  status: MemberStatus;
+  schoolEmail: string | null;
+  gmail: string | null;
+  /** 対象メンバーの楽観ロック版数 (resolve link の expectedVersion に渡す)。 */
+  version: number;
+  /** 一致した手掛かり ("email" = 学校メール/Gmail 一致 / "name" = 氏名正規化一致)。 */
+  matchedBy: Array<"email" | "name">;
+}
+
+/** GET /api/v1/members/participation/:id/candidates — 突合候補 (招待中/検討中のみ). */
+export interface ListParticipationCandidatesResponse {
+  candidates: ParticipationCandidate[];
+}
+
+/** POST /api/v1/members/participation/:id/resolve — 管理者が 参加届 の名簿反映を確定する。
+ *  - `link`   : 既存の招待中/検討中メンバー(`memberId`)を在籍(added)へ昇格し結合（重複を作らない）。
+ *               `expectedVersion` は対象メンバーの楽観ロック。
+ *  - `create` : 参加届の内容から新規メンバー(added)を作成する。
+ *  - `skip`   : 名簿に反映しない（対象外）。 */
+export type ResolveParticipationRequest =
+  | { action: "link"; memberId: string; expectedVersion: number }
+  | { action: "create" }
+  | { action: "skip" };
+
+/** Response of a resolve: 更新後の 参加届 + 反映先メンバー (skip 時は null)。 */
+export interface ResolveParticipationResponse {
+  participation: Participation;
+  member: Member | null;
 }
 
 /** Create/set a link in one call (POST /members/people/:id/identity-link). The member's

@@ -63,6 +63,21 @@ describe("MockApiClient contract enforcement (design tests 2/3/9/11/12)", () => 
     expect(list.items.find((t) => t.id === created.id)).toBeUndefined(); // archived hidden
   });
 
+  it("DELETE a task with live children -> 409 TASK_HAS_CHILDREN (no orphan re-parenting)", async () => {
+    const c = new MockApiClient({
+      tasks: [seedTask("p"), seedTask("c1")],
+      hierarchy: { c1: { parentTaskId: "p", depth: 1 } },
+    });
+    await expect(api.deleteTask(c, "p")).rejects.toSatisfy(
+      (e: unknown) => isApiError(e) && e.status === 409 && e.body.error.code === "TASK_HAS_CHILDREN",
+    );
+    // Parent still live; removing the child first lets the parent delete.
+    expect((await api.getTask(c, "p")).id).toBe("p");
+    await api.deleteTask(c, "c1");
+    await api.deleteTask(c, "p");
+    expect((await api.listTasks(c, { eventId: "evt_1" })).items).toHaveLength(0);
+  });
+
   it("forced failNext surfaces the injected ApiError (error-branch fixture, test 11)", async () => {
     const c = new MockApiClient({ tasks: [seedTask("t1")] });
     c.failNext = new ApiError(429, { error: { code: "RATE_LIMITED", message: "slow down", retryable: true } });

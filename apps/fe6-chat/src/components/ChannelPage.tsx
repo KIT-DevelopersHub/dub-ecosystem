@@ -5,7 +5,7 @@
 // channel-settings modal. The main section and the ThreadPane are returned as
 // sibling fragment children so both land as columns of the ChatApp grid.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Modal } from "@dub/ui";
+import { ConfirmDialog, Modal, useToast } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
@@ -36,6 +36,7 @@ export function ChannelPage({
 }) {
   const { api, can, currentUserId } = useChatRuntime();
   const view = useChannelView(channelId);
+  const { show } = useToast();
   const markRead = useChatStore((s) => s.markRead);
 
   const [channel, setChannel] = useState<Channel | null>(null);
@@ -46,6 +47,7 @@ export function ChannelPage({
   const [thread, setThread] = useState<Message | null>(null);
   const [pinned, setPinned] = useState<Message[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
 
   // search state (workspace-wide)
   const [searchQuery, setSearchQuery] = useState("");
@@ -172,14 +174,21 @@ export function ChannelPage({
     [view],
   );
 
-  const onDelete = useCallback(
-    (message: Message) => {
-      if (globalThis.confirm?.("このメッセージを削除しますか？")) {
-        void view.deleteMessage(message.id, message.version);
-      }
-    },
-    [view],
-  );
+  // Open the shared confirm gate (core @dub/ui ConfirmDialog) instead of the
+  // native browser confirm, so every destructive confirm looks/behaves the same.
+  const onDelete = useCallback((message: Message) => setPendingDelete(message), []);
+
+  const confirmDelete = useCallback(() => {
+    const message = pendingDelete;
+    setPendingDelete(null);
+    if (!message) return;
+    // Optimistic: the row updates instantly (view.deleteMessage). On failure the
+    // hook rolls back (the message reappears) and we surface an error toast.
+    void view.deleteMessage(message.id, message.version).catch((err) => {
+      const code = err instanceof ChatApiError ? err.code : "INTERNAL";
+      show({ kind: "error", title: "メッセージを削除できませんでした", description: mapChatError(code).message });
+    });
+  }, [pendingDelete, view, show]);
 
   const onTogglePin = useCallback(
     (message: Message) => {
@@ -320,6 +329,17 @@ export function ChannelPage({
           <ChannelSettingsForm channel={channel} onSave={onSaveSettings} onArchiveToggle={onArchiveToggle} />
         </Modal>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="メッセージを削除しますか？"
+        message="このメッセージを削除します。この操作は取り消せません。"
+        confirmLabel="削除する"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+        testId="fe6-timeline-delete-confirm"
+      />
     </>
   );
 }

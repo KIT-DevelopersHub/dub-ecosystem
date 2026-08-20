@@ -7,7 +7,7 @@
 // FE1 stays router-free: items carry `onSelect`; navigation/dialogs are the
 // consumer's concern. Interaction (outside-click + Escape close) mirrors
 // AppLauncher so every header dropdown behaves the same.
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { MenuProps, MenuItem } from "../types";
 import { Button } from "./Button";
@@ -91,23 +91,26 @@ export function Menu({
           data-align={align}
         >
           {items.map((item): ReactNode => (
-            <button
-              key={item.id}
-              type="button"
-              role="menuitem"
-              className={cx(styles.item)}
-              disabled={item.disabled ?? false}
-              aria-disabled={item.disabled ?? undefined}
-              data-testid={item.testId}
-              onClick={() => select(item)}
-            >
-              {item.icon ? (
-                <span className={cx(styles.itemIcon)}>
-                  <Icon name={item.icon} size="sm" />
-                </span>
-              ) : null}
-              <span className={cx(styles.itemLabel)}>{item.label}</span>
-            </button>
+            <Fragment key={item.id}>
+              {item.dividerBefore ? <div role="separator" className={cx(styles.separator)} /> : null}
+              <button
+                type="button"
+                role="menuitem"
+                className={cx(styles.item)}
+                data-tone={item.tone === "danger" ? "danger" : undefined}
+                disabled={item.disabled ?? false}
+                aria-disabled={item.disabled ?? undefined}
+                data-testid={item.testId}
+                onClick={() => select(item)}
+              >
+                {item.icon ? (
+                  <span className={cx(styles.itemIcon)}>
+                    <Icon name={item.icon} size="sm" />
+                  </span>
+                ) : null}
+                <span className={cx(styles.itemLabel)}>{item.label}</span>
+              </button>
+            </Fragment>
           ))}
         </div>
       )}

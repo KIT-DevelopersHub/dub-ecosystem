@@ -55,9 +55,48 @@ jobs:
       # Public origins used by the post-deploy smoke checks.
       GATEWAY_HEALTH_URL: ${{ vars.GATEWAY_HEALTH_URL || 'https://dub-api-gateway.developershub-site.workers.dev' }}
       MOBILE_BFF_HEALTH_URL: ${{ vars.MOBILE_BFF_HEALTH_URL }}
+      # Optional: when set, deploy-prod.sh arms the app-health-monitor hourly alarm after deploy
+      # (POST /internal/monitor/kick, gated by this shared token). Unset => armed manually once.
+      MONITOR_ADMIN_TOKEN: ${{ secrets.MONITOR_ADMIN_TOKEN }}
+      MONITOR_HEALTH_URL: ${{ vars.MONITOR_HEALTH_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # --- Gate #2 (fail-close): production label gate ---------------------------------
+      # Defence in depth for prod-gate.yml (which enforces the `確認した` label at MERGE
+      # time via branch protection). This re-verifies, at DEPLOY time, that the merged PR
+      # behind this commit actually carried `確認した` — catching direct pushes, admin
+      # merge-without-check bypasses, and label races. If the label is absent the deploy
+      # ABORTS (exit 1) before deploy-prod.sh runs.
+      #
+      # STANDBY BY DEFAULT: gated on the repo variable PROD_LABEL_GATE (mirrors the
+      # DEPLOY_APPLY_MIGRATIONS / DEPLOY_ADMIN_NOTIFY pattern). While unset/false this is a
+      # no-op, so in-flight prod-direct work keeps deploying under the old rules. At CUTOVER
+      # the owner sets PROD_LABEL_GATE=true. `workflow_dispatch` (manual owner deploy) is
+      # intentionally exempt — the manual run IS the confirmation. See
+      # docs/runbooks/04-staging-label-gate.md.
+      - name: Enforce 「確認した」 label (fail-close)
+        if: ${{ vars.PROD_LABEL_GATE == 'true' && github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Resolve the merged PR behind this commit (same mechanism as the admin-notify step).
+          PR_NUM="$(gh pr list --repo "${REPO}" --search "${SHA}" --state merged \
+            --json number --jq '.[0].number' 2>/dev/null || echo '')"
+          if [ -z "${PR_NUM}" ] || [ "${PR_NUM}" = "null" ]; then
+            echo "::error title=本番ゲート::この commit (${SHA}) に対応する merged PR が見つかりません。ラベルゲートを機械判定できないため fail-close します。「確認した」ラベル付きの PR 経由でマージするか、workflow_dispatch で手動デプロイしてください。"
+            exit 1
+          fi
+          HAS_LABEL="$(gh pr view "${PR_NUM}" --repo "${REPO}" \
+            --json labels --jq '[.labels[].name] | index("確認した") != null')"
+          if [ "${HAS_LABEL}" != "true" ]; then
+            echo "::error title=本番ゲート::PR #${PR_NUM} に「確認した」ラベルがありません。staging 確認 → 「確認した」付与の手順を踏んでから本番へ。deploy を abort します。"
+            exit 1
+          fi
+          echo "✅ PR #${PR_NUM} は「確認した」済み — 本番デプロイを続行します。"
 
       - name: Preflight — required secret present
         run: |
