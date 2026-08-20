@@ -1,23 +1,35 @@
 name: Deploy (staging)
 
-# PR -> STAGING deploy, label-triggered.
+# STAGING deploy — two entry points into the SAME single shared staging environment:
 #
-# WHY label-triggered (not every push): there is ONE shared staging environment but
-# many concurrent open PRs. Auto-deploying every push would make them fight over the
-# single environment. Instead, the reviewer adds the `stagingへ` label to the ONE PR
-# under review; that PR (and its subsequent pushes) occupy staging. Per-PR preview
-# environments would be needed for "every PR auto-deploys" — a future step, not $0.
+#   1. push to `main`  -> redeploy staging from main's HEAD on every merge. This keeps
+#      staging a faithful mirror of production: whatever lands in main (and thus goes to
+#      prod via deploy.yml) is always ALSO on staging, so the two never drift.
 #
-# Flow:
-#   add `stagingへ` label  -> this workflow builds the PR head and deploys the
-#                             `-staging` Worker set (infra/deploy/deploy-staging.sh)
-#                          -> posts/updates a sticky PR comment with the staging URLs
+#   2. PR + `stagingへ` label  -> pre-merge preview. There is ONE shared staging
+#      environment but many concurrent open PRs, so we do NOT auto-deploy every PR push;
+#      the reviewer adds the `stagingへ` label to the ONE PR under review and that PR
+#      (plus its later pushes) temporarily occupies staging for verification. Per-PR
+#      preview environments would be needed for "every PR auto-deploys" — a future step.
+#
+# Both paths build the fe2 bundle against the STAGING gateway with VITE_DEMO_AUTOLOGIN=1
+# and deploy the `-staging` Worker set (infra/deploy/deploy-staging.sh). The `concurrency`
+# group below serializes them: a label preview and a main-follow deploy queue rather than
+# race for the single slot. After a merge, only the push:main run fires (merge does not
+# emit `synchronize`), so staging converges on main's HEAD.
+#
+# Flow (label preview):
+#   add `stagingへ` label  -> build PR head, deploy `-staging` set, post/update a sticky
+#                             PR comment with the staging URLs
 #   owner opens the URL, verifies, then adds `確認した` (prod-gate.yml turns green)
 #
 # Cost: staging Workers/D1/KV are all free tier; GitHub Actions minutes are free on
 # this public repo. See docs/runbooks/04-staging-label-gate.md.
 
 on:
+  # Mirror production: every merge to main redeploys staging from main's HEAD.
+  push:
+    branches: [main]
   pull_request:
     # `labeled` fires when `stagingへ` is added; `synchronize` redeploys new pushes of
     # an already-labelled PR; `reopened` re-covers a reopened labelled PR.
@@ -39,9 +51,13 @@ env:
 jobs:
   staging:
     name: build · deploy-staging · comment
-    # Only run when the PR currently carries the `stagingへ` label (covers both the
-    # `labeled` event that added it and later `synchronize` pushes while it stays on).
-    if: contains(github.event.pull_request.labels.*.name, 'stagingへ')
+    # Run on every push to main (mirror prod), OR on a PR that currently carries the
+    # `stagingへ` label (covers both the `labeled` event and later `synchronize` pushes
+    # while it stays on). The label condition is NOT applied to push:main.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'stagingへ'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: staging
@@ -49,10 +65,12 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - name: Checkout PR head
+      # pull_request: build the PR head. push:main: pull_request is null, so the ||
+      # falls back to github.sha (main's HEAD) — the exact tree that goes to prod.
+      - name: Checkout target SHA
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Preflight — CF token present (same-repo PRs only)
         run: |
@@ -104,7 +122,9 @@ jobs:
       - name: Deploy to staging
         run: bash infra/deploy/deploy-staging.sh
 
+      # PR-only: there is no PR to comment on for a push:main mirror deploy.
       - name: Sticky staging-URL comment
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
