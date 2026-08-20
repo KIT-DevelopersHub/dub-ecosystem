@@ -16,6 +16,12 @@ on:
   push:
     tags:
       - "de1-desktop-v*"
+  # Also build (and upload downloadable artifacts) on PRs that touch the desktop
+  # app or this workflow, so the installers can be produced without merging.
+  pull_request:
+    paths:
+      - "apps/de1-desktop/**"
+      - ".github/workflows/desktop-installers.yml"
 
 permissions:
   contents: read
