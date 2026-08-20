@@ -95,6 +95,11 @@ export interface ApiClient {
   download(path: `/api/v1/${string}`): Promise<Blob>;
   auth: {
     passwordLogin(email: string, password: string): Promise<void>;
+    /** STAGING ONLY: one-click demo sign-in (no password). Backed by the auth-service
+     *  /auth/demo-login route which exists only when DEMO_AUTOLOGIN is set on staging;
+     *  in production the route 404s. The login button is itself hidden unless the
+     *  VITE_DEMO_AUTOLOGIN build flag is on, so production bundles never call this. */
+    demoLogin(): Promise<void>;
     logout(): Promise<void>;
     me(): Promise<MeResponse>;
     /** Self password change (#5b): the logged-in user rotates their OWN password.
@@ -288,6 +293,7 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           path: "/api/v1/auth/password/login",
           body: { email, password },
         }),
+      demoLogin: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/demo-login", body: {} }),
       logout: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/logout", body: {} }),
       me: () => request<MeResponse>({ method: "GET", path: "/api/v1/me" }),
       changePassword: (currentPassword: string, newPassword: string) =>
