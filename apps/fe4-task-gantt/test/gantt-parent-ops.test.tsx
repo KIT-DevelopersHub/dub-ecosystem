@@ -162,3 +162,55 @@ describe("#39-3 parent detail shows the child count", () => {
     expect(screen.queryByTestId("fe4-detail-child-count")).toBeNull();
   });
 });
+
+describe("delete is blocked when the task has children (no re-parenting)", () => {
+  it("削除 on a parent reports the block to the host (toast) and never calls onDelete (#375)", () => {
+    const onDelete = vi.fn();
+    const onDeleteBlocked = vi.fn();
+    render(
+      <TaskDetailPanel
+        task={mkParent("p")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={onDelete}
+        onDeleteBlocked={onDeleteBlocked}
+        onClose={() => {}}
+        scopeTasks={[
+          { id: "p", title: "親", parentTaskId: null },
+          { id: "c1", title: "子1", parentTaskId: "p" },
+          { id: "c2", title: "子2", parentTaskId: "p" },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("fe4-detail-delete"));
+    // No delete confirm, no inline block — the host is asked to surface a toast instead.
+    expect(screen.queryByTestId("fe4-confirm-delete")).toBeNull();
+    expect(screen.queryByTestId("fe4-delete-blocked")).toBeNull();
+    expect(onDeleteBlocked).toHaveBeenCalledTimes(1);
+    expect(onDeleteBlocked).toHaveBeenCalledWith(2); // child count passed through
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("a leaf task still deletes through the normal confirm flow", () => {
+    const onDelete = vi.fn();
+    render(
+      <TaskDetailPanel
+        task={mkParent("leaf")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={onDelete}
+        onClose={() => {}}
+        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("fe4-detail-delete"));
+    expect(screen.queryByTestId("fe4-delete-blocked")).toBeNull();
+    // Leaf delete confirm is now a ConfirmDialog modal (#375): confirm via its 削除する button.
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
