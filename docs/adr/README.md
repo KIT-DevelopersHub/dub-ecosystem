@@ -13,3 +13,5 @@ change code. Points that could not be asserted against the current code are mark
 | [0003](0003-event-payload-versioning-and-compatibility.md) | Event payload **versioning & compatibility** (numeric `version`, tolerant reader, idempotency by `id`) | Accepted |
 | [0004](0004-auth-session-cookie-plus-trusted-gateway-header.md) | Auth — **session cookie** at the edge + **trusted gateway header** (`x-dub-user-id`) internally | Accepted |
 | [0005](0005-single-d1-core-logical-namespace-partitioning.md) | **Single D1 (`dub-core`)** with 16 logical namespaces (prefix + lint enforced) | Accepted |
+| [0006](0006-desktop-flutter-client.md) | Desktop client — **Flutter** (Web完コピ→段階ネイティブ化) | Accepted |
+| [0007](0007-cross-team-task-requests-not-dependencies.md) | チーム跨ぎタスク連携は **依頼→承認→cross-link**（依存/矢印にしない）・依存は同一チーム限定 | Accepted |
