@@ -25,6 +25,7 @@ import {
   dayAtX,
   extendWindow,
   initialWindow,
+  parentEnclosures,
   pxToDays,
   rollupRowDates,
   shiftBar,
@@ -493,23 +494,26 @@ export function GanttView({
       .filter((s): s is NonNullable<typeof s> => s !== null);
   }, [dto.dependencies, barById, titleById, visibleAnchor]);
 
-  // Faint enclosing band drawn behind an open parent + its (contiguous) children,
-  // so the parent-child grouping reads as a container — distinct from the arrows,
-  // which mean dependency. Children render right after their parent, so the run
-  // is contiguous.
-  const groupBands = useMemo(() => {
-    const bands: { id: common.TaskId; top: number; height: number }[] = [];
-    rows.forEach((r, i) => {
-      if (!(r.hasChildren && openParents.has(r.taskId))) return;
-      let n = 0;
-      for (let j = i + 1; j < rows.length; j++) {
-        if (rows[j]!.parentTaskId === r.taskId) n += 1;
-        else break;
-      }
-      if (n > 0) bands.push({ id: r.taskId, top: i * ROW_HEIGHT, height: (n + 1) * ROW_HEIGHT });
+  // 内包バー (experimental): an open parent's bar GROWS vertically to cover its
+  // subtree, so the parent visually CONTAINS its children instead of sitting in a
+  // same-height row beside them (どれが親か図で分かりにくい問題, feedback). Each
+  // enclosure is a translucent, bordered container spanning the parent's period
+  // horizontally and its descendant rows vertically; the parent's own solid bar
+  // rides the top edge as the container "header". Geometry is pure (parentEnclosures
+  // walks the visible rows by DEPTH, so 3–4 level nests each get their own nested
+  // box); here we just attach each parent's horizontal span (x/width) from its bar.
+  // Folded parents produce nothing and fall back to the ordinary 1-row bar.
+  const enclosures = useMemo(() => {
+    return parentEnclosures(rows).map((e) => {
+      const bar = barById.get(e.taskId);
+      const left = bar?.hasBar ? bar.x : 0;
+      const boxW = bar?.hasBar ? bar.width : width;
+      // deeper nests read as "inside" via a stronger tint (5%,9%,13%…) and a
+      // brand left-spine, all @dub/tokens-derived.
+      const tintPct = 5 + Math.min(e.depth, 5) * 4;
+      return { ...e, left, boxW, tintPct };
     });
-    return bands;
-  }, [rows, openParents]);
+  }, [rows, barById, width]);
 
   // Sort grouping brackets: collapse the (already sorted) visible rows into runs of
   // rows that share a group key, so the list's right edge can draw one labelled
@@ -776,7 +780,7 @@ export function GanttView({
         </span>
         <span className={styles.tlGuideItem}>
           <span className={styles.tlGuideSummary} aria-hidden />
-          まとめバー（親＝子の期間を合算）
+          親の内包枠（展開時＝子を囲む・入れ子対応）
         </span>
         <span className={styles.tlGuideItem}>
           <svg className={styles.tlGuideDepIcon} width="28" height="12" aria-hidden>
@@ -928,13 +932,23 @@ export function GanttView({
                 style={{ width, height: rowsH }}
                 onClick={onCanvasBackgroundClick}
               >
-                {/* parent-child grouping: faint enclosure behind an open parent + its children */}
-                {groupBands.map((g) => (
+                {/* 内包バー: an open parent's bar grows to a container that encloses
+                    its subtree (nested boxes for 3–4 level WBS). Row order is
+                    shallow-first, so a grandparent paints before (behind) the inner
+                    parent's smaller box — the nesting reads correctly without z juggling. */}
+                {enclosures.map((e) => (
                   <div
-                    key={`grp-${g.id}`}
-                    className={styles.tlGroupBand}
-                    style={{ top: g.top, height: g.height, width }}
-                    data-testid={`fe4-gantt-group-${g.id}`}
+                    key={`grp-${e.taskId}`}
+                    className={styles.tlEncl}
+                    style={{
+                      top: e.top + 2,
+                      height: e.height - 4,
+                      left: e.left,
+                      width: e.boxW,
+                      background: `color-mix(in srgb, var(--dub-color-brand-500) ${e.tintPct}%, transparent)`,
+                    }}
+                    data-testid={`fe4-gantt-group-${e.taskId}`}
+                    data-depth={e.depth}
                     aria-hidden
                   />
                 ))}
