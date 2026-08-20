@@ -789,7 +789,10 @@
   border-bottom: 1px solid var(--dub-color-border-default);
   z-index: 0;
 }
-.tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+/* Dependency connectors sit ABOVE the bars (z-index 4 > .bar's 3) so an arrow is never
+   hidden behind a bar it crosses — part of the correct gantt overlay order:
+   weekend/grid → 親ゾーン塗り+枠(.tlEncl z0) → バー(.bar z3) → コネクタ/当日ライン(front). */
+.tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 /* dependency connectors: a distinct indigo (not the gray gridline colour), so a
    dependency arrow never reads as a border. Paired with the legend + a hover
    tooltip so the meaning is unambiguous vs the parent-child grouping. */
@@ -809,7 +812,9 @@
   background: var(--dub-color-brand-500);
   opacity: 0.7;
   pointer-events: none;
-  z-index: 2;
+  /* Today line is the FRONTMOST timeline marker (above bars z3 and connectors z4) so it
+     reads as one continuous vertical line, never chopped by the bars it crosses. */
+  z-index: 5;
 }
 
 /* ---- bars (soft, rounded, Notion-style) ---- */

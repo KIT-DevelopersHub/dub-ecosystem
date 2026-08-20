@@ -936,10 +936,21 @@ export function GanttView({
                 style={{ width, height: rowsH }}
                 onClick={onCanvasBackgroundClick}
               >
-                {/* 内包バー: an open parent's bar grows to a container that encloses
-                    its subtree (nested boxes for 3–4 level WBS). Row order is
-                    shallow-first, so a grandparent paints before (behind) the inner
-                    parent's smaller box — the nesting reads correctly without z juggling. */}
+                {/* weekend shading (painted FIRST, behind the parent enclosure) */}
+                {weekends.map((b) => (
+                  <div key={b.key} className={styles.tlWeekend} style={{ left: b.x, width: b.width, height: rowsH }} aria-hidden />
+                ))}
+                {/* row lines / hover stripes */}
+                {rows.map((_, i) => (
+                  <div key={i} className={styles.tlRowLine} style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }} aria-hidden />
+                ))}
+                {/* 内包ゾーン: an open parent's bar grows to a container that encloses its
+                    subtree (nested boxes for 3–4 level WBS). Row order is shallow-first, so a
+                    grandparent paints before (behind) the inner parent's smaller box.
+                    Rendered AFTER weekend shading + row lines so the parent-colour zone is
+                    CONTINUOUS across weekend columns (the grey 休日 stripes no longer paint
+                    over it, which made the zone look cut off / colourless on weekends). Still
+                    below the bars/connectors, which are drawn later + on higher z-indexes. */}
                 {enclosures.map((e) => (
                   <div
                     key={`grp-${e.taskId}`}
@@ -962,14 +973,6 @@ export function GanttView({
                     data-depth={e.depth}
                     aria-hidden
                   />
-                ))}
-                {/* weekend shading */}
-                {weekends.map((b) => (
-                  <div key={b.key} className={styles.tlWeekend} style={{ left: b.x, width: b.width, height: rowsH }} aria-hidden />
-                ))}
-                {/* row lines / hover stripes */}
-                {rows.map((_, i) => (
-                  <div key={i} className={styles.tlRowLine} style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }} aria-hidden />
                 ))}
 
                 {/* dependency connectors (前工程 → 後工程) */}
