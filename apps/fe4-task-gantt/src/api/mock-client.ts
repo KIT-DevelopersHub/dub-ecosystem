@@ -491,8 +491,8 @@ export class MockApiClient implements ApiClient {
   // ---- identity ----
   // Two modes, mirroring the real GET /identity/users:
   //   - `?ids=a,b`  → resolve exactly those users (name-batch resolve).
-  //   - no ids      → roster list (all members), honouring `q` search + `limit`.
-  // The old ids-only version returned [] for a roster query, so the assignee
+  //   - no ids      → roster list (all members, listRoster), honouring `q` search + `limit`.
+  // The old ids-only version returned [] for a roster query, so the 依頼先/assignee
   // dropdown could only ever show "未割当" on a fresh event (bug 1b).
   private listUsers(query: Record<string, string | number | boolean | undefined>): common.Paginated<identity.UserSummary> {
     const idsCsv = query.ids !== undefined ? String(query.ids) : undefined;

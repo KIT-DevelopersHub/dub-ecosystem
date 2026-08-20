@@ -19,7 +19,7 @@
 //    dates in-repo (WBS 3.4, 2026-08-16 → 2026-09-15) keep those exact dates.
 //  - Dependencies encode the real phase spine + a handful of the real cross-section
 //    edges; the critical path is the F1→F3→F4→F5→F6→F7 governance backbone.
-import type { task, identity, gantt, common, team } from "@dub/types";
+import type { task, identity, gantt, common, team, event } from "@dub/types";
 import { MockApiClient } from "./api/mock-client";
 
 export const DEMO_EVENT_ID = "evt_hokuriku_conf_2027";
@@ -384,6 +384,13 @@ type MockSeedRowDates = Record<
   { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }
 >;
 
+// The one demo event, so listEvents returns a friendly title (the 対象イベント picker
+// shows「北陸ITカンファレンス」rather than the raw id) instead of falling back to
+// task-derived id-as-label.
+const events: event.EventSummary[] = [
+  { id: DEMO_EVENT_ID, title: "北陸ITカンファレンス", phase: "planning", startsAt: iso("2027-07-01") },
+];
+
 export function createDevClient(opts: { padTo?: number; deepNest?: boolean } = {}): MockApiClient {
   // `deepNest` (demo/E2E only) adds a 3rd WBS level under two leaves so the 内包バー's
   // nested containers are demonstrable; the locked "real LMB data" tests keep it off.
@@ -417,6 +424,7 @@ export function createDevClient(opts: { padTo?: number; deepNest?: boolean } = {
     currentUserId: DEMO_CURRENT_USER,
     users,
     teams,
+    events,
     tasks,
     dependencies: deps,
     rowDates,
