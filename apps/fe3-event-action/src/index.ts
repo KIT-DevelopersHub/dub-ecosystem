@@ -28,6 +28,11 @@ export {
 } from "./context/EventContext";
 export { EventApiProvider, RegistryProvider } from "./context/ApiContext";
 
+// Auth store bridge — FE3's event-scoped permissions (EventContext → EventDetailsPanel
+// 編集 gate) read `me` from this store. The FE2 shell owns auth, so it must push its
+// resolved `me` in via setMe; without it FE3 fails closed (DENY_ALL / read-only).
+export { useAuthStore, type AuthState } from "./contracts/fe2";
+
 // Navigation contract — FE2 owns the router; it wraps FE3's pages with
 // NavigationProvider fed from its TanStack Router (navigate/useParams/useSearch),
 // backing the no-op fallback shim. Exported so the shell can inject it without a

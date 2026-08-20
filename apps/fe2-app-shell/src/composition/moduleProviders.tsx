@@ -6,10 +6,10 @@
 // so a feature's routes render inside a fully-wired runtime context. They read
 // live shell state via hooks (auth, toast, router) rather than props, so a
 // single wrapper instance stays correct as the session/route changes.
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useEffect, type ReactNode } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { gateway } from "@dub/types";
-import { EventApiProvider, RegistryProvider, actionTypeRegistry } from "@dub/fe3-event-action";
+import { EventApiProvider, RegistryProvider, actionTypeRegistry, useAuthStore } from "@dub/fe3-event-action";
 import { NotificationProvider, type NotificationDeps } from "@dub/fe5-notification-inbox";
 import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
@@ -34,6 +34,13 @@ function useMe(): gateway.MeResponse | null {
 /** FE3 events: EventApi injection + the app-global ActionTypeRegistry. */
 export function EventProviders({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const eventApi = useMemo(() => createEventApi(api), [api]);
+  // Bridge the shell's resolved /me into FE3's auth store so its event-scoped
+  // permissions (EventContext → EventDetailsPanel 編集 gate) reflect the real session.
+  // Without this FE3 fails closed (read-only) and the イベント詳細 store can't be edited.
+  const me = useMe();
+  useEffect(() => {
+    useAuthStore.getState().setMe(me);
+  }, [me]);
   return (
     <EventApiProvider api={eventApi}>
       <RegistryProvider registry={actionTypeRegistry}>{children}</RegistryProvider>

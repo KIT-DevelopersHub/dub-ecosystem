@@ -1217,6 +1217,47 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     }
   }
 
+  // Issue (create) a task — マイタスク「タスクを発行」(POST /tasks). Adds to the task store
+  // AND, when linked to an event that has a gantt, appends a gantt row so 発行→ガント同期 が
+  // その場で見える (③). createdBy = デモ管理者 so the 依頼 lens shows it.
+  if (method === "POST" && pathname === "/api/v1/tasks") {
+    const bd = (body ?? {}) as Partial<task.CreateTaskRequest>;
+    const id = `tsk_demo_${++attSeq}`;
+    const now = new Date().toISOString();
+    const evId = (bd.eventId ?? null) as string | null;
+    const created: task.Task = {
+      id,
+      eventId: evId,
+      title: bd.title ?? "無題タスク",
+      description: bd.description ?? null,
+      status: "todo",
+      priority: bd.priority ?? "medium",
+      assigneeId: bd.assigneeId ?? null,
+      teamId: bd.teamId ?? null,
+      startAt: bd.dueAt ?? now,
+      dueAt: bd.dueAt ?? now,
+      origin: "internal",
+      createdBy: ME_ID,
+      version: 1,
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as task.Task;
+    TASKS.unshift(created);
+    if (evId && GANTT[evId]) {
+      GANTT[evId].rows.push({
+        taskId: id,
+        title: created.title,
+        startsAt: created.startAt ?? now,
+        endsAt: created.dueAt ?? now,
+        progressPercent: 0,
+        assigneeId: created.assigneeId,
+        teamId: created.teamId ?? null,
+      } as gantt.GanttRow);
+    }
+    return json(created, 201);
+  }
+
   // Event detail store (イベント詳細ハブ): GET returns the free-form store (defaults until
   // saved), PUT persists it (LWW version bump). "何でも貯める" per-event notes.
   {
