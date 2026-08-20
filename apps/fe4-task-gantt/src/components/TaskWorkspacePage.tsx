@@ -851,6 +851,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const onDeleteDetail = () => {
     if (!selectedTask) return;
     const id = selectedTask.id;
+    // Guard (defense-in-depth over the panel's own block): never delete a task that
+    // still has live children. Deleting it would orphan the children and the read model
+    // would silently re-parent them under the previous row. Block + explain instead of
+    // optimistically removing then rolling back on the server 409.
+    const hasChildren = scopeTasks.some((s) => s.parentTaskId === id);
+    if (hasChildren) {
+      toast.show({
+        kind: "error",
+        title: "子タスクがあるため削除できません。先に子タスクを削除または移動してください",
+      });
+      return;
+    }
     // Optimistic: close the panel + drop the bar instantly; the store removes the
     // row immediately and restores it on failure (with the reason surfaced).
     setSelected(null);
@@ -1062,6 +1074,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}
+          onDeleteBlocked={(n) =>
+            toast.show({
+              kind: "warning",
+              title: "削除できません",
+              description: `子タスクが${n}件あるため削除できません。先に子タスクを削除するか、別の親へ移動してください。`,
+            })
+          }
           onCreateChild={onCreateChild}
           onCreatePredecessor={onCreatePredecessor}
           onClose={() => setSelected(null)}
