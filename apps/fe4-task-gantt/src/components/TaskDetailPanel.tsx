@@ -212,22 +212,6 @@ export function TaskDetailPanel({
           )}
         </div>
 
-        {/* 内容: free-text body/notes captured on the task (optimistic save + toast). */}
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-detail-description">
-            内容
-          </label>
-          <Textarea
-            id="fe4-detail-description"
-            value={description}
-            disabled={!canWrite}
-            onChange={setDescription}
-            rows={4}
-            placeholder="タスクの背景・手順・補足などを書けます"
-            testId="fe4-detail-description"
-          />
-        </div>
-
         <div className={styles.formRow}>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-status">
@@ -388,6 +372,24 @@ export function TaskDetailPanel({
 
         {/* 添付（ファイル・URL）: upload/add, list, download/open, delete. */}
         <TaskAttachmentsEditor taskId={t.id} canWrite={canWrite} />
+
+        {/* 詳細（旧「内容」）: free-text body/notes. Moved to the very bottom of the panel
+            per feedback ② — the everyday fields (ステータス/担当/日付…) stay above the fold,
+            the long-form note sits last. */}
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor="fe4-detail-description">
+            詳細
+          </label>
+          <Textarea
+            id="fe4-detail-description"
+            value={description}
+            disabled={!canWrite}
+            onChange={setDescription}
+            rows={4}
+            placeholder="タスクの背景・手順・補足などを書けます"
+            testId="fe4-detail-description"
+          />
+        </div>
 
         {/* Leaf (no children) delete confirm — a ConfirmDialog modal (#375), unified with
             運営メンバー削除 etc. A parent-with-children NEVER reaches here — its 削除 fires
