@@ -1,7 +1,9 @@
 // EventDetailsPanel — the "何でも貯める" free-form store for the selected event.
 // View mode renders the saved sections; edit mode lets the user change everything
-// and save the whole document at once (optimistic, version-locked). Sections:
-//   概要 / メモ / 会場 / 重要リンク / 連絡先
+// and save the whole document at once (optimistic, version-locked). Sections cover
+// what event ops actually tracks:
+//   概要 / 開催情報(会場・アクセス・定員・持ち物) / 当日(タイムテーブル・登壇者・運営フロー)
+//   / 運営管理(予算・協賛・準備チェックリスト) / 記録・連絡(メモ・重要リンク・連絡先)
 import { useState } from "react";
 import { Button, Icon, SkeletonLoader, Badge } from "@dub/ui";
 import type { IconName } from "@dub/ui";
@@ -13,31 +15,44 @@ import {
   type EventDetailsData,
   type EventDetailLink,
   type EventDetailContact,
+  type EventScheduleItem,
+  type EventSpeaker,
+  type EventSponsor,
+  type EventChecklistItem,
 } from "../api/detailsContracts";
 import styles from "./components.module.css";
 
 function Section({
   icon,
   title,
+  count,
+  wide,
   action,
   children,
 }: {
   icon: IconName;
   title: string;
+  count?: string;
+  wide?: boolean;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section className={styles.section}>
+    <section className={wide ? `${styles.section} ${styles.sectionWide}` : styles.section}>
       <div className={styles.sectionHead}>
         <Icon name={icon} />
         <span className={styles.sectionHeadTitle}>{title}</span>
+        {count ? <span className={styles.countChip}>{count}</span> : null}
         <div className={styles.spacer} />
         {action}
       </div>
       {children}
     </section>
   );
+}
+
+function GroupHeading({ children }: { children: React.ReactNode }) {
+  return <div className={styles.groupHeading}>{children}</div>;
 }
 
 function TextBlock({ value, placeholder }: { value: string; placeholder: string }) {
@@ -60,7 +75,7 @@ export function EventDetailsPanel({
   if (isLoading || !data) {
     return (
       <div className={styles.detailGrid} data-testid="fe3-details-skeleton">
-        {[0, 1, 2].map((i) => (
+        {[0, 1, 2, 3].map((i) => (
           <section className={styles.section} key={i}>
             <SkeletonLoader lines={4} />
           </section>
@@ -70,11 +85,16 @@ export function EventDetailsPanel({
   }
 
   const d = data.data;
+  const doneCount = d.checklist.filter((c) => c.done).length;
 
   const startEdit = () => {
     setDraft({
       ...EMPTY_EVENT_DETAILS_DATA,
       ...d,
+      schedule: d.schedule.map((s) => ({ ...s })),
+      speakers: d.speakers.map((s) => ({ ...s })),
+      sponsors: d.sponsors.map((s) => ({ ...s })),
+      checklist: d.checklist.map((c) => ({ ...c })),
       links: d.links.map((l) => ({ ...l })),
       contacts: d.contacts.map((c) => ({ ...c })),
     });
@@ -82,10 +102,7 @@ export function EventDetailsPanel({
   };
 
   const commit = () => {
-    save.mutate(
-      { data: draft, version: data.version },
-      { onSuccess: () => setEditing(false) },
-    );
+    save.mutate({ data: draft, version: data.version }, { onSuccess: () => setEditing(false) });
   };
 
   // ---- read (view) mode ----
@@ -116,18 +133,132 @@ export function EventDetailsPanel({
         </div>
 
         <div className={styles.detailGrid}>
-          <Section icon="info" title="概要">
+          <Section icon="info" title="概要" wide>
             <TextBlock value={d.overview} placeholder="概要は未記入です。" />
           </Section>
 
-          <Section icon="edit" title="メモ">
+          <GroupHeading>開催情報</GroupHeading>
+          <Section icon="home" title="会場">
+            <TextBlock value={d.venue} placeholder="会場は未記入です。" />
+          </Section>
+          <Section icon="pin" title="アクセス">
+            <TextBlock value={d.access} placeholder="アクセス（交通・最寄り駅・駐車場）は未記入です。" />
+          </Section>
+          <Section icon="users" title="定員・参加予定">
+            <TextBlock value={d.capacity} placeholder="定員・参加予定人数は未記入です。" />
+          </Section>
+          <Section icon="archive" title="持ち物・服装">
+            <TextBlock value={d.belongings} placeholder="持ち物・服装は未記入です。" />
+          </Section>
+
+          <GroupHeading>当日運営</GroupHeading>
+          <Section
+            icon="clock"
+            title="タイムテーブル"
+            count={d.schedule.length ? `${d.schedule.length}件` : undefined}
+            wide
+          >
+            {d.schedule.length === 0 ? (
+              <div className={styles.sectionEmpty}>タイムテーブルは未登録です。</div>
+            ) : (
+              <div data-testid="fe3-details-schedule">
+                {d.schedule.map((s, i) => (
+                  <div className={styles.timeRow} key={i}>
+                    <div className={styles.timeSlot}>{s.time || "—"}</div>
+                    <div className={styles.timeMain}>
+                      <span className={styles.timeTitle}>{s.title || "（無題）"}</span>
+                      {s.note ? <span className={styles.timeNote}>{s.note}</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <Section
+            icon="megaphone"
+            title="登壇者・ゲスト"
+            count={d.speakers.length ? `${d.speakers.length}名` : undefined}
+            wide
+          >
+            {d.speakers.length === 0 ? (
+              <div className={styles.sectionEmpty}>登壇者は未登録です。</div>
+            ) : (
+              <div className={styles.recordList} data-testid="fe3-details-speakers">
+                {d.speakers.map((s, i) => (
+                  <div className={styles.recordItem} key={i}>
+                    <div className={styles.recordTop}>
+                      <span className={styles.recordName}>{s.name || "（氏名未記入）"}</span>
+                      {s.role ? <Badge>{s.role}</Badge> : null}
+                    </div>
+                    {s.topic ? <span className={styles.recordSub}>{s.topic}</span> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <Section icon="flag" title="当日運営フロー" wide>
+            <TextBlock value={d.operations} placeholder="当日運営フロー・担当は未記入です。" />
+          </Section>
+
+          <GroupHeading>運営管理</GroupHeading>
+          <Section icon="file" title="予算・収支メモ">
+            <TextBlock value={d.budget} placeholder="予算・収支メモは未記入です。" />
+          </Section>
+          <Section
+            icon="shield"
+            title="協賛・スポンサー"
+            count={d.sponsors.length ? `${d.sponsors.length}社` : undefined}
+            wide
+          >
+            {d.sponsors.length === 0 ? (
+              <div className={styles.sectionEmpty}>協賛・スポンサーは未登録です。</div>
+            ) : (
+              <div className={styles.recordList} data-testid="fe3-details-sponsors">
+                {d.sponsors.map((s, i) => (
+                  <div className={styles.recordItem} key={i}>
+                    <div className={styles.recordTop}>
+                      <span className={styles.recordName}>{s.name || "（社名未記入）"}</span>
+                      {s.tier ? <Badge>{s.tier}</Badge> : null}
+                      {s.status ? <span className={styles.recordSub}>{s.status}</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+          <Section
+            icon="check-square"
+            title="準備チェックリスト"
+            count={d.checklist.length ? `${doneCount}/${d.checklist.length}` : undefined}
+            wide
+          >
+            {d.checklist.length === 0 ? (
+              <div className={styles.sectionEmpty}>チェックリストは未登録です。</div>
+            ) : (
+              <div className={styles.checkList} data-testid="fe3-details-checklist">
+                {d.checklist.map((c, i) => (
+                  <div
+                    className={c.done ? `${styles.checkItem} ${styles.checkItemDone}` : styles.checkItem}
+                    key={i}
+                  >
+                    {c.done ? (
+                      <Icon name="check" className={`${styles.checkIcon} ${styles.checkIconDone}`} />
+                    ) : (
+                      <span className={styles.checkToggle} aria-hidden />
+                    )}
+                    <span>{c.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <GroupHeading>記録・連絡</GroupHeading>
+          <Section icon="edit" title="メモ" wide>
             <TextBlock value={d.memo} placeholder="メモは未記入です。" />
           </Section>
-
-          <Section icon="calendar" title="会場・日程">
-            <TextBlock value={d.venue} placeholder="会場情報は未記入です。" />
-          </Section>
-
           <Section icon="external-link" title="重要リンク">
             {d.links.length === 0 ? (
               <div className={styles.sectionEmpty}>リンクは未登録です。</div>
@@ -144,7 +275,6 @@ export function EventDetailsPanel({
               </div>
             )}
           </Section>
-
           <Section icon="user" title="連絡先">
             {d.contacts.length === 0 ? (
               <div className={styles.sectionEmpty}>連絡先は未登録です。</div>
@@ -166,10 +296,39 @@ export function EventDetailsPanel({
 
   // ---- edit mode ----
   const setField = (patch: Partial<EventDetailsData>) => setDraft((p) => ({ ...p, ...patch }));
-  const updateLink = (i: number, patch: Partial<EventDetailLink>) =>
-    setDraft((p) => ({ ...p, links: p.links.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
-  const updateContact = (i: number, patch: Partial<EventDetailContact>) =>
-    setDraft((p) => ({ ...p, contacts: p.contacts.map((c, j) => (j === i ? { ...c, ...patch } : c)) }));
+  const updateAt = <T,>(key: keyof EventDetailsData, i: number, patch: Partial<T>) =>
+    setDraft((p) => ({
+      ...p,
+      [key]: (p[key] as T[]).map((row, j) => (j === i ? { ...row, ...patch } : row)),
+    }));
+  const removeAt = (key: keyof EventDetailsData, i: number) =>
+    setDraft((p) => ({ ...p, [key]: (p[key] as unknown[]).filter((_, j) => j !== i) }));
+  const addTo = <T,>(key: keyof EventDetailsData, blank: T) =>
+    setDraft((p) => ({ ...p, [key]: [...(p[key] as T[]), blank] }));
+
+  const addBtn = (label: string, onClick: () => void, testId: string) => (
+    <Button iconLeft={<Icon name="plus" />} variant="ghost" onClick={onClick} testId={testId}>
+      {label}
+    </Button>
+  );
+  const removeBtn = (onClick: () => void, testId: string) => (
+    <Button iconLeft={<Icon name="trash" />} variant="ghost" onClick={onClick} testId={testId}>
+      <span className="sr-only">削除</span>
+    </Button>
+  );
+
+  const textEdit = (
+    key: "overview" | "venue" | "access" | "capacity" | "belongings" | "budget" | "operations" | "memo",
+    placeholder: string,
+  ) => (
+    <textarea
+      className={styles.textarea}
+      value={draft[key]}
+      placeholder={placeholder}
+      onChange={(e) => setField({ [key]: e.target.value } as Partial<EventDetailsData>)}
+      data-testid={`fe3-edit-${key}`}
+    />
+  );
 
   return (
     <div data-testid="fe3-details-edit">
@@ -178,49 +337,196 @@ export function EventDetailsPanel({
       </div>
 
       <div className={styles.detailGrid}>
-        <Section icon="info" title="概要">
-          <textarea
-            className={styles.textarea}
-            value={draft.overview}
-            placeholder="イベントの概要を入力"
-            onChange={(e) => setField({ overview: e.target.value })}
-            data-testid="fe3-edit-overview"
-          />
+        <Section icon="info" title="概要" wide>
+          {textEdit("overview", "イベントの概要を入力")}
         </Section>
 
-        <Section icon="edit" title="メモ">
-          <textarea
-            className={styles.textarea}
-            value={draft.memo}
-            placeholder="自由記述メモ（議事・ToDo・気づき など）"
-            onChange={(e) => setField({ memo: e.target.value })}
-            data-testid="fe3-edit-memo"
-          />
+        <GroupHeading>開催情報</GroupHeading>
+        <Section icon="home" title="会場">
+          {textEdit("venue", "会場名・住所")}
+        </Section>
+        <Section icon="pin" title="アクセス">
+          {textEdit("access", "交通・最寄り駅・駐車場")}
+        </Section>
+        <Section icon="users" title="定員・参加予定">
+          {textEdit("capacity", "定員・参加予定人数（運営/来場 など）")}
+        </Section>
+        <Section icon="archive" title="持ち物・服装">
+          {textEdit("belongings", "持ち物・服装・名札 など")}
         </Section>
 
-        <Section icon="calendar" title="会場・日程">
-          <textarea
-            className={styles.textarea}
-            value={draft.venue}
-            placeholder="会場・アクセス・日程の補足"
-            onChange={(e) => setField({ venue: e.target.value })}
-            data-testid="fe3-edit-venue"
-          />
+        <GroupHeading>当日運営</GroupHeading>
+        <Section
+          icon="clock"
+          title="タイムテーブル"
+          wide
+          action={addBtn("行を追加", () => addTo<EventScheduleItem>("schedule", { time: "", title: "", note: "" }), "fe3-edit-add-schedule")}
+        >
+          <div className={styles.linkList}>
+            {draft.schedule.map((s, i) => (
+              <div className={styles.editRow} key={i}>
+                <input
+                  className={styles.input}
+                  style={{ maxWidth: 120 }}
+                  value={s.time}
+                  placeholder="10:00"
+                  onChange={(e) => updateAt<EventScheduleItem>("schedule", i, { time: e.target.value })}
+                  data-testid={`fe3-edit-schedule-time-${i}`}
+                />
+                <input
+                  className={styles.input}
+                  value={s.title}
+                  placeholder="内容（例: 開場・受付）"
+                  onChange={(e) => updateAt<EventScheduleItem>("schedule", i, { title: e.target.value })}
+                  data-testid={`fe3-edit-schedule-title-${i}`}
+                />
+                <input
+                  className={styles.input}
+                  value={s.note}
+                  placeholder="補足（担当・場所）"
+                  onChange={(e) => updateAt<EventScheduleItem>("schedule", i, { note: e.target.value })}
+                  data-testid={`fe3-edit-schedule-note-${i}`}
+                />
+                {removeBtn(() => removeAt("schedule", i), `fe3-edit-schedule-remove-${i}`)}
+              </div>
+            ))}
+            {draft.schedule.length === 0 ? (
+              <div className={styles.sectionEmpty}>「行を追加」でタイムテーブルを登録できます。</div>
+            ) : null}
+          </div>
         </Section>
 
         <Section
+          icon="megaphone"
+          title="登壇者・ゲスト"
+          wide
+          action={addBtn("追加", () => addTo<EventSpeaker>("speakers", { name: "", role: "", topic: "" }), "fe3-edit-add-speaker")}
+        >
+          <div className={styles.linkList}>
+            {draft.speakers.map((s, i) => (
+              <div className={styles.editRow} key={i}>
+                <input
+                  className={styles.input}
+                  value={s.name}
+                  placeholder="氏名"
+                  onChange={(e) => updateAt<EventSpeaker>("speakers", i, { name: e.target.value })}
+                  data-testid={`fe3-edit-speaker-name-${i}`}
+                />
+                <input
+                  className={styles.input}
+                  style={{ maxWidth: 160 }}
+                  value={s.role}
+                  placeholder="肩書き・所属"
+                  onChange={(e) => updateAt<EventSpeaker>("speakers", i, { role: e.target.value })}
+                  data-testid={`fe3-edit-speaker-role-${i}`}
+                />
+                <input
+                  className={styles.input}
+                  value={s.topic}
+                  placeholder="登壇テーマ"
+                  onChange={(e) => updateAt<EventSpeaker>("speakers", i, { topic: e.target.value })}
+                  data-testid={`fe3-edit-speaker-topic-${i}`}
+                />
+                {removeBtn(() => removeAt("speakers", i), `fe3-edit-speaker-remove-${i}`)}
+              </div>
+            ))}
+            {draft.speakers.length === 0 ? (
+              <div className={styles.sectionEmpty}>「追加」で登壇者を登録できます。</div>
+            ) : null}
+          </div>
+        </Section>
+
+        <Section icon="flag" title="当日運営フロー" wide>
+          {textEdit("operations", "当日の動き・担当・時系列の運営フロー")}
+        </Section>
+
+        <GroupHeading>運営管理</GroupHeading>
+        <Section icon="file" title="予算・収支メモ">
+          {textEdit("budget", "予算・費目・収支の見込み")}
+        </Section>
+        <Section
+          icon="shield"
+          title="協賛・スポンサー"
+          wide
+          action={addBtn("追加", () => addTo<EventSponsor>("sponsors", { name: "", tier: "", status: "" }), "fe3-edit-add-sponsor")}
+        >
+          <div className={styles.linkList}>
+            {draft.sponsors.map((s, i) => (
+              <div className={styles.editRow} key={i}>
+                <input
+                  className={styles.input}
+                  value={s.name}
+                  placeholder="社名・団体名"
+                  onChange={(e) => updateAt<EventSponsor>("sponsors", i, { name: e.target.value })}
+                  data-testid={`fe3-edit-sponsor-name-${i}`}
+                />
+                <input
+                  className={styles.input}
+                  style={{ maxWidth: 140 }}
+                  value={s.tier}
+                  placeholder="ティア（例: Gold）"
+                  onChange={(e) => updateAt<EventSponsor>("sponsors", i, { tier: e.target.value })}
+                  data-testid={`fe3-edit-sponsor-tier-${i}`}
+                />
+                <input
+                  className={styles.input}
+                  style={{ maxWidth: 160 }}
+                  value={s.status}
+                  placeholder="状況（打診中/契約済 等）"
+                  onChange={(e) => updateAt<EventSponsor>("sponsors", i, { status: e.target.value })}
+                  data-testid={`fe3-edit-sponsor-status-${i}`}
+                />
+                {removeBtn(() => removeAt("sponsors", i), `fe3-edit-sponsor-remove-${i}`)}
+              </div>
+            ))}
+            {draft.sponsors.length === 0 ? (
+              <div className={styles.sectionEmpty}>「追加」で協賛先を登録できます。</div>
+            ) : null}
+          </div>
+        </Section>
+        <Section
+          icon="check-square"
+          title="準備チェックリスト"
+          wide
+          action={addBtn("項目を追加", () => addTo<EventChecklistItem>("checklist", { label: "", done: false }), "fe3-edit-add-check")}
+        >
+          <div className={styles.linkList}>
+            {draft.checklist.map((c, i) => (
+              <div className={styles.editRow} key={i}>
+                <button
+                  type="button"
+                  className={c.done ? `${styles.checkToggle} ${styles.checkToggleOn}` : styles.checkToggle}
+                  onClick={() => updateAt<EventChecklistItem>("checklist", i, { done: !c.done })}
+                  aria-pressed={c.done}
+                  aria-label={c.done ? "完了を解除" : "完了にする"}
+                  data-testid={`fe3-edit-check-toggle-${i}`}
+                >
+                  {c.done ? <Icon name="check" /> : null}
+                </button>
+                <input
+                  className={styles.input}
+                  value={c.label}
+                  placeholder="準備項目（例: 会場鍵の受け取り）"
+                  onChange={(e) => updateAt<EventChecklistItem>("checklist", i, { label: e.target.value })}
+                  data-testid={`fe3-edit-check-label-${i}`}
+                />
+                {removeBtn(() => removeAt("checklist", i), `fe3-edit-check-remove-${i}`)}
+              </div>
+            ))}
+            {draft.checklist.length === 0 ? (
+              <div className={styles.sectionEmpty}>「項目を追加」で準備タスクを登録できます。</div>
+            ) : null}
+          </div>
+        </Section>
+
+        <GroupHeading>記録・連絡</GroupHeading>
+        <Section icon="edit" title="メモ" wide>
+          {textEdit("memo", "自由記述メモ（議事・ToDo・気づき など）")}
+        </Section>
+        <Section
           icon="external-link"
           title="重要リンク"
-          action={
-            <Button
-              iconLeft={<Icon name="plus" />}
-              variant="ghost"
-              onClick={() => setField({ links: [...draft.links, { label: "", url: "" }] })}
-              testId="fe3-edit-add-link"
-            >
-              追加
-            </Button>
-          }
+          action={addBtn("追加", () => addTo<EventDetailLink>("links", { label: "", url: "" }), "fe3-edit-add-link")}
         >
           <div className={styles.linkList}>
             {draft.links.map((l, i) => (
@@ -229,24 +535,17 @@ export function EventDetailsPanel({
                   className={styles.input}
                   value={l.label}
                   placeholder="ラベル（例: アジェンダ）"
-                  onChange={(e) => updateLink(i, { label: e.target.value })}
+                  onChange={(e) => updateAt<EventDetailLink>("links", i, { label: e.target.value })}
                   data-testid={`fe3-edit-link-label-${i}`}
                 />
                 <input
                   className={styles.input}
                   value={l.url}
                   placeholder="https://…"
-                  onChange={(e) => updateLink(i, { url: e.target.value })}
+                  onChange={(e) => updateAt<EventDetailLink>("links", i, { url: e.target.value })}
                   data-testid={`fe3-edit-link-url-${i}`}
                 />
-                <Button
-                  iconLeft={<Icon name="trash" />}
-                  variant="ghost"
-                  onClick={() => setField({ links: draft.links.filter((_, j) => j !== i) })}
-                  testId={`fe3-edit-link-remove-${i}`}
-                >
-                  <span className="sr-only">削除</span>
-                </Button>
+                {removeBtn(() => removeAt("links", i), `fe3-edit-link-remove-${i}`)}
               </div>
             ))}
             {draft.links.length === 0 ? (
@@ -254,20 +553,10 @@ export function EventDetailsPanel({
             ) : null}
           </div>
         </Section>
-
         <Section
           icon="user"
           title="連絡先"
-          action={
-            <Button
-              iconLeft={<Icon name="plus" />}
-              variant="ghost"
-              onClick={() => setField({ contacts: [...draft.contacts, { label: "", value: "" }] })}
-              testId="fe3-edit-add-contact"
-            >
-              追加
-            </Button>
-          }
+          action={addBtn("追加", () => addTo<EventDetailContact>("contacts", { label: "", value: "" }), "fe3-edit-add-contact")}
         >
           <div className={styles.linkList}>
             {draft.contacts.map((c, i) => (
@@ -276,24 +565,17 @@ export function EventDetailsPanel({
                   className={styles.input}
                   value={c.label}
                   placeholder="ラベル（例: 事務局）"
-                  onChange={(e) => updateContact(i, { label: e.target.value })}
+                  onChange={(e) => updateAt<EventDetailContact>("contacts", i, { label: e.target.value })}
                   data-testid={`fe3-edit-contact-label-${i}`}
                 />
                 <input
                   className={styles.input}
                   value={c.value}
                   placeholder="メール / 電話 / チャンネル"
-                  onChange={(e) => updateContact(i, { value: e.target.value })}
+                  onChange={(e) => updateAt<EventDetailContact>("contacts", i, { value: e.target.value })}
                   data-testid={`fe3-edit-contact-value-${i}`}
                 />
-                <Button
-                  iconLeft={<Icon name="trash" />}
-                  variant="ghost"
-                  onClick={() => setField({ contacts: draft.contacts.filter((_, j) => j !== i) })}
-                  testId={`fe3-edit-contact-remove-${i}`}
-                >
-                  <span className="sr-only">削除</span>
-                </Button>
+                {removeBtn(() => removeAt("contacts", i), `fe3-edit-contact-remove-${i}`)}
               </div>
             ))}
             {draft.contacts.length === 0 ? (
@@ -307,12 +589,7 @@ export function EventDetailsPanel({
         <Button variant="ghost" onClick={() => setEditing(false)} testId="fe3-details-cancel">
           キャンセル
         </Button>
-        <Button
-          variant="primary"
-          onClick={commit}
-          disabled={save.isPending}
-          testId="fe3-details-save"
-        >
+        <Button variant="primary" onClick={commit} disabled={save.isPending} testId="fe3-details-save">
           保存
         </Button>
       </div>

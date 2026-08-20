@@ -34,7 +34,22 @@ describe("event details store (free-form)", () => {
     expect(got.json.eventId).toBe(id);
     expect(got.json.version).toBe(0);
     expect(got.json.updatedAt).toBeNull();
-    expect(got.json.data).toEqual({ overview: "", memo: "", venue: "", links: [], contacts: [] });
+    expect(got.json.data).toEqual({
+      overview: "",
+      venue: "",
+      access: "",
+      capacity: "",
+      belongings: "",
+      budget: "",
+      operations: "",
+      memo: "",
+      schedule: [],
+      speakers: [],
+      sponsors: [],
+      checklist: [],
+      links: [],
+      contacts: [],
+    });
   });
 
   it("PUT creates (v0 -> v1), persists, and GET reads it back", async () => {
@@ -98,6 +113,47 @@ describe("event details store (free-form)", () => {
     expect(saved.json.data.links).toHaveLength(1);
     expect(saved.json.data.links[0].label).toBe("資料");
     expect(saved.json.data.memo).toBe(""); // missing key -> default
+  });
+
+  it("persists the rich event-ops sections (schedule/speakers/sponsors/checklist) and drops blank rows", async () => {
+    const deps = makeDeps();
+    const id = seedEvent(deps);
+    const app = createApp(deps);
+
+    const body = {
+      version: 0,
+      data: {
+        access: "JR金沢駅 徒歩5分",
+        capacity: "来場400名 / 運営20名",
+        budget: "総予算180万円",
+        operations: "08:00 設営 / 09:00 受付",
+        schedule: [
+          { time: "10:00", title: "基調講演", note: "大ホール" },
+          { time: "", title: "", note: "" }, // dropped (all empty)
+        ],
+        speakers: [{ name: "井上", role: "CTO", topic: "開発組織" }],
+        sponsors: [{ name: "アルファオメガ", tier: "Gold", status: "契約済" }],
+        checklist: [
+          { label: "会場鍵の受取", done: true },
+          { label: "", done: false }, // dropped (no label)
+        ],
+      },
+    };
+    const saved = await call(app, "PUT", `/events/${id}/details`, { body });
+    expect(saved.status).toBe(200);
+    expect(saved.json.data.access).toBe("JR金沢駅 徒歩5分");
+    expect(saved.json.data.capacity).toBe("来場400名 / 運営20名");
+    expect(saved.json.data.operations).toBe("08:00 設営 / 09:00 受付");
+    expect(saved.json.data.schedule).toHaveLength(1);
+    expect(saved.json.data.schedule[0].title).toBe("基調講演");
+    expect(saved.json.data.speakers[0].name).toBe("井上");
+    expect(saved.json.data.sponsors[0].tier).toBe("Gold");
+    expect(saved.json.data.checklist).toHaveLength(1);
+    expect(saved.json.data.checklist[0].done).toBe(true);
+
+    const got = await call(app, "GET", `/events/${id}/details`);
+    expect(got.json.data.budget).toBe("総予算180万円");
+    expect(got.json.data.checklist[0].label).toBe("会場鍵の受取");
   });
 
   it("details on an archived event are immutable (409)", async () => {

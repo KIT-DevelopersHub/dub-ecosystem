@@ -71,13 +71,54 @@ export interface EventDetailContact {
   label: string;
   value: string;
 }
+/** タイムテーブル項目 — one row of the day-of schedule. */
+export interface EventScheduleItem {
+  time: string;
+  title: string;
+  note: string;
+}
+/** 登壇者・ゲスト — a speaker / guest entry. */
+export interface EventSpeaker {
+  name: string;
+  role: string;
+  topic: string;
+}
+/** 協賛・スポンサー — a sponsor entry with tier + negotiation status. */
+export interface EventSponsor {
+  name: string;
+  tier: string;
+  status: string;
+}
+/** 準備チェックリスト項目 — a prep task with a done flag. */
+export interface EventChecklistItem {
+  label: string;
+  done: boolean;
+}
 export interface EventDetailsData {
   /** 概要 — a short summary shown at the top of the event app. */
   overview: string;
-  /** メモ — free-form running notes (markdown-ish plain text). */
-  memo: string;
   /** 会場 — venue / location free text. */
   venue: string;
+  /** アクセス — 交通・最寄り駅・駐車場など. */
+  access: string;
+  /** 定員・参加予定人数 — capacity / expected headcount free text. */
+  capacity: string;
+  /** 持ち物・服装 — what staff/attendees should bring / dress code. */
+  belongings: string;
+  /** 予算・収支メモ — budget / cost notes. */
+  budget: string;
+  /** 当日運営フロー — day-of operations flow / responsibilities. */
+  operations: string;
+  /** メモ — free-form running notes (markdown-ish plain text). */
+  memo: string;
+  /** タイムテーブル — ordered day-of schedule. */
+  schedule: EventScheduleItem[];
+  /** 登壇者・ゲスト — speakers / guests. */
+  speakers: EventSpeaker[];
+  /** 協賛・スポンサー — sponsors. */
+  sponsors: EventSponsor[];
+  /** 準備チェックリスト — prep checklist. */
+  checklist: EventChecklistItem[];
   /** 重要リンク — labelled URLs (agenda, drive folder, form, …). */
   links: EventDetailLink[];
   /** 連絡先 — labelled contacts (person, channel, phone, …). */

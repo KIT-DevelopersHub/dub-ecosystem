@@ -3,7 +3,7 @@
 import type { DbClient } from "@dub/db";
 import type { common, event } from "@dub/types";
 import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventDetailsData, Keyset } from "./types";
-import { EMPTY_EVENT_DETAILS } from "./domain";
+import { EMPTY_EVENT_DETAILS, normalizeEventDetails } from "./domain";
 
 interface EventDbRow {
   id: string;
@@ -42,14 +42,9 @@ interface EventDetailsDbRow {
 
 function parseDetailsData(json: string): EventDetailsData {
   try {
-    const raw = JSON.parse(json) as Partial<EventDetailsData>;
-    return {
-      overview: typeof raw.overview === "string" ? raw.overview : "",
-      memo: typeof raw.memo === "string" ? raw.memo : "",
-      venue: typeof raw.venue === "string" ? raw.venue : "",
-      links: Array.isArray(raw.links) ? raw.links : [],
-      contacts: Array.isArray(raw.contacts) ? raw.contacts : [],
-    };
+    // Single source of truth for coercion/bounds — also fills in any fields added
+    // after this row was written (the store is additive; no migration on new keys).
+    return normalizeEventDetails(JSON.parse(json) as Partial<EventDetailsData>);
   } catch {
     return { ...EMPTY_EVENT_DETAILS };
   }
