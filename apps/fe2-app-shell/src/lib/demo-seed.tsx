@@ -777,7 +777,7 @@ interface DemoEmailAddress {
   id: string;
   localPart: string;
   address: string;
-  destination: string;
+  destination: string | null; // null → routed to the shared Email Worker (no forward)
   enabled: boolean;
   createdAt: string;
 }
@@ -891,6 +891,19 @@ function createRosterStore() {
         users.push(user);
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         return json(user);
+      }
+      // Issue a new @developershub.jp address bound to the shared Email Worker.
+      // No forward destination is entered — received mail lands in the Dub mail app
+      // automatically (mirrors mail-gateway POST /addresses/issue). destination = null.
+      if (pathname === "/api/v1/mail/admin/email-routing/addresses/issue") {
+        const req = body as { localPart?: string };
+        const localPart = req?.localPart?.trim().toLowerCase() ?? "";
+        if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
+        if (emails.some((a) => a.localPart === localPart)) return problem("CONFLICT", "同名のアドレスが既に存在します", 409);
+        const addr: DemoEmailAddress = { id: rid("eml"), localPart, address: `${localPart}@${EMAIL_DOMAIN}`, destination: null, enabled: true, createdAt: new Date().toISOString() };
+        emails.push(addr);
+        audit("mail.email_routing.issued", "email_address", addr.id, { address: addr.address });
+        return json(addr);
       }
       if (pathname === "/api/v1/mail/admin/email-routing/addresses") {
         const req = body as { localPart?: string; destination?: string };
