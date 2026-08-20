@@ -77,6 +77,83 @@ describe("TaskDetailPanel — seeds date fields from the bar window (real-path �
     expect(patch.dueAt).toBe("2026-09-29T00:00:00.000Z");
   });
 
+  it("PARENT: the rolled bar window WINS over a stale own start_at/due_at (症状#7 親子の値ズレ)", () => {
+    // A work-package whose own columns hold a STALE window (08-12〜08-13) left over from
+    // before it had children. The gantt bar shows the ROLLUP of its children (08-05〜08-22),
+    // passed here as barStartsAt/barEndsAt. The detail must show the rollup — matching the bar
+    // and the children — not the stale stored value.
+    const staleParent: task.Task = {
+      ...dueOnly("p"),
+      startAt: "2026-08-12T00:00:00.000Z",
+      dueAt: "2026-08-13T00:00:00.000Z",
+    };
+    render(
+      <TaskDetailPanel
+        task={staleParent}
+        users={[]}
+        canWrite
+        canDelete
+        hasChildren
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+        barStartsAt={"2026-08-05T00:00:00.000Z"}
+        barEndsAt={"2026-08-22T00:00:00.000Z"}
+      />,
+    );
+    // 値(詳細) === バー(rollup) === 子の実データ, NOT the stale stored 08-12/08-13.
+    expect(val("fe4-detail-start")).toBe("2026-08-05");
+    expect(val("fe4-detail-due")).toBe("2026-08-22");
+  });
+
+  it("PARENT with no rolled window falls back to its own columns (no crash, best-available)", () => {
+    const parentNoRoll: task.Task = {
+      ...dueOnly("p"),
+      startAt: "2026-08-12T00:00:00.000Z",
+      dueAt: "2026-08-13T00:00:00.000Z",
+    };
+    render(
+      <TaskDetailPanel
+        task={parentNoRoll}
+        users={[]}
+        canWrite
+        canDelete
+        hasChildren
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+        barStartsAt={null}
+        barEndsAt={null}
+      />,
+    );
+    expect(val("fe4-detail-start")).toBe("2026-08-12");
+    expect(val("fe4-detail-due")).toBe("2026-08-13");
+  });
+
+  it("LEAF still prefers its own start_at over the bar (parent rule does not leak to leaves)", () => {
+    const leaf: task.Task = {
+      ...dueOnly("t1"),
+      startAt: "2026-09-01T00:00:00.000Z",
+      dueAt: "2026-09-15T00:00:00.000Z",
+    };
+    render(
+      <TaskDetailPanel
+        task={leaf}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+        // a different (derived) bar window must NOT override the leaf's explicit columns.
+        barStartsAt={"2026-09-05T00:00:00.000Z"}
+        barEndsAt={"2026-09-20T00:00:00.000Z"}
+      />,
+    );
+    expect(val("fe4-detail-start")).toBe("2026-09-01");
+    expect(val("fe4-detail-due")).toBe("2026-09-15");
+  });
+
   it("no date edit ⇒ the seeded window is NOT written back (clean save, no spurious dates)", () => {
     const onSave = vi.fn();
     render(
