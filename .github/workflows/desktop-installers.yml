@@ -40,8 +40,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout (desktop app only)
+        # Sparse-checkout of just the Flutter app. The full repo cannot be
+        # checked out on Windows: docs/ contains a path with a trailing-space
+        # directory name that is illegal on NTFS (git exit 128). The app is
+        # self-contained (no monorepo path deps), so this is all we need.
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/de1-desktop
+          sparse-checkout-cone-mode: true
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -98,8 +105,13 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout (desktop app only)
+        # Sparse-checkout keeps parity with the Windows job (see note there) and
+        # skips the rest of the monorepo the Flutter shell does not need.
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/de1-desktop
+          sparse-checkout-cone-mode: true
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
