@@ -33,6 +33,9 @@ export interface MyTasksPageProps {
   people: readonly identity.UserSummary[];
   teams: readonly team.Team[];
   events: readonly EventOption[];
+  /** 対象イベントの初期値 for 「タスクを発行」 — the globally header-selected event.
+   *  Passed straight to the create modal; null = start unlinked. */
+  initialEventId?: common.EventId | null;
 }
 
 /**
@@ -41,7 +44,7 @@ export interface MyTasksPageProps {
  * 「すべて」, unified into one list that shows 依頼→担当 (from→to). Create is
  * optimistic (the new task appears instantly, rolls back on error).
  */
-export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPageProps) {
+export function MyTasksPage({ currentUserId, people, teams, events, initialEventId }: MyTasksPageProps) {
   const client = useApiClient();
   const toast = useToast();
 
@@ -135,7 +138,9 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       title: draft.title,
       description: draft.description,
       status: "todo",
-      priority: draft.priority,
+      // 未設定(null) mirrors the server's CreateTaskRequest default so the optimistic
+      // row matches the reconciled task — and the ガント (same task record) agrees.
+      priority: draft.priority ?? "medium",
       assigneeId: draft.assigneeId,
       teamId: draft.teamId,
       createdBy: currentUserId,
@@ -154,7 +159,9 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.eventId ? { eventId: draft.eventId } : {}),
         title: draft.title,
         ...(draft.description !== null ? { description: draft.description } : {}),
-        priority: draft.priority,
+        // Omit when 未設定 so the server applies its "medium" default (both views read
+        // the resulting task, keeping マイタスク and ガント consistent).
+        ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
@@ -259,6 +266,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         teams={teams}
         onCreate={onCreate}
         requesterName={currentUserName}
+        defaultEventId={initialEventId ?? null}
       />
     </section>
   );

@@ -425,8 +425,12 @@ export class MockApiClient implements ApiClient {
   }
 
   // ---- identity ----
+  // With `?ids=` → batch-resolve those users (max 50); with NO ids → the full roster
+  // (listRoster, for the 依頼先 picker). Mirrors the gateway: an unfiltered list is the
+  // member roster, an id-scoped list is a batch resolve.
   private listUsers(idsCsv: string): common.Paginated<identity.UserSummary> {
-    const ids = idsCsv ? idsCsv.split(",") : [];
+    if (!idsCsv) return { items: [...this.users.values()], nextCursor: null };
+    const ids = idsCsv.split(",");
     const items = ids.map((id) => this.users.get(id)).filter((u): u is identity.UserSummary => u !== undefined);
     return { items, nextCursor: null };
   }
