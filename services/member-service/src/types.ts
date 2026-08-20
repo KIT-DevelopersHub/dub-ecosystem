@@ -77,10 +77,32 @@ export interface ParticipationRow {
   status: "submitted";
   matchKind: member.ParticipationMatchKind;
   reviewState: member.ParticipationReviewState;
+  /** 紐付け前スナップショット (JSON, `ParticipationUndoSnapshot`)。link/create 確定時に
+   *  セットし unlink で復元後に null へ戻す。取消可能な行だけ非 null。 */
+  undoSnapshot: string | null;
   submittedBy: common.UserId;
   submittedAt: common.ISODateTime;
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
+}
+
+/** 紐付け(link/create)取消(unlink)用の紐付け前スナップショット。link は対象メンバーの
+ *  紐付け前 PersonRow + team links を、create は作成したメンバー id を保持し、加えて参加届
+ *  自身の元レビュー状態を持つ。undo_snapshot 列に JSON で格納する。 */
+export interface ParticipationUndoSnapshot {
+  action: "link" | "create";
+  /** link のみ: マージ前のメンバー行 (これへ厳密復元する)。 */
+  member?: PersonRow;
+  /** link のみ: マージ前の所属チーム (これへ復元する)。 */
+  teamIds?: string[];
+  /** create のみ: 作成したメンバー id (unlink で撤去する)。 */
+  createdMemberId?: string;
+  /** 参加届の元レビュー状態 (unlink でここへ戻す)。 */
+  prev: {
+    memberId: string | null;
+    reviewState: member.ParticipationReviewState;
+    matchKind: member.ParticipationMatchKind;
+  };
 }
 
 // ---- injected dependencies (enables full HTTP-level tests with fakes) ----
