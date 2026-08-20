@@ -35,6 +35,24 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     }
   }
 
+  // STAGING ONLY. This button is compiled in only when the VITE_DEMO_AUTOLOGIN build flag
+  // is set (staging build). Production builds have it unset ⇒ the button never renders and
+  // the demo path is never invoked; even if it were, the backend /auth/demo-login route
+  // does not exist in production (404). No password/secret lives in the bundle.
+  const demoAutologin = import.meta.env.VITE_DEMO_AUTOLOGIN === "1";
+  async function submitDemo(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.auth.demoLogin();
+      globalThis.location.assign(redirectPath);
+    } catch (e) {
+      setBusy(false);
+      setError(messageFor(e, "デモログインに失敗しました。"));
+    }
+  }
+
   const canSubmit = email.trim().length > 0 && password.length > 0 && !busy;
 
   return (
@@ -95,6 +113,20 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
             ログイン
           </Button>
         </form>
+
+        {demoAutologin ? (
+          <Button
+            className="fe2-login-block"
+            testId="fe2-login-demo"
+            variant="ghost"
+            size="lg"
+            loading={busy}
+            disabled={busy}
+            onClick={() => void submitDemo()}
+          >
+            デモ管理者で入る（staging）
+          </Button>
+        ) : null}
 
         {error ? (
           <p role="alert" data-testid="fe2-login-error" className="fe2-login-error">

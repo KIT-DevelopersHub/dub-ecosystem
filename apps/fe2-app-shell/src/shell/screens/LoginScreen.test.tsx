@@ -68,3 +68,22 @@ describe("LoginScreen — email/password", () => {
     expect(screen.getByTestId("fe2-login-submit")).not.toBeDisabled();
   });
 });
+
+describe("LoginScreen — staging demo one-click login (VITE_DEMO_AUTOLOGIN)", () => {
+  it("hides the demo button by default (production build has no flag)", () => {
+    render(<LoginScreen api={makeApi({})} />);
+    expect(screen.queryByTestId("fe2-login-demo")).toBeNull();
+  });
+
+  it("shows the demo button and one-click signs in when the staging flag is set", async () => {
+    vi.stubEnv("VITE_DEMO_AUTOLOGIN", "1");
+    const demoLogin = vi.fn().mockResolvedValue(undefined);
+    render(<LoginScreen api={makeApi({ demoLogin })} redirectPath="/dashboard" />);
+    const btn = screen.getByTestId("fe2-login-demo");
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    await waitFor(() => expect(demoLogin).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/dashboard"));
+    vi.unstubAllEnvs();
+  });
+});

@@ -92,9 +92,13 @@ jobs:
           echo "fe2=https://dub-fe2-app-shell-staging.${SUB}.workers.dev"   >> "$GITHUB_OUTPUT"
 
       # Build everything; fe2's Vite bundle bakes in the STAGING gateway base URL.
+      # VITE_DEMO_AUTOLOGIN=1 compiles in the one-click demo-login button — STAGING ONLY.
+      # Production builds never set it, so the button is absent from the prod bundle (and
+      # the backend /auth/demo-login route does not exist in prod either).
       - name: Build
         env:
           VITE_API_BASE_URL: ${{ steps.origins.outputs.gateway }}
+          VITE_DEMO_AUTOLOGIN: "1"
         run: pnpm run build
 
       - name: Deploy to staging
