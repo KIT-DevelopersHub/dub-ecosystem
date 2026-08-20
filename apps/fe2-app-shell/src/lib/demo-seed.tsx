@@ -207,6 +207,10 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
+      // Cross-scope, same-team (統括) edge (ADR-0006): tsk_7 (top-level) → tsk_4 (nested
+      // under tsk_1). Visible on load; when tsk_1 is folded, the arrow re-anchors to the
+      // MIDDLE of the tsk_1 parent bar (= a dependency to a child inside it).
+      { id: "tsk_7->tsk_4", fromTaskId: "tsk_7", toTaskId: "tsk_4", type: "FS", lagDays: 0 },
     ],
   },
   evt_3: {
@@ -222,6 +226,13 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
     ],
   },
 };
+
+// In-session task attachments store (file data-URLs / external URLs). Persists for the
+// session so 添付 の 追加→サムネ→再オープンで残る that end-to-end. A reload resets it
+// (demo transport). Mirrors task-service task_attachments; bodies are self-contained
+// data: URLs (same $0 storage path the real feature ships).
+const TASK_ATTACHMENTS: Record<string, task.TaskAttachment[]> = {};
+let attSeq = 0;
 
 // Serve the gantt DTO the way gantt-service does: a work-package (hasChildren) row's OWN
 // startsAt/endsAt are NULL — the span is DERIVED from its children (the client rolls it up
@@ -1130,6 +1141,58 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // Task dependencies (先行タスク＝依存) full replace — mutate the event's gantt deps so the
+  // arrow renders immediately after save (cross-scope deps / ADR-0006). Wire shape reply.
+  if (method === "PUT") {
+    const depId = seg(/^\/api\/v1\/tasks\/([^/]+)\/dependencies$/);
+    if (depId) {
+      const t = TASKS.find((x) => x.id === depId);
+      if (!t) return notFound(`PUT ${pathname}`);
+      const b = (body ?? {}) as Partial<task.ReplaceDependenciesRequest>;
+      const deps = Array.isArray(b.dependsOnIds) ? b.dependsOnIds : [];
+      const ev = String(t.eventId ?? "evt_1");
+      const dto = GANTT[ev];
+      if (dto) {
+        dto.dependencies = dto.dependencies
+          .filter((d) => d.toTaskId !== depId)
+          .concat(deps.map((from) => ({ id: `${from}->${depId}`, fromTaskId: from, toTaskId: depId, type: "FS", lagDays: 0 })));
+      }
+      t.version += 1;
+      return json({ taskId: depId, dependsOnIds: [...deps] });
+    }
+  }
+
+  // Task attachments (task_attachments): list / add / delete. File bodies are self-contained
+  // data: URLs (kind=file); external links are kind=url. Persisted in-session.
+  {
+    const attId = seg(/^\/api\/v1\/tasks\/([^/]+)\/attachments$/);
+    if (attId && method === "GET") return json({ items: TASK_ATTACHMENTS[attId] ?? [] });
+    if (attId && method === "POST") {
+      const b = (body ?? {}) as Partial<task.CreateTaskAttachmentRequest>;
+      const att: task.TaskAttachment = {
+        id: `att_demo_${++attSeq}`,
+        taskId: attId,
+        kind: b.kind === "url" ? "url" : "file",
+        name: b.name ?? "添付",
+        url: b.url ?? "",
+        fileId: (b.fileId ?? null) as task.TaskAttachment["fileId"],
+        mimeType: b.mimeType ?? null,
+        sizeBytes: b.sizeBytes ?? null,
+        createdBy: ME_ID,
+        createdAt: new Date().toISOString(),
+      };
+      (TASK_ATTACHMENTS[attId] ??= []).push(att);
+      return json(att, 201);
+    }
+    const delMatch = /^\/api\/v1\/tasks\/([^/]+)\/attachments\/([^/]+)$/.exec(pathname);
+    if (delMatch && method === "DELETE") {
+      const tid = decodeURIComponent(delMatch[1]!);
+      const aid = decodeURIComponent(delMatch[2]!);
+      TASK_ATTACHMENTS[tid] = (TASK_ATTACHMENTS[tid] ?? []).filter((a) => a.id !== aid);
+      return json(null, 204);
+    }
+  }
+
   if (method === "GET") {
     // events
     if (pathname === "/api/v1/events") return json(page(EVENTS));
@@ -1310,6 +1373,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         if (!t) return notFound(`PATCH ${pathname}`);
         const b = (body ?? {}) as Partial<task.UpdateTaskRequest>;
         if (b.title !== undefined) t.title = b.title;
+        if (b.description !== undefined) t.description = b.description ?? null;
         if (b.status !== undefined) t.status = b.status;
         if (b.priority !== undefined) t.priority = b.priority;
         if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
