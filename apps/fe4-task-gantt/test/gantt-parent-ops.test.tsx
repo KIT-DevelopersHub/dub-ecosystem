@@ -209,7 +209,8 @@ describe("delete is blocked when the task has children (no re-parenting)", () =>
     );
     fireEvent.click(screen.getByTestId("fe4-detail-delete"));
     expect(screen.queryByTestId("fe4-delete-blocked")).toBeNull();
-    fireEvent.click(screen.getByTestId("fe4-confirm-yes"));
+    // Leaf delete confirm is now a ConfirmDialog modal (#375): confirm via its 削除する button.
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 });

@@ -154,12 +154,17 @@ test("3a (#375): parent WITH children is BLOCKED via bottom-right toast (no inli
   await page.screenshot({ path: shot("03a-parent-delete-toast.png"), fullPage: true });
 });
 
-test("3b (#375): leaf WITHOUT children is deletable (confirm shown)", async ({ page }) => {
+test("3b (#375): leaf WITHOUT children is deletable via a MODAL confirm dialog", async ({ page }) => {
   await openGantt(page);
   await page.getByTestId("fe4-gantt-row-tsk_2").click();
   await expect(page.getByTestId("fe4-detail-panel")).toBeVisible();
   await page.getByTestId("fe4-detail-delete").click();
-  await expect(page.getByTestId("fe4-confirm-delete")).toBeVisible();
+  const dialog = page.getByTestId("fe4-confirm-delete");
+  await expect(dialog).toBeVisible();
+  // #375: the confirm is a centered MODAL (@dub/ui ConfirmDialog), NOT the old inline box.
+  await expect(dialog).toHaveAttribute("role", "dialog");
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  expect(await dialog.evaluate((el) => !!el.closest('[data-testid="fe4-detail-panel"]'))).toBe(false); // portaled outside panel
   await expect(page.getByTestId("fe4-delete-blocked")).toHaveCount(0);
   await page.screenshot({ path: shot("03b-leaf-deletable.png"), fullPage: true });
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, IconButton, TextField, Select } from "@dub/ui";
+import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -360,23 +360,24 @@ export function TaskDetailPanel({
           )}
         </div>
 
-        {/* Leaf (no children) delete confirm stays inline; a parent-with-children NEVER
-            reaches here — its 削除 click fires onDeleteBlocked (bottom-right warning toast)
-            instead of any inline block (#375 rework: no more inline block message). */}
-        {confirming && (
-          <div className={styles.confirmBox} data-testid="fe4-confirm-delete">
-            <p className={styles.confirmText}>このタスクを削除しますか？この操作は取り消せません。</p>
-            <div className={styles.panelActions}>
-              <Button variant="danger" onClick={onDelete} testId="fe4-confirm-yes">
-                削除する
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirming(false)} testId="fe4-confirm-no">
-                やめる
-              </Button>
-            </div>
-          </div>
-        )}
       </aside>
+
+      {/* Leaf (no children) delete confirm — a centered MODAL dialog (@dub/ui ConfirmDialog),
+          unified with 運営メンバー削除 etc. The old inline box under the button was easy to
+          miss and kept regressing on merges; a modal is unmissable and lives outside the
+          panel <aside>. A parent-with-children NEVER reaches here — its 削除 fires
+          onDeleteBlocked (bottom-right warning toast), never a confirm. */}
+      <ConfirmDialog
+        open={confirming}
+        title="タスクを削除しますか？"
+        message="このタスクを削除します。この操作は取り消せません。"
+        confirmLabel="削除する"
+        cancelLabel="やめる"
+        danger
+        onConfirm={onDelete}
+        onCancel={() => setConfirming(false)}
+        testId="fe4-confirm-delete"
+      />
     </>
   );
 }
