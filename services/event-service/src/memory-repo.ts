@@ -127,6 +127,10 @@ function cloneDetails(r: EventDetailsRow): EventDetailsRow {
     ...r,
     data: {
       ...r.data,
+      schedule: r.data.schedule.map((s) => ({ ...s })),
+      speakers: r.data.speakers.map((s) => ({ ...s })),
+      sponsors: r.data.sponsors.map((s) => ({ ...s })),
+      checklist: r.data.checklist.map((c) => ({ ...c })),
       links: r.data.links.map((l) => ({ ...l })),
       contacts: r.data.contacts.map((c) => ({ ...c })),
     },

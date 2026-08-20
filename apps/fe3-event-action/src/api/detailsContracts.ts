@@ -11,10 +11,38 @@ export interface EventDetailContact {
   label: string;
   value: string;
 }
+export interface EventScheduleItem {
+  time: string;
+  title: string;
+  note: string;
+}
+export interface EventSpeaker {
+  name: string;
+  role: string;
+  topic: string;
+}
+export interface EventSponsor {
+  name: string;
+  tier: string;
+  status: string;
+}
+export interface EventChecklistItem {
+  label: string;
+  done: boolean;
+}
 export interface EventDetailsData {
   overview: string;
-  memo: string;
   venue: string;
+  access: string;
+  capacity: string;
+  belongings: string;
+  budget: string;
+  operations: string;
+  memo: string;
+  schedule: EventScheduleItem[];
+  speakers: EventSpeaker[];
+  sponsors: EventSponsor[];
+  checklist: EventChecklistItem[];
   links: EventDetailLink[];
   contacts: EventDetailContact[];
 }
@@ -34,8 +62,17 @@ export interface SaveEventDetailsRequest {
 
 export const EMPTY_EVENT_DETAILS_DATA: EventDetailsData = {
   overview: "",
-  memo: "",
   venue: "",
+  access: "",
+  capacity: "",
+  belongings: "",
+  budget: "",
+  operations: "",
+  memo: "",
+  schedule: [],
+  speakers: [],
+  sponsors: [],
+  checklist: [],
   links: [],
   contacts: [],
 };
