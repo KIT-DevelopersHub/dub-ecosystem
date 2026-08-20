@@ -8,7 +8,10 @@ import { extractContext, type RequestContext } from "@dub/http";
 import { newId, nowIso } from "@dub/db";
 import { HEADERS } from "@dub/observability";
 import type { DubEventEnvelope } from "@dub/events";
-import type { task, common, auditLog } from "@dub/types";
+import type { common, auditLog } from "@dub/types";
+// value import: needs the runtime DEPENDENCY_REJECT_REASONS constant (also gives the
+// `task.*` types).
+import { task } from "@dub/types";
 import type { Deps } from "./deps";
 import { taskErrors } from "./errors";
 import { resolvePrincipal, isServiceRole, actorIdOf, type Principal } from "./principal";
@@ -170,6 +173,9 @@ export function buildApp(deps: Deps): Hono {
     if (body.assigneeId !== undefined && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    if (body.teamId !== undefined && body.teamId !== null && typeof body.teamId !== "string") {
+      fe.push({ field: "teamId", reason: "invalid_type" });
+    }
     // eventId is now OPTIONAL (判断44). If present it must be a string; when omitted the
     // task is issued unlinked to any event. Only validate against event-service when set.
     if (body.eventId !== undefined && body.eventId !== null && typeof body.eventId !== "string") {
@@ -206,6 +212,7 @@ export function buildApp(deps: Deps): Hono {
       assigneeId: body.assigneeId ?? null,
       dueAt: body.dueAt ?? null,
       origin: (isServiceRole(principal) ? body.origin : undefined) ?? "internal",
+      teamId: body.teamId ?? null,
       createdBy: actorId,
       now,
     });
@@ -255,6 +262,9 @@ export function buildApp(deps: Deps): Hono {
     if (body.assigneeId !== undefined && body.assigneeId !== null && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    if (body.teamId !== undefined && body.teamId !== null && typeof body.teamId !== "string") {
+      fe.push({ field: "teamId", reason: "invalid_type" });
+    }
     assertValid(fe);
 
     const current = await deps.repo.getById(id);
@@ -293,6 +303,7 @@ export function buildApp(deps: Deps): Hono {
       priority?: task.TaskPriority;
       assigneeId?: common.UserId | null;
       dueAt?: common.ISODateTime | null;
+      teamId?: common.TeamId | null;
     } = {};
     if (body.title !== undefined) patch.title = body.title;
     if (body.description !== undefined) patch.description = body.description;
@@ -300,6 +311,7 @@ export function buildApp(deps: Deps): Hono {
     if (body.priority !== undefined) patch.priority = body.priority;
     if (body.assigneeId !== undefined) patch.assigneeId = body.assigneeId;
     if (body.dueAt !== undefined) patch.dueAt = body.dueAt;
+    if (body.teamId !== undefined) patch.teamId = body.teamId;
 
     if (Object.keys(patch).length === 0) return c.json(current); // version-only no-op
 
@@ -314,7 +326,7 @@ export function buildApp(deps: Deps): Hono {
     const evt = current.eventId ? { eventId: current.eventId } : {};
     const specs: EventSpec[] = [];
     const changed: string[] = [];
-    for (const f of ["title", "description", "priority", "dueAt"] as const) {
+    for (const f of ["title", "description", "priority", "dueAt", "teamId"] as const) {
       if (patch[f] !== undefined && current[f] !== updated[f]) changed.push(f);
     }
     if (changed.length > 0) {
@@ -468,8 +480,31 @@ export function buildApp(deps: Deps): Hono {
     // graph is the bucket's edges with this task's swapped for the requested ones (409
     // on cycle).
     const bucket = current.eventId ?? null;
-    const liveIds = await deps.repo.listLiveTaskIdsByEvent(bucket);
+    const bucketTasks = await deps.repo.listLiveTasksByEvent(bucket);
+    const liveIds = bucketTasks.map((t) => t.id);
     const liveSet = new Set(liveIds);
+
+    // Team gate (cross-scope deps / ADR-0006): a dependency (arrow) may span different
+    // WBS scopes (別階層) but only within the SAME team. `team_id === null` counts as its
+    // own "no team" bucket, so two teamless tasks may still depend (back-compat); a
+    // one-sided null is a mismatch. Cross-team links go through the request/approval flow
+    // instead — never a dependency arrow. We only flag candidates that exist in this
+    // bucket; unknown ids fall through to the gantt-calc `unknownTaskIds` check below.
+    const teamById = new Map(bucketTasks.map((t) => [t.id, t.teamId ?? null]));
+    const currentTeam = current.teamId ?? null;
+    const crossTeamIds = dependsOnIds.filter(
+      (dep) => liveSet.has(dep) && teamById.get(dep) !== currentTeam,
+    );
+    if (crossTeamIds.length > 0) {
+      throw errors.validationFailed(
+        crossTeamIds.map((dep) => ({
+          field: "dependsOnIds",
+          reason: task.DEPENDENCY_REJECT_REASONS.crossTeamNotAllowed,
+          message: `cross-team dependency not allowed: ${dep}`,
+        })),
+      );
+    }
+
     const dependencies: task.TaskDependency[] = (await deps.repo.listDependenciesByEvent(bucket))
       .filter((e) => e.taskId !== id && liveSet.has(e.taskId) && liveSet.has(e.dependsOnId))
       .concat(dependsOnIds.map((dep) => ({ taskId: id, dependsOnId: dep })));

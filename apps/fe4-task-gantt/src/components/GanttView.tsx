@@ -178,23 +178,63 @@ export function GanttView({
   const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
+  // Direct parent of EVERY task (all rows, not just visible), for the mid-anchor walk.
+  const parentOfAll = useMemo(
+    () => new Map(dto.rows.map((r) => [r.taskId, r.parentTaskId ?? null])),
+    [dto.rows],
+  );
+
+  // Resolve a dependency endpoint to a drawable bar. When the endpoint task itself has a
+  // visible bar we use it (edge anchor). When it is hidden because an ancestor is
+  // collapsed, we walk up to the nearest VISIBLE ancestor and anchor at that bar's MIDDLE
+  // — an arrow into the middle of a 2nd-level (parent) bar reads as "a dependency to a
+  // child (3rd-level) under it", so the edge stays legible even while the child is folded.
+  // This is a VISUAL anchor only: CPM /前後関係 is computed over the real child tasks
+  // server-side (dto.criticalTaskIds) and is never derived from these coordinates.
+  const resolveEndpoint = useCallback(
+    (taskId: common.TaskId): { bar: TimelineBar; viaAncestor: boolean } | null => {
+      let cur: common.TaskId | null = taskId;
+      let viaAncestor = false;
+      const seen = new Set<common.TaskId>();
+      while (cur && !seen.has(cur)) {
+        seen.add(cur);
+        const bar = barById.get(cur);
+        if (bar && bar.hasBar) return { bar, viaAncestor };
+        cur = parentOfAll.get(cur) ?? null;
+        viaAncestor = true;
+      }
+      return null;
+    },
+    [barById, parentOfAll],
+  );
+
   const segs = useMemo(() => {
     return dto.dependencies
       .map((d) => {
-        const from = barById.get(d.fromTaskId);
-        const to = barById.get(d.toTaskId);
-        if (!from || !to || !from.hasBar || !to.hasBar) return null;
+        const from = resolveEndpoint(d.fromTaskId);
+        const to = resolveEndpoint(d.toTaskId);
+        if (!from || !to) return null;
+        // Both endpoints folded into the SAME visible ancestor: the edge is internal to a
+        // collapsed subtree — drawing a self-loop on one bar is noise, so skip it.
+        if (from.bar.taskId === to.bar.taskId) return null;
+        const mid = from.viaAncestor || to.viaAncestor;
         return {
           id: d.id,
-          x1: from.x + from.width,
-          y1: from.y + ROW_HEIGHT / 2,
-          x2: to.x,
-          y2: to.y + ROW_HEIGHT / 2,
-          tip: `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
+          // source (predecessor): right edge normally; middle when folded into a parent.
+          x1: from.viaAncestor ? from.bar.x + from.bar.width / 2 : from.bar.x + from.bar.width,
+          y1: from.bar.y + ROW_HEIGHT / 2,
+          // target (successor): left edge normally; middle when folded into a parent, so
+          // the arrowHEAD points at the parent bar's middle (= "depends on a child inside").
+          x2: to.viaAncestor ? to.bar.x + to.bar.width / 2 : to.bar.x,
+          y2: to.bar.y + ROW_HEIGHT / 2,
+          mid,
+          tip:
+            `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}` +
+            (mid ? "（折りたたみ中の子タスク・親バー中間を指しています）" : ""),
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
-  }, [dto.dependencies, barById, titleById]);
+  }, [dto.dependencies, resolveEndpoint, titleById]);
 
   // Faint enclosing band drawn behind an open parent + its (contiguous) children,
   // so the parent-child grouping reads as a container — distinct from the arrows,
@@ -561,7 +601,15 @@ export function GanttView({
                       const midX = Math.max(s.x1 + 10, s.x2 - 10);
                       const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
                       return (
-                        <path key={s.id} d={d} fill="none" className={styles.tlDep} markerEnd="url(#fe4-arrow)" data-testid={`fe4-gantt-dep-${s.id}`}>
+                        <path
+                          key={s.id}
+                          d={d}
+                          fill="none"
+                          className={styles.tlDep}
+                          markerEnd="url(#fe4-arrow)"
+                          data-testid={`fe4-gantt-dep-${s.id}`}
+                          data-mid-anchor={s.mid ? "true" : undefined}
+                        >
                           <title>{s.tip}</title>
                         </path>
                       );

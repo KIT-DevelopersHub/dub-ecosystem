@@ -31,6 +31,7 @@ export class InMemoryTaskRepo implements TaskRepo {
       assigneeId: input.assigneeId,
       dueAt: input.dueAt,
       origin: input.origin,
+      teamId: input.teamId ?? null,
       version: 1,
       archivedAt: null,
       createdAt: input.now,
@@ -86,6 +87,7 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (patch.priority !== undefined) r.priority = patch.priority;
     if (patch.assigneeId !== undefined) r.assigneeId = patch.assigneeId;
     if (patch.dueAt !== undefined) r.dueAt = patch.dueAt;
+    if (patch.teamId !== undefined) r.teamId = patch.teamId;
     r.version += 1;
     r.updatedAt = now;
     return true;
@@ -123,10 +125,12 @@ export class InMemoryTaskRepo implements TaskRepo {
       .map((d) => ({ ...d }));
   }
 
-  async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
+  async listLiveTasksByEvent(
+    eventId: string | null,
+  ): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>> {
     return [...this.rows.values()]
       .filter((r) => (r.eventId ?? null) === eventId && r.archivedAt === null)
-      .map((r) => r.id);
+      .map((r) => ({ id: r.id, teamId: r.teamId ?? null }));
   }
 
   async replaceDependencies(

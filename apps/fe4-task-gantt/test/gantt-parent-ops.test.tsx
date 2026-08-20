@@ -102,9 +102,9 @@ describe("#39-3 parent detail shows the child count", () => {
         onDelete={() => {}}
         onClose={() => {}}
         scopeTasks={[
-          { id: "p", title: "設計フェーズ", parentTaskId: null },
-          { id: "c1", title: "子1", parentTaskId: "p" },
-          { id: "c2", title: "子2", parentTaskId: "p" },
+          { id: "p", title: "設計フェーズ", parentTaskId: null, teamId: null },
+          { id: "c1", title: "子1", parentTaskId: "p", teamId: null },
+          { id: "c2", title: "子2", parentTaskId: "p", teamId: null },
         ]}
       />,
     );
@@ -123,7 +123,7 @@ describe("#39-3 parent detail shows the child count", () => {
         onSave={() => {}}
         onDelete={() => {}}
         onClose={() => {}}
-        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null }]}
+        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null, teamId: null }]}
       />,
     );
     expect(screen.queryByTestId("fe4-detail-child-count")).toBeNull();
