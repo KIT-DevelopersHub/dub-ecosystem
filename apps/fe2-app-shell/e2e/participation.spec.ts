@@ -166,3 +166,47 @@ test("(g) 追加する: 自動候補なし → 名簿から手動検索 → 招�
   await expect(page.getByTestId("members-orgchip-member_3")).not.toContainText("打診中");
   await page.screenshot({ path: shot("14-orgchart-manual-linked.png"), fullPage: true });
 });
+
+test("(h) 追加する→紐付け取消(undo): 結合で在籍へ昇格し情報が増え、取消で紐付け前(招待中)へ戻る", async ({ page }) => {
+  await page.goto("/participation/list");
+  await expect(page.getByTestId("participation-list-table")).toBeVisible();
+
+  // seed_3「田村 未」は未処理・招待中 member_6 と氏名一致 → 結合(link)。
+  await page.getByTestId("participation-add-part_seed_3").click();
+  await expect(page.getByTestId("participation-resolve-dialog")).toBeVisible();
+  await page.getByTestId("participation-link-member_6").click();
+  await expect(page.getByTestId("participation-reviewstate-part_seed_3")).toHaveText(/追加済/);
+  // 反映済みになると「紐付けを取り消す」導線が出る (canUnlink)。
+  await expect(page.getByTestId("participation-unlink-part_seed_3")).toBeVisible();
+  await page.screenshot({ path: shot("15-after-link-has-undo.png"), fullPage: true });
+
+  // 組織図: 結合で在籍へ昇格 (打診中バッジ消滅) = 情報が増えた状態。
+  await gotoMembersOrgInApp(page);
+  await expect(page.getByTestId("members-orgchart").getByText("田村 未")).toHaveCount(1);
+  await expect(page.getByTestId("members-orgchip-member_6")).not.toContainText("打診中");
+  await page.screenshot({ path: shot("16-orgchart-linked-before-undo.png"), fullPage: true });
+
+  // 回答一覧へ client-side history で戻る (page.goto はデモ store を再seedして反映を失うため使わない)。
+  await page.goBack();
+  await expect(page.getByTestId("participation-list-table")).toBeVisible();
+  // store が保持されている証拠: 紐付けはまだ「追加済」。
+  await expect(page.getByTestId("participation-reviewstate-part_seed_3")).toHaveText(/追加済/);
+
+  // 紐付けを取り消す (undo)。
+  await page.getByTestId("participation-unlink-part_seed_3").click();
+  const confirm = page.getByTestId("participation-unlink-confirm");
+  await expect(confirm).toBeVisible();
+  await page.screenshot({ path: shot("17-unlink-confirm.png"), fullPage: true });
+  await confirm.getByRole("button", { name: "紐付けを取り消す" }).click();
+  // 紐付け前へ: 未処理へ戻り、取消ボタンは消え「追加する」が復活する。
+  await expect(page.getByTestId("participation-reviewstate-part_seed_3")).toHaveText(/未処理/);
+  await expect(page.getByTestId("participation-unlink-part_seed_3")).toHaveCount(0);
+  await expect(page.getByTestId("participation-add-part_seed_3")).toBeVisible();
+  await page.screenshot({ path: shot("18-after-undo.png"), fullPage: true });
+
+  // 組織図: 田村 未 は依然1つ (重複なし) だが、打診中バッジが復活 = 紐付け前へ戻った。
+  await gotoMembersOrgInApp(page);
+  await expect(page.getByTestId("members-orgchart").getByText("田村 未")).toHaveCount(1);
+  await expect(page.getByTestId("members-orgchip-member_6")).toContainText("打診中");
+  await page.screenshot({ path: shot("19-orgchart-after-undo.png"), fullPage: true });
+});

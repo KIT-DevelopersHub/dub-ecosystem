@@ -127,6 +127,8 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     status: r.status,
     matchKind: r.matchKind,
     reviewState: r.reviewState,
+    // 取消可能なのは、紐付け前スナップショットを保持した反映済み(added)行だけ。
+    canUnlink: r.reviewState === "added" && r.undoSnapshot != null,
     submittedBy: r.submittedBy,
     submittedAt: r.submittedAt,
     createdAt: r.createdAt,

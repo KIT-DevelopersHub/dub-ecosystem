@@ -3,7 +3,7 @@
 // thin adapter. member_teams is the source of truth for the shared Team entity.
 import { DubError, errors } from "@dub/errors";
 import type { common, member } from "@dub/types";
-import type { AppDeps, ParticipationRow, PersonRow, TeamRow } from "./types";
+import type { AppDeps, ParticipationRow, ParticipationUndoSnapshot, PersonRow, TeamRow } from "./types";
 import {
   composeName,
   isDesiredActivity,
@@ -34,6 +34,12 @@ const errPersonNotFound = (id: string): DubError =>
   new DubError("MEMBER_NOT_FOUND", `Member not found: ${id}`, { status: 404 });
 const errParticipationNotFound = (id: string): DubError =>
   new DubError("MEMBER_PARTICIPATION_NOT_FOUND", `Participation not found: ${id}`, { status: 404 });
+const errParticipationNotUnlinkable = (id: string): DubError =>
+  new DubError(
+    "MEMBER_PARTICIPATION_NOT_UNLINKABLE",
+    `Participation ${id} has no reversible link to undo`,
+    { status: 409, details: [{ field: "action", reason: "not_unlinkable" }] },
+  );
 
 function name(value: unknown, field = "name"): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -370,6 +376,8 @@ export class MemberService {
       // matchKind は未処理時は意味を持たない placeholder（reviewState で表示制御）。
       matchKind: existing?.matchKind ?? "created_new",
       reviewState: existing?.reviewState ?? "pending",
+      // 反映済み(added)行の再提出では取消スナップショットを保持（再提出で取消不能にしない）。
+      undoSnapshot: existing?.undoSnapshot ?? null,
       submittedBy: ctx.userId,
       submittedAt: now,
       createdAt: existing?.createdAt ?? now,
@@ -449,8 +457,11 @@ export class MemberService {
     const action = (body as { action?: unknown } | null)?.action;
     const now = this.deps.now();
 
+    if (action === "unlink") return this.unlinkParticipation(p, now);
+
     if (action === "skip") {
-      const row: ParticipationRow = { ...p, memberId: null, reviewState: "skipped", updatedAt: now };
+      // 対象外は紐付けではないので取消スナップショットは持たない（あれば破棄）。
+      const row: ParticipationRow = { ...p, memberId: null, reviewState: "skipped", undoSnapshot: null, updatedAt: now };
       await this.deps.repo.upsertParticipation(row);
       return { participation: toParticipation(row), member: null };
     }
@@ -474,12 +485,20 @@ export class MemberService {
           { status: 409, details: [{ field: "memberId", reason: "already_linked", message: clash.id }] },
         );
       }
+      // 取消(unlink)のため、マージ前のメンバー行＋所属チーム＋参加届の元レビュー状態を控える。
+      const snapshot: ParticipationUndoSnapshot = {
+        action: "link",
+        member: { ...target },
+        teamIds: await this.currentTeamIds(target.id),
+        prev: { memberId: p.memberId, reviewState: p.reviewState, matchKind: p.matchKind },
+      };
       const resolved = await this.promoteFromParticipation(target, p, expectedVersion);
       const row: ParticipationRow = {
         ...p,
         memberId: resolved.id,
         matchKind: "linked_existing",
         reviewState: "added",
+        undoSnapshot: JSON.stringify(snapshot),
         updatedAt: now,
       };
       await this.deps.repo.upsertParticipation(row);
@@ -488,11 +507,18 @@ export class MemberService {
 
     if (action === "create") {
       const resolved = await this.createMemberFromParticipation(ctx, p);
+      // 取消(unlink)では、作成したメンバーを撤去して参加届を pending へ戻す。
+      const snapshot: ParticipationUndoSnapshot = {
+        action: "create",
+        createdMemberId: resolved.id,
+        prev: { memberId: p.memberId, reviewState: p.reviewState, matchKind: p.matchKind },
+      };
       const row: ParticipationRow = {
         ...p,
         memberId: resolved.id,
         matchKind: "created_new",
         reviewState: "added",
+        undoSnapshot: JSON.stringify(snapshot),
         updatedAt: now,
       };
       await this.deps.repo.upsertParticipation(row);
@@ -500,6 +526,48 @@ export class MemberService {
     }
 
     throw errors.validationFailed([{ field: "action", reason: "invalid" }]);
+  }
+
+  /** 紐付け(link/create)を取り消し、紐付け前の状態へ戻す。link はスナップショットから
+   *  メンバーを厳密復元（結合で足した空欄補完・チーム追加・在籍昇格を撤回）、create は
+   *  作成したメンバーを撤去。参加届は元のレビュー状態(通常 pending)へ戻す。取消可能なのは
+   *  スナップショットを持つ added 行だけ（過去の自動反映行や skip は 409）。 */
+  private async unlinkParticipation(p: ParticipationRow, now: string): Promise<member.ResolveParticipationResponse> {
+    if (p.reviewState !== "added" || !p.undoSnapshot) throw errParticipationNotUnlinkable(p.id);
+    let snapshot: ParticipationUndoSnapshot;
+    try {
+      snapshot = JSON.parse(p.undoSnapshot) as ParticipationUndoSnapshot;
+    } catch {
+      throw errParticipationNotUnlinkable(p.id);
+    }
+
+    let restored: member.Member | null = null;
+    if (snapshot.action === "link" && snapshot.member) {
+      // マージ前の値へ復元。現在版数の上に version を1つ進めて楽観ロック連鎖を保つ
+      // (link〜unlink 間に他者編集があってもここで snapshot 値へ巻き戻す＝「元に戻す」)。
+      const cur = await this.deps.repo.getPerson(snapshot.member.id);
+      if (cur) {
+        const next: PersonRow = { ...snapshot.member, version: cur.version + 1, updatedAt: now };
+        const ok = await this.deps.repo.updatePerson(next, cur.version, snapshot.teamIds ?? []);
+        if (!ok) throw errVersionConflict(snapshot.member.id);
+        restored = toMember(next, snapshot.teamIds ?? []);
+      }
+    } else if (snapshot.action === "create" && snapshot.createdMemberId) {
+      // 作成したメンバーを撤去（archive）。既に手で消えていても無害。
+      const cur = await this.deps.repo.getPerson(snapshot.createdMemberId);
+      if (cur) await this.deps.repo.archivePerson(snapshot.createdMemberId);
+    }
+
+    const row: ParticipationRow = {
+      ...p,
+      memberId: snapshot.prev.memberId,
+      reviewState: snapshot.prev.reviewState,
+      matchKind: snapshot.prev.matchKind,
+      undoSnapshot: null,
+      updatedAt: now,
+    };
+    await this.deps.repo.upsertParticipation(row);
+    return { participation: toParticipation(row), member: restored };
   }
 
   /** desiredTeamId が今も実在すれば返す (削除済みは無視)。link/create 時の結合に使う。 */

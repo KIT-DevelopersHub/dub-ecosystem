@@ -1812,7 +1812,7 @@ function createMembersStore() {
       grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
       schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
       desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
-      matchKind: "linked_existing", reviewState: "added", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      matchKind: "linked_existing", reviewState: "added", undoSnapshot: null, canUnlink: false, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
     {
       // 未処理・招待中に該当なし → 「追加する」で新規追加フローを確認できる。
@@ -1822,7 +1822,7 @@ function createMembersStore() {
       grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
-      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      matchKind: "created_new", reviewState: "pending", undoSnapshot: null, canUnlink: false, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
     {
       // 未処理・招待中の「田村 未」(member_6) と氏名一致 → 「追加する」で候補提示→結合(link)を確認できる。
@@ -1832,7 +1832,7 @@ function createMembersStore() {
       grade: "1", department: "情報工学科", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
-      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      matchKind: "created_new", reviewState: "pending", undoSnapshot: null, canUnlink: false, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
     {
       // 未処理・招待中「鈴木 一郎」(member_3) の漢字違い「一朗」＋別メール → 自動一致には出ない。
@@ -1843,11 +1843,17 @@ function createMembersStore() {
       grade: "1", department: "メディア情報学科", contact: "suzuki.i@school.ac.jp", phone: "070-7777-8888",
       schoolEmail: "suzuki.i@school.ac.jp", gmail: "suzuki.ichiro@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: "広報を手伝いたいです。", status: "submitted",
-      matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
+      matchKind: "created_new", reviewState: "pending", undoSnapshot: null, canUnlink: false, submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
   ];
 
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
+
+  // Serialize a 参加届 for the wire: drop the internal取消スナップショット, keep canUnlink.
+  const pubPart = (p: any): any => {
+    const { undoSnapshot: _drop, ...rest } = p;
+    return { ...rest, canUnlink: !!p.canUnlink };
+  };
 
   const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
@@ -1978,6 +1984,7 @@ function createMembersStore() {
         schoolEmail: String(body?.schoolEmail ?? ""), gmail: String(body?.gmail ?? ""),
         desiredTeamId: body?.desiredTeamId ?? null, desiredActivity: body?.desiredActivity ?? null, note: body?.note ?? null,
         status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
+        undoSnapshot: existing?.undoSnapshot ?? null, canUnlink: existing?.canUnlink ?? false,
         submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
       };
       if (existing) participations[participations.indexOf(existing)] = participation;
@@ -2006,12 +2013,12 @@ function createMembersStore() {
     // Authenticated submit (back-compat): participation echo, member は反映前なので null。
     if (method === "POST" && pathname === "/api/v1/members/participation") {
       const { participation } = recordParticipation();
-      return json({ participation, member: null, matchKind: participation.matchKind }, 201);
+      return json({ participation: pubPart(participation), member: null, matchKind: participation.matchKind }, 201);
     }
 
     // 運営専用の回答一覧 (identity:read はデモでは全許可)。最新順で返す。
     if (method === "GET" && pathname === "/api/v1/members/participation") {
-      return json({ participations: participations.map((p) => ({ ...p })) });
+      return json({ participations: participations.map(pubPart) });
     }
 
     // 突合候補 (招待中/検討中で 氏名正規化 or 学校メール/Gmail 一致)。
@@ -2042,7 +2049,7 @@ function createMembersStore() {
       const action = body?.action;
       if (action === "skip") {
         p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
-        return json({ participation: { ...p }, member: null });
+        return json({ participation: pubPart(p), member: null });
       }
       if (action === "link") {
         const mem = members.find((m) => m.id === body?.memberId);
@@ -2050,16 +2057,32 @@ function createMembersStore() {
         // 二重紐付け防止: 同一メンバーが別の参加届に反映済みなら 409。
         const clash = participations.find((o) => o.id !== p.id && o.memberId === mem.id && o.reviewState === "added");
         if (clash) return json({ error: { code: "MEMBER_PARTICIPATION_ALREADY_LINKED", message: "already linked", retryable: false } }, 409);
+        // 取消(unlink)のため、マージ前のメンバー行(所属チーム含む)＋参加届の元状態を控える。
+        const snapshot = {
+          action: "link",
+          member: { ...mem, teamIds: [...mem.teamIds] },
+          prev: { memberId: p.memberId, reviewState: p.reviewState, matchKind: p.matchKind },
+        };
         if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
         if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
+        // 非破壊マージ: 空欄のみ補完 (既存優先)。参加届の全項目で名簿情報を充実させる。
         if (mem.contact === null) mem.contact = p.schoolEmail;
         if (mem.schoolEmail === null && p.schoolEmail) mem.schoolEmail = p.schoolEmail;
         if (mem.gmail === null && p.gmail) mem.gmail = p.gmail;
         if (mem.department === null && p.department) mem.department = p.department;
         if (mem.grade === null && p.grade) mem.grade = p.grade;
+        if (mem.phone === null && p.phone) mem.phone = p.phone;
+        if (mem.lastName === null && p.lastName) mem.lastName = p.lastName;
+        if (mem.firstName === null && p.firstName) mem.firstName = p.firstName;
+        if (mem.lastNameKana === null && p.lastNameKana) mem.lastNameKana = p.lastNameKana;
+        if (mem.firstNameKana === null && p.firstNameKana) mem.firstNameKana = p.firstNameKana;
+        if (mem.lastNameRomaji === null && p.lastNameRomaji) mem.lastNameRomaji = p.lastNameRomaji;
+        if (mem.firstNameRomaji === null && p.firstNameRomaji) mem.firstNameRomaji = p.firstNameRomaji;
+        if (mem.note === null && p.note) mem.note = p.note;
         mem.version += 1; mem.updatedAt = isoNow();
-        p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
-        return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
+        p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added";
+        p.undoSnapshot = snapshot; p.canUnlink = true; p.updatedAt = isoNow();
+        return json({ participation: pubPart(p), member: { ...mem, teamIds: [...mem.teamIds] } });
       }
       if (action === "create") {
         const created: DemoMember = {
@@ -2071,8 +2094,33 @@ function createMembersStore() {
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(created);
-        p.memberId = created.id; p.matchKind = "created_new"; p.reviewState = "added"; p.updatedAt = isoNow();
-        return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
+        p.memberId = created.id; p.matchKind = "created_new"; p.reviewState = "added";
+        // 取消(unlink)で作成したメンバーを撤去できるよう控える。
+        p.undoSnapshot = { action: "create", createdMemberId: created.id, prev: { memberId: null, reviewState: "pending", matchKind: p.matchKind } };
+        p.canUnlink = true; p.updatedAt = isoNow();
+        return json({ participation: pubPart(p), member: { ...created, teamIds: [...created.teamIds] } });
+      }
+      // 紐付け(link/create)取消 — 紐付け前へ厳密復元 (結合で足した情報も撤回)。
+      if (action === "unlink") {
+        if (p.reviewState !== "added" || !p.undoSnapshot) {
+          return json({ error: { code: "MEMBER_PARTICIPATION_NOT_UNLINKABLE", message: "no reversible link", retryable: false } }, 409);
+        }
+        const snap = p.undoSnapshot;
+        let restored: DemoMember | null = null;
+        if (snap.action === "link" && snap.member) {
+          const mem = members.find((m) => m.id === snap.member.id);
+          if (mem) {
+            const nextVersion = mem.version + 1;
+            Object.assign(mem, snap.member, { teamIds: [...(snap.member.teamIds ?? [])], version: nextVersion, updatedAt: isoNow() });
+            restored = { ...mem, teamIds: [...mem.teamIds] };
+          }
+        } else if (snap.action === "create" && snap.createdMemberId) {
+          const idx = members.findIndex((m) => m.id === snap.createdMemberId);
+          if (idx >= 0) members.splice(idx, 1);
+        }
+        p.memberId = snap.prev.memberId; p.reviewState = snap.prev.reviewState; p.matchKind = snap.prev.matchKind;
+        p.undoSnapshot = null; p.canUnlink = false; p.updatedAt = isoNow();
+        return json({ participation: pubPart(p), member: restored });
       }
       return json({ error: { code: "VALIDATION_FAILED", message: "invalid action", retryable: false } }, 400);
     }
