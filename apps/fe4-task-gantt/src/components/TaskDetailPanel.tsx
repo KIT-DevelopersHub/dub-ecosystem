@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, Modal, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
+import { Button, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -167,39 +167,22 @@ export function TaskDetailPanel({
   };
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title="タスクの詳細"
-      size="lg"
-      testId="fe4-detail-panel"
-      footer={
-        <div className={styles.modalFooter}>
-          {canDelete && !confirming && (
-            <Button
-              variant="danger"
-              // A task with children cannot be deleted (it would orphan them). Hand the block
-              // to the host as a bottom-right warning toast (#375) instead of confirming.
-              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
-              testId="fe4-detail-delete"
-            >
-              削除
-            </Button>
-          )}
+    <>
+      {/* 判断65: タスク詳細はモーダルでなく右サイドパネル（PR#373のモーダル化を差し戻し）。
+          削除確認は別物としてモーダル(ConfirmDialog)のまま。 */}
+      <div className={styles.panelScrim} onClick={onClose} data-testid="fe4-detail-scrim" aria-hidden />
+      <aside className={styles.panel} data-testid="fe4-detail-panel" aria-label="タスク詳細">
+        <div className={styles.panelHeader}>
+          <div className={styles.panelHeadInfo}>
+            <TaskStatusBadge status={t.status} />
+            <h2 className={styles.panelTitle}>タスクの詳細</h2>
+          </div>
           <Button variant="ghost" onClick={onClose} testId="fe4-detail-close">
             閉じる
           </Button>
-          <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
-            保存
-          </Button>
-        </div>
-      }
-    >
-      <div className={styles.detailPanelBody} aria-label="タスク詳細">
-        <div className={styles.panelHeadInfo}>
-          <TaskStatusBadge status={t.status} />
         </div>
 
+        <div className={styles.detailPanelBody} aria-label="タスク詳細">
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-detail-title">
             タイトル
@@ -210,22 +193,6 @@ export function TaskDetailPanel({
               {fieldErrors.title}
             </span>
           )}
-        </div>
-
-        {/* 内容: free-text body/notes captured on the task (optimistic save + toast). */}
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-detail-description">
-            内容
-          </label>
-          <Textarea
-            id="fe4-detail-description"
-            value={description}
-            disabled={!canWrite}
-            onChange={setDescription}
-            rows={4}
-            placeholder="タスクの背景・手順・補足などを書けます"
-            testId="fe4-detail-description"
-          />
         </div>
 
         <div className={styles.formRow}>
@@ -393,24 +360,58 @@ export function TaskDetailPanel({
           </div>
         )}
 
-        {/* 添付（ファイル・URL）: upload/add, list, download/open, delete. */}
-        <TaskAttachmentsEditor taskId={t.id} canWrite={canWrite} />
+        {/* 内容（本文）＋添付 — メール作成のように本文の“中/直下”にファイル・画像を添付できる
+            （画像はインラインプレビュー）。判断65: 先行タスクの下＝パネル最下部に配置。 */}
+        <div className={`${styles.formField} ${styles.contentCompose}`} data-testid="fe4-detail-content">
+          <label className={styles.formLabel} htmlFor="fe4-detail-description">
+            内容
+          </label>
+          <Textarea
+            id="fe4-detail-description"
+            value={description}
+            disabled={!canWrite}
+            onChange={setDescription}
+            rows={6}
+            placeholder="タスクの背景・手順・補足などを書けます（下にファイル/画像を添付できます）"
+            testId="fe4-detail-description"
+          />
+          {/* メール風: 本文の直下に添付を貼り付け（画像はサムネのインラインプレビュー）。 */}
+          <TaskAttachmentsEditor taskId={t.id} canWrite={canWrite} />
+        </div>
+        </div>
 
-        {/* Leaf (no children) delete confirm — a ConfirmDialog modal (#375), unified with
-            運営メンバー削除 etc. A parent-with-children NEVER reaches here — its 削除 fires
-            onDeleteBlocked (bottom-right warning toast), never a confirm. */}
-        <ConfirmDialog
-          open={confirming}
-          title="タスクを削除しますか？"
-          message="このタスクを削除します。この操作は取り消せません。"
-          confirmLabel="削除する"
-          cancelLabel="やめる"
-          danger
-          onConfirm={onDelete}
-          onCancel={() => setConfirming(false)}
-          testId="fe4-confirm-delete"
-        />
-      </div>
-    </Modal>
+        <div className={styles.panelActions}>
+          <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
+            保存
+          </Button>
+          {canDelete && !confirming && (
+            <Button
+              variant="danger"
+              // A task with children cannot be deleted (it would orphan them). Hand the block
+              // to the host as a bottom-right warning toast (#375) instead of confirming.
+              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
+              testId="fe4-detail-delete"
+            >
+              削除
+            </Button>
+          )}
+        </div>
+      </aside>
+
+      {/* Leaf (no children) delete confirm — a ConfirmDialog MODAL (#375; a modal even
+          though the detail itself is now a sidebar — it's a separate concern). A
+          parent-with-children never reaches here (its 削除 fires onDeleteBlocked toast). */}
+      <ConfirmDialog
+        open={confirming}
+        title="タスクを削除しますか？"
+        message="このタスクを削除します。この操作は取り消せません。"
+        confirmLabel="削除する"
+        cancelLabel="やめる"
+        danger
+        onConfirm={onDelete}
+        onCancel={() => setConfirming(false)}
+        testId="fe4-confirm-delete"
+      />
+    </>
   );
 }

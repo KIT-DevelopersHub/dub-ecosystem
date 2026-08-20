@@ -513,18 +513,30 @@ export function GanttView({
         const fromAgg = fromId !== d.fromTaskId;
         const toAgg = toId !== d.toTaskId;
         const mid = fromAgg || toAgg;
+        // 判断65: when the arrow lands on a folded parent bar, approach it VERTICALLY from
+        // above or below and touch the bar's top/bottom edge at its horizontal middle,
+        // instead of piercing the bar horizontally. The head then points down (from above)
+        // or up (from below) ONTO the bar. Non-folded FS edges keep the left-edge approach.
+        const fromCenterY = from.y + ROW_HEIGHT / 2;
+        const toBarTop = to.y + (ROW_HEIGHT - BAR_HEIGHT) / 2;
+        const toBarBottom = to.y + (ROW_HEIGHT + BAR_HEIGHT) / 2;
+        const fromAbove = fromCenterY <= to.y + ROW_HEIGHT / 2;
         return {
           id: d.id,
           // predecessor: right edge normally; parent-bar middle when folded up.
           x1: fromAgg ? from.x + from.width / 2 : from.x + from.width,
-          y1: from.y + ROW_HEIGHT / 2,
-          // successor: left edge normally; parent-bar middle when folded up (arrowhead → middle).
+          y1: fromCenterY,
+          // successor: left edge normally; parent-bar middle when folded up.
           x2: toAgg ? to.x + to.width / 2 : to.x,
           y2: to.y + ROW_HEIGHT / 2,
+          // vertical drop onto the folded parent bar (top edge when the source is above,
+          // bottom edge when below), so the head meets the bar edge — never pierces it.
+          dropOntoBar: toAgg,
+          dropEdgeY: fromAbove ? toBarTop : toBarBottom,
           aggregated: mid,
           mid,
           tip: mid
-            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の子タスク・親バー中間を指しています）`
+            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の子タスク・親バー上辺/下辺を指しています）`
             : `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
@@ -1155,8 +1167,12 @@ export function GanttView({
                       </marker>
                     </defs>
                     {segs.map((s) => {
-                      const midX = Math.max(s.x1 + 10, s.x2 - 10);
-                      const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
+                      // Folded-parent target → run to the bar's horizontal middle then drop
+                      // VERTICALLY onto its top/bottom edge (head meets the edge, no pierce).
+                      // Normal FS target → the classic elbow into the left edge.
+                      const d = s.dropOntoBar
+                        ? `M ${s.x1} ${s.y1} H ${s.x2} V ${s.dropEdgeY}`
+                        : `M ${s.x1} ${s.y1} H ${Math.max(s.x1 + 10, s.x2 - 10)} V ${s.y2} H ${s.x2}`;
                       const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
                       return (
                         <path
