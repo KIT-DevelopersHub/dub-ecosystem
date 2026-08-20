@@ -234,6 +234,30 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
 const TASK_ATTACHMENTS: Record<string, task.TaskAttachment[]> = {};
 let attSeq = 0;
 
+// In-session per-event detail store (イベント詳細ハブの "何でも貯める" — overview/memo/venue
+// /links/contacts). GET returns defaults (version 0) until first save; PUT bumps version.
+// Mirrors event-service /events/:id/details. A reload resets it (demo transport).
+interface DemoEventDetailsData {
+  overview: string;
+  memo: string;
+  venue: string;
+  links: { label: string; url: string }[];
+  contacts: { label: string; value: string }[];
+}
+interface DemoEventDetails {
+  eventId: string;
+  data: DemoEventDetailsData;
+  version: number;
+  updatedAt: string | null;
+}
+const EVENT_DETAILS: Record<string, DemoEventDetails> = {};
+const emptyEventDetails = (eventId: string): DemoEventDetails => ({
+  eventId,
+  data: { overview: "", memo: "", venue: "", links: [], contacts: [] },
+  version: 0,
+  updatedAt: null,
+});
+
 // Serve the gantt DTO the way gantt-service does: a work-package (hasChildren) row's OWN
 // startsAt/endsAt are NULL — the span is DERIVED from its children (the client rolls it up
 // for the bar AND the parent's detail 開始/終了). Echoing a parent's stored dates here would
@@ -1190,6 +1214,25 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const aid = decodeURIComponent(delMatch[2]!);
       TASK_ATTACHMENTS[tid] = (TASK_ATTACHMENTS[tid] ?? []).filter((a) => a.id !== aid);
       return json(null, 204);
+    }
+  }
+
+  // Event detail store (イベント詳細ハブ): GET returns the free-form store (defaults until
+  // saved), PUT persists it (LWW version bump). "何でも貯める" per-event notes.
+  {
+    const evId = seg(/^\/api\/v1\/events\/([^/]+)\/details$/);
+    if (evId && method === "GET") return json(EVENT_DETAILS[evId] ?? emptyEventDetails(evId));
+    if (evId && method === "PUT") {
+      const b = (body ?? {}) as { data?: DemoEventDetailsData; version?: number };
+      const cur = EVENT_DETAILS[evId] ?? emptyEventDetails(evId);
+      const next: DemoEventDetails = {
+        eventId: evId,
+        data: b.data ?? cur.data,
+        version: cur.version + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      EVENT_DETAILS[evId] = next;
+      return json(next);
     }
   }
 
