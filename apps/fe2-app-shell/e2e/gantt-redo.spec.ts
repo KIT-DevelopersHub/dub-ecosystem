@@ -62,11 +62,17 @@ test("5 (#369): expanded parent shows a bordered/tinted enclosure zone", async (
   await page.waitForTimeout(400);
   const encl = page.getByTestId("fe4-gantt-group-tsk_1");
   await expect(encl).toBeVisible();
-  const border = await encl.evaluate((el) => getComputedStyle(el).borderTopWidth);
-  const bg = await encl.evaluate((el) => getComputedStyle(el).backgroundColor);
-  console.log(`[#369 enclosure] borderTopWidth=${border} background=${bg}`);
-  expect(parseFloat(border)).toBeGreaterThan(0); // has a visible border
-  expect(bg).not.toBe("rgba(0, 0, 0, 0)"); // has a tint (not transparent)
+  const s = await encl.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const rail = getComputedStyle(el, "::before");
+    return { border: cs.borderTopWidth, radius: cs.borderTopLeftRadius, bgImage: cs.backgroundImage, shadow: cs.boxShadow, railW: rail.width };
+  });
+  console.log(`[#369 enclosure] border=${s.border} radius=${s.radius} bgImage=${s.bgImage.slice(0, 40)} rail=${s.railW}`);
+  // #369 rework: crisp solid border (>=1.5px) + rounded card + header-lane GRADIENT fill + accent rail.
+  expect(parseFloat(s.border)).toBeGreaterThanOrEqual(1); // CSS is 1.5px; Chromium computed rounds to 1px
+  expect(parseFloat(s.radius)).toBeGreaterThan(0);
+  expect(s.bgImage).toContain("gradient");
+  expect(parseFloat(s.railW)).toBeGreaterThan(0); // left accent rail present
   await page.screenshot({ path: shot("05-parent-enclosure.png"), fullPage: true });
 });
 
@@ -133,17 +139,19 @@ test("2 (#376): drag leaf bar → no error + detail refetch; child extend rolls 
   await page.screenshot({ path: shot("02b-parent-rollup-detail.png"), fullPage: true });
 });
 
-test("3a (#375): parent WITH children is BLOCKED from delete", async ({ page }) => {
+test("3a (#375): parent WITH children is BLOCKED via bottom-right toast (no inline)", async ({ page }) => {
   await openGantt(page);
   await page.getByTestId("fe4-gantt-row-tsk_1").click();
   await expect(page.getByTestId("fe4-detail-panel")).toBeVisible();
   await page.getByTestId("fe4-detail-delete").click();
-  const blocked = page.getByTestId("fe4-delete-blocked");
-  await expect(blocked).toBeVisible();
-  await expect(blocked).toContainText("子タスクが");
-  await expect(blocked).toContainText("削除できません");
+  // #375 rework: a bottom-right WARNING TOAST, NOT the old inline block box.
+  const toast = page.getByTestId("toast-warning");
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("削除できません");
+  await expect(toast).toContainText("子タスクが");
+  await expect(page.getByTestId("fe4-delete-blocked")).toHaveCount(0); // inline block removed
   await expect(page.getByTestId("fe4-confirm-delete")).toHaveCount(0); // NOT the deletable confirm
-  await page.screenshot({ path: shot("03a-parent-delete-blocked.png"), fullPage: true });
+  await page.screenshot({ path: shot("03a-parent-delete-toast.png"), fullPage: true });
 });
 
 test("3b (#375): leaf WITHOUT children is deletable (confirm shown)", async ({ page }) => {

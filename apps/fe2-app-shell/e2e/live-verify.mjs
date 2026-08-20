@@ -54,10 +54,14 @@ await p.locator('[data-testid="fe4-gantt-toggle-tsk_1"]').click();
 await p.waitForTimeout(400);
 const encl = p.locator('[data-testid="fe4-gantt-group-tsk_1"]');
 const enclVisible = await encl.count() && await encl.first().isVisible();
-const border = enclVisible ? await encl.first().evaluate((e) => getComputedStyle(e).borderTopWidth) : "0px";
-const bg = enclVisible ? await encl.first().evaluate((e) => getComputedStyle(e).backgroundColor) : "none";
+const es = enclVisible ? await encl.first().evaluate((e) => {
+  const cs = getComputedStyle(e), rail = getComputedStyle(e, "::before");
+  return { border: cs.borderTopWidth, radius: cs.borderTopLeftRadius, bgImage: cs.backgroundImage, railW: rail.width, shadow: cs.boxShadow };
+}) : { border: "0px", radius: "0px", bgImage: "none", railW: "0px", shadow: "none" };
 await p.screenshot({ path: shot("05-enclosure.png"), fullPage: true });
-ok("5 #369 parent enclosure bordered+tinted", enclVisible && parseFloat(border) > 0 && bg !== "rgba(0, 0, 0, 0)", `border=${border} bg=${bg}`);
+ok("5 #369 REFINED enclosure: solid border>=1.5px + rounded card + gradient fill + accent rail",
+   enclVisible && parseFloat(es.border) >= 1 && parseFloat(es.radius) > 0 && es.bgImage.includes("gradient") && parseFloat(es.railW) > 0,
+   `border=${es.border} radius=${es.radius} rail=${es.railW} grad=${es.bgImage.includes("gradient")}`);
 
 // 2. #376 — drag leaf, no error + refetch; parent rollup
 await openGantt();
@@ -95,16 +99,20 @@ await p.screenshot({ path: shot("02b-parent-rollup.png"), fullPage: true });
 // parent's OWN seeded column is 2026-07-28/08-03; child rollup is 2026-07-25/08-02 → proves rollup shown
 ok("2 #376 parent detail = child rollup (not stale own column)", pStart === "2026-07-25" && pDue === "2026-08-02", `start=${pStart} due=${pDue}`);
 
-// 3a. #375 parent blocked
+// 3a. #375 parent blocked → bottom-right TOAST (rework: no inline block)
 await openGantt();
 await p.locator('[data-testid="fe4-gantt-row-tsk_1"]').click();
 await p.locator('[data-testid="fe4-detail-delete"]').click();
-const blocked = p.locator('[data-testid="fe4-delete-blocked"]');
-const blockedVisible = await blocked.count() && await blocked.first().isVisible();
-const blockedText = blockedVisible ? await blocked.first().innerText() : "";
+await p.waitForTimeout(300);
+const toast = p.locator('[data-testid="toast-warning"]');
+const toastVisible = await toast.count() && await toast.first().isVisible();
+const toastText = toastVisible ? await toast.first().innerText() : "";
+const inlineGone = (await p.locator('[data-testid="fe4-delete-blocked"]').count()) === 0;
 const confirmCount = await p.locator('[data-testid="fe4-confirm-delete"]').count();
-await p.screenshot({ path: shot("03a-parent-blocked.png"), fullPage: true });
-ok("3a #375 parent WITH children blocked", blockedVisible && /子タスク.*削除できません/s.test(blockedText) && confirmCount === 0, blockedText.replace(/\n/g, " ").slice(0, 60));
+await p.screenshot({ path: shot("03a-parent-blocked-toast.png"), fullPage: true });
+ok("3a #375 parent blocked via bottom-right TOAST (inline removed)",
+   toastVisible && /子タスク/.test(toastText) && /削除できません/.test(toastText) && inlineGone && confirmCount === 0,
+   toastText.replace(/\n/g, " ").slice(0, 60));
 
 // 3b. #375 leaf deletable
 await openGantt();
