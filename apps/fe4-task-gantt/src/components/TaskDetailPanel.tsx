@@ -234,12 +234,9 @@ export function TaskDetailPanel({
             />
           </div>
         </div>
-        {/* 親タスクはステータスを手動編集できない旨を明示(#374)。子の進捗で自動判定される。 */}
-        {isParent && (
-          <p className={styles.parentStatusNote} data-testid="fe4-detail-parent-status-note">
-            このタスクは子タスクを持つため、ステータスは子タスクの進捗から自動で判定されます（手動では変更できません）。
-          </p>
-        )}
+        {/* 親タスク(子あり)は status を手動編集させない(#374)。以前はここに自動判定の
+            注記を出していたが、ユーザー要望で撤去 — 親の詳細はステータス欄も注記も出さず、
+            何も表示しない。 */}
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-detail-assignee">

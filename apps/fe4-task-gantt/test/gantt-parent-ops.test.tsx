@@ -183,9 +183,9 @@ describe("#374 parent task has no editable status field", () => {
         scopeTasks={parentScope}
       />,
     );
-    // the status <Select> is gone; an explanatory note takes its place
+    // 親タスクは status <Select> も注記も出さない(#374, 注記はユーザー要望で撤去)
     expect(screen.queryByTestId("fe4-detail-status")).toBeNull();
-    expect(screen.getByTestId("fe4-detail-parent-status-note")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-detail-parent-status-note")).toBeNull();
     // 優先度 (the field that shared the row) still renders
     expect(screen.getByTestId("fe4-detail-priority")).toBeInTheDocument();
   });
@@ -222,7 +222,7 @@ describe("#374 parent task has no editable status field", () => {
       />,
     );
     expect(screen.queryByTestId("fe4-detail-status")).toBeNull();
-    expect(screen.getByTestId("fe4-detail-parent-status-note")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-detail-parent-status-note")).toBeNull();
   });
 });
 

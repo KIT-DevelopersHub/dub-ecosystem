@@ -1443,17 +1443,6 @@
 }
 .detailChildCountLabel { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
 .detailChildCountValue { font-size: var(--dub-font-size-sm, 0.82rem); font-weight: 700; color: var(--dub-color-brand-700); }
-/* 親タスクのステータスは自動判定 — 手動編集不可の補足文(#374)。 */
-.parentStatusNote {
-  margin: calc(-1 * var(--dub-space-1)) 0 0;
-  padding: var(--dub-space-2) var(--dub-space-3);
-  border-radius: var(--dub-radius-md, 6px);
-  background: var(--dub-color-surface-sunken);
-  border: 1px solid var(--dub-color-border-default);
-  font-size: var(--dub-font-size-xs, 0.75rem);
-  line-height: 1.5;
-  color: var(--dub-color-text-secondary);
-}
 
 /* ================= My Tasks hub ================= */
 .myPage {
