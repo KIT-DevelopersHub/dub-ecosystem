@@ -17,7 +17,6 @@
 //
 // 各タブは対応ルートと同じ requiredPermissions で出し分ける（権限が無ければタブ自体を
 // 出さない = ルートガードと二重で fail-closed）。
-import type { ReactNode } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Tabs } from "@dub/ui";
 import type { identity } from "@dub/types";
@@ -59,14 +58,23 @@ export function activeSectionId(pathname: string): string | null {
   return best?.id ?? null;
 }
 
-/** 統合アプリの共有サブナビ帯 + セクション本体（children）。 */
-export function MemberRosterNav({ children }: { children: ReactNode }): JSX.Element {
+/** 統合アプリの共有サブナビ帯（バーのみ）。
+ *
+ *  以前は各ルートを個別に包む wrapper（rosterChromeWrapper）としてバー＋本体(children)を一緒に
+ *  描画していたため、タブ切替のたびに Tabs ごと unmount/remount され、キャッシュ未取得のタブへ
+ *  移ると「バーごとリフレッシュ」して見えた（＋スライド下線もリセット）。これを解消するため、バーは
+ *  シェルのレイアウト側（router.tsx）で永続的に1度だけマウントし、タブ下の本体だけ Outlet で差し替える。
+ *  このコンポーネントは pathname 由来で active タブを描くだけの純粋なバーで、remount されない。
+ *  統合アプリ外（active=null）では null を返す。 */
+export function MemberRosterSubnav(): JSX.Element | null {
   const navigate = useNavigate();
   const { can } = usePermissions();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  const visible = SECTIONS.filter((s) => s.requiredPermissions.every((p) => can(p)));
   const active = activeSectionId(pathname);
+  if (active == null) return null; // 統合アプリ外ではバーを出さない
+
+  const visible = SECTIONS.filter((s) => s.requiredPermissions.every((p) => can(p)));
   const items = visible.map((s) => ({ id: s.id, label: s.label }));
 
   const onChange = (id: string): void => {
@@ -77,9 +85,8 @@ export function MemberRosterNav({ children }: { children: ReactNode }): JSX.Elem
   return (
     <div data-testid="member-roster-app">
       <div className={styles.rosterSubnav}>
-        <Tabs items={items} activeId={active ?? ""} onChange={onChange} testId="member-roster-subnav" />
+        <Tabs items={items} activeId={active} onChange={onChange} testId="member-roster-subnav" />
       </div>
-      {children}
     </div>
   );
 }
