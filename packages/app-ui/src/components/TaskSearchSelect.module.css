@@ -32,6 +32,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Stable task-ID number badge (e.g. "TK-0026"), shown before the title in chips + options. */
+.optNum {
+  flex: 0 0 auto;
+  font-family: var(--dub-font-mono, ui-monospace, monospace);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 600;
+  color: var(--dub-color-text-muted, #64748b);
+  letter-spacing: 0.02em;
+}
 
 .chipRemove {
   display: inline-flex;

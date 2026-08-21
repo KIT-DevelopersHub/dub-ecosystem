@@ -15,6 +15,10 @@ import styles from "./TaskSearchSelect.module.css";
 export interface TaskSearchOption<Id extends string = string> {
   id: Id;
   title: string;
+  /** Optional stable task-ID number (e.g. "TK-0026"). When present it is shown before
+   *  the title (chip + option row) and is matched by the search query, so a task can be
+   *  found BY ID as well as by title. */
+  number?: string;
 }
 
 /** Optional per-chip secondary action (e.g. 先行→親 promote). Multi mode only. */
@@ -92,7 +96,11 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return options.filter(
-      (o) => !selectedIds.includes(o.id) && (q === "" || o.title.toLowerCase().includes(q)),
+      (o) =>
+        !selectedIds.includes(o.id) &&
+        (q === "" ||
+          o.title.toLowerCase().includes(q) ||
+          (o.number ?? "").toLowerCase().includes(q)),
     );
   }, [options, selectedIds, query]);
 
@@ -144,6 +152,7 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
               className={styles.chip}
               data-testid={testId ? `${testId}-chip-${o.id}` : undefined}
             >
+              {o.number && <span className={styles.optNum}>{o.number}</span>}
               <span className={styles.chipText}>{o.title}</span>
               {multiple && props.chipAction && (
                 <button
@@ -237,6 +246,7 @@ export function TaskSearchSelect<Id extends string = string>(props: TaskSearchSe
                 onMouseEnter={() => setActiveIndex(i)}
                 data-testid={testId ? `${testId}-opt-${o.id}` : undefined}
               >
+                {o.number && <span className={styles.optNum}>{o.number}</span>}
                 <span className={styles.optionText}>{o.title}</span>
                 <span className={styles.optionAdd}>{multiple ? "＋" : "選択"}</span>
               </button>
