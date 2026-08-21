@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import { render, screen, act, fireEvent, waitForElementToBeRemoved } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ToastProvider, useToast } from "../src/components/Toast";
 import type { ToastOptions } from "../src/types";
@@ -47,7 +47,10 @@ describe("ToastProvider", () => {
     const toast = screen.getByTestId("toast-error");
     expect(toast).toHaveAttribute("role", "alert");
     await userEvent.click(screen.getByLabelText("通知を閉じる"));
-    expect(screen.queryByTestId("toast-error")).not.toBeInTheDocument();
+    // A01: dismissal is two-phase — the toast enters a `leaving` state (exit
+    // animation) and is unmounted after EXIT_MS.
+    expect(toast).toHaveAttribute("data-leaving", "true");
+    await waitForElementToBeRemoved(() => screen.queryByTestId("toast-error"));
   });
 });
 
@@ -67,6 +70,12 @@ describe("ToastProvider (timers)", () => {
     expect(screen.getByTestId("toast-success")).toBeInTheDocument();
     act(() => {
       vi.advanceTimersByTime(1000);
+    });
+    // A01: auto-dismiss now enters a `leaving` state first; the node unmounts
+    // after the exit phase (EXIT_MS).
+    expect(screen.getByTestId("toast-success")).toHaveAttribute("data-leaving", "true");
+    act(() => {
+      vi.advanceTimersByTime(200);
     });
     expect(screen.queryByTestId("toast-success")).not.toBeInTheDocument();
   });
