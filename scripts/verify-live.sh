@@ -125,6 +125,25 @@ fetch() {  # url -> append body to $BLOB; returns curl exit status
   curl -fsS --max-time "$TIMEOUT" --retry 3 --retry-delay 2 --retry-all-errors "$1" >> "$BLOB"
 }
 
+# Crawl every JS/CSS asset the SPA references, ITERATIVELY: index.html only names the entry
+# bundle (index.js/index.css), and the LAZY route chunks (where most feature code — a task
+# dialog, a detail panel — actually lives) are named INSIDE index.js as dynamic imports.
+# One pass reaches only the entry bundle; each further pass discovers the chunk names the
+# freshly-fetched JS revealed. Loop until no new asset appears (bounded by the seen-set), so
+# a marker in a code-split chunk is not falsely reported missing.
+crawl_assets() {  # origin
+  local origin="$1" seen=" " a new pass
+  for pass in 1 2 3 4 5 6; do
+    new=0
+    for a in $(grep -oE '/?assets/[A-Za-z0-9_.-]+\.(js|css)' "$BLOB" | sort -u); do
+      case "$seen" in *" ${a#/} "*) continue ;; esac
+      seen="$seen${a#/} "; new=1
+      fetch "${origin}/${a#/}" || echo "::warning::could not fetch asset ${a}" >&2
+    done
+    [ "$new" = 0 ] && break
+  done
+}
+
 case "$MODE" in
   file)
     DESC="file:$TARGET"
@@ -133,18 +152,24 @@ case "$MODE" in
     ;;
   url)
     DESC="$TARGET"
+    # 1) the SPA shell (or whatever the URL points at)
     fetch "$TARGET" || { echo "::error::unreachable: $TARGET" >&2; exit 4; }
+    # 2) every JS/CSS asset the shell references — feature code (a data-testid, a class, a
+    #    CSS @keyframes) lives in the hashed bundles, NOT in index.html. Without this, a
+    #    per-feature demo URL is checked against index.html alone and EVERY real UI marker
+    #    is falsely reported missing. Derive the origin (scheme://host) from the URL and
+    #    pull each referenced asset. (Skip when the URL already points at an asset itself.)
+    ORIGIN_URL="$(printf '%s' "$TARGET" | sed -E 's#^(https?://[^/]+).*#\1#')"
+    crawl_assets "$ORIGIN_URL"
     ;;
   env)
     ORIGIN="$(fe2_origin_for "$ENVNAME")"
     DESC="$ENVNAME ($ORIGIN)"
     # 1) the SPA shell
     if ! fetch "${ORIGIN}/"; then echo "::error::$ENVNAME unreachable at ${ORIGIN}/" >&2; exit 4; fi
-    # 2) every JS/CSS asset the shell references (the feature code lives here, not in HTML)
-    assets="$(grep -oE '/?assets/[A-Za-z0-9_.-]+\.(js|css)' "$BLOB" | sort -u || true)"
-    for a in $assets; do
-      fetch "${ORIGIN}/${a#/}" || echo "::warning::could not fetch asset ${a}" >&2
-    done
+    # 2) every JS/CSS asset the shell references, including lazy route chunks (feature code
+    #    lives here, not in HTML)
+    crawl_assets "$ORIGIN"
     # 3) optional API liveness (e.g. an endpoint that only exists once a service shipped)
     if [ -n "$API_PATH" ]; then
       GW="$(gateway_origin_for "$ENVNAME")"
