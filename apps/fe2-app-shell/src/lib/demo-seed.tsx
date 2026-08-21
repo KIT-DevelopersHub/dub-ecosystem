@@ -262,6 +262,99 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
 const TASK_ATTACHMENTS: Record<string, task.TaskAttachment[]> = {};
 let attSeq = 0;
 
+// ── 送る・受け取る (task_requests) ─────────────────────────────────────────────
+// マイタスクのチャット風タイムラインを demo で描くための依頼サンプル。ボール保持で左右:
+//   incoming (toUserId = ME_ID)  → 自分がボール（承諾/却下する番）→ 右
+//   outgoing (fromUserId = ME_ID) → 相手がボール（承認待ち・自分が渡した）→ 左（← を描く）
+// state はすべて pending（やりとり中）。承諾/却下/取消は matchDemoRoute が in-session で確定。
+const TASK_REQUESTS: task.TaskRequest[] = [
+  // ── 受け取った依頼（自分がボール・右） ──
+  {
+    id: "treq_in_1",
+    eventId: "evt_1",
+    fromUserId: "usr_bob",
+    toUserId: ME_ID,
+    fromTeamId: "team_ops",
+    toTeamId: "team_hq",
+    title: "受付フローの最終レビューをお願いします",
+    description: "当日の受付導線を通しでレビューしてほしいです。名簿連携の確認観点も添えました。\n・入場〜受付〜着席の待ち時間\n・当日名簿の同期タイミング",
+    priority: "high",
+    dueAt: "2026-08-18T09:00:00Z",
+    sourceTaskId: null,
+    state: "pending",
+    declineReason: null,
+    createdTaskId: null,
+    createdAt: "2026-08-11T01:20:00Z",
+    decidedAt: null,
+    updatedAt: "2026-08-11T01:20:00Z",
+    version: 1,
+  },
+  {
+    id: "treq_in_2",
+    eventId: "evt_3",
+    fromUserId: "usr_carol",
+    toUserId: ME_ID,
+    fromTeamId: "team_dev",
+    toTeamId: "team_hq",
+    title: "Hackit 募集LPの文言チェック",
+    description: "募集LPのコピーを最終チェックしてください。締切がタイトです。",
+    priority: "urgent",
+    dueAt: "2026-08-15T12:00:00Z",
+    sourceTaskId: null,
+    state: "pending",
+    declineReason: null,
+    createdTaskId: null,
+    createdAt: "2026-08-12T03:05:00Z",
+    decidedAt: null,
+    updatedAt: "2026-08-12T03:05:00Z",
+    version: 1,
+  },
+  // ── 送った依頼（相手がボール・左・← を描く） ──
+  {
+    id: "treq_out_1",
+    eventId: "evt_1",
+    fromUserId: ME_ID,
+    toUserId: "usr_bob",
+    fromTeamId: "team_hq",
+    toTeamId: "team_ops",
+    title: "スポンサー請求書の送付をお願いします",
+    description: "確定した金額で請求書を送付してください。宛先リストは共有済みです。",
+    priority: "medium",
+    dueAt: "2026-08-20T09:00:00Z",
+    sourceTaskId: null,
+    state: "pending",
+    declineReason: null,
+    createdTaskId: null,
+    createdAt: "2026-08-11T05:40:00Z",
+    decidedAt: null,
+    updatedAt: "2026-08-11T05:40:00Z",
+    version: 1,
+  },
+  {
+    id: "treq_out_2",
+    eventId: "evt_3",
+    fromUserId: ME_ID,
+    toUserId: "usr_dave",
+    fromTeamId: "team_hq",
+    toTeamId: null,
+    title: "当日運営スタッフの割り当て表を作成",
+    description: "当日の運営・審査の担当割り当て表をドラフトしてください。",
+    priority: "low",
+    dueAt: null,
+    sourceTaskId: null,
+    state: "pending",
+    declineReason: null,
+    createdTaskId: null,
+    createdAt: "2026-08-12T00:10:00Z",
+    decidedAt: null,
+    updatedAt: "2026-08-12T00:10:00Z",
+    version: 1,
+  },
+];
+// arrow-less cross-team links (承諾で生成される「お願いした/受け負った」ペア). 起点は空。
+const TASK_CROSS_LINKS: task.TaskCrossLink[] = [];
+let reqSeq = 0;
+
 // In-session per-event detail store (イベント詳細ハブの "何でも貯める" — overview/memo/venue
 // /links/contacts). GET returns defaults (version 0) until first save; PUT bumps version.
 // Mirrors event-service /events/:id/details. A reload resets it (demo transport).
@@ -1399,6 +1492,140 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     const m = re.exec(pathname);
     return m ? decodeURIComponent(m[1]!) : null;
   };
+
+  // ── 送る・受け取る (task_requests + cross-links) ──────────────────────────────
+  // Matched BEFORE the generic /tasks/:id + /task-requests/:id GETs so the literal
+  // sub-paths (…/accept, /tasks/cross-links) are never shadowed. state はすべて
+  // pending 起点。承諾/却下/取消は in-session で確定（reload でサンプルへ戻る）。
+  {
+    // arrow-less cross-team links (badge 用). Filter by eventId when given.
+    if (method === "GET" && pathname === "/api/v1/tasks/cross-links") {
+      const ev = url.searchParams.get("eventId");
+      const items = ev ? TASK_CROSS_LINKS.filter((l) => l.eventId === ev) : [...TASK_CROSS_LINKS];
+      return json({ items } satisfies task.ListTaskCrossLinksResponse);
+    }
+    // 受信/送信ボックスの一覧（自分がボール＝右 / 相手がボール＝左）。
+    if (method === "GET" && pathname === "/api/v1/task-requests") {
+      const box = url.searchParams.get("box") ?? "incoming";
+      const stateParam = url.searchParams.get("state");
+      const wantStates = stateParam ? stateParam.split(",").filter(Boolean) : null;
+      const items = TASK_REQUESTS.filter((r) => {
+        const boxOk = box === "incoming" ? r.toUserId === ME_ID : r.fromUserId === ME_ID;
+        const stateOk = !wantStates || wantStates.includes(r.state);
+        return boxOk && stateOk;
+      }).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return json(page(items) satisfies task.ListTaskRequestsResponse);
+    }
+    // 依頼を送る (POST /task-requests): 自分宛=即タスク化 / 他者宛=承認待ちの request。
+    if (method === "POST" && pathname === "/api/v1/task-requests") {
+      const b = (body ?? {}) as Partial<task.IssueTaskRequestBody>;
+      const now = new Date().toISOString();
+      const toUserId = String(b.toUserId ?? "");
+      if (toUserId && toUserId === ME_ID) {
+        const created: task.Task = {
+          id: `tsk_req_${++reqSeq}`,
+          eventId: (b.eventId ?? null) as string | null,
+          title: b.title ?? "無題タスク",
+          description: b.description ?? null,
+          status: "todo",
+          priority: b.priority ?? "medium",
+          assigneeId: ME_ID,
+          teamId: (b.targetTeamId ?? null) as string | null,
+          startAt: (b.dueAt ?? now) as string,
+          dueAt: (b.dueAt ?? null) as string | null,
+          origin: "internal",
+          createdBy: ME_ID,
+          version: 1,
+          archivedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        } as task.Task;
+        TASKS.unshift(created);
+        return json({ kind: "task", task: created } satisfies task.IssueTaskRequestResponse, 201);
+      }
+      const request: task.TaskRequest = {
+        id: `treq_${++reqSeq}`,
+        eventId: (b.eventId ?? null) as string | null,
+        fromUserId: ME_ID,
+        toUserId: (toUserId || "usr_bob") as string,
+        fromTeamId: null,
+        toTeamId: (b.targetTeamId ?? null) as string | null,
+        title: b.title ?? "無題の依頼",
+        description: b.description ?? null,
+        priority: b.priority ?? "medium",
+        dueAt: (b.dueAt ?? null) as string | null,
+        sourceTaskId: null,
+        state: "pending",
+        declineReason: null,
+        createdTaskId: null,
+        createdAt: now,
+        decidedAt: null,
+        updatedAt: now,
+        version: 1,
+      };
+      TASK_REQUESTS.push(request);
+      return json({ kind: "request", request } satisfies task.IssueTaskRequestResponse, 201);
+    }
+    // 承諾: 受け負ったタスクを生成し、cross-link を張り、request を accepted に。
+    const acceptId = seg(/^\/api\/v1\/task-requests\/([^/]+)\/accept$/);
+    if (acceptId && method === "POST") {
+      const idx = TASK_REQUESTS.findIndex((r) => r.id === acceptId);
+      if (idx < 0) return notFound(`POST ${pathname}`);
+      const r = TASK_REQUESTS[idx]!;
+      const now = new Date().toISOString();
+      const createdTask: task.Task = {
+        id: `tsk_recv_${++reqSeq}`,
+        eventId: r.eventId ?? null,
+        title: r.title,
+        description: r.description,
+        status: "todo",
+        priority: r.priority,
+        assigneeId: r.toUserId,
+        teamId: r.toTeamId ?? null,
+        startAt: now,
+        dueAt: r.dueAt,
+        origin: "internal",
+        createdBy: r.fromUserId,
+        version: 1,
+        archivedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      } as task.Task;
+      TASKS.unshift(createdTask);
+      const crossLink: task.TaskCrossLink = {
+        id: `txl_${++reqSeq}`,
+        requestId: r.id,
+        requesterTaskId: (r.sourceTaskId ?? `tsk_src_${reqSeq}`) as string,
+        requesteeTaskId: createdTask.id,
+        eventId: r.eventId ?? null,
+        createdAt: now,
+      };
+      TASK_CROSS_LINKS.push(crossLink);
+      const updated: task.TaskRequest = { ...r, state: "accepted", createdTaskId: createdTask.id, decidedAt: now, updatedAt: now, version: r.version + 1 };
+      TASK_REQUESTS[idx] = updated;
+      return json({ request: updated, createdTask, crossLink } satisfies task.AcceptTaskRequestResponse);
+    }
+    // 却下 / 取消: request を decided 状態へ（一覧の pending から外れる）。
+    const declineId = seg(/^\/api\/v1\/task-requests\/([^/]+)\/decline$/);
+    const cancelId = seg(/^\/api\/v1\/task-requests\/([^/]+)\/cancel$/);
+    const decide = (id: string, next: task.TaskRequestState): Response => {
+      const idx = TASK_REQUESTS.findIndex((r) => r.id === id);
+      if (idx < 0) return notFound(`POST ${pathname}`);
+      const r = TASK_REQUESTS[idx]!;
+      const now = new Date().toISOString();
+      const updated: task.TaskRequest = { ...r, state: next, decidedAt: now, updatedAt: now, version: r.version + 1 };
+      TASK_REQUESTS[idx] = updated;
+      return json(updated);
+    };
+    if (declineId && method === "POST") return decide(declineId, "declined");
+    if (cancelId && method === "POST") return decide(cancelId, "cancelled");
+    // 単一取得。
+    const trId = seg(/^\/api\/v1\/task-requests\/([^/]+)$/);
+    if (trId && method === "GET") {
+      const r = TASK_REQUESTS.find((x) => x.id === trId);
+      return r ? json(r) : notFound(`GET ${pathname}`);
+    }
+  }
 
   // Persist the per-user gantt view state (manual drag order) so a reorder sticks
   // across the round-trip (LWW, no version — a personal setting). Without this the
