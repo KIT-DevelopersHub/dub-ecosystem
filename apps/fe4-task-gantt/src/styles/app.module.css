@@ -1832,6 +1832,27 @@
   gap: var(--dub-space-4);
   min-width: 0;
 }
+/* 詳細を右サイドバー(Drawer)化(判断75②): ヘッダー(Drawer既定)＋スクロール本文＋固定フッター。
+   本文だけが縦スクロールし、保存/削除は常に見える位置に留まる。 */
+.detailDrawer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.detailDrawerScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.detailDrawerFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--dub-space-2);
+  padding-top: var(--dub-space-3);
+  margin-top: var(--dub-space-3);
+  border-top: 1px solid var(--dub-color-border-default);
+}
 .attachEditControls {
   display: flex;
   flex-direction: column;
