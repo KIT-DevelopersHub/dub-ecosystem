@@ -153,6 +153,18 @@ const TASKS: task.Task[] = [
     status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
   },
+  // Second 統括(team_hq) subtree (parent tsk_7 + child tsk_8) in a different WBS branch than
+  // tsk_1 — the cross-hierarchy same-team predecessors #408 makes selectable from tsk_4.
+  {
+    version: 1, id: "tsk_7", eventId: "evt_1", title: "受付フロー設計", description: "受付動線と当日フローの設計",
+    status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_hq", dueAt: "2026-07-30T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-08T00:00:00Z", updatedAt: "2026-07-26T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_8", eventId: "evt_1", title: "受付スタッフ手配", description: null,
+    status: "todo", priority: "medium", assigneeId: "usr_bob", teamId: "team_hq", dueAt: "2026-07-29T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-09T00:00:00Z", updatedAt: "2026-07-27T00:00:00Z",
+  },
   // ── evt_3 (学生ハッカソン Hackit 秋) — a 2nd event WITH a gantt so the global
   //    header イベント switcher demonstrably reloads the timeline on switch. ──
   {
@@ -181,14 +193,23 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      // teamId is projected onto ScopeTask (scopeTasksFromRows) so the dependency picker can
+      // scope predecessors by TEAM (ADR-0007 / #408): same team across different WBS subtrees
+      // is selectable; a different team is not. Ids/colours match the roster teams.
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, teamId: "team_hq", hasChildren: true },
       // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
       // contiguous; used to prove the team rail stays straight across an indented child.
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
-      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
-      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_1", depth: 1 },
+      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_ops" },
+      // A SECOND 統括(team_hq) subtree in a different WBS branch than tsk_1. This is the
+      // cross-hierarchy(別階層/別親) same-team case #408 unlocks: tsk_4 (under tsk_1) can now
+      // take tsk_7 / tsk_8 as predecessors (same team_hq) even though they live under a
+      // different parent; the team_dev / team_ops rows above stay excluded from tsk_4's picker.
+      { taskId: "tsk_7", title: "受付フロー設計", startsAt: "2026-07-22T00:00:00Z", endsAt: "2026-07-30T00:00:00Z", progressPercent: 20, assigneeId: ME_ID, teamId: "team_hq", hasChildren: true },
+      { taskId: "tsk_8", title: "受付スタッフ手配", startsAt: "2026-07-24T00:00:00Z", endsAt: "2026-07-29T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_hq", parentTaskId: "tsk_7", depth: 1 },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
