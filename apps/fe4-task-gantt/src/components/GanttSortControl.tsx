@@ -62,9 +62,6 @@ export function GanttSortControl({ state, actions, testId }: GanttSortControlPro
 
       {auto ? (
         <>
-          <p className={styles.hint}>
-            上から順に適用します（第1条件が同値なら第2条件で並べます）。
-          </p>
           <ol className={styles.list}>
             {state.keys.map((spec, i) => {
               const others = usedByOthers(i);
