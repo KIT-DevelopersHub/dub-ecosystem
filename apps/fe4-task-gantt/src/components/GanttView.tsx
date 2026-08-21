@@ -545,16 +545,37 @@ export function GanttView({
         const key = `${fromId}->${toId}`;
         if (seen.has(key)) return null;
         seen.add(key);
-        const aggregated = fromId !== d.fromTaskId || toId !== d.toTaskId;
+        // ADR-0006 / 判断65: an endpoint folded UP to a visible parent is a
+        // CROSS-HIERARCHY dependency (the real endpoint is a child at a deeper level,
+        // shown aggregated on its parent bar). Same-level FS edges keep the side (left
+        // edge) approach — 判断16「真ん中でなく横から」; cross-hierarchy edges instead
+        // approach the parent bar VERTICALLY and touch its top/bottom edge at the bar's
+        // horizontal middle, so the arrowhead reads as "a dependency onto that subtree"
+        // rather than piercing the bar from the side. Visual anchor only — CPM/前後関係
+        // is over the real child tasks, never derived from these coordinates.
+        const fromAgg = fromId !== d.fromTaskId;
+        const toAgg = toId !== d.toTaskId;
+        const aggregated = fromAgg || toAgg;
+        const fromCenterY = from.y + ROW_HEIGHT / 2;
+        const toBarTop = to.y + (ROW_HEIGHT - BAR_HEIGHT) / 2;
+        const toBarBottom = to.y + (ROW_HEIGHT + BAR_HEIGHT) / 2;
+        const fromAbove = fromCenterY <= to.y + ROW_HEIGHT / 2;
         return {
           id: d.id,
-          x1: from.x + from.width,
-          y1: from.y + ROW_HEIGHT / 2,
-          x2: to.x,
+          // predecessor: right edge normally; parent-bar middle when folded up.
+          x1: fromAgg ? from.x + from.width / 2 : from.x + from.width,
+          y1: fromCenterY,
+          // successor: left edge normally; parent-bar middle when folded up.
+          x2: toAgg ? to.x + to.width / 2 : to.x,
           y2: to.y + ROW_HEIGHT / 2,
+          // cross-hierarchy target → drop onto the parent bar's top/bottom edge
+          // (top when the source is above, bottom when below), never piercing it.
+          dropOntoBar: toAgg,
+          dropEdgeY: fromAbove ? toBarTop : toBarBottom,
           aggregated,
+          mid: aggregated,
           tip: aggregated
-            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の依存を含む）`
+            ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の子タスク・親バー上辺/下辺を指しています）`
             : `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
@@ -1250,11 +1271,16 @@ export function GanttView({
                       </marker>
                     </defs>
                     {segs.map((s) => {
-                      // Vertical-first L routing (縦→横): drop DOWN/UP out of the
-                      // predecessor end first, then run horizontally into the successor's
-                      // left edge — the elbow's corner sits near the predecessor, not the
-                      // successor. Head still enters the successor horizontally, as before.
-                      const d = `M ${s.x1} ${s.y1} V ${s.y2} H ${s.x2}`;
+                      // Vertical-first routing (縦→横): drop DOWN/UP out of the predecessor
+                      // end first, then run horizontally into the successor — the elbow's
+                      // corner sits near the predecessor, not the successor.
+                      // Cross-hierarchy target (folded parent) → drop out vertically, cross
+                      // at mid-height, then meet the bar's top/bottom edge with a final
+                      // vertical drop (head touches the edge from above/below, no pierce).
+                      // Same-level FS target → vertical then horizontal into the left edge.
+                      const d = s.dropOntoBar
+                        ? `M ${s.x1} ${s.y1} V ${(s.y1 + s.dropEdgeY) / 2} H ${s.x2} V ${s.dropEdgeY}`
+                        : `M ${s.x1} ${s.y1} V ${s.y2} H ${s.x2}`;
                       const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
                       return (
                         <path
@@ -1265,6 +1291,7 @@ export function GanttView({
                           markerEnd="url(#fe4-arrow)"
                           data-testid={`fe4-gantt-dep-${s.id}`}
                           data-aggregated={s.aggregated ? "1" : undefined}
+                          data-mid-anchor={s.mid ? "true" : undefined}
                         >
                           <title>{s.tip}</title>
                         </path>
