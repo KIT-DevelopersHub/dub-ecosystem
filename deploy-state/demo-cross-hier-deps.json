@@ -1,0 +1,17 @@
+{
+  "kind": "demo-feature",
+  "slug": "cross-hier-deps",
+  "worker": "dub-demo-cross-hier-deps",
+  "url": "https://dub-demo-cross-hier-deps.developershub-site.workers.dev",
+  "deployedSha": "7954379",
+  "version": "f9fe21be-2fd2-4b30-bb86-b51e63192d01",
+  "branch": "demo/cross-hier-deps-408",
+  "actor": "ko-tarou",
+  "markers": ["同じチーム内のタスク"],
+  "live": true,
+  "liveVerifiedBy": "direct-fetch of served asset index-BuY2nXgC.js (846KB) — marker present; verify-live.sh --url only fetches index.html and false-negatives (known bug)",
+  "browserE2E": "playwright: tsk_4(team_hq, child of tsk_1) picker offers tsk_7/tsk_8 (team_hq, different subtree), excludes team_dev tsk_2, and dependency set — ALL PASS",
+  "verifiedAt": "2026-08-21T20:09:14Z",
+  "updatedAt": "2026-08-21T20:09:14Z",
+  "note": "PR#408 ADR-0007 別階層(別スコープ)同一チーム依存ピッカー + demo seed(tsk_7/tsk_8 hq subtree)"
+}
