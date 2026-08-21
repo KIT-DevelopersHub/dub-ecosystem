@@ -141,6 +141,14 @@ export class InMemoryTaskRepo implements TaskRepo {
       .map((r) => ({ id: r.id, teamId: r.teamId ?? null }));
   }
 
+  async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+    const teams = new Set<common.TeamId | null>();
+    for (const r of this.rows.values()) {
+      if (r.parentTaskId === parentId && r.archivedAt === null) teams.add(r.teamId ?? null);
+    }
+    return [...teams];
+  }
+
   async replaceDependencies(
     taskId: string,
     dependsOnIds: string[],
