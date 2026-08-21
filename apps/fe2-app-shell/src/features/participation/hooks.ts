@@ -75,14 +75,20 @@ export function useResolveParticipation() {
     onMutate: async ({ id, body }) => {
       await qc.cancelQueries({ queryKey: LIST_KEY });
       const prev = qc.getQueryData<ListParticipationsResponse>(LIST_KEY);
-      const nextReviewState = body.action === "skip" ? "skipped" : "added";
+      // unlink は紐付け前(pending)へ戻す・取消不可に。他は added/skipped へ。
+      const nextReviewState = body.action === "unlink" ? "pending" : body.action === "skip" ? "skipped" : "added";
       const nextMatchKind = body.action === "link" ? "linked_existing" : "created_new";
       qc.setQueryData<ListParticipationsResponse>(LIST_KEY, (old) =>
         old
           ? {
               participations: old.participations.map((p) =>
                 p.id === id
-                  ? { ...p, reviewState: nextReviewState, matchKind: body.action === "skip" ? p.matchKind : nextMatchKind }
+                  ? {
+                      ...p,
+                      reviewState: nextReviewState,
+                      canUnlink: body.action === "unlink" ? false : p.canUnlink,
+                      matchKind: body.action === "skip" || body.action === "unlink" ? p.matchKind : nextMatchKind,
+                    }
                   : p,
               ),
             }
@@ -97,11 +103,13 @@ export function useResolveParticipation() {
     },
     onSuccess: (_res, { body }) => {
       const title =
-        body.action === "skip"
-          ? "対象外にしました"
-          : body.action === "link"
-            ? "招待中のメンバーに結びつけて追加しました"
-            : "新規メンバーとして追加しました";
+        body.action === "unlink"
+          ? "紐付けを取り消しました（元に戻しました）"
+          : body.action === "skip"
+            ? "対象外にしました"
+            : body.action === "link"
+              ? "招待中のメンバーに結びつけて追加しました"
+              : "新規メンバーとして追加しました";
       toast.show({ kind: "success", title });
     },
     onSettled: () => {

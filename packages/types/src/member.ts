@@ -193,6 +193,10 @@ export interface Participation {
   /** 管理者レビュー状態. 提出時は "pending"（名簿未反映）。管理者が確定した時のみ
    *  "added"/"skipped" になる (additive; 既存の自動反映済みデータは移行で "added")。 */
   reviewState: ParticipationReviewState;
+  /** 紐付け(link/create)の取消(unlink)が可能か. 反映確定時に「紐付け前スナップショット」を
+   *  保持した行だけ true (additive)。過去に自動反映された行やスナップショット欠損の行は
+   *  安全に元へ戻せないため false。UI の「紐付けを取り消す」導線の出し分けに使う。 */
+  canUnlink?: boolean;
   submittedBy: UserId;
   submittedAt: ISODateTime;
   createdAt: ISODateTime;
@@ -298,13 +302,18 @@ export interface ListParticipationCandidatesResponse {
 
 /** POST /api/v1/members/participation/:id/resolve — 管理者が 参加届 の名簿反映を確定する。
  *  - `link`   : 既存の招待中/検討中メンバー(`memberId`)を在籍(added)へ昇格し結合（重複を作らない）。
+ *               参加届の各項目を非破壊マージ（空欄のみ補完・既存優先）してメンバー情報を充実させる。
  *               `expectedVersion` は対象メンバーの楽観ロック。
  *  - `create` : 参加届の内容から新規メンバー(added)を作成する。
- *  - `skip`   : 名簿に反映しない（対象外）。 */
+ *  - `skip`   : 名簿に反映しない（対象外）。
+ *  - `unlink` : 直前の link/create を取り消し、紐付け前の状態へ戻す（結合で足した情報も撤回）。
+ *               link はメンバーをスナップショットから復元、create は作成したメンバーを撤去し、
+ *               参加届を "pending" に戻す。`canUnlink` が true の行だけ可能。 */
 export type ResolveParticipationRequest =
   | { action: "link"; memberId: string; expectedVersion: number }
   | { action: "create" }
-  | { action: "skip" };
+  | { action: "skip" }
+  | { action: "unlink" };
 
 /** Response of a resolve: 更新後の 参加届 + 反映先メンバー (skip 時は null)。 */
 export interface ResolveParticipationResponse {

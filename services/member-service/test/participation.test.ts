@@ -248,6 +248,98 @@ describe("member-service 参加届 (participation)", () => {
     expect(ov.json.members).toHaveLength(0);
   });
 
+  it("resolve link sets canUnlink; unlink restores the member to its 紐付け前 state and returns 参加届 to pending", async () => {
+    const app = createApp(makeDeps());
+    const t = await call(app, "POST", "/members/teams", { body: { name: "会場" } });
+    const teamId = t.json.id as string;
+    // 招待中・空欄多め (メール/電話/学科/学年 未設定) の既存メンバー。
+    const invited = await call(app, "POST", "/members/people", {
+      body: { name: "山田 花子", status: "invited", teamIds: [] },
+    });
+    const memberId = invited.json.id as string;
+    const version = invited.json.version as number;
+
+    const sub = await call(app, "POST", "/members/participation", {
+      body: {
+        lastName: "山田", firstName: "花子", desiredTeamId: teamId,
+        schoolEmail: "hanako@school.ac.jp", gmail: "hanako@gmail.com", phone: "090-1234-5678",
+        department: "建築学科", grade: "2",
+      },
+    });
+    const pid = sub.json.participation.id as string;
+
+    // link → マージで情報が増える。canUnlink=true。
+    const linked = await call(app, "POST", `/members/participation/${pid}/resolve`, {
+      body: { action: "link", memberId, expectedVersion: version },
+    });
+    expect(linked.status).toBe(200);
+    expect(linked.json.participation.canUnlink).toBe(true);
+    expect(linked.json.member.status).toBe("added");
+    expect(linked.json.member.teamIds).toEqual([teamId]);
+    expect(linked.json.member.schoolEmail).toBe("hanako@school.ac.jp");
+    expect(linked.json.member.gmail).toBe("hanako@gmail.com");
+    expect(linked.json.member.phone).toBe("090-1234-5678");
+    expect(linked.json.member.department).toBe("建築学科");
+    expect(linked.json.member.grade).toBe("2");
+
+    // unlink → 紐付け前へ厳密復元 (status invited へ戻る・増やした情報は消える・teams 空)。
+    const unlinked = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "unlink" } });
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.json.participation.reviewState).toBe("pending");
+    expect(unlinked.json.participation.memberId).toBeNull();
+    expect(unlinked.json.participation.canUnlink).toBe(false);
+    expect(unlinked.json.member.id).toBe(memberId);
+    expect(unlinked.json.member.status).toBe("invited"); // 昇格を撤回
+    expect(unlinked.json.member.teamIds).toEqual([]); // 追加したチームを撤回
+    expect(unlinked.json.member.schoolEmail).toBeNull(); // 補完した情報を撤回
+    expect(unlinked.json.member.gmail).toBeNull();
+    expect(unlinked.json.member.phone).toBeNull();
+    expect(unlinked.json.member.department).toBeNull();
+    expect(unlinked.json.member.grade).toBeNull();
+
+    // 名簿には重複なく、その1人だけが残る。再度 link もできる (二重紐付けガードは解除済み)。
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members).toHaveLength(1);
+    const relink = await call(app, "POST", `/members/participation/${pid}/resolve`, {
+      body: { action: "link", memberId, expectedVersion: ov.json.members[0].version },
+    });
+    expect(relink.status).toBe(200);
+    expect(relink.json.participation.reviewState).toBe("added");
+  });
+
+  it("unlink after create archives the newly-created member and returns 参加届 to pending", async () => {
+    const app = createApp(makeDeps());
+    const sub = await call(app, "POST", "/members/participation", { body: { name: "新規太郎", ...EMAILS } });
+    const pid = sub.json.participation.id as string;
+
+    const created = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "create" } });
+    expect(created.json.participation.canUnlink).toBe(true);
+    expect((await call(app, "GET", "/members/overview")).json.members).toHaveLength(1);
+
+    const unlinked = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "unlink" } });
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.json.participation.reviewState).toBe("pending");
+    expect(unlinked.json.participation.memberId).toBeNull();
+    expect(unlinked.json.member).toBeNull();
+    // 作成したメンバーは撤去され、名簿は空に戻る。
+    expect((await call(app, "GET", "/members/overview")).json.members).toHaveLength(0);
+  });
+
+  it("unlink on a non-linked (pending/skipped/legacy) 参加届 is a 409", async () => {
+    const app = createApp(makeDeps());
+    const sub = await call(app, "POST", "/members/participation", { body: { name: "未処理花子", ...EMAILS } });
+    const pid = sub.json.participation.id as string;
+    const res = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "unlink" } });
+    expect(res.status).toBe(409);
+    expect(res.json.error.code).toBe("MEMBER_PARTICIPATION_NOT_UNLINKABLE");
+  });
+
+  it("requires identity:admin to unlink", async () => {
+    const app = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read"])) }));
+    const res = await call(app, "POST", "/members/participation/part_x/resolve", { body: { action: "unlink" } });
+    expect(res.status).toBe(403);
+  });
+
   it("resolve requires identity:admin", async () => {
     const app = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read"])) }));
     const res = await call(app, "POST", "/members/participation/part_x/resolve", { body: { action: "create" } });
