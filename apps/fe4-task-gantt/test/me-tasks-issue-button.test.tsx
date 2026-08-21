@@ -49,7 +49,7 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     expect(eventSelect).toHaveTextContent("北陸ITカンファレンス2026");
   });
 
-  it("admin can press 発行 and issue a task — it lands in the list", async () => {
+  it("admin can press 発行 and issue a task — POST /tasks fires + success toast", async () => {
     const client = new MockApiClient({ events: EVENTS, currentUserId: ME });
     renderRoute(client);
 
@@ -70,8 +70,8 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
       const created = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
       expect(created).toBeTruthy();
     });
-    // 単一の「すべて」ビューなので、発行したタスクはタブ切替なしでそのまま一覧に出る。
-    expect(await screen.findByText("登壇者へ最終案内メールを送る")).toBeInTheDocument();
+    // 表形式の一覧は廃止（チャット形式に集中）したので、成功トーストで発行成立を確認する。
+    expect(await screen.findByText("タスクを作成しました")).toBeInTheDocument();
   });
 
   it("判断44: with no events at all, the button is still pressable and can issue an unlinked task", async () => {
