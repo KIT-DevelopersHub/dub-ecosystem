@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SegmentedControl, Select, SortableList } from "@dub/ui";
-import type { SegmentedOption, SelectOption, SortableItemContext, SortableReorderEvent } from "@dub/ui";
-import type { GanttSortMode } from "../domain/row-sort";
-import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
+import { SegmentedControl, SortableList } from "@dub/ui";
+import type { SegmentedOption, SortableItemContext, SortableReorderEvent } from "@dub/ui";
+import type { GanttSortActions, GanttSortState } from "../domain/gantt-sort-pref";
+import { GanttSortControl } from "./GanttSortControl";
 import { groupRuns, type RowGroup } from "../domain/row-groups";
 import { readableTextColor } from "../domain/color-contrast";
 import type { common, gantt, task } from "@dub/types";
@@ -70,11 +70,11 @@ export interface GanttViewProps {
    *  dragged row should sit immediately before (null ⇒ move to the end of its
    *  group). Only same-parent moves are applied by the container. Absent ⇒ no DnD. */
   onReorder?: (draggedId: common.TaskId, beforeTaskId: common.TaskId | null) => void;
-  /** Current row 並び替え mode (手動/重要度/時期/チーム). The container owns the state
-   *  and applies the actual re-ordering to `dto.rows`; this view only renders the
-   *  selector and, in non-"manual" modes, hides the drag handles (auto-sorted). */
-  sortMode?: GanttSortMode;
-  onSortModeChange?: (mode: GanttSortMode) => void;
+  /** Current 並び替え preference (手動ドラッグ or a multi-key 多段ソート). The container
+   *  owns the state and applies the actual re-ordering to `dto.rows`; this view only
+   *  renders the builder and, in non-manual modes, hides the drag handles (auto-sorted). */
+  sortState?: GanttSortState;
+  sortActions?: GanttSortActions;
   /** Click a bar or row to open the detail panel. */
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
@@ -235,8 +235,8 @@ export function GanttView({
   onScheduleShift,
   onParentResize,
   onReorder,
-  sortMode = "manual",
-  onSortModeChange,
+  sortState,
+  sortActions,
   onSelect,
   onCreateOnDate,
   statusById,
@@ -278,7 +278,8 @@ export function GanttView({
   // clone + neighbour reflow + keyboard a11y; this view only supplies the rows and
   // commits the drop. Drag only makes sense in 手動 mode (an automatic sort would just
   // overwrite the drop next render), so the handles are hidden when a sort is active.
-  const reorderEnabled = !!onReorder && editing && sortMode === "manual";
+  const isManualSort = sortState?.manual ?? true;
+  const reorderEnabled = !!onReorder && editing && isManualSort;
   // The current visible rows, read inside the reorder handler (which is memoised
   // before `rows` is derived). Kept fresh every render so the drop maps to the screen.
   const visibleRowsRef = useRef<gantt.GanttRow[]>([]);
@@ -709,18 +710,10 @@ export function GanttView({
         </div>
         <div className={styles.tlToolbarRight}>
           {/* 並び替えは編集寄りの操作なので閲覧（拡大）モードでは隠す */}
-          {onSortModeChange && !presenting && (
-            <label className={styles.tlSort}>
-              <span className={styles.tlSortLabel}>並び替え</span>
-              <Select<GanttSortMode>
-                id="fe4-gantt-sort"
-                value={sortMode}
-                onChange={onSortModeChange}
-                options={GANTT_SORT_OPTIONS as SelectOption<GanttSortMode>[]}
-                aria-label="タスクの並び替え"
-                testId="fe4-gantt-sort"
-              />
-            </label>
+          {sortState && sortActions && !presenting && (
+            <div className={styles.tlSort}>
+              <GanttSortControl state={sortState} actions={sortActions} />
+            </div>
           )}
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
             今日

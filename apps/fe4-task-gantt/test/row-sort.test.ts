@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { common, gantt, task } from "@dub/types";
-import { sortRows, type SortContext } from "../src/domain/row-sort";
+import { sortRows, sortRowsMulti, type SortContext } from "../src/domain/row-sort";
 
 // Minimal row factory. Sorting reads taskId + parentTaskId (+ dates for schedule).
 function row(
@@ -127,5 +127,91 @@ describe("sortRows — safety", () => {
 
   it("returns [] for empty input", () => {
     expect(sortRows([], "priority", ctx())).toEqual([]);
+  });
+});
+
+describe("sortRowsMulti — 多段（複数キー）composition", () => {
+  const prio = (m: Record<string, task.TaskPriority>) =>
+    new Map(Object.entries(m) as [common.TaskId, task.TaskPriority][]);
+  const teamOf = (m: Record<string, string>) =>
+    new Map(Object.entries(m) as [common.TaskId, common.TeamId][]);
+
+  it("empty spec list returns the input unchanged", () => {
+    const rows = [row("a"), row("b"), row("c")];
+    expect(ids(sortRowsMulti(rows, [], ctx()))).toEqual(["a", "b", "c"]);
+  });
+
+  it("applies チーム → 重要度 → 時期 in priority order (each breaks the previous's ties)", () => {
+    const rows = [
+      row("A"), // team-b, high, no date
+      row("B"), // team-a, low, no date
+      row("C", null, { start: "2026-01-01T00:00:00Z" }), // team-a, high, early
+      row("D", null, { start: "2026-02-01T00:00:00Z" }), // team-a, high, late
+    ];
+    const c = ctx({
+      priorityById: prio({ A: "high", B: "low", C: "high", D: "high" }),
+      teamIdById: teamOf({ A: "team-b", B: "team-a", C: "team-a", D: "team-a" }),
+      teamOrder: new Map([
+        ["team-a", 0],
+        ["team-b", 1],
+      ] as [common.TeamId, number][]),
+    });
+    const out = sortRowsMulti(
+      rows,
+      [
+        { key: "team", dir: "asc" },
+        { key: "priority", dir: "asc" },
+        { key: "schedule", dir: "asc" },
+      ],
+      c,
+    );
+    // team-a first: high(C,D) before low(B); C before D by earlier date. Then team-b: A.
+    expect(ids(out)).toEqual(["C", "D", "B", "A"]);
+  });
+
+  it("honors per-key direction (重要度 降順 puts low before high)", () => {
+    const rows = [row("hi"), row("lo")];
+    const c = ctx({ priorityById: prio({ hi: "high", lo: "low" }) });
+    expect(ids(sortRowsMulti(rows, [{ key: "priority", dir: "asc" }], c))).toEqual(["hi", "lo"]);
+    expect(ids(sortRowsMulti(rows, [{ key: "priority", dir: "desc" }], c))).toEqual(["lo", "hi"]);
+  });
+
+  it("a single ascending spec equals the single-key sortRows (superset)", () => {
+    const rows = [row("a"), row("b"), row("c")];
+    const c = ctx({ priorityById: prio({ a: "low", b: "urgent", c: "medium" }) });
+    expect(ids(sortRowsMulti(rows, [{ key: "priority", dir: "asc" }], c))).toEqual(
+      ids(sortRows(rows, "priority", c)),
+    );
+  });
+
+  it("preserves WBS contiguity: only re-sorts within each sibling group", () => {
+    // p1 (team-b) with children c1,c2 ; p2 (team-a) with child c3
+    const rows = [
+      row("p1"),
+      row("c1", "p1"),
+      row("c2", "p1"),
+      row("p2"),
+      row("c3", "p2"),
+    ];
+    const c = ctx({
+      teamIdById: teamOf({ p1: "team-b", c1: "team-b", c2: "team-b", p2: "team-a", c3: "team-a" }),
+      priorityById: prio({ c1: "low", c2: "urgent" }),
+      teamOrder: new Map([
+        ["team-a", 0],
+        ["team-b", 1],
+      ] as [common.TeamId, number][]),
+    });
+    const out = ids(
+      sortRowsMulti(
+        rows,
+        [
+          { key: "team", dir: "asc" },
+          { key: "priority", dir: "asc" },
+        ],
+        c,
+      ),
+    );
+    // p2 (team-a) moves ahead of p1 (team-b); each parent keeps its own children block.
+    expect(out).toEqual(["p2", "c3", "p1", "c2", "c1"]);
   });
 });

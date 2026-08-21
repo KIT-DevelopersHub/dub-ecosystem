@@ -20,10 +20,10 @@ import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "..
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
-import { sortRows, type SortContext } from "../domain/row-sort";
+import { sortRowsMulti, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
 import { PRIORITY_LABEL } from "../domain/task-form";
-import { useGanttSortMode } from "../domain/gantt-sort-pref";
+import { useGanttSort } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
 import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
@@ -105,7 +105,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const orderedTaskIds = useMemo(() => view.data?.orderedTaskIds ?? [], [view.data]);
   // Row 並び替え mode (手動/重要度/時期/チーム). Personal client-side view preference,
   // persisted per-event in localStorage; "手動" falls back to the drag order overlay.
-  const [sortMode, setSortMode] = useGanttSortMode(eventId);
+  const [sortState, sortActions] = useGanttSort(eventId);
+  // The primary sort key (keys[0]) drives the group-bracket rail below when it's a
+  // groupable key (チーム/重要度) and we're not in manual mode.
+  const primarySortKey = sortState.manual ? null : (sortState.keys[0]?.key ?? null);
   // Task-number prefix (e.g. "AA") + zero-pad width (e.g. 4 -> "AA-0001") — personal
   // view settings, persisted per event.
   const [numberPrefix, setNumberPrefix] = useTaskNumberPrefix(eventId);
@@ -235,7 +238,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // solid fill colour (team colour / priority colour / a neutral) — the bracket fills
   // with it and GanttView picks a WCAG-legible text colour on top. Read-only overlay.
   const rowGroupById = useMemo<ReadonlyMap<common.TaskId, RowGroup> | undefined>(() => {
-    if (sortMode === "team") {
+    if (primarySortKey === "team") {
       const m = new Map<common.TaskId, RowGroup>();
       for (const t of tasks) {
         const team = t.teamId ? teamById.get(t.teamId) : undefined;
@@ -244,13 +247,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       }
       return m;
     }
-    if (sortMode === "priority") {
+    if (primarySortKey === "priority") {
       const m = new Map<common.TaskId, RowGroup>();
       for (const t of tasks) m.set(t.id, { key: t.priority, label: PRIORITY_LABEL[t.priority], color: PRIORITY_GROUP_COLOR[t.priority] });
       return m;
     }
     return undefined;
-  }, [sortMode, tasks, teamById]);
+  }, [primarySortKey, tasks, teamById]);
 
   // Sort context for the automatic 並び替え modes (重要度/時期/チーム). priority already
   // lives on task.Task (no schema change); team order = the order member-service
@@ -271,7 +274,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // "手動": apply the per-user drag overlay (siblings only, parent→children
     // contiguity preserved). Otherwise: apply the chosen automatic sort. Both keep
     // the WBS hierarchy intact (only re-sort within each sibling group).
-    const rows = sortMode === "manual" ? applyManualOrder(base, orderedTaskIds) : sortRows(base, sortMode, sortContext);
+    const rows = sortState.manual
+      ? applyManualOrder(base, orderedTaskIds)
+      : sortRowsMulti(base, sortState.keys, sortContext);
     return {
       ...gantt.data,
       rows,
@@ -279,7 +284,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       criticalTaskIds: (gantt.data.criticalTaskIds ?? []).filter((id) => visible.has(id)),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gantt.data, tasks, orderedTaskIds, sortMode, sortContext]);
+  }, [gantt.data, tasks, orderedTaskIds, sortState, sortContext]);
 
   // WBS task numbers (e.g. "AA-1-1"), derived from the CURRENT display order + the
   // WBS tree on each row, so re-ordering / re-parenting re-numbers automatically. It
@@ -1031,8 +1036,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onScheduleShift={caps.canWrite ? onScheduleShift : undefined}
           onParentResize={caps.canWrite ? onParentResize : undefined}
           onReorder={caps.canWrite ? onReorder : undefined}
-          sortMode={sortMode}
-          onSortModeChange={setSortMode}
+          sortState={sortState}
+          sortActions={sortActions}
           onSelect={setSelected}
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
