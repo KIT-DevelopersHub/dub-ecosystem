@@ -6,6 +6,7 @@ import type { GanttSortMode } from "../domain/row-sort";
 import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
 import { groupRuns, type RowGroup } from "../domain/row-groups";
 import { readableTextColor } from "../domain/color-contrast";
+import { childProgressByParent, type ChildProgress } from "../domain/child-progress";
 import type { common, gantt, task } from "@dub/types";
 
 /** arrayMove — pure list move (kept local so fe4 needs no direct @dnd-kit/sortable dep;
@@ -130,6 +131,18 @@ const STATUS_BAR_CLASS: Record<task.TaskStatus, string> = {
   blocked: styles.barBlocked!,
   done: styles.barDone!,
   cancelled: styles.barCancelled!,
+};
+
+// Per-status slice fill for a parent (work-package) bar. Reuses the SAME pastel
+// tokens as the leaf status bars above, so a parent whose children are all 完了
+// reads identically to a 完了 leaf bar, and a mixed parent shows those exact hues
+// in proportion (design: 親バーを子ステータスの割合で色分け).
+const STATUS_SEG_CLASS: Record<task.TaskStatus, string> = {
+  todo: styles.barSegTodo!,
+  in_progress: styles.barSegInProgress!,
+  blocked: styles.barSegBlocked!,
+  done: styles.barSegDone!,
+  cancelled: styles.barSegCancelled!,
 };
 
 type DragMode = "move" | "resize-start" | "resize-end";
@@ -427,6 +440,15 @@ export function GanttView({
       return next;
     });
   }, [parentIds]);
+
+  // parentId -> its children's status mix (完了/進行中/未着手…), for the at-a-glance
+  // "子: n/m 完了" bar. Computed from ALL rows (not just the visible/rolled set) so a
+  // collapsed parent still shows its full progress. Pure + memoised; re-derives when a
+  // child's status changes (optimistic status edits flow through statusById).
+  const childProgressById = useMemo<Map<common.TaskId, ChildProgress>>(
+    () => (statusById ? childProgressByParent(dto.rows, statusById) : new Map()),
+    [dto.rows, statusById],
+  );
 
   // taskId -> the ROLLED row (parent dates are the union of their children). Drag
   // start/end must read these displayed dates, not the parent's pre-rollup seed.
@@ -746,8 +768,12 @@ export function GanttView({
   };
 
   const barClassOf = (taskId: common.TaskId) => {
+    // Parent (work-package) bars with a known child-status mix render as a neutral
+    // track filled by per-status slices (see childProgressById); their own single
+    // status must NOT paint the whole bar, or the slices would be invisible.
+    const isParentWithProgress = parentIds.has(taskId) && childProgressById.has(taskId);
     const status = statusById?.get(taskId);
-    const cls = status ? STATUS_BAR_CLASS[status] : "";
+    const cls = isParentWithProgress ? styles.barParent : status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
     const selected = selectedIds.has(taskId) ? styles.barSelected : "";
     // Parent (work-package) rows keep the rollup behaviour (their span still auto-
@@ -1291,20 +1317,45 @@ export function GanttView({
                   if (!b.hasBar) return null;
                   const g = previewGeom(b);
                   const showInside = g.width > 66;
+                  const title = titleById.get(b.taskId) ?? "";
+                  // Parent bars are painted by their children's status mix (完了/進行中/
+                  // 未着手…) instead of one flat progress fill, plus a "n/m 完了" count.
+                  const prog = childProgressById.get(b.taskId);
+                  const countText = prog ? `${prog.doneCount}/${prog.total} 完了` : null;
+                  const barTitle = prog
+                    ? `${title} — 子タスク ${prog.doneCount}/${prog.total} 完了` +
+                      (prog.inProgressCount ? `・進行中 ${prog.inProgressCount}` : "")
+                    : title;
                   return (
                     <div
                       key={b.taskId}
                       className={barClassOf(b.taskId)}
                       style={{ left: g.left, top: b.y + (ROW_HEIGHT - BAR_HEIGHT) / 2, width: g.width, height: BAR_HEIGHT }}
-                      title={titleById.get(b.taskId) ?? ""}
+                      title={barTitle}
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
+                      data-child-done={prog ? prog.doneCount : undefined}
+                      data-child-total={prog ? prog.total : undefined}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
                       {...(selectedIds.has(b.taskId) ? { "data-fe4-keep-selection": "true" } : {})}
                     >
                       {teamColorById?.get(b.taskId) && (
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
                       )}
-                      <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
+                      {prog ? (
+                        // stacked per-status slices (design 案A — 割合の積み上げ)
+                        <div className={styles.barSegTrack} aria-hidden data-testid={`fe4-gantt-segs-${b.taskId}`}>
+                          {prog.segments.map((s) => (
+                            <span
+                              key={s.status}
+                              className={`${styles.barSeg} ${STATUS_SEG_CLASS[s.status]}`}
+                              style={{ width: `${s.fraction * 100}%` }}
+                              data-status={s.status}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
+                      )}
                       {editing && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleL}
@@ -1313,7 +1364,16 @@ export function GanttView({
                           aria-hidden
                         />
                       )}
-                      {showInside && <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>}
+                      {showInside && (
+                        <span className={styles.barLabel}>
+                          {title}
+                          {countText && (
+                            <span className={styles.barCount} data-testid={`fe4-gantt-count-${b.taskId}`}>
+                              {countText}
+                            </span>
+                          )}
+                        </span>
+                      )}
                       {editing && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleR}
@@ -1322,7 +1382,16 @@ export function GanttView({
                           aria-hidden
                         />
                       )}
-                      {!showInside && <span className={styles.barLabelOut} style={{ left: g.width + 8 }}>{titleById.get(b.taskId)}</span>}
+                      {!showInside && (
+                        <span className={styles.barLabelOut} style={{ left: g.width + 8 }}>
+                          {title}
+                          {countText && (
+                            <span className={styles.barCount} data-testid={`fe4-gantt-count-${b.taskId}`}>
+                              {countText}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
