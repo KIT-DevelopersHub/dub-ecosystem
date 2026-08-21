@@ -8,9 +8,11 @@ import { presentError, fieldErrorMap } from "../lib/errorDisplay";
 
 const suffixRow: React.CSSProperties = { display: "flex", gap: 6, alignItems: "center" };
 const suffixStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", whiteSpace: "nowrap" };
+const hintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13, margin: "8px 0 0" };
 
-// Issue a new @developershub.jp address (creates a Cloudflare Email Routing rule
-// forwarding `localPart@developershub.jp` -> `destination`).
+// Issue a new @developershub.jp address (creates a Cloudflare Email Routing rule routing
+// `localPart@developershub.jp` -> the shared Email Worker). No forward destination is
+// entered here — the receiving mail lands in the Dub mail app automatically.
 export function NewEmailAddressDialog({
   open,
   onClose,
@@ -22,7 +24,6 @@ export function NewEmailAddressDialog({
   onCreated?: () => void;
 }) {
   const [localPart, setLocalPart] = useState("");
-  const [destination, setDestination] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const create = useCreateEmailAddress();
@@ -30,7 +31,6 @@ export function NewEmailAddressDialog({
 
   function reset() {
     setLocalPart("");
-    setDestination("");
     setFieldErrors({});
     setFormError(null);
   }
@@ -39,7 +39,7 @@ export function NewEmailAddressDialog({
     setFieldErrors({});
     setFormError(null);
     create.mutate(
-      { localPart: localPart.trim(), destination: destination.trim() },
+      { localPart: localPart.trim() },
       {
         onSuccess: (addr) => {
           toast({ kind: "success", title: "アドレスを発行しました", description: addr.address });
@@ -72,16 +72,9 @@ export function NewEmailAddressDialog({
           </span>
         </div>
       </FormField>
-      <FormField label="転送先（destination）" htmlFor="fe7-email-destination" error={fieldErrors.destination}>
-        <TextField
-          id="fe7-email-destination"
-          type="email"
-          value={destination}
-          onChange={(v) => setDestination(v)}
-          placeholder="team@example.com"
-          testId="fe7-email-destination"
-        />
-      </FormField>
+      <p style={hintStyle} data-testid="fe7-email-worker-hint">
+        受信したメールは Dub のメールアプリに自動で届きます（転送先の設定は不要です）。
+      </p>
       <FormError>{formError}</FormError>
       <DialogActions>
         <Button variant="secondary" onClick={onClose} testId="fe7-email-cancel">
@@ -90,7 +83,7 @@ export function NewEmailAddressDialog({
         <Button
           variant="primary"
           onClick={submit}
-          disabled={create.isPending || !localPart.trim() || !destination.trim()}
+          disabled={create.isPending || !localPart.trim()}
           testId="fe7-email-submit"
         >
           発行する

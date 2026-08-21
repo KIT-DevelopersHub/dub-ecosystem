@@ -29,6 +29,7 @@ export interface EmailRoutingConfig {
   accountId?: string; // required for destination-address operations
   zoneId?: string; // required for rule operations
   zoneName: string; // zone apex (anti-spoof check on rule matchers)
+  workerName: string; // Email Worker every issued receiving address routes to (Worker action)
   timeoutMs: number;
   fetchImpl?: typeof fetch; // injectable for tests; defaults to global fetch
 }
@@ -111,6 +112,35 @@ function firstForwardTarget(rule: CfRoutingRule): string | null {
   return null;
 }
 
+/**
+ * The Email Worker most existing rules route to — i.e. the shared inbox Worker new
+ * addresses should join. Scans every rule's `worker` action targets and returns the most
+ * frequent one (ties broken by first-seen), or null when no rule routes to a Worker. This
+ * is what makes issuance "route to the SAME Worker as everyone else" without a human
+ * typing a destination; callers fall back to the configured constant when it returns null.
+ */
+export function mostCommonWorkerTarget(rules: CfRoutingRule[]): string | null {
+  const counts = new Map<string, number>();
+  for (const rule of rules ?? []) {
+    for (const a of rule.actions ?? []) {
+      if (a.type !== "worker" || !Array.isArray(a.value)) continue;
+      for (const target of a.value) {
+        if (typeof target !== "string" || target.length === 0) continue;
+        counts.set(target, (counts.get(target) ?? 0) + 1);
+      }
+    }
+  }
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [target, count] of counts) {
+    if (count > bestCount) {
+      best = target;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 interface CfEnvelope<T> {
   success: boolean;
   errors: Array<{ code?: number; message?: string }>;
@@ -137,6 +167,7 @@ export function emailRoutingConfigFromEnv(env: Env): EmailRoutingConfig | null {
     accountId: env.CF_EMAIL_ROUTING_ACCOUNT_ID || undefined,
     zoneId: env.CF_EMAIL_ROUTING_ZONE_ID || undefined,
     zoneName: env.CF_EMAIL_ROUTING_ZONE_NAME || "developershub.jp",
+    workerName: env.CF_EMAIL_ROUTING_WORKER || "dub-mail-gateway",
     timeoutMs: parseTimeoutMs(env),
     fetchImpl: undefined,
   };

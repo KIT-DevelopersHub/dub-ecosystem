@@ -36,6 +36,26 @@ function localOf(email: string): string {
   return email.split("@")[0] ?? "";
 }
 
+/**
+ * Issue a new RECEIVING address: `{ localPart }` only — NO forward destination. The
+ * address is constrained to our own zone apex (anti-spoof) and a strict local-part charset
+ * (anti-abuse), mirroring rule-matcher validation. The route binds it to the shared Email
+ * Worker automatically, so the admin never types (or can spoof) a forward target.
+ */
+export function parseIssueAddressRequest(body: unknown, zoneName: string): { localPart: string; address: string } {
+  const o = body as { localPart?: unknown } | null;
+  if (!o || typeof o !== "object") bad("request body must be a JSON object");
+  const raw = o!.localPart;
+  if (typeof raw !== "string" || raw.length === 0) bad("`localPart` is required");
+  const localPart = raw.trim().toLowerCase();
+  if (!LOCAL_PART_RE.test(localPart)) {
+    bad("local part must be lowercase alphanumeric with . _ % + - (no spaces)");
+  }
+  const address = `${localPart}@${zoneName.toLowerCase()}`;
+  if (address.length > ADDRESS_MAX_LEN) bad(`address too long (max ${ADDRESS_MAX_LEN})`);
+  return { localPart, address };
+}
+
 /** Destination address to create (a forward target — any domain, e.g. a personal inbox). */
 export function parseCreateAddressRequest(body: unknown): { email: string } {
   const o = body as { email?: unknown } | null;

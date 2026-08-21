@@ -21,8 +21,8 @@ import { common } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import { buildAuditEnv } from "./deps";
 import type { AppBindings } from "./env";
-import { CfEmailRoutingClient, requireEmailRoutingConfig, rosterAddressesFromRules } from "./email-routing";
-import { parseCreateAddressRequest, parseCreateRuleRequest, parseUpdateRuleRequest } from "./email-routing-validation";
+import { CfEmailRoutingClient, mostCommonWorkerTarget, requireEmailRoutingConfig, rosterAddressesFromRules } from "./email-routing";
+import { parseCreateAddressRequest, parseCreateRuleRequest, parseIssueAddressRequest, parseUpdateRuleRequest } from "./email-routing-validation";
 
 type WithAuth = (permission: identity.PermissionKey) => MiddlewareHandler<AppBindings>;
 
@@ -44,6 +44,32 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>, withAuth: With
       clientOf(c).createAddress(email),
     );
     return c.json(created, 201);
+  });
+
+  // Issue a new RECEIVING @zone address with NO forward destination: it is bound to the
+  // SAME Email Worker existing rules route to (auto-detected from live rules, falling back
+  // to the configured worker name). This is the roster's "アドレスを発行" action — the admin
+  // only supplies the local part; the shared inbox Worker is chosen for them. Returns the
+  // created rule in the roster's EmailRoutingAddress shape (destination is null = Worker-routed).
+  ext.post("/admin/email-routing/addresses/issue", async (c) => {
+    const cfg = requireEmailRoutingConfig(c.env);
+    const { localPart, address } = parseIssueAddressRequest(await c.req.json().catch(() => null), cfg.zoneName);
+    const client = new CfEmailRoutingClient(cfg);
+    // Read existing rules first (non-destructive) to route to the SAME Worker as everyone
+    // else; fall back to the configured constant when no rule routes to a Worker yet.
+    const worker = mostCommonWorkerTarget(await client.listRules()) ?? cfg.workerName;
+    const rule = await audited(c, "mail.email_routing.address.issue", "email_routing_address", address, () =>
+      client.createRule({
+        name: address,
+        enabled: true,
+        matchers: [{ type: "literal", field: "to", value: address }],
+        actions: [{ type: "worker", value: [worker] }],
+      }),
+    );
+    return c.json(
+      { id: rule.id, localPart, address, destination: null, enabled: rule.enabled, createdAt: nowIso() },
+      201,
+    );
   });
 
   ext.delete("/admin/email-routing/addresses/:id", async (c) => {
