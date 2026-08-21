@@ -2,6 +2,10 @@
 // Leaf front-end package: no backend, no router, no data. Consumers (FE2〜FE7)
 // import components + types here; FE8 uses @dub/tokens/css only.
 
+// Global (non-module) base layer — bundled into dist/style.css so it reaches
+// every app that loads `@dub/ui/style.css` (A02: app-wide button press feedback).
+import "./global.css";
+
 // Contract types (frozen — FE1 §2-3)
 export type {
   Size,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, useToast } from "@dub/ui";
+import { Button, SegmentedControl, useToast } from "@dub/ui";
+import type { SegmentedOption } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
 import { listTasks, createTask, resolveUsers, createTaskAttachment } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
@@ -221,21 +222,21 @@ export function MyTasksPage({ currentUserId, people, teams, events, initialEvent
         </Button>
       </header>
 
-      <div className={styles.lensTabs} role="tablist" aria-label="表示するタスクの範囲">
-        {LENS_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={lens === t.key}
-            title={t.hint}
-            className={`${styles.lensTab} ${lens === t.key ? styles.lensTabActive : ""}`}
-            onClick={() => setLens(t.key)}
-            data-testid={`fe4-mytasks-lens-${t.key}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* A03: sliding-pill selector (shared SegmentedControl) — the highlight
+        * glides between lenses instead of snapping. */}
+      <SegmentedControl<MyTasksLens>
+        aria-label="表示するタスクの範囲"
+        value={lens}
+        onChange={setLens}
+        testId="fe4-mytasks-lens"
+        options={LENS_TABS.map(
+          (t): SegmentedOption<MyTasksLens> => ({
+            value: t.key,
+            label: t.label,
+            testId: `fe4-mytasks-lens-${t.key}`,
+          }),
+        )}
+      />
 
       <MyTasksFilterBar
         value={filter}

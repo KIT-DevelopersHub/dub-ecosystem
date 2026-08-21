@@ -18,6 +18,7 @@ import { createApiClient } from "./lib/api-client.tsx";
 import { resolveBaseUrl } from "./lib/resolve-base-url.tsx";
 import { createMockFetch, isMockEnabled } from "./lib/mock-api-client.tsx";
 import { createDemoFetch, isDemoEnabled } from "./lib/demo-seed.tsx";
+import { DemoDrivers } from "./lib/demo-drivers.tsx";
 import { registerFeatureModules } from "./modules/registry.tsx";
 import { assembleFeatureModules } from "./composition/index.tsx";
 import { AppRoot } from "./shell/AppRoot.tsx";
@@ -105,6 +106,7 @@ if (rootEl) {
   createRoot(rootEl).render(
     <StrictMode>
       <AppRoot api={api}>
+        {useDemo ? <DemoDrivers /> : null}
         <RouterProvider router={router} />
       </AppRoot>
     </StrictMode>,

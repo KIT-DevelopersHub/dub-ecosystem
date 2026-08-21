@@ -1,0 +1,26 @@
+/* @dub/ui — design-system GLOBAL layer (non-module, app-wide).
+ *
+ * Everything here is a bare element selector that must reach EVERY consumer of
+ * `@dub/ui/style.css` (FE2〜FE7), not just the components authored in this
+ * package. Vite bundles this file into `dist/style.css` because index.tsx
+ * imports it, so any app that loads `@dub/ui/style.css` inherits these rules.
+ *
+ * Keep this file tiny and additive — it is a base layer, so app/component CSS
+ * (higher specificity or later cascade) always wins.
+ */
+
+/* A02 (core-ised): tactile press feedback on EVERY native <button>, app-wide.
+ * The shared @dub/ui Button already scales on :active; this promotes the same
+ * cue to raw <button>s that never adopted the shared component (dozens across
+ * FE3〜FE7). Guarded behind `no-preference` so reduced-motion users get neither
+ * the transform nor its transition. `:not(:disabled)` keeps disabled controls
+ * inert. dnd drag handles set their transform inline (which wins over this
+ * stylesheet), so dragging is unaffected. */
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled) {
+    transition: transform var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+  }
+  button:not(:disabled):active {
+    transform: scale(0.97);
+  }
+}

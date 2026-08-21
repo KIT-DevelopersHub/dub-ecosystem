@@ -470,6 +470,34 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
 ];
 
+// Rotating stand-ins for the A04 demo driver (demo-drivers.tsx). Each 30s tick
+// unshifts a fresh unread item so the header bell badge count rises (→ pulse) and
+// the inbox list stays coherent with `unread-count`.
+const DEMO_LIVE_NOTIFICATIONS: Pick<notification.InboxItem, "type" | "title" | "body" | "resourceType" | "resourceId">[] = [
+  { type: "task.assigned", title: "タスクが割り当てられました", body: "「受付マニュアル最終確認」があなたに割り当てられました。", resourceType: "task", resourceId: "tsk_1" },
+  { type: "mail.received", title: "新着メール", body: "スポンサー担当からメールが届いています。", resourceType: "mail", resourceId: "msg_1" },
+  { type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」の当日運営情報が更新されました。", resourceType: "event", resourceId: "evt_1" },
+];
+let demoNotifSeq = 0;
+
+/** A04 (demo only): append one fresh UNREAD notification so the bell count rises. */
+export function demoAddNotification(): notification.InboxItem {
+  const tpl = DEMO_LIVE_NOTIFICATIONS[demoNotifSeq % DEMO_LIVE_NOTIFICATIONS.length]!;
+  demoNotifSeq += 1;
+  const item: notification.InboxItem = {
+    id: `ntf_demo_${Date.now()}_${demoNotifSeq}`,
+    type: tpl.type,
+    title: tpl.title,
+    body: tpl.body,
+    readAt: null,
+    createdAt: new Date().toISOString(),
+    resourceType: tpl.resourceType,
+    resourceId: tpl.resourceId,
+  };
+  NOTIFICATIONS.unshift(item);
+  return item;
+}
+
 // audience='admin' notifications powering the Notification管理 screen
 // (/notifications/manage, gated on notif:broadcast_publish). Mutable in-session so
 // the "メンバーへ公開" action persists (row stays 公開済み on reload) and the
@@ -1334,6 +1362,19 @@ function createChatStore() {
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
       return json(page([])); // empty timeline (Paginated envelope)
+    }
+    {
+      // A05 (demo only): a stub WS ticket so useChannelView calls `connect()` on
+      // the demo realtime client (DemoChatRealtimeClient), which then fabricates
+      // one inbound message every 30s. The ticket is never dialed (no DO).
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/ws-ticket$/.exec(pathname);
+      if (m && method === "GET") {
+        return json({
+          ticket: "demo-ws-ticket",
+          doUrl: "wss://demo.invalid/do",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        } satisfies chat.WsTicketResponse);
+      }
     }
     return null;
   }

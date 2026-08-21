@@ -72,6 +72,19 @@ li a:hover {
 button {
   font-family: inherit;
 }
+/* A02 (core-ised): tactile press feedback on EVERY native <button> across the
+ * whole demo SPA — including the FE3〜FE7 micro-frontends embedded in this shell,
+ * which is why the rule lives here (base layer) in addition to @dub/ui. Guarded
+ * behind `no-preference`; disabled buttons stay inert; dnd handles set transform
+ * inline so dragging is unaffected. Mirrors packages fe1-design-system/global.css. */
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled) {
+    transition: transform var(--dub-motion-fast) var(--dub-motion-easing);
+  }
+  button:not(:disabled):active {
+    transform: scale(0.97);
+  }
+}
 
 img,
 svg {

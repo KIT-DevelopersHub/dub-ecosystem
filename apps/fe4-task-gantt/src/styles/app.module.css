@@ -1349,23 +1349,23 @@
 .ppEmpty { padding: var(--dub-space-2); font-size: var(--dub-font-size-sm, 0.82rem); color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
 /* ================= team view switch ================= */
+/* A03: the outer chrome (border/background/pill) now belongs to the shared
+ * SegmentedControl rendered inside; this row only aligns the "表示" lead with it. */
 .teamSwitch {
   display: inline-flex;
   align-items: center;
-  gap: var(--dub-space-1);
+  gap: var(--dub-space-2);
   flex-wrap: wrap;
-  padding: 4px 5px;
-  background: var(--dub-color-surface-raised);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-lg, 10px);
 }
 .teamSwitchLead {
-  padding: 0 var(--dub-space-2) 0 var(--dub-space-1);
-  margin-right: 2px;
-  border-right: 1px solid var(--dub-color-border-default);
   font-size: var(--dub-font-size-sm, 0.82rem);
   font-weight: var(--dub-font-weight-medium, 600);
   color: var(--dub-color-text-secondary);
+}
+.teamChipLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .teamChip {
   display: inline-flex;
