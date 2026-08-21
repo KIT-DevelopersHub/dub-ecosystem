@@ -23,7 +23,7 @@ export interface ChatMessageVM {
   /** server MessageId once confirmed; the local id while still "pending". */
   id: MessageId;
   channelId: ChannelId;
-  authorId: UserId;
+  authorId: UserId | null; // null = system post (chat-service kind="system"); no human author
   body: string;
   createdAt: ISODateTime;
   status: ChatMessageStatus;

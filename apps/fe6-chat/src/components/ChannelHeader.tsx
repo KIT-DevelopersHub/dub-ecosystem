@@ -7,6 +7,7 @@ import { Avatar } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Channel, ChannelMember, Message } from "../api/contract";
 import { getPresence } from "../lib/presence";
+import { authorNameOf } from "../lib/author";
 import styles from "../styles/chat.module.css";
 
 export interface ChannelHeaderProps {
@@ -96,7 +97,7 @@ export function ChannelHeader({
   onJumpToMessage,
 }: ChannelHeaderProps) {
   const isDm = channel.type === "dm";
-  const nameOf = (id: common.UserId): string => resolveUser?.(id)?.displayName ?? id;
+  const nameOf = (id: common.UserId | null): string => authorNameOf(id, resolveUser);
 
   return (
     <header className={styles.channelHeader} data-testid="fe6-channel-header">

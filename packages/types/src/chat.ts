@@ -69,7 +69,7 @@ export interface ChatChannel {
 export interface ChatMessage {
   id: MessageId;
   channelId: ChannelId;
-  authorId: UserId;
+  authorId: UserId | null; // null = system post (chat-service kind="system"); no human author
   body: string;
   createdAt: ISODateTime;
 }

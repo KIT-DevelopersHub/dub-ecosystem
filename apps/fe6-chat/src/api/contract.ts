@@ -64,7 +64,7 @@ export interface GetChannelResponse {
 export interface Message extends common.Versioned {
   id: common.MessageId; // ULID — ascending order is chronological
   channelId: common.ChannelId;
-  authorId: common.UserId;
+  authorId: common.UserId | null; // null = system post (chat-service kind="system"); no human author
   body: string; // Markdown subset; mentions encoded as <@userId>
   threadRootId: common.MessageId | null; // null = top-level
   replyCount: number;

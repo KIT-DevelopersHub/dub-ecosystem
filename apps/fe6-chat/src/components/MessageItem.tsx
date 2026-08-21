@@ -14,6 +14,7 @@ import { Avatar } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message } from "../api/contract";
 import { segmentBody } from "../lib/render-body";
+import { authorNameOf } from "../lib/author";
 import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
 import styles from "../styles/chat.module.css";
@@ -32,10 +33,6 @@ export interface MessageItemProps {
   onReply?: (message: Message) => void; // open/append in the thread pane
   onOpenThread?: (message: Message) => void;
   onTogglePin?: (message: Message) => void;
-}
-
-function nameOf(id: common.UserId, resolve?: MessageItemProps["resolveUser"]): string {
-  return resolve?.(id)?.displayName ?? id;
 }
 
 function initials(name: string): string {
@@ -66,12 +63,13 @@ export function MessageItem({
   onOpenThread,
   onTogglePin,
 }: MessageItemProps) {
-  const isAuthor = message.authorId === currentUserId;
+  const isSystem = message.authorId === null; // system post — no human author, not moderatable
+  const isAuthor = message.authorId !== null && message.authorId === currentUserId;
   const isDeleted = message.deletedAt !== null;
   const canEdit = isAuthor && !isDeleted; // authors only — even moderators can't edit others'
-  const canDelete = (isAuthor || canModerate) && !isDeleted;
-  const authorName = nameOf(message.authorId, resolveUser);
-  const authorAvatar = resolveUser?.(message.authorId)?.avatarUrl ?? undefined;
+  const canDelete = (isAuthor || canModerate) && !isDeleted && !isSystem;
+  const authorName = authorNameOf(message.authorId, resolveUser);
+  const authorAvatar = (message.authorId !== null ? resolveUser?.(message.authorId)?.avatarUrl : null) ?? undefined;
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
@@ -227,7 +225,7 @@ export function MessageItem({
                 case "mention":
                   return (
                     <span key={i} className={styles.mention}>
-                      @{nameOf(seg.userId, resolveUser)}
+                      @{authorNameOf(seg.userId, resolveUser)}
                     </span>
                   );
                 case "code":

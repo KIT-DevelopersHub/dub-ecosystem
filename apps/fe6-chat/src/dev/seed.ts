@@ -105,6 +105,9 @@ const messages: Message[] = [
   m("msg_00030000000000000000000x", C_GENERAL, ME, "スタンドアップの前に `deploy` を本番へ流しました ✅", t(9, 9, 12), {
     reactions: [react("🚀", HANAKO, DAISUKE, MISAKI, KENICHI)],
   }),
+  // system post: chat-service delivers these with authorId=null (kind="system").
+  // Kept in the demo seed so the null-author render path is exercised out of the box.
+  { ...m("msg_00035000000000000000000x", C_GENERAL, ME, "本番デプロイが完了しました: 使用量ダッシュボードを公開", t(9, 9, 14)), authorId: null },
   m("msg_00040000000000000000000x", C_GENERAL, KENICHI, `<@${ME}> ありがとう！ステージングの確認もお願いできますか`, t(9, 9, 20)),
   m("msg_00050000000000000000000x", C_GENERAL, ME, "了解です、これから見ます 👀", t(9, 9, 21)),
   m(THREAD_ROOT, C_GENERAL, MISAKI, "新しいロゴ案、3パターン用意しました。意見ください！", t(9, 10, 30), {

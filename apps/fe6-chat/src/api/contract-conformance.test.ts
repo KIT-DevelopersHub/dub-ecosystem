@@ -40,7 +40,7 @@ const reactionSchema = z.object({ emoji: z.string(), userIds: z.array(z.string()
 const messageSchema = z.object({
   id: z.string(),
   channelId: z.string(),
-  authorId: z.string(),
+  authorId: z.string().nullable(), // null = system post (chat-service kind="system")
   body: z.string(),
   threadRootId: z.string().nullable(),
   replyCount: z.number(),
@@ -100,7 +100,7 @@ describe("contract conformance", () => {
     const stubMessage = z.object({
       id: z.string(),
       channelId: z.string(),
-      authorId: z.string(),
+      authorId: z.string().nullable(), // null = system post (chat-service kind="system")
       body: z.string(),
       createdAt: z.string(),
     });

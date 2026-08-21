@@ -32,6 +32,14 @@ describe("Display", () => {
     expect(screen.getByText("AL")).toBeInTheDocument();
   });
 
+  it("Avatar tolerates a null/undefined name without crashing", () => {
+    // Regression: a null name (e.g. system posts with no author) used to throw
+    // "Cannot read properties of null (reading 'trim')" from initials().
+    render(<Avatar name={null as unknown as string} testId="anull" />);
+    expect(screen.getByTestId("anull")).toBeInTheDocument();
+    expect(screen.getByText("?")).toBeInTheDocument();
+  });
+
   it("Tag calls onRemove", async () => {
     const onRemove = vi.fn();
     render(

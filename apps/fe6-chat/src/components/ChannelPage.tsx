@@ -82,7 +82,11 @@ export function ChannelPage({
 
   // resolve author display names in batch as new authors/members appear
   useEffect(() => {
-    const ids = new Set<common.UserId>([...view.state.messages.map((m) => m.authorId), ...members.map((m) => m.userId)]);
+    const ids = new Set<common.UserId>([
+      // system posts have authorId=null — nothing to resolve, and never send null to identity
+      ...view.state.messages.map((m) => m.authorId).filter((id): id is common.UserId => id !== null),
+      ...members.map((m) => m.userId),
+    ]);
     const missing = [...ids].filter((id) => !(id in users));
     if (missing.length === 0) return;
     let cancelled = false;
@@ -146,7 +150,7 @@ export function ChannelPage({
     (query: string): identity.UserSummary[] => {
       const q = query.toLowerCase();
       return Object.values(users)
-        .filter((u) => u.displayName.toLowerCase().includes(q))
+        .filter((u) => (u.displayName ?? "").toLowerCase().includes(q))
         .slice(0, 8);
     },
     [users],
