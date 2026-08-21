@@ -13,21 +13,27 @@ async function getDto(): Promise<gantt.GanttChartDTO> {
 }
 
 describe("dev-seed (real LMB conference data)", () => {
-  it("exposes the 7 real conference teams with colours", async () => {
+  it("exposes the 8 real conference teams with colours (会計→法務会計 rename + 法人 add)", async () => {
     const client = createDevClient();
     const res = await client.request<member.ListTeamsResponse>({ method: "GET", path: "/api/v1/teams" });
     const names = res.teams.map((t) => t.name).sort();
-    expect(names).toEqual(["会場", "会計", "全体進行", "集客告知", "スポンサー", "開発", "本部"].sort());
+    expect(names).toEqual(["会場", "法務会計", "全体進行", "集客告知", "スポンサー", "開発", "本部", "法人"].sort());
     expect(res.teams.every((t) => typeof t.color === "string")).toBe(true);
+    // rename keeps the stable id/key so existing task assignments survive
+    const kaikei = res.teams.find((t) => t.id === "team_kaikei");
+    expect(kaikei?.key).toBe("kaikei");
+    expect(kaikei?.name).toBe("法務会計");
+    // new 法人 team carries a distinct colour
+    expect(res.teams.find((t) => t.id === "team_houjin")?.name).toBe("法人");
   });
 
-  it("renders the 41 work-packages + 128 WBS leaves as a two-level tree, each with a bar", async () => {
+  it("renders the 42 work-packages + 128 WBS leaves as a two-level tree, each with a bar", async () => {
     const dto = await getDto();
     const parents = dto.rows.filter((r) => (r.depth ?? 0) === 0);
     const leaves = dto.rows.filter((r) => (r.depth ?? 0) === 1);
-    expect(parents).toHaveLength(41); // LMB's 41 section work-packages
+    expect(parents).toHaveLength(42); // LMB's 41 section work-packages + the 法人 demo work-package (3.8)
     expect(leaves).toHaveLength(128); // 129 config leaves − the 3.3 self-leaf
-    expect(dto.rows).toHaveLength(169);
+    expect(dto.rows).toHaveLength(170);
     // A row WITH children (work-package) carries null own dates — its span is derived from
     // children (mirrors gantt-service dto.toRow). Every row WITHOUT children (leaves +
     // childless top-level work-packages like 3.3) carries real dates. The client rolls the
@@ -80,7 +86,7 @@ describe("dev-seed (real LMB conference data)", () => {
   it("lists tasks under the conference event with real assignee owners", async () => {
     const client = createDevClient();
     const res = await client.request<task.ListTasksResponse>({ method: "GET", path: "/api/v1/tasks", query: { eventId: DEMO_EVENT_ID, limit: 200 } });
-    expect(res.items.length).toBe(169); // 41 work-packages + 128 WBS leaves
+    expect(res.items.length).toBe(170); // 41 work-packages + 法人 demo (3.8) + 128 WBS leaves
     const kickoff = res.items.find((t) => t.id === "task_3_1");
     expect(kickoff?.assigneeId).toBe("usr_takaoka"); // 本部 owner = 高岡 己太朗
     expect(kickoff?.status).toBe("done");
