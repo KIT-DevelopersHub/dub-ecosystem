@@ -2,7 +2,7 @@
 // Emits filter changes; URL sync is handled by the page (FE5 §2-2, test 3).
 
 import type { ReactNode } from "react";
-import { Switch, Tabs, type TabItem } from "@dub/ui";
+import { Stack, Switch, Tabs, type TabItem } from "@dub/ui";
 import type { InboxFilter } from "../lib/inbox-filter";
 import { NOTIFICATION_GROUP_PREFIXES } from "../lib/type-dictionary";
 
@@ -19,8 +19,10 @@ export interface NotificationFilterBarProps {
 
 export function NotificationFilterBar(props: NotificationFilterBarProps): ReactNode {
   const { filter, onChange } = props;
+  // Breathing room between the type tabs and the unread-only toggle so the
+  // switch doesn't crowd the tab row (space-4 = 16px, @dub/tokens).
   return (
-    <div data-testid="fe5-inbox-filterbar">
+    <Stack gap={4} align="start" testId="fe5-inbox-filterbar">
       <Tabs
         items={TYPE_OPTIONS}
         activeId={filter.type}
@@ -34,6 +36,6 @@ export function NotificationFilterBar(props: NotificationFilterBarProps): ReactN
         label="Unread only"
         testId="fe5-inbox-unreadtoggle"
       />
-    </div>
+    </Stack>
   );
 }

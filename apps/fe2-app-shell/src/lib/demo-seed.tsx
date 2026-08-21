@@ -152,10 +152,35 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
 };
 
 // ── notifications ─────────────────────────────────────────────────────────────
+// A deliberately LONG inbox (25 rows) so the notification dialog overflows and the
+// pinned-header / pinned-footer + inner-scroll behavior is demonstrable in the demo
+// (feedback: "通知が少なくて溢れず確認できなかった").
 const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
   { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
+  { id: "ntf_4", type: "task.assigned", title: "タスクが割り当てられました", body: "「会場レイアウト確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T23:30:00Z", resourceType: "task", resourceId: "tsk_2" },
+  { id: "ntf_5", type: "release", title: "🎉 ガントチャートをメンバー公開しました", body: "タスクの期間・進捗・依存をタイムラインで確認できます。", readAt: null, createdAt: "2026-08-01T23:00:00Z", resourceType: "notification", resourceId: "ntfn_adm_0002" },
+  { id: "ntf_6", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんからメールが届いています。", readAt: null, createdAt: "2026-08-01T22:30:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_7", type: "task.completed", title: "タスクが完了しました", body: "「懇親会の会場予約」が完了になりました。", readAt: null, createdAt: "2026-08-01T22:00:00Z", resourceType: "task", resourceId: "tsk_3" },
+  { id: "ntf_8", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「ハッカソン 2026」が open になりました。", readAt: "2026-08-01T21:40:00Z", createdAt: "2026-08-01T21:30:00Z", resourceType: "event", resourceId: "evt_2" },
+  { id: "ntf_9", type: "release", title: "🎉 メール添付ファイルに対応しました", body: "メールの送受信で添付ファイルを扱えるようになりました。", readAt: null, createdAt: "2026-08-01T21:00:00Z", resourceType: "notification", resourceId: "ntfn_adm_0004" },
+  { id: "ntf_10", type: "task.assigned", title: "タスクが割り当てられました", body: "「スポンサー資料の作成」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T20:30:00Z", resourceType: "task", resourceId: "tsk_4" },
+  { id: "ntf_11", type: "mail.received", title: "新着メール", body: "運営事務局からメールが届いています。", readAt: null, createdAt: "2026-08-01T20:00:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_12", type: "comment.mentioned", title: "コメントでメンションされました", body: "「当日の受付フロー」で @you が言及されました。", readAt: null, createdAt: "2026-08-01T19:30:00Z", resourceType: "task", resourceId: "tsk_5" },
+  { id: "ntf_13", type: "release", title: "🎉 使用量ダッシュボードを公開しました", body: "各サービスの無料枠の使用状況を確認できます。", readAt: "2026-08-01T19:10:00Z", createdAt: "2026-08-01T19:00:00Z", resourceType: "notification", resourceId: "ntfn_adm_0005" },
+  { id: "ntf_14", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「登壇者スライド回収」の期限は明日です。", readAt: null, createdAt: "2026-08-01T18:30:00Z", resourceType: "task", resourceId: "tsk_6" },
+  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "田中 一郎さんからメールが届いています。", readAt: null, createdAt: "2026-08-01T18:00:00Z", resourceType: "mail", resourceId: "msg_4" },
+  { id: "ntf_16", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「LT ナイト」が closed になりました。", readAt: "2026-08-01T17:40:00Z", createdAt: "2026-08-01T17:30:00Z", resourceType: "event", resourceId: "evt_3" },
+  { id: "ntf_17", type: "task.assigned", title: "タスクが割り当てられました", body: "「懇親会の飲食手配」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T17:00:00Z", resourceType: "task", resourceId: "tsk_7" },
+  { id: "ntf_18", type: "release", title: "🎉 通知の一括既読に対応しました", body: "「Mark all as read」で未読をまとめて既読にできます。", readAt: null, createdAt: "2026-08-01T16:30:00Z", resourceType: "notification", resourceId: "ntfn_adm_0007" },
+  { id: "ntf_19", type: "mail.received", title: "新着メール", body: "広報チームからメールが届いています。", readAt: null, createdAt: "2026-08-01T16:00:00Z", resourceType: "mail", resourceId: "msg_5" },
+  { id: "ntf_20", type: "task.completed", title: "タスクが完了しました", body: "「公式サイトの更新」が完了になりました。", readAt: "2026-08-01T15:40:00Z", createdAt: "2026-08-01T15:30:00Z", resourceType: "task", resourceId: "tsk_8" },
+  { id: "ntf_21", type: "comment.mentioned", title: "コメントでメンションされました", body: "「予算の最終確認」で @you が言及されました。", readAt: null, createdAt: "2026-08-01T15:00:00Z", resourceType: "task", resourceId: "tsk_9" },
+  { id: "ntf_22", type: "task.assigned", title: "タスクが割り当てられました", body: "「アンケートフォームの準備」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T14:30:00Z", resourceType: "task", resourceId: "tsk_10" },
+  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "会場担当者からメールが届いています。", readAt: null, createdAt: "2026-08-01T14:00:00Z", resourceType: "mail", resourceId: "msg_6" },
+  { id: "ntf_24", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が open になりました。", readAt: null, createdAt: "2026-08-01T13:30:00Z", resourceType: "event", resourceId: "evt_1" },
+  { id: "ntf_25", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「配信機材の最終チェック」の期限は今日です。", readAt: null, createdAt: "2026-08-01T13:00:00Z", resourceType: "task", resourceId: "tsk_11" },
 ];
 
 // audience='admin' notifications powering the Notification管理 screen
