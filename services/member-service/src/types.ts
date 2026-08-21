@@ -40,6 +40,9 @@ export interface PersonRow {
   lastNameRomaji: string | null;
   firstNameRomaji: string | null;
   phone: string | null;
+  /** 希望する活動 (参加届 由来). member_participations にしか無かった項目を名簿にも保持し、
+   *  本人が アカウント設定 → 参加情報 で自己編集できるようにする (0009 additive column)。 */
+  desiredActivity: member.DesiredActivity | null;
   note: string | null;
   sortOrder: number;
   version: number;
