@@ -1,9 +1,12 @@
 import { useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { AttachmentField, type AttachmentChip } from "./AttachmentField";
+import { PredecessorPicker } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
 
 /** A file the requester attached in the modal — read into a self-contained data:
@@ -31,6 +34,11 @@ export interface MyTaskDraft {
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  /** WBS 親タスク（親子関係）. null ⇒ トップレベル（親なし）. 子は親と同じチームに固定される
+   *  （親子でチームが食い違う状態は作れない・サーバも 422 で担保）。 */
+  parentId: common.TaskId | null;
+  /** 先行タスク（依存＝この新規タスクが待つタスク）. 同じチーム内のタスクのみ（ADR-0007）。 */
+  dependsOnIds: common.TaskId[];
   dueAt: common.ISODateTime | null;
   attachments: DraftAttachments;
 }
@@ -65,6 +73,15 @@ export interface MyTaskCreateModalProps {
   title?: string;
   /** Primary button label (default「発行する」). Send/receive passes「依頼する」. */
   submitLabel?: string;
+  /** ③ 先行タスク・親タスクを選ぶための候補（`scopeEventId` イベントのタスク一覧・チーム情報つき）。
+   *  非空 かつ モーダルで選択中の対象イベントが `scopeEventId` と一致するときだけ、親タスク検索と
+   *  先行タスクピッカーを出す（別イベントの親子・依存を作らせない）。空/未指定なら両欄を出さない。 */
+  scopeTasks?: readonly ScopeTask[];
+  /** `scopeTasks` が属する対象イベント。モーダルで選択中の対象イベントがこれと一致するときだけ関係欄を出す。 */
+  scopeEventId?: common.EventId | null;
+  /** 対象イベントが変わったら親（呼び出し側）へ通知する。呼び出し側は候補（scopeTasks）を
+   *  そのイベントで読み直す（親子・依存は同一イベント内でのみ）。 */
+  onEventChange?: (eventId: common.EventId | null) => void;
 }
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -88,12 +105,17 @@ export function MyTaskCreateModal({
   requesterName,
   title: modalTitle = "タスクを発行",
   submitLabel = "発行する",
+  scopeTasks,
+  scopeEventId = null,
+  onEventChange,
 }: MyTaskCreateModalProps) {
   const [eventId, setEventId] = useState<common.EventId | "">(NO_EVENT);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
+  const [parentId, setParentId] = useState<common.TaskId | null>(null);
+  const [deps, setDeps] = useState<common.TaskId[]>([]);
   const [due, setDue] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
@@ -107,6 +129,8 @@ export function MyTaskCreateModal({
     setAssigneeId(null);
     setPriority("medium");
     setTeamId(null);
+    setParentId(null);
+    setDeps([]);
     setDue(null);
     setDescription("");
     setFiles([]);
@@ -151,6 +175,42 @@ export function MyTaskCreateModal({
     onClose();
   };
 
+  // ③ 親タスク・先行タスク（親子/依存）を選ぶための候補とロック状態を導出する。
+  // scope = 対象イベントのタスク（チーム情報つき）。空/未指定なら関係欄は出さない。
+  const scope = scopeTasks ?? [];
+  const selectedEventId: common.EventId | null = eventId === NO_EVENT ? null : (eventId as common.EventId);
+  // 別イベントの親子・依存を作らせない: 選択中の対象イベントが候補の属するイベント(scopeEventId)と
+  // 一致するときだけ関係欄を出す。
+  const scopeMatchesEvent = selectedEventId != null && selectedEventId === scopeEventId;
+  const showRelationFields = scope.length > 0 && scopeMatchesEvent;
+  // 親子は同一チーム: 親を選んだらチームは親のチームに固定する（親子でチーム不一致を作らせない）。
+  const teamLockedToParent = parentId != null;
+  // 新規タスクが属することになるチーム（親があれば親のチーム・無ければ選択中のチーム）。
+  const effectiveTeamId = teamLockedToParent ? teamOf(scope, parentId) : teamId;
+  // 先行（依存）は同じチーム内のタスクのみ（TaskCreateModal と同一の same-team スコープ・ADR-0007）。
+  const depOptions = dependencyScopeOptions(scope, effectiveTeamId);
+  const parentOptions = scope.map((s) => ({ id: s.id, title: s.title }));
+
+  // 親タスクを選ぶ/外すと、別チームになった先行（依存）を落とし、子のチームを親のチームへ合わせる。
+  const onChangeParent = (next: common.TaskId | null) => {
+    setParentId(next);
+    if (next) {
+      const parentTeam = teamOf(scope, next);
+      setTeamId(parentTeam);
+      setDeps((d) => pruneToScope(scope, parentTeam, d).filter((id) => id !== next));
+    } else {
+      // トップレベルへ戻す: チームは現状維持のまま、自分自身の除去だけ行う。
+      setDeps((d) => d.filter((id) => id !== next));
+    }
+  };
+  // 対象イベントを変えたら親（呼び出し側）へ通知（候補の再ロード用）＋現在の親/先行を解除。
+  const onChangeEvent = (next: common.EventId | "") => {
+    setEventId(next);
+    setParentId(null);
+    setDeps([]);
+    onEventChange?.(next === NO_EVENT ? null : (next as common.EventId));
+  };
+
   // Event link is optional now — only the title gates submission.
   const canSubmit = title.trim().length > 0 && !saving;
 
@@ -164,7 +224,11 @@ export function MyTaskCreateModal({
         description: description.trim() ? description.trim() : null,
         priority,
         assigneeId,
-        teamId,
+        // 親を選んでいれば子は親のチームに固定（UIは disabled だが送信値も親で確定）。
+        teamId: teamLockedToParent ? teamOf(scope, parentId) : teamId,
+        // ③ 親子（親タスク）・依存（先行タスク）。関係欄を出していない場面では null / 空で送る。
+        parentId: showRelationFields ? parentId : null,
+        dependsOnIds: showRelationFields ? deps : [],
         dueAt: isoFromDateInput(due),
         attachments: { files, urls },
       });
@@ -218,7 +282,7 @@ export function MyTaskCreateModal({
           <Select
             id="fe4-mytask-event"
             value={eventId}
-            onChange={(v) => setEventId(v as common.EventId | "")}
+            onChange={(v) => onChangeEvent(v as common.EventId | "")}
             options={[
               { value: NO_EVENT, label: "紐付けない" },
               ...events.map((e) => ({ value: e.id, label: e.name })),
@@ -268,10 +332,48 @@ export function MyTaskCreateModal({
             <Select
               id="fe4-mytask-team"
               value={teamId ?? ""}
-              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
+              disabled={teamLockedToParent}
+              onChange={(v) => {
+                const next = v ? (v as common.TeamId) : null;
+                setTeamId(next);
+                // 依存は同一チームのみ — 別チームになった先行タスクを落とす（ADR-0007）。
+                setDeps((d) => pruneToScope(scope, next, d));
+              }}
               options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
               testId="fe4-mytask-create-team"
             />
+            {teamLockedToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-mytask-create-team-locked">
+                親タスクと同じチームになります（変更できません）
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ③ 親タスク（親子関係）: 選択中イベントのタスクから検索して親を選べる。親を選ぶと
+            チームは親のチームに固定される（親子で同一チーム・#409）。空欄＝親なし（トップレベル）。
+            ガント（TaskCreateModal）と同じ導線。scope が無い場面では出さない。 */}
+        {showRelationFields && (
+          <div className={styles.formFieldFull}>
+            <span className={styles.formLabel}>親タスク（親子関係・任意）</span>
+            <TaskSearchSelect<common.TaskId>
+              value={parentId}
+              options={parentOptions}
+              placeholder="タスク名で検索・一覧から選択…"
+              emptyOptionsLabel="親にできるタスクがありません"
+              hint="空欄のままなら親なし（トップレベル）。親を選ぶとチームは親に合わせます。"
+              onChange={onChangeParent}
+              testId="fe4-mytask-create-parent"
+            />
+          </div>
+        )}
+
+        {/* ③ 先行タスク（依存）: この新規タスクが待つ先行タスクを、同じチーム内のタスクから選べる。
+            ガント（TaskCreateModal）と同じピッカー・同じ same-team スコープ規則（ADR-0007）。 */}
+        {showRelationFields && (
+          <div className={styles.formFieldFull}>
+            <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク・任意）</span>
+            <PredecessorPicker options={depOptions} value={deps} onChange={setDeps} testId="fe4-mytask-create-deps" />
           </div>
         )}
 

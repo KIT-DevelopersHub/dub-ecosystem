@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { createTask, createTaskAttachment, issueTaskRequest } from "../api/endpoints";
+import { createTask, createTaskAttachment, issueTaskRequest, getGantt, replaceDependencies } from "../api/endpoints";
+import { scopeTasksFromRows, type ScopeTask } from "../domain/task-hierarchy";
 import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
 import { MyTaskRequests } from "./MyTaskRequests";
 import styles from "../styles/app.module.css";
@@ -32,6 +33,30 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   // send (依頼) so the new 送った依頼 card appears without a table to reconcile.
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((n) => n + 1), []);
+
+  // ③ 親タスク・先行タスクの候補は「作成モーダルで選択中の対象イベント」のタスク（＝そのイベントの
+  // ガント読み取りモデル）。モーダルで対象イベントを選ぶ/変えると onEventChange で scopeEventId が
+  // 差し替わり、候補を読み直す（親子・依存は同一イベント内でのみ・別チーム依存は不可）。
+  const [scopeEventId, setScopeEventId] = useState<common.EventId | null>(null);
+  const [scopeTasks, setScopeTasks] = useState<readonly ScopeTask[]>([]);
+  useEffect(() => {
+    if (!scopeEventId) {
+      setScopeTasks([]);
+      return;
+    }
+    let live = true;
+    void getGantt(client, scopeEventId)
+      .then((dto) => {
+        if (live) setScopeTasks(scopeTasksFromRows(dto.rows));
+      })
+      .catch(() => {
+        // イベントにガントが無い/未紐付け等 → 候補なし（親/先行欄は出さない）。degrade gracefully。
+        if (live) setScopeTasks([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, scopeEventId]);
 
   // Fallbacks so the hub works in the shell too, where the caller may not hand a
   // full roster / event list: people/events fall back to empty (the modal then
@@ -102,7 +127,21 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+        // ③ 親タスク（親子関係）。子は親と同じチーム（モーダルで固定済み）。
+        ...(draft.parentId ? { parentTaskId: draft.parentId } : {}),
       });
+      // ③ 先行タスク（依存）。タスク作成後に別途反映（同じチーム内のみ・ADR-0007）。失敗しても作成は取り消さない。
+      if (draft.dependsOnIds.length > 0) {
+        try {
+          await replaceDependencies(client, created.id, { version: created.version, dependsOnIds: draft.dependsOnIds });
+        } catch {
+          toast.show({
+            kind: "error",
+            title: "一部の先行タスクを設定できませんでした",
+            description: "タスクは作成済みです。詳細から設定し直せます。",
+          });
+        }
+      }
       await attachBestEffort(created.id, draft.attachments);
       toast.show({ kind: "success", title: "タスクを作成しました" });
     } catch (e) {
@@ -132,6 +171,9 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         requesterName={currentUserName}
         title="タスクを依頼"
         submitLabel="依頼する"
+        scopeTasks={scopeTasks}
+        scopeEventId={scopeEventId}
+        onEventChange={setScopeEventId}
       />
     </section>
   );
