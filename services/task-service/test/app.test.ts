@@ -337,6 +337,92 @@ describe("PUT /tasks/:id/dependencies — same-team gate (ADR-0007)", () => {
   });
 });
 
+// 親子は必ず同一チーム: 子タスクは親と別チームにできない（親から作る導線はチームを親に固定
+// する。整合はサーバでも担保）。既存のクロスチーム依存制約と同じチーム境界・null semantics。
+describe("親子タスクの同一チーム制約 (PARENT_CHILD_TEAM_MISMATCH)", () => {
+  it("201: 親と同じチームの子タスクは作成できる", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_dev" }),
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as task.Task).teamId).toBe("team_dev");
+  });
+
+  it("201: 親子ともにチームなし(null)なら作成できる (back-compat)", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親" }); // team=null
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("422: 親と別チームの子タスクは作成できない", async () => {
+    const { h, app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_sponsor" }),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+    // 门番 rejected: only the parent's task.created was emitted.
+    expect(h.events.byName("task.created")).toHaveLength(1);
+  });
+
+  it("422: 親にチームあり・子がチームなし(片側null)も不一致で弾く", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id }), // team=null
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+  });
+
+  it("422: PATCH で子のチームを親と別チームへ変更できない", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const child = await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${child.id}`,
+      userInit("PATCH", { version: child.version, teamId: "team_sponsor" }),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+  });
+
+  it("422: PATCH で親のチームを変えると子が別チームになるため弾く", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${parent.id}`,
+      userInit("PATCH", { version: parent.version, teamId: "team_sponsor" }),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+  });
+
+  it("200: PATCH で同一チームの親へ付け替えは許可", async () => {
+    const { app } = setup();
+    const p1 = await create(app, { title: "親1", teamId: "team_dev" });
+    const p2 = await create(app, { title: "親2", teamId: "team_dev" });
+    const child = await create(app, { title: "子", parentTaskId: p1.id, teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${child.id}`,
+      userInit("PATCH", { version: child.version, parentTaskId: p2.id }),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(p2.id);
+  });
+});
+
 describe("DELETE /tasks/:id (archive)", () => {
   it("archives, emits task.archived, then GET is 404 and list hides it (includeArchived reveals)", async () => {
     const { h, app } = setup();
@@ -677,7 +763,8 @@ describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory re
 
   it("persists parentTaskId/teamId/wbs on create and echoes them on read", async () => {
     const { app } = setup();
-    const parent = await create(app, { title: "親" });
+    // 親子は同一チーム制約に合わせ、親も team_dev で作る（永続化の検証が目的）。
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
     const child = await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev", wbs: "1.2.3" } as Partial<task.CreateTaskRequest>);
     const read = await get(app, child.id);
     expect(read.status).toBe(200);

@@ -8,6 +8,7 @@ import {
   createRoute,
   createRouter,
   Outlet,
+  useRouterState,
 } from "@tanstack/react-router";
 import type { ComponentType } from "react";
 import type { ApiClient } from "../lib/api-client.tsx";
@@ -17,6 +18,8 @@ import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 import type { FeatureModuleId } from "../modules/types.tsx";
 import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
+import { MemberRosterSubnav, activeSectionId } from "../features/members/MemberRosterNav.tsx";
+import { RosterContentSkeleton } from "../features/members/RosterContentSkeleton.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { HomeScreen } from "./screens/HomeScreen.tsx";
 import { PublicParticipationPage, PUBLIC_PARTICIPATION_PATH } from "../features/participation/index.tsx";
@@ -86,6 +89,29 @@ function guard(route: ResolvedRoute, Body: ComponentType): () => JSX.Element {
   };
 }
 
+/**
+ * Persistent shell content region: renders the feature route via <Outlet/> under a
+ * single Suspense boundary. For the 統合アプリ「運営メンバー・名簿」sections the shared
+ * サブナビ帯(MemberRosterSubnav) is mounted HERE — above the Suspense — so it persists
+ * across tab switches: switching to a not-yet-cached tab no longer remounts the bar
+ * (which made "バーごとリフレッシュ" して見えた + reset the sliding underline). Only the
+ * タブ下の本体 (Outlet) suspends, and it shows a skeleton (FE1 §5 loading principle)
+ * instead of the whole area collapsing to the top loading bar. Non-roster routes keep
+ * the thin RouteLoadingBar fallback as before.
+ */
+function ShellRouteContent(): JSX.Element {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const inRoster = activeSectionId(pathname) != null;
+  return (
+    <>
+      {inRoster && <MemberRosterSubnav />}
+      <Suspense fallback={inRoster ? <RosterContentSkeleton /> : <RouteLoadingBar active />}>
+        <Outlet />
+      </Suspense>
+    </>
+  );
+}
+
 export function createShellRouter(
   api: ApiClient,
   registry: Registry,
@@ -122,9 +148,7 @@ export function createShellRouter(
         {...(opts?.onLogout ? { onLogout: opts.onLogout } : {})}
       >
         <RequireAuth loadingFallback={<RouteLoadingBar active />}>
-          <Suspense fallback={<RouteLoadingBar active />}>
-            <Outlet />
-          </Suspense>
+          <ShellRouteContent />
         </RequireAuth>
       </AppShellLayout>
     ),
