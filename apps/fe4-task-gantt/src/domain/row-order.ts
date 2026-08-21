@@ -67,6 +67,109 @@ export function applyManualOrder(rows: readonly Row[], orderedTaskIds: readonly 
 }
 
 /**
+ * Move a MULTI-SELECTION up (dir=-1) or down (dir=+1) by one slot, per sibling
+ * group, and return the full `orderedTaskIds` to persist (or null when nothing
+ * moves — e.g. the whole selection is already at the group's edge).
+ *
+ * Each parent group is reordered independently: the selected members slide as a
+ * block past one unselected neighbour, keeping their own relative order and the
+ * WBS parent→children contiguity (the tree is re-linearised at the end). This is
+ * the vertical counterpart to a marquee bulk move; only 手動 mode uses it (an
+ * automatic sort would just overwrite the result next render).
+ */
+export function moveSelectionVertical(
+  rows: readonly Row[],
+  selectedIds: ReadonlySet<common.TaskId>,
+  dir: -1 | 1,
+): common.TaskId[] | null {
+  if (rows.length === 0 || selectedIds.size === 0) return null;
+  const groups = groupByParent(rows);
+  const reordered = new Map<common.TaskId | null, common.TaskId[]>();
+  let changed = false;
+  for (const [parent, arr] of groups) {
+    const ids = arr.map((r) => r.taskId);
+    const moved = moveBlockWithinGroup(ids, selectedIds, dir);
+    if (moved.changed) changed = true;
+    reordered.set(parent, moved.ids);
+  }
+  if (!changed) return null;
+
+  const out: common.TaskId[] = [];
+  const emitted = new Set<common.TaskId>();
+  const walk = (parent: common.TaskId | null): void => {
+    for (const id of reordered.get(parent) ?? []) {
+      if (emitted.has(id)) continue;
+      emitted.add(id);
+      out.push(id);
+      walk(id);
+    }
+  };
+  walk(null);
+  if (out.length < rows.length) {
+    for (const r of rows) if (!emitted.has(r.taskId)) out.push(r.taskId);
+  }
+  return out;
+}
+
+/** Slide the selected members of one ordered group by one slot in `dir`, as a
+ *  block (each selected item hops one unselected neighbour). Pure; returns the new
+ *  order and whether it changed. */
+function moveBlockWithinGroup(
+  ids: readonly common.TaskId[],
+  selected: ReadonlySet<common.TaskId>,
+  dir: -1 | 1,
+): { ids: common.TaskId[]; changed: boolean } {
+  const a = [...ids];
+  let changed = false;
+  if (dir === -1) {
+    for (let i = 1; i < a.length; i++) {
+      if (selected.has(a[i]!) && !selected.has(a[i - 1]!)) {
+        [a[i - 1], a[i]] = [a[i]!, a[i - 1]!];
+        changed = true;
+      }
+    }
+  } else {
+    for (let i = a.length - 2; i >= 0; i--) {
+      if (selected.has(a[i]!) && !selected.has(a[i + 1]!)) {
+        [a[i + 1], a[i]] = [a[i]!, a[i + 1]!];
+        changed = true;
+      }
+    }
+  }
+  return { ids: a, changed };
+}
+
+/**
+ * The "roots" of a selection: selected ids that have NO selected ancestor. Shifting
+ * a work-package (parent) already carries its whole subtree, so a bulk horizontal
+ * move must skip any selected descendant of another selected id — otherwise a child
+ * both inside a shifted subtree AND individually shifted would move twice.
+ */
+export function selectionRoots(
+  rows: readonly Row[],
+  selectedIds: ReadonlySet<common.TaskId>,
+): common.TaskId[] {
+  const parentOf = new Map<common.TaskId, common.TaskId | null>(
+    rows.map((r) => [r.taskId, r.parentTaskId ?? null] as const),
+  );
+  const hasSelectedAncestor = (id: common.TaskId): boolean => {
+    let p = parentOf.get(id) ?? null;
+    const guard = new Set<common.TaskId>();
+    while (p && !guard.has(p)) {
+      guard.add(p);
+      if (selectedIds.has(p)) return true;
+      p = parentOf.get(p) ?? null;
+    }
+    return false;
+  };
+  const out: common.TaskId[] = [];
+  for (const r of rows) {
+    if (selectedIds.has(r.taskId) && !hasSelectedAncestor(r.taskId)) out.push(r.taskId);
+  }
+  return out;
+}
+
+/**
  * Given the CURRENT linear rows and a sibling reorder (a task moved to sit right
  * before `beforeTaskId`, or to the end of its group when null), produce the full
  * `orderedTaskIds` sequence to persist. Only same-parent moves are honoured — a
