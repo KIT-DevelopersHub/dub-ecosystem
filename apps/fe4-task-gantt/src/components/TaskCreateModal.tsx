@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
-import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
@@ -61,14 +61,23 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   // whenever the parent changes so the picker only offers same-scope tasks.
   const depOptions = useMemo(() => dependencyScopeOptions(scopeTasks, parentId), [scopeTasks, parentId]);
 
+  // 親子は同一チーム: 親を選んだ子タスクは親のチームに固定する。チーム欄は親のチームで
+  // プリフィルし、親がいる間は変更不可（disabled）にして、親子でチームが食い違う状態を
+  // 作らせない（サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保）。親なし＝自由。
+  const teamLockedToParent = parentId != null;
+
   // seed the due date + parent + predecessors when (re)opened (timeline cell /
-  // "ここから子タスクを作成" preset the parent, etc.).
+  // "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
+  // チームも親のチームで固定する。
   useEffect(() => {
     if (open) {
       setDue(initialDue ?? null);
-      setParentId(initialParentId ?? null);
+      const nextParent = initialParentId ?? null;
+      setParentId(nextParent);
+      if (nextParent) setTeamId(teamOf(scopeTasks, nextParent));
       setDeps(initialDependsOn ? [...initialDependsOn] : []);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialDue, initialParentId, initialDependsOn]);
 
   const reset = () => {
@@ -98,7 +107,8 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         status,
         priority,
         assigneeId,
-        teamId,
+        // 子タスク作成時はチームを親に固定（UIは disabled だが念のため送信値も親で確定）。
+        teamId: parentId ? teamOf(scopeTasks, parentId) : teamId,
         startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
         parentTaskId: parentId,
@@ -209,10 +219,16 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
             <Select
               id="fe4-create-team"
               value={teamId ?? ""}
+              disabled={teamLockedToParent}
               onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
               options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
               testId="fe4-create-team"
             />
+            {teamLockedToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-create-team-locked">
+                親タスクと同じチームになります（変更できません）
+              </p>
+            )}
           </div>
         )}
 
@@ -230,6 +246,9 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
               setParentId(next);
               // dependencies must stay within the new scope — drop the out-of-scope ones.
               setDeps((d) => pruneToScope(scopeTasks, next, d));
+              // 親子は同一チーム: 親を選んだらチームを親のチームへ合わせる（親子でチームが
+              // 食い違う状態を作らせない）。トップレベルへ戻す（next=null）ならチームは維持。
+              if (next) setTeamId(teamOf(scopeTasks, next));
             }}
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-create-parent"

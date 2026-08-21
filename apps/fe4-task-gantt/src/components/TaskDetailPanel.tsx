@@ -3,7 +3,7 @@ import type { common, identity, task, team } from "@dub/types";
 import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
-import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
@@ -118,6 +118,10 @@ export function TaskDetailPanel({
     () => scopeTasks.filter((s) => s.parentTaskId === t.id).length,
     [scopeTasks, t.id],
   );
+  // 親子は同一チーム: このタスクが子（親を持つ）なら、チームは親のチームに固定し編集させない。
+  // 親の付け替えで親のチームへ追従する（下の親セレクトの onChange）。親なし＝トップレベルなら自由。
+  // サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保。
+  const teamLockedToParent = parentId != null;
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
@@ -250,11 +254,16 @@ export function TaskDetailPanel({
             <Select
               id="fe4-detail-team"
               value={teamId ?? ""}
-              disabled={!canWrite}
+              disabled={!canWrite || teamLockedToParent}
               onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
               options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
               testId="fe4-detail-team"
             />
+            {teamLockedToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-detail-team-locked">
+                親タスクと同じチームです（子タスクのチームは変更できません）
+              </p>
+            )}
           </div>
         )}
 
@@ -280,6 +289,9 @@ export function TaskDetailPanel({
               setParentId(next);
               // dependencies must stay within the new scope — drop out-of-scope ones.
               setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
+              // 親子は同一チーム: 親を付け替えたら子のチームを新しい親のチームへ合わせる（親子で
+              // チームが食い違う状態を作らせない）。トップレベルへ分離（next=null）ならチームは維持。
+              if (next) setTeamId(teamOf(scopeTasks, next));
             }}
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
