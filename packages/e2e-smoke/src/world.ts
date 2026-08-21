@@ -126,6 +126,7 @@ export function createWorld(): World {
       },
     },
     identity: { userExists: async () => true },
+    member: { teamsOfUser: async () => [] },
     idempotency: { wasProcessed: async () => false, markProcessed: async () => {} },
   };
   const taskApp = buildTaskApp(taskDeps);

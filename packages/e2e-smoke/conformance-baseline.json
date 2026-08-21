@@ -43,6 +43,13 @@
     ],
     "missingInCode": []
   },
+  "event-service": {
+    "missingInSpec": [
+      "GET /events/{}/details",
+      "PUT /events/{}/details"
+    ],
+    "missingInCode": []
+  },
   "gantt-service": {
     "missingInSpec": [
       "POST /internal/events-async"
