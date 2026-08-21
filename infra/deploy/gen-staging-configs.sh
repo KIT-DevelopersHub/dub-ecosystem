@@ -98,7 +98,7 @@ gen_one() {
       -v AUTHKV_ID="$PROD_AUTHKV_ID"         -v AUTHKV_STG="$STAGING_AUTH_KV_ID" \
       -v DPKV_ID="$PROD_DPKV_ID"             -v DPKV_STG="$STAGING_DRIVE_PROXY_KV_ID" \
       -v GANTTKV_ID="$PROD_GANTTKV_ID"       -v GANTTKV_STG="$STAGING_GANTT_KV_ID" \
-      -v FE2ORIGIN="$FE2_ORIGIN" '
+      -v FE2ORIGIN="$FE2_ORIGIN"             -v SUB="$STAGING_WORKERS_SUBDOMAIN" '
       BEGIN { seen_header=0; in_triggers=0 }
       # --- section headers: drop the whole [triggers] block, pass others through ---
       /^\[/ {
@@ -115,6 +115,16 @@ gen_one() {
       /^service = "/ {
         match($0, /"[^"]*"/); v=substr($0,RSTART+1,RLENGTH-2); rest=substr($0,RSTART+RLENGTH)
         print "service = \"" v "-staging\"" rest; next
+      }
+      # --- gantt realtime: retarget the DO-direct WS base + Origin allow-list at STAGING.
+      #     The ws-ticket doUrl must point to THIS staging worker (dub-gantt-service-staging),
+      #     and the GanttRoom DO Origin check must admit the staging fe2 origin — otherwise a
+      #     staging browser is bounced to the prod DO / rejected by the prod-only allow-list. ---
+      /^GANTT_RT_DO_URL_BASE = "/ {
+        print "GANTT_RT_DO_URL_BASE = \"wss://dub-gantt-service-staging." SUB ".workers.dev/ws/:id\""; next
+      }
+      /^GANTT_RT_ALLOWED_ORIGINS = "/ {
+        print "GANTT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
       }
       # --- D1 logical names ---
       /^database_name = "dub-core"/    { print "database_name = \"dub-core-staging\""; next }

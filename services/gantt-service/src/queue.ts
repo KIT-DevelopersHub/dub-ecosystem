@@ -11,39 +11,46 @@
 // consumer over HTTP does NOT reintroduce the event↔task cycle. Handlers are idempotent
 // (purge/DELETE), so an at-least-once redelivery from a drain is safe with no dedup store.
 import { createQueueHandler, type DubEventEnvelope, type DubEventHandlerMap } from "@dub/events";
-import type { common } from "@dub/types";
+import type { common, gantt } from "@dub/types";
 import type { Env } from "./env";
 import type { AppDeps } from "./ports";
 import { defaultDeps } from "./deps";
+import { broadcastGanttChange } from "./realtime";
 
 /** Domain-event handlers (transport-agnostic: shared by the Queue consumer and the free-tier route). */
 export function ganttEventHandlers(env: Env, deps: AppDeps = defaultDeps): DubEventHandlerMap {
   const cache = deps.cache(env);
   const views = deps.views(env);
-  const purge = (eventId: common.EventId): Promise<void> => cache.purge(eventId);
+  // Purge the DTO cache AND tell the room to refetch (realtime). The broadcast is best-
+  // effort (never throws) so a realtime hiccup can't fail cache invalidation. actorId is
+  // the envelope's actor (null ⇒ "system" for cron/webhook-driven changes).
+  const purgeAndNotify = async (eventId: common.EventId, change: gantt.GanttChangeKind, actorId: string | null): Promise<void> => {
+    await cache.purge(eventId);
+    await broadcastGanttChange(env, eventId, change, (actorId ?? "system") as common.UserId);
+  };
   // task.* eventId is optional now (判断44): an unlinked task belongs to no event-scoped
   // gantt, so there is nothing to purge — no-op instead of purging a bogus key.
-  const purgeIf = (eventId?: common.EventId): Promise<void> =>
-    eventId ? cache.purge(eventId) : Promise.resolve();
+  const purgeIf = (eventId: common.EventId | undefined, change: gantt.GanttChangeKind, actorId: string | null): Promise<void> =>
+    eventId ? purgeAndNotify(eventId, change, actorId) : Promise.resolve();
 
   return {
     // task.* (carry an OPTIONAL eventId; status/assignee are in the DTO -> must purge)
-    "task.created": (e) => purgeIf(e.payload.eventId),
-    "task.updated": (e) => purgeIf(e.payload.eventId),
-    "task.assigned": (e) => purgeIf(e.payload.eventId),
-    "task.status_changed": (e) => purgeIf(e.payload.eventId),
-    "task.archived": (e) => purgeIf(e.payload.eventId),
-    "task.dependency_changed": (e) => purgeIf(e.payload.eventId),
+    "task.created": (e) => purgeIf(e.payload.eventId, "task.upserted", e.actorId),
+    "task.updated": (e) => purgeIf(e.payload.eventId, "task.upserted", e.actorId),
+    "task.assigned": (e) => purgeIf(e.payload.eventId, "task.upserted", e.actorId),
+    "task.status_changed": (e) => purgeIf(e.payload.eventId, "task.upserted", e.actorId),
+    "task.archived": (e) => purgeIf(e.payload.eventId, "task.deleted", e.actorId),
+    "task.dependency_changed": (e) => purgeIf(e.payload.eventId, "relations", e.actorId),
     // action.*
-    "action.created": (e) => purge(e.payload.eventId),
-    "action.updated": (e) => purge(e.payload.eventId),
-    "action.status_changed": (e) => purge(e.payload.eventId),
-    "action.archived": (e) => purge(e.payload.eventId),
+    "action.created": (e) => purgeAndNotify(e.payload.eventId, "task.upserted", e.actorId),
+    "action.updated": (e) => purgeAndNotify(e.payload.eventId, "task.upserted", e.actorId),
+    "action.status_changed": (e) => purgeAndNotify(e.payload.eventId, "task.upserted", e.actorId),
+    "action.archived": (e) => purgeAndNotify(e.payload.eventId, "task.deleted", e.actorId),
     // event.*
-    "event.updated": (e) => purge(e.payload.eventId),
-    "event.phase_changed": (e) => purge(e.payload.eventId),
+    "event.updated": (e) => purgeAndNotify(e.payload.eventId, "view", e.actorId),
+    "event.phase_changed": (e) => purgeAndNotify(e.payload.eventId, "view", e.actorId),
     "event.archived": async (e) => {
-      await purge(e.payload.eventId);
+      await purgeAndNotify(e.payload.eventId, "task.deleted", e.actorId);
       await views.deleteByEvent(e.payload.eventId);
     },
   };

@@ -1,0 +1,133 @@
+/* Presence avatars (Google-Docs-style): who is viewing / editing this gantt. Colours are
+   generated per user (presence.ts), so only layout + state affordances live here. Uses
+   @dub/tokens CSS custom properties for surfaces/lines so it tracks light/dark. */
+.bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-fg-muted, #64748b);
+  white-space: nowrap;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-fg-muted, #94a3b8);
+}
+.dot.open {
+  background: var(--color-success-solid, #17b26a);
+}
+.dot.connecting,
+.dot.reconnecting {
+  background: var(--color-warning-solid, #f79009);
+  animation: blink 1s ease-in-out infinite;
+}
+.dot.closed {
+  background: var(--color-fg-muted, #94a3b8);
+}
+
+.avatars {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 8px;
+}
+
+.avatar {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  margin-left: -8px;
+  border: 2px solid var(--color-bg-surface, #ffffff);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
+  cursor: default;
+  user-select: none;
+}
+.avatar:first-child {
+  margin-left: 0;
+}
+
+/* Editing = Google-Docs coloured ring + a subtle pulse + an "編集" badge. */
+.editing {
+  box-shadow:
+    0 0 0 2px var(--color-bg-surface, #fff),
+    0 0 0 4px var(--color-warning-solid, #f79009);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+.badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: var(--color-warning-solid, #f79009);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 3px;
+  border-radius: 6px;
+  line-height: 1;
+  border: 1px solid var(--color-bg-surface, #fff);
+}
+
+/* Self marker: a small ring inset + a persistent "あなた" caption above the chip. */
+.me::before {
+  content: "あなた";
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--color-fg-muted, #64748b);
+  white-space: nowrap;
+}
+
+.overflow {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -8px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--color-fg-default, #334155);
+  background: var(--color-bg-muted, #e2e8f0);
+  border: 2px solid var(--color-bg-surface, #ffffff);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--color-bg-surface, #fff),
+      0 0 0 4px var(--color-warning-solid, #f79009);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px var(--color-bg-surface, #fff),
+      0 0 0 7px rgba(247, 144, 9, 0.25);
+  }
+}
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

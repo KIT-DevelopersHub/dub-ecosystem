@@ -85,6 +85,7 @@ export const GANTT_WIRE = {
   getGanttDependencies: { method: "GET", path: "/gantt/dependencies", query: ["eventId"] },
   getGanttView: { method: "GET", path: "/gantt/views", query: ["eventId"] },
   putGanttView: { method: "PUT", path: "/gantt/views", query: ["eventId"] },
+  getGanttWsTicket: { method: "GET", path: "/gantt/ws-ticket", query: ["eventId"] },
 } as const;
 
 // Compile-time tie between the runtime descriptor and the typed query interface: every
@@ -94,3 +95,72 @@ type _GanttWireKeysAreTyped =
   (typeof GANTT_WIRE)[keyof typeof GANTT_WIRE]["query"][number] extends keyof GetGanttQuery ? true : never;
 const _ganttWireKeyGuard: _GanttWireKeysAreTyped = true;
 void _ganttWireKeyGuard;
+
+// ── Realtime collaboration: presence + live data sync ────────────────────────
+// gantt-service owns a Durable Object ("GanttRoom"), one instance per eventId, that
+// fans out two kinds of frames over a gateway-bypassing / DO-direct WebSocket:
+//   1. presence — who is currently viewing/editing this gantt (Google-Docs-style avatars)
+//   2. data.changed — a peer committed a write, so refetch the authoritative rows.
+// The DB stays the SINGLE source of truth (last-write-wins): WS carries only signals;
+// the confirmed values always come from the REST API. This mirrors the chat-service
+// RT土台 (theme11): HMAC ws-ticket + Origin verified at the DO, no header trust on /ws.
+
+/** TTLs / cadences shared by the DO and the client (SoT so both sides agree). */
+export const GANTT_WS_TICKET_TTL_SEC = 60;
+/** Client heartbeat interval — keeps the socket's presence entry fresh. */
+export const GANTT_PRESENCE_HEARTBEAT_MS = 15_000;
+/** A socket with no heartbeat for this long is reaped by the DO's alarm (half-open
+ *  / crashed tab cleanup) so a stale avatar disappears even without a clean close. */
+export const GANTT_PRESENCE_TTL_MS = 45_000;
+
+/** The kind of gantt mutation a `data.changed` frame announces, so a receiver can
+ *  label/log it. Open by intent: clients MUST tolerate an unknown kind (⇒ "refetch"). */
+export type GanttChangeKind =
+  | "task.upserted"
+  | "task.deleted"
+  | "schedule"
+  | "relations"
+  | "reorder"
+  | "view";
+
+/** One participant connected to a gantt room, deduped by userId across that user's
+ *  tabs. `editing` is true when ANY of the user's sockets is mid-edit (detail panel
+ *  open / dragging a bar); `editingTaskIds` is the union of the rows they're touching. */
+export interface GanttPresenceUser {
+  userId: UserId;
+  /** Label the DO learned from the SIGNED ws-ticket (non-spoofable). Absent when the
+   *  issuer could not resolve a name — the client then falls back to its own roster. */
+  displayName?: string;
+  editing: boolean;
+  editingTaskIds: TaskId[];
+}
+
+/** Server → client WS frames fanned out by the GanttRoom DO. */
+export type GanttRealtimeEvent =
+  | { kind: "presence"; users: GanttPresenceUser[] }
+  | {
+      kind: "data.changed";
+      /** GanttChangeKind, but widened so an older client never rejects a newer kind. */
+      change: GanttChangeKind | string;
+      taskId?: TaskId | null;
+      actorId: UserId;
+      at: ISODateTime;
+    };
+
+/** Client → server WS frames. The DO trusts ONLY the socket's ticket-derived identity —
+ *  never any userId a frame might carry — so these frames cannot spoof another user. */
+export type GanttClientMessage =
+  | { t: "hello" } // request the current presence snapshot
+  | { t: "ping" } // heartbeat (keeps the presence entry alive)
+  | { t: "state"; editing: boolean; editingTaskId?: TaskId | null } // viewing⇄editing
+  | { t: "change"; change: GanttChangeKind | string; taskId?: TaskId | null }; // "I saved"
+
+/** GET /gantt/ws-ticket response — a short-lived HMAC ticket + the absolute DO URL to
+ *  connect to (DO-direct, gateway bypassed), plus the caller's own identity so the
+ *  client can mark "you" in the presence bar without a second /me round-trip. */
+export interface WsTicketResponse {
+  ticket: string; // short-lived; verified by the GanttRoom DO
+  doUrl: string; // absolute wss:// URL of the DO (gateway bypassed)
+  expiresAt: ISODateTime;
+  self: { userId: UserId; displayName?: string };
+}

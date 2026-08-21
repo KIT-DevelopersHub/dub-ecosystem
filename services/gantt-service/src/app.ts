@@ -14,6 +14,7 @@ import { buildGanttChartDTO } from "./dto";
 import { validatePutBody } from "./views";
 import { dispatchEvent } from "./queue";
 import { defaultDeps } from "./deps";
+import { issueWsTicket, broadcastGanttChange } from "./realtime";
 
 type Vars = { dubCtx: RequestContext; authn: AuthnContext };
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
@@ -154,6 +155,22 @@ export function createApp(deps: AppDeps = defaultDeps): App {
     return c.json(state satisfies gantt.GanttViewState);
   });
 
+  // ---- GET /gantt/ws-ticket (realtime collaboration handshake) ----
+  // Issues a short-lived HMAC ticket + the absolute GanttRoom DO URL so the browser can
+  // open a gateway-bypassing / DO-direct WebSocket (presence + live data sync). The
+  // userId is taken from the VERIFIED session (trusted header) — never the client — so
+  // the DO can trust the signed identity on the public /ws path. Requires event:read
+  // (same guard as the chart read). 503 when realtime is not provisioned for this deploy.
+  app.get("/gantt/ws-ticket", async (c) => {
+    const ctx = c.get("dubCtx");
+    const eventId = requireEventId(c);
+    if (!c.env.GANTT_ROOM) {
+      throw new DubError("GANTT_RT_UNAVAILABLE", "realtime is not enabled for this deployment", { status: 503 });
+    }
+    const ticket = await issueWsTicket(c.env, ctx, c.get("authn").userId, eventId);
+    return c.json(ticket satisfies gantt.WsTicketResponse);
+  });
+
   // ---- PATCH /gantt/rows/:taskId (persist a bar's window: startsAt/endsAt) ----
   // The write path a timeline drag/resize OR a start/due edit uses. gantt maps the
   // window onto the underlying task (startsAt→startAt, endsAt→dueAt) via task-service
@@ -165,7 +182,13 @@ export function createApp(deps: AppDeps = defaultDeps): App {
     const body = validatePatchRowBody(await c.req.json().catch(() => ({})));
     const upstream = deps.upstream(c.env);
     const updated = await upstream.updateTaskDates(ctx, taskId, body);
-    if (updated.eventId) await deps.cache(c.env).purge(updated.eventId);
+    if (updated.eventId) {
+      await deps.cache(c.env).purge(updated.eventId);
+      // Realtime: tell the room a bar moved so other viewers refetch (best-effort; the
+      // author already reflected it optimistically and is excluded via their own socket
+      // path — this covers non-fe4 / cross-tab callers). Never fails the write.
+      await broadcastGanttChange(c.env, updated.eventId, "schedule", c.get("authn").userId, updated.id);
+    }
     const row: gantt.GanttRow = {
       taskId: updated.id,
       title: updated.title,
