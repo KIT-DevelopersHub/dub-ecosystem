@@ -148,6 +148,8 @@ export class MockApiClient implements ApiClient {
     }
     const taskAtt = path.match(/^\/api\/v1\/tasks\/([^/]+)\/attachments\/([^/]+)$/);
     if (taskAtt && req.method === "DELETE") return this.removeAttachment(taskAtt[1]!, taskAtt[2]!) as T;
+    const taskRestore = path.match(/^\/api\/v1\/tasks\/([^/]+)\/restore$/);
+    if (taskRestore && req.method === "POST") return this.restoreTask(taskRestore[1]!) as T;
     const taskId = path.match(/^\/api\/v1\/tasks\/([^/]+)$/);
     if (taskId) {
       const id = taskId[1]!;
@@ -375,6 +377,18 @@ export class MockApiClient implements ApiClient {
       });
     }
     this.taskById.set(id, { ...cur, archivedAt: new Date().toISOString(), version: cur.version + 1 });
+  }
+
+  // Un-archive a soft-deleted task (undo of a delete). Mirrors the server: parent/deps/
+  // assignee are untouched by archive, so clearing archivedAt brings the task back whole.
+  // Idempotent — restoring a live task just echoes it.
+  private restoreTask(id: string): task.Task {
+    const cur = this.taskById.get(id);
+    if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
+    if (cur.archivedAt === null) return cur;
+    const next: task.Task = { ...cur, archivedAt: null, version: cur.version + 1, updatedAt: new Date().toISOString() };
+    this.taskById.set(id, next);
+    return next;
   }
 
   // Returns the SERVER wire shape { taskId, dependsOnIds } — NOT a task.Task. The

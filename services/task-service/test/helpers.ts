@@ -120,6 +120,15 @@ export class InMemoryTaskRepo implements TaskRepo {
     return n;
   }
 
+  async restore(id: string, now: string): Promise<boolean> {
+    const r = this.rows.get(id);
+    if (!r || !r.archivedAt) return false;
+    r.archivedAt = null;
+    r.updatedAt = now;
+    r.version += 1;
+    return true;
+  }
+
   async archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]> {
     const ids: string[] = [];
     for (const r of this.rows.values()) {

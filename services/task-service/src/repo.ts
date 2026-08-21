@@ -155,6 +155,11 @@ export interface TaskRepo {
    *  delete: a task with live children must not be archived (else the children are
    *  orphaned and the read model silently re-parents them). */
   countLiveChildren(parentId: string): Promise<number>;
+  /** Restore (un-archive) a soft-deleted task — the inverse of `archive`, used by
+   *  the gantt "削除を元に戻す" (undo). False if not found / already live. Everything
+   *  else (parent_id, assignee, dependency rows) is untouched by archive, so a plain
+   *  clear of archived_at brings the task back with all its relations intact. */
+  restore(id: string, now: string): Promise<boolean>;
   /** Bulk-archive every live task of an event (event.archived compensation). */
   archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]>;
   getDependsOn(taskId: string): Promise<common.TaskId[]>;
@@ -323,6 +328,15 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         parentId,
       );
       return row?.n ?? 0;
+    },
+
+    async restore(id: string, now: string): Promise<boolean> {
+      const res = await db.run(
+        `UPDATE task_tasks SET archived_at = NULL, updated_at = ?, version = version + 1 WHERE id = ? AND archived_at IS NOT NULL`,
+        now,
+        id,
+      );
+      return res.meta.changes > 0;
     },
 
     async archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]> {
