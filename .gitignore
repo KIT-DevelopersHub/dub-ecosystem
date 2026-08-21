@@ -11,3 +11,5 @@ coverage/
 
 # Generated staging Worker configs (source of truth: gen-staging-configs.sh + staging-resources.env)
 **/wrangler.staging.toml
+# Transient binding-free bootstrap config written by deploy-staging.sh (rm'd after use)
+**/wrangler.staging.bootstrap.toml

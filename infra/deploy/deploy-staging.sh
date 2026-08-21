@@ -109,7 +109,7 @@ bootstrap_missing_workers() {
       continue   # already exists — nothing to bootstrap
     fi
     echo "::group::bootstrap (binding-free) ${name}"
-    tmp="${cfg}.bootstrap"
+    tmp="${cfg%.toml}.bootstrap.toml"
     strip_services "$cfg" > "$tmp"
     if ! $WRANGLER deploy --config "$tmp"; then
       echo "bootstrap first attempt failed, retrying in 8s..." >&2; sleep 8
