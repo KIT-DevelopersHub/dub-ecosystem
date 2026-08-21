@@ -1312,35 +1312,6 @@
 }
 .mySubtitle { margin: 4px 0 0; font-size: var(--dub-font-size-sm, 0.85rem); color: var(--dub-color-text-secondary); }
 
-/* ---- lens tabs (担当 / 依頼 / すべて) ---- */
-.lensTabs {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--dub-color-surface-sunken);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-lg, 10px);
-  width: fit-content;
-}
-.lensTab {
-  min-width: 72px;
-  padding: 6px var(--dub-space-4);
-  border: none;
-  border-radius: var(--dub-radius-md, 8px);
-  background: transparent;
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm, 0.85rem);
-  font-weight: var(--dub-font-weight-medium, 600);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.lensTab:hover { color: var(--dub-color-text-primary); }
-.lensTabActive {
-  background: var(--dub-color-surface-base);
-  color: var(--dub-color-brand-700);
-  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
-}
-
 /* ---- filter bar (two rows: inputs, then chips) ---- */
 .myFilterBar {
   display: flex;
@@ -1376,57 +1347,164 @@
 .colFromTo { min-width: 220px; }
 .cellTitle { font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); }
 .cellTitleRow { display: inline-flex; align-items: center; gap: var(--dub-space-2, 8px); flex-wrap: wrap; }
-/* 受け取る — request inbox (受け取った依頼 / 送った依頼). Cards with generous spacing. */
-.requestInbox { display: flex; flex-direction: column; gap: var(--dub-space-5, 20px); margin-bottom: var(--dub-space-5, 20px); }
-.requestGroup { display: flex; flex-direction: column; gap: var(--dub-space-3, 12px); }
-.requestSectionTitle {
-  margin: 0;
-  font-size: var(--dub-font-size-sm, 0.85rem);
-  font-weight: 700;
-  color: var(--dub-color-text-secondary);
+/* ================= 送る・受け取る — chat-style request timeline =================
+   依頼を1本の時系列（LINE/TaskTalk風トーク）で表示。左右は「いまボールを持つ人」で決まる:
+   右=自分の番（承諾/却下できる） / 左=相手の番（承諾待ち）。 */
+.chatInbox {
   display: flex;
-  align-items: center;
-  gap: var(--dub-space-2, 8px);
-}
-.requestCount {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--dub-color-accent-500, var(--dub-color-brand-500, #2563eb));
-  color: #fff;
-  font-size: var(--dub-font-size-xs, 0.72rem);
-  font-weight: 700;
-}
-.requestList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--dub-space-3, 12px); }
-.requestCard {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--dub-space-4, 16px);
+  flex-direction: column;
+  gap: var(--dub-space-3, 12px);
   padding: var(--dub-space-4, 16px);
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg, 12px);
-  background: var(--dub-color-surface-default, var(--dub-color-surface-raised));
+  background: var(--dub-color-surface-sunken);
+  margin-bottom: var(--dub-space-2, 8px);
 }
-.requestMain { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.requestTitle { margin: 0; font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); }
-.requestMeta { margin: 0; font-size: var(--dub-font-size-xs, 0.75rem); color: var(--dub-color-text-secondary); }
-.requestActions { display: flex; align-items: center; gap: var(--dub-space-2, 8px); flex-shrink: 0; }
-.requestSkeleton {
-  height: 64px;
-  border-radius: var(--dub-radius-lg, 12px);
+.chatHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dub-space-3, 12px);
+  flex-wrap: wrap;
+}
+.chatHeaderTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-sm, 0.9rem);
+  font-weight: 700;
+  color: var(--dub-color-text-primary);
+}
+.chatHeaderHint {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1, 4px);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-secondary);
+}
+.chatLegendSelf,
+.chatLegendOther {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-left: var(--dub-space-2, 8px);
+}
+.chatLegendSelf { background: var(--dub-color-brand-500, #2563eb); }
+.chatLegendOther { background: var(--dub-color-surface-base); border: 1px solid var(--dub-color-border-strong); }
+
+.chatTimeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4, 16px);
+}
+
+/* one message row: avatar + bubble, aligned by ball ownership. */
+.chatRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--dub-space-2, 8px);
+  max-width: 100%;
+}
+.chatRowLeft { justify-content: flex-start; flex-direction: row; }
+.chatRowRight { justify-content: flex-end; flex-direction: row-reverse; }
+
+.chatAvatar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  font-weight: 700;
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  user-select: none;
+}
+
+.chatBubbleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(78%, 460px);
+}
+.chatByline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dub-space-3, 12px);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-secondary);
+  padding: 0 var(--dub-space-1, 4px);
+}
+/* my turn (右): 名前グループを右・時刻を左に。名前+敬称は1まとまりなので語順は保たれる。 */
+.chatRowRight .chatByline { flex-direction: row-reverse; }
+.chatWho { display: inline-flex; align-items: baseline; gap: var(--dub-space-1, 4px); min-width: 0; }
+.chatName { font-weight: 700; color: var(--dub-color-text-primary); }
+.chatRel { color: var(--dub-color-text-secondary); }
+.chatTime { color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); white-space: nowrap; }
+
+.chatBubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2, 8px);
+  padding: var(--dub-space-3, 12px) var(--dub-space-4, 16px);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg, 14px);
+}
+/* other's turn (左) — neutral surface, corner notched toward the avatar (left). */
+.chatBubbleOther {
+  background: var(--dub-color-surface-base);
+  border-bottom-left-radius: var(--dub-radius-xs, 4px);
+}
+/* my turn (右) — brand-tinted, corner notched toward the avatar (right). */
+.chatBubbleSelf {
+  background: var(--dub-color-brand-50, rgba(37, 99, 235, 0.08));
+  border-color: var(--dub-color-brand-200, rgba(37, 99, 235, 0.28));
+  border-bottom-right-radius: var(--dub-radius-xs, 4px);
+}
+.chatTitle { margin: 0; font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); line-height: 1.45; }
+.chatDesc { margin: 0; font-size: var(--dub-font-size-xs, 0.8rem); color: var(--dub-color-text-secondary); line-height: 1.5; }
+.chatBadges {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2, 8px);
+  flex-wrap: wrap;
+}
+.chatStatus { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
+.chatActions {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2, 8px);
+  margin-top: 2px;
+}
+.chatRowRight .chatActions { justify-content: flex-end; }
+
+/* loading skeleton — a couple of alternating-side bubbles. */
+.chatSkeleton {
+  height: 68px;
+  width: min(70%, 380px);
+  border-radius: var(--dub-radius-lg, 14px);
   background: linear-gradient(90deg, var(--dub-color-surface-sunken) 25%, var(--dub-color-surface-raised) 50%, var(--dub-color-surface-sunken) 75%);
   background-size: 200% 100%;
-  animation: requestShimmer 1.2s ease-in-out infinite;
+  animation: chatShimmer 1.2s ease-in-out infinite;
 }
-@keyframes requestShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.chatSkeletonLeft { align-self: flex-start; }
+.chatSkeletonRight { align-self: flex-end; }
+@keyframes chatShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .chatSkeleton { animation: none; }
+}
 @media (max-width: 640px) {
-  .requestCard { flex-direction: column; align-items: stretch; }
-  .requestActions { justify-content: flex-end; }
+  .chatBubbleWrap { max-width: 82%; }
+  .chatActions { flex-wrap: wrap; }
 }
 
 .myRow { cursor: pointer; transition: background 0.1s ease; }

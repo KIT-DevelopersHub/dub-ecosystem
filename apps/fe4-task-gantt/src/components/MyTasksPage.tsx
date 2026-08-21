@@ -6,7 +6,6 @@ import { listTasks, createTask, resolveUsers, createTaskAttachment, issueTaskReq
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
   type MyTasksFilter,
-  type MyTasksLens,
   emptyMyTasksFilter,
   lensQueries,
   mergeTasks,
@@ -22,12 +21,6 @@ import styles from "../styles/app.module.css";
 
 const PAGE_SIZE = 25;
 
-const LENS_TABS: { key: MyTasksLens; label: string; hint: string }[] = [
-  { key: "assigned", label: "担当", hint: "自分に割り当てられたタスク" },
-  { key: "requested", label: "依頼", hint: "自分が発行したタスク" },
-  { key: "all", label: "すべて", hint: "自分に関わる全タスク" },
-];
-
 export interface MyTasksPageProps {
   currentUserId: common.UserId;
   /** roster for the filter selects + create modal 依頼先. */
@@ -38,15 +31,14 @@ export interface MyTasksPageProps {
 
 /**
  * マイタスク hub — a clear, filterable list of the tasks a person is involved in,
- * built for 300 people. Two lenses (担当 assigned-to-me / 依頼 issued-by-me) plus
- * 「すべて」, unified into one list that shows 依頼→担当 (from→to). Create is
- * optimistic (the new task appears instantly, rolls back on error).
+ * built for 300 people. 自分に関わる全タスク（担当＋依頼）を1つのリストに統合して
+ * 依頼→担当 (from→to) を示す（担当/依頼の切替タブは廃止・常に「すべて」の単一ビュー）。
+ * Create is optimistic (the new task appears instantly, rolls back on error).
  */
 export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPageProps) {
   const client = useApiClient();
   const toast = useToast();
 
-  const [lens, setLens] = useState<MyTasksLens>("assigned");
   const [filter, setFilter] = useState<MyTasksFilter>(() => emptyMyTasksFilter());
   const [tasks, setTasks] = useState<task.Task[]>([]);
   const [users, setUsers] = useState<UserCache>(() => createUserCache(people));
@@ -80,12 +72,12 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     [users, people, currentUserId],
   );
 
-  // fetch the lens' task set (one or two self-scoped queries, merged + deduped).
+  // fetch the full task set for「すべて」(assigned + issued, merged + deduped).
   const load = useCallback(async () => {
     const seq = ++reqSeq.current;
     setLoading(true);
     try {
-      const queries = lensQueries(currentUserId, lens);
+      const queries = lensQueries(currentUserId, "all");
       const pages = await Promise.all(queries.map((q) => listTasks(client, q)));
       if (seq !== reqSeq.current) return; // a newer load superseded this one
       const merged = mergeTasks(...pages.map((p) => p.items));
@@ -93,7 +85,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [client, currentUserId, lens]);
+  }, [client, currentUserId]);
 
   useEffect(() => {
     void load();
@@ -136,7 +128,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   // reset the reveal window when the visible result set changes shape.
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [lens, filter]);
+  }, [filter]);
 
   const visible = useMemo(() => {
     const filtered = applyMyTasksFilter(tasks, filter);
@@ -189,9 +181,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       if (res.kind === "task") {
         // self / same team → materialised now. Surface it + best-effort attachments.
         await attachBestEffort(res.task.id, draft.attachments);
-        const belongs =
-          lens === "all" || lens === "requested" || (lens === "assigned" && res.task.assigneeId === currentUserId);
-        if (belongs) setTasks((prev) => [res.task, ...prev.filter((t) => t.id !== res.task.id)]);
+        // 「すべて」ビューなので自分に関わるタスクは常に表示対象。
+        setTasks((prev) => [res.task, ...prev.filter((t) => t.id !== res.task.id)]);
         toast.show({ kind: "success", title: "タスクを作成しました" });
       } else {
         // other team → pending request; it appears under 送った依頼 (承認待ち).
@@ -228,9 +219,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       updatedAt: now,
       version: 1,
     };
-    // only surface it in the current lens if it belongs there.
-    const belongs = lens === "all" || lens === "requested" || (lens === "assigned" && draft.assigneeId === currentUserId);
-    if (belongs) setTasks((prev) => [optimistic, ...prev]);
+    // 「すべて」ビューなので自分が作るタスクは常に表示対象。
+    setTasks((prev) => [optimistic, ...prev]);
     try {
       const created = await createTask(client, {
         ...(draft.eventId ? { eventId: draft.eventId } : {}),
@@ -242,11 +232,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
       });
       await attachBestEffort(created.id, draft.attachments);
-      // reconcile the temp row with the server task (or drop it if out of lens).
-      setTasks((prev) => {
-        const withoutTemp = prev.filter((t) => t.id !== tempId);
-        return belongs ? [created, ...withoutTemp] : withoutTemp;
-      });
+      // reconcile the temp row with the server task.
+      setTasks((prev) => [created, ...prev.filter((t) => t.id !== tempId)]);
       toast.show({ kind: "success", title: "タスクを作成しました" });
     } catch (e) {
       setTasks((prev) => prev.filter((t) => t.id !== tempId)); // rollback
@@ -266,22 +253,6 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           ＋ タスクを依頼
         </Button>
       </header>
-
-      <div className={styles.lensTabs} role="tablist" aria-label="表示するタスクの範囲">
-        {LENS_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={lens === t.key}
-            title={t.hint}
-            className={`${styles.lensTab} ${lens === t.key ? styles.lensTabActive : ""}`}
-            onClick={() => setLens(t.key)}
-            data-testid={`fe4-mytasks-lens-${t.key}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
 
       <MyTaskRequests seedUsers={effectivePeople} onChanged={load} />
 
