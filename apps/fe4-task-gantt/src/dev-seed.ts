@@ -21,6 +21,7 @@
 //    edges; the critical path is the F1→F3→F4→F5→F6→F7 governance backbone.
 import type { task, identity, gantt, common, team } from "@dub/types";
 import { MockApiClient } from "./api/mock-client";
+import { CANONICAL_TEAMS } from "./domain/team-code";
 
 export const DEMO_EVENT_ID = "evt_hokuriku_conf_2027";
 /** signed-in user for the standalone My Tasks demo (createdBy stamp + /me scope).
@@ -31,17 +32,34 @@ export const DEMO_CURRENT_USER = "usr_takaoka";
 const MS_DAY = 86_400_000;
 const iso = (d: string): common.ISODateTime => `${d}T00:00:00.000Z`;
 
-// ---- teams (LMB's 7 real conference teams; colours mirror the member-service roster) ----
-const teams: team.Team[] = [
-  { id: "team_honbu", key: "honbu", name: "本部", color: "#1e3a5f", description: "全体統括・意思決定・進行統制" },
-  { id: "team_shinko", key: "shinko", name: "全体進行", color: "#2563eb", description: "進行管理・当日運営・定例運営" },
-  { id: "team_dev", key: "dev", name: "開発", color: "#0d9488", description: "運営アプリ内製" },
-  { id: "team_sponsor", key: "sponsor", name: "スポンサー", color: "#ea580c", description: "協賛打診・契約" },
-  { id: "team_venue", key: "venue", name: "会場", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
-  { id: "team_kaikei", key: "kaikei", name: "会計", color: "#7c3aed", description: "法人設立・予算・会計運用" },
-  { id: "team_pr", key: "pr", name: "集客告知", color: "#db2777", description: "LP・SNS・広報／集客" },
-];
-const TEAM_ID: Record<string, common.TeamId> = Object.fromEntries(teams.map((t) => [t.name, t.id]));
+// ---- teams (the 8 official conference teams + their 2-letter ID codes; see
+//      domain/team-code.ts for the canonical taxonomy) ----
+const teams: team.Team[] = CANONICAL_TEAMS.map((t) => ({
+  id: `team_${t.key}`,
+  key: t.key,
+  name: t.name,
+  color: t.color,
+  code: t.code,
+  description: t.description,
+}));
+const OFFICIAL_ID: Record<string, common.TeamId> = Object.fromEntries(teams.map((t) => [t.key, t.id]));
+
+// The demo roadmap predates the 8-team taxonomy, so its section rows still use the
+// old team names. Map each onto its official team (本部/開発→統括, 全体進行→当日進行,
+// 会計→法務会計, 集客告知→集客広報) so existing assignments are preserved under the
+// new taxonomy. デザイン/法人メンバー have no seed tasks yet (still selectable).
+const SECTION_TEAM_KEY: Record<string, string> = {
+  本部: "toukatsu",
+  全体進行: "toujitsu",
+  開発: "toukatsu",
+  スポンサー: "sponsor",
+  会場: "kaijou",
+  会計: "houmukaikei",
+  集客告知: "shukkyaku",
+};
+const TEAM_ID: Record<string, common.TeamId> = Object.fromEntries(
+  Object.entries(SECTION_TEAM_KEY).map(([name, key]) => [name, OFFICIAL_ID[key] as common.TeamId]),
+);
 
 // ---- users (real運営メンバー names from the member-service roster; one owner per team) ----
 const users: identity.UserSummary[] = [
@@ -247,7 +265,14 @@ function build(deepNest = false): {
   deps: gantt.GanttDependencyLine[];
   hierarchy: MockSeedHierarchy;
 } {
+  // Distinct, monotonically-increasing createdAt per task (build order = creation
+  // order) so the global creation-sequence ID (`<team code>-NNNN`) is well-defined and
+  // stable. Base is the seed epoch; +1s per task keeps them ordered and unique.
   const now = "2026-06-01T00:00:00.000Z";
+  const CREATED_BASE = Date.parse(now);
+  let createdSeq = 0;
+  const nextCreatedAt = (): common.ISODateTime =>
+    new Date(CREATED_BASE + createdSeq++ * 1000).toISOString();
   const byPhase = new Map<Phase, Sec[]>();
   for (const s of SECTIONS) (byPhase.get(s.phase) ?? byPhase.set(s.phase, []).get(s.phase)!).push(s);
 
@@ -293,7 +318,7 @@ function build(deepNest = false): {
         dueAt,
         origin: "internal",
         archivedAt: null,
-        createdAt: now,
+        createdAt: nextCreatedAt(),
         updatedAt: now,
         version: 1,
       });
@@ -326,7 +351,7 @@ function build(deepNest = false): {
           dueAt: cDue,
           origin: "internal",
           archivedAt: null,
-          createdAt: now,
+          createdAt: nextCreatedAt(),
           updatedAt: now,
           version: 1,
         });

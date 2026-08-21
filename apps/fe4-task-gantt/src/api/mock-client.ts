@@ -61,6 +61,15 @@ export class MockApiClient implements ApiClient {
   private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
   private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
+  /** taskId -> ID-sequence timestamp override. Set when a task's team changes, so the
+   *  row sorts to the tail of the global creation sequence and is re-numbered under the
+   *  new team's prefix (mirrors gantt-service's future `id_seq_at` projection). */
+  private idSeqAt: Record<common.TaskId, common.ISODateTime> = {};
+  /** Absolute, monotonic creation-sequence number per task (never reused). Assigned at
+   *  seed/create and re-assigned (to the tail) on a team change, so a task's ID number
+   *  is a stable attribute — re-teaming/deleting another task never shifts it. */
+  private seqNoByTask = new Map<common.TaskId, number>();
+  private seqCounter = 0;
 
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
@@ -69,6 +78,14 @@ export class MockApiClient implements ApiClient {
 
   constructor(seed: MockSeed = {}) {
     for (const t of seed.tasks ?? []) this.taskById.set(t.id, t);
+    // Assign absolute creation-sequence numbers in createdAt order (taskId tie-break),
+    // so seeded tasks number in the order they were created. The counter then continues
+    // from here for every subsequent create / team-change.
+    for (const t of [...this.taskById.values()].sort(
+      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    )) {
+      this.seqNoByTask.set(t.id, ++this.seqCounter);
+    }
     for (const d of seed.dependencies ?? []) {
       const list = this.deps.get(d.toTaskId) ?? [];
       list.push(d.fromTaskId);
@@ -283,6 +300,7 @@ export class MockApiClient implements ApiClient {
       version: 1,
     };
     this.taskById.set(t.id, t);
+    this.seqNoByTask.set(t.id, ++this.seqCounter); // tail of the global creation sequence
     if (body.parentTaskId !== undefined) this.setParent(t.id, body.parentTaskId ?? null);
     return t;
   }
@@ -311,6 +329,13 @@ export class MockApiClient implements ApiClient {
       updatedAt: new Date().toISOString(),
     };
     this.taskById.set(id, next);
+    // Team change ⇒ retire the old ID and re-number at the tail of the global
+    // creation sequence under the new team's prefix. We model this by stamping a
+    // fresh ID-sequence timestamp (mirrors "delete old task, create a new one").
+    if (body.teamId !== undefined && (body.teamId ?? null) !== (cur.teamId ?? null)) {
+      this.idSeqAt[id] = new Date().toISOString();
+      this.seqNoByTask.set(id, ++this.seqCounter); // fresh tail number under the new team
+    }
     // Keep the gantt read-model in sync with a start/due edit. The bar reads its
     // window from `rowDates` (a stand-in for gantt-service's derived DTO); the real
     // gantt-service derives the bar from the task's live startAt/dueAt columns on
@@ -402,6 +427,13 @@ export class MockApiClient implements ApiClient {
           progressPercent: progressForStatus(t.status),
           assigneeId: t.assigneeId,
           teamId: t.teamId ?? null,
+          // Stable ID-sequence basis: seqNo is the absolute creation number (used
+          // directly); createdAt/idSeqAt are the fallback ordering the FE uses when a
+          // backend hasn't projected seqNo. idSeqAt (set on a team change) also marks
+          // the tail so the row re-numbers under the new team's prefix.
+          createdAt: t.createdAt,
+          ...(this.seqNoByTask.has(t.id) ? { seqNo: this.seqNoByTask.get(t.id) } : {}),
+          ...(this.idSeqAt[t.id] ? { idSeqAt: this.idSeqAt[t.id] } : {}),
           parentTaskId: h?.parentTaskId ?? null,
           depth: h?.depth ?? 0,
           hasChildren: parents.has(t.id),
