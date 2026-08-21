@@ -122,6 +122,38 @@ jobs:
       - name: Deploy to staging
         run: bash infra/deploy/deploy-staging.sh
 
+      # LIVENESS GATE: prove the feature is ACTUALLY in the served staging bundle before the
+      # owner is invited to add `確認した`. Opt-in per PR: add a trailer line to the PR body
+      #   Liveness-Marker: <string>[, <string>...]
+      # (a data-testid you added, a unique label, a build stamp). Each string must appear in
+      # the served staging fe2 bundle. Missing => this job fails (after the comment posts) so
+      # the PR can't be marked 確認した on a stale/empty deploy. No trailer => skipped
+      # (back-compatible; the comment says "not verified").
+      - name: Liveness verification (feature markers)
+        id: liveness
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          MARKERS="$(printf '%s\n' "${PR_BODY:-}" | grep -iE '^[[:space:]]*Liveness-Marker[[:space:]]*:' | head -n1 | sed -E 's/^[^:]*:[[:space:]]*//' || true)"
+          if [ -z "${MARKERS// /}" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "detail=no \`Liveness-Marker:\` trailer in the PR body — served bundle not asserted." >> "$GITHUB_OUTPUT"
+            echo "::warning::no Liveness-Marker trailer; skipping feature-liveness assertion."
+            exit 0
+          fi
+          # comma -> args
+          IFS=',' read -r -a ARR <<< "$MARKERS"
+          ARGS=(); for m in "${ARR[@]}"; do t="$(printf '%s' "$m" | sed 's/^ *//;s/ *$//')"; [ -n "$t" ] && ARGS+=("$t"); done
+          echo "markers=${MARKERS}" >> "$GITHUB_OUTPUT"
+          if bash scripts/verify-live.sh staging "${ARGS[@]}"; then
+            echo "status=live" >> "$GITHUB_OUTPUT"
+            echo "detail=all marker(s) present in the served staging bundle: \`${MARKERS}\`" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=not-live" >> "$GITHUB_OUTPUT"
+            echo "detail=❌ marker(s) MISSING from the served staging bundle: \`${MARKERS}\` — the feature is NOT live." >> "$GITHUB_OUTPUT"
+          fi
+
       # PR-only: there is no PR to comment on for a push:main mirror deploy.
       - name: Sticky staging-URL comment
         if: github.event_name == 'pull_request'
@@ -132,8 +164,15 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           FE2_URL: ${{ steps.origins.outputs.fe2 }}
           GW_URL: ${{ steps.origins.outputs.gateway }}
+          LIVENESS_STATUS: ${{ steps.liveness.outputs.status }}
+          LIVENESS_DETAIL: ${{ steps.liveness.outputs.detail }}
         run: |
           MARKER="<!-- staging-deploy -->"
+          case "${LIVENESS_STATUS}" in
+            live)     LIVE_LINE="- liveness: ✅ live — ${LIVENESS_DETAIL}" ;;
+            not-live) LIVE_LINE="- liveness: 🚫 NOT live — ${LIVENESS_DETAIL} **確認しないでください（再デプロイが必要）。**" ;;
+            *)        LIVE_LINE="- liveness: ⏭️ 未検証 — ${LIVENESS_DETAIL:-PR 本文に \`Liveness-Marker: <文字列>\` を書くと配信バンドルを自動検証します。}" ;;
+          esac
           # Build the comment body into a file (every line stays indented under `run: |`,
           # so no column-0 heredoc that would break the YAML block scalar).
           {
@@ -147,6 +186,7 @@ jobs:
             echo ""
             echo "- commit: \`${SHA}\`"
             echo "- 更新時刻: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "${LIVE_LINE}"
             echo ""
             echo "動作確認できたら、この PR に **\`確認した\`** ラベルを付けてください（本番マージのゲートが緑になります）。"
           } > /tmp/staging-comment.md
@@ -159,3 +199,13 @@ jobs:
             gh pr comment "${PR}" --repo "${REPO}" --body-file /tmp/staging-comment.md
             echo "created sticky comment"
           fi
+
+      # Fail the job LAST (after the sticky comment is posted) when the feature markers were
+      # given but are NOT in the served staging bundle. This turns a stale/empty staging
+      # deploy into a red check, so the PR can't be advanced to 確認した on a build the user
+      # would open and find broken. `skipped` (no trailer) and `live` both pass.
+      - name: Enforce liveness result
+        if: github.event_name == 'pull_request' && steps.liveness.outputs.status == 'not-live'
+        run: |
+          echo "::error::staging liveness FAILED — the feature markers are not in the served bundle. Re-deploy / investigate before requesting 確認."
+          exit 1
