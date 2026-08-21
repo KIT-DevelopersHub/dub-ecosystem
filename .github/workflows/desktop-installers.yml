@@ -4,8 +4,11 @@ name: Desktop installers
 #   - Windows .exe (Inno Setup) on windows-latest  — the only way to produce a
 #     Windows build, since Flutter cannot cross-compile Windows from macOS/Linux.
 #   - macOS .dmg on macos-latest (mirrors the local build for reproducibility).
+#   - Android .apk on ubuntu-latest (universal + per-ABI, debug-signed) for
+#     internal sharing / testing the WebView shell on phones.
 #
-# Both artifacts are UNSIGNED. See apps/de1-desktop/README for the end-user
+# All artifacts are UNSIGNED (Android is debug-signed). See apps/de1-desktop/README
+# for the end-user
 # "unblock" steps (macOS right-click > Open, Windows SmartScreen "Run anyway").
 #
 # Trigger manually from the Actions tab, or by pushing a tag like
@@ -172,4 +175,68 @@ jobs:
         with:
           name: dub-macos-installer
           path: ${{ env.APP_DIR }}/output_installer/*.dmg
+          if-no-files-found: error
+
+  android:
+    name: Android .apk
+    # Android can be built on any host; Linux is the cheapest runner. The APK is
+    # signed with Flutter's DEBUG keystore (no release keystore configured), so it
+    # is installable for internal sharing but must NOT be treated as a store build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (desktop app only)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/de1-desktop
+          sparse-checkout-cone-mode: true
+
+      - name: Setup Java 17
+        # Flutter 3.29's Android Gradle plugin cannot parse very new JDKs; pin 17.
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve app version
+        id: ver
+        shell: bash
+        run: |
+          raw=$(grep -E '^version:' "${APP_DIR}/pubspec.yaml" | head -1 | sed 's/version:[[:space:]]*//')
+          echo "version=${raw%%+*}" >> "$GITHUB_OUTPUT"
+
+      - name: flutter pub get
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: Build Android release APKs
+        working-directory: ${{ env.APP_DIR }}
+        # Universal APK (works on every device, easiest to share) plus per-ABI
+        # splits (smaller downloads for a specific phone).
+        run: |
+          flutter build apk --release
+          flutter build apk --release --split-per-abi
+
+      - name: Stage APKs
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.ver.outputs.version }}"
+          out=build/app/outputs/flutter-apk
+          mkdir -p output_installer
+          cp "$out/app-release.apk"          "output_installer/Dub-Android-${v}.apk"
+          cp "$out/app-arm64-v8a-release.apk" "output_installer/Dub-Android-${v}-arm64.apk"
+
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dub-android-apk
+          path: ${{ env.APP_DIR }}/output_installer/Dub-Android-*.apk
           if-no-files-found: error
