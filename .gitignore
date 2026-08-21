@@ -11,3 +11,6 @@ coverage/
 
 # Generated staging Worker configs (source of truth: gen-staging-configs.sh + staging-resources.env)
 **/wrangler.staging.toml
+
+# break-glass emergency-merge audit log (local record of each bypass)
+infra/deploy/break-glass.log

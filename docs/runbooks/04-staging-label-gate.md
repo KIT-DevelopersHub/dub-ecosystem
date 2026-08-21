@@ -15,6 +15,7 @@
 - [8. デモ seed の入れ方](#8-デモ-seed-の入れ方)
 - [9. カットオーバー手順（ブランチ保護の適用）](#9-カットオーバー手順ブランチ保護の適用)
 - [10. 生成規則（gen-staging-configs.sh）](#10-生成規則gen-staging-configssh)
+- [11. break-glass（緊急 hotfix の脱出弁）](#11-break-glass緊急-hotfix-の脱出弁)
 
 ## 1. 結論（3環境と流れ）
 
@@ -143,11 +144,14 @@ bash infra/deploy/setup-staging-resources.sh
      -f 'required_status_checks[strict]=true' \
      -f 'required_status_checks[contexts][]=confirm-gate' \
      -f 'required_status_checks[contexts][]=typecheck · test · build' \
-     -f 'enforce_admins=false' \
+     -f 'enforce_admins=true' \
      -f 'required_pull_request_reviews[required_approving_review_count]=0' \
      -f 'restrictions=' 
    ```
    （`restrictions` は null 必須。`gh api` で null を送るには `-F restrictions=null` を使う。）
+   `enforce_admins=true`＝**完全ガチガチ**（admin も例外なくラベル必須）。緊急 hotfix は §11 の
+   break-glass で明示的・監査可能に脱出する。単独で切替えるなら
+   `gh api -X POST .../branches/main/protection/enforce_admins`（ON）/ `-X DELETE`（OFF）。
 3. 以後、`確認した` の無い PR は main にマージ不可・deploy もされない。
 4. **本パイプライン PR 自体**も最後は `確認した` を付けて自己適用でマージする。
 
@@ -164,3 +168,30 @@ bash infra/deploy/setup-staging-resources.sh
 - KV id → staging id、R2 `bucket_name` → `+ -staging`
 - api-gateway `ALLOWED_ORIGINS` → staging fe2 origin を追記（CORS）
 - `[triggers]`/`crons` → **除去**（5/5 cron 上限の回避・§3）
+
+## 11. break-glass（緊急 hotfix の脱出弁）
+
+`enforce_admins=true` にしたので、平時は admin でも `確認した` ラベル＋必須チェック緑なしに
+`main` へマージできない。**本番障害時の緊急 hotfix** だけは、ゲートを恒久的に弱めずに
+**明示的・監査可能に一時脱出**する。これがゲートを弱めるのではなく、監査ログに残る脱出弁である。
+
+これは `enforce_admins` を「一時 OFF → hotfix マージ → 即 ON」する 1 コマンド:
+
+```
+bash infra/deploy/break-glass.sh <PR_NUMBER> "<障害と hotfix の理由>"
+```
+
+挙動（`infra/deploy/break-glass.sh`）:
+
+1. 現在の `enforce_admins` 状態を退避し、監査ログ `infra/deploy/break-glass.log`
+   に actor・時刻・PR・理由を記録
+2. `enforce_admins` を **OFF**（admin の例外を一時的に解除。他の保護＝必須 PR/必須チェックは維持）
+3. その **1 本の hotfix PR** を `gh pr merge --admin` でマージ
+4. `enforce_admins` を **ON** に復元（マージ失敗時も EXIT trap で必ず復元）
+
+注意:
+- `<理由>` は必須（監査ログに残す）。PR は OPEN かつ base=`main` のみ許可。
+- 復元に失敗した場合はログに再実行コマンドを出力するので、手動で
+  `gh api -X POST repos/KIT-DevelopersHub/dub-ecosystem/branches/main/protection/enforce_admins` を実行。
+- hotfix であっても、可能なら通常フロー（staging 確認→`確認した`）を優先する。break-glass は
+  「今すぐ本番を直さないと被害が拡大する」ケース専用。
