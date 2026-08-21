@@ -36,6 +36,7 @@ import {
   weekendBands,
   withGranularity,
 } from "../domain/timeline-axis";
+import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import styles from "../styles/app.module.css";
 
 const HEADER_TOP = 28;
@@ -107,6 +108,10 @@ export interface GanttViewProps {
   onBulkShiftDays?: (ids: readonly common.TaskId[], deltaDays: number) => void;
   /** Move a marquee-selected set up/down one slot (手動 mode only). */
   onBulkMoveVertical?: (ids: readonly common.TaskId[], dir: -1 | 1) => void;
+  /** Group drag-reorder (⑤): drop a marquee-selected block at `overId`; the whole selection
+   *  moves together, contiguous + in order. `draggedId` = grabbed row, `overId` = drop target.
+   *  手動 mode only. Absent ⇒ a group drag falls back to a single-row `onReorder`. */
+  onBulkReorderTo?: (ids: readonly common.TaskId[], draggedId: common.TaskId, overId: common.TaskId) => void;
   canWrite?: boolean;
 }
 
@@ -146,6 +151,7 @@ function LeftPaneRow({
   dragEnabled,
   grouped,
   selected,
+  lifting,
   dragHandleProps,
   number,
   onSelect,
@@ -160,6 +166,9 @@ function LeftPaneRow({
   grouped: boolean;
   /** true when this row is part of the marquee multi-selection. */
   selected: boolean;
+  /** true while a GROUP drag is in flight and this is a selected row OTHER than the
+   *  grabbed one — it dims in place so it reads as "picked up" into the floating stack. */
+  lifting?: boolean;
   /** from SortableList.renderItem — spread on the drag handle to arm pointer/keyboard. */
   dragHandleProps: SortableItemContext["dragHandleProps"];
   /** WBS number label (e.g. "AA-1-1"); absent ⇒ no badge. */
@@ -179,12 +188,13 @@ function LeftPaneRow({
   return (
     <button
       type="button"
-      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""} ${selected ? styles.tlRowSelected : ""}`}
+      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""} ${selected ? styles.tlRowSelected : ""} ${lifting ? styles.tlRowLifting : ""}`}
       style={style}
       aria-pressed={selected}
       title={r.title}
       onClick={() => onSelect?.(r.taskId)}
       data-testid={`fe4-gantt-row-${r.taskId}`}
+      {...(selected ? { "data-fe4-keep-selection": "true" } : {})}
     >
       {dragEnabled && (
         <span
@@ -260,6 +270,7 @@ export function GanttView({
   onBulkDelete,
   onBulkShiftDays,
   onBulkMoveVertical,
+  onBulkReorderTo,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -312,6 +323,13 @@ export function GanttView({
     (e: SortableReorderEvent) => {
       const activeId = e.activeId as common.TaskId;
       const overId = e.overId as common.TaskId;
+      // Group drag (⑤): when the grabbed row is part of a marquee multi-selection, move the
+      // WHOLE selected block together (contiguous, in order) to the drop target — not just the
+      // one row. Hands the raw active/over ids to the host, which computes the block move.
+      if (onBulkReorderTo && selectedIds.size > 1 && selectedIds.has(activeId)) {
+        onBulkReorderTo([...selectedIds], activeId, overId);
+        return;
+      }
       // Translate the drop into the container's "place before X" contract so the
       // committed order equals the sortable PREVIEW (no post-drop jump). Same-parent
       // only: move the sibling id list, then whichever id ends up right AFTER the
@@ -336,7 +354,26 @@ export function GanttView({
         onReorder?.(activeId, overId);
       }
     },
-    [onReorder],
+    [onReorder, onBulkReorderTo, selectedIds],
+  );
+
+  // Group-move animation (⑤): for a marquee multi-selection drag, give the SortableList
+  // the FULL next order up front (the same block move the host commits) so it can render
+  // the drop in ONE step and FLIP every moved row into place TOGETHER — instead of only
+  // the grabbed row sliding while the rest jump. Single-row drags return null (default
+  // arrayMove). Uses the visible rows + current selection so the optimistic order matches
+  // what onBulkReorderTo persists.
+  const computeGroupOrder = useCallback(
+    (activeId: string, overId: string): string[] | null => {
+      if (!(onBulkReorderTo && selectedIds.size > 1 && selectedIds.has(activeId as common.TaskId))) return null;
+      return reorderSelectionWithinSiblings(
+        visibleRowsRef.current,
+        selectedIds,
+        activeId as common.TaskId,
+        overId as common.TaskId,
+      );
+    },
+    [onBulkReorderTo, selectedIds],
   );
 
   // Swap in the store's (authoritative + optimistic) title before any geometry runs,
@@ -722,6 +759,30 @@ export function GanttView({
     setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
   }, []);
 
+  // ---- 外側クリックで選択解除 (⑤b) ----
+  // Once a marquee selection exists, a pointer-down anywhere that is NOT a selected row/
+  // bar, the bulk-action bar, or an additive (Shift/⌘/Ctrl) gesture clears it — so a stray
+  // click on empty space or another task drops the selection instead of it lingering.
+  // Capture phase so it runs regardless of a target's own stopPropagation (bars do), and
+  // BEFORE dnd-kit arms a group drag off a selected row (which is data-marked to be kept).
+  // Skipped while the bulk-delete confirm is open (its buttons act on the selection).
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const onDown = (e: PointerEvent) => {
+      if (bulkDeleteOpen) return;
+      if (e.button !== 0) return;
+      if (e.shiftKey || e.metaKey || e.ctrlKey) return; // additive — keep building the set
+      const el = e.target as HTMLElement | null;
+      if (el && el.closest("[data-fe4-keep-selection]")) return; // selected row/bar or the action bar
+      // The timeline canvas owns its own clear/create priority (onCanvasBackgroundClick +
+      // the marquee session) — defer to it so a deselect-click there never spawns a task.
+      if (el && el.closest("[data-fe4-gantt-canvas]")) return;
+      clearSelection();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [selectedIds, bulkDeleteOpen, clearSelection]);
+
   // ---- marquee (範囲ドラッグ) pointer session on the timeline body ----
   // Starts on a pointer-down over the empty canvas (bars stopPropagation their own
   // pointer-down, so this only fires on background). While dragging we draw the
@@ -769,14 +830,22 @@ export function GanttView({
       marqueeConsumedClickRef.current = false;
       return;
     }
-    if (e.target !== e.currentTarget) return; // ignore clicks that bubbled from a bar
-    // An empty-canvas click with an active selection clears it (PowerPoint-style),
-    // taking priority over create so a mis-aimed deselect never spawns a task.
+    // ⑤b: while a selection is active, a click anywhere on the timeline that is NOT on a
+    // bar (or a kept-selection element) clears it — including the decorative layers that
+    // fill the canvas (row lines / weekend shading / 内包ゾーン / today line / connectors),
+    // whose clicks previously did nothing because they aren't the exact canvas node. Only
+    // bar / selected-row / action-bar clicks are excluded from deselect.
     if (selectedIds.size > 0) {
+      const el = e.target as HTMLElement | null;
+      const onBar = !!el?.closest?.('[data-testid^="fe4-gantt-bar-"]');
+      const keep = !!el?.closest?.("[data-fe4-keep-selection]");
+      if (onBar || keep) return;
       clearSelection();
       return;
     }
+
     if (!editing || !onCreateOnDate) return;
+    if (e.target !== e.currentTarget) return; // create only on the bare canvas, never a bar
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const day = dayAtX(x, win);
@@ -989,35 +1058,67 @@ export function GanttView({
                   getItemId={(r) => r.taskId}
                   disabled={!reorderEnabled}
                   onReorder={onRowReorder}
+                  computeNextOrder={computeGroupOrder}
+                  // ⑤a: when a marquee multi-selection is grabbed, the whole set rides as one
+                  // deck — tell SortableList so the reflow opens a gap as tall as the number of
+                  // floating rows (not a fixed single row). Only meaningful while >1 is selected.
+                  liftedIds={selectedIds.size > 1 ? [...selectedIds] : undefined}
                   aria-label="タスクの並び替え"
-                  renderItem={(r, ctx) => (
-                    <LeftPaneRow
-                      r={r}
-                      isOpen={openParents.has(r.taskId)}
-                      dragEnabled={reorderEnabled}
-                      grouped={hasGroupRail}
-                      selected={selectedIds.has(r.taskId)}
-                      dragHandleProps={ctx.dragHandleProps}
-                      number={numberById?.get(r.taskId)}
-                      onSelect={interactive ? onSelect : undefined}
-                      toggleParent={toggleParent}
-                      statusById={statusById}
-                      assigneeNameById={assigneeNameById}
-                    />
-                  )}
-                  renderOverlay={(r) => (
-                    <div className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }} data-testid="fe4-gantt-drag-overlay">
-                      <span className={styles.tlRowDrag} aria-hidden>⠿</span>
-                      {teamColorById?.get(r.taskId) && (
-                        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
-                      )}
-                      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
-                      {numberById?.get(r.taskId) && (
-                        <span className={styles.tlRowNum}>{numberById.get(r.taskId)}</span>
-                      )}
-                      <span className={styles.tlRowName}>{r.title}</span>
-                    </div>
-                  )}
+                  renderItem={(r, ctx) => {
+                    // Group drag in flight: the grabbed row rides the floating overlay (hidden
+                    // in place by SortableList); every OTHER selected row dims in place so the
+                    // whole marquee selection reads as "lifted" together (⑤a).
+                    const groupDragging =
+                      ctx.dragActiveId != null &&
+                      selectedIds.size > 1 &&
+                      selectedIds.has(ctx.dragActiveId as common.TaskId);
+                    const lifting = groupDragging && selectedIds.has(r.taskId) && r.taskId !== ctx.dragActiveId;
+                    return (
+                      <LeftPaneRow
+                        r={r}
+                        isOpen={openParents.has(r.taskId)}
+                        dragEnabled={reorderEnabled}
+                        grouped={hasGroupRail}
+                        selected={selectedIds.has(r.taskId)}
+                        lifting={lifting}
+                        dragHandleProps={ctx.dragHandleProps}
+                        number={numberById?.get(r.taskId)}
+                        onSelect={interactive ? onSelect : undefined}
+                        toggleParent={toggleParent}
+                        statusById={statusById}
+                        assigneeNameById={assigneeNameById}
+                      />
+                    );
+                  }}
+                  renderOverlay={(r) => {
+                    // A single mini-row clone (the visual used both alone and stacked).
+                    const cloneRow = (row: gantt.GanttRow, key?: string) => (
+                      <div key={key} className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }}>
+                        <span className={styles.tlRowDrag} aria-hidden>⠿</span>
+                        {teamColorById?.get(row.taskId) && (
+                          <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(row.taskId) }} aria-hidden />
+                        )}
+                        <span className={`${styles.tlDot} ${statusById?.get(row.taskId) ? STATUS_BAR_CLASS[statusById.get(row.taskId)!] : ""}`} aria-hidden />
+                        {numberById?.get(row.taskId) && <span className={styles.tlRowNum}>{numberById.get(row.taskId)}</span>}
+                        <span className={styles.tlRowName}>{row.title}</span>
+                      </div>
+                    );
+                    // Group drag (⑤a): float the WHOLE selection as a stacked deck under the
+                    // cursor — every selected row (in visible order) lifts, not just the grabbed
+                    // one. A count badge names how many are moving.
+                    if (selectedIds.size > 1 && selectedIds.has(r.taskId)) {
+                      const picked = rows.filter((row) => selectedIds.has(row.taskId));
+                      return (
+                        <div className={styles.tlRowOverlayStack} style={{ width: leftW }} data-testid="fe4-gantt-drag-overlay">
+                          <span className={styles.tlRowOverlayCount} data-testid="fe4-gantt-drag-overlay-count">{picked.length}</span>
+                          {picked.map((row) => cloneRow(row, row.taskId))}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div data-testid="fe4-gantt-drag-overlay">{cloneRow(r)}</div>
+                    );
+                  }}
                 />
                 {/* team accent rail: fixed-x straight segments (one per contiguous team run) */}
                 {teamRailRuns.length > 0 && (
@@ -1097,6 +1198,7 @@ export function GanttView({
                 onClick={onCanvasBackgroundClick}
                 onPointerDown={onBodyPointerDown}
                 data-testid="fe4-gantt-body"
+                data-fe4-gantt-canvas="true"
               >
                 {/* weekend shading (painted FIRST, behind the parent enclosure) */}
                 {weekends.map((b) => (
@@ -1182,6 +1284,7 @@ export function GanttView({
                       title={titleById.get(b.taskId) ?? ""}
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
+                      {...(selectedIds.has(b.taskId) ? { "data-fe4-keep-selection": "true" } : {})}
                     >
                       {teamColorById?.get(b.taskId) && (
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
@@ -1226,7 +1329,7 @@ export function GanttView({
 
       {/* selection action hint — surfaces the available bulk ops (keyboard/drag) */}
       {selectedIds.size > 0 && (
-        <div className={styles.tlSelectionBar} role="status" data-testid="fe4-gantt-selection-bar">
+        <div className={styles.tlSelectionBar} role="status" data-testid="fe4-gantt-selection-bar" data-fe4-keep-selection="true">
           <span className={styles.tlSelectionCount} data-testid="fe4-gantt-selection-count">
             {selectedIds.size} 件選択中
           </span>
