@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import type { identity, task } from "@dub/types";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { renderWithProviders as render } from "./helpers-providers";
+import type { identity, task, team } from "@dub/types";
 import { TaskCreateModal, type TaskDraft } from "../src/components/TaskCreateModal";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
