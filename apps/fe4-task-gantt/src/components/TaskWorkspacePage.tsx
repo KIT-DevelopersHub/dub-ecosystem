@@ -17,7 +17,7 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
-import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
+import { scopeTasksFromRows, directParentOf, topLevelParentOptions } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
@@ -307,26 +307,26 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
   const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
-  // Prefer the store's fresh title so the parent / 先行タスク pickers relabel the same
-  // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
-  // which the store list omits).
-  const allTaskOptions = useMemo(
-    () => allRows.map((r) => ({ id: r.taskId, title: titleById.get(r.taskId) ?? r.title })),
-    [allRows, titleById],
-  );
+  // WBS parent候補は「一番上の階層（ルート）のタスクのみ」。ネストした子孫は出さない。
+  const rootParentOptions = useMemo(() => topLevelParentOptions(scopeTasks), [scopeTasks]);
   // predecessors currently on the selected task (先行タスク＝依存元 where to===selected).
   const selectedDependsOn = useMemo(() => {
     if (!selected || !gantt.data) return [] as common.TaskId[];
     return gantt.data.dependencies.filter((d) => d.toTaskId === selected).map((d) => d.fromTaskId);
   }, [selected, gantt.data]);
+  // successors of the selected task (後続タスク＝依存先 where from===selected → to).
+  const selectedSuccessors = useMemo(() => {
+    if (!selected || !gantt.data) return [] as common.TaskId[];
+    return gantt.data.dependencies.filter((d) => d.fromTaskId === selected).map((d) => d.toTaskId);
+  }, [selected, gantt.data]);
   const selectedParentId = useMemo(
     () => (selected ? directParentOf(scopeTasks, selected) : null),
     [selected, scopeTasks],
   );
-  // parent options for the detail panel exclude the task itself.
+  // parent options for the detail panel: top-level roots only, minus the task itself.
   const detailParentOptions = useMemo(
-    () => (selected ? allTaskOptions.filter((o) => o.id !== selected) : allTaskOptions),
-    [allTaskOptions, selected],
+    () => topLevelParentOptions(scopeTasks, selected),
+    [scopeTasks, selected],
   );
 
   // Inline field errors read from the RAW error detail (lastErrorDetail carries the
@@ -563,6 +563,52 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return true;
   };
 
+  // 後続タスク（successor）edits are the REVERSE of a dependency: making S a successor of
+  // `id` means "add `id` to S's predecessors". So we don't store a successor edge — we
+  // edit each affected sibling S's own dependsOn list (add on link, remove on unlink).
+  // additive: reuses replaceDependencies + the existing dependency read model (no schema
+  // change, no migration). Optimistic + rollback mirrors applyRelationsRaw.
+  const applySuccessorsRaw = async (
+    id: common.TaskId,
+    added: readonly common.TaskId[],
+    removed: readonly common.TaskId[],
+  ): Promise<boolean> => {
+    const targets = [...added.map((s) => ({ s, add: true })), ...removed.map((s) => ({ s, add: false }))];
+    if (targets.length === 0) return true;
+    // Snapshot each target's CURRENT predecessor list from the live cache for rollback.
+    const depsOf = (s: common.TaskId) =>
+      gantt.currentDependencies().filter((d) => d.toTaskId === s).map((d) => d.fromTaskId);
+    const snaps = new Map<common.TaskId, common.TaskId[]>();
+    for (const { s } of targets) if (!snaps.has(s)) snaps.set(s, depsOf(s));
+    const nextOf = (s: common.TaskId, add: boolean) => {
+      const cur = snaps.get(s) ?? [];
+      return add ? [...new Set([...cur, id])] : cur.filter((x) => x !== id);
+    };
+    // Optimistic: flip each target's predecessor edge the same tick.
+    for (const { s, add } of targets) gantt.setDependenciesOptimistic(s, nextOf(s, add));
+
+    try {
+      for (const { s, add } of targets) {
+        const cur = await getTask(client, s); // fresh version for THIS target
+        await replaceDependencies(client, s, { version: cur.version, dependsOnIds: nextOf(s, add) });
+      }
+    } catch (e) {
+      for (const [s, prev] of snaps) gantt.setDependenciesOptimistic(s, prev); // roll all back
+      store.reportError(e);
+      void reconcileRelations();
+      return false;
+    }
+
+    let reconciled = await store.reconcile(client, query);
+    try {
+      await gantt.refetchFresh();
+    } catch {
+      reconciled = false;
+    }
+    if (!reconciled) void reconcileRelations();
+    return true;
+  };
+
   // Re-issue a field-only patch (title/status/優先度/担当/チーム/開始日/期日) as a plain
   // "set" — the reversible primitive an undo/redo command re-runs. It reads a FRESH
   // version (getTask) first, so a DEFERRED undo/redo (run long after the edit, once the
@@ -762,7 +808,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
     if (!selectedTask) return;
-    const needsRelations = relations.parentChanged || relations.depsChanged;
+    const needsRelations = relations.parentChanged || relations.depsChanged || relations.successorsChanged;
     // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
     // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
     // field from the current task so Ctrl/⌘-Z restores exactly those fields.
@@ -827,23 +873,40 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     const id = selectedTask.id;
     const prevParent = selectedParentId;
     const prevDeps = selectedDependsOn;
+    const prevSucc = selectedSuccessors;
     const nextParent = relations.parentChanged ? relations.parentTaskId : undefined;
     const nextDeps = relations.depsChanged ? relations.dependsOnIds : undefined;
-    // Field + parent + deps go through ONE fresh-version save (applyRelationsRaw re-reads
-    // the version), so a field change committed alongside a relation edit can't 409 on a
-    // stale panel version — the reparent→依存 failure class. The optimistic parent + 依存
-    // reflection (and its rollback) now lives INSIDE applyRelationsRaw, so save + undo +
-    // redo all reflect instantly. On success we confirm with a success toast.
-    void applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined).then((ok) => {
-      if (ok) feedback.success();
+    // 後続 diff (against the current successors) → which sibling deps to add/remove.
+    const succAdded = relations.successorsChanged
+      ? relations.successorIds.filter((s) => !prevSucc.includes(s))
+      : [];
+    const succRemoved = relations.successorsChanged
+      ? prevSucc.filter((s) => !relations.successorIds.includes(s))
+      : [];
+    // applyRelationsRaw only needs to run when the task's OWN facets change (field / parent /
+    // 先行). 後続 edits touch OTHER tasks, handled by applySuccessorsRaw. Both are optimistic.
+    const runsOwn = relations.parentChanged || relations.depsChanged || hasFieldPatch;
+    const ops: Promise<boolean>[] = [];
+    if (runsOwn) ops.push(applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined));
+    if (relations.successorsChanged) ops.push(applySuccessorsRaw(id, succAdded, succRemoved));
+    void Promise.all(ops).then((res) => {
+      if (res.length > 0 && res.every(Boolean)) feedback.success();
     });
     history.push({
-      label: relations.depsChanged ? "先行タスク（依存）の変更" : "親タスク（親子）の変更",
+      label: relations.successorsChanged && !runsOwn
+        ? "後続タスク（依存）の変更"
+        : relations.depsChanged
+          ? "先行タスク（依存）の変更"
+          : relations.parentChanged
+            ? "親タスク（親子）の変更"
+            : "後続タスク（依存）の変更",
       undo: async () => {
-        await applyRelationsRaw(id, relations.parentChanged ? prevParent : undefined, relations.depsChanged ? prevDeps : undefined);
+        if (runsOwn) await applyRelationsRaw(id, relations.parentChanged ? prevParent : undefined, relations.depsChanged ? prevDeps : undefined);
+        if (relations.successorsChanged) await applySuccessorsRaw(id, succRemoved, succAdded); // reverse
       },
       redo: async () => {
-        await applyRelationsRaw(id, nextParent, nextDeps);
+        if (runsOwn) await applyRelationsRaw(id, nextParent, nextDeps);
+        if (relations.successorsChanged) await applySuccessorsRaw(id, succAdded, succRemoved);
       },
     });
   };
@@ -1051,7 +1114,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         onClose={closeCreate}
         users={assignableUsers}
         teams={teams}
-        parentOptions={allTaskOptions}
+        parentOptions={rootParentOptions}
         scopeTasks={scopeTasks}
         onCreate={onCreate}
       />
@@ -1068,6 +1131,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           parentTaskId={selectedParentId}
           scopeTasks={scopeTasks}
           dependsOnIds={selectedDependsOn}
+          successorIds={selectedSuccessors}
           barStartsAt={selectedRow?.startsAt ?? null}
           barEndsAt={selectedRow?.endsAt ?? null}
           hasChildren={selectedRow?.hasChildren ?? false}

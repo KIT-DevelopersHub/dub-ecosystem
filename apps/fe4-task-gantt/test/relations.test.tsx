@@ -33,8 +33,11 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + �
         onCreate={async () => {}}
       />,
     );
-    // choose parent P
-    fireEvent.change(screen.getByTestId("fe4-create-parent"), { target: { value: "P" } });
+    // choose parent P via the searchable selector (type its name → pick)
+    const parentInput = screen.getByTestId("fe4-create-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "親P" } });
+    fireEvent.mouseDown(screen.getByTestId("fe4-create-parent-opt-P"));
     const depInput = screen.getByTestId("fe4-create-deps-input");
     fireEvent.focus(depInput);
     fireEvent.change(depInput, { target: { value: "子" } }); // matches 子1/子2/子D by title
@@ -58,7 +61,10 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + �
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-create-title"), { target: { value: "新タスク" } });
-    fireEvent.change(screen.getByTestId("fe4-create-parent"), { target: { value: "P" } });
+    const parentInput = screen.getByTestId("fe4-create-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "親P" } });
+    fireEvent.mouseDown(screen.getByTestId("fe4-create-parent-opt-P"));
     fireEvent.click(screen.getByTestId("fe4-create-submit"));
     await waitFor(() => expect(onCreate).toHaveBeenCalled());
     expect(onCreate.mock.calls[0]![0].parentTaskId).toBe("P");
@@ -109,7 +115,10 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null }, { id: "P", title: "親P", parentTaskId: null }]}
       />,
     );
-    fireEvent.change(screen.getByTestId("fe4-detail-parent"), { target: { value: "P" } });
+    const parentInput = screen.getByTestId("fe4-detail-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "親P" } });
+    fireEvent.mouseDown(screen.getByTestId("fe4-detail-parent-opt-P"));
     fireEvent.click(screen.getByTestId("fe4-detail-save"));
     expect(onSave).toHaveBeenCalled();
     const [patch, relations] = onSave.mock.calls[0]!;
@@ -146,6 +155,56 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
     expect(relations.depsChanged).toBe(true);
     expect(relations.dependsOnIds).toContain("sib");
   });
+
+  it("adding a successor flags a successor change (後続タスク編集)", () => {
+    const onSave = vi.fn();
+    render(
+      <TaskDetailPanel
+        task={mkTask("self")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={onSave}
+        onDelete={() => {}}
+        onClose={() => {}}
+        parentTaskId={null}
+        dependsOnIds={[]}
+        successorIds={[]}
+        scopeTasks={[
+          { id: "self", title: "対象タスク", parentTaskId: null },
+          { id: "sib", title: "兄弟タスク", parentTaskId: null },
+        ]}
+      />,
+    );
+    const input = screen.getByTestId("fe4-detail-succs-input");
+    fireEvent.focus(input);
+    fireEvent.mouseDown(screen.getByTestId("fe4-detail-succs-opt-sib"));
+    fireEvent.click(screen.getByTestId("fe4-detail-save"));
+    const [, relations] = onSave.mock.calls[0]!;
+    expect(relations.successorsChanged).toBe(true);
+    expect(relations.successorIds).toContain("sib");
+    expect(relations.depsChanged).toBe(false); // 先行は変わらない
+  });
+
+  it("blocks a direct cycle: a predecessor is not offered as a successor (and vice versa)", () => {
+    const base = {
+      task: mkTask("self"), users: [] as identity.UserSummary[], canWrite: true, canDelete: true,
+      onSave: () => {}, onDelete: () => {}, onClose: () => {},
+      scopeTasks: [
+        { id: "self", title: "対象タスク", parentTaskId: null },
+        { id: "sib", title: "兄弟タスク", parentTaskId: null },
+      ] as ScopeTask[],
+    };
+    // sib is already a predecessor → it must NOT appear in the successor list.
+    const { unmount } = render(<TaskDetailPanel {...base} dependsOnIds={["sib"]} successorIds={[]} />);
+    fireEvent.focus(screen.getByTestId("fe4-detail-succs-input"));
+    expect(screen.queryByTestId("fe4-detail-succs-opt-sib")).toBeNull();
+    unmount();
+    // sib is already a successor → it must NOT appear in the predecessor list.
+    render(<TaskDetailPanel {...base} dependsOnIds={[]} successorIds={["sib"]} />);
+    fireEvent.focus(screen.getByTestId("fe4-detail-deps-input"));
+    expect(screen.queryByTestId("fe4-detail-deps-opt-sib")).toBeNull();
+  });
 });
 
 // ---- workspace integration: create-with-parent + detail predecessor edit ----
@@ -165,7 +224,10 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.click(screen.getByTestId("fe4-create-open"));
     const modal = await screen.findByTestId("fe4-create-modal");
     fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "小タスク" } });
-    fireEvent.change(within(modal).getByTestId("fe4-create-parent"), { target: { value: "t1" } });
+    const parentInput = within(modal).getByTestId("fe4-create-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "会場" } }); // t1 = 会場予約
+    fireEvent.mouseDown(within(modal).getByTestId("fe4-create-parent-opt-t1"));
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     // t1 now owns a child → renders the expand/collapse toggle
     expect(await screen.findByTestId("fe4-gantt-toggle-t1")).toBeInTheDocument();
@@ -189,6 +251,34 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
     // t1 -> t2 dependency now rendered on the timeline
     expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
+  });
+
+  it("adding a successor from the detail panel draws the reverse dependency arrow", async () => {
+    render(<App client={wsClient()} eventId={EVENT} permissions={PERMS} />);
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    const input = within(panel).getByTestId("fe4-detail-succs-input");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "登壇" } }); // t2 = 登壇者調整 (same scope)
+    fireEvent.mouseDown(within(panel).getByTestId("fe4-detail-succs-opt-t2"));
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // successor of t1 = t2 ⇒ reverse edge t1 -> t2 (t1 becomes t2's predecessor)
+    expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
+  });
+
+  it("removing a successor removes the reverse dependency", async () => {
+    const linked = new MockApiClient({
+      tasks: [wsTask("t1", "会場予約"), wsTask("t2", "登壇者調整")],
+      dependencies: [{ id: "t1->t2", fromTaskId: "t1", toTaskId: "t2", type: "FS", lagDays: 0 }],
+    });
+    render(<App client={linked} eventId={EVENT} permissions={PERMS} />);
+    expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    // t2 shows as a successor chip → remove it, then save
+    fireEvent.click(within(panel).getByTestId("fe4-detail-succs-remove-t2"));
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(screen.queryByTestId("fe4-gantt-dep-t1->t2")).toBeNull());
   });
 
   it("confirms a saved predecessor edit with a success toast (楽観的UIの成功フィードバック)", async () => {

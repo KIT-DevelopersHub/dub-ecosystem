@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
-import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
+import { PredecessorPicker } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
 
 export interface TaskDraft {
@@ -107,7 +108,6 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
       // Close ONLY on success — a failed create keeps the form (with its input) open
       // so the user can retry after reading the error dialog. Success shows a toast.
       if (ok !== false) {
-        rememberPredecessors(deps);
         reset();
         onClose();
       }
@@ -219,19 +219,18 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         {/* 親タスク → then 先行タスク: choose the WBS parent first, then dependencies.
             Predecessors are limited to the chosen parent's siblings (same scope). */}
         <div className={styles.formFieldFull}>
-          <label className={styles.formLabel} htmlFor="fe4-create-parent">
-            親タスク（任意・未選択でトップレベル）
-          </label>
-          <Select
-            id="fe4-create-parent"
-            value={parentId ?? ""}
-            onChange={(v) => {
-              const next = v ? (v as common.TaskId) : null;
+          <span className={styles.formLabel}>親タスク（任意・未選択でトップレベル）</span>
+          <TaskSearchSelect<common.TaskId>
+            value={parentId}
+            options={parentOptions}
+            placeholder="タスク名で検索・一覧から選択…"
+            emptyOptionsLabel="親にできるタスクがありません"
+            hint="空欄のままなら親なし（トップレベル）"
+            onChange={(next) => {
               setParentId(next);
               // dependencies must stay within the new scope — drop the out-of-scope ones.
               setDeps((d) => pruneToScope(scopeTasks, next, d));
             }}
-            options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-create-parent"
           />
         </div>

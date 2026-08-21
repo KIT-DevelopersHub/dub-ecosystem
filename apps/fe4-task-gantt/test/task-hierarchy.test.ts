@@ -5,6 +5,7 @@ import {
   directParentOf,
   sameScope,
   dependencyScopeOptions,
+  topLevelParentOptions,
   pruneToScope,
 } from "../src/domain/task-hierarchy";
 import { MockApiClient } from "../src/api/mock-client";
@@ -45,6 +46,13 @@ describe("task-hierarchy scope rules (判断10: 同一直接親のみ依存可)"
     // for a top-level task, only the other top-level tasks
     const forTop = dependencyScopeOptions(st, null, "P").map((o) => o.id);
     expect(forTop).toEqual(["Q"]);
+  });
+
+  it("topLevelParentOptions offers only top-level roots (nested descendants excluded)", () => {
+    // only P and Q are roots; children c1/c2/d1 are never offered as parents
+    expect(topLevelParentOptions(st).map((o) => o.id)).toEqual(["P", "Q"]);
+    // the edited task itself is excluded (self/cycle guard)
+    expect(topLevelParentOptions(st, "P").map((o) => o.id)).toEqual(["Q"]);
   });
 
   it("pruneToScope drops ids that are not in the target scope", () => {

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -11,12 +12,17 @@ import styles from "../styles/app.module.css";
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-/** Relation edits committed alongside the field patch (先行タスク＝依存 / 親子). */
+/** Relation edits committed alongside the field patch (先行 / 後続 / 親子). */
 export interface RelationEdit {
   parentChanged: boolean;
   parentTaskId: common.TaskId | null;
   depsChanged: boolean;
+  /** This task's predecessors (先行＝依存元): tasks THIS one depends on. */
   dependsOnIds: common.TaskId[];
+  successorsChanged: boolean;
+  /** This task's successors (後続＝依存先): tasks that depend on THIS one. Persisted by
+   *  the caller as the reverse edge — adding S adds this task to S's predecessors. */
+  successorIds: common.TaskId[];
 }
 
 export interface TaskDetailPanelProps {
@@ -43,6 +49,8 @@ export interface TaskDetailPanelProps {
   scopeTasks?: readonly ScopeTask[];
   /** This task's current predecessors (先行タスク＝依存元). */
   dependsOnIds?: readonly common.TaskId[];
+  /** This task's current successors (後続タスク＝依存先: tasks that depend on this one). */
+  successorIds?: readonly common.TaskId[];
   /** The bar's DISPLAYED window (gantt row startsAt/endsAt). Seeds 開始日/期日 when the
    *  task has no explicit startAt/dueAt column yet — the gantt read model derives a bar
    *  window from dueAt (＋priority/CPM), so a task with only dueAt still SHOWS a start on
@@ -73,6 +81,7 @@ export function TaskDetailPanel({
   parentTaskId = null,
   scopeTasks = [],
   dependsOnIds = [],
+  successorIds = [],
   barStartsAt = null,
   barEndsAt = null,
   hasChildren = false,
@@ -105,13 +114,23 @@ export function TaskDetailPanel({
   // panel is remounted per task (keyed on id) so these never go stale.
   const [parentId, setParentId] = useState<common.TaskId | null>(parentTaskId);
   const [deps, setDeps] = useState<common.TaskId[]>([...dependsOnIds]);
+  const [succs, setSuccs] = useState<common.TaskId[]>([...successorIds]);
   const [confirming, setConfirming] = useState(false);
 
-  // Predecessors are limited to this task's siblings under its (possibly changed)
-  // parent — same scope only (判断10). Excludes self.
-  const depOptions = useMemo(
+  // Both 先行 and 後続 are limited to this task's siblings under its (possibly changed)
+  // parent — same scope only (判断10). Excludes self. To block a direct cycle (A→B と
+  // B→A を同時に張れない) each side also drops the tasks already used by the OTHER side.
+  const scopeOptions = useMemo(
     () => dependencyScopeOptions(scopeTasks, parentId, t.id),
     [scopeTasks, parentId, t.id],
+  );
+  const depOptions = useMemo(
+    () => scopeOptions.filter((o) => !succs.includes(o.id)),
+    [scopeOptions, succs],
+  );
+  const succOptions = useMemo(
+    () => scopeOptions.filter((o) => !deps.includes(o.id)),
+    [scopeOptions, deps],
   );
   // How many tasks hang directly under this one (親タスクなら子の数を明示・feedback #39).
   const childCount = useMemo(
@@ -130,6 +149,9 @@ export function TaskDetailPanel({
   const sameDeps =
     deps.length === dependsOnIds.length && deps.every((id) => dependsOnIds.includes(id));
   const depsChanged = !sameDeps;
+  const sameSuccs =
+    succs.length === successorIds.length && succs.every((id) => successorIds.includes(id));
+  const successorsChanged = !sameSuccs;
   const dirty =
     title !== t.title ||
     status !== t.status ||
@@ -138,7 +160,8 @@ export function TaskDetailPanel({
     teamId !== curTeam ||
     datesChanged ||
     parentChanged ||
-    depsChanged;
+    depsChanged ||
+    successorsChanged;
 
   const save = () => {
     const patch: task.UpdateTaskRequest = { version: t.version };
@@ -156,7 +179,14 @@ export function TaskDetailPanel({
       patch.dueAt = nextDueIso;
     }
     if (parentChanged) patch.parentTaskId = parentId;
-    onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
+    onSave(patch, {
+      parentChanged,
+      parentTaskId: parentId,
+      depsChanged,
+      dependsOnIds: deps,
+      successorsChanged,
+      successorIds: succs,
+    });
   };
 
   return (
@@ -266,22 +296,24 @@ export function TaskDetailPanel({
           </div>
         )}
 
-        {/* 親子（親タスク）: change/detach which work-package this task hangs under. */}
+        {/* 親子（親タスク）: change/detach which work-package this task hangs under.
+            タスク名の検索で選択（＝親あり）。空欄のまま（chip なし）なら親なし＝トップレベル。 */}
         <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-detail-parent">
-            親タスク（親子関係）
-          </label>
-          <Select
-            id="fe4-detail-parent"
-            value={parentId ?? ""}
+          <span className={styles.formLabel}>親タスク（親子関係）</span>
+          <TaskSearchSelect<common.TaskId>
+            value={parentId}
+            options={canWrite ? parentOptions : []}
+            placeholder="タスク名で検索・一覧から選択…"
+            emptyOptionsLabel="親にできるタスクがありません"
+            hint="空欄のままなら親なし（トップレベル）"
             disabled={!canWrite}
-            onChange={(v) => {
-              const next = v ? (v as common.TaskId) : null;
+            onChange={(next) => {
+              if (!canWrite) return;
               setParentId(next);
-              // dependencies must stay within the new scope — drop out-of-scope ones.
+              // 先行/後続 must stay within the new scope — drop out-of-scope ones.
               setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
+              setSuccs((s) => pruneToScope(scopeTasks, next, s).filter((id) => id !== t.id));
             }}
-            options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
           />
           {/* 関係タイプの変換: 親（親子）→ 先行（依存）。保存で親子/依存を一括反映。 */}
@@ -294,6 +326,7 @@ export function TaskDetailPanel({
                 setParentId(null);
                 // detach to top-level, then keep p as a predecessor (same-scope only).
                 setDeps((d) => pruneToScope(scopeTasks, null, [...new Set([...d, p])]).filter((id) => id !== t.id));
+                setSuccs((s) => pruneToScope(scopeTasks, null, s).filter((id) => id !== t.id));
               }}
               data-testid="fe4-detail-parent-to-dep"
             >
@@ -314,13 +347,29 @@ export function TaskDetailPanel({
               ? {
                   onPromoteToParent: (id: common.TaskId) => {
                     // 依存 → 親子: this predecessor becomes the parent; drop it from deps,
-                    // and re-scope the rest to the new parent (保存で一括反映).
+                    // and re-scope the rest (先行/後続) to the new parent (保存で一括反映).
                     setParentId(id);
                     setDeps((d) => pruneToScope(scopeTasks, id, d.filter((x) => x !== id)).filter((x) => x !== t.id));
+                    setSuccs((s) => pruneToScope(scopeTasks, id, s.filter((x) => x !== id)).filter((x) => x !== t.id));
                   },
                 }
               : {})}
             testId="fe4-detail-deps"
+          />
+        </div>
+
+        {/* 後続タスク（依存先）: tasks that depend on THIS one. Stored as the reverse edge
+            (adding S adds this task to S's predecessors) — same scope, same core UI. */}
+        <div className={styles.formField}>
+          <span className={styles.formLabel}>後続タスク（このタスクに依存・同じ親のタスクのみ）</span>
+          <TaskSearchSelect<common.TaskId>
+            multiple
+            options={canWrite ? succOptions : []}
+            value={succs}
+            onChange={(next) => canWrite && setSuccs(next)}
+            placeholder="タスク名で検索・一覧から選択…"
+            emptyOptionsLabel="後続にできるタスクがありません"
+            testId="fe4-detail-succs"
           />
         </div>
 

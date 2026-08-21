@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { task } from "@dub/types";
-import { PredecessorPicker, rememberPredecessors } from "../src/components/PredecessorPicker";
+import { PredecessorPicker } from "../src/components/PredecessorPicker";
 import { DateField } from "../src/components/DateField";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 
@@ -11,15 +11,13 @@ const OPTS = [
   { id: "t3", title: "登壇者調整" },
 ];
 
-beforeEach(() => localStorage.clear());
-
-describe("PredecessorPicker — searchable combobox (feature #1)", () => {
-  it("does not list all tasks up-front; searches by title", () => {
+describe("PredecessorPicker — scrollable dropdown + search (feature #1)", () => {
+  it("lists ALL candidates on focus, and narrows them while typing", () => {
     render(<PredecessorPicker options={OPTS} value={[]} onChange={() => {}} testId="pp" />);
-    // no option is shown until the user focuses + types (no giant flat list)
-    expect(screen.queryByTestId("pp-opt-t1")).toBeNull();
+    expect(screen.queryByTestId("pp-opt-t1")).toBeNull(); // nothing before focus
     const input = screen.getByTestId("pp-input");
     fireEvent.focus(input);
+    expect(screen.getAllByTestId(/^pp-opt-/)).toHaveLength(3); // full list, no typing
     fireEvent.change(input, { target: { value: "スポンサー" } });
     expect(screen.getByTestId("pp-opt-t2")).toBeInTheDocument();
     expect(screen.queryByTestId("pp-opt-t1")).toBeNull(); // filtered out
@@ -37,20 +35,14 @@ describe("PredecessorPicker — searchable combobox (feature #1)", () => {
     expect(screen.getByTestId("pp-chip-t3")).toBeInTheDocument();
   });
 
-  it("surfaces recently-chosen tasks (max 4) when the query is empty", () => {
-    rememberPredecessors(["t2"]);
-    render(<PredecessorPicker options={OPTS} value={[]} onChange={() => {}} testId="pp" />);
-    fireEvent.focus(screen.getByTestId("pp-input"));
-    expect(screen.getByText("最近選んだタスク")).toBeInTheDocument();
-    expect(screen.getByTestId("pp-opt-t2")).toBeInTheDocument();
-  });
-
-  it("rememberPredecessors dedupes and caps recent history", () => {
-    rememberPredecessors(["a", "b"]);
-    rememberPredecessors(["b", "c"]);
-    const raw = JSON.parse(localStorage.getItem("fe4:recent-predecessors")!);
-    expect(raw[0]).toBe("b"); // most-recent first
-    expect(new Set(raw).size).toBe(raw.length); // no dups
+  it("supports keyboard selection (↓ then Enter)", () => {
+    const onChange = vi.fn();
+    render(<PredecessorPicker options={OPTS} value={[]} onChange={onChange} testId="pp" />);
+    const input = screen.getByTestId("pp-input");
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "ArrowDown" }); // index 0 -> 1 (t2)
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith(["t2"]);
   });
 });
 
