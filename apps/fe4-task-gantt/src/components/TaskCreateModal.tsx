@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
-import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
@@ -62,14 +62,23 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   // request/approval flow). Recomputes whenever the team changes.
   const depOptions = useMemo(() => dependencyScopeOptions(scopeTasks, teamId), [scopeTasks, teamId]);
 
+  // 親子は同一チーム: 親を選んだ子タスクは親のチームに固定する。チーム欄は親のチームで
+  // プリフィルし、親がいる間は変更不可（disabled）にして、親子でチームが食い違う状態を
+  // 作らせない（サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保）。親なし＝自由。
+  const teamLockedToParent = parentId != null;
+
   // seed the due date + parent + predecessors when (re)opened (timeline cell /
-  // "ここから子タスクを作成" preset the parent, etc.).
+  // "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
+  // チームも親のチームで固定する。
   useEffect(() => {
     if (open) {
       setDue(initialDue ?? null);
-      setParentId(initialParentId ?? null);
+      const nextParent = initialParentId ?? null;
+      setParentId(nextParent);
+      if (nextParent) setTeamId(teamOf(scopeTasks, nextParent));
       setDeps(initialDependsOn ? [...initialDependsOn] : []);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialDue, initialParentId, initialDependsOn]);
 
   const reset = () => {
@@ -99,7 +108,8 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         status,
         priority,
         assigneeId,
-        teamId,
+        // 子タスク作成時はチームを親に固定（UIは disabled だが念のため送信値も親で確定）。
+        teamId: parentId ? teamOf(scopeTasks, parentId) : teamId,
         startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
         parentTaskId: parentId,
@@ -210,6 +220,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
             <Select
               id="fe4-create-team"
               value={teamId ?? ""}
+              disabled={teamLockedToParent}
               onChange={(v) => {
                 const next = v ? (v as common.TeamId) : null;
                 setTeamId(next);
@@ -219,6 +230,11 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
               options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
               testId="fe4-create-team"
             />
+            {teamLockedToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-create-team-locked">
+                親タスクと同じチームになります（変更できません）
+              </p>
+            )}
           </div>
         )}
 
@@ -232,9 +248,15 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
             id="fe4-create-parent"
             value={parentId ?? ""}
             onChange={(v) => {
-              // Re-parenting no longer changes the dependency scope (deps are team-scoped,
-              // ADR-0007), so predecessors are preserved across a parent change.
-              setParentId(v ? (v as common.TaskId) : null);
+              const next = v ? (v as common.TaskId) : null;
+              setParentId(next);
+              // 親子は同一チーム: 親を選んだら子のチームを親のチームへ合わせる。チームが変わりうる
+              // ので team-scoped(ADR-0007)の依存を新チームへ絞る。トップレベル(null)ならチーム維持。
+              if (next) {
+                const parentTeam = teamOf(scopeTasks, next);
+                setTeamId(parentTeam);
+                setDeps((d) => pruneToScope(scopeTasks, parentTeam, d));
+              }
             }}
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-create-parent"

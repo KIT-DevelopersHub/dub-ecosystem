@@ -18,8 +18,9 @@ export interface ScopeTask {
   id: common.TaskId;
   title: string;
   parentTaskId: common.TaskId | null;
-  /** Owning team — the dependency boundary (same team ⇒ same scope for deps). */
-  teamId: common.TeamId | null;
+  /** Owning team — the dependency boundary (same team ⇒ same scope for deps). null=未割当。
+   *  Optional so 親子でチームを親に固定する導線（子作成/再親付け）が teamId 省略でも通る。 */
+  teamId?: common.TeamId | null;
 }
 
 /** Project the gantt rows down to the minimal scope info the pickers need. */
@@ -37,7 +38,8 @@ export function directParentOf(tasks: readonly ScopeTask[], taskId: common.TaskI
   return tasks.find((t) => t.id === taskId)?.parentTaskId ?? null;
 }
 
-/** Team of a task (null = no team / not found). */
+/** Owning team of a task (null = 未割当 / not found). Used to fix a child's team to its
+ *  parent — 親子でチームが食い違う状態を作らせない（作成時プリフィル・再親付けで追従）。 */
 export function teamOf(tasks: readonly ScopeTask[], taskId: common.TaskId): common.TeamId | null {
   return tasks.find((t) => t.id === taskId)?.teamId ?? null;
 }

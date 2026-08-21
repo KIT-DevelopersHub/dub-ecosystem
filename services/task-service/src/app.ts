@@ -229,6 +229,19 @@ export function buildApp(deps: Deps): Hono {
       }
     }
 
+    // 親子は同一チーム: 親を指定して作る子タスクは、親と同じチームでなければならない（親から
+    // 作る導線はチームを親に固定する。整合はサーバでも担保）。null=未割当同士は一致。親が存在
+    // しないときは比較対象がないので素通し（既存の後方互換）。
+    const parentTaskId = body.parentTaskId ?? null;
+    if (parentTaskId) {
+      const parent = await deps.repo.getById(parentTaskId);
+      if (parent) {
+        const childTeam = body.teamId ?? null;
+        const parentTeam = parent.teamId ?? null;
+        if (childTeam !== parentTeam) throw taskErrors.parentChildTeamMismatch(parentTeam, childTeam);
+      }
+    }
+
     const now = nowIso();
     const id = newId("task");
     const actorId = actorIdOf(principal);
@@ -325,6 +338,27 @@ export function buildApp(deps: Deps): Hono {
     if (assigneeChanged && body.assigneeId) {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
+    }
+
+    // 親子は同一チーム (整合をサーバでも担保)。teamId か parentTaskId が変わるとき、このタスクと
+    // その親・子のチームが食い違わないか検証する。null=未割当同士は一致。フロントは子作成時に
+    // チームを親に固定し・子タスクのチーム欄をロックするが、直接APIや将来のクライアントに備えた門番。
+    if (body.teamId !== undefined || body.parentTaskId !== undefined) {
+      const nextTeam = (body.teamId !== undefined ? body.teamId : current.teamId) ?? null;
+      const nextParentId = (body.parentTaskId !== undefined ? body.parentTaskId : current.parentTaskId) ?? null;
+      // 親側: 付け替え先/現在の親と同一チームでなければならない。
+      if (nextParentId) {
+        const parent = await deps.repo.getById(nextParentId);
+        if (parent && (parent.teamId ?? null) !== nextTeam) {
+          throw taskErrors.parentChildTeamMismatch(parent.teamId ?? null, nextTeam);
+        }
+      }
+      // 子側: このタスクの team 変更で子が別チームになるのを拒否（親のチーム変更で親子が食い違うのを防ぐ）。
+      if (body.teamId !== undefined) {
+        const childTeams = await deps.repo.liveChildrenTeams(id);
+        const mismatch = childTeams.find((ct) => ct !== nextTeam);
+        if (mismatch !== undefined) throw taskErrors.parentChildTeamMismatch(nextTeam, mismatch ?? null);
+      }
     }
 
     // build patch (only provided keys).
