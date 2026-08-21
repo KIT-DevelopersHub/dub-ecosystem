@@ -8,7 +8,12 @@ import type { IconName } from "../types";
 
 interface ActiveToast extends ToastOptions {
   id: string;
+  leaving?: boolean;
 }
+
+// A01: keep the exit animation duration in sync with --dub-motion-normal (200ms)
+// so the leaving node is removed only after its slide-out/fade completes.
+const EXIT_MS = 200;
 
 interface ToastApi {
   show: (opts: ToastOptions) => void;
@@ -33,14 +38,23 @@ let counter = 0;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ActiveToast[]>([]);
   const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const exitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // A01: two-phase removal — mark the toast `leaving` (plays the exit animation),
+  // then actually unmount it after EXIT_MS. Multiple toasts leave independently.
   const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-    const timer = timers.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
+    const autoTimer = timers.current.get(id);
+    if (autoTimer) {
+      clearTimeout(autoTimer);
       timers.current.delete(id);
     }
+    if (exitTimers.current.has(id)) return; // already leaving
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    const exitTimer = setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+      exitTimers.current.delete(id);
+    }, EXIT_MS);
+    exitTimers.current.set(id, exitTimer);
   }, []);
 
   const show = useCallback(
@@ -59,9 +73,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const map = timers.current;
+    const exitMap = exitTimers.current;
     return () => {
       map.forEach((t) => clearTimeout(t));
       map.clear();
+      exitMap.forEach((t) => clearTimeout(t));
+      exitMap.clear();
     };
   }, []);
 
@@ -77,6 +94,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             role={t.kind === "error" ? "alert" : "status"}
             className={cx(styles.toast)}
             data-kind={t.kind}
+            data-leaving={t.leaving ? "true" : undefined}
             data-testid={`toast-${t.kind}`}
           >
             <Icon name={KIND_ICON[t.kind]} size="sm" className={styles.icon} />

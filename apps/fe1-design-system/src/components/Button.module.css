@@ -9,11 +9,25 @@
   border: 1px solid transparent;
   cursor: pointer;
   transition: background-color var(--dub-motion-fast) var(--dub-motion-easing),
-    border-color var(--dub-motion-fast) var(--dub-motion-easing);
+    border-color var(--dub-motion-fast) var(--dub-motion-easing),
+    transform var(--dub-motion-fast) var(--dub-motion-easing);
 }
 .button:focus-visible {
   outline: 2px solid var(--dub-color-border-focus);
   outline-offset: 2px;
+}
+/* A02: press feedback — every button gets a tactile "pushed" cue on :active. */
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: background-color var(--dub-motion-fast) var(--dub-motion-easing),
+      border-color var(--dub-motion-fast) var(--dub-motion-easing);
+  }
+  .button:active:not(:disabled) {
+    transform: none;
+  }
 }
 .button:disabled {
   cursor: not-allowed;
