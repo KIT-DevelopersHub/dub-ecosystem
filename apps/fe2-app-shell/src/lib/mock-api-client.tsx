@@ -319,6 +319,23 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
       // Self password change (#5b): acknowledge so the demo/offline build shows success.
       case "POST /api/v1/me/password":
         return json({ ok: true }, 200);
+      // Self profile edit (アカウント設定): echo the seed user so the offline/CI build shows
+      // success. In staging/prod the real gateway POST /me/profile persists the change.
+      case "POST /api/v1/me/profile":
+        return json({ displayName: data.me.user.displayName, avatarUrl: data.me.user.avatarUrl ?? null }, 200);
+      // Self 参加届 (アカウント設定 → 参加情報): the boot mock stays stateless — GET returns an
+      // empty submission, POST echoes an empty one. In staging/prod the real gateway
+      // GET/POST /me/participation reads/persists the caller's own 参加届.
+      case "GET /api/v1/me/participation":
+      case "POST /api/v1/me/participation":
+        return json(
+          {
+            lastName: null, firstName: null, lastNameKana: null, firstNameKana: null,
+            lastNameRomaji: null, firstNameRomaji: null, schoolEmail: null, gmail: null,
+            phone: null, grade: null, department: null, desiredActivity: null, note: null,
+          },
+          200,
+        );
       // Feedback widget (shell chrome): acknowledge so the offline/demo build shows
       // the success state. No real feedback leaves the browser under the mock.
       case "POST /api/v1/feedback":
