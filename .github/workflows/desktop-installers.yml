@@ -37,7 +37,12 @@ env:
 jobs:
   windows:
     name: Windows .exe (nsis-free / Inno Setup)
-    runs-on: windows-latest
+    # Pinned to windows-2022 (not windows-latest, which now maps to windows-2025).
+    # Flutter's Windows desktop build needs the Visual Studio "Desktop
+    # development with C++" toolchain; the 2022 image ships VS 2022 with that
+    # workload, whereas the 2025 image fails detection ("could not find any
+    # instance of Visual Studio" -> "Unable to generate build files").
+    runs-on: windows-2022
     timeout-minutes: 30
     steps:
       - name: Disable NTFS path protection
