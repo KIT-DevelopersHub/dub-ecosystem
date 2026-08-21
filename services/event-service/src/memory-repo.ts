@@ -1,7 +1,7 @@
 // In-memory EventRepo: backs unit tests and local `--test` runs. Same keyset
 // semantics as the D1 repo so pagination tests are representative.
 import type { common, event } from "@dub/types";
-import type { EventRepo, EventRow, ActionRow, Keyset } from "./types";
+import type { EventRepo, EventRow, ActionRow, EventDetailsRow, Keyset } from "./types";
 
 function afterKeysetById(id: string) {
   return (row: { id: string }) => row.id > id;
@@ -10,6 +10,7 @@ function afterKeysetById(id: string) {
 export class InMemoryEventRepo implements EventRepo {
   private events = new Map<common.EventId, EventRow>();
   private actions = new Map<common.ActionId, ActionRow>();
+  private details = new Map<common.EventId, EventDetailsRow>();
 
   // test/seed helper — bypasses service invariants (e.g. cross-org rows).
   seedEvent(row: EventRow): void {
@@ -107,6 +108,33 @@ export class InMemoryEventRepo implements EventRepo {
     }
     return max;
   }
+
+  async getEventDetails(eventId: common.EventId): Promise<EventDetailsRow | null> {
+    const r = this.details.get(eventId);
+    return r ? cloneDetails(r) : null;
+  }
+  async upsertEventDetails(next: EventDetailsRow, expectedVersion: number): Promise<boolean> {
+    const cur = this.details.get(next.eventId);
+    const curVersion = cur?.version ?? 0;
+    if (curVersion !== expectedVersion) return false;
+    this.details.set(next.eventId, cloneDetails(next));
+    return true;
+  }
+}
+
+function cloneDetails(r: EventDetailsRow): EventDetailsRow {
+  return {
+    ...r,
+    data: {
+      ...r.data,
+      schedule: r.data.schedule.map((s) => ({ ...s })),
+      speakers: r.data.speakers.map((s) => ({ ...s })),
+      sponsors: r.data.sponsors.map((s) => ({ ...s })),
+      checklist: r.data.checklist.map((c) => ({ ...c })),
+      links: r.data.links.map((l) => ({ ...l })),
+      contacts: r.data.contacts.map((c) => ({ ...c })),
+    },
+  };
 }
 
 function cmpStr(a: string, b: string): number {
