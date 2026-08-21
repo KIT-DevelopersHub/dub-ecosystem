@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, Drawer, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -278,21 +279,23 @@ export function TaskDetailPanel({
           </div>
         )}
 
-        {/* 親子（親タスク）: change/detach which work-package this task hangs under. */}
+        {/* 親子（親タスク）: change/detach which work-package this task hangs under.
+            タスク名の検索で選択（#356）。空欄（chip なし）なら親なし＝トップレベル。 */}
         <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-detail-parent">
-            親タスク（親子関係）
-          </label>
-          <Select
-            id="fe4-detail-parent"
-            value={parentId ?? ""}
+          <span className={styles.formLabel}>親タスク（親子関係）</span>
+          <TaskSearchSelect<common.TaskId>
+            value={parentId}
+            options={canWrite ? parentOptions : []}
+            placeholder="タスク名で検索・一覧から選択…"
+            emptyOptionsLabel="親にできるタスクがありません"
+            hint="空欄のままなら親なし（トップレベル）"
             disabled={!canWrite}
-            onChange={(v) => {
+            onChange={(next) => {
+              if (!canWrite) return;
               // Re-parenting no longer changes the dependency scope (deps are team-scoped,
-              // ADR-0006), so predecessors are preserved across a parent change.
-              setParentId(v ? (v as common.TaskId) : null);
+              // ADR-0007), so predecessors are preserved across a parent change.
+              setParentId(next);
             }}
-            options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
           />
           {/* 関係タイプの変換: 親（親子）→ 先行（依存）。保存で親子/依存を一括反映。 */}

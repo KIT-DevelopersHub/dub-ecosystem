@@ -91,7 +91,10 @@ describe("relation-type conversion in the detail pane", () => {
     const { rerender } = render(<TaskDetailPanel {...base} parentTaskId={null} />);
     expect(screen.queryByTestId("fe4-detail-parent-to-dep")).toBeNull();
     rerender(<TaskDetailPanel {...base} key="p" parentTaskId={null} parentOptions={[{ id: "P", title: "P" }]} />);
-    fireEvent.change(screen.getByTestId("fe4-detail-parent"), { target: { value: "P" } });
+    const parentInput = screen.getByTestId("fe4-detail-parent-input");
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "P" } });
+    fireEvent.mouseDown(screen.getByTestId("fe4-detail-parent-opt-P"));
     expect(screen.getByTestId("fe4-detail-parent-to-dep")).toBeInTheDocument();
   });
 });
