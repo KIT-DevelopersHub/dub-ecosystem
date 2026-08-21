@@ -174,6 +174,13 @@ const TASKS: task.Task[] = [
     archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z",
   },
   {
+    // grandchild of tsk_1 (child of tsk_4) — the 3rd WBS level. Must exist in the task
+    // store too, else TaskWorkspacePage intersects it out of the gantt (filteredDto).
+    version: 1, id: "tsk_8", eventId: "evt_1", title: "受付端末セットアップ", description: null,
+    status: "todo", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: "2026-07-30T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-11T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z",
+  },
+  {
     version: 1, id: "tsk_5", eventId: "evt_1", title: "運営ツール名簿連携", description: "名簿とタスクの連携確認",
     status: "in_progress", priority: "high", assigneeId: ME_ID, teamId: "team_dev", dueAt: "2026-08-06T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-12T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z",
