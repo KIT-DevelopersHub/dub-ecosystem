@@ -473,6 +473,42 @@
 .tlRowOverlay .tlRowDrag { opacity: 0.9; cursor: grabbing; }
 .tlRowOverlay .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* ⑤a group drag: the OTHER selected rows dim in place while their clones ride the
+   floating stack, so the whole marquee selection reads as "picked up" together (not
+   just the grabbed row). Honoured against reduced-motion (opacity is instant there). */
+.tlRowLifting { opacity: 0.4; }
+
+/* ⑤a group-drag floating stack: every selected row clones into a small deck under the
+   cursor. Each clone keeps the row-card look (.tlRowOverlay); a slight negative gap
+   overlaps them into a tidy stack, and a count badge names how many are moving. */
+.tlRowOverlayStack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tlRowOverlayStack .tlRowOverlay {
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.35);
+}
+.tlRowOverlayCount {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 1;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-on-brand, #fff);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
 /* ---- sort grouping brackets (right edge of the task list) ---- */
 /* A per-run vertical bracket that hugs the right edge of each contiguous same-group
    run and carries a vertical label ("統括チーム" / "高" …). Overlays the sticky left

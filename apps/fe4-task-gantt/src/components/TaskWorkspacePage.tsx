@@ -19,7 +19,7 @@ import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
-import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, selectionRoots } from "../domain/row-order";
+import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
 import { PRIORITY_LABEL } from "../domain/task-form";
@@ -911,6 +911,31 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     });
   };
 
+  // Group drag-reorder (⑤ グループD&D): drop a marquee-selected block; the whole selection
+  // moves together (contiguous, in order) to the drop position. Reuses the same manual-order
+  // persistence + undo/redo machinery as the single-row drag; a no-op (cross-group / edge)
+  // just returns.
+  const onBulkReorderTo = (ids: readonly common.TaskId[], draggedId: common.TaskId, overId: common.TaskId) => {
+    if (ids.length === 0) return;
+    const displayed = applyManualOrder(gantt.currentRows(), orderedTaskIds);
+    const nextOrder = reorderSelectionWithinSiblings(displayed, new Set(ids), draggedId, overId);
+    if (!nextOrder) return; // cross-parent drop or no-op
+    const prevOrder = displayed.map((r) => r.taskId);
+    void view
+      .saveOrder(nextOrder)
+      .then(() => feedback.success("並び順を更新しました"))
+      .catch((e) => feedback.failure(e, "並び順の保存に失敗しました"));
+    history.push({
+      label: "選択タスクの並び替え",
+      undo: async () => {
+        await applyOrderRaw(prevOrder);
+      },
+      redo: async () => {
+        await applyOrderRaw(nextOrder);
+      },
+    });
+  };
+
   // ---- marquee bulk operations (範囲選択 → 一括操作) ----
 
   // Bulk delete a marquee selection (after the confirm dialog in GanttView). Mirrors
@@ -1142,6 +1167,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onBulkDelete={caps.canDelete ? onBulkDelete : undefined}
           onBulkShiftDays={caps.canWrite ? onBulkShiftDays : undefined}
           onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
+          onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
         />
       )}
