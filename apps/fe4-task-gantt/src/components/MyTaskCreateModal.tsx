@@ -90,6 +90,10 @@ export interface MyTaskCreateModalProps {
    *  earlier than today the 開始日 clamps down to it so the range is never inverted.
    *  Null ⇒ the plain 発行/新規 flow: 開始日・終了日ともに今日が初期値。 */
   initialDue?: string | null;
+  /** Modal heading (default「タスクを発行」). The send/receive flow passes「タスクを依頼」. */
+  title?: string;
+  /** Primary button label (default「発行する」). Send/receive passes「依頼する」. */
+  submitLabel?: string;
 }
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -104,7 +108,7 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 const NO_PRIORITY = ""; // sentinel for the "未設定" priority Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, lockEventToDefault = false, initialDue }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, lockEventToDefault = false, initialDue, title: modalTitle = "タスクを発行", submitLabel = "発行する" }: MyTaskCreateModalProps) {
   // The header-selected event is the initial 対象イベント, but only when it is a real
   // option in `events` (guards against a stale/foreign id) — otherwise start unlinked.
   const seedEventId = (): common.EventId | "" =>
@@ -238,7 +242,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     <Modal
       open={open}
       onClose={close}
-      title="タスクを発行"
+      title={modalTitle}
       testId="fe4-mytask-create-modal"
       footer={
         <div className={styles.modalFooter}>
@@ -246,7 +250,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             キャンセル
           </Button>
           <Button onClick={submit} loading={saving} disabled={!canSubmit} testId="fe4-mytask-create-submit">
-            発行する
+            {submitLabel}
           </Button>
         </div>
       }

@@ -110,6 +110,93 @@ export function replaceDependencies(
   });
 }
 
+// ---- send / receive (task-service; task_requests + task_cross_links) ----
+// Data layer only (no UI here). Query keys come from task.TASK_REQUEST_WIRE — never
+// hand-renamed — and are reconciled in test/endpoints-wire-contract.test.ts.
+
+/** Issue a task request (送る). Server branches: self/same-team → {kind:"task"},
+ *  other team → {kind:"request"} (pending, awaiting the receiver's approval). */
+export function issueTaskRequest(
+  client: ApiClient,
+  body: task.IssueTaskRequestBody,
+): Promise<task.IssueTaskRequestResponse> {
+  return client.request<task.IssueTaskRequestResponse>({ method: "POST", path: `${P}/task-requests`, body });
+}
+
+/** My incoming (to me) / outgoing (from me) requests. Keys = TASK_REQUEST_WIRE.listTaskRequests. */
+export function listTaskRequests(
+  client: ApiClient,
+  q: task.ListTaskRequestsQuery,
+): Promise<task.ListTaskRequestsResponse> {
+  return client.request<task.ListTaskRequestsResponse>({
+    method: "GET",
+    path: `${P}/task-requests`,
+    query: {
+      box: q.box,
+      ...(q.state !== undefined ? { state: q.state.join(",") } : {}),
+      ...(q.eventId !== undefined ? { eventId: q.eventId } : {}),
+      ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    },
+  });
+}
+
+export function getTaskRequest(client: ApiClient, id: string): Promise<task.TaskRequest> {
+  return client.request<task.TaskRequest>({ method: "GET", path: `${P}/task-requests/${id}` as ApiPath });
+}
+
+/** Accept (受け取る): materialises the receiver + requester tasks and the arrow-less
+ *  cross-link. Optimistic-locked on the request's version. */
+export function acceptTaskRequest(
+  client: ApiClient,
+  id: string,
+  body: task.AcceptTaskRequestBody,
+): Promise<task.AcceptTaskRequestResponse> {
+  return client.request<task.AcceptTaskRequestResponse>({
+    method: "POST",
+    path: `${P}/task-requests/${id}/accept` as ApiPath,
+    body,
+  });
+}
+
+export function declineTaskRequest(
+  client: ApiClient,
+  id: string,
+  body: task.DeclineTaskRequestBody,
+): Promise<task.TaskRequest> {
+  return client.request<task.TaskRequest>({
+    method: "POST",
+    path: `${P}/task-requests/${id}/decline` as ApiPath,
+    body,
+  });
+}
+
+export function cancelTaskRequest(
+  client: ApiClient,
+  id: string,
+  body: task.CancelTaskRequestBody,
+): Promise<task.TaskRequest> {
+  return client.request<task.TaskRequest>({
+    method: "POST",
+    path: `${P}/task-requests/${id}/cancel` as ApiPath,
+    body,
+  });
+}
+
+/** The event's arrow-less cross-team links (used to badge rows「お願いした/受け負った」;
+ *  NEVER drawn as arrows). Key = TASK_REQUEST_WIRE.listTaskCrossLinks = `eventId`. */
+export function listTaskCrossLinks(
+  client: ApiClient,
+  eventId: common.EventId,
+): Promise<task.ListTaskCrossLinksResponse> {
+  const query: task.ListTaskCrossLinksQuery = { eventId };
+  return client.request<task.ListTaskCrossLinksResponse>({
+    method: "GET",
+    path: `${P}/tasks/cross-links`,
+    query: { ...query },
+  });
+}
+
 // ---- gantt-service (read-only; query key from gantt.GetGanttQuery = `eventId`) ----
 // Build the query object AS the typed contract so its keys are the SoT field names; a
 // renamed key (the old `event`) can no longer be introduced without a type error here.

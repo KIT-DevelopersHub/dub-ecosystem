@@ -100,6 +100,13 @@ single-task endpoint.
 | `DELETE /api/v1/tasks/{id}` | `task:delete` | `200` `Task` | Soft-delete (archive). |
 | `PUT /api/v1/tasks/{id}/dependencies` | `task:write` | `200` `{ taskId, dependsOnIds }` | Full-replace this task's dependency edges. |
 | `GET /api/v1/tasks/dependencies` | `task:read` | `200` `{ items: TaskDependency[] }` | All dependency edges for an event. |
+| `POST /api/v1/task-requests` | `task:write` | `201` `IssueTaskRequestResponse` | Issue a task request; self/same-team → task now, other team → pending request. |
+| `GET /api/v1/task-requests` | `task:read` | `200` `Paginated<TaskRequest>` | My incoming/outgoing requests. |
+| `GET /api/v1/task-requests/{id}` | `task:read` | `200` `TaskRequest` | Read one request. |
+| `POST /api/v1/task-requests/{id}/accept` | `task:write` (receiver) | `200` `AcceptTaskRequestResponse` | Accept → receiver task + tracking task + cross-link. |
+| `POST /api/v1/task-requests/{id}/decline` | `task:write` (receiver) | `200` `TaskRequest` | Decline a pending request. |
+| `POST /api/v1/task-requests/{id}/cancel` | `task:write` (requester) | `200` `TaskRequest` | Requester cancels a pending request. |
+| `GET /api/v1/tasks/cross-links` | `task:read` | `200` `{ items: TaskCrossLink[] }` | An event's arrow-less cross-team links (`?eventId=` required). |
 
 Permission is resolved via identity-roster `/authz/check` (see `auth.md` §10); a denied
 key surfaces as `403 FORBIDDEN`. All mutations that carry a `version` follow the frozen
@@ -298,6 +305,36 @@ those; the wire shape is the frozen `{ items: TaskDependency[] }`.
   ]
 }
 ```
+
+### 4.8 Send / receive — cross-team task requests (contract only in this PR)
+
+The "送る・受け取る" surface. Same-team collaboration stays as arrow-linked
+dependencies (§4.6); cross-team collaboration goes through a **request → approval →
+arrow-less cross-link** instead. Design SoT: `docs/design/send-receive-task-requests.md`
+and ADR-0007. This section documents the wire contract; the endpoints are implemented
+incrementally by later PRs (roadmap `docs/design/send-receive-roadmap.md`).
+
+- **`POST /api/v1/task-requests`** (`IssueTaskRequestBody` → `IssueTaskRequestResponse`).
+  The server resolves the destination's team membership and branches: **self / same-team**
+  → a task is created immediately (`{ kind: "task", task }`); **other team** → a pending
+  `TaskRequest` is created and the receiver is notified (`{ kind: "request", request }`).
+  Any client-supplied team hint is UX-only and never trusted.
+- **`GET /api/v1/task-requests?box=incoming|outgoing`** — cursor-paged `TaskRequest`s
+  (`incoming` = `to_user`=self, `outgoing` = `from_user`=self), optional `state`/`eventId`.
+- **`GET /api/v1/task-requests/{id}`** — one request.
+- **`POST …/{id}/accept`** (receiver only) — pending only, else `409`. Creates the
+  receiver's task, the requester's tracking task, and the `TaskCrossLink` joining them
+  (`AcceptTaskRequestResponse`). The cross-link is **not** a dependency — it never enters
+  `task_dependencies`, so the gantt draws no arrow and CPM never sees it.
+- **`POST …/{id}/decline`** (receiver only) / **`POST …/{id}/cancel`** (requester only) —
+  pending only, else `409`.
+- **`GET /api/v1/tasks/cross-links?eventId=`** — an event's cross-links (same wire shape as
+  `/tasks/dependencies`). The「タスクをお願いした / 受け負った」status label is **derived
+  from `TaskCrossRole`** (`TASK_CROSS_ROLE_STATUS_LABEL`), never stored, so it always stays
+  in sync and is i18n-swappable.
+
+New error codes (added when the endpoints land): `TASK_REQUEST_NOT_FOUND` (404),
+`TASK_REQUEST_INVALID_STATE` (409), `TASK_REQUEST_FORBIDDEN_ROLE` (403).
 
 ---
 

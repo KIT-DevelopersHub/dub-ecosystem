@@ -18,6 +18,10 @@ const RMW_MAX_RETRIES = 3;
 interface ListDependenciesResponse {
   items: task.TaskDependency[];
 }
+// GET /tasks/cross-links wire shape (same envelope as dependencies).
+interface ListCrossLinksResponse {
+  items: task.TaskCrossLink[];
+}
 
 export function createHttpUpstream(env: Env): UpstreamPort {
   const taskSvc: ServiceClient = createServiceClient(env.SVC_TASK, { service: "task-service", caller: SERVICE_NAME });
@@ -61,6 +65,13 @@ export function createHttpUpstream(env: Env): UpstreamPort {
 
     async listDependencies(ctx: RequestContext, eventId: common.EventId): Promise<task.TaskDependency[]> {
       const res = await taskSvc.get<ListDependenciesResponse>(ctx, "/tasks/dependencies", {
+        query: { eventId },
+      });
+      return res.items;
+    },
+
+    async listCrossLinks(ctx: RequestContext, eventId: common.EventId): Promise<task.TaskCrossLink[]> {
+      const res = await taskSvc.get<ListCrossLinksResponse>(ctx, "/tasks/cross-links", {
         query: { eventId },
       });
       return res.items;

@@ -1,5 +1,6 @@
 // gantt — gantt-service namespace (view states; read model over task/event).
 import type { EventId, TaskId, UserId, TeamId, ISODateTime } from "./common";
+import type { TaskCrossRole, TaskCrossLink } from "./task";
 
 export type GanttZoom = "day" | "week" | "month";
 
@@ -40,6 +41,12 @@ export interface GanttRow {
   hasChildren?: boolean;
   /** WBS code (e.g. "4.9.3"), for stable ordering + a legible row label. */
   wbs?: string;
+  /** Cross-team role for the「送る・受け取る」badge (ADR-0007). additive/optional;
+   *  absent/null ⇒ no cross-team link on this row. `requested` = お願いした side,
+   *  `accepted` = 受け負った side. The gantt draws NO arrow for this — it is projected
+   *  from task_cross_links (not task_dependencies), so CPM never sees it; the row just
+   *  shows a status badge whose label is derived from the role (never stored). */
+  crossTeamRole?: TaskCrossRole | null;
 }
 
 export interface GanttDependencyLine {
@@ -57,6 +64,10 @@ export interface GanttChartDTO {
   /** Zero-slack tasks on the critical path (CPM over durations+FS deps). Optional
    *  & additive: absent/[] means "not computed" — UI colors these bars distinctly. */
   criticalTaskIds?: TaskId[];
+  /** Cross-team links (送る・受け取る) for this event — a SEPARATE channel from
+   *  `dependencies` precisely so the gantt does not draw them as arrows. additive/
+   *  optional: absent/[] ⇒ none. The UI reads these to place role badges on rows. */
+  crossLinks?: TaskCrossLink[];
 }
 
 export interface GanttViewState {

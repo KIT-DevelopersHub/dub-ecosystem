@@ -143,6 +143,115 @@ export interface InsertAttachmentInput {
   now: common.ISODateTime;
 }
 
+// ── send / receive: task_requests + task_cross_links (send-receive PR5) ───────
+// snake-cased D1 row for task_requests.
+export interface TaskRequestRow {
+  id: string;
+  event_id: string | null;
+  from_user_id: string;
+  to_user_id: string;
+  from_team_id: string | null;
+  to_team_id: string | null;
+  title: string;
+  description: string | null;
+  priority: task.TaskPriority;
+  due_at: string | null;
+  source_task_id: string | null;
+  state: task.TaskRequestState;
+  decline_reason: string | null;
+  created_task_id: string | null;
+  version: number;
+  created_at: string;
+  decided_at: string | null;
+  updated_at: string;
+}
+
+export function rowToTaskRequest(r: TaskRequestRow): task.TaskRequest {
+  return {
+    id: r.id,
+    eventId: r.event_id,
+    fromUserId: r.from_user_id,
+    toUserId: r.to_user_id,
+    fromTeamId: r.from_team_id,
+    toTeamId: r.to_team_id,
+    title: r.title,
+    description: r.description,
+    priority: r.priority,
+    dueAt: r.due_at,
+    sourceTaskId: r.source_task_id,
+    state: r.state,
+    declineReason: r.decline_reason,
+    createdTaskId: r.created_task_id,
+    version: r.version,
+    createdAt: r.created_at,
+    decidedAt: r.decided_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export interface InsertTaskRequestInput {
+  id: string; // treq_ ULID
+  eventId: common.EventId | null;
+  fromUserId: common.UserId;
+  toUserId: common.UserId;
+  fromTeamId: common.TeamId | null;
+  toTeamId: common.TeamId | null;
+  title: string;
+  description: string | null;
+  priority: task.TaskPriority;
+  dueAt: common.ISODateTime | null;
+  sourceTaskId: common.TaskId | null;
+  now: common.ISODateTime;
+}
+
+/** Terminal transition of a request (accept / decline / cancel). Only provided keys
+ *  are written; `state` + `decidedAt` are always set and `version` is bumped. */
+export interface TaskRequestDecision {
+  state: task.TaskRequestState; // accepted | declined | cancelled
+  declineReason?: string | null;
+  createdTaskId?: common.TaskId | null;
+  toTeamId?: common.TeamId | null;
+}
+
+export interface ListRequestsFilter {
+  box: "incoming" | "outgoing";
+  userId: string; // the caller — incoming ⇒ to_user_id, outgoing ⇒ from_user_id
+  states?: task.TaskRequestState[];
+  eventId?: string;
+  limit: number;
+  cursorId?: string;
+}
+
+// snake-cased D1 row for task_cross_links.
+export interface TaskCrossLinkRow {
+  id: string;
+  request_id: string;
+  requester_task_id: string;
+  requestee_task_id: string;
+  event_id: string | null;
+  created_at: string;
+}
+
+export function rowToCrossLink(r: TaskCrossLinkRow): task.TaskCrossLink {
+  return {
+    id: r.id,
+    requestId: r.request_id,
+    requesterTaskId: r.requester_task_id,
+    requesteeTaskId: r.requestee_task_id,
+    eventId: r.event_id,
+    createdAt: r.created_at,
+  };
+}
+
+export interface InsertCrossLinkInput {
+  id: string; // txl_ ULID
+  requestId: string;
+  requesterTaskId: common.TaskId;
+  requesteeTaskId: common.TaskId;
+  eventId: common.EventId | null;
+  now: common.ISODateTime;
+}
+
 export interface TaskRepo {
   insert(input: InsertTaskInput): Promise<task.Task>;
   getById(id: string, includeArchived?: boolean): Promise<task.Task | null>;
@@ -189,6 +298,26 @@ export interface TaskRepo {
   listAttachments(taskId: string): Promise<task.TaskAttachment[]>;
   /** Soft-delete one attachment; false if not found / already archived. */
   archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean>;
+
+  // ── send / receive: task requests + cross-links ────────────────────────────
+  /** Create a pending cross-team request (send-receive). */
+  insertRequest(input: InsertTaskRequestInput): Promise<task.TaskRequest>;
+  /** One request by id, or null. */
+  getRequestById(id: string): Promise<task.TaskRequest | null>;
+  /** Cursor-paged incoming/outgoing requests for a user, optional state/event filter. */
+  listRequests(filter: ListRequestsFilter): Promise<{ items: task.TaskRequest[]; nextCursor: string | null }>;
+  /** Optimistic-locked terminal transition (accept/decline/cancel). Only moves a
+   *  `pending` row; returns false on version mismatch or a non-pending state. */
+  decideRequest(
+    id: string,
+    decision: TaskRequestDecision,
+    expectedVersion: number,
+    now: string,
+  ): Promise<boolean>;
+  /** Create the arrow-less cross-link joining requester + requestee tasks. */
+  insertCrossLink(input: InsertCrossLinkInput): Promise<task.TaskCrossLink>;
+  /** Every cross-link in an event (same shape as listDependenciesByEvent). */
+  listCrossLinksByEvent(eventId: string): Promise<task.TaskCrossLink[]>;
 }
 
 export function encodeCursor(id: string): string {
@@ -490,6 +619,127 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         taskId,
       );
       return res.meta.changes > 0;
+    },
+
+    // ── send / receive: task requests + cross-links ──────────────────────────
+    async insertRequest(input: InsertTaskRequestInput): Promise<task.TaskRequest> {
+      await db.run(
+        `INSERT INTO task_requests
+           (id, event_id, from_user_id, to_user_id, from_team_id, to_team_id, title,
+            description, priority, due_at, source_task_id, state, decline_reason,
+            created_task_id, version, created_at, decided_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, 1, ?, NULL, ?)`,
+        input.id,
+        input.eventId,
+        input.fromUserId,
+        input.toUserId,
+        input.fromTeamId,
+        input.toTeamId,
+        input.title,
+        input.description,
+        input.priority,
+        input.dueAt,
+        input.sourceTaskId,
+        input.now,
+        input.now,
+      );
+      const row = await db.first<TaskRequestRow>(`SELECT * FROM task_requests WHERE id = ?`, input.id);
+      if (!row) throw new Error("insertRequest readback failed");
+      return rowToTaskRequest(row);
+    },
+
+    async getRequestById(id: string): Promise<task.TaskRequest | null> {
+      const row = await db.first<TaskRequestRow>(`SELECT * FROM task_requests WHERE id = ?`, id);
+      return row ? rowToTaskRequest(row) : null;
+    },
+
+    async listRequests(
+      filter: ListRequestsFilter,
+    ): Promise<{ items: task.TaskRequest[]; nextCursor: string | null }> {
+      const where: string[] = [];
+      const binds: unknown[] = [];
+      where.push(filter.box === "incoming" ? "to_user_id = ?" : "from_user_id = ?");
+      binds.push(filter.userId);
+      if (filter.states && filter.states.length > 0) {
+        where.push(`state IN (${filter.states.map(() => "?").join(",")})`);
+        binds.push(...filter.states);
+      }
+      if (filter.eventId) {
+        where.push("event_id = ?");
+        binds.push(filter.eventId);
+      }
+      if (filter.cursorId) {
+        where.push("id < ?");
+        binds.push(filter.cursorId);
+      }
+      const rows = await db.all<TaskRequestRow>(
+        `SELECT * FROM task_requests WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ?`,
+        ...binds,
+        filter.limit + 1,
+      );
+      const hasMore = rows.length > filter.limit;
+      const page = hasMore ? rows.slice(0, filter.limit) : rows;
+      const last = page[page.length - 1];
+      return {
+        items: page.map(rowToTaskRequest),
+        nextCursor: hasMore && last ? encodeCursor(last.id) : null,
+      };
+    },
+
+    async decideRequest(
+      id: string,
+      decision: TaskRequestDecision,
+      expectedVersion: number,
+      now: string,
+    ): Promise<boolean> {
+      const sets = ["state = ?", "decided_at = ?", "updated_at = ?", "version = version + 1"];
+      const binds: unknown[] = [decision.state, now, now];
+      if (decision.declineReason !== undefined) {
+        sets.push("decline_reason = ?");
+        binds.push(decision.declineReason);
+      }
+      if (decision.createdTaskId !== undefined) {
+        sets.push("created_task_id = ?");
+        binds.push(decision.createdTaskId);
+      }
+      if (decision.toTeamId !== undefined) {
+        sets.push("to_team_id = ?");
+        binds.push(decision.toTeamId);
+      }
+      // Only a still-pending row may transition (guards double-accept / lost updates).
+      const res = await db.run(
+        `UPDATE task_requests SET ${sets.join(", ")}
+         WHERE id = ? AND version = ? AND state = 'pending'`,
+        ...binds,
+        id,
+        expectedVersion,
+      );
+      return res.meta.changes > 0;
+    },
+
+    async insertCrossLink(input: InsertCrossLinkInput): Promise<task.TaskCrossLink> {
+      await db.run(
+        `INSERT INTO task_cross_links
+           (id, request_id, requester_task_id, requestee_task_id, event_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        input.id,
+        input.requestId,
+        input.requesterTaskId,
+        input.requesteeTaskId,
+        input.eventId,
+        input.now,
+      );
+      const row = await db.first<TaskCrossLinkRow>(`SELECT * FROM task_cross_links WHERE id = ?`, input.id);
+      if (!row) throw new Error("insertCrossLink readback failed");
+      return rowToCrossLink(row);
+    },
+
+    async listCrossLinksByEvent(eventId: string): Promise<task.TaskCrossLink[]> {
+      const rows = await db.all<TaskCrossLinkRow>(
+        `SELECT * FROM task_cross_links WHERE event_id = ? ORDER BY id DESC`,
+        eventId,
+      );
+      return rows.map(rowToCrossLink);
     },
   };
 }

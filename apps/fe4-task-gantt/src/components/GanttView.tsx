@@ -255,6 +255,7 @@ function LeftPaneRow({
         <span className={styles.tlRowNum} data-testid={`fe4-gantt-num-${r.taskId}`}>{number}</span>
       )}
       <span className={styles.tlRowName}>{r.title}</span>
+      {r.crossTeamRole && <CrossTeamRoleBadge role={r.crossTeamRole} testId={`fe4-gantt-role-${r.taskId}`} />}
       {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
     </button>
   );

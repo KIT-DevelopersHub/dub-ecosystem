@@ -774,3 +774,358 @@ describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory re
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
 });
+
+// send / receive (ADR-0007): POST /task-requests branches server-side on team membership.
+// Default caller is usr_alice (userInit). member.teams maps identityUserId → teamIds.
+describe("POST /task-requests (send / 送る)", () => {
+  const issue = (
+    app: Hono,
+    body: Record<string, unknown>,
+    init: (method: string, body?: unknown) => RequestInit = userInit,
+  ) => app.request("/task-requests", init("POST", body));
+
+  it("self → materialises a task immediately (kind:task), assigned to the caller", async () => {
+    const { h, app } = setup();
+    const res = await issue(app, { toUserId: "usr_alice", title: "自分用タスク", eventId: "evt_1" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as task.IssueTaskRequestResponse;
+    expect(body.kind).toBe("task");
+    if (body.kind !== "task") throw new Error("expected task");
+    expect(body.task.assigneeId).toBe("usr_alice");
+    expect(body.task.createdBy).toBe("usr_alice");
+    expect(h.events.byName("task.created")).toHaveLength(1);
+    expect(h.events.byName("task.assigned")).toHaveLength(1);
+    expect(h.events.byName("task.request.created")).toHaveLength(0);
+    expect(h.repo.requests.size).toBe(0);
+  });
+
+  it("same team → materialises a task immediately, team = the shared team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_alice", ["team_dev"]);
+    h.member.teams.set("usr_bob", ["team_dev", "team_other"]);
+    const res = await issue(app, { toUserId: "usr_bob", title: "実装おねがい", eventId: "evt_1" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as task.IssueTaskRequestResponse;
+    if (body.kind !== "task") throw new Error("expected task");
+    expect(body.task.assigneeId).toBe("usr_bob");
+    expect(body.task.teamId).toBe("team_dev"); // the intersection
+    expect(h.repo.requests.size).toBe(0);
+  });
+
+  it("other team → creates a pending request (kind:request) + task.request.created, no task", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_alice", ["team_dev"]);
+    h.member.teams.set("usr_bob", ["team_sponsor"]);
+    const res = await issue(app, { toUserId: "usr_bob", title: "スポンサー確認", eventId: "evt_1" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as task.IssueTaskRequestResponse;
+    expect(body.kind).toBe("request");
+    if (body.kind !== "request") throw new Error("expected request");
+    expect(body.request).toMatchObject({
+      state: "pending",
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+      fromTeamId: "team_dev",
+      toTeamId: "team_sponsor",
+    });
+    expect(h.events.byName("task.request.created")).toHaveLength(1);
+    expect(h.events.byName("task.request.created")[0]!.payload).toMatchObject({
+      requestId: body.request.id,
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+    });
+    expect(h.events.byName("task.created")).toHaveLength(0);
+    expect(h.repo.requests.size).toBe(1);
+  });
+
+  it("400 VALIDATION_FAILED when toUserId or title is missing", async () => {
+    const { app } = setup();
+    expect((await issue(app, { title: "no target" })).status).toBe(400);
+    expect((await issue(app, { toUserId: "usr_bob" })).status).toBe(400);
+  });
+
+  it("400 when the receiver does not exist", async () => {
+    const { h, app } = setup();
+    h.identity.unknown.add("usr_ghost");
+    const res = await issue(app, { toUserId: "usr_ghost", title: "宛先不明" });
+    expect(res.status).toBe(400);
+  });
+
+  it("400 when a service principal tries to issue (no from identity)", async () => {
+    const { app } = setup();
+    const res = await issue(app, { toUserId: "usr_bob", title: "svc" }, serviceInit);
+    expect(res.status).toBe(400);
+  });
+});
+
+// GET /task-requests (incoming/outgoing) + GET /task-requests/:id. Default caller usr_alice.
+describe("GET /task-requests (list + one)", () => {
+  const seed = (h: TestHarness, id: string, from: string, to: string, over: Record<string, unknown> = {}) =>
+    h.repo.insertRequest({
+      id,
+      eventId: "evt_1",
+      fromUserId: from,
+      toUserId: to,
+      fromTeamId: null,
+      toTeamId: null,
+      title: id,
+      description: null,
+      priority: "medium",
+      dueAt: null,
+      sourceTaskId: null,
+      now: "2026-08-20T00:00:00.000Z",
+      ...over,
+    });
+
+  it("box=incoming returns only requests addressed to the caller; outgoing only from the caller", async () => {
+    const { h, app } = setup();
+    await seed(h, "treq_in", "usr_carol", "usr_alice");
+    await seed(h, "treq_out", "usr_alice", "usr_bob");
+    await seed(h, "treq_other", "usr_dan", "usr_eve");
+
+    const inc = (await (await app.request("/task-requests?box=incoming", userInit("GET"))).json()) as task.ListTaskRequestsResponse;
+    expect(inc.items.map((r) => r.id)).toEqual(["treq_in"]);
+    const out = (await (await app.request("/task-requests?box=outgoing", userInit("GET"))).json()) as task.ListTaskRequestsResponse;
+    expect(out.items.map((r) => r.id)).toEqual(["treq_out"]);
+  });
+
+  it("400 when box is missing or invalid", async () => {
+    const { app } = setup();
+    expect((await app.request("/task-requests", userInit("GET"))).status).toBe(400);
+    expect((await app.request("/task-requests?box=sideways", userInit("GET"))).status).toBe(400);
+  });
+
+  it("filters by state", async () => {
+    const { h, app } = setup();
+    await seed(h, "treq_p", "usr_bob", "usr_alice");
+    await seed(h, "treq_a", "usr_bob", "usr_alice");
+    await h.repo.decideRequest("treq_a", { state: "accepted" }, 1, "2026-08-20T01:00:00.000Z");
+    const res = (await (await app.request("/task-requests?box=incoming&state=pending", userInit("GET"))).json()) as task.ListTaskRequestsResponse;
+    expect(res.items.map((r) => r.id)).toEqual(["treq_p"]);
+  });
+
+  it("GET /:id returns the request to a participant, 404 to a stranger, 404 when missing", async () => {
+    const { h, app } = setup();
+    await seed(h, "treq_x", "usr_alice", "usr_bob");
+    await seed(h, "treq_y", "usr_dan", "usr_eve");
+    expect((await app.request("/task-requests/treq_x", userInit("GET"))).status).toBe(200);
+    const stranger = await app.request("/task-requests/treq_y", userInit("GET"));
+    expect(stranger.status).toBe(404);
+    expect(((await stranger.json()) as { error: { code: string } }).error.code).toBe("TASK_REQUEST_NOT_FOUND");
+    expect((await app.request("/task-requests/treq_missing", userInit("GET"))).status).toBe(404);
+  });
+});
+
+// POST /task-requests/:id/accept — receiver materialises both tasks + the cross-link.
+describe("POST /task-requests/:id/accept (受け取る)", () => {
+  const seedReq = (h: TestHarness, id: string, over: Record<string, unknown> = {}) =>
+    h.repo.insertRequest({
+      id,
+      eventId: "evt_1",
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+      fromTeamId: "team_dev",
+      toTeamId: "team_sponsor",
+      title: id,
+      description: null,
+      priority: "medium",
+      dueAt: null,
+      sourceTaskId: null,
+      now: "2026-08-20T00:00:00.000Z",
+      ...over,
+    });
+  const asBob = (body: unknown) => userInit("POST", body, { userId: "usr_bob" });
+
+  it("accepts: creates receiver + requester tasks + cross-link, moves to accepted, emits events", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_1");
+    const res = await app.request("/task-requests/treq_1/accept", asBob({ version: 1 }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.AcceptTaskRequestResponse;
+    expect(body.request.state).toBe("accepted");
+    expect(body.request.createdTaskId).toBe(body.createdTask.id);
+    expect(body.createdTask.assigneeId).toBe("usr_bob");
+    expect(body.createdTask.teamId).toBe("team_sponsor");
+    expect(body.crossLink.requesteeTaskId).toBe(body.createdTask.id);
+    // both sides materialised (receiver + auto-generated requester tracking task)
+    expect(h.events.byName("task.created")).toHaveLength(2);
+    expect(h.events.byName("task.request.accepted")).toHaveLength(1);
+    expect(h.events.byName("task.cross_link.created")).toHaveLength(1);
+    expect(body.crossLink.requesterTaskId).not.toBe(body.createdTask.id);
+  });
+
+  it("reuses sourceTaskId as the requester ('お願いした') task instead of generating one", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_2", { sourceTaskId: "task_src" });
+    const res = await app.request("/task-requests/treq_2/accept", asBob({ version: 1 }));
+    const body = (await res.json()) as task.AcceptTaskRequestResponse;
+    expect(body.crossLink.requesterTaskId).toBe("task_src");
+    expect(h.events.byName("task.created")).toHaveLength(1); // only the receiver task
+  });
+
+  it("403 when a non-receiver (the requester) tries to accept", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_3");
+    const res = await app.request("/task-requests/treq_3/accept", userInit("POST", { version: 1 })); // usr_alice
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_REQUEST_FORBIDDEN_ROLE");
+  });
+
+  it("409 when the request is not pending (already accepted)", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_4");
+    await app.request("/task-requests/treq_4/accept", asBob({ version: 1 }));
+    const again = await app.request("/task-requests/treq_4/accept", asBob({ version: 2 }));
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: { code: string } }).error.code).toBe("TASK_REQUEST_INVALID_STATE");
+  });
+
+  it("409 on a version mismatch", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_5");
+    const res = await app.request("/task-requests/treq_5/accept", asBob({ version: 99 }));
+    expect(res.status).toBe(409);
+  });
+
+  it("404 when the request does not exist", async () => {
+    const { app } = setup();
+    expect((await app.request("/task-requests/treq_missing/accept", userInit("POST", { version: 1 }, { userId: "usr_bob" }))).status).toBe(404);
+  });
+});
+
+// POST /task-requests/:id/decline (receiver) + /cancel (requester).
+describe("POST /task-requests/:id/decline + /cancel", () => {
+  const seedReq = (h: TestHarness, id: string) =>
+    h.repo.insertRequest({
+      id,
+      eventId: "evt_1",
+      fromUserId: "usr_alice",
+      toUserId: "usr_bob",
+      fromTeamId: "team_dev",
+      toTeamId: "team_sponsor",
+      title: id,
+      description: null,
+      priority: "medium",
+      dueAt: null,
+      sourceTaskId: null,
+      now: "2026-08-20T00:00:00.000Z",
+    });
+
+  it("decline: receiver rejects with a reason, no task/cross-link, emits task.request.declined", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_d");
+    const res = await app.request("/task-requests/treq_d/decline", userInit("POST", { version: 1, reason: "多忙" }, { userId: "usr_bob" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.TaskRequest;
+    expect(body).toMatchObject({ state: "declined", declineReason: "多忙" });
+    expect(h.events.byName("task.request.declined")).toHaveLength(1);
+    expect(h.events.byName("task.created")).toHaveLength(0);
+  });
+
+  it("decline: 403 when a non-receiver tries", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_d2");
+    const res = await app.request("/task-requests/treq_d2/decline", userInit("POST", { version: 1 })); // usr_alice
+    expect(res.status).toBe(403);
+  });
+
+  it("cancel: requester withdraws, emits task.request.cancelled", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_c");
+    const res = await app.request("/task-requests/treq_c/cancel", userInit("POST", { version: 1 })); // usr_alice = from
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as task.TaskRequest).state).toBe("cancelled");
+    expect(h.events.byName("task.request.cancelled")).toHaveLength(1);
+  });
+
+  it("cancel: 403 when the receiver (not the requester) tries", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_c2");
+    const res = await app.request("/task-requests/treq_c2/cancel", userInit("POST", { version: 1 }, { userId: "usr_bob" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("409 when declining/cancelling a non-pending request", async () => {
+    const { h, app } = setup();
+    await seedReq(h, "treq_x");
+    await app.request("/task-requests/treq_x/cancel", userInit("POST", { version: 1 }));
+    const res = await app.request("/task-requests/treq_x/decline", userInit("POST", { version: 2 }, { userId: "usr_bob" }));
+    expect(res.status).toBe(409);
+  });
+});
+
+// GET /tasks/cross-links?eventId= — the event's arrow-less cross-team links.
+describe("GET /tasks/cross-links", () => {
+  const link = (h: TestHarness, id: string, eventId: string) =>
+    h.repo.insertCrossLink({
+      id,
+      requestId: `treq_${id}`,
+      requesterTaskId: `task_r_${id}`,
+      requesteeTaskId: `task_e_${id}`,
+      eventId,
+      now: "2026-08-20T00:00:00.000Z",
+    });
+
+  it("returns only the requested event's cross-links (same shape as /dependencies)", async () => {
+    const { h, app } = setup();
+    await link(h, "txl_1", "evt_1");
+    await link(h, "txl_2", "evt_1");
+    await link(h, "txl_3", "evt_2");
+    const res = await app.request("/tasks/cross-links?eventId=evt_1", userInit("GET"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.ListTaskCrossLinksResponse;
+    expect(body.items.map((c) => c.id).sort()).toEqual(["txl_1", "txl_2"]);
+    expect(body.items[0]).toHaveProperty("requesterTaskId");
+    expect(body.items[0]).toHaveProperty("requesteeTaskId");
+  });
+
+  it("400 when eventId is absent", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks/cross-links", userInit("GET"));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+  });
+
+  it("is a literal route — not captured by /tasks/:id", async () => {
+    const { app } = setup();
+    // A GET without eventId must be the cross-links 400, not a 404 for task id "cross-links".
+    const res = await app.request("/tasks/cross-links?eventId=evt_1", userInit("GET"));
+    expect(res.status).toBe(200);
+  });
+});
+
+// D4 (ADR-0007): POST /tasks must not let a cross-team assignee be set directly — that
+// bypasses the 送る・受け取る request flow. Guard fires only when team_id is non-null AND
+// the assignee's teams are known and exclude it. Teamless / unknown-team pass through.
+describe("POST /tasks — cross-team assignee guard (D4)", () => {
+  const post = (app: Hono, body: Record<string, unknown>) =>
+    app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", ...body }));
+
+  it("422 when assigning a team task to someone on another team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_bob", ["team_sponsor"]);
+    const res = await post(app, { teamId: "team_dev", assigneeId: "usr_bob" });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_CROSS_TEAM_ASSIGNEE");
+  });
+
+  it("201 when the assignee belongs to the task's team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_bob", ["team_dev", "team_x"]);
+    const res = await post(app, { teamId: "team_dev", assigneeId: "usr_bob" });
+    expect(res.status).toBe(201);
+  });
+
+  it("201 (pass-through) for a teamless task even if the assignee is on some other team", async () => {
+    const { h, app } = setup();
+    h.member.teams.set("usr_bob", ["team_sponsor"]);
+    const res = await post(app, { assigneeId: "usr_bob" }); // no teamId
+    expect(res.status).toBe(201);
+  });
+
+  it("201 (pass-through) when the assignee's teams are unknown (no linked member ⇒ [])", async () => {
+    const { app } = setup();
+    const res = await post(app, { teamId: "team_dev", assigneeId: "usr_nomember" });
+    expect(res.status).toBe(201);
+  });
+});

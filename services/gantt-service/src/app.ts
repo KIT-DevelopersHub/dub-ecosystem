@@ -114,11 +114,12 @@ export function createApp(deps: AppDeps = defaultDeps): App {
       if (hit) return c.json(hit);
     }
 
-    const [tasks, dependencies] = await Promise.all([
+    const [tasks, dependencies, crossLinks] = await Promise.all([
       upstream.listTasks(ctx, eventId),
       upstream.listDependencies(ctx, eventId),
+      upstream.listCrossLinks(ctx, eventId),
     ]);
-    const dto = buildGanttChartDTO(eventId, tasks, dependencies);
+    const dto = buildGanttChartDTO(eventId, tasks, dependencies, crossLinks);
     await cache.put(eventId, dto);
     return c.json(dto);
   });

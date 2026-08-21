@@ -34,6 +34,10 @@ export function ganttEventHandlers(env: Env, deps: AppDeps = defaultDeps): DubEv
     "task.status_changed": (e) => purgeIf(e.payload.eventId),
     "task.archived": (e) => purgeIf(e.payload.eventId),
     "task.dependency_changed": (e) => purgeIf(e.payload.eventId),
+    // send / receive (ADR-0007): accept materialises both tasks + the cross-link, so the
+    // chart's rows AND crossLinks change — purge so the next read re-projects the badges.
+    "task.request.accepted": (e) => purgeIf(e.payload.eventId),
+    "task.cross_link.created": (e) => purgeIf(e.payload.eventId),
     // action.*
     "action.created": (e) => purge(e.payload.eventId),
     "action.updated": (e) => purge(e.payload.eventId),
