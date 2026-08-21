@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SegmentedControl, Select, SortableList } from "@dub/ui";
+import { ConfirmDialog, SegmentedControl, Select, SortableList } from "@dub/ui";
 import type { SegmentedOption, SelectOption, SortableItemContext, SortableReorderEvent } from "@dub/ui";
+import { barsInRect, normalizeRect, rectIsDrag, unionIds, type Rect } from "../domain/marquee";
 import type { GanttSortMode } from "../domain/row-sort";
 import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
 import { groupRuns, type RowGroup } from "../domain/row-groups";
@@ -35,6 +36,7 @@ import {
   weekendBands,
   withGranularity,
 } from "../domain/timeline-axis";
+import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import { visibleTreeRows } from "../domain/gantt-layout";
 import styles from "../styles/app.module.css";
 
@@ -100,6 +102,17 @@ export interface GanttViewProps {
    *  present, contiguous same-group rows get a labelled bracket down the list's right
    *  edge. Absent/empty (手動・時期) ⇒ no brackets. */
   rowGroupById?: ReadonlyMap<common.TaskId, RowGroup>;
+  /** Bulk delete a marquee-selected set (after the confirm dialog). Absent ⇒ no bulk delete. */
+  onBulkDelete?: (ids: readonly common.TaskId[]) => void;
+  /** Shift a marquee-selected set left/right by whole days (arrow keys / group drag).
+   *  Each selection root moves its own subtree, preserving relative positions + spans. */
+  onBulkShiftDays?: (ids: readonly common.TaskId[], deltaDays: number) => void;
+  /** Move a marquee-selected set up/down one slot (手動 mode only). */
+  onBulkMoveVertical?: (ids: readonly common.TaskId[], dir: -1 | 1) => void;
+  /** Group drag-reorder (⑤): drop a marquee-selected block at `overId`; the whole selection
+   *  moves together, contiguous + in order. `draggedId` = grabbed row, `overId` = drop target.
+   *  手動 mode only. Absent ⇒ a group drag falls back to a single-row `onReorder`. */
+  onBulkReorderTo?: (ids: readonly common.TaskId[], draggedId: common.TaskId, overId: common.TaskId) => void;
   canWrite?: boolean;
 }
 
@@ -138,6 +151,8 @@ function LeftPaneRow({
   isOpen,
   dragEnabled,
   grouped,
+  selected,
+  lifting,
   dragHandleProps,
   number,
   onSelect,
@@ -150,6 +165,11 @@ function LeftPaneRow({
   dragEnabled: boolean;
   /** true when the group-bracket rail is shown — reserves right padding for it. */
   grouped: boolean;
+  /** true when this row is part of the marquee multi-selection. */
+  selected: boolean;
+  /** true while a GROUP drag is in flight and this is a selected row OTHER than the
+   *  grabbed one — it dims in place so it reads as "picked up" into the floating stack. */
+  lifting?: boolean;
   /** from SortableList.renderItem — spread on the drag handle to arm pointer/keyboard. */
   dragHandleProps: SortableItemContext["dragHandleProps"];
   /** WBS number label (e.g. "AA-1-1"); absent ⇒ no badge. */
@@ -169,11 +189,13 @@ function LeftPaneRow({
   return (
     <button
       type="button"
-      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""}`}
+      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""} ${selected ? styles.tlRowSelected : ""} ${lifting ? styles.tlRowLifting : ""}`}
       style={style}
+      aria-pressed={selected}
       title={r.title}
       onClick={() => onSelect?.(r.taskId)}
       data-testid={`fe4-gantt-row-${r.taskId}`}
+      {...(selected ? { "data-fe4-keep-selection": "true" } : {})}
     >
       {dragEnabled && (
         <span
@@ -246,6 +268,10 @@ export function GanttView({
   teamLegend,
   rowGroupById,
   numberById,
+  onBulkDelete,
+  onBulkShiftDays,
+  onBulkMoveVertical,
+  onBulkReorderTo,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -261,6 +287,18 @@ export function GanttView({
   // 拡大中は編集不可（editing）・タップで詳細も開かない（interactive）＝純粋な閲覧。
   const editing = canWrite && !presenting;
   const interactive = !presenting;
+  // ---- marquee multi-select (範囲ドラッグ) ----
+  // The set of bars selected by a marquee (or additive shift/⌘ marquee). Bulk delete
+  // / left-right shift / up-down reorder all act on this set. Cleared by Esc or an
+  // empty background click.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<common.TaskId>>(() => new Set());
+  // The live marquee rectangle (tlBody-local) while the user is dragging one out.
+  const [marquee, setMarquee] = useState<Rect | null>(null);
+  // Open state for the bulk-delete confirm dialog (same tone as the single-delete #364).
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  // Set true for the click that immediately follows a marquee drag, so the canvas
+  // background click handler doesn't also fire (create / clear).
+  const marqueeConsumedClickRef = useRef(false);
   // WBS drill-down: set of expanded work-package ids. Empty = all collapsed, so the
   // view opens on the 41 work-packages and each toggle reveals its leaf children.
   const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() => new Set());
@@ -286,6 +324,13 @@ export function GanttView({
     (e: SortableReorderEvent) => {
       const activeId = e.activeId as common.TaskId;
       const overId = e.overId as common.TaskId;
+      // Group drag (⑤): when the grabbed row is part of a marquee multi-selection, move the
+      // WHOLE selected block together (contiguous, in order) to the drop target — not just the
+      // one row. Hands the raw active/over ids to the host, which computes the block move.
+      if (onBulkReorderTo && selectedIds.size > 1 && selectedIds.has(activeId)) {
+        onBulkReorderTo([...selectedIds], activeId, overId);
+        return;
+      }
       // Translate the drop into the container's "place before X" contract so the
       // committed order equals the sortable PREVIEW (no post-drop jump). Same-parent
       // only: move the sibling id list, then whichever id ends up right AFTER the
@@ -310,7 +355,26 @@ export function GanttView({
         onReorder?.(activeId, overId);
       }
     },
-    [onReorder],
+    [onReorder, onBulkReorderTo, selectedIds],
+  );
+
+  // Group-move animation (⑤): for a marquee multi-selection drag, give the SortableList
+  // the FULL next order up front (the same block move the host commits) so it can render
+  // the drop in ONE step and FLIP every moved row into place TOGETHER — instead of only
+  // the grabbed row sliding while the rest jump. Single-row drags return null (default
+  // arrayMove). Uses the visible rows + current selection so the optimistic order matches
+  // what onBulkReorderTo persists.
+  const computeGroupOrder = useCallback(
+    (activeId: string, overId: string): string[] | null => {
+      if (!(onBulkReorderTo && selectedIds.size > 1 && selectedIds.has(activeId as common.TaskId))) return null;
+      return reorderSelectionWithinSiblings(
+        visibleRowsRef.current,
+        selectedIds,
+        activeId as common.TaskId,
+        overId as common.TaskId,
+      );
+    },
+    [onBulkReorderTo, selectedIds],
   );
 
   // Swap in the store's (authoritative + optimistic) title before any geometry runs,
@@ -372,6 +436,7 @@ export function GanttView({
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
   const movedRef = useRef(false);
   const resizeStartX = useRef(0);
@@ -615,6 +680,14 @@ export function GanttView({
     } else {
       const deltaDays = pxToDays(dxPx, win);
       if (deltaDays !== 0) {
+        // Group MOVE: the grabbed bar is in a multi-select — shift the whole selected
+        // set together (each root carries its subtree), keeping relative positions.
+        if (mode === "move" && selectedIds.size > 1 && selectedIds.has(taskId) && onBulkShiftDays) {
+          onBulkShiftDays([...selectedIds], deltaDays);
+          setDrag(null);
+          movedRef.current = false;
+          return;
+        }
         // Parent MOVE: shift the whole subtree so children follow (keeps rollup
         // consistent — the parent bar stays the union of its shifted children).
         if (mode === "move" && parentIds.has(taskId) && onScheduleShift) {
@@ -637,8 +710,14 @@ export function GanttView({
     movedRef.current = false;
   };
 
+  // True when the active drag is a group move: the grabbed bar is in a multi-select,
+  // so every selected bar slides together (まとめてドラッグ).
+  const isGroupMove = !!drag && drag.mode === "move" && selectedIds.size > 1 && selectedIds.has(drag.taskId);
+
   // live-preview geometry for the bar under an active drag
   const previewGeom = (bar: TimelineBar): { left: number; width: number } => {
+    // Group move: shift EVERY selected bar by the same dx (not just the grabbed one).
+    if (isGroupMove && selectedIds.has(bar.taskId)) return { left: bar.x + drag!.dxPx, width: bar.width };
     if (!drag || drag.taskId !== bar.taskId) return { left: bar.x, width: bar.width };
     const d = drag.dxPx;
     if (drag.mode === "move") return { left: bar.x + d, width: bar.width };
@@ -651,12 +730,13 @@ export function GanttView({
     const status = statusById?.get(taskId);
     const cls = status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
+    const selected = selectedIds.has(taskId) ? styles.barSelected : "";
     // Parent (work-package) rows keep the rollup behaviour (their span still auto-
     // encloses their children) but render as an ordinary, legible task bar — the
     // hollow "bracket summary" look was reverted per feedback #97 (見づらい). The
     // parent/child vs dependency distinction is carried by indent + tree lines +
     // the dashed dependency arrows + the legend, not by a special bar shape.
-    return `${styles.bar} ${cls} ${dragging}`;
+    return `${styles.bar} ${cls} ${dragging} ${selected}`;
   };
 
   // ---- left-pane resize ----
@@ -677,14 +757,161 @@ export function GanttView({
     window.addEventListener("pointerup", up);
   };
 
-  // click an empty timeline cell -> create with that day preset
+  const clearSelection = useCallback(() => {
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
+  }, []);
+
+  // ---- 外側クリックで選択解除 (⑤b) ----
+  // Once a marquee selection exists, a pointer-down anywhere that is NOT a selected row/
+  // bar, the bulk-action bar, or an additive (Shift/⌘/Ctrl) gesture clears it — so a stray
+  // click on empty space or another task drops the selection instead of it lingering.
+  // Capture phase so it runs regardless of a target's own stopPropagation (bars do), and
+  // BEFORE dnd-kit arms a group drag off a selected row (which is data-marked to be kept).
+  // Skipped while the bulk-delete confirm is open (its buttons act on the selection).
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const onDown = (e: PointerEvent) => {
+      if (bulkDeleteOpen) return;
+      if (e.button !== 0) return;
+      if (e.shiftKey || e.metaKey || e.ctrlKey) return; // additive — keep building the set
+      const el = e.target as HTMLElement | null;
+      if (el && el.closest("[data-fe4-keep-selection]")) return; // selected row/bar or the action bar
+      // The timeline canvas owns its own clear/create priority (onCanvasBackgroundClick +
+      // the marquee session) — defer to it so a deselect-click there never spawns a task.
+      if (el && el.closest("[data-fe4-gantt-canvas]")) return;
+      clearSelection();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [selectedIds, bulkDeleteOpen, clearSelection]);
+
+  // ---- marquee (範囲ドラッグ) pointer session on the timeline body ----
+  // Starts on a pointer-down over the empty canvas (bars stopPropagation their own
+  // pointer-down, so this only fires on background). While dragging we draw the
+  // rectangle; on release, every bar it touches is selected (union when Shift/⌘/Ctrl
+  // is held). A drag that never crosses the click threshold is treated as a plain
+  // click (create / clear) — see onCanvasBackgroundClick.
+  const onBodyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    if (!interactive) return; // 拡大（全画面）閲覧モードは look-only — 範囲選択させない
+    if (drag) return; // a bar drag owns the pointer
+    // Fresh gesture — clear any stale "a marquee just ended" flag so it can never
+    // swallow a later genuine background click (create / clear).
+    marqueeConsumedClickRef.current = false;
+    const body = bodyRef.current;
+    if (!body) return;
+    const rect = body.getBoundingClientRect();
+    const origin = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    let moved = false;
+    const barsSnapshot = bars;
+    const move = (ev: PointerEvent) => {
+      const cur = { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+      const r = normalizeRect(origin, cur);
+      if (rectIsDrag(r)) moved = true;
+      setMarquee(r);
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setMarquee(null);
+      if (!moved) return; // a plain click — let the click handler decide (create/clear)
+      marqueeConsumedClickRef.current = true;
+      const r = normalizeRect(origin, { x: ev.clientX - rect.left, y: ev.clientY - rect.top });
+      const hit = barsInRect(barsSnapshot, r);
+      setSelectedIds((prev) => (additive ? unionIds(prev, hit) : new Set(hit)));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  // click an empty timeline cell -> create with that day preset (or clear a selection)
   const onCanvasBackgroundClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Swallow the click that ends a marquee drag (it isn't a create/clear intent).
+    if (marqueeConsumedClickRef.current) {
+      marqueeConsumedClickRef.current = false;
+      return;
+    }
+    // ⑤b: while a selection is active, a click anywhere on the timeline that is NOT on a
+    // bar (or a kept-selection element) clears it — including the decorative layers that
+    // fill the canvas (row lines / weekend shading / 内包ゾーン / today line / connectors),
+    // whose clicks previously did nothing because they aren't the exact canvas node. Only
+    // bar / selected-row / action-bar clicks are excluded from deselect.
+    if (selectedIds.size > 0) {
+      const el = e.target as HTMLElement | null;
+      const onBar = !!el?.closest?.('[data-testid^="fe4-gantt-bar-"]');
+      const keep = !!el?.closest?.("[data-fe4-keep-selection]");
+      if (onBar || keep) return;
+      clearSelection();
+      return;
+    }
+
     if (!editing || !onCreateOnDate) return;
-    if (e.target !== e.currentTarget) return; // ignore clicks that bubbled from a bar
+    if (e.target !== e.currentTarget) return; // create only on the bare canvas, never a bar
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const day = dayAtX(x, win);
     onCreateOnDate(new Date(day).toISOString());
+  };
+
+  // ---- keyboard: bulk ops on the marquee selection ----
+  // Backspace/Delete → confirm then bulk delete; ←/→ → shift dates by ±1 day; ↑/↓ →
+  // reorder (手動 mode only); Esc → clear. Guarded so typing in a field never fires,
+  // and skipped while the confirm dialog is open (its own buttons drive delete).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (selectedIds.size === 0 || bulkDeleteOpen) return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        (t && t.isContentEditable)
+      ) {
+        // typing in a field — never hijack its own keys (except Esc-to-clear stays off here).
+        return;
+      }
+      if (e.key === "Escape") {
+        clearSelection();
+        return;
+      }
+      if (!canWrite) return;
+      if ((e.key === "Backspace" || e.key === "Delete") && onBulkDelete) {
+        e.preventDefault();
+        setBulkDeleteOpen(true);
+        return;
+      }
+      if (e.key === "ArrowLeft" && onBulkShiftDays) {
+        e.preventDefault();
+        onBulkShiftDays([...selectedIds], -1);
+        return;
+      }
+      if (e.key === "ArrowRight" && onBulkShiftDays) {
+        e.preventDefault();
+        onBulkShiftDays([...selectedIds], 1);
+        return;
+      }
+      if (e.key === "ArrowUp" && sortMode === "manual" && onBulkMoveVertical) {
+        e.preventDefault();
+        onBulkMoveVertical([...selectedIds], -1);
+        return;
+      }
+      if (e.key === "ArrowDown" && sortMode === "manual" && onBulkMoveVertical) {
+        e.preventDefault();
+        onBulkMoveVertical([...selectedIds], 1);
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedIds, bulkDeleteOpen, canWrite, sortMode, onBulkDelete, onBulkShiftDays, onBulkMoveVertical, clearSelection]);
+
+  const confirmBulkDelete = () => {
+    const ids = [...selectedIds];
+    onBulkDelete?.(ids);
+    setBulkDeleteOpen(false);
+    clearSelection();
   };
 
   const effLeftW = collapsed ? 0 : leftW;
@@ -833,34 +1060,67 @@ export function GanttView({
                   getItemId={(r) => r.taskId}
                   disabled={!reorderEnabled}
                   onReorder={onRowReorder}
+                  computeNextOrder={computeGroupOrder}
+                  // ⑤a: when a marquee multi-selection is grabbed, the whole set rides as one
+                  // deck — tell SortableList so the reflow opens a gap as tall as the number of
+                  // floating rows (not a fixed single row). Only meaningful while >1 is selected.
+                  liftedIds={selectedIds.size > 1 ? [...selectedIds] : undefined}
                   aria-label="タスクの並び替え"
-                  renderItem={(r, ctx) => (
-                    <LeftPaneRow
-                      r={r}
-                      isOpen={openParents.has(r.taskId)}
-                      dragEnabled={reorderEnabled}
-                      grouped={hasGroupRail}
-                      dragHandleProps={ctx.dragHandleProps}
-                      number={numberById?.get(r.taskId)}
-                      onSelect={interactive ? onSelect : undefined}
-                      toggleParent={toggleParent}
-                      statusById={statusById}
-                      assigneeNameById={assigneeNameById}
-                    />
-                  )}
-                  renderOverlay={(r) => (
-                    <div className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }} data-testid="fe4-gantt-drag-overlay">
-                      <span className={styles.tlRowDrag} aria-hidden>⠿</span>
-                      {teamColorById?.get(r.taskId) && (
-                        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
-                      )}
-                      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
-                      {numberById?.get(r.taskId) && (
-                        <span className={styles.tlRowNum}>{numberById.get(r.taskId)}</span>
-                      )}
-                      <span className={styles.tlRowName}>{r.title}</span>
-                    </div>
-                  )}
+                  renderItem={(r, ctx) => {
+                    // Group drag in flight: the grabbed row rides the floating overlay (hidden
+                    // in place by SortableList); every OTHER selected row dims in place so the
+                    // whole marquee selection reads as "lifted" together (⑤a).
+                    const groupDragging =
+                      ctx.dragActiveId != null &&
+                      selectedIds.size > 1 &&
+                      selectedIds.has(ctx.dragActiveId as common.TaskId);
+                    const lifting = groupDragging && selectedIds.has(r.taskId) && r.taskId !== ctx.dragActiveId;
+                    return (
+                      <LeftPaneRow
+                        r={r}
+                        isOpen={openParents.has(r.taskId)}
+                        dragEnabled={reorderEnabled}
+                        grouped={hasGroupRail}
+                        selected={selectedIds.has(r.taskId)}
+                        lifting={lifting}
+                        dragHandleProps={ctx.dragHandleProps}
+                        number={numberById?.get(r.taskId)}
+                        onSelect={interactive ? onSelect : undefined}
+                        toggleParent={toggleParent}
+                        statusById={statusById}
+                        assigneeNameById={assigneeNameById}
+                      />
+                    );
+                  }}
+                  renderOverlay={(r) => {
+                    // A single mini-row clone (the visual used both alone and stacked).
+                    const cloneRow = (row: gantt.GanttRow, key?: string) => (
+                      <div key={key} className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }}>
+                        <span className={styles.tlRowDrag} aria-hidden>⠿</span>
+                        {teamColorById?.get(row.taskId) && (
+                          <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(row.taskId) }} aria-hidden />
+                        )}
+                        <span className={`${styles.tlDot} ${statusById?.get(row.taskId) ? STATUS_BAR_CLASS[statusById.get(row.taskId)!] : ""}`} aria-hidden />
+                        {numberById?.get(row.taskId) && <span className={styles.tlRowNum}>{numberById.get(row.taskId)}</span>}
+                        <span className={styles.tlRowName}>{row.title}</span>
+                      </div>
+                    );
+                    // Group drag (⑤a): float the WHOLE selection as a stacked deck under the
+                    // cursor — every selected row (in visible order) lifts, not just the grabbed
+                    // one. A count badge names how many are moving.
+                    if (selectedIds.size > 1 && selectedIds.has(r.taskId)) {
+                      const picked = rows.filter((row) => selectedIds.has(row.taskId));
+                      return (
+                        <div className={styles.tlRowOverlayStack} style={{ width: leftW }} data-testid="fe4-gantt-drag-overlay">
+                          <span className={styles.tlRowOverlayCount} data-testid="fe4-gantt-drag-overlay-count">{picked.length}</span>
+                          {picked.map((row) => cloneRow(row, row.taskId))}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div data-testid="fe4-gantt-drag-overlay">{cloneRow(r)}</div>
+                    );
+                  }}
                 />
                 {/* team accent rail: fixed-x straight segments (one per contiguous team run) */}
                 {teamRailRuns.length > 0 && (
@@ -934,9 +1194,13 @@ export function GanttView({
 
               {/* body */}
               <div
+                ref={bodyRef}
                 className={styles.tlBody}
                 style={{ width, height: rowsH }}
                 onClick={onCanvasBackgroundClick}
+                onPointerDown={onBodyPointerDown}
+                data-testid="fe4-gantt-body"
+                data-fe4-gantt-canvas="true"
               >
                 {/* weekend shading (painted FIRST, behind the parent enclosure) */}
                 {weekends.map((b) => (
@@ -1025,6 +1289,7 @@ export function GanttView({
                       title={titleById.get(b.taskId) ?? ""}
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
+                      {...(selectedIds.has(b.taskId) ? { "data-fe4-keep-selection": "true" } : {})}
                     >
                       {teamColorById?.get(b.taskId) && (
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
@@ -1051,11 +1316,63 @@ export function GanttView({
                     </div>
                   );
                 })}
+
+                {/* marquee (範囲ドラッグ) rectangle while selecting */}
+                {marquee && (
+                  <div
+                    className={styles.tlMarquee}
+                    style={{ left: marquee.x0, top: marquee.y0, width: marquee.x1 - marquee.x0, height: marquee.y1 - marquee.y0 }}
+                    data-testid="fe4-gantt-marquee"
+                    aria-hidden
+                  />
+                )}
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* selection action hint — surfaces the available bulk ops (keyboard/drag) */}
+      {selectedIds.size > 0 && (
+        <div className={styles.tlSelectionBar} role="status" data-testid="fe4-gantt-selection-bar" data-fe4-keep-selection="true">
+          <span className={styles.tlSelectionCount} data-testid="fe4-gantt-selection-count">
+            {selectedIds.size} 件選択中
+          </span>
+          <span className={styles.tlSelectionHint}>
+            ←→ で移動{sortMode === "manual" ? " ・ ↑↓ で並べ替え" : ""} ・ Backspace で削除 ・ Esc で解除
+          </span>
+          {canWrite && onBulkDelete && (
+            <button
+              type="button"
+              className={styles.tlSelectionDelete}
+              onClick={() => setBulkDeleteOpen(true)}
+              data-testid="fe4-gantt-selection-delete"
+            >
+              削除
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.tlSelectionClear}
+            onClick={clearSelection}
+            data-testid="fe4-gantt-selection-clear"
+          >
+            選択解除
+          </button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title="タスクを削除"
+        message={`${selectedIds.size}件のタスクを削除しますか？取り消せません。`}
+        confirmLabel="削除"
+        cancelLabel="キャンセル"
+        danger
+        onConfirm={confirmBulkDelete}
+        onCancel={() => setBulkDeleteOpen(false)}
+        testId="fe4-gantt-bulk-delete-confirm"
+      />
     </div>
   );
 }
