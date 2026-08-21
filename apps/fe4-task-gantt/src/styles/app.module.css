@@ -860,6 +860,44 @@
   background: rgba(15, 23, 42, 0.14);
   pointer-events: none;
 }
+
+/* ---- parent (work-package) bar: children's status mix as proportional slices ---- */
+/* Neutral track; the slices below carry all the colour. */
+.barParent { background: var(--dub-color-gray-100); }
+/* The status slices use the light *-300 pastels in BOTH themes (shared scales), so
+   the INSIDE label must stay dark in dark mode too — gray-900 is theme-independent.
+   The OUTSIDE label (.barLabelOut) sits on the page bg, so it keeps its theme colour. */
+.barParent .barLabel { color: var(--dub-color-gray-900); }
+
+.barSegTrack {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden; /* clip slice corners back to the bar's rounded ends */
+  pointer-events: none;
+}
+.barSeg { height: 100%; min-width: 0; }
+/* hairline separator so adjacent light pastels stay legible as distinct shares */
+.barSeg + .barSeg { box-shadow: inset 1px 0 0 rgba(15, 23, 42, 0.12); }
+
+/* Same pastel tokens as the leaf status bars (barDone/barInProgress/…) so a
+   parent whose children are all 完了 reads identically to a 完了 leaf bar. */
+.barSegDone { background: var(--dub-color-success-300, var(--dub-color-success-400)); }
+.barSegInProgress { background: var(--dub-color-brand-300, var(--dub-color-brand-400)); }
+.barSegBlocked { background: var(--dub-color-warning-300, var(--dub-color-warning-400)); }
+.barSegTodo { background: var(--dub-color-gray-200); }
+.barSegCancelled { background: var(--dub-color-gray-100); }
+
+/* "n/m 完了" count appended to the parent bar label. */
+.barCount {
+  margin-left: 6px;
+  font-weight: var(--dub-font-weight-bold, 700);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  opacity: 0.82;
+}
 .barLabel {
   position: relative;
   z-index: 1;
