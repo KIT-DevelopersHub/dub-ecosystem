@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "tab-anim",
+  "worker": "dub-demo-tab-anim",
+  "url": "https://dub-demo-tab-anim.developershub-site.workers.dev",
+  "deployedSha": "a5474ae",
+  "branch": "HEAD",
+  "actor": "ko-tarou",
+  "markers": ["toastInFade"],
+  "live": true,
+  "verifiedAt": "2026-08-21T19:52:25Z",
+  "updatedAt": "2026-08-21T19:52:25Z",
+  "note": "refresh-demos: origin/main(e71c140)+fe7/microanim-a01a03-core — micro-interactions A01-A03 (toast exit / button press / tab underline slide) in @dub/ui"
+}

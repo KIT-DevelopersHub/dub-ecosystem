@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "_comment": "The list of per-feature demos to keep fresh. scripts/refresh-demos.sh rebuilds each one as `main + <ref>` and redeploys `dub-demo-<slug>` (URL unchanged), so the surrounding UI is always the latest main (= prod/staging) — never the stale snapshot the feature branch was cut from (判断87). Add a feature here ONCE; every refresh (manual or scheduled) rebases it onto the newest main automatically. `markers` = comma-separated feature-unique strings that MUST appear in the built bundle (see scripts/verify-live.sh); pick strings that survive minification (CSS @keyframes / class names, runtime string literals, aria-labels — NOT comments).",
+  "base": "origin/main",
+  "demos": [
+    {
+      "slug": "tab-anim",
+      "ref": "fe7/microanim-a01a03-core",
+      "pr": 425,
+      "markers": "toastInFade",
+      "note": "micro-interactions A01-A03 (toast exit / button press / tab underline slide) in @dub/ui"
+    },
+    {
+      "slug": "notif-ui",
+      "ref": "fe/notif-ui-fixes",
+      "pr": 424,
+      "markers": "通知の一括既読に対応しました",
+      "note": "notification dialog action buttons always visible + filter-bar spacing (fe2 + fe5)"
+    },
+    {
+      "slug": "task-detail-scroll",
+      "ref": "fe4/task-detail-dialog-clean",
+      "pr": 411,
+      "markers": "タスクの背景・手順・補足などを書けます",
+      "note": "task detail dialog (memo + file/URL attachments, scrollable body, fixed footer) in fe4"
+    }
+  ]
+}
