@@ -261,6 +261,12 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
       await db.run(`DELETE FROM member_team_links WHERE person_id = ?`, id);
       await db.run(`UPDATE member_people SET archived_at = ? WHERE id = ?`, new Date().toISOString(), id);
     },
+    async hardDeletePerson(id: string): Promise<void> {
+      // team links を外してから member_people 行を物理削除。参加届(member_id)の紐付け解除は
+      // サービスが先に upsertParticipation で NULL 化するので、ここでは people/links のみ。
+      await db.run(`DELETE FROM member_team_links WHERE person_id = ?`, id);
+      await db.run(`DELETE FROM member_people WHERE id = ?`, id);
+    },
     async maxPersonSortOrder(orgId): Promise<number> {
       const r = await db.first<{ m: number | null }>(
         `SELECT MAX(sort_order) AS m FROM member_people WHERE org_id = ?`,
