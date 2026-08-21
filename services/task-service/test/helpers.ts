@@ -37,7 +37,6 @@ export class InMemoryTaskRepo implements TaskRepo {
       startAt: input.startAt ?? null,
       dueAt: input.dueAt,
       origin: input.origin,
-      teamId: input.teamId ?? null,
       version: 1,
       archivedAt: null,
       createdAt: input.now,
