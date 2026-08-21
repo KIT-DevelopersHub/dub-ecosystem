@@ -14,6 +14,18 @@ type BffHomeResponse = gateway.BffHomeResponse;
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
+/** Self profile edit payload (display name / avatar). Both fields optional so the caller
+ *  can patch just one; `avatarUrl: null` clears the avatar (back to initials). */
+export interface ProfileUpdateInput {
+  displayName?: string;
+  avatarUrl?: string | null;
+}
+/** Persisted self profile after an update — the caller reconciles its /me cache with this. */
+export interface ProfileUpdateResult {
+  displayName: string;
+  avatarUrl: string | null;
+}
+
 export interface RequestInput<TBody = unknown> {
   method: HttpMethod;
   path: `/api/v1/${string}`;
@@ -105,6 +117,13 @@ export interface ApiClient {
     /** Self password change (#5b): the logged-in user rotates their OWN password.
      *  The gateway re-verifies the session + current password before storing. */
     changePassword(currentPassword: string, newPassword: string): Promise<void>;
+    /** Self profile update: the logged-in user edits their OWN display name / avatar.
+     *  Posts to the gateway-owned POST /api/v1/me/profile (session-scoped to the caller
+     *  — no target id, unlike FE7's admin roster PATCH /identity/users/:id). Returns the
+     *  persisted display name + avatar so the caller can reconcile its optimistic cache.
+     *  NOTE (本番課題): the gateway + identity-roster self-profile endpoint is not yet
+     *  implemented server-side; the demo transport answers it (see demo-seed). */
+    updateProfile(input: ProfileUpdateInput): Promise<ProfileUpdateResult>;
   };
   bff: { home(): Promise<BffHomeResponse> };
   events: ResourceClient;
@@ -301,6 +320,12 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           method: "POST",
           path: "/api/v1/me/password",
           body: { currentPassword, newPassword },
+        }),
+      updateProfile: (input: ProfileUpdateInput) =>
+        request<ProfileUpdateResult, ProfileUpdateInput>({
+          method: "POST",
+          path: "/api/v1/me/profile",
+          body: input,
         }),
     },
     bff: {

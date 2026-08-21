@@ -784,11 +784,48 @@ function currentAccount(): DemoAccount {
   return DEMO_ACCOUNTS[0]!;
 }
 
-/** The /me session for the active account (drives RequireAuth + the shell header). */
+// ── self profile edit (アカウント設定) ─────────────────────────────────────────
+// The signed-in user edits their OWN display name / avatar from 設定(⚙) → アカウント設定.
+// The demo persists the edit per-account in localStorage (keyed by account id) so it
+// SURVIVES a reload and stays account-scoped (switching demo accounts shows each one's
+// own profile) — mirroring the real gateway persisting it server-side. No real backend:
+// avatars are self-contained data: URLs, nothing leaves the browser.
+const DEMO_PROFILE_STORAGE_PREFIX = "dub_demo_profile_";
+interface DemoProfileOverride {
+  displayName?: string;
+  avatarUrl?: string | null;
+}
+function profileOverride(id: string): DemoProfileOverride {
+  try {
+    const raw = globalThis.localStorage?.getItem(DEMO_PROFILE_STORAGE_PREFIX + id);
+    return raw ? (JSON.parse(raw) as DemoProfileOverride) : {};
+  } catch {
+    return {};
+  }
+}
+function saveProfileOverride(id: string, patch: DemoProfileOverride): DemoProfileOverride {
+  const next = { ...profileOverride(id), ...patch };
+  try {
+    globalThis.localStorage?.setItem(DEMO_PROFILE_STORAGE_PREFIX + id, JSON.stringify(next));
+  } catch {
+    /* storage unavailable — profile edit is best-effort in the demo */
+  }
+  return next;
+}
+
+/** The /me session for the active account (drives RequireAuth + the shell header). The
+ *  self-edited display name / avatar (localStorage override) is layered over the seed so
+ *  a saved アカウント設定 shows on reload and in the header. */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
+  const ov = profileOverride(a.id);
   return {
-    user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
+    user: {
+      id: a.id,
+      displayName: ov.displayName ?? a.displayName,
+      avatarUrl: ov.avatarUrl ?? null,
+      email: a.email,
+    },
     orgId: ORG,
     permissions: a.permissions,
     sessionExpiresAt: Date.now() + 60 * 60 * 1000,
@@ -2777,6 +2814,18 @@ export function createDemoFetch(): typeof fetch {
     // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
     // Nothing is persisted — the demo session is stateless for credentials.
     if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
+    // Self profile edit (アカウント設定): persist the caller's display name / avatar override
+    // (per-account localStorage) and echo the merged result, so the 設定 → アカウント設定 flow
+    // is exercisable end-to-end offline and reflects on reload. Nothing leaves the browser.
+    if (method === "POST" && url.pathname === "/api/v1/me/profile") {
+      const b = (parsedBody ?? {}) as { displayName?: unknown; avatarUrl?: unknown };
+      const a = currentAccount();
+      const patch: DemoProfileOverride = {};
+      if (typeof b.displayName === "string") patch.displayName = b.displayName.trim();
+      if ("avatarUrl" in b) patch.avatarUrl = typeof b.avatarUrl === "string" ? b.avatarUrl : null;
+      const merged = saveProfileOverride(a.id, patch);
+      return json({ displayName: merged.displayName ?? a.displayName, avatarUrl: merged.avatarUrl ?? null });
+    }
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??

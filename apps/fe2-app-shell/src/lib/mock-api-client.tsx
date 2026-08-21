@@ -327,6 +327,11 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
       // Self password change (#5b): acknowledge so the demo/offline build shows success.
       case "POST /api/v1/me/password":
         return json({ ok: true }, 200);
+      // Self profile edit (アカウント設定): echo the seed user so the offline/CI build shows
+      // success. The richer demo transport (demo-seed) persists the override; the boot mock
+      // stays stateless (it only serves the boot surface).
+      case "POST /api/v1/me/profile":
+        return json({ displayName: data.me.user.displayName, avatarUrl: data.me.user.avatarUrl ?? null }, 200);
       // Feedback widget (shell chrome): acknowledge so the offline/demo build shows
       // the success state. No real feedback leaves the browser under the mock.
       case "POST /api/v1/feedback":

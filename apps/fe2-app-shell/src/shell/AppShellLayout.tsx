@@ -7,14 +7,14 @@
 // (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
 // with no nested/double sidebar.
 import { useState, type ComponentType, type ReactNode } from "react";
-import { AppShell, PageHeader, AppLauncher, Menu } from "@dub/ui";
+import { AppShell, PageHeader, AppLauncher, Menu, Avatar } from "@dub/ui";
 import type { AppLauncherItem, MenuItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
-import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
+import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import {
   isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
@@ -41,6 +41,13 @@ export function truncateEmail(email: string, maxLen = 30): string {
 // dominating the header (the brand, not the address, is the primary label now).
 function accountEmail(auth: ReturnType<typeof useAuth>): string | null {
   if (auth.status === "authenticated" && auth.me.user.email) return truncateEmail(auth.me.user.email);
+  return null;
+}
+
+// The signed-in user summary (display name + avatar) once /me resolves, else null. Drives
+// the header account chip beside 設定(⚙), which updates optimistically when アカウント設定 saves.
+function accountUser(auth: ReturnType<typeof useAuth>): { displayName: string; avatarUrl: string | null } | null {
+  if (auth.status === "authenticated") return { displayName: auth.me.user.displayName, avatarUrl: auth.me.user.avatarUrl };
   return null;
 }
 
@@ -121,24 +128,26 @@ export function AppShellLayout({
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
   const { can } = usePermissions();
-  const [pwOpen, setPwOpen] = useState(false);
+  const [acctOpen, setAcctOpen] = useState(false);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
   const authed = auth.status === "authenticated";
 
-  // The ⚙ menu's contents. パスワード変更 needs the api-client; ログアウト only needs the
-  // onLogout handler, so logout stays available to any signed-in viewer even if no
-  // api is wired. Logout sits last, under a divider, danger-toned — a 離脱/destructive
-  // action set apart from the safe settings above it.
+  // The ⚙ menu's contents. アカウント設定 (display name / avatar / password) needs the
+  // api-client; ログアウト only needs the onLogout handler, so logout stays available to
+  // any signed-in viewer even if no api is wired. Logout sits last, under a divider,
+  // danger-toned — a 離脱/destructive action set apart from the safe settings above it.
+  // パスワード変更 is no longer a separate item: it lives INSIDE アカウント設定, unifying
+  // all self-service account actions under one entry.
   const settingsItems: MenuItem[] = [];
   if (showAccount) {
     settingsItems.push({
-      id: "change-password",
-      label: "パスワード変更",
-      icon: "lock",
-      onSelect: () => setPwOpen(true),
-      testId: "fe2-change-password-open",
+      id: "account-settings",
+      label: "アカウント設定",
+      icon: "user",
+      onSelect: () => setAcctOpen(true),
+      testId: "fe2-account-settings-open",
     });
   }
   if (authed && onLogout) {
@@ -154,6 +163,7 @@ export function AppShellLayout({
   }
 
   const email = accountEmail(auth);
+  const user = accountUser(auth);
   // Brand-first header: "DevHub" (bold, primary) is the app label AND the home导线
   // — clicking it navigates back to "/" (the ubiquitous logo=home pattern). The
   // account email rides alongside, small & muted, so it never overshadows the brand.
@@ -200,12 +210,22 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
+          {user ? (
+            // Account chip: avatar + display name, sitting just left of 設定(⚙). Both come
+            // from /me, so a saved アカウント設定 reflects here immediately (optimistic cache).
+            <span className="fe2-account-chip" data-testid="fe2-header-account-chip">
+              <span className="fe2-account-chip-name" data-testid="fe2-header-display-name">
+                {user.displayName}
+              </span>
+              <Avatar name={user.displayName} src={user.avatarUrl ?? undefined} size="sm" testId="fe2-header-avatar" />
+            </span>
+          ) : null}
           {settingsItems.length > 0 ? (
-            // Settings (⚙) dropdown — the account self-service container. Password
-            // change (#155) and ログアウト both live INSIDE it now, so the header is
-            // just 9-dot / bell / ⚙ (uniform icon row, no bare buttons). Future self
-            // settings (display name / theme …) become extra items here. Behaviour/
-            // API/authz of パスワード変更 and the logout flow are unchanged.
+            // Settings (⚙) dropdown — the account self-service container. アカウント設定
+            // (display name / avatar / password change) and ログアウト live INSIDE it, so
+            // the header is just 9-dot / bell / account chip / ⚙ (uniform icon row, no bare
+            // buttons). パスワード変更 is now nested within アカウント設定 (unified), and the
+            // logout flow's behaviour/API/authz are unchanged.
             <Menu
               testId="fe2-settings-menu"
               label="設定"
@@ -226,7 +246,7 @@ export function AppShellLayout({
     <AppShell header={header} testId="fe2-shell">
       {children}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
-      {showAccount && api ? <ChangePasswordDialog api={api} open={pwOpen} onClose={() => setPwOpen(false)} /> : null}
+      {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
     </AppShell>
   );
 }
