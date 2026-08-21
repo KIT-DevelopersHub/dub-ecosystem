@@ -90,7 +90,7 @@ describe("MockChatClient", () => {
   });
 
   it("tombstones on delete when the policy is switched to tombstone", async () => {
-    api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone" });
+    api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone", protectReacted: false });
     const posted = await api.postMessage({ channelId: GENERAL, body: "del me", clientTempId: "d2" });
     const deleted = await api.deleteMessage(posted.message.id);
     expect(deleted.mode).toBe("tombstone");

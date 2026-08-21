@@ -293,6 +293,9 @@ export interface ChatRepo {
 
   // reactions
   hasReaction(messageId: common.MessageId, emoji: string, userId: common.UserId): Promise<boolean>;
+  /** True if the message has at least one reaction (any emoji, any user) — backs the
+   *  reaction-protection delete guard. */
+  messageHasReactions(messageId: common.MessageId): Promise<boolean>;
   addReaction(messageId: common.MessageId, emoji: string, userId: common.UserId, at: string): Promise<void>;
   removeReaction(messageId: common.MessageId, emoji: string, userId: common.UserId): Promise<boolean>;
   reactionsFor(messageIds: common.MessageId[]): Promise<Map<string, Record<string, common.UserId[]>>>;

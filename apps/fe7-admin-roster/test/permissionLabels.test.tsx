@@ -10,7 +10,10 @@ const catalog = [...identity.PERMISSION_CATALOG];
 // accordion), NOT the flat per-key grid — covered by appAccessMatrix/AppAccessSection
 // tests. The generic-grid assertions below scope to the non-app domains so a per-app
 // row label (e.g. "メール" the app) never collides with a domain heading ("メール").
-const gridCatalog = catalog.filter((e) => e.domain !== "app");
+// chat:delete / chat:moderate are surfaced as the 削除権限 3-choice inside the チャット
+// app-access row (not the flat grid), so they have no fe7-matrix-desc-<key> node.
+const CHAT_ROW_KEYS = new Set(["chat:delete", "chat:moderate"]);
+const gridCatalog = catalog.filter((e) => e.domain !== "app" && !CHAT_ROW_KEYS.has(e.key));
 
 describe("permissionLabels — localization map", () => {
   it("maps every catalog domain to a Japanese group heading", () => {

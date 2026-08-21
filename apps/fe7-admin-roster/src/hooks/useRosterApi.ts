@@ -485,21 +485,32 @@ export function useChatDeletionPolicy(): UseQueryResult<chat.DeletionPolicyRespo
   });
 }
 
-/** NON-optimistic: save the deletion policy (ConfirmDialog upstream). Version-locked —
- *  the server 409s on a stale `version`; the caller re-reads and retries. */
+/** OPTIMISTIC: save the deletion policy (FRONTEND_GUIDE §5.3 — all mutations optimistic).
+ *  The toggle reflects the new value instantly; on error we roll back the cache and toast.
+ *  Version-locked — the server 409s on a stale `version`; onSettled refetches the truth. */
 export function useUpdateChatDeletionPolicy() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
   const { toast } = useToast();
   return useMutation({
     mutationFn: (req: chat.UpdateDeletionPolicyRequest) => api.updateChatDeletionPolicy(req),
-    onSuccess: (res) => {
-      qc.setQueryData(queryKeys.chatDeletionPolicy(), res);
-      toast({ kind: "success", title: "メッセージ削除ポリシーを保存しました" });
+    onMutate: async (req) => {
+      await qc.cancelQueries({ queryKey: queryKeys.chatDeletionPolicy() });
+      const prev = qc.getQueryData<chat.DeletionPolicyResponse>(queryKeys.chatDeletionPolicy());
+      // Reflect the change immediately (keep the version; onSettled reconciles it).
+      qc.setQueryData(queryKeys.chatDeletionPolicy(), { policy: req.policy, version: req.version });
+      return { prev };
     },
-    onError: (err) => {
+    onError: (err, _req, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKeys.chatDeletionPolicy(), ctx.prev);
       const p = presentError(err);
       toast({ kind: "error", title: "保存に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+    onSuccess: (res) => {
+      qc.setQueryData(queryKeys.chatDeletionPolicy(), res);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.chatDeletionPolicy() });
     },
   });
 }

@@ -28,12 +28,12 @@ describe("app-level auth & routing", () => {
     expect(res.status).toBe(200);
   });
 
-  it("exposes the frozen 57-key permission catalog", async () => {
+  it("exposes the frozen 58-key permission catalog", async () => {
     const h = await makeHarness();
     const res = await h.app.request("/identity/permissions/catalog", asUser(h.memberId));
     expect(res.status).toBe(200);
     const body = (await res.json()) as identity.PermissionCatalogEntry[];
-    expect(body).toHaveLength(57);
+    expect(body).toHaveLength(58);
     // <domain>:<action>[:self] — action may contain an underscore (mail:read_all) — or
     // the per-app access tier app:<id>:view|edit (domain "app").
     expect(body.every((e) => /^[a-z]+:[a-z_]+(:self)?$/.test(e.key) || /^app:[a-z]+:(view|edit)$/.test(e.key))).toBe(true);
