@@ -223,7 +223,10 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
       { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, teamId: "team_hq", hasChildren: true },
       // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
       // contiguous; used to prove the team rail stays straight across an indented child.
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_1", depth: 1 },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_1", depth: 1, hasChildren: true },
+      // grandchild of tsk_1 (child of tsk_4) — a 3rd WBS level (depth 2). Proves recursive
+      // collapse: folding tsk_1 (or tsk_4) must hide tsk_8 even while tsk_4's own toggle is open.
+      { taskId: "tsk_8", title: "受付端末セットアップ", startsAt: "2026-07-26T00:00:00Z", endsAt: "2026-07-30T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_4", depth: 2 },
       // tsk_7: another 統括チーム task at TOP LEVEL — a different scope from tsk_4, same team,
       // so it is a valid cross-scope predecessor candidate (and, once linked to the folded
       // child tsk_4, its arrow mid-anchors on the collapsed tsk_1 parent bar).
