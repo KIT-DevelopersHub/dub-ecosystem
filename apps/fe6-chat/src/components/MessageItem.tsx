@@ -24,6 +24,7 @@ export interface MessageItemProps {
   canModerate: boolean;
   grouped?: boolean; // same author + short gap as the previous row → compact
   mentionsMe?: boolean; // highlight the whole row (yellow rail)
+  entering?: boolean; // A05: newly-arrived tail message → slide-up + fade-in once
   pinned?: boolean;
   resolveUser?: (id: common.UserId) => identity.UserSummary | undefined;
   onToggleReaction?: (id: common.MessageId, emoji: string) => void;
@@ -57,6 +58,7 @@ export function MessageItem({
   canModerate,
   grouped = false,
   mentionsMe = false,
+  entering = false,
   pinned = false,
   resolveUser,
   onToggleReaction,
@@ -90,6 +92,7 @@ export function MessageItem({
     styles.messageRow,
     grouped ? styles.grouped : "",
     mentionsMe ? styles.mentionsMe : "",
+    entering ? styles.entering : "",
     pinned ? styles.pinnedRow : "",
   ]
     .filter(Boolean)
