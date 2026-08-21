@@ -40,11 +40,18 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
+      - name: Disable NTFS path protection
+        # docs/ contains a legacy path with a trailing-space directory name that
+        # is illegal on NTFS. git's core.protectNTFS (on by default on Windows)
+        # rejects that entry while populating the index — so even a sparse
+        # checkout of just apps/de1-desktop fails at `git checkout` (exit 128)
+        # before it can skip the path. Turning protectNTFS off lets the index
+        # populate; the offending path stays OUTSIDE the sparse cone, so it is
+        # never written to the working tree and never hits the filesystem limit.
+        run: git config --global core.protectNTFS false
       - name: Checkout (desktop app only)
-        # Sparse-checkout of just the Flutter app. The full repo cannot be
-        # checked out on Windows: docs/ contains a path with a trailing-space
-        # directory name that is illegal on NTFS (git exit 128). The app is
-        # self-contained (no monorepo path deps), so this is all we need.
+        # Sparse-checkout of just the Flutter app. The app is self-contained
+        # (no monorepo path deps), so this is all we need.
         uses: actions/checkout@v4
         with:
           sparse-checkout: apps/de1-desktop
