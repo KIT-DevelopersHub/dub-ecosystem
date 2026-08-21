@@ -42,6 +42,10 @@ binding = "SVC_EVENT"
 service = "dub-event-service"     # GET /events/:id (create-time event validation)
 
 [[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"    # GET /members/people/by-identity/:id (user→teamIds, 送る・受け取る)
+
+[[services]]
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 

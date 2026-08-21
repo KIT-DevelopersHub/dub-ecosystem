@@ -15,3 +15,4 @@ change code. Points that could not be asserted against the current code are mark
 | [0005](0005-single-d1-core-logical-namespace-partitioning.md) | **Single D1 (`dub-core`)** with 16 logical namespaces (prefix + lint enforced) | Accepted |
 | [0006](0006-desktop-flutter-client.md) | Desktop client — **Flutter** (macOS + Windows) over the shared gateway | Proposed |
 | [0007](0007-cross-scope-task-dependencies-within-team.md) | Task dependencies span **any WBS scope within a team**; **cross-team rejected** (backend门番 + fe4 picker, single reason constant) | Accepted |
+| [0008](0008-cross-team-task-requests-not-dependencies.md) | Cross-team task links are **request → approval → cross-link** (送る・受け取る), never a dependency arrow | Accepted |

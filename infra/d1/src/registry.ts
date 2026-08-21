@@ -20,7 +20,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
     tables: ["identity_orgs", "identity_users", "identity_roles", "identity_role_permissions", "identity_role_assignments"],
   },
   { ns: "event", ownerUnit: "event-service#4", tables: ["event_events", "event_actions"] },
-  { ns: "task", ownerUnit: "task-service#5", tables: ["task_tasks", "task_dependencies", "task_idempotency", "task_attachments"] },
+  { ns: "task", ownerUnit: "task-service#5", tables: ["task_tasks", "task_dependencies", "task_idempotency", "task_attachments", "task_requests", "task_cross_links"] },
   { ns: "gantt", ownerUnit: "gantt-service#6", tables: ["gantt_view_states"] },
   {
     ns: "notif",

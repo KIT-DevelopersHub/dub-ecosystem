@@ -50,6 +50,7 @@ export function fakeAuthClient(opts: { allow: boolean }): AuthClient {
 export function fakeUpstream(init: {
   tasks?: task.Task[];
   dependencies?: task.TaskDependency[];
+  crossLinks?: task.TaskCrossLink[];
   eventExists?: boolean;
 }): UpstreamPort & { calls: { listTasks: number; updateTaskDates: number } } {
   const state = { calls: { listTasks: 0, updateTaskDates: 0 } };
@@ -62,6 +63,9 @@ export function fakeUpstream(init: {
     },
     async listDependencies() {
       return init.dependencies ?? [];
+    },
+    async listCrossLinks() {
+      return init.crossLinks ?? [];
     },
     async eventExists() {
       return init.eventExists ?? true;

@@ -8,7 +8,7 @@
 // spec are ALSO reconciled against (see @dub/e2e-smoke wire-params.test.ts). If someone
 // reintroduces `query: { event: eventId }`, this suite turns red — unmergeable.
 import { describe, it, expect } from "vitest";
-import { gantt } from "@dub/types";
+import { gantt, task } from "@dub/types";
 import type { ApiClient, RequestInput } from "../src/contracts/spa-shell";
 import * as api from "../src/api/endpoints";
 
@@ -55,5 +55,50 @@ describe("gantt endpoints conform to the @dub/types wire contract (query keys)",
     const { client, calls } = spyClient();
     void api.getGanttFresh(client, EVENT_ID);
     expect(Object.keys(calls[0]!.query ?? {})).toEqual([...gantt.GANTT_WIRE.getGantt.query]);
+  });
+});
+
+// Same guard for the 送る・受け取る (send/receive) endpoints against task.TASK_REQUEST_WIRE.
+describe("send/receive endpoints conform to the task.TASK_REQUEST_WIRE contract", () => {
+  const W = task.TASK_REQUEST_WIRE;
+
+  it("listTaskCrossLinks: exact query key = eventId", () => {
+    const { client, calls } = spyClient();
+    void api.listTaskCrossLinks(client, EVENT_ID);
+    const req = calls[0]!;
+    expect(req.method).toBe(W.listTaskCrossLinks.method);
+    expect(req.path.endsWith(W.listTaskCrossLinks.path)).toBe(true);
+    expect(Object.keys(req.query ?? {})).toEqual([...W.listTaskCrossLinks.query]);
+    expect((req.query ?? {}).eventId).toBe(EVENT_ID);
+  });
+
+  it("listTaskRequests: every emitted query key is from the wire set (no hand-renamed keys)", () => {
+    const { client, calls } = spyClient();
+    void api.listTaskRequests(client, { box: "incoming", state: ["pending"], eventId: EVENT_ID, cursor: "c1", limit: 20 });
+    const req = calls[0]!;
+    expect(req.method).toBe(W.listTaskRequests.method);
+    expect(req.path.endsWith(W.listTaskRequests.path)).toBe(true);
+    for (const k of Object.keys(req.query ?? {})) expect(W.listTaskRequests.query).toContain(k);
+    expect((req.query ?? {}).box).toBe("incoming");
+    expect((req.query ?? {}).state).toBe("pending"); // array serialized as csv under `state`
+    expect((req.query ?? {}).eventId).toBe(EVENT_ID);
+  });
+
+  it("issue/get/accept/decline/cancel: method + path honour the wire, no query", () => {
+    const cases: { name: keyof typeof W; run: (c: ApiClient) => void }[] = [
+      { name: "issueTaskRequest", run: (c) => void api.issueTaskRequest(c, { toUserId: "usr_x", title: "t" }) },
+      { name: "getTaskRequest", run: (c) => void api.getTaskRequest(c, "treq_1") },
+      { name: "acceptTaskRequest", run: (c) => void api.acceptTaskRequest(c, "treq_1", { version: 1 }) },
+      { name: "declineTaskRequest", run: (c) => void api.declineTaskRequest(c, "treq_1", { version: 1 }) },
+      { name: "cancelTaskRequest", run: (c) => void api.cancelTaskRequest(c, "treq_1", { version: 1 }) },
+    ];
+    for (const { name, run } of cases) {
+      const { client, calls } = spyClient();
+      run(client);
+      const req = calls[0]!;
+      expect(req.method).toBe(W[name].method);
+      expect(req.path.endsWith(W[name].path.replace("{id}", "treq_1"))).toBe(true);
+      expect(Object.keys(req.query ?? {})).toEqual([]);
+    }
   });
 });
