@@ -5,7 +5,8 @@
 // bar and the axis. And any date edit must materialise BOTH edges so the saved task
 // carries an explicit window (bar == value with no re-derivation drift).
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { renderWithProviders as render } from "./helpers-providers";
 import type { task } from "@dub/types";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 
