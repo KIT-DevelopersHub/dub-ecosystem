@@ -22,7 +22,19 @@ export const useUnreadStore = create<UnreadStore>((set) => ({
   reset: (count) => set({ count: Math.max(0, count), initialized: true }),
 }));
 
-// Non-hook accessor for the nav badgeSource (FeatureModule.nav.badgeSource).
+// Non-hook accessor: a one-shot getState read. Handy for imperative call sites,
+// but it does NOT subscribe — a consumer that renders this value will not update
+// when the store changes. The nav/launcher badge must stay live, so it uses the
+// reactive hook below instead.
 export function getUnreadCount(): number {
   return useUnreadStore.getState().count;
+}
+
+// Reactive badge selector for the nav / 9-dot launcher tile (FeatureModule.nav.
+// badgeSource). Subscribes to the shared unread store so every consumer — the
+// header bell AND the launcher tile — re-renders together when the count changes
+// (A04: the launcher badge previously read getUnreadCount once and never updated).
+// Mirrors FE6's useChatUnreadTotal, the established badgeSource-as-hook pattern.
+export function useUnreadBadge(): number {
+  return useUnreadStore((s) => s.count);
 }

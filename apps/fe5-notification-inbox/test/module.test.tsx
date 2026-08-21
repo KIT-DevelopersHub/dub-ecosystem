@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import { notificationsModule } from "../src/module";
 import { useUnreadStore, getUnreadCount } from "../src/store/unread-store";
 import { PERM_INBOX, PERM_PREFS, PERM_BROADCAST_PUBLISH, ROUTE_INBOX, ROUTE_PREFERENCES, ROUTE_MANAGE } from "../src/lib/routes";
@@ -32,7 +33,19 @@ describe("notificationsModule (FeatureModule contract)", () => {
 
   it("nav badgeSource reads the shared unread store (single source of truth)", () => {
     useUnreadStore.setState({ count: 5, initialized: true });
-    expect(notificationsModule.nav[0]!.badgeSource!()).toBe(5);
     expect(getUnreadCount()).toBe(5);
+    // badgeSource is a subscribing hook, so it must be read inside a render.
+    const { result } = renderHook(() => notificationsModule.nav[0]!.badgeSource!());
+    expect(result.current).toBe(5);
+  });
+
+  it("nav badgeSource is reactive: re-renders when the shared store changes (A04)", () => {
+    useUnreadStore.setState({ count: 1, initialized: true });
+    const { result } = renderHook(() => notificationsModule.nav[0]!.badgeSource!());
+    expect(result.current).toBe(1);
+    // A store update (e.g. the demo's 30s unread bump) must flow to the launcher badge,
+    // exactly like the header bell — not stay frozen at the mount-time value.
+    act(() => useUnreadStore.getState().setCount(4));
+    expect(result.current).toBe(4);
   });
 });

@@ -19,7 +19,7 @@ export { useAdminNotifications, PENDING_BROADCAST_ID } from "./hooks/useAdminNot
 export type { UseAdminNotificationsResult } from "./hooks/useAdminNotifications";
 export { usePreferences } from "./hooks/usePreferences";
 export type { UsePreferencesResult } from "./hooks/usePreferences";
-export { useUnreadStore, getUnreadCount } from "./store/unread-store";
+export { useUnreadStore, getUnreadCount, useUnreadBadge } from "./store/unread-store";
 
 // ---- Components ----
 export { NotificationInboxPage } from "./components/NotificationInboxPage";

@@ -12,7 +12,7 @@ import {
   ROUTE_PREFERENCES,
   ROUTE_MANAGE,
 } from "./lib/routes";
-import { getUnreadCount } from "./store/unread-store";
+import { useUnreadBadge } from "./store/unread-store";
 import NotificationBell from "./components/NotificationBell";
 
 export const notificationsModule: FeatureModule = {
@@ -57,8 +57,10 @@ export const notificationsModule: FeatureModule = {
       icon: "bell",
       // events(10) < tasks(20) < notifications(30) < chat(40) < admin(50).
       order: 30,
-      // Single source of truth: the shell reads this, never polls itself.
-      badgeSource: getUnreadCount,
+      // Single source of truth: the shell reads this, never polls itself. A
+      // subscribing hook (not a one-shot read) so the 9-dot launcher tile badge
+      // re-renders with the bell whenever the shared unread count changes (A04).
+      badgeSource: useUnreadBadge,
     },
   ],
   headerWidget: NotificationBell as ComponentType,
