@@ -263,6 +263,45 @@ components:
           type:
             - string
             - 'null'
+        crossTeamRole:
+          description: >-
+            Cross-team badge role (送る・受け取る, ADR-0007). Additive/optional;
+            absent/null ⇒ no cross-team link. NOT an arrow — projected from
+            task_cross_links, never entering CPM.
+          oneOf:
+            - $ref: '#/components/schemas/TaskCrossRole'
+            - type: 'null'
+    TaskCrossRole:
+      type: string
+      enum:
+        - requested
+        - accepted
+    TaskCrossLink:
+      type: object
+      required:
+        - id
+        - requestId
+        - requesterTaskId
+        - requesteeTaskId
+        - createdAt
+      properties:
+        id:
+          type: string
+        requestId:
+          type: string
+        requesterTaskId:
+          type: string
+          description: お願いした側 (role=requested).
+        requesteeTaskId:
+          type: string
+          description: 受け負った側 (role=accepted).
+        eventId:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
     GanttDependencyLine:
       type: object
       required:
@@ -301,6 +340,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GanttDependencyLine'
+        crossLinks:
+          description: >-
+            Cross-team links (送る・受け取る). A SEPARATE channel from `dependencies`
+            so the gantt never draws them as arrows. Additive/optional.
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskCrossLink'
     GanttViewState:
       type: object
       required:

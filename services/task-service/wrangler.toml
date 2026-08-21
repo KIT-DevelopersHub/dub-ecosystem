@@ -57,6 +57,10 @@ service = "identity-roster"
 binding = "SVC_EVENT"
 service = "event-service"
 
+[[services]]
+binding = "SVC_MEMBER"
+service = "member-service"        # GET /members/people/by-identity/:id (user→teamIds, 送る・受け取る)
+
 # --- cron: due-soon scan (task.due_soon, 24h window) ---
 [triggers]
 crons = ["*/15 * * * *"]

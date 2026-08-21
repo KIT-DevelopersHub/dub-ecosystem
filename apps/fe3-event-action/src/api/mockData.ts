@@ -15,6 +15,12 @@ import type {
 } from "./actionContracts";
 import { EventErrorCodes } from "../lib/errorMap";
 import { nextSortOrder } from "../lib/sortOrder";
+import {
+  emptyEventDetails,
+  EMPTY_EVENT_DETAILS_DATA,
+  type EventDetails,
+  type SaveEventDetailsRequest,
+} from "./detailsContracts";
 
 let seq = 0;
 function id(prefix: string): string {
@@ -55,6 +61,35 @@ export interface MockSeed {
   orgId?: common.OrgId;
   events?: number;
   actionsPerEvent?: number;
+}
+
+// ---- event-details persistence (localStorage so the dev harness survives reload) ----
+const DETAILS_LS_PREFIX = "fe3-mock-details:";
+
+function loadDetails(eventId: string): EventDetails {
+  if (typeof localStorage === "undefined") return emptyEventDetails(eventId);
+  try {
+    const raw = localStorage.getItem(DETAILS_LS_PREFIX + eventId);
+    if (!raw) return emptyEventDetails(eventId);
+    const parsed = JSON.parse(raw) as EventDetails;
+    return {
+      eventId,
+      version: typeof parsed.version === "number" ? parsed.version : 0,
+      updatedAt: parsed.updatedAt ?? null,
+      data: { ...EMPTY_EVENT_DETAILS_DATA, ...parsed.data },
+    };
+  } catch {
+    return emptyEventDetails(eventId);
+  }
+}
+
+function storeDetails(d: EventDetails): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(DETAILS_LS_PREFIX + d.eventId, JSON.stringify(d));
+  } catch {
+    /* quota / private mode — non-fatal for the demo */
+  }
 }
 
 export function createStore(seed: MockSeed = {}): Store {
@@ -212,6 +247,30 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
       await delay();
       const e = getEventOr404(eid);
       store.events.set(eid, { ...e, archivedAt: now(), updatedAt: now(), version: e.version + 1 });
+    },
+
+    async getEventDetails(eid: common.EventId): Promise<EventDetails> {
+      await delay();
+      getEventOr404(eid);
+      return loadDetails(eid);
+    },
+
+    async saveEventDetails(eid: common.EventId, req: SaveEventDetailsRequest): Promise<EventDetails> {
+      await delay();
+      const e = getEventOr404(eid);
+      if (e.archivedAt !== null) {
+        throw new DubError(EventErrorCodes.ARCHIVED_IMMUTABLE, "Event is archived (read-only)", { status: 409 });
+      }
+      const current = loadDetails(eid);
+      assertVersion(current.version, req.version, EventErrorCodes.VERSION_CONFLICT);
+      const next: EventDetails = {
+        eventId: eid,
+        data: { ...EMPTY_EVENT_DETAILS_DATA, ...req.data },
+        version: current.version + 1,
+        updatedAt: now(),
+      };
+      storeDetails(next);
+      return next;
     },
 
     async listActions(eid: common.EventId, query?: ListActionsQuery): Promise<ListActionsResponse> {

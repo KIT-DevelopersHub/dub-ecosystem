@@ -10,6 +10,9 @@ export interface UpstreamPort {
   listTasks(ctx: RequestContext, eventId: common.EventId): Promise<task.Task[]>;
   /** Dependency edges for an event (task-service is sole owner). */
   listDependencies(ctx: RequestContext, eventId: common.EventId): Promise<task.TaskDependency[]>;
+  /** Arrow-less cross-team links for an event (送る・受け取る). NOT dependencies — used
+   *  only to project a role badge onto rows; never drawn as an arrow / fed to CPM. */
+  listCrossLinks(ctx: RequestContext, eventId: common.EventId): Promise<task.TaskCrossLink[]>;
   /** Existence / visibility check (404 + org-boundary transparency). */
   eventExists(ctx: RequestContext, eventId: common.EventId): Promise<boolean>;
   /** Persist a row's window by writing the underlying task's startAt/dueAt (PATCH

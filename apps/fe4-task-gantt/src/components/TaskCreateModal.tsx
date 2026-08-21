@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
-import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
@@ -27,8 +27,8 @@ export interface TaskCreateModalProps {
   teams: readonly team.Team[];
   /** existing tasks in the event, offered as WBS parents (親タスク). */
   parentOptions: readonly { id: common.TaskId; title: string }[];
-  /** every task in the event with its direct parent — predecessors are scoped to
-   *  the chosen parent's siblings (判断10: 同一直接親のみ依存可). */
+  /** every task in the event with its team — predecessors are scoped to the chosen
+   *  team (ADR-0007: 同一チーム内なら別スコープ/別階層も依存可・別チームは不可). */
   scopeTasks: readonly ScopeTask[];
   /** Resolves `false` when the task was NOT created (keep the modal open so the
    *  user can fix + retry); `true`/void on success (modal closes). */
@@ -57,18 +57,28 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   const [deps, setDeps] = useState<common.TaskId[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // Predecessors are scoped to the chosen parent's siblings (判断10). Recomputes
-  // whenever the parent changes so the picker only offers same-scope tasks.
-  const depOptions = useMemo(() => dependencyScopeOptions(scopeTasks, parentId), [scopeTasks, parentId]);
+  // Predecessors are scoped to the chosen TEAM (ADR-0007): same-team tasks across any
+  // hierarchy level are offered; other teams are excluded (their work goes through the
+  // request/approval flow). Recomputes whenever the team changes.
+  const depOptions = useMemo(() => dependencyScopeOptions(scopeTasks, teamId), [scopeTasks, teamId]);
+
+  // 親子は同一チーム: 親を選んだ子タスクは親のチームに固定する。チーム欄は親のチームで
+  // プリフィルし、親がいる間は変更不可（disabled）にして、親子でチームが食い違う状態を
+  // 作らせない（サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保）。親なし＝自由。
+  const teamLockedToParent = parentId != null;
 
   // seed the due date + parent + predecessors when (re)opened (timeline cell /
-  // "ここから子タスクを作成" preset the parent, etc.).
+  // "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
+  // チームも親のチームで固定する。
   useEffect(() => {
     if (open) {
       setDue(initialDue ?? null);
-      setParentId(initialParentId ?? null);
+      const nextParent = initialParentId ?? null;
+      setParentId(nextParent);
+      if (nextParent) setTeamId(teamOf(scopeTasks, nextParent));
       setDeps(initialDependsOn ? [...initialDependsOn] : []);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialDue, initialParentId, initialDependsOn]);
 
   const reset = () => {
@@ -98,7 +108,8 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         status,
         priority,
         assigneeId,
-        teamId,
+        // 子タスク作成時はチームを親に固定（UIは disabled だが念のため送信値も親で確定）。
+        teamId: parentId ? teamOf(scopeTasks, parentId) : teamId,
         startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
         parentTaskId: parentId,
@@ -209,15 +220,26 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
             <Select
               id="fe4-create-team"
               value={teamId ?? ""}
-              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
+              disabled={teamLockedToParent}
+              onChange={(v) => {
+                const next = v ? (v as common.TeamId) : null;
+                setTeamId(next);
+                // dependencies are same-team only — drop predecessors on other teams.
+                setDeps((d) => pruneToScope(scopeTasks, next, d));
+              }}
               options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
               testId="fe4-create-team"
             />
+            {teamLockedToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-create-team-locked">
+                親タスクと同じチームになります（変更できません）
+              </p>
+            )}
           </div>
         )}
 
-        {/* 親タスク → then 先行タスク: choose the WBS parent first, then dependencies.
-            Predecessors are limited to the chosen parent's siblings (same scope). */}
+        {/* 親タスク → then 先行タスク: choose the WBS parent, then dependencies.
+            Predecessors are limited to the chosen TEAM (any hierarchy level, ADR-0007). */}
         <div className={styles.formFieldFull}>
           <label className={styles.formLabel} htmlFor="fe4-create-parent">
             親タスク（任意・未選択でトップレベル）
@@ -228,8 +250,13 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
             onChange={(v) => {
               const next = v ? (v as common.TaskId) : null;
               setParentId(next);
-              // dependencies must stay within the new scope — drop the out-of-scope ones.
-              setDeps((d) => pruneToScope(scopeTasks, next, d));
+              // 親子は同一チーム: 親を選んだら子のチームを親のチームへ合わせる。チームが変わりうる
+              // ので team-scoped(ADR-0007)の依存を新チームへ絞る。トップレベル(null)ならチーム維持。
+              if (next) {
+                const parentTeam = teamOf(scopeTasks, next);
+                setTeamId(parentTeam);
+                setDeps((d) => pruneToScope(scopeTasks, parentTeam, d));
+              }
             }}
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-create-parent"
@@ -237,7 +264,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         </div>
 
         <div className={styles.formFieldFull}>
-          <span className={styles.formLabel}>先行タスク（依存・同じ親のタスクのみ）</span>
+          <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク）</span>
           <PredecessorPicker options={depOptions} value={deps} onChange={setDeps} testId="fe4-create-deps" />
         </div>
       </div>

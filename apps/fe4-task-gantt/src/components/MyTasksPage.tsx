@@ -2,11 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, resolveUsers, createTaskAttachment } from "../api/endpoints";
+import { listTasks, createTask, resolveUsers, createTaskAttachment, issueTaskRequest, listTaskCrossLinks } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
   type MyTasksFilter,
-  type MyTasksLens,
   emptyMyTasksFilter,
   lensQueries,
   mergeTasks,
@@ -16,16 +15,11 @@ import {
 import { MyTasksFilterBar } from "./MyTasksFilterBar";
 import { MyTaskList } from "./MyTaskList";
 import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
+import { MyTaskRequests } from "./MyTaskRequests";
 import { TaskDetailDialog } from "./TaskDetailDialog";
 import styles from "../styles/app.module.css";
 
 const PAGE_SIZE = 25;
-
-const LENS_TABS: { key: MyTasksLens; label: string; hint: string }[] = [
-  { key: "assigned", label: "担当", hint: "自分に割り当てられたタスク" },
-  { key: "requested", label: "依頼", hint: "自分が発行したタスク" },
-  { key: "all", label: "すべて", hint: "自分に関わる全タスク" },
-];
 
 export interface MyTasksPageProps {
   currentUserId: common.UserId;
@@ -37,15 +31,14 @@ export interface MyTasksPageProps {
 
 /**
  * マイタスク hub — a clear, filterable list of the tasks a person is involved in,
- * built for 300 people. Two lenses (担当 assigned-to-me / 依頼 issued-by-me) plus
- * 「すべて」, unified into one list that shows 依頼→担当 (from→to). Create is
- * optimistic (the new task appears instantly, rolls back on error).
+ * built for 300 people. 自分に関わる全タスク（担当＋依頼）を1つのリストに統合して
+ * 依頼→担当 (from→to) を示す（担当/依頼の切替タブは廃止・常に「すべて」の単一ビュー）。
+ * Create is optimistic (the new task appears instantly, rolls back on error).
  */
 export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPageProps) {
   const client = useApiClient();
   const toast = useToast();
 
-  const [lens, setLens] = useState<MyTasksLens>("assigned");
   const [filter, setFilter] = useState<MyTasksFilter>(() => emptyMyTasksFilter());
   const [tasks, setTasks] = useState<task.Task[]>([]);
   const [users, setUsers] = useState<UserCache>(() => createUserCache(people));
@@ -53,6 +46,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<task.Task | null>(null);
+  // 送る・受け取る: taskId → cross-team role, for the「お願いした/受け負った」badge.
+  const [roleByTask, setRoleByTask] = useState<ReadonlyMap<common.TaskId, task.TaskCrossRole>>(new Map());
   const reqSeq = useRef(0);
 
   const teamNames = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
@@ -77,12 +72,12 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     [users, people, currentUserId],
   );
 
-  // fetch the lens' task set (one or two self-scoped queries, merged + deduped).
+  // fetch the full task set for「すべて」(assigned + issued, merged + deduped).
   const load = useCallback(async () => {
     const seq = ++reqSeq.current;
     setLoading(true);
     try {
-      const queries = lensQueries(currentUserId, lens);
+      const queries = lensQueries(currentUserId, "all");
       const pages = await Promise.all(queries.map((q) => listTasks(client, q)));
       if (seq !== reqSeq.current) return; // a newer load superseded this one
       const merged = mergeTasks(...pages.map((p) => p.items));
@@ -90,7 +85,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [client, currentUserId, lens]);
+  }, [client, currentUserId]);
 
   useEffect(() => {
     void load();
@@ -103,10 +98,37 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
 
+  // 送る・受け取る: fetch the cross-team links for the events these tasks belong to and
+  // project a taskId → role map (requester→お願いした / requestee→受け負った). Same data
+  // the ガント badges from — so both views stay in sync.
+  useEffect(() => {
+    let live = true;
+    const events = [...new Set(tasks.map((t) => t.eventId).filter((e): e is common.EventId => !!e))];
+    if (events.length === 0) {
+      setRoleByTask(new Map());
+      return;
+    }
+    void Promise.all(events.map((eventId) => listTaskCrossLinks(client, eventId).catch(() => ({ items: [] }))))
+      .then((results) => {
+        if (!live) return;
+        const map = new Map<common.TaskId, task.TaskCrossRole>();
+        for (const res of results) {
+          for (const link of res.items) {
+            map.set(link.requesterTaskId, "requested");
+            map.set(link.requesteeTaskId, "accepted");
+          }
+        }
+        setRoleByTask(map);
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, tasks]);
+
   // reset the reveal window when the visible result set changes shape.
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [lens, filter]);
+  }, [filter]);
 
   const visible = useMemo(() => {
     const filtered = applyMyTasksFilter(tasks, filter);
@@ -125,8 +147,59 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     }
   };
 
+  // Best-effort attachment persistence after a task exists (needs its real id). A failed
+  // attachment must never undo an already-created task.
+  const attachBestEffort = async (taskId: common.TaskId, attachments: MyTaskDraft["attachments"]) => {
+    if (attachments.files.length + attachments.urls.length === 0) return;
+    try {
+      for (const f of attachments.files) {
+        await createTaskAttachment(client, taskId, { kind: "file", name: f.name, url: f.url, mimeType: f.mimeType, sizeBytes: f.sizeBytes });
+      }
+      for (const u of attachments.urls) {
+        await createTaskAttachment(client, taskId, { kind: "url", name: u.name, url: u.url });
+      }
+    } catch {
+      toast.show({ kind: "error", title: "一部の添付を保存できませんでした", description: "タスクは作成済みです。詳細から再度添付できます。" });
+    }
+  };
+
+  // 送る (依頼): when a 依頼先 is chosen, the submit goes through POST /task-requests. The
+  // SERVER decides (never the client): 自分/自チーム → タスク即作成 (task), 他チーム →
+  // 承認待ちの依頼 (request). Cross-team work therefore can be requested from マイタスク
+  // even though ガント never lets you draw a cross-team arrow.
+  const onIssueRequest = async (draft: MyTaskDraft, toUserId: common.UserId) => {
+    try {
+      const res = await issueTaskRequest(client, {
+        toUserId,
+        title: draft.title,
+        ...(draft.description !== null ? { description: draft.description } : {}),
+        priority: draft.priority,
+        ...(draft.eventId ? { eventId: draft.eventId } : {}),
+        ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+        ...(draft.teamId ? { targetTeamId: draft.teamId } : {}),
+      });
+      if (res.kind === "task") {
+        // self / same team → materialised now. Surface it + best-effort attachments.
+        await attachBestEffort(res.task.id, draft.attachments);
+        // 「すべて」ビューなので自分に関わるタスクは常に表示対象。
+        setTasks((prev) => [res.task, ...prev.filter((t) => t.id !== res.task.id)]);
+        toast.show({ kind: "success", title: "タスクを作成しました" });
+      } else {
+        // other team → pending request; it appears under 送った依頼 (承認待ち).
+        const toName = users.get(toUserId)?.displayName ?? "相手";
+        toast.show({ kind: "success", title: "依頼を送信しました", description: `${toName} の承認を待っています。` });
+      }
+    } catch (e) {
+      toast.show({ kind: "error", title: "依頼に失敗しました", description: "もう一度お試しください。" });
+      throw e;
+    }
+  };
+
   const onCreate = async (draft: MyTaskDraft) => {
-    // optimistic: show the new task immediately with a temporary id.
+    // A 依頼先 (assignee) → route through the request flow (server branches self/team/other).
+    if (draft.assigneeId) return onIssueRequest(draft, draft.assigneeId);
+
+    // No assignee → a personal/team task: direct optimistic create with a temporary id.
     const tempId = `task_temp_${Date.now()}` as common.TaskId;
     const now = new Date().toISOString();
     const optimistic: task.Task = {
@@ -146,9 +219,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       updatedAt: now,
       version: 1,
     };
-    // only surface it in the current lens if it belongs there.
-    const belongs = lens === "all" || lens === "requested" || (lens === "assigned" && draft.assigneeId === currentUserId);
-    if (belongs) setTasks((prev) => [optimistic, ...prev]);
+    // 「すべて」ビューなので自分が作るタスクは常に表示対象。
+    setTasks((prev) => [optimistic, ...prev]);
     try {
       const created = await createTask(client, {
         ...(draft.eventId ? { eventId: draft.eventId } : {}),
@@ -159,40 +231,13 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
       });
-      // Persist attachments after the task exists (they need its real id). Best-effort:
-      // a failed attachment must not undo an already-created task.
-      const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
-      if (attachCount > 0) {
-        try {
-          for (const f of draft.attachments.files) {
-            await createTaskAttachment(client, created.id, {
-              kind: "file",
-              name: f.name,
-              url: f.url,
-              mimeType: f.mimeType,
-              sizeBytes: f.sizeBytes,
-            });
-          }
-          for (const u of draft.attachments.urls) {
-            await createTaskAttachment(client, created.id, { kind: "url", name: u.name, url: u.url });
-          }
-        } catch {
-          toast.show({
-            kind: "error",
-            title: "一部の添付を保存できませんでした",
-            description: "タスクは作成済みです。詳細から再度添付できます。",
-          });
-        }
-      }
-      // reconcile the temp row with the server task (or drop it if out of lens).
-      setTasks((prev) => {
-        const withoutTemp = prev.filter((t) => t.id !== tempId);
-        return belongs ? [created, ...withoutTemp] : withoutTemp;
-      });
-      toast.show({ kind: "success", title: "タスクを発行しました" });
+      await attachBestEffort(created.id, draft.attachments);
+      // reconcile the temp row with the server task.
+      setTasks((prev) => [created, ...prev.filter((t) => t.id !== tempId)]);
+      toast.show({ kind: "success", title: "タスクを作成しました" });
     } catch (e) {
       setTasks((prev) => prev.filter((t) => t.id !== tempId)); // rollback
-      toast.show({ kind: "error", title: "発行に失敗しました", description: "もう一度お試しください。" });
+      toast.show({ kind: "error", title: "作成に失敗しました", description: "もう一度お試しください。" });
       throw e;
     }
   };
@@ -205,25 +250,11 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           <p className={styles.mySubtitle}>自分に関わるタスクを、誰から誰へかが分かる一覧で管理できます。</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open">
-          ＋ タスクを発行
+          ＋ タスクを依頼
         </Button>
       </header>
 
-      <div className={styles.lensTabs} role="tablist" aria-label="表示するタスクの範囲">
-        {LENS_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={lens === t.key}
-            title={t.hint}
-            className={`${styles.lensTab} ${lens === t.key ? styles.lensTabActive : ""}`}
-            onClick={() => setLens(t.key)}
-            data-testid={`fe4-mytasks-lens-${t.key}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <MyTaskRequests seedUsers={effectivePeople} onChanged={load} />
 
       <MyTasksFilterBar
         value={filter}
@@ -239,6 +270,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         teamNames={teamNames}
         loading={loading}
         onSelect={setSelected}
+        roleByTask={roleByTask}
         visibleCount={visibleCount}
         onShowMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
       />
@@ -259,6 +291,8 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         teams={teams}
         onCreate={onCreate}
         requesterName={currentUserName}
+        title="タスクを依頼"
+        submitLabel="依頼する"
       />
     </section>
   );

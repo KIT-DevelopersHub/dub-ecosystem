@@ -421,6 +421,13 @@
   transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
+/* marquee multi-select: tint the left-pane row + a brand left edge so the list and
+   the bars agree on what's selected. */
+.tlRowSelected,
+.tlRowSelected:hover {
+  background: var(--dub-color-brand-100, var(--dub-color-surface-sunken));
+  box-shadow: inset 3px 0 0 0 var(--dub-color-brand-500);
+}
 @media (prefers-reduced-motion: reduce) {
   .tlRow { transition: none; }
 }
@@ -846,6 +853,58 @@
 
 .barDragging { cursor: grabbing; z-index: 6; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
 
+/* marquee multi-select highlight: a brand ring + faint wash so a selected bar reads
+   as "picked" over any status fill, without hiding its own colour. */
+.barSelected {
+  z-index: 5;
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dub-color-brand-500) 22%, transparent);
+}
+
+/* the marquee rectangle the user drags out over the empty canvas */
+.tlMarquee {
+  position: absolute;
+  z-index: 7;
+  border: 1px solid var(--dub-color-brand-500);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
+  border-radius: var(--dub-radius-sm, 4px);
+  pointer-events: none;
+}
+
+/* selection action bar (below the chart) — count + key hints + delete/clear */
+.tlSelectionBar {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3, 12px);
+  margin-top: var(--dub-space-2, 8px);
+  padding: var(--dub-space-2, 8px) var(--dub-space-3, 12px);
+  border: 1px solid var(--dub-color-brand-500);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-brand-100, var(--dub-color-surface-sunken));
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+}
+.tlSelectionCount { font-weight: var(--dub-font-weight-bold, 700); color: var(--dub-color-brand-700, var(--dub-color-brand-600)); }
+.tlSelectionHint { color: var(--dub-color-text-secondary); flex: 1 1 auto; }
+.tlSelectionDelete,
+.tlSelectionClear {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-radius: var(--dub-radius-sm, 6px);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  cursor: pointer;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+}
+.tlSelectionDelete {
+  border-color: var(--dub-color-danger-500, #d92d20);
+  color: var(--dub-color-danger-600, #d92d20);
+}
+.tlSelectionDelete:hover { background: var(--dub-color-danger-100, var(--dub-color-surface-sunken)); }
+.tlSelectionClear:hover { background: var(--dub-color-surface-sunken); }
+
 /* Parent (work-package) bars render like any other task bar — the hollow "bracket
    summary" style was reverted per feedback #97 (見づらい). Rollup still applies, so
    the bar spans its children; the parent/child vs dependency distinction is carried
@@ -981,6 +1040,7 @@
 }
 .req { color: var(--dub-color-danger-500); margin-left: 2px; }
 .fieldError { color: var(--dub-color-danger-500); font-size: var(--dub-font-size-xs, 0.78rem); }
+.fieldHint { margin: 4px 0 0; color: var(--dub-color-text-secondary); font-size: var(--dub-font-size-xs, 0.78rem); }
 .modalFooter { display: flex; justify-content: flex-end; gap: var(--dub-space-2); }
 
 .depPicker {
@@ -1312,35 +1372,6 @@
 }
 .mySubtitle { margin: 4px 0 0; font-size: var(--dub-font-size-sm, 0.85rem); color: var(--dub-color-text-secondary); }
 
-/* ---- lens tabs (担当 / 依頼 / すべて) ---- */
-.lensTabs {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--dub-color-surface-sunken);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-lg, 10px);
-  width: fit-content;
-}
-.lensTab {
-  min-width: 72px;
-  padding: 6px var(--dub-space-4);
-  border: none;
-  border-radius: var(--dub-radius-md, 8px);
-  background: transparent;
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm, 0.85rem);
-  font-weight: var(--dub-font-weight-medium, 600);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.lensTab:hover { color: var(--dub-color-text-primary); }
-.lensTabActive {
-  background: var(--dub-color-surface-base);
-  color: var(--dub-color-brand-700);
-  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
-}
-
 /* ---- filter bar (two rows: inputs, then chips) ---- */
 .myFilterBar {
   display: flex;
@@ -1375,6 +1406,167 @@
 }
 .colFromTo { min-width: 220px; }
 .cellTitle { font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); }
+.cellTitleRow { display: inline-flex; align-items: center; gap: var(--dub-space-2, 8px); flex-wrap: wrap; }
+/* ================= 送る・受け取る — chat-style request timeline =================
+   依頼を1本の時系列（LINE/TaskTalk風トーク）で表示。左右は「いまボールを持つ人」で決まる:
+   右=自分の番（承諾/却下できる） / 左=相手の番（承諾待ち）。 */
+.chatInbox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3, 12px);
+  padding: var(--dub-space-4, 16px);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg, 12px);
+  background: var(--dub-color-surface-sunken);
+  margin-bottom: var(--dub-space-2, 8px);
+}
+.chatHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dub-space-3, 12px);
+  flex-wrap: wrap;
+}
+.chatHeaderTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-sm, 0.9rem);
+  font-weight: 700;
+  color: var(--dub-color-text-primary);
+}
+.chatHeaderHint {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1, 4px);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-secondary);
+}
+.chatLegendSelf,
+.chatLegendOther {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-left: var(--dub-space-2, 8px);
+}
+.chatLegendSelf { background: var(--dub-color-brand-500, #2563eb); }
+.chatLegendOther { background: var(--dub-color-surface-base); border: 1px solid var(--dub-color-border-strong); }
+
+.chatTimeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4, 16px);
+}
+
+/* one message row: avatar + bubble, aligned by ball ownership. */
+.chatRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--dub-space-2, 8px);
+  max-width: 100%;
+}
+.chatRowLeft { justify-content: flex-start; flex-direction: row; }
+.chatRowRight { justify-content: flex-end; flex-direction: row-reverse; }
+
+.chatAvatar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  font-weight: 700;
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  user-select: none;
+}
+
+.chatBubbleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(78%, 460px);
+}
+.chatByline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dub-space-3, 12px);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-secondary);
+  padding: 0 var(--dub-space-1, 4px);
+}
+/* my turn (右): 名前グループを右・時刻を左に。名前+敬称は1まとまりなので語順は保たれる。 */
+.chatRowRight .chatByline { flex-direction: row-reverse; }
+.chatWho { display: inline-flex; align-items: baseline; gap: var(--dub-space-1, 4px); min-width: 0; }
+.chatName { font-weight: 700; color: var(--dub-color-text-primary); }
+.chatRel { color: var(--dub-color-text-secondary); }
+.chatTime { color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); white-space: nowrap; }
+
+.chatBubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2, 8px);
+  padding: var(--dub-space-3, 12px) var(--dub-space-4, 16px);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg, 14px);
+}
+/* other's turn (左) — neutral surface, corner notched toward the avatar (left). */
+.chatBubbleOther {
+  background: var(--dub-color-surface-base);
+  border-bottom-left-radius: var(--dub-radius-xs, 4px);
+}
+/* my turn (右) — brand-tinted, corner notched toward the avatar (right). */
+.chatBubbleSelf {
+  background: var(--dub-color-brand-50, rgba(37, 99, 235, 0.08));
+  border-color: var(--dub-color-brand-200, rgba(37, 99, 235, 0.28));
+  border-bottom-right-radius: var(--dub-radius-xs, 4px);
+}
+.chatTitle { margin: 0; font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); line-height: 1.45; }
+.chatDesc { margin: 0; font-size: var(--dub-font-size-xs, 0.8rem); color: var(--dub-color-text-secondary); line-height: 1.5; }
+.chatBadges {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2, 8px);
+  flex-wrap: wrap;
+}
+.chatStatus { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
+.chatActions {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2, 8px);
+  margin-top: 2px;
+}
+.chatRowRight .chatActions { justify-content: flex-end; }
+
+/* loading skeleton — a couple of alternating-side bubbles. */
+.chatSkeleton {
+  height: 68px;
+  width: min(70%, 380px);
+  border-radius: var(--dub-radius-lg, 14px);
+  background: linear-gradient(90deg, var(--dub-color-surface-sunken) 25%, var(--dub-color-surface-raised) 50%, var(--dub-color-surface-sunken) 75%);
+  background-size: 200% 100%;
+  animation: chatShimmer 1.2s ease-in-out infinite;
+}
+.chatSkeletonLeft { align-self: flex-start; }
+.chatSkeletonRight { align-self: flex-end; }
+@keyframes chatShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .chatSkeleton { animation: none; }
+}
+@media (max-width: 640px) {
+  .chatBubbleWrap { max-width: 82%; }
+  .chatActions { flex-wrap: wrap; }
+}
+
 .myRow { cursor: pointer; transition: background 0.1s ease; }
 .myRow:hover { background: var(--dub-color-surface-sunken); }
 .myRow:focus-visible { outline: 2px solid var(--dub-color-border-focus); outline-offset: -2px; }
@@ -1561,3 +1753,98 @@
 .attachViewLink:hover { background: var(--dub-color-surface-sunken, #f8f8fa); }
 .attachViewName { font-size: var(--dub-font-size-sm, 0.9rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachViewSize { font-size: var(--dub-font-size-xs, 0.75rem); color: var(--dub-color-text-secondary); }
+.attachViewImageLink { display: inline-block; min-width: 0; }
+
+/* ── Detail dialog: memo + attachment editor ─────────────────────────────── */
+.detailPanelBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  min-width: 0;
+}
+.attachEditControls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-3);
+  border: 1px dashed var(--dub-color-border-default, #e4e4e7);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-surface-sunken, #f8f8fa);
+}
+.attachEditItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  min-width: 0;
+}
+.attachEditItem > a { min-width: 0; flex: 1 1 auto; }
+
+/* ── Compact attachment field (shared: gantt 詳細 + マイタスク発行) ─────────────
+   📎 button主体・大きなドロップゾーンを廃止。添付済みは小さなチップの一覧で表示。 */
+.attachAddArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.attachAddBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+/* The real file input is opened by the 📎 button — kept off-screen, not display:none,
+   so it stays focus/label-reachable for assistive tech. */
+.attachHiddenInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.attachChipList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-2);
+}
+.attachChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  max-width: 100%;
+  padding: 3px var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default, #e4e4e7);
+  border-radius: var(--dub-radius-full, 999px);
+  background: var(--dub-color-surface-sunken, #f8f8fa);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  min-width: 0;
+}
+.attachChipIcon { flex: 0 0 auto; line-height: 1; }
+.attachChipName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dub-color-text-primary);
+}
+a.attachChipName { color: var(--dub-color-accent, #2246d6); text-decoration: none; }
+a.attachChipName:hover { text-decoration: underline; }
+.attachChipSize { flex: 0 0 auto; font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
+.attachChipRemove {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--dub-color-text-secondary);
+  padding: 0 2px;
+}
+.attachChipRemove:hover { color: var(--dub-color-danger-600, #b42318); }

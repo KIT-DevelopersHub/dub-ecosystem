@@ -3,6 +3,7 @@ import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
 import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
 import { DateField } from "./DateField";
+import { AttachmentField, type AttachmentChip } from "./AttachmentField";
 import styles from "../styles/app.module.css";
 
 /** A file the requester attached in the modal — read into a self-contained data:
@@ -60,6 +61,10 @@ export interface MyTaskCreateModalProps {
   onCreate: (draft: MyTaskDraft) => Promise<void>;
   /** preselect the requester's own name in the header hint. */
   requesterName?: string;
+  /** Modal heading (default「タスクを発行」). The send/receive flow passes「タスクを依頼」. */
+  title?: string;
+  /** Primary button label (default「発行する」). Send/receive passes「依頼する」. */
+  submitLabel?: string;
 }
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -73,7 +78,17 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
  */
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({
+  open,
+  onClose,
+  events,
+  people,
+  teams,
+  onCreate,
+  requesterName,
+  title: modalTitle = "タスクを発行",
+  submitLabel = "発行する",
+}: MyTaskCreateModalProps) {
   const [eventId, setEventId] = useState<common.EventId | "">(NO_EVENT);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
@@ -83,8 +98,6 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
   const [urls, setUrls] = useState<DraftUrlAttachment[]>([]);
-  const [urlInput, setUrlInput] = useState("");
-  const [urlName, setUrlName] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -98,13 +111,10 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setDescription("");
     setFiles([]);
     setUrls([]);
-    setUrlInput("");
-    setUrlName("");
     setAttachError(null);
   };
 
-  const onPickFiles = async (list: FileList | null) => {
-    if (!list) return;
+  const onPickFiles = async (list: FileList) => {
     setAttachError(null);
     const added: DraftFileAttachment[] = [];
     for (const file of Array.from(list)) {
@@ -118,17 +128,21 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     if (added.length > 0) setFiles((prev) => [...prev, ...added]);
   };
 
-  const addUrl = () => {
-    const url = urlInput.trim();
-    if (!url) return;
-    if (!/^https?:\/\//i.test(url)) {
-      setAttachError("URLは http(s):// から始めてください");
-      return;
-    }
+  const addUrl = (url: string, name: string) => {
     setAttachError(null);
-    setUrls((prev) => [...prev, { url, name: urlName.trim() || url }]);
-    setUrlInput("");
-    setUrlName("");
+    setUrls((prev) => [...prev, { url, name: name || url }]);
+  };
+
+  // Draft attachments as compact chips (no href — the task doesn't exist yet, so there's
+  // nothing to open/download until it's issued). Stable ids encode kind+index for removal.
+  const attachChips: AttachmentChip[] = [
+    ...files.map((f, i): AttachmentChip => ({ id: `f${i}`, kind: "file", name: f.name, sizeBytes: f.sizeBytes })),
+    ...urls.map((u, i): AttachmentChip => ({ id: `u${i}`, kind: "url", name: u.name })),
+  ];
+  const removeChip = (id: string) => {
+    const i = Number(id.slice(1));
+    if (id.startsWith("f")) setFiles((prev) => prev.filter((_, j) => j !== i));
+    else if (id.startsWith("u")) setUrls((prev) => prev.filter((_, j) => j !== i));
   };
 
   const close = () => {
@@ -165,7 +179,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     <Modal
       open={open}
       onClose={close}
-      title="タスクを発行"
+      title={modalTitle}
       testId="fe4-mytask-create-modal"
       footer={
         <div className={styles.modalFooter}>
@@ -173,7 +187,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             キャンセル
           </Button>
           <Button onClick={submit} loading={saving} disabled={!canSubmit} testId="fe4-mytask-create-submit">
-            発行する
+            {submitLabel}
           </Button>
         </div>
       }
@@ -261,9 +275,25 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           </div>
         )}
 
+        {/* 添付（ファイル・URL）: shared compact 📎/🔗 control — same look as the gantt
+            タスク詳細 (③=②で統一・共通コンポーネント化). */}
+        <div className={styles.formFieldFull}>
+          <AttachmentField
+            chips={attachChips}
+            canWrite
+            busy={saving}
+            error={attachError}
+            onPickFiles={(list) => void onPickFiles(list)}
+            onAddUrl={addUrl}
+            onRemove={removeChip}
+            testIdPrefix="fe4-mytask-attach"
+          />
+        </div>
+
+        {/* 詳細（任意・旧「内容」）: long-form note last, mirroring the タスク詳細 order. */}
         <div className={styles.formFieldFull}>
           <label className={styles.formLabel} htmlFor="fe4-mytask-desc">
-            内容（任意）
+            詳細（任意）
           </label>
           <Textarea
             id="fe4-mytask-desc"
@@ -273,77 +303,6 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             placeholder="依頼の詳細や補足を書けます"
             testId="fe4-mytask-create-desc"
           />
-        </div>
-
-        <div className={styles.formFieldFull}>
-          <label className={styles.formLabel}>添付（ファイル・URL）</label>
-          <div className={styles.attachRow}>
-            <input
-              type="file"
-              multiple
-              className={styles.attachFileInput}
-              onChange={(e) => {
-                void onPickFiles(e.target.files);
-                e.target.value = "";
-              }}
-              data-testid="fe4-mytask-create-file"
-              aria-label="ファイルを添付"
-            />
-          </div>
-          <div className={styles.attachUrlRow}>
-            <TextField
-              id="fe4-mytask-url-name"
-              value={urlName}
-              onChange={setUrlName}
-              placeholder="表示名（任意）"
-              testId="fe4-mytask-create-url-name"
-            />
-            <TextField
-              id="fe4-mytask-url"
-              value={urlInput}
-              onChange={setUrlInput}
-              placeholder="https://example.com/..."
-              testId="fe4-mytask-create-url"
-            />
-            <Button variant="ghost" onClick={addUrl} disabled={!urlInput.trim()} testId="fe4-mytask-create-url-add">
-              URLを追加
-            </Button>
-          </div>
-          {attachError && (
-            <p className={styles.attachError} data-testid="fe4-mytask-create-attach-error">
-              {attachError}
-            </p>
-          )}
-          {(files.length > 0 || urls.length > 0) && (
-            <ul className={styles.attachDraftList} data-testid="fe4-mytask-create-attach-list">
-              {files.map((f, i) => (
-                <li key={`f-${i}`} className={styles.attachDraftItem}>
-                  <span className={styles.attachDraftName}>📎 {f.name}</span>
-                  <button
-                    type="button"
-                    className={styles.attachDraftRemove}
-                    onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
-                    aria-label={`${f.name} を外す`}
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-              {urls.map((u, i) => (
-                <li key={`u-${i}`} className={styles.attachDraftItem}>
-                  <span className={styles.attachDraftName}>🔗 {u.name}</span>
-                  <button
-                    type="button"
-                    className={styles.attachDraftRemove}
-                    onClick={() => setUrls((prev) => prev.filter((_, j) => j !== i))}
-                    aria-label={`${u.name} を外す`}
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       </div>
     </Modal>

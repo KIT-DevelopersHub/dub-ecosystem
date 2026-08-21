@@ -33,6 +33,10 @@ export const ROUTES: readonly GatewayRoute[] = [
   { segment: "events", binding: "SVC_EVENT", auth: "required" },
   { segment: "actions", binding: "SVC_EVENT", auth: "required" },
   { segment: "tasks", binding: "SVC_TASK", auth: "required" },
+  // 送る・受け取る (ADR-0007): cross-team task requests live on their own top-level
+  // segment (/api/v1/task-requests/*) so the FE path stays simple; same task-service
+  // binding as /tasks. (/tasks/cross-links stays under the "tasks" segment above.)
+  { segment: "task-requests", binding: "SVC_TASK", auth: "required" },
   { segment: "gantt", binding: "SVC_GANTT", auth: "required" },
   {
     segment: "notifications",

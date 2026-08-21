@@ -17,9 +17,9 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
-import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
+import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
-import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
+import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
 import { PRIORITY_LABEL } from "../domain/task-form";
@@ -665,6 +665,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const onCreate = async (draft: TaskDraft) => {
     const linkPredecessorFor = createPredecessorFor;
+    // 親子は同一チーム: 子タスク作成時はチームを親のチームに強制する（作成モーダルのチーム欄も
+    // 親でロックするが、送信値もここで親に確定＝二重の担保）。親なし通常作成では draft の値。
+    const teamId: common.TeamId | null = draft.parentTaskId ? teamOf(scopeTasks, draft.parentTaskId) : draft.teamId;
     // Optimistic create: show a provisional task + its bar on the timeline the same
     // tick, then reconcile with the server row (rolled back + surfaced on failure).
     const tempId = provisionalTaskId();
@@ -676,7 +679,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         status: draft.status,
         priority: draft.priority,
         assigneeId: draft.assigneeId,
-        teamId: draft.teamId,
+        teamId,
         startAt: draft.startAt,
         dueAt: draft.dueAt,
         parentTaskId: draft.parentTaskId,
@@ -693,7 +696,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         title: draft.title,
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
-        ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(teamId ? { teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
         ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
@@ -908,6 +911,103 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     });
   };
 
+  // ---- marquee bulk operations (範囲選択 → 一括操作) ----
+
+  // Bulk delete a marquee selection (after the confirm dialog in GanttView). Mirrors
+  // onDeleteDetail per task: optimistic bar removal + store delete, then reconcile.
+  // Irreversible (no undo push) — the confirm dialog is the guard, same as #364.
+  const onBulkDelete = (ids: readonly common.TaskId[]) => {
+    if (ids.length === 0) return;
+    if (selected && ids.includes(selected)) setSelected(null);
+    for (const id of ids) gantt.removeRowOptimistic(id);
+    void Promise.all(ids.map((id) => store.removeTask(client, id))).then(async (results) => {
+      const okCount = results.filter(Boolean).length;
+      if (okCount > 0) feedback.success(`${okCount}件のタスクを削除しました`);
+      try {
+        await store.loadAll(client, query);
+        await gantt.refetchFresh();
+      } catch {
+        void gantt.refetchFresh(); // some delete failed (reason surfaced) — restore true bars
+      }
+    });
+  };
+
+  // Optimistically shift a SET of roots (each carries its subtree) by whole days, then
+  // persist + one refetch. Reads the LIVE cache so a deferred undo/redo (opposite shift)
+  // applies to the bar's CURRENT position — the same discipline as applyShiftRaw.
+  const applyBulkShiftRaw = (rootIds: readonly common.TaskId[], deltaDays: number): Promise<unknown> => {
+    const rows = gantt.currentRows();
+    if (rows.length === 0 || deltaDays === 0) return Promise.resolve();
+    const targetIds = new Set<common.TaskId>();
+    for (const root of rootIds) {
+      const ids: common.TaskId[] = [root];
+      for (let i = 0; i < ids.length; i++) {
+        for (const r of rows) if (r.parentTaskId === ids[i]) ids.push(r.taskId);
+      }
+      for (const id of ids) targetIds.add(id);
+    }
+    const shifts = [...targetIds]
+      .map((id) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r && !!r.startsAt && !!r.endsAt)
+      .map((r) => ({
+        id: r.taskId,
+        startsAt: new Date(Date.parse(r.startsAt!) + deltaDays * MS_PER_DAY).toISOString() as common.ISODateTime,
+        endsAt: new Date(Date.parse(r.endsAt!) + deltaDays * MS_PER_DAY).toISOString() as common.ISODateTime,
+      }));
+    if (shifts.length === 0) return Promise.resolve();
+    for (const s of shifts) gantt.setRowScheduleOptimistic(s.id, s.startsAt, s.endsAt);
+    return Promise.all(shifts.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
+      .then(() => gantt.refetchFresh())
+      .then(() => store.loadAll(client, query))
+      .catch((e) => {
+        feedback.failure(e, "予定の保存に失敗しました");
+        void gantt.refetchFresh();
+      });
+  };
+
+  // Bulk left/right move: shift the whole selection by ±deltaDays (arrow keys / group
+  // drag). Only the selection ROOTS move (a selected child inside a selected parent's
+  // subtree is carried, never shifted twice). Undo = the opposite shift.
+  const onBulkShiftDays = (ids: readonly common.TaskId[], deltaDays: number) => {
+    if (deltaDays === 0 || ids.length === 0) return;
+    const roots = selectionRoots(gantt.currentRows(), new Set(ids));
+    if (roots.length === 0) return;
+    void applyBulkShiftRaw(roots, deltaDays);
+    history.push({
+      label: "選択タスクの移動",
+      undo: async () => {
+        await applyBulkShiftRaw(roots, -deltaDays);
+      },
+      redo: async () => {
+        await applyBulkShiftRaw(roots, deltaDays);
+      },
+    });
+  };
+
+  // Bulk up/down reorder (手動 mode only): slide the selection one slot within each
+  // sibling group, persist the manual order, and record undo/redo. Reuses the same
+  // order machinery as the single-row drag reorder.
+  const onBulkMoveVertical = (ids: readonly common.TaskId[], dir: -1 | 1) => {
+    if (ids.length === 0) return;
+    const displayed = applyManualOrder(gantt.currentRows(), orderedTaskIds);
+    const nextOrder = moveSelectionVertical(displayed, new Set(ids), dir);
+    if (!nextOrder) return; // already at the edge / no-op
+    const prevOrder = displayed.map((r) => r.taskId);
+    void view
+      .saveOrder(nextOrder)
+      .then(() => feedback.success("並び順を更新しました"))
+      .catch((e) => feedback.failure(e, "並び順の保存に失敗しました"));
+    history.push({
+      label: "選択タスクの並び替え",
+      undo: async () => {
+        await applyOrderRaw(prevOrder);
+      },
+      redo: async () => {
+        await applyOrderRaw(nextOrder);
+      },
+    });
+  };
+
   return (
     <div className={styles.workspace} data-testid="fe4-workspace">
       <header className={styles.pageHeader}>
@@ -1039,6 +1139,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           teamLegend={teamLegend}
           numberById={numberById}
           {...(rowGroupById ? { rowGroupById } : {})}
+          onBulkDelete={caps.canDelete ? onBulkDelete : undefined}
+          onBulkShiftDays={caps.canWrite ? onBulkShiftDays : undefined}
+          onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
           canWrite={caps.canWrite}
         />
       )}

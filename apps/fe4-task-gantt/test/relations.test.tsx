@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import type { identity, task } from "@dub/types";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { renderWithProviders as render } from "./helpers-providers";
+import type { identity, task, team } from "@dub/types";
 import { TaskCreateModal, type TaskDraft } from "../src/components/TaskCreateModal";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
@@ -9,36 +10,40 @@ import { MockApiClient } from "../src/api/mock-client";
 
 beforeEach(() => localStorage.clear());
 
-// P(top) ┐ Q(top) ┐
-//   c1,c2┘   d1   ┘
+// Team A: P(top) ┐   Team B: Q(top) ┐
+//         c1,c2 ┘            d1      ┘
 const SCOPE: ScopeTask[] = [
-  { id: "P", title: "親P", parentTaskId: null },
-  { id: "Q", title: "親Q", parentTaskId: null },
-  { id: "c1", title: "子1", parentTaskId: "P" },
-  { id: "c2", title: "子2", parentTaskId: "P" },
-  { id: "d1", title: "子D", parentTaskId: "Q" },
+  { id: "P", title: "親P", parentTaskId: null, teamId: "A" },
+  { id: "Q", title: "親Q", parentTaskId: null, teamId: "B" },
+  { id: "c1", title: "子1", parentTaskId: "P", teamId: "A" },
+  { id: "c2", title: "子2", parentTaskId: "P", teamId: "A" },
+  { id: "d1", title: "子D", parentTaskId: "Q", teamId: "B" },
 ];
 const PARENT_OPTS = SCOPE.map((s) => ({ id: s.id, title: s.title }));
+const TEAMS: team.Team[] = [
+  { id: "A", key: "a", name: "チームA" },
+  { id: "B", key: "b", name: "チームB" },
+];
 
-describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + 判断10 scope)", () => {
-  it("selecting a parent scopes the predecessor options to that parent's children", () => {
+describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + ADR-0007 team scope)", () => {
+  it("selecting a team scopes the predecessor options to that team (across scopes)", () => {
     render(
       <TaskCreateModal
         open
         onClose={() => {}}
         users={[]}
-        teams={[]}
+        teams={TEAMS}
         parentOptions={PARENT_OPTS}
         scopeTasks={SCOPE}
         onCreate={async () => {}}
       />,
     );
-    // choose parent P
-    fireEvent.change(screen.getByTestId("fe4-create-parent"), { target: { value: "P" } });
+    // choose team A (the dependency boundary — parent no longer scopes deps)
+    fireEvent.change(screen.getByTestId("fe4-create-team"), { target: { value: "A" } });
     const depInput = screen.getByTestId("fe4-create-deps-input");
     fireEvent.focus(depInput);
     fireEvent.change(depInput, { target: { value: "子" } }); // matches 子1/子2/子D by title
-    // only P's children are offered; d1 (under Q) is out of scope
+    // team-A tasks across scopes are offered; d1 (team B) is excluded
     expect(screen.getByTestId("fe4-create-deps-opt-c1")).toBeInTheDocument();
     expect(screen.getByTestId("fe4-create-deps-opt-c2")).toBeInTheDocument();
     expect(screen.queryByTestId("fe4-create-deps-opt-d1")).toBeNull();
@@ -106,7 +111,7 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         onClose={() => {}}
         parentOptions={[{ id: "P", title: "親P" }, { id: "Q", title: "親Q" }]}
         parentTaskId={null}
-        scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null }, { id: "P", title: "親P", parentTaskId: null }]}
+        scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null, teamId: null }, { id: "P", title: "親P", parentTaskId: null, teamId: null }]}
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-detail-parent"), { target: { value: "P" } });
@@ -132,8 +137,8 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         parentTaskId={null}
         dependsOnIds={[]}
         scopeTasks={[
-          { id: "self", title: "対象タスク", parentTaskId: null },
-          { id: "sib", title: "兄弟タスク", parentTaskId: null },
+          { id: "self", title: "対象タスク", parentTaskId: null, teamId: null },
+          { id: "sib", title: "兄弟タスク", parentTaskId: null, teamId: null },
         ]}
       />,
     );

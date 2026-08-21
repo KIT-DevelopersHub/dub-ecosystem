@@ -70,7 +70,7 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
       const created = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
       expect(created).toBeTruthy();
     });
-    fireEvent.click(screen.getByTestId("fe4-mytasks-lens-requested"));
+    // 単一の「すべて」ビューなので、発行したタスクはタブ切替なしでそのまま一覧に出る。
     expect(await screen.findByText("登壇者へ最終案内メールを送る")).toBeInTheDocument();
   });
 

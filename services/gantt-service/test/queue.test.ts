@@ -57,4 +57,13 @@ describe("gantt-service queue consumer", () => {
     await consume(batch, {} as Env);
     expect(cache.purges).toEqual(["event_1"]);
   });
+
+  it("purges on send/receive: task.request.accepted + task.cross_link.created", async () => {
+    const cache = fakeCache();
+    const deps: AppDeps = { cache: () => cache, views: () => fakeViewRepo(), upstream: () => ({}) as never, authClient: () => ({}) as never };
+    const consume = buildQueueConsumer({} as Env, deps);
+    await consume(batchOf(createEvent("task.request.accepted", { requestId: "treq_1", createdTaskId: "task_x", eventId: "event_1" }, ctx)), {} as Env);
+    await consume(batchOf(createEvent("task.cross_link.created", { crossLinkId: "txl_1", requesterTaskId: "task_r", requesteeTaskId: "task_e", eventId: "event_1" }, ctx)), {} as Env);
+    expect(cache.purges).toEqual(["event_1", "event_1"]);
+  });
 });

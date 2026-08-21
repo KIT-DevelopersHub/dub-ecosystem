@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { renderWithProviders as render } from "./helpers-providers";
 import type { gantt } from "@dub/types";
 import { GanttView } from "../src/components/GanttView";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
@@ -135,9 +136,9 @@ describe("#39-3 parent detail shows the child count", () => {
         onDelete={() => {}}
         onClose={() => {}}
         scopeTasks={[
-          { id: "p", title: "設計フェーズ", parentTaskId: null },
-          { id: "c1", title: "子1", parentTaskId: "p" },
-          { id: "c2", title: "子2", parentTaskId: "p" },
+          { id: "p", title: "設計フェーズ", parentTaskId: null, teamId: null },
+          { id: "c1", title: "子1", parentTaskId: "p", teamId: null },
+          { id: "c2", title: "子2", parentTaskId: "p", teamId: null },
         ]}
       />,
     );
@@ -156,7 +157,7 @@ describe("#39-3 parent detail shows the child count", () => {
         onSave={() => {}}
         onDelete={() => {}}
         onClose={() => {}}
-        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null }]}
+        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null, teamId: null }]}
       />,
     );
     expect(screen.queryByTestId("fe4-detail-child-count")).toBeNull();
@@ -178,9 +179,9 @@ describe("delete is blocked when the task has children (no re-parenting)", () =>
         onDeleteBlocked={onDeleteBlocked}
         onClose={() => {}}
         scopeTasks={[
-          { id: "p", title: "親", parentTaskId: null },
-          { id: "c1", title: "子1", parentTaskId: "p" },
-          { id: "c2", title: "子2", parentTaskId: "p" },
+          { id: "p", title: "親", parentTaskId: null, teamId: null },
+          { id: "c1", title: "子1", parentTaskId: "p", teamId: null },
+          { id: "c2", title: "子2", parentTaskId: "p", teamId: null },
         ]}
       />,
     );
@@ -204,7 +205,7 @@ describe("delete is blocked when the task has children (no re-parenting)", () =>
         onSave={() => {}}
         onDelete={onDelete}
         onClose={() => {}}
-        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null }]}
+        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null, teamId: null }]}
       />,
     );
     fireEvent.click(screen.getByTestId("fe4-detail-delete"));
