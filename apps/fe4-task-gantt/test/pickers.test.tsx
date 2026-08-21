@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
+import { renderWithProviders } from "./helpers-providers";
 import type { task } from "@dub/types";
 import { PredecessorPicker } from "../src/components/PredecessorPicker";
 import { DateField } from "../src/components/DateField";
@@ -74,7 +75,7 @@ const mkTask = (id: string): task.Task => ({
 describe("TaskDetailPanel — create child task (feature #4)", () => {
   it("renders the child-create action and passes this task id as the parent", () => {
     const onCreateChild = vi.fn();
-    render(
+    renderWithProviders(
       <TaskDetailPanel
         task={mkTask("parent1")}
         users={[]}
