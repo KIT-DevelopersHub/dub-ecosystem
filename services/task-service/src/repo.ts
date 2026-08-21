@@ -264,6 +264,10 @@ export interface TaskRepo {
    *  delete: a task with live children must not be archived (else the children are
    *  orphaned and the read model silently re-parents them). */
   countLiveChildren(parentId: string): Promise<number>;
+  /** Distinct owning-team ids of the LIVE (non-archived) direct children of `parentId`
+   *  (`null` = a child with no team). Guards a parent's team change: a parent must not be
+   *  moved to a team that differs from any of its children (親子は同一チーム). */
+  liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>>;
   /** Restore (un-archive) a soft-deleted task — the inverse of `archive`, used by
    *  the gantt "削除を元に戻す" (undo). False if not found / already live. Everything
    *  else (parent_id, assignee, dependency rows) is untouched by archive, so a plain
@@ -457,6 +461,14 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         parentId,
       );
       return row?.n ?? 0;
+    },
+
+    async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+      const rows = await db.all<{ team_id: string | null }>(
+        `SELECT DISTINCT team_id FROM task_tasks WHERE parent_id = ? AND archived_at IS NULL`,
+        parentId,
+      );
+      return rows.map((r) => (r.team_id ?? null) as common.TeamId | null);
     },
 
     async restore(id: string, now: string): Promise<boolean> {

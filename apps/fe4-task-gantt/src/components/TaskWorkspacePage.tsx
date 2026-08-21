@@ -17,7 +17,7 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
-import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
+import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
@@ -398,6 +398,13 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
     () => (selected ? directParentOf(scopeTasks, selected) : null),
     [selected, scopeTasks],
   );
+  // 子タスク作成時に固定する親のチーム。「＋子タスクを作成」で親をプリセットして開いたとき、
+  // 子のチームは必ずこの親のチームになる（親が未割当なら null=未割当）。親子でチームが
+  // 食い違う状態を作らせないための固定先で、作成モーダルのチーム欄をこの値でロックする。
+  const createParentTeamId = useMemo(
+    () => (createPresetParent ? teamOf(scopeTasks, createPresetParent) : null),
+    [createPresetParent, scopeTasks],
+  );
   // parent options for the detail panel exclude the task itself.
   const detailParentOptions = useMemo(
     () => (selected ? allTaskOptions.filter((o) => o.id !== selected) : allTaskOptions),
@@ -746,6 +753,9 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
     const linkPredecessorFor = createPredecessorFor;
     const parentTaskId = createPresetParent;
     const presetDeps = createPresetDeps;
+    // 親子でチームが食い違わないよう、子タスク作成時はチームを親のチームに強制する（モーダルの
+    // チーム欄は disabled だが、送信値もここで親に確定＝二重の担保）。親なし通常作成では draft の値。
+    const teamId: common.TeamId | null = parentTaskId ? teamOf(scopeTasks, parentTaskId) : draft.teamId;
     const provisionalPriority: task.TaskPriority = draft.priority ?? "medium";
     // Optimistic create: show a provisional task + its bar on the timeline the same
     // tick, then reconcile with the server row (rolled back + surfaced on failure).
@@ -758,7 +768,7 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
         status: "todo",
         priority: provisionalPriority,
         assigneeId: draft.assigneeId,
-        teamId: draft.teamId,
+        teamId,
         startAt: draft.startAt,
         dueAt: draft.dueAt,
         parentTaskId,
@@ -778,7 +788,7 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
         // and ガント read the resulting task, keeping the two views consistent).
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
-        ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(teamId ? { teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
         ...(parentTaskId ? { parentTaskId } : {}),
@@ -1314,6 +1324,8 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
         {...(requesterName ? { requesterName } : {})}
         defaultEventId={eventId}
         defaultTeamId={issueDefaultTeamId}
+        lockTeamToParent={createPresetParent != null}
+        parentTeamId={createParentTeamId}
         lockEventToDefault
         initialDue={createPresetDue}
       />

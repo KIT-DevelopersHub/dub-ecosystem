@@ -79,6 +79,13 @@ export interface MyTaskCreateModalProps {
    *  the modal opens it seeds チーム to this (when it is one of `teams`); the requester can
    *  still change it. Null / unknown ⇒ start 未割当. */
   defaultTeamId?: common.TeamId | null;
+  /** 親から「子タスクを作成」で開いたとき true — 子のチームは親のチームに固定する。親子で
+   *  チームが食い違う状態を作れないよう、チーム欄を親の値でプリフィルし変更不可（disabled）に
+   *  する。`parentTeamId` が固定先（親のチーム。親が未割当なら null=未割当で固定）。既存の
+   *  クロスチーム依存制約（依存は同一チームのみ・ADR-0006/0007）と整合。 */
+  lockTeamToParent?: boolean;
+  /** 親タスクのチーム — `lockTeamToParent` が true のときの固定先。 */
+  parentTeamId?: common.TeamId | null;
   /** ③ ガントからの発行では 対象イベント を選ばせない — ヘッダーで選択中のイベント
    *  (defaultEventId) で確定し、他イベント混在を防ぐ。true のとき「対象イベント」欄を
    *  出さず、作成時は defaultEventId を裏で自動セットする（ユーザーには見せない）。
@@ -108,15 +115,19 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 const NO_PRIORITY = ""; // sentinel for the "未設定" priority Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, lockEventToDefault = false, initialDue, title: modalTitle = "タスクを発行", submitLabel = "発行する" }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, lockTeamToParent = false, parentTeamId = null, lockEventToDefault = false, initialDue, title: modalTitle = "タスクを発行", submitLabel = "発行する" }: MyTaskCreateModalProps) {
   // The header-selected event is the initial 対象イベント, but only when it is a real
   // option in `events` (guards against a stale/foreign id) — otherwise start unlinked.
   const seedEventId = (): common.EventId | "" =>
     defaultEventId && events.some((e) => e.id === defaultEventId) ? defaultEventId : NO_EVENT;
   // The requester's own team is the initial チーム, but only when it is a real option in
-  // `teams` (guards against a stale/foreign id) — otherwise start 未割当.
-  const seedTeamId = (): common.TeamId | null =>
-    defaultTeamId && teams.some((t) => t.id === defaultTeamId) ? defaultTeamId : null;
+  // `teams` (guards against a stale/foreign id) — otherwise start 未割当. When creating a
+  // 子タスク (lockTeamToParent) the seed is the PARENT's team instead, and the field is
+  // locked below so 親子でチームが食い違う状態を作れない (親が未割当なら null=未割当で固定)。
+  const seedTeamId = (): common.TeamId | null => {
+    if (lockTeamToParent) return parentTeamId ?? null;
+    return defaultTeamId && teams.some((t) => t.id === defaultTeamId) ? defaultTeamId : null;
+  };
   // 開始日/終了日 の初期値。プレーンな 発行/新規 では両方とも「今日」。ガントのプリセット
   // (親/先行/セル由来の initialDue) では 終了日=そのプリセット・開始日=min(今日, プリセット)
   // として範囲が逆転しないようにする。
@@ -152,7 +163,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
       setEndDate(seedEnd());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultEventId, defaultTeamId, teams, initialDue]);
+  }, [open, defaultEventId, defaultTeamId, teams, initialDue, lockTeamToParent, parentTeamId]);
 
   const reset = () => {
     setEventId(seedEventId());
@@ -223,7 +234,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         description: description.trim() ? description.trim() : null,
         priority: priority === NO_PRIORITY ? null : (priority as task.TaskPriority),
         assigneeId,
-        teamId,
+        // 子タスク作成時はチームを親に固定（UIは disabled だが念のため送信値も親で確定）。
+        teamId: lockTeamToParent ? (parentTeamId ?? null) : teamId,
         startAt: isoFromDateInput(startDate),
         dueAt: isoFromDateInput(endDate),
         attachments: { files, urls },
@@ -354,10 +366,16 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             <Select
               id="fe4-mytask-team"
               value={teamId ?? ""}
+              disabled={lockTeamToParent}
               onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
               options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
               testId="fe4-mytask-create-team"
             />
+            {lockTeamToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-mytask-create-team-locked">
+                親タスクと同じチームになります（変更できません）
+              </p>
+            )}
           </div>
         )}
 

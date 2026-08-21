@@ -16,6 +16,7 @@ export const TaskErrorCodes = {
   REQUEST_FORBIDDEN_ROLE: "TASK_REQUEST_FORBIDDEN_ROLE", // 403 not the receiver/requester for this action
   REQUEST_INVALID_STATE: "TASK_REQUEST_INVALID_STATE", // 409 not pending (accept/decline/cancel of a decided request)
   CROSS_TEAM_ASSIGNEE: "TASK_CROSS_TEAM_ASSIGNEE", // 422 direct cross-team assignee (use the request flow)
+  PARENT_CHILD_TEAM_MISMATCH: "TASK_PARENT_CHILD_TEAM_MISMATCH", // 422 parent と child のチームが不一致（親子は同一チーム）
 } as const;
 
 export const taskErrors = {
@@ -84,6 +85,15 @@ export const taskErrors = {
       TaskErrorCodes.CROSS_TEAM_ASSIGNEE,
       "Cannot directly assign a task to someone on another team — use a task request (送る) instead",
       { status: 422, details: { assigneeId, teamId } },
+    );
+  },
+  // 親子は必ず同一チーム: 子タスクは親と別チームにできない（親から作る導線はチームを親に固定
+  // する。整合はサーバでも担保）。`parentTeamId`/`childTeamId` は不一致の両チーム（null=未割当）。
+  parentChildTeamMismatch(parentTeamId: string | null, childTeamId: string | null): DubError {
+    return new DubError(
+      TaskErrorCodes.PARENT_CHILD_TEAM_MISMATCH,
+      "A child task must belong to the same team as its parent",
+      { status: 422, details: { parentTeamId, childTeamId } },
     );
   },
 };

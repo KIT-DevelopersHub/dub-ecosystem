@@ -4,7 +4,7 @@ import { Button, Drawer, TextField, Textarea, Select, ConfirmDialog } from "@dub
 import { TaskSearchSelect } from "@dub/app-ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
-import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
@@ -132,6 +132,12 @@ export function TaskDetailPanel({
   // ので、手動編集させない: 編集UIから「ステータス」欄自体を出さず、保存でも status を送らない。
   // hasChildren(read model) と childCount(scope) のどちらかが立てば親とみなす。
   const isParent = hasChildren || childCount > 0;
+
+  // 親子でチームが食い違う状態を作らせない: このタスクが子（親を持つ）なら、チームは親の
+  // チームに固定し編集させない。親のチーム変更に追随（再親付け時に teamId を親へ合わせる）。
+  // 親なし（トップレベル）なら従来どおり自由に編集できる。既存のクロスチーム依存制約と整合。
+  const parentTeam = parentId ? teamOf(scopeTasks, parentId) : null;
+  const teamLockedToParent = parentId != null;
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
@@ -276,7 +282,7 @@ export function TaskDetailPanel({
             <Select
               id="fe4-detail-team"
               value={teamId ?? ""}
-              disabled={!canWrite}
+              disabled={!canWrite || teamLockedToParent}
               onChange={(v) => {
                 const next = v ? (v as common.TeamId) : null;
                 setTeamId(next);
@@ -287,6 +293,11 @@ export function TaskDetailPanel({
               options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
               testId="fe4-detail-team"
             />
+            {teamLockedToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-detail-team-locked">
+                親タスクと同じチームです（子タスクのチームは変更できません）
+              </p>
+            )}
           </div>
         )}
 
@@ -311,9 +322,16 @@ export function TaskDetailPanel({
             disabled={!canWrite}
             onChange={(next) => {
               if (!canWrite) return;
-              // Re-parenting no longer changes the dependency scope (deps are team-scoped,
-              // ADR-0007), so predecessors are preserved across a parent change.
               setParentId(next);
+              // 親子でチームを一致させる: 親を付け替えたら子のチームを新しい親のチームへ
+              // 合わせる（親子でチームが食い違う状態を作らせない）。同一チーム内の付け替えや
+              // トップレベルへの分離（next=null）ではチームは変えない。付け替え後にチームが
+              // 変わる場合は、別チームになった先行タスク（依存）を落とす（ADR-0006/0007）。
+              if (next) {
+                const nextTeam = teamOf(scopeTasks, next);
+                setTeamId(nextTeam);
+                setDeps((d) => pruneToScope(scopeTasks, nextTeam, d).filter((id) => id !== t.id));
+              }
             }}
             testId="fe4-detail-parent"
           />

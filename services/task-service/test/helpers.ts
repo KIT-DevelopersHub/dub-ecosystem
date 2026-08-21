@@ -130,6 +130,14 @@ export class InMemoryTaskRepo implements TaskRepo {
     return n;
   }
 
+  async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+    const teams = new Set<common.TeamId | null>();
+    for (const r of this.rows.values()) {
+      if (r.parentTaskId === parentId && r.archivedAt === null) teams.add(r.teamId ?? null);
+    }
+    return [...teams];
+  }
+
   async restore(id: string, now: string): Promise<boolean> {
     const r = this.rows.get(id);
     if (!r || !r.archivedAt) return false;
