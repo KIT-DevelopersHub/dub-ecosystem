@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { gateway } from "@dub/types";
-import { ApiError, type ApiClient } from "../lib/api-client.tsx";
+import { ApiError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 
@@ -15,10 +15,27 @@ const ME: gateway.MeResponse = {
   sessionExpiresAt: Date.now() + 60_000,
 };
 
-function setup(updateProfile: ApiClient["auth"]["updateProfile"]) {
+const PART: SelfParticipation = {
+  lastName: "高岡", firstName: "己太朗", lastNameKana: null, firstNameKana: null,
+  lastNameRomaji: null, firstNameRomaji: null, schoolEmail: "kota@school.ac.jp", gmail: "kota@gmail.com",
+  phone: "090-0000-0000", grade: "3", department: "情報工学科", desiredActivity: "both", note: null,
+};
+
+function setup(
+  updateProfile: ApiClient["auth"]["updateProfile"],
+  opts: { updateSelfParticipation?: ApiClient["auth"]["updateSelfParticipation"] } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(queryKeys.me, ME);
-  const shellApi = { auth: { updateProfile, changePassword: vi.fn(() => Promise.resolve()) } } as unknown as ApiClient;
+  const updateSelfParticipation = opts.updateSelfParticipation ?? vi.fn((p: Partial<SelfParticipation>) => Promise.resolve({ ...PART, ...p }));
+  const shellApi = {
+    auth: {
+      updateProfile,
+      changePassword: vi.fn(() => Promise.resolve()),
+      getSelfParticipation: vi.fn(() => Promise.resolve(PART)),
+      updateSelfParticipation,
+    },
+  } as unknown as ApiClient;
   render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
@@ -26,7 +43,7 @@ function setup(updateProfile: ApiClient["auth"]["updateProfile"]) {
       </ToastProvider>
     </QueryClientProvider>,
   );
-  return { qc };
+  return { qc, updateSelfParticipation };
 }
 
 describe("AccountSettingsDialog", () => {
@@ -90,5 +107,26 @@ describe("AccountSettingsDialog", () => {
     await userEvent.click(clear);
     await userEvent.click(screen.getByTestId("fe2-account-settings-save"));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledWith({ displayName: "Kota", avatarUrl: null }));
+  });
+
+  it("loads the 参加届 fields and saves an edit without touching the profile", async () => {
+    const updateProfile = vi.fn(() => Promise.resolve({ displayName: "Kota", avatarUrl: null }));
+    const { updateSelfParticipation } = setup(updateProfile);
+
+    // The participation section loads and pre-fills the seeded submission.
+    const dept = (await screen.findByTestId("fe2-part-department")) as HTMLInputElement;
+    await waitFor(() => expect(dept.value).toBe("情報工学科"));
+
+    await userEvent.clear(dept);
+    await userEvent.type(dept, "電気電子工学科");
+    await userEvent.click(screen.getByTestId("fe2-account-settings-save"));
+
+    // The 参加届 update carries the edited field (full patched set from the single-source form).
+    await waitFor(() => expect(updateSelfParticipation).toHaveBeenCalled());
+    const arg = (updateSelfParticipation as unknown as { mock: { calls: Array<[Partial<SelfParticipation>]> } }).mock.calls[0]![0];
+    expect(arg.department).toBe("電気電子工学科");
+    expect(arg.lastName).toBe("高岡"); // unchanged fields still sent
+    // Profile was untouched → updateProfile not called.
+    expect(updateProfile).not.toHaveBeenCalled();
   });
 });

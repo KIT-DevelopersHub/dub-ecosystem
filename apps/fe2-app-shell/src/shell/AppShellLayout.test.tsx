@@ -17,6 +17,12 @@ const ME: gateway.MeResponse = {
   sessionExpiresAt: Date.now() + 60_000,
 };
 
+const EMPTY_PARTICIPATION = {
+  lastName: null, firstName: null, lastNameKana: null, firstNameKana: null,
+  lastNameRomaji: null, firstNameRomaji: null, schoolEmail: null, gmail: null,
+  phone: null, grade: null, department: null, desiredActivity: null, note: null,
+};
+
 function api(): ApiClient {
   return { auth: { me: () => Promise.resolve(ME) } } as unknown as ApiClient;
 }
@@ -110,7 +116,7 @@ describe("AppShellLayout", () => {
     // so this case passes `api` to the layout — unlike renderShell().
     const changePassword = vi.fn(() => Promise.resolve());
     const shellApi = {
-      auth: { me: () => Promise.resolve(ME), changePassword, updateProfile: vi.fn(() => Promise.resolve({ displayName: ME.user.displayName, avatarUrl: null })) },
+      auth: { me: () => Promise.resolve(ME), changePassword, updateProfile: vi.fn(() => Promise.resolve({ displayName: ME.user.displayName, avatarUrl: null })), getSelfParticipation: vi.fn(() => Promise.resolve(EMPTY_PARTICIPATION)), updateSelfParticipation: vi.fn((p) => Promise.resolve(p)) },
     } as unknown as ApiClient;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -141,7 +147,7 @@ describe("AppShellLayout", () => {
 
   it("puts ログアウト inside the 設定 menu as a danger item below アカウント設定", async () => {
     const shellApi = {
-      auth: { me: () => Promise.resolve(ME), changePassword: vi.fn(() => Promise.resolve()), updateProfile: vi.fn(() => Promise.resolve({ displayName: ME.user.displayName, avatarUrl: null })) },
+      auth: { me: () => Promise.resolve(ME), changePassword: vi.fn(() => Promise.resolve()), updateProfile: vi.fn(() => Promise.resolve({ displayName: ME.user.displayName, avatarUrl: null })), getSelfParticipation: vi.fn(() => Promise.resolve(EMPTY_PARTICIPATION)), updateSelfParticipation: vi.fn((p) => Promise.resolve(p)) },
     } as unknown as ApiClient;
     const onLogout = vi.fn();
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

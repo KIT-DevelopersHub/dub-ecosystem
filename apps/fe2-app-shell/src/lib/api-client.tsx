@@ -6,7 +6,7 @@
 // inside apps/fe2-app-shell to keep this unit's work self-contained — see notes.)
 import type { ErrorResponse } from "@dub/errors";
 import { isErrorResponse } from "@dub/errors";
-import type { gateway } from "@dub/types";
+import type { gateway, member } from "@dub/types";
 import type { DisplayableError } from "@dub/ui";
 
 type MeResponse = gateway.MeResponse;
@@ -24,6 +24,25 @@ export interface ProfileUpdateInput {
 export interface ProfileUpdateResult {
   displayName: string;
   avatarUrl: string | null;
+}
+
+/** The self-editable slice of the signed-in user's own 参加届 (participation). A subset of
+ *  the canonical `member.SubmitParticipationRequest`; the field descriptors that drive the
+ *  edit UI live in features/participation/profileFields.ts (single source of truth). */
+export interface SelfParticipation {
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  lastNameRomaji: string | null;
+  firstNameRomaji: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
+  phone: string | null;
+  grade: member.Grade | null;
+  department: string | null;
+  desiredActivity: member.DesiredActivity | null;
+  note: string | null;
 }
 
 export interface RequestInput<TBody = unknown> {
@@ -124,6 +143,12 @@ export interface ApiClient {
      *  NOTE (本番課題): the gateway + identity-roster self-profile endpoint is not yet
      *  implemented server-side; the demo transport answers it (see demo-seed). */
     updateProfile(input: ProfileUpdateInput): Promise<ProfileUpdateResult>;
+    /** The signed-in user's OWN 参加届 (self-service). GET returns the stored fields (all
+     *  null when nothing was submitted yet); the update patches them. Session-scoped — no
+     *  target id. NOTE (本番課題): a gateway/member-service self 参加届 endpoint is not yet
+     *  implemented; the demo transport answers it (see demo-seed). */
+    getSelfParticipation(): Promise<SelfParticipation>;
+    updateSelfParticipation(input: Partial<SelfParticipation>): Promise<SelfParticipation>;
   };
   bff: { home(): Promise<BffHomeResponse> };
   events: ResourceClient;
@@ -325,6 +350,13 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
         request<ProfileUpdateResult, ProfileUpdateInput>({
           method: "POST",
           path: "/api/v1/me/profile",
+          body: input,
+        }),
+      getSelfParticipation: () => request<SelfParticipation>({ method: "GET", path: "/api/v1/me/participation" }),
+      updateSelfParticipation: (input: Partial<SelfParticipation>) =>
+        request<SelfParticipation, Partial<SelfParticipation>>({
+          method: "POST",
+          path: "/api/v1/me/participation",
           body: input,
         }),
     },

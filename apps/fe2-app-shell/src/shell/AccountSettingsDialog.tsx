@@ -1,19 +1,22 @@
-// Account settings (アカウント設定). The signed-in user edits their OWN profile — display
-// name + avatar — from the shell chrome (設定 ⚙ → アカウント設定), deliberately separate
-// from FE7's admin roster (which manages OTHER users). Password change lives INSIDE this
-// dialog too (a パスワード section), so all self-service account actions are unified under
-// one entry instead of scattered across the ⚙ menu.
+// Account settings (アカウント設定). The signed-in user edits their OWN account from the
+// shell chrome (設定 ⚙ → アカウント設定), deliberately separate from FE7's admin roster
+// (which manages OTHER users). One dialog unifies every self-service action:
+//   • プロフィール — display name + avatar (upload / preset / initials)
+//   • 基本情報      — login email (read-only) + password change (nested dialog)
+//   • 参加情報      — the fields the user entered in the 参加届 (participation form),
+//                     rendered from the SINGLE-SOURCE descriptor (profileFields.ts) so the
+//                     set never drifts from the submit contract.
 //
-// Save is OPTIMISTIC ([[optimistic-ui-principle]]): the /me query cache is patched
+// Save is OPTIMISTIC ([[optimistic-ui-principle]]): the /me and 参加届 caches are patched
 // immediately (header avatar + name update at once) and a success toast shows; on failure
-// the cache rolls back to the pre-save snapshot and an error toast explains. Posts to the
-// gateway-owned POST /api/v1/me/profile (api.auth.updateProfile).
+// both caches roll back to their pre-save snapshots and an error toast explains.
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Modal, Button, TextField, FormField, Avatar, useToast } from "@dub/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Modal, Button, TextField, Textarea, Select, FormField, Avatar, Skeleton, useToast } from "@dub/ui";
 import type { gateway } from "@dub/types";
-import { ApiError, toDisplayableError, type ApiClient } from "../lib/api-client.tsx";
+import { ApiError, toDisplayableError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
+import { PARTICIPATION_PROFILE_FIELDS, emptySelfParticipation, type ParticipationFieldDescriptor } from "../features/participation/index.tsx";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
 
 type MeResponse = gateway.MeResponse;
@@ -22,6 +25,9 @@ const MAX_NAME_LENGTH = 40;
 // Cap an uploaded avatar so the data: URL stays small (demo stores it in localStorage /
 // the /me cache). ~512KB pre-encode keeps the base64 well under storage limits.
 const MAX_AVATAR_BYTES = 512 * 1024;
+
+// The 参加届 profile lives under its own query key (a shell-owned feature key).
+const PARTICIPATION_KEY = queryKeys.feature("me-participation");
 
 // Preset avatars: a small palette of solid-colour tiles rendered as self-contained SVG
 // data: URLs (no network). Picking one sets avatarUrl to that data URL — a "preset avatar"
@@ -41,6 +47,55 @@ function presetAvatarDataUrl(color: string, name: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+// ── 参加届 draft helpers (Record<key,string>; "" == null) ──────────────────────
+type PartDraft = Record<string, string>;
+function toDraft(p: SelfParticipation): PartDraft {
+  const d: PartDraft = {};
+  for (const f of PARTICIPATION_PROFILE_FIELDS) {
+    const v = p[f.key];
+    d[f.key] = v == null ? "" : String(v);
+  }
+  return d;
+}
+function draftToPatch(d: PartDraft): SelfParticipation {
+  const out = emptySelfParticipation();
+  for (const f of PARTICIPATION_PROFILE_FIELDS) {
+    const v = (d[f.key] ?? "").trim();
+    // Values come from constrained controls (selects use the closed unions), so the
+    // string→union cast is runtime-safe; empty clears the field.
+    (out as unknown as Record<string, unknown>)[f.key] = v.length > 0 ? v : null;
+  }
+  return out;
+}
+function draftEquals(a: PartDraft, b: PartDraft): boolean {
+  return PARTICIPATION_PROFILE_FIELDS.every((f) => (a[f.key] ?? "").trim() === (b[f.key] ?? "").trim());
+}
+
+// Group the descriptor into rows: consecutive `half` fields pair up (2-up); full-width
+// fields (textarea) stand alone.
+function toRows(fields: ParticipationFieldDescriptor[]): ParticipationFieldDescriptor[][] {
+  const rows: ParticipationFieldDescriptor[][] = [];
+  let buf: ParticipationFieldDescriptor[] = [];
+  for (const f of fields) {
+    if (f.half) {
+      buf.push(f);
+      if (buf.length === 2) {
+        rows.push(buf);
+        buf = [];
+      }
+    } else {
+      if (buf.length) {
+        rows.push(buf);
+        buf = [];
+      }
+      rows.push([f]);
+    }
+  }
+  if (buf.length) rows.push(buf);
+  return rows;
+}
+const PARTICIPATION_ROWS = toRows(PARTICIPATION_PROFILE_FIELDS);
+
 export function AccountSettingsDialog({
   api,
   open,
@@ -59,27 +114,50 @@ export function AccountSettingsDialog({
 
   const [name, setName] = useState(currentName);
   const [avatar, setAvatar] = useState<string | null>(currentAvatar);
+  const [part, setPart] = useState<PartDraft>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const partSeeded = useRef(false);
 
-  // Re-sync the draft from the live /me whenever the dialog (re)opens, so it always
-  // starts from the persisted values (e.g. after a previous save or account switch).
+  // The signed-in user's own 参加届 (loaded when the dialog opens).
+  const partQuery = useQuery({
+    queryKey: PARTICIPATION_KEY,
+    queryFn: () => api.auth.getSelfParticipation(),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const loadedPart = partQuery.data ?? null;
+
+  // Re-sync the profile draft from the live /me whenever the dialog (re)opens.
   useEffect(() => {
     if (open) {
       setName(currentName);
       setAvatar(currentAvatar);
       setError(null);
       setSubmitting(false);
+    } else {
+      partSeeded.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Seed the 参加届 draft ONCE per open, when its data arrives (so edits aren't clobbered
+  // by a background refetch).
+  useEffect(() => {
+    if (open && !partSeeded.current && loadedPart) {
+      setPart(toDraft(loadedPart));
+      partSeeded.current = true;
+    }
+  }, [open, loadedPart]);
+
   const trimmed = name.trim();
   const tooLong = trimmed.length > MAX_NAME_LENGTH;
   const nameEmpty = trimmed.length === 0;
-  const dirty = trimmed !== currentName || avatar !== currentAvatar;
+  const profileDirty = trimmed !== currentName || avatar !== currentAvatar;
+  const participationDirty = loadedPart != null && partSeeded.current && !draftEquals(part, toDraft(loadedPart));
+  const dirty = profileDirty || participationDirty;
   const canSubmit = dirty && !nameEmpty && !tooLong && !submitting;
 
   function close() {
@@ -112,28 +190,56 @@ export function AccountSettingsDialog({
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
-    const prev = qc.getQueryData<MeResponse>(queryKeys.me);
-    // Optimistic: patch the /me cache NOW so the header avatar + name update instantly.
-    qc.setQueryData<MeResponse>(queryKeys.me, (old) =>
-      old ? { ...old, user: { ...old.user, displayName: trimmed, avatarUrl: avatar } } : old,
-    );
-    try {
-      const updated = await api.auth.updateProfile({ displayName: trimmed, avatarUrl: avatar });
-      // Reconcile with the server's canonical values.
+    const prevMe = qc.getQueryData<MeResponse>(queryKeys.me);
+    const prevPart = qc.getQueryData<SelfParticipation>(PARTICIPATION_KEY);
+    const nextPart = draftToPatch(part);
+    // Optimistic: patch BOTH caches NOW so the header + form reflect immediately.
+    if (profileDirty) {
       qc.setQueryData<MeResponse>(queryKeys.me, (old) =>
-        old ? { ...old, user: { ...old.user, displayName: updated.displayName, avatarUrl: updated.avatarUrl } } : old,
+        old ? { ...old, user: { ...old.user, displayName: trimmed, avatarUrl: avatar } } : old,
       );
+    }
+    if (participationDirty) qc.setQueryData<SelfParticipation>(PARTICIPATION_KEY, nextPart);
+    try {
+      const ops: Promise<unknown>[] = [];
+      if (profileDirty) {
+        ops.push(
+          api.auth.updateProfile({ displayName: trimmed, avatarUrl: avatar }).then((updated) =>
+            qc.setQueryData<MeResponse>(queryKeys.me, (old) =>
+              old ? { ...old, user: { ...old.user, displayName: updated.displayName, avatarUrl: updated.avatarUrl } } : old,
+            ),
+          ),
+        );
+      }
+      if (participationDirty) {
+        ops.push(api.auth.updateSelfParticipation(nextPart).then((res) => qc.setQueryData(PARTICIPATION_KEY, res)));
+      }
+      await Promise.all(ops);
       toast.show({ kind: "success", title: "アカウント設定を保存しました" });
       setSubmitting(false);
       onClose();
     } catch (e) {
-      // Roll back the optimistic patch and explain.
-      if (prev) qc.setQueryData(queryKeys.me, prev);
+      // Roll back BOTH optimistic patches and explain.
+      if (prevMe) qc.setQueryData(queryKeys.me, prevMe);
+      if (prevPart) qc.setQueryData(PARTICIPATION_KEY, prevPart);
       const msg = ApiError.isApiError(e) ? toDisplayableError(e).message : "保存に失敗しました。";
       setError(msg);
       toast.show({ kind: "error", title: "アカウント設定を保存できませんでした", description: msg });
       setSubmitting(false);
     }
+  }
+
+  function renderControl(f: ParticipationFieldDescriptor): JSX.Element {
+    const id = `fe2-part-${f.key}`;
+    const val = part[f.key] ?? "";
+    const set = (v: string) => setPart((prev) => ({ ...prev, [f.key]: v }));
+    if (f.kind === "select") {
+      return <Select id={id} value={val.length > 0 ? val : null} onChange={set} options={f.options ?? []} placeholder="選択してください" testId={id} />;
+    }
+    if (f.kind === "textarea") {
+      return <Textarea id={id} value={val} onChange={set} rows={3} testId={id} />;
+    }
+    return <TextField id={id} type={f.kind === "email" ? "email" : "text"} value={val} onChange={set} {...(f.placeholder ? { placeholder: f.placeholder } : {})} testId={id} />;
   }
 
   return (
@@ -155,7 +261,7 @@ export function AccountSettingsDialog({
         }
       >
         <div className="fe2-account-form">
-          {/* Avatar preview + controls */}
+          {/* ── プロフィール ── */}
           <div className="fe2-account-avatar-row">
             <Avatar name={trimmed || currentName || "?"} src={avatar ?? undefined} size="lg" testId="fe2-account-avatar-preview" />
             <div className="fe2-account-avatar-controls">
@@ -169,7 +275,6 @@ export function AccountSettingsDialog({
             </div>
           </div>
 
-          {/* Preset avatars */}
           <div className="fe2-account-presets" role="group" aria-label="プリセットアバター">
             {PRESET_COLORS.map((color) => {
               const url = presetAvatarDataUrl(color, trimmed || currentName || "?");
@@ -191,7 +296,6 @@ export function AccountSettingsDialog({
             })}
           </div>
 
-          {/* Display name */}
           <FormField
             label="表示名"
             htmlFor="fe2-account-name"
@@ -202,12 +306,11 @@ export function AccountSettingsDialog({
             <TextField id="fe2-account-name" value={name} onChange={setName} invalid={nameEmpty || tooLong} testId="fe2-account-name" />
           </FormField>
 
-          {/* Read-only basic info */}
+          {/* ── 基本情報 ── */}
           <FormField label="メールアドレス" htmlFor="fe2-account-email" help="ログイン中のアカウント（変更不可）">
             <TextField id="fe2-account-email" value={email ?? "—"} onChange={() => {}} disabled testId="fe2-account-email" />
           </FormField>
 
-          {/* Password — kept adjacent/unified under アカウント設定 */}
           <div className="fe2-account-password">
             <div>
               <div className="fe2-account-password-label">パスワード</div>
@@ -216,6 +319,33 @@ export function AccountSettingsDialog({
             <Button variant="secondary" size="sm" onClick={() => setPwOpen(true)} testId="fe2-account-password-open">
               パスワードを変更
             </Button>
+          </div>
+
+          {/* ── 参加情報（参加届） ── */}
+          <div className="fe2-account-section" data-testid="fe2-account-participation">
+            <div className="fe2-account-section-title">参加情報（参加届）</div>
+            <div className="fe2-account-section-help">イベント参加登録フォームで入力した項目を編集できます。</div>
+            {partQuery.isPending ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" }}>
+                <Skeleton width="100%" height={40} />
+                <Skeleton width="100%" height={40} />
+                <Skeleton width="100%" height={40} />
+              </div>
+            ) : partQuery.isError ? (
+              <p role="alert" className="fe2-account-error" data-testid="fe2-account-participation-error">
+                参加情報を読み込めませんでした。
+              </p>
+            ) : (
+              PARTICIPATION_ROWS.map((row, i) => (
+                <div key={i} className={row.length > 1 ? "fe2-account-prow" : undefined}>
+                  {row.map((f) => (
+                    <FormField key={f.key} label={f.label} htmlFor={`fe2-part-${f.key}`} {...(f.help ? { help: f.help } : {})}>
+                      {renderControl(f)}
+                    </FormField>
+                  ))}
+                </div>
+              ))
+            )}
           </div>
 
           {error ? (

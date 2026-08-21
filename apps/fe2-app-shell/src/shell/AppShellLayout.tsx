@@ -200,6 +200,17 @@ export function AppShellLayout({
           {leadingHeaderWidgets.map((Widget, i) => (
             <Widget key={`lead-${i}`} />
           ))}
+          {user ? (
+            // Account chip: avatar + display name, docked immediately RIGHT of the event
+            // dropdown (its home on the header's left cluster) — not next to ⚙. Both come
+            // from /me, so a saved アカウント設定 reflects here immediately (optimistic cache).
+            <span className="fe2-account-chip" data-testid="fe2-header-account-chip">
+              <Avatar name={user.displayName} src={user.avatarUrl ?? undefined} size="sm" testId="fe2-header-avatar" />
+              <span className="fe2-account-chip-name" data-testid="fe2-header-display-name">
+                {user.displayName}
+              </span>
+            </span>
+          ) : null}
           <AppLauncher
             testId="fe2-app-launcher"
             title="アプリ"
@@ -210,16 +221,6 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
-          {user ? (
-            // Account chip: avatar + display name, sitting just left of 設定(⚙). Both come
-            // from /me, so a saved アカウント設定 reflects here immediately (optimistic cache).
-            <span className="fe2-account-chip" data-testid="fe2-header-account-chip">
-              <span className="fe2-account-chip-name" data-testid="fe2-header-display-name">
-                {user.displayName}
-              </span>
-              <Avatar name={user.displayName} src={user.avatarUrl ?? undefined} size="sm" testId="fe2-header-avatar" />
-            </span>
-          ) : null}
           {settingsItems.length > 0 ? (
             // Settings (⚙) dropdown — the account self-service container. アカウント設定
             // (display name / avatar / password change) and ログアウト live INSIDE it, so

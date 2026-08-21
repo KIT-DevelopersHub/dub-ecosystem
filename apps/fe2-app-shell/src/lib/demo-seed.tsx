@@ -832,6 +832,74 @@ function currentMe(): gateway.MeResponse {
   };
 }
 
+// ── self 参加届 (participation) edit (アカウント設定 → 参加情報) ────────────────────
+// The signed-in user edits the fields they entered on the 参加届. The demo seeds a
+// representative submission per account and persists edits per-account in localStorage
+// (survives reload, account-scoped) — mirroring member-service storing them server-side.
+// Field set mirrors features/participation/profileFields.ts (the single source of truth).
+interface DemoSelfParticipation {
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  lastNameRomaji: string | null;
+  firstNameRomaji: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
+  phone: string | null;
+  grade: string | null;
+  department: string | null;
+  desiredActivity: string | null;
+  note: string | null;
+}
+const PARTICIPATION_FIELDS: (keyof DemoSelfParticipation)[] = [
+  "lastName", "firstName", "lastNameKana", "firstNameKana", "lastNameRomaji", "firstNameRomaji",
+  "schoolEmail", "gmail", "phone", "grade", "department", "desiredActivity", "note",
+];
+const DEMO_PARTICIPATION_STORAGE_PREFIX = "dub_demo_participation_";
+
+/** A representative seed 参加届 for a demo account (pre-populates the edit form). */
+function defaultParticipation(a: DemoAccount): DemoSelfParticipation {
+  const parts = a.displayName.split(/\s+/);
+  const last = parts[0] ?? a.displayName;
+  const first = parts.slice(1).join(" ");
+  const localPart = a.email.replace(/@.*/, "");
+  return {
+    lastName: last,
+    firstName: first || null,
+    lastNameKana: null,
+    firstNameKana: null,
+    lastNameRomaji: null,
+    firstNameRomaji: null,
+    schoolEmail: a.email,
+    gmail: `${localPart}@gmail.com`,
+    phone: "090-1234-5678",
+    grade: "3",
+    department: "情報工学科",
+    desiredActivity: "both",
+    note: "",
+  };
+}
+function participationOverride(id: string): Partial<DemoSelfParticipation> {
+  try {
+    const raw = globalThis.localStorage?.getItem(DEMO_PARTICIPATION_STORAGE_PREFIX + id);
+    return raw ? (JSON.parse(raw) as Partial<DemoSelfParticipation>) : {};
+  } catch {
+    return {};
+  }
+}
+function currentParticipation(): DemoSelfParticipation {
+  const a = currentAccount();
+  return { ...defaultParticipation(a), ...participationOverride(a.id) };
+}
+function saveParticipation(id: string, full: DemoSelfParticipation): void {
+  try {
+    globalThis.localStorage?.setItem(DEMO_PARTICIPATION_STORAGE_PREFIX + id, JSON.stringify(full));
+  } catch {
+    /* storage unavailable — participation edit is best-effort in the demo */
+  }
+}
+
 // ── mail: stateful Inbox + Sent folders ───────────────────────────────────────
 // A tiny in-session store so the mail folders behave end-to-end: received messages
 // persist their read flag (opening one clears the unread badge on refetch), and a
@@ -2825,6 +2893,20 @@ export function createDemoFetch(): typeof fetch {
       if ("avatarUrl" in b) patch.avatarUrl = typeof b.avatarUrl === "string" ? b.avatarUrl : null;
       const merged = saveProfileOverride(a.id, patch);
       return json({ displayName: merged.displayName ?? a.displayName, avatarUrl: merged.avatarUrl ?? null });
+    }
+    // Self 参加届 read/update (アカウント設定 → 参加情報). GET returns the seeded/edited fields;
+    // POST persists the full patched set per-account (localStorage) and echoes it back.
+    if (method === "GET" && url.pathname === "/api/v1/me/participation") return json(currentParticipation());
+    if (method === "POST" && url.pathname === "/api/v1/me/participation") {
+      const a = currentAccount();
+      const b = (parsedBody ?? {}) as Partial<DemoSelfParticipation>;
+      const patch: Partial<DemoSelfParticipation> = {};
+      for (const k of PARTICIPATION_FIELDS) {
+        if (k in b) patch[k] = (b[k] ?? null) as string | null;
+      }
+      const merged = { ...currentParticipation(), ...patch };
+      saveParticipation(a.id, merged);
+      return json(merged);
     }
 
     const hit =
