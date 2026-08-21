@@ -59,6 +59,8 @@ describe("buildGanttChartDTO", () => {
         assigneeId: "user_x",
         // additive WBS/team projection (flat task ⇒ no team, top-level, no children).
         teamId: null,
+        // stable creation-order basis for the task-ID number (projected from the task).
+        createdAt: "2026-08-01T00:00:00Z",
         parentTaskId: null,
         depth: 0,
         hasChildren: false,

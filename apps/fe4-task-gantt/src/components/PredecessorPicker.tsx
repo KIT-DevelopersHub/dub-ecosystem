@@ -1,7 +1,15 @@
 import type { common } from "@dub/types";
-import { TaskSearchSelect, type TaskSearchOption } from "@dub/app-ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 
-export type PredecessorOption = TaskSearchOption<common.TaskId>;
+export interface PredecessorOption {
+  id: common.TaskId;
+  title: string;
+  /** Stable task-ID number (e.g. "TK-0026"), carried through so a predecessor can be
+   *  identified BY ID. Optional (absent ⇒ title only). Flows through the type so
+   *  number-bearing option lists (TaskWorkspacePage) type-check against the shared
+   *  TaskSearchSelect core. */
+  number?: string;
+}
 
 export interface PredecessorPickerProps {
   options: readonly PredecessorOption[];

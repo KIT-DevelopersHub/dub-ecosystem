@@ -208,6 +208,9 @@ export function toDomainTeams(res: member.ListTeamsResponse): team.Team[] {
     key: t.key,
     name: t.name,
     ...(t.color != null ? { color: t.color } : {}),
+    // Carry the team's 2-letter ID-prefix code through so numbering can use an
+    // explicit member-service code (falls back to the canonical key map when absent).
+    ...(t.code != null ? { code: t.code } : {}),
     ...(t.description != null ? { description: t.description } : {}),
   }));
 }

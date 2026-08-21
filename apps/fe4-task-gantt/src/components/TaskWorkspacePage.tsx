@@ -25,7 +25,8 @@ import type { RowGroup } from "../domain/row-groups";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { useGanttSortMode } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
-import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
+import { teamCode } from "../domain/team-code";
+import { useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
@@ -110,12 +111,12 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
   // Row 並び替え mode (手動/重要度/時期/チーム). Personal client-side view preference,
   // persisted per-event in localStorage; "手動" falls back to the drag order overlay.
   const [sortMode, setSortMode] = useGanttSortMode(eventId);
-  // Task-number prefix (e.g. "AA") + zero-pad width (e.g. 4 -> "AA-0001") — personal
-  // view settings, persisted per event.
-  const [numberPrefix, setNumberPrefix] = useTaskNumberPrefix(eventId);
+  // Task-ID number: `<team code>-<global creation sequence>` (e.g. "TK-0001"). The
+  // 桁数 (zero-pad width) is a personal view setting; the PREFIX is derived from each
+  // task's owning team (see domain/team-code.ts), not a manual input.
   const [numberPadWidth, setNumberPadWidth] = useTaskNumberPadWidth(eventId);
   // Show/hide the task-number badge (default ON). OFF hides the badges and the
-  // prefix/桁数 inputs, but keeps their saved values for when it's turned back on.
+  // 桁数 input, but keeps its saved value for when it's turned back on.
   const [numberVisible, setNumberVisible] = useTaskNumberVisible(eventId);
   const teams = useTeams().data ?? [];
   // Org member roster — the source for the assignee dropdown. Without it the only
@@ -329,13 +330,22 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gantt.data, tasks, orderedTaskIds, sortMode, sortContext]);
 
-  // WBS task numbers (e.g. "AA-1-1"), derived from the CURRENT display order + the
-  // WBS tree on each row, so re-ordering / re-parenting re-numbers automatically. It
-  // is computed over the exact rows the gantt renders (filtered + sorted), so the
-  // badges match what's on screen. View-time only — nothing persisted.
+  // Task-ID numbers `<team code>-<global creation sequence>` (e.g. "TK-0001"). The
+  // numeric part is the task's rank in the GLOBAL creation order and the prefix comes
+  // from its owning team — so it is a STABLE per-task attribute. Computed over the
+  // FULL, unfiltered row set (gantt.data.rows), NOT the filtered/sorted view, so
+  // filtering a team, changing the sort mode, or dragging rows never re-numbers a
+  // task. Nothing is persisted; the number is derived from createdAt/idSeqAt + team.
+  const teamCodeOf = useMemo(
+    () => (row: ganttNs.GanttRow) => teamCode(row.teamId ? teamById.get(row.teamId) : null),
+    [teamById],
+  );
   const numberById = useMemo<ReadonlyMap<common.TaskId, string>>(
-    () => (filteredDto && numberVisible ? computeTaskNumbers(filteredDto.rows, numberPrefix, numberPadWidth) : new Map()),
-    [filteredDto, numberVisible, numberPrefix, numberPadWidth],
+    () =>
+      gantt.data && numberVisible
+        ? computeTaskNumbers(gantt.data.rows, teamCodeOf, numberPadWidth)
+        : new Map(),
+    [gantt.data, numberVisible, teamCodeOf, numberPadWidth],
   );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
@@ -359,8 +369,10 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
   // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
   // which the store list omits).
   const allTaskOptions = useMemo(
-    () => allRows.map((r) => ({ id: r.taskId, title: titleById.get(r.taskId) ?? r.title })),
-    [allRows, titleById],
+    // Prefer the store's fresh title for rename relabel; carry the stable ID number so
+    // predecessors can be picked/searched BY ID.
+    () => allRows.map((r) => ({ id: r.taskId, title: titleById.get(r.taskId) ?? r.title, number: numberById.get(r.taskId) })),
+    [allRows, titleById, numberById],
   );
   // predecessors currently on the selected task (先行タスク＝依存元 where to===selected).
   const selectedDependsOn = useMemo(() => {
@@ -1177,35 +1189,20 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
           <span className={styles.numPrefixLabel}>タスク番号を表示</span>
         </label>
         {numberVisible && (
-          <>
-            <label className={styles.numPrefix}>
-              <span className={styles.numPrefixLabel}>番号プレフィックス</span>
-              <input
-                type="text"
-                className={styles.numPrefixInput}
-                value={numberPrefix}
-                onChange={(e) => setNumberPrefix(e.target.value)}
-                maxLength={8}
-                placeholder="AA"
-                aria-label="タスク番号のプレフィックス"
-                data-testid="fe4-number-prefix"
-              />
-            </label>
-            <label className={styles.numPrefix}>
-              <span className={styles.numPrefixLabel}>桁数</span>
-              <input
-                type="number"
-                className={styles.numPadInput}
-                value={numberPadWidth}
-                onChange={(e) => setNumberPadWidth(Number(e.target.value))}
-                min={0}
-                max={MAX_PAD_WIDTH}
-                step={1}
-                aria-label="タスク番号の桁数（ゼロ埋め）"
-                data-testid="fe4-number-pad"
-              />
-            </label>
-          </>
+          <label className={styles.numPrefix}>
+            <span className={styles.numPrefixLabel}>桁数</span>
+            <input
+              type="number"
+              className={styles.numPadInput}
+              value={numberPadWidth}
+              onChange={(e) => setNumberPadWidth(Number(e.target.value))}
+              min={0}
+              max={MAX_PAD_WIDTH}
+              step={1}
+              aria-label="タスク番号の桁数（ゼロ埋め）"
+              data-testid="fe4-number-pad"
+            />
+          </label>
         )}
       </div>
 
@@ -1271,6 +1268,7 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
           parentTaskId={selectedParentId}
           scopeTasks={scopeTasks}
           dependsOnIds={selectedDependsOn}
+          numberById={numberById}
           barStartsAt={selectedRow?.startsAt ?? null}
           barEndsAt={selectedRow?.endsAt ?? null}
           hasChildren={selectedRow?.hasChildren ?? false}

@@ -12,6 +12,23 @@ export interface GanttRow {
   assigneeId: UserId | null;
   /** Owning team (canonical team.Team), for team-scoped views. Additive. */
   teamId?: TeamId | null;
+  /** Creation timestamp of the underlying task. This is the STABLE basis for the
+   *  task's global creation-order ID number: numbering sorts rows by this (not by
+   *  display order), so filtering / sorting / re-ordering the gantt never re-numbers
+   *  a task. Additive/optional — absent ⇒ numbering falls back to taskId order. */
+  createdAt?: ISODateTime;
+  /** When set, overrides `createdAt` as the ID-sequence basis. It is re-stamped to
+   *  "now" whenever a task's owning team changes, so a team change retires the old
+   *  ID and re-numbers the task at the TAIL of the global sequence under the new
+   *  team's prefix (= "delete old task + create a new one" semantics). Additive. */
+  idSeqAt?: ISODateTime | null;
+  /** Absolute, monotonically-increasing creation sequence number (never reused). When
+   *  present it fixes the numeric part of the task's ID directly, so it is a truly
+   *  stable attribute: deleting or re-teaming another task never shifts this one's
+   *  number. A team change assigns a fresh (tail) seqNo. Absent (e.g. a backend not yet
+   *  projecting it) ⇒ numbering falls back to a dense rank over createdAt/idSeqAt, which
+   *  is still stable under filter/sort/reorder. Additive/optional. */
+  seqNo?: number;
   /** WBS hierarchy (all additive/optional; absent ⇒ a flat top-level row).
    *  A row whose `parentTaskId` points at another row is a child (WBS leaf) of
    *  that work-package; the UI indents it and hides it when the parent collapses. */

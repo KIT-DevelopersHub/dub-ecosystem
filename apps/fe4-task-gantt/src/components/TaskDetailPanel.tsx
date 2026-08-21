@@ -45,6 +45,8 @@ export interface TaskDetailPanelProps {
   scopeTasks?: readonly ScopeTask[];
   /** This task's current predecessors (先行タスク＝依存元). */
   dependsOnIds?: readonly common.TaskId[];
+  /** taskId -> stable ID number, so predecessors can be shown/searched BY ID. */
+  numberById?: ReadonlyMap<common.TaskId, string>;
   /** The bar's DISPLAYED window (gantt row startsAt/endsAt). Seeds 開始日/期日 when the
    *  task has no explicit startAt/dueAt column yet — the gantt read model derives a bar
    *  window from dueAt (＋priority/CPM), so a task with only dueAt still SHOWS a start on
@@ -75,6 +77,7 @@ export function TaskDetailPanel({
   parentTaskId = null,
   scopeTasks = [],
   dependsOnIds = [],
+  numberById,
   barStartsAt = null,
   barEndsAt = null,
   hasChildren = false,
@@ -113,8 +116,12 @@ export function TaskDetailPanel({
   // Predecessors are limited to this task's TEAM (ADR-0006): same-team tasks across any
   // hierarchy level, minus self. Cross-team tasks are excluded. Recomputes on team change.
   const depOptions = useMemo(
-    () => dependencyScopeOptions(scopeTasks, teamId, t.id),
-    [scopeTasks, teamId, t.id],
+    () =>
+      dependencyScopeOptions(scopeTasks, teamId, t.id).map((o) => ({
+        ...o,
+        number: numberById?.get(o.id),
+      })),
+    [scopeTasks, teamId, t.id, numberById],
   );
   // How many tasks hang directly under this one (親タスクなら子の数を明示・feedback #39).
   const childCount = useMemo(

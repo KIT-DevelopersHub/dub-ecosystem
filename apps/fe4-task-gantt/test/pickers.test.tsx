@@ -24,6 +24,29 @@ describe("PredecessorPicker — scrollable dropdown + search (feature #1)", () =
     expect(screen.queryByTestId("pp-opt-t1")).toBeNull(); // filtered out
   });
 
+  it("shows the stable ID number and lets a predecessor be searched BY ID", () => {
+    const withNums = [
+      { id: "t1", title: "会場予約", number: "KJ-0001" },
+      { id: "t2", title: "スポンサー募集", number: "SP-0002" },
+    ];
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <PredecessorPicker options={withNums} value={[]} onChange={onChange} testId="pp" />,
+    );
+    const input = screen.getByTestId("pp-input");
+    fireEvent.focus(input);
+    // typing the ID (not the title) surfaces the matching task
+    fireEvent.change(input, { target: { value: "SP-0002" } });
+    const opt = screen.getByTestId("pp-opt-t2");
+    expect(opt).toBeInTheDocument();
+    expect(opt).toHaveTextContent("SP-0002");
+    fireEvent.mouseDown(opt);
+    expect(onChange).toHaveBeenCalledWith(["t2"]);
+    // the chip also shows the ID number
+    rerender(<PredecessorPicker options={withNums} value={["t2"]} onChange={onChange} testId="pp" />);
+    expect(screen.getByTestId("pp-chip-t2")).toHaveTextContent("SP-0002");
+  });
+
   it("selecting a match calls onChange and shows a removable chip", () => {
     const onChange = vi.fn();
     const { rerender } = render(<PredecessorPicker options={OPTS} value={[]} onChange={onChange} testId="pp" />);
