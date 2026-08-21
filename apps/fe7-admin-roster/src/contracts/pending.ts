@@ -45,9 +45,11 @@ export interface RoleAssignment {
 // ---- Email Routing (Cloudflare Email Routing @developershub.jp) ----
 // PENDING contract, OWNED by the Email Routing proxy service (separate agent /
 // unmerged branch). Modeled locally here until it publishes into @dub/types.
-// Gateway boundary: `/api/v1/mail/admin/email-routing/addresses` (each managed address
-// maps 1:1 to a Cloudflare Email Routing rule that forwards to `destination`).
-// The org domain is fixed (@developershub.jp); only the local part is editable.
+// Gateway boundary: `/api/v1/mail/admin/email-routing/addresses/issue` (each managed
+// address maps 1:1 to a Cloudflare Email Routing rule). A newly-issued address carries NO
+// forward destination: it is routed to the shared Email Worker (chosen server-side), so
+// `destination` is null for Worker-routed addresses. The org domain is fixed
+// (@developershub.jp); only the local part is editable.
 
 export const EMAIL_ROUTING_DOMAIN = "developershub.jp" as const;
 
@@ -55,14 +57,15 @@ export interface EmailRoutingAddress {
   id: string; // rule id
   localPart: string; // e.g. "info" — address is `${localPart}@developershub.jp`
   address: string; // full address, server-derived
-  destination: string; // forward-to address (the Email Routing rule action)
+  destination: string | null; // forward-to address, or null when routed to the Email Worker
   enabled: boolean; // rule enabled/paused
   createdAt: common.ISODateTime;
 }
 
+// Issue a new @developershub.jp address. Only the local part is supplied — the receiving
+// mail is bound to the shared Email Worker automatically (no forward destination input).
 export interface CreateEmailAddressRequest {
   localPart: string;
-  destination: string;
 }
 
 // ---- Roster provenance + Email Routing sync (identity-roster) ----
