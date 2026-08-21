@@ -178,6 +178,8 @@ export function DataTable<Row>({
   onRowClick,
   selection,
   columnHiding,
+  stickyHeader,
+  zebra,
   testId,
 }: DataTableProps<Row>) {
   const { isVisible, toggle, showAll, reset } = useColumnVisibility(columns, columnHiding?.storageKey);
@@ -224,8 +226,8 @@ export function DataTable<Row>({
   return (
     <>
       {picker}
-      <div className={cx(styles.wrap)} data-testid={testId}>
-        <table className={cx(styles.table)}>
+      <div className={cx(styles.wrap, stickyHeader && styles.scroll)} data-testid={testId}>
+        <table className={cx(styles.table, stickyHeader && styles.stickyTable, zebra && styles.zebra)}>
           <thead>
             <tr>
               {selection && (

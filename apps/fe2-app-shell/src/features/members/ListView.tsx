@@ -133,6 +133,8 @@ export function ListView({
       columns={columns}
       rows={members}
       rowKey={(m) => m.id}
+      stickyHeader
+      zebra
       testId="members-table"
       columnHiding={{ storageKey: "dub.members.roster.columns.v1" }}
       emptyState={<EmptyState title="メンバーがいません" description="「メンバーを追加」から登録してください" icon="users" />}
