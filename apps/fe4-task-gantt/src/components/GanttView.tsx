@@ -7,6 +7,7 @@ import { GANTT_SORT_OPTIONS } from "../domain/gantt-sort-pref";
 import { groupRuns, type RowGroup } from "../domain/row-groups";
 import { readableTextColor } from "../domain/color-contrast";
 import { childProgressByParent, type ChildProgress } from "../domain/child-progress";
+import { CrossTeamRoleBadge } from "./CrossTeamRoleBadge";
 import type { common, gantt, task } from "@dub/types";
 
 /** arrayMove — pure list move (kept local so fe4 needs no direct @dnd-kit/sortable dep;

@@ -125,7 +125,10 @@ describe("マイタスク「タスクを発行」 — defaults + ガント parit
     expect(eventSelect.value).toBe(""); // 紐付けない
   });
 
-  it("issues a task with event+assignee+priority — it appears in the ガント for that event", async () => {
+  it("issues a task with event+priority (依頼先なし=直接タスク) — it appears in the ガント for that event", async () => {
+    // 依頼先(assignee)を選ぶと「送る依頼」= POST /task-requests に回る（相手の承認待ち・
+    // ガントには承諾後に載る）。この parity テストは 依頼先なし の直接タスク作成を確認する
+    // （依頼先ありの送信フローは me-tasks-request-flow.test.tsx が担保）。
     setCurrentEventId(EVT);
     const client = newClient();
     renderRoute(client);
@@ -138,25 +141,22 @@ describe("マイタスク「タスクを発行」 — defaults + ガント parit
     fireEvent.change(screen.getByTestId("fe4-mytask-create-title"), {
       target: { value: "登壇者へ最終案内メールを送る" },
     });
-    fireEvent.change(screen.getByTestId("fe4-mytask-create-assignee"), { target: { value: "usr_hanako" } });
     fireEvent.change(screen.getByTestId("fe4-mytask-create-priority"), { target: { value: "high" } });
     fireEvent.click(screen.getByTestId("fe4-mytask-create-submit"));
 
-    // POST carried the selected event / assignee / priority.
+    // POST carried the selected event / priority (依頼先なしなので直接 /tasks に作成).
     await waitFor(() => {
       const created = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
       expect(created).toBeTruthy();
-      const body = created?.body as { eventId?: string; assigneeId?: string; priority?: string };
+      const body = created?.body as { eventId?: string; priority?: string };
       expect(body.eventId).toBe(EVT);
-      expect(body.assigneeId).toBe("usr_hanako");
       expect(body.priority).toBe("high");
     });
 
-    // ガント parity: the same task shows in the event's gantt with the same assignee.
+    // ガント parity: the same task shows in the event's gantt.
     const dto = await getGantt(client, EVT);
     const row = dto.rows.find((r) => r.title === "登壇者へ最終案内メールを送る");
     expect(row).toBeTruthy();
-    expect(row?.assigneeId).toBe("usr_hanako");
   });
 
   it("未設定 priority is omitted on POST (server defaults medium) and the task still lands in the ガント", async () => {

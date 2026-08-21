@@ -74,7 +74,7 @@ export function MyTasksPage({ currentUserId, people, teams, events, initialEvent
         toUserId,
         title: draft.title,
         ...(draft.description !== null ? { description: draft.description } : {}),
-        priority: draft.priority,
+        ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.eventId ? { eventId: draft.eventId } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
         ...(draft.teamId ? { targetTeamId: draft.teamId } : {}),
