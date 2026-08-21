@@ -2054,6 +2054,10 @@ interface DemoTeam {
   key: string;
   name: string;
   color: string | null;
+  /** 2-letter uppercase task-ID prefix code (統括⇒TK, 法務会計⇒HK, …). Carried through
+   *  /api/v1/members/teams so the gantt switcher/legend can show it beside the name
+   *  and task IDs derive their prefix from the owning team (#368). */
+  code: string | null;
   description: string | null;
 }
 interface DemoMember {
@@ -2086,14 +2090,21 @@ interface DemoMember {
 function createMembersStore() {
   let seq = 100;
   const nid = (p: string): string => `${p}_demo_${++seq}`;
-  // PDF「全体組織体制図」に寄せた構成: 統括チーム＋色付き5チーム、役割段は roleTitle で表現。
+  // 正式分類（#363/#368）= 統括 / 法務会計 / 会場 / 当日進行 / スポンサー / 集客広報 /
+  // デザイン / 法人メンバー の8チーム。key/color/code は fe4 の CANONICAL_TEAMS
+  // (apps/fe4-task-gantt/src/domain/team-code.ts) に合わせてある（値で単一定義に寄せる）。
+  // id は既存のタスク/メンバー参照(team_hq/team_dev/…)を壊さないよう据え置き、旧「開発」は
+  // 正式分類の「デザイン」へ改称（色 #0d9488 は元から canonical デザイン色）。「法務会計」
+  // (旧「会計」を改称) と「法人メンバー」を新規追加して demo に出す。
   const teams: DemoTeam[] = [
-    { id: "team_hq", key: "soukatsu", name: "統括チーム", color: "#1e3a5f", description: "全体意思決定・進行統制・チーム間調整" },
-    { id: "team_dev", key: "dev", name: "開発チーム", color: "#0d9488", description: "運営ツール内製・名簿・当日連絡基盤" },
-    { id: "team_ops", key: "ops", name: "当日進行チーム", color: "#2563eb", description: "進行管理・タイムテーブル・人員配置" },
-    { id: "team_sponsor", key: "sponsor", name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
-    { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
-    { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
+    { id: "team_hq", key: "toukatsu", name: "統括チーム", color: "#1e3a5f", code: "TK", description: "全体統括・意思決定・進行統制" },
+    { id: "team_kaikei", key: "houmukaikei", name: "法務会計チーム", color: "#7c3aed", code: "HK", description: "法人・法務・予算・会計運用" },
+    { id: "team_venue", key: "kaijou", name: "会場チーム", color: "#16a34a", code: "KJ", description: "会場・設営・ネットワーク／配信" },
+    { id: "team_ops", key: "toujitsu", name: "当日進行チーム", color: "#2563eb", code: "TS", description: "進行管理・当日運営・定例運営" },
+    { id: "team_sponsor", key: "sponsor", name: "スポンサーチーム", color: "#ea580c", code: "SP", description: "協賛打診・契約" },
+    { id: "team_pr", key: "shukkyaku", name: "集客広報チーム", color: "#db2777", code: "SK", description: "LP・SNS・広報／集客" },
+    { id: "team_dev", key: "design", name: "デザインチーム", color: "#0d9488", code: "DS", description: "ブランド・制作物・UIデザイン" },
+    { id: "team_houjin", key: "houjin", name: "法人メンバー", color: "#6366f1", code: "HJ", description: "法人メンバー" },
   ];
   const mk = (
     id: string,
@@ -2114,7 +2125,7 @@ function createMembersStore() {
     mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
     mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1, null, "情報工学科", "3年"),
     mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年"),
-    // 開発
+    // デザイン（旧「開発」を正式分類へ改称）
     mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
     mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年"),
     mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年"),
@@ -2132,9 +2143,15 @@ function createMembersStore() {
     mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13, null, "メディア情報学科", "3年"),
     mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
     mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+    // 法務会計（旧「会計」を正式分類へ改称して新規に demo へ）
+    mk("member_k1", "早川", "会計・法務担当", "added", ["team_kaikei"], 16, null, "経営情報学科", "3年"),
+    mk("member_k2", "森田", "会計メンバー", "added", ["team_kaikei"], 17, null, "経営情報学科", "2年"),
+    // 法人メンバー（正式分類の 法人チーム）
+    mk("member_hj1", "森", "法人担当", "added", ["team_houjin"], 18, null, "経営情報学科", "M1"),
+    mk("member_hj2", "大西", "法人メンバー", "added", ["team_houjin"], 19, null, "情報工学科", "3年"),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 20),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 17, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 21, null, "情報工学科", "1年"),
   ];
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
@@ -2201,7 +2218,7 @@ function createMembersStore() {
     // teams
     if (method === "POST" && pathname === "/api/v1/members/teams") {
       const name = String(body?.name ?? "");
-      const t: DemoTeam = { id: nid("team"), key: slug(body?.key ?? name) || `team-${teams.length + 1}`, name, color: body?.color ?? null, description: body?.description ?? null };
+      const t: DemoTeam = { id: nid("team"), key: slug(body?.key ?? name) || `team-${teams.length + 1}`, name, color: body?.color ?? null, code: body?.code ?? null, description: body?.description ?? null };
       teams.push(t);
       return json(t, 201);
     }
@@ -2497,8 +2514,8 @@ export function createDemoFetch(): typeof fetch {
         ],
         worst: { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 58.2 },
       },
-      // 運営メンバー / チーム — matches the seeded roster below (6 teams, 17 members).
-      orgStats: { members: 17, teams: 6 },
+      // 運営メンバー / チーム — matches the seeded roster below (8 teams, 21 members).
+      orgStats: { members: 21, teams: 8 },
       partialErrors: [],
     },
   });

@@ -1392,6 +1392,25 @@
   color: var(--dub-color-brand-700);
 }
 .teamDot { width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto; }
+/* 2-letter team code (#368): a small monospaced pill so the task-ID prefix
+   (TK-0001 …) reads at a glance next to its team in the top filter. */
+.teamCode {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: var(--dub-radius-sm, 4px);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-tertiary, var(--dub-color-text-secondary));
+  font-family: var(--dub-font-family-mono, ui-monospace, monospace);
+  font-size: var(--dub-font-size-2xs, 0.66rem);
+  font-weight: var(--dub-font-weight-semibold, 600);
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+}
+.teamChipOn .teamCode {
+  background: var(--dub-color-brand-200, var(--dub-color-surface-sunken));
+  color: var(--dub-color-brand-700);
+}
 
 /* ================= detail: create child task ================= */
 .childCreateBtn {
@@ -1424,6 +1443,17 @@
 }
 .detailChildCountLabel { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
 .detailChildCountValue { font-size: var(--dub-font-size-sm, 0.82rem); font-weight: 700; color: var(--dub-color-brand-700); }
+/* 親タスクのステータスは自動判定 — 手動編集不可の補足文(#374)。 */
+.parentStatusNote {
+  margin: calc(-1 * var(--dub-space-1)) 0 0;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-radius: var(--dub-radius-md, 6px);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  font-size: var(--dub-font-size-xs, 0.75rem);
+  line-height: 1.5;
+  color: var(--dub-color-text-secondary);
+}
 
 /* ================= My Tasks hub ================= */
 .myPage {

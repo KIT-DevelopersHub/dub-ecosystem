@@ -1,6 +1,7 @@
 import { SegmentedControl } from "@dub/ui";
 import type { SegmentedOption } from "@dub/ui";
 import type { common, team } from "@dub/types";
+import { teamCode } from "../domain/team-code";
 import styles from "../styles/app.module.css";
 
 export interface TeamViewSwitcherProps {
@@ -27,8 +28,12 @@ const ALL = "__all__";
 export function TeamViewSwitcher({ teams, value, onChange, disabled }: TeamViewSwitcherProps) {
   const options: SegmentedOption<string>[] = [
     { value: ALL, label: "全体表示", testId: "fe4-team-all", ...(disabled ? { disabled: true } : {}) },
-    ...teams.map(
-      (t): SegmentedOption<string> => ({
+    ...teams.map((t): SegmentedOption<string> => {
+      // 2-letter team code (TK/HK/…) shown beside the name so the task-ID prefix
+      // (e.g. TK-0001) maps at a glance to its team (#368). Derived from the team,
+      // not free text (domain/team-code.ts).
+      const code = teamCode(t);
+      return {
         value: t.id,
         testId: `fe4-team-${t.id}`,
         ...(disabled ? { disabled: true } : {}),
@@ -40,10 +45,15 @@ export function TeamViewSwitcher({ teams, value, onChange, disabled }: TeamViewS
               aria-hidden
             />
             {t.name}
+            {code && (
+              <span className={styles.teamCode} data-testid={`fe4-team-code-${t.id}`}>
+                {code}
+              </span>
+            )}
           </span>
         ),
-      }),
-    ),
+      };
+    }),
   ];
 
   return (

@@ -128,6 +128,10 @@ export function TaskDetailPanel({
     () => scopeTasks.filter((s) => s.parentTaskId === t.id).length,
     [scopeTasks, t.id],
   );
+  // 親タスク（子を持つ work-package）判定。親のステータスは子の集計で自動色分けされる(#374)
+  // ので、手動編集させない: 編集UIから「ステータス」欄自体を出さず、保存でも status を送らない。
+  // hasChildren(read model) と childCount(scope) のどちらかが立てば親とみなす。
+  const isParent = hasChildren || childCount > 0;
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
@@ -146,7 +150,7 @@ export function TaskDetailPanel({
   const dirty =
     title !== t.title ||
     descriptionChanged ||
-    status !== t.status ||
+    (!isParent && status !== t.status) ||
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
     teamId !== curTeam ||
@@ -158,7 +162,8 @@ export function TaskDetailPanel({
     const patch: task.UpdateTaskRequest = { version: t.version };
     if (title !== t.title) patch.title = title;
     if (descriptionChanged) patch.description = description.trim() === "" ? null : description;
-    if (status !== t.status) patch.status = status;
+    // 親タスク(子あり)は status を手動更新させない(#374) — 子の集計で自動色分けされる。
+    if (!isParent && status !== t.status) patch.status = status;
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
     if (teamId !== curTeam) patch.teamId = teamId;
@@ -198,19 +203,23 @@ export function TaskDetailPanel({
         </div>
 
         <div className={styles.formRow}>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-status">
-              ステータス
-            </label>
-            <Select
-              id="fe4-detail-status"
-              value={status}
-              disabled={!canWrite}
-              onChange={(v) => setStatus(v as task.TaskStatus)}
-              options={statusOptions.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
-              testId="fe4-detail-status"
-            />
-          </div>
+          {/* ステータス欄は子を持たない通常タスクだけに出す。親タスク(子あり)は子の集計で
+              自動的に進捗色分けされるため手動編集不可 — 欄自体を出さない(#374)。 */}
+          {!isParent && (
+            <div className={styles.formField}>
+              <label className={styles.formLabel} htmlFor="fe4-detail-status">
+                ステータス
+              </label>
+              <Select
+                id="fe4-detail-status"
+                value={status}
+                disabled={!canWrite}
+                onChange={(v) => setStatus(v as task.TaskStatus)}
+                options={statusOptions.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+                testId="fe4-detail-status"
+              />
+            </div>
+          )}
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-priority">
               優先度
@@ -225,6 +234,12 @@ export function TaskDetailPanel({
             />
           </div>
         </div>
+        {/* 親タスクはステータスを手動編集できない旨を明示(#374)。子の進捗で自動判定される。 */}
+        {isParent && (
+          <p className={styles.parentStatusNote} data-testid="fe4-detail-parent-status-note">
+            このタスクは子タスクを持つため、ステータスは子タスクの進捗から自動で判定されます（手動では変更できません）。
+          </p>
+        )}
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-detail-assignee">

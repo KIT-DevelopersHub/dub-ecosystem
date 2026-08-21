@@ -164,6 +164,68 @@ describe("#39-3 parent detail shows the child count", () => {
   });
 });
 
+describe("#374 parent task has no editable status field", () => {
+  const parentScope = [
+    { id: "p", title: "設計フェーズ", parentTaskId: null, teamId: null },
+    { id: "c1", title: "子1", parentTaskId: "p", teamId: null },
+  ];
+
+  it("removes the ステータス field entirely for a task with children", () => {
+    render(
+      <TaskDetailPanel
+        task={mkParent("p")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+        scopeTasks={parentScope}
+      />,
+    );
+    // the status <Select> is gone; an explanatory note takes its place
+    expect(screen.queryByTestId("fe4-detail-status")).toBeNull();
+    expect(screen.getByTestId("fe4-detail-parent-status-note")).toBeInTheDocument();
+    // 優先度 (the field that shared the row) still renders
+    expect(screen.getByTestId("fe4-detail-priority")).toBeInTheDocument();
+  });
+
+  it("keeps the ステータス field for a leaf task (no children)", () => {
+    render(
+      <TaskDetailPanel
+        task={mkParent("leaf")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+        scopeTasks={[{ id: "leaf", title: "葉", parentTaskId: null, teamId: null }]}
+      />,
+    );
+    expect(screen.getByTestId("fe4-detail-status")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-detail-parent-status-note")).toBeNull();
+  });
+
+  it("also treats hasChildren=true (read model) as a parent", () => {
+    render(
+      <TaskDetailPanel
+        task={mkParent("p")}
+        users={[]}
+        canWrite
+        canDelete
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+        hasChildren
+        scopeTasks={[{ id: "p", title: "設計フェーズ", parentTaskId: null, teamId: null }]}
+      />,
+    );
+    expect(screen.queryByTestId("fe4-detail-status")).toBeNull();
+    expect(screen.getByTestId("fe4-detail-parent-status-note")).toBeInTheDocument();
+  });
+});
+
 describe("delete is blocked when the task has children (no re-parenting)", () => {
   it("削除 on a parent reports the block to the host (toast) and never calls onDelete (#375)", () => {
     const onDelete = vi.fn();

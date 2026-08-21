@@ -72,4 +72,17 @@ describe("TeamViewSwitcher (feature C)", () => {
     fireEvent.click(screen.getByTestId("fe4-team-all"));
     expect(onChange).toHaveBeenCalledWith(undefined);
   });
+
+  it("shows each team's 2-letter code beside the name (#368)", () => {
+    const teams: team.Team[] = [
+      { id: "team_hq", key: "toukatsu", name: "統括", color: "#1e3a5f", code: "TK" },
+      { id: "team_kaikei", key: "houmukaikei", name: "法務会計", color: "#7c3aed", code: "HK" },
+    ];
+    render(<TeamViewSwitcher teams={teams} value={undefined} onChange={vi.fn()} />);
+    expect(screen.getByTestId("fe4-team-code-team_hq").textContent).toBe("TK");
+    expect(screen.getByTestId("fe4-team-code-team_kaikei").textContent).toBe("HK");
+    // and the code sits inside its team's chip
+    expect(screen.getByTestId("fe4-team-team_kaikei").textContent).toContain("法務会計");
+    expect(screen.getByTestId("fe4-team-team_kaikei").textContent).toContain("HK");
+  });
 });
