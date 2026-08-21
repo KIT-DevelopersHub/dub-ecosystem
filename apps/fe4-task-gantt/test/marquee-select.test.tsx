@@ -109,4 +109,35 @@ describe("marquee multi-select", () => {
     expect(onBulkShiftDays).not.toHaveBeenCalled();
     input.remove();
   });
+
+  // ⑤b — 外側クリックで選択解除
+  it("clicking outside the selection (blank area / another element) clears it", () => {
+    render(<GanttView dto={flatDto} zoom="day" canWrite onBulkDelete={vi.fn()} />);
+    marqueeRows0And1();
+    expect(screen.getByTestId("fe4-gantt-selection-count")).toBeInTheDocument();
+    // a pointer-down on an unrelated element outside any selected row/bar clears it.
+    const outside = document.createElement("div");
+    document.body.appendChild(outside);
+    fireEvent.pointerDown(outside, { button: 0 });
+    expect(screen.queryByTestId("fe4-gantt-selection-count")).toBeNull();
+    outside.remove();
+  });
+
+  it("keeps the selection on an additive (Shift) pointer-down", () => {
+    render(<GanttView dto={flatDto} zoom="day" canWrite onBulkDelete={vi.fn()} />);
+    marqueeRows0And1();
+    const outside = document.createElement("div");
+    document.body.appendChild(outside);
+    fireEvent.pointerDown(outside, { button: 0, shiftKey: true });
+    expect(screen.getByTestId("fe4-gantt-selection-count")).toBeInTheDocument();
+    outside.remove();
+  });
+
+  it("keeps the selection when the pointer-down lands on a selected row (group drag start)", () => {
+    render(<GanttView dto={flatDto} zoom="day" canWrite sortMode="manual" onReorder={vi.fn()} onBulkReorderTo={vi.fn()} />);
+    marqueeRows0And1();
+    // row A is part of the selection → a pointer-down on it must NOT clear (it may begin a group drag).
+    fireEvent.pointerDown(screen.getByTestId("fe4-gantt-row-A"), { button: 0 });
+    expect(screen.getByTestId("fe4-gantt-selection-count")).toBeInTheDocument();
+  });
 });

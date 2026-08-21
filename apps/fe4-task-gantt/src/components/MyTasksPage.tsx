@@ -147,6 +147,7 @@ export function MyTasksPage({ currentUserId, people, teams, events, initialEvent
       assigneeId: draft.assigneeId,
       teamId: draft.teamId,
       createdBy: currentUserId,
+      startAt: draft.startAt,
       dueAt: draft.dueAt,
       origin: "internal",
       archivedAt: null,
@@ -167,6 +168,7 @@ export function MyTasksPage({ currentUserId, people, teams, events, initialEvent
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
       });
       // Persist attachments after the task exists (they need its real id). Best-effort:

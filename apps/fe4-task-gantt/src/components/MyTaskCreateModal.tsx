@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
-import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
+import { PRIORITY_LABEL, isoFromDateInput, todayDateInput } from "../domain/task-form";
 import { DateField } from "./DateField";
 import { AttachmentField, type AttachmentChip } from "./AttachmentField";
 import styles from "../styles/app.module.css";
@@ -36,6 +36,10 @@ export interface MyTaskDraft {
   priority: task.TaskPriority | null;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  /** 開始日 (planned start). Maps to Task.startAt. null ⇒ 開始日なし. */
+  startAt: common.ISODateTime | null;
+  /** 終了日 (旧「期限」相当). Maps to Task.dueAt — the deadline / gantt bar end. When
+   *  both startAt and dueAt are set the ガントのバー spans exactly [startAt, dueAt]. */
   dueAt: common.ISODateTime | null;
   attachments: DraftAttachments;
 }
@@ -75,9 +79,11 @@ export interface MyTaskCreateModalProps {
    *  the modal opens it seeds チーム to this (when it is one of `teams`); the requester can
    *  still change it. Null / unknown ⇒ start 未割当. */
   defaultTeamId?: common.TeamId | null;
-  /** 期限の初期値 (YYYY-MM-DD) — seeded each time the modal opens. Used by the ガント
+  /** 終了日の初期値 (YYYY-MM-DD) — seeded each time the modal opens. Used by the ガント
    *  "＋子タスクを作成 / ＋先行タスクを作成 / タイムラインのセルから作成" entry points, which
-   *  compute a due so the new bar lands relative to its parent/successor. Null ⇒ 期限なし. */
+   *  compute an end so the new bar lands relative to its parent/successor. When it is
+   *  earlier than today the 開始日 clamps down to it so the range is never inverted.
+   *  Null ⇒ the plain 発行/新規 flow: 開始日・終了日ともに今日が初期値。 */
   initialDue?: string | null;
 }
 
@@ -102,13 +108,22 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   // `teams` (guards against a stale/foreign id) — otherwise start 未割当.
   const seedTeamId = (): common.TeamId | null =>
     defaultTeamId && teams.some((t) => t.id === defaultTeamId) ? defaultTeamId : null;
+  // 開始日/終了日 の初期値。プレーンな 発行/新規 では両方とも「今日」。ガントのプリセット
+  // (親/先行/セル由来の initialDue) では 終了日=そのプリセット・開始日=min(今日, プリセット)
+  // として範囲が逆転しないようにする。
+  const seedEnd = (): string => initialDue ?? todayDateInput();
+  const seedStart = (): string => {
+    const today = todayDateInput();
+    return initialDue && initialDue < today ? initialDue : today;
+  };
 
   const [eventId, setEventId] = useState<common.EventId | "">(seedEventId);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority | "">(NO_PRIORITY);
   const [teamId, setTeamId] = useState<common.TeamId | null>(seedTeamId);
-  const [due, setDue] = useState<string | null>(initialDue ?? null);
+  const [startDate, setStartDate] = useState<string | null>(seedStart);
+  const [endDate, setEndDate] = useState<string | null>(seedEnd);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
   const [urls, setUrls] = useState<DraftUrlAttachment[]>([]);
@@ -124,7 +139,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     if (open) {
       setEventId(seedEventId());
       setTeamId(seedTeamId());
-      setDue(initialDue ?? null);
+      setStartDate(seedStart());
+      setEndDate(seedEnd());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultEventId, defaultTeamId, teams, initialDue]);
@@ -135,7 +151,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setAssigneeId(null);
     setPriority(NO_PRIORITY);
     setTeamId(seedTeamId());
-    setDue(initialDue ?? null);
+    setStartDate(seedStart());
+    setEndDate(seedEnd());
     setDescription("");
     setFiles([]);
     setUrls([]);
@@ -179,8 +196,11 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     onClose();
   };
 
-  // Event link is optional now — only the title gates submission.
-  const canSubmit = title.trim().length > 0 && !saving;
+  // 開始日 must not be after 終了日 (both default to 今日, so this only blocks a manual
+  // inversion). An empty side is always fine (開始日なし / 終了日なし).
+  const datesValid = !(startDate && endDate && startDate > endDate);
+  // Event link is optional now — the title and a valid date range gate submission.
+  const canSubmit = title.trim().length > 0 && datesValid && !saving;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -193,7 +213,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         priority: priority === NO_PRIORITY ? null : (priority as task.TaskPriority),
         assigneeId,
         teamId,
-        dueAt: isoFromDateInput(due),
+        startAt: isoFromDateInput(startDate),
+        dueAt: isoFromDateInput(endDate),
         attachments: { files, urls },
       });
       reset();
@@ -288,10 +309,22 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         </div>
 
         <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-due">
-            期限
+          <label className={styles.formLabel} htmlFor="fe4-mytask-start">
+            開始日
           </label>
-          <DateField id="fe4-mytask-due" value={due} onChange={setDue} testId="fe4-mytask-create-due" />
+          <DateField id="fe4-mytask-start" value={startDate} onChange={setStartDate} testId="fe4-mytask-create-start" />
+        </div>
+
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor="fe4-mytask-due">
+            終了日
+          </label>
+          <DateField id="fe4-mytask-due" value={endDate} onChange={setEndDate} testId="fe4-mytask-create-due" />
+          {!datesValid && (
+            <p className={styles.fieldError} data-testid="fe4-mytask-create-date-error">
+              終了日は開始日以降にしてください
+            </p>
+          )}
         </div>
 
         {teams.length > 0 && (

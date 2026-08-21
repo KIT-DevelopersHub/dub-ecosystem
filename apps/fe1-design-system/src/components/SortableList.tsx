@@ -49,6 +49,11 @@ export interface SortableItemContext {
   isDragging: boolean;
   /** Spread onto the drag handle (or the item root) to make it grab the pointer/keyboard. */
   dragHandleProps: SortableDragHandleProps;
+  /** id of the row currently grabbed (any row, not just this one), or null when idle.
+   *  Lets a consumer render the OTHER rows of a multi-selection as "lifted" while a
+   *  group drag is in flight — the grabbed row rides the floating overlay. Additive;
+   *  consumers that don't need it can ignore it. */
+  dragActiveId: string | null;
 }
 
 export interface SortableReorderEvent {
@@ -125,6 +130,7 @@ function SortableRow<T>({
   disabled,
   renderItem,
   registerNode,
+  activeId,
 }: {
   id: string;
   item: T;
@@ -132,6 +138,8 @@ function SortableRow<T>({
   renderItem: (item: T, ctx: SortableItemContext) => ReactNode;
   /** Register/unregister this row's DOM node so the list can FLIP a group move. */
   registerNode: (id: string, el: HTMLElement | null) => void;
+  /** id of the row currently grabbed (list-wide), forwarded to renderItem's ctx. */
+  activeId: string | null;
 }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id, disabled });
   // Compose dnd-kit's node ref with the list's node registry (used by the group-move
@@ -160,7 +168,7 @@ function SortableRow<T>({
   const dragHandleProps = (disabled ? {} : { ...attributes, ...(listeners ?? {}) }) as SortableDragHandleProps;
   return (
     <div ref={composedRef} style={style} className={styles.item} data-dragging={isDragging || undefined}>
-      {renderItem(item, { isDragging, dragHandleProps })}
+      {renderItem(item, { isDragging, dragHandleProps, dragActiveId: activeId })}
     </div>
   );
 }
@@ -362,7 +370,7 @@ export function SortableList<T>({
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         <div className={className} data-testid={testId} aria-label={ariaLabel}>
           {orderedItems.map((item) => (
-            <SortableRow key={getItemId(item)} id={getItemId(item)} item={item} disabled={disabled} renderItem={renderItem} registerNode={registerNode} />
+            <SortableRow key={getItemId(item)} id={getItemId(item)} item={item} disabled={disabled} renderItem={renderItem} registerNode={registerNode} activeId={activeId} />
           ))}
         </div>
       </SortableContext>
@@ -372,7 +380,7 @@ export function SortableList<T>({
       <DragOverlay dropAnimation={dropAnimation}>
         {activeItem ? (
           <div className={cx(styles.overlay, overlayClassName)}>
-            {renderOverlay ? renderOverlay(activeItem) : renderItem(activeItem, { isDragging: false, dragHandleProps: {} })}
+            {renderOverlay ? renderOverlay(activeItem) : renderItem(activeItem, { isDragging: false, dragHandleProps: {}, dragActiveId: activeId })}
           </div>
         ) : null}
       </DragOverlay>
