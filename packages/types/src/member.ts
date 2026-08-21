@@ -63,6 +63,8 @@ export interface Member {
   firstNameRomaji?: string | null;
   /** 電話番号 — retained from a 参加届 (任意 / additive). */
   phone?: string | null;
+  /** 希望する活動 — retained from a 参加届 (任意 / additive). 本人が自己編集できる (アカウント設定). */
+  desiredActivity?: DesiredActivity | null;
   note: string | null;
   sortOrder: number;
   /** Optimistic-concurrency version; PATCH must echo the last seen value. */
@@ -235,6 +237,30 @@ export interface SubmitParticipationRequest {
   desiredActivity?: DesiredActivity | null;
   note?: string | null;
 }
+
+/** The signed-in user's OWN 参加届 (self-service, session-scoped — no target id). The
+ *  self-editable slice a 運営 member manages from アカウント設定 → 参加情報. Every field is
+ *  nullable so an unfilled 届 reads as all-null; `SelfParticipationUpdateRequest` patches
+ *  a subset. Backed by the caller's linked member_people row (resolved via identity link)
+ *  — see member-service getSelfParticipation / updateSelfParticipation. Distinct from the
+ *  admin `SubmitParticipationRequest` (which targets the review pipeline). */
+export interface SelfParticipation {
+  lastName: string | null;
+  firstName: string | null;
+  lastNameKana: string | null;
+  firstNameKana: string | null;
+  lastNameRomaji: string | null;
+  firstNameRomaji: string | null;
+  schoolEmail: string | null;
+  gmail: string | null;
+  phone: string | null;
+  grade: Grade | null;
+  department: string | null;
+  desiredActivity: DesiredActivity | null;
+  note: string | null;
+}
+/** Patch body for the self 参加届 (any subset of the fields). */
+export type SelfParticipationUpdateRequest = Partial<SelfParticipation>;
 
 /** Response of a submit: the stored 参加届. 提出時は名簿へ反映しない（管理者が一覧で
  *  確定する）ので `reviewState` は "pending"。`member` は反映されるまで null。
