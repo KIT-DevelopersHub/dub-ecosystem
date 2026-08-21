@@ -19,7 +19,10 @@
   box-shadow: var(--dub-shadow-overlay);
   width: 100%;
   max-height: 90vh;
-  overflow: auto;
+  /* Dialog itself does NOT scroll: header/footer stay pinned and only .body
+     scrolls (see .body min-height:0 + overflow-y). Prevents the "scroll to the
+     bottom to reach the footer actions" problem when the list is long. */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   animation: dub-modal-dialog-in 0.18s ease-out;
@@ -70,6 +73,8 @@
   gap: var(--dub-space-3);
   padding: var(--dub-space-4);
   border-bottom: 1px solid var(--dub-color-border-default);
+  /* Pinned: title + close button stay visible while the body scrolls. */
+  flex-shrink: 0;
 }
 .title {
   font-family: var(--dub-font-family-sans);
@@ -80,6 +85,11 @@
 .body {
   padding: var(--dub-space-4);
   flex: 1;
+  /* min-height:0 lets this flex child shrink below its content height so
+     overflow-y actually engages (same height-resolution fix as PR #411's
+     drawer body); only the list scrolls, header/footer stay put. */
+  min-height: 0;
+  overflow-y: auto;
 }
 .footer {
   padding: var(--dub-space-4);
@@ -87,6 +97,8 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--dub-space-2);
+  /* Pinned bottom bar: Mark-all-read / すべての通知を見る always reachable. */
+  flex-shrink: 0;
 }
 .message {
   margin: 0 0 var(--dub-space-4);
