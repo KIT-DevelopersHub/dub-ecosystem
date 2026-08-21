@@ -41,6 +41,8 @@ export function RoleAssignmentList({ userId }: { userId: string }) {
         columns={columns}
         rows={assignments.data ?? []}
         rowKey={(a) => a.id}
+        stickyHeader
+        zebra
         testId="fe7-assignments-table"
       />
       <ConfirmDialog
