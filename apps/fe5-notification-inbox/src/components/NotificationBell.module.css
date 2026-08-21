@@ -40,3 +40,27 @@
   line-height: 16px;
   text-align: center;
 }
+/* A04: one bounce/pulse when a new unread arrives (applied only on increase). */
+.badge.pulse {
+  animation: badgePulse var(--dub-motion-slow) var(--dub-motion-easing);
+  transform-origin: center;
+}
+@keyframes badgePulse {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.45);
+  }
+  60% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .badge.pulse {
+    animation: none;
+  }
+}

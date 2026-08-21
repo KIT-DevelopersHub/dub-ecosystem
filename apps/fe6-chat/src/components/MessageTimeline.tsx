@@ -2,6 +2,7 @@
 // pending rows. Consecutive posts by the same author within a short window are
 // "grouped" (avatar/name hidden, hover timestamp) for Slack-style density.
 // Native scroll + loadOlder paging (FE6 virtualization deferred, design §8-1 #7).
+import { useEffect, useRef } from "react";
 import { Avatar } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message } from "../api/contract";
@@ -53,6 +54,30 @@ export function MessageTimeline(props: MessageTimelineProps) {
   const { messages, pending, currentUserId, lastReadMessageId } = props;
   const unreadAt = firstUnreadIndex(messages, lastReadMessageId, currentUserId);
 
+  // A05: animate only *newly-arrived tail* messages. `seenIds` is seeded (via the
+  // ref initializer) with the first render's ids so the initial list never
+  // animates. A message is "entering" iff it is unseen AND newer than the newest
+  // id we had already seen — this excludes prepended history from `loadOlder`.
+  // The seen set / max-timestamp are advanced after commit so re-renders don't
+  // re-fire the animation on existing rows.
+  const seenIds = useRef<Set<common.MessageId>>(new Set(messages.map((m) => m.id)));
+  const maxSeenTs = useRef<number>(
+    messages.reduce((max, m) => Math.max(max, Date.parse(m.createdAt)), 0),
+  );
+  const entering = new Set<common.MessageId>();
+  for (const m of messages) {
+    if (!seenIds.current.has(m.id) && Date.parse(m.createdAt) >= maxSeenTs.current) {
+      entering.add(m.id);
+    }
+  }
+  useEffect(() => {
+    for (const m of messages) {
+      seenIds.current.add(m.id);
+      const ts = Date.parse(m.createdAt);
+      if (ts > maxSeenTs.current) maxSeenTs.current = ts;
+    }
+  }, [messages]);
+
   return (
     <div className={styles.timeline} data-testid="fe6-channel-timeline">
       {props.hasOlder && (
@@ -82,6 +107,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
               canModerate={props.canModerate}
               grouped={grouped}
               mentionsMe={mentionsMe}
+              entering={entering.has(m.id)}
               pinned={props.pinnedIds?.has(m.id) ?? false}
               resolveUser={props.resolveUser}
               onToggleReaction={props.onToggleReaction}
@@ -98,7 +124,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
       {pending.map((p) => (
         <div
           key={p.clientTempId}
-          className={`${styles.messageRow} ${p.state === "failed" ? styles.failed : styles.pending}`}
+          className={`${styles.messageRow} ${styles.entering} ${p.state === "failed" ? styles.failed : styles.pending}`}
           data-testid="fe6-timeline-pending"
           data-pending-state={p.state}
         >

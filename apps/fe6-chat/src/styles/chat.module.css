@@ -465,6 +465,33 @@
   background: color-mix(in srgb, var(--dub-color-warning-100) 60%, transparent);
   box-shadow: inset 3px 0 0 var(--dub-color-warning-500);
 }
+/* A05: a newly-arrived (tail) message slides up + fades in, once, on mount. */
+.messageRow.entering {
+  animation: messageEnter var(--dub-motion-normal) var(--dub-motion-easing);
+}
+@keyframes messageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .messageRow.entering {
+    animation: messageEnterFade var(--dub-motion-normal) var(--dub-motion-easing);
+  }
+  @keyframes messageEnterFade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
 .avatarCol {
   display: flex;
   justify-content: center;
