@@ -1,0 +1,175 @@
+name: Desktop installers
+
+# Builds the downloadable Dub desktop client installers on native runners:
+#   - Windows .exe (Inno Setup) on windows-latest  — the only way to produce a
+#     Windows build, since Flutter cannot cross-compile Windows from macOS/Linux.
+#   - macOS .dmg on macos-latest (mirrors the local build for reproducibility).
+#
+# Both artifacts are UNSIGNED. See apps/de1-desktop/README for the end-user
+# "unblock" steps (macOS right-click > Open, Windows SmartScreen "Run anyway").
+#
+# Trigger manually from the Actions tab, or by pushing a tag like
+# `de1-desktop-v1.0.0`. Download the built installers from the run's Artifacts.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "de1-desktop-v*"
+  # Also build (and upload downloadable artifacts) on PRs that touch the desktop
+  # app or this workflow, so the installers can be produced without merging.
+  pull_request:
+    paths:
+      - "apps/de1-desktop/**"
+      - ".github/workflows/desktop-installers.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.29.3"
+  APP_DIR: apps/de1-desktop
+
+jobs:
+  windows:
+    name: Windows .exe (nsis-free / Inno Setup)
+    # Pinned to windows-2022 (not windows-latest, which now maps to windows-2025).
+    # Flutter's Windows desktop build needs the Visual Studio "Desktop
+    # development with C++" toolchain; the 2022 image ships VS 2022 with that
+    # workload, whereas the 2025 image fails detection ("could not find any
+    # instance of Visual Studio" -> "Unable to generate build files").
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Disable NTFS path protection
+        # docs/ contains a legacy path with a trailing-space directory name that
+        # is illegal on NTFS. git's core.protectNTFS (on by default on Windows)
+        # rejects that entry while populating the index — so even a sparse
+        # checkout of just apps/de1-desktop fails at `git checkout` (exit 128)
+        # before it can skip the path. Turning protectNTFS off lets the index
+        # populate; the offending path stays OUTSIDE the sparse cone, so it is
+        # never written to the working tree and never hits the filesystem limit.
+        run: git config --global core.protectNTFS false
+      - name: Checkout (desktop app only)
+        # Sparse-checkout of just the Flutter app. The app is self-contained
+        # (no monorepo path deps), so this is all we need.
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/de1-desktop
+          sparse-checkout-cone-mode: true
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Resolve app version
+        id: ver
+        shell: bash
+        run: |
+          raw=$(grep -E '^version:' "${APP_DIR}/pubspec.yaml" | head -1 | sed 's/version:[[:space:]]*//')
+          echo "version=${raw%%+*}" >> "$GITHUB_OUTPUT"
+
+      - name: flutter pub get
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: Build Windows release
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter build windows --release
+
+      - name: Compile installer (Inno Setup)
+        working-directory: ${{ env.APP_DIR }}
+        shell: pwsh
+        run: |
+          $bundle = "$PWD\build\windows\x64\runner\Release"
+          # ${env:ProgramFiles(x86)} — the braces are REQUIRED: PowerShell parses
+          # a bare $env:ProgramFiles(x86) as the var $env:ProgramFiles followed by
+          # literal "(x86)", yielding "C:\Program Files(x86)" (no space) and a
+          # "term not recognized" error. ISCC.exe ships on the windows-2022 image.
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            /DMyAppVersion=${{ steps.ver.outputs.version }} `
+            /DBundleDir=$bundle `
+            /Ooutput_installer `
+            windows\packaging\dub.iss
+
+      - name: Package portable zip (fallback)
+        working-directory: ${{ env.APP_DIR }}
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" `
+            -DestinationPath "output_installer\Dub-Windows-${{ steps.ver.outputs.version }}-portable.zip"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: dub-windows-installer
+          path: ${{ env.APP_DIR }}/output_installer/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS .dmg
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (desktop app only)
+        # Sparse-checkout keeps parity with the Windows job (see note there) and
+        # skips the rest of the monorepo the Flutter shell does not need.
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/de1-desktop
+          sparse-checkout-cone-mode: true
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Resolve app version
+        id: ver
+        shell: bash
+        run: |
+          raw=$(grep -E '^version:' "${APP_DIR}/pubspec.yaml" | head -1 | sed 's/version:[[:space:]]*//')
+          echo "version=${raw%%+*}" >> "$GITHUB_OUTPUT"
+
+      - name: flutter pub get
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: Build macOS release
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter build macos --release
+
+      - name: Package .dmg (unsigned)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          app=$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' | head -1)
+          stage="$RUNNER_TEMP/dmg"
+          rm -rf "$stage"; mkdir -p "$stage"
+          cp -R "$app" "$stage/"
+          ln -s /Applications "$stage/Applications"
+          mkdir -p output_installer
+          hdiutil create -volname "Dub" -srcfolder "$stage" -ov -format UDZO \
+            "output_installer/Dub-macOS-${{ steps.ver.outputs.version }}-unsigned.dmg"
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: dub-macos-installer
+          path: ${{ env.APP_DIR }}/output_installer/*.dmg
+          if-no-files-found: error
