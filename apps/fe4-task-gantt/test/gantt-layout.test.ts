@@ -8,6 +8,7 @@ import {
   shiftDatesByDays,
   pxToDayDelta,
   PX_PER_DAY,
+  visibleTreeRows,
 } from "../src/domain/gantt-layout";
 
 const row = (id: string, s: string | null, e: string | null, pct = 0): gantt.GanttRow => ({
@@ -74,5 +75,47 @@ describe("gantt-layout (design tests 4/5/7)", () => {
     expect(shifted.endsAt).toBe("2026-08-07T00:00:00.000Z");
     expect(pxToDayDelta(PX_PER_DAY.day * 3 + 5, "day")).toBe(3);
     expect(shiftDatesByDays(null, null, 5)).toEqual({ startsAt: null, endsAt: null });
+  });
+});
+
+describe("visibleTreeRows — recursive WBS collapse (祖先が閉じれば子孫は必ず非表示)", () => {
+  // 3-level tree: P(parent) -> C(child) -> G(grandchild)
+  const tree = (): gantt.GanttRow[] => [
+    { ...row("P", null, null), parentTaskId: null, hasChildren: true, depth: 0 },
+    { ...row("C", null, null), parentTaskId: "P", hasChildren: true, depth: 1 },
+    { ...row("G", null, null), parentTaskId: "C", hasChildren: false, depth: 2 },
+  ];
+  const ids = (rs: gantt.GanttRow[]) => rs.map((r) => r.taskId);
+
+  it("all ancestors open ⇒ every row visible", () => {
+    expect(ids(visibleTreeRows(tree(), new Set(["P", "C"])))).toEqual(["P", "C", "G"]);
+  });
+
+  it("collapsing the child hides the grandchild", () => {
+    // P open, C closed ⇒ C visible, G hidden
+    expect(ids(visibleTreeRows(tree(), new Set(["P"])))).toEqual(["P", "C"]);
+  });
+
+  it("collapsing an ancestor hides deep descendants even when the child's own toggle stays open (the bug)", () => {
+    // P collapsed but C still marked open in the toggle set: G must NOT stay visible.
+    expect(ids(visibleTreeRows(tree(), new Set(["C"])))).toEqual(["P"]);
+  });
+
+  it("re-expanding an ancestor restores the subtree using each node's preserved toggle state", () => {
+    const rows = tree();
+    // Grandchild's parent C was left open; only P was collapsed. Re-opening P should
+    // bring back C AND G (because C's open state was preserved), not just C.
+    expect(ids(visibleTreeRows(rows, new Set(["P", "C"])))).toEqual(["P", "C", "G"]);
+    // If instead C had been collapsed by the user, re-opening P shows C but keeps G hidden.
+    expect(ids(visibleTreeRows(rows, new Set(["P"])))).toEqual(["P", "C"]);
+  });
+
+  it("is cycle-safe against a malformed parent loop", () => {
+    const cyclic: gantt.GanttRow[] = [
+      { ...row("X", null, null), parentTaskId: "Y" },
+      { ...row("Y", null, null), parentTaskId: "X" },
+    ];
+    // Neither open ⇒ both hidden, and no infinite loop.
+    expect(ids(visibleTreeRows(cyclic, new Set()))).toEqual([]);
   });
 });
