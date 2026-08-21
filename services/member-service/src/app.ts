@@ -70,6 +70,21 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await svc.submitParticipation(internalReqCtx(c), body), 201);
   });
 
+  // Self 参加届 (アカウント設定 → 参加情報). The gateway's GET/POST /api/v1/me/participation
+  // authenticates the session, then forwards here as a genuine s2s call (x-dub-internal +
+  // the caller's identity x-dub-user-id). Session-scoped to THAT user — no target id, and
+  // resolved via the identity link to their member_people row. reqCtx (not internalReqCtx)
+  // is used deliberately: a real signed-in user id is required here (not the system actor).
+  app.get("/members/internal/me/participation", async (c) => {
+    const ctx = reqCtx(c);
+    return c.json(await svc.getSelfParticipation(ctx.userId));
+  });
+  app.post("/members/internal/me/participation", async (c) => {
+    const ctx = reqCtx(c);
+    const body = await readJson<member.SelfParticipationUpdateRequest>(c);
+    return c.json(await svc.updateSelfParticipation(ctx, ctx.userId, body));
+  });
+
   // Auth for the rest of /members/*. The public internal route above is handled before
   // this runs, so exclude it here (it must not require a signed-in user).
   app.use("/members/*", async (c, next) => {

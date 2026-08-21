@@ -6,13 +6,24 @@
 // inside apps/fe2-app-shell to keep this unit's work self-contained — see notes.)
 import type { ErrorResponse } from "@dub/errors";
 import { isErrorResponse } from "@dub/errors";
-import type { gateway } from "@dub/types";
+import type { gateway, member } from "@dub/types";
 import type { DisplayableError } from "@dub/ui";
 
 type MeResponse = gateway.MeResponse;
 type BffHomeResponse = gateway.BffHomeResponse;
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+
+// Self-service contract types come from the single source of truth (@dub/types), shared
+// with the gateway handlers ([[dub-api-contract-sot]]) — never re-defined here. Aliased to
+// the FE-local names the shell already imports (AccountSettingsDialog / participation).
+/** Self profile edit payload (display name / avatar). `avatarUrl: null` clears the avatar. */
+export type ProfileUpdateInput = gateway.MeProfileUpdateRequest;
+/** Persisted self profile after an update — the caller reconciles its /me cache with this. */
+export type ProfileUpdateResult = gateway.MeProfileResponse;
+/** The self-editable slice of the signed-in user's own 参加届 (participation). The field
+ *  descriptors that drive the edit UI live in features/participation (single source). */
+export type SelfParticipation = member.SelfParticipation;
 
 export interface RequestInput<TBody = unknown> {
   method: HttpMethod;
@@ -105,6 +116,19 @@ export interface ApiClient {
     /** Self password change (#5b): the logged-in user rotates their OWN password.
      *  The gateway re-verifies the session + current password before storing. */
     changePassword(currentPassword: string, newPassword: string): Promise<void>;
+    /** Self profile update: the logged-in user edits their OWN display name / avatar.
+     *  Posts to the gateway-owned POST /api/v1/me/profile (session-scoped to the caller
+     *  — no target id, unlike FE7's admin roster PATCH /identity/users/:id). Returns the
+     *  persisted display name + avatar so the caller can reconcile its optimistic cache.
+     *  Backed by the gateway-owned POST /api/v1/me/profile (identity-roster self-profile
+     *  route), session-scoped to the caller. */
+    updateProfile(input: ProfileUpdateInput): Promise<ProfileUpdateResult>;
+    /** The signed-in user's OWN 参加届 (self-service). GET returns the stored fields (all
+     *  null when nothing was submitted yet); the update patches them. Session-scoped — no
+     *  target id. Backed by the gateway GET/POST /api/v1/me/participation
+     *  (member-service getSelfParticipation / updateSelfParticipation). */
+    getSelfParticipation(): Promise<SelfParticipation>;
+    updateSelfParticipation(input: Partial<SelfParticipation>): Promise<SelfParticipation>;
   };
   bff: { home(): Promise<BffHomeResponse> };
   events: ResourceClient;
@@ -301,6 +325,19 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           method: "POST",
           path: "/api/v1/me/password",
           body: { currentPassword, newPassword },
+        }),
+      updateProfile: (input: ProfileUpdateInput) =>
+        request<ProfileUpdateResult, ProfileUpdateInput>({
+          method: "POST",
+          path: "/api/v1/me/profile",
+          body: input,
+        }),
+      getSelfParticipation: () => request<SelfParticipation>({ method: "GET", path: "/api/v1/me/participation" }),
+      updateSelfParticipation: (input: Partial<SelfParticipation>) =>
+        request<SelfParticipation, Partial<SelfParticipation>>({
+          method: "POST",
+          path: "/api/v1/me/participation",
+          body: input,
         }),
     },
     bff: {

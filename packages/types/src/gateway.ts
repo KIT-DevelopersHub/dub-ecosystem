@@ -11,6 +11,24 @@ export interface MeResponse {
   sessionExpiresAt: EpochMs; // epoch-ms exception (theme10)
 }
 
+// ---- self profile (アカウント設定 → 表示名/アバター) -------------------------------
+// GET/POST /api/v1/me/profile — the signed-in user reads/edits their OWN identity
+// display name + avatar (session-scoped, no target id — unlike FE7's admin roster
+// PATCH /identity/users/:id). The gateway authenticates the session, then forwards to
+// identity-roster as a genuine s2s call scoped to the caller's userId.
+export interface MeProfileResponse {
+  displayName: string;
+  /** Avatar image reference. Currently a URL or data: URL string (最小実装); a future
+   *  R2-backed object URL will replace inline data URLs (本番課題・TODO). null = initials. */
+  avatarUrl: string | null;
+}
+/** Patch body for the self profile. Both optional so the caller can patch just one;
+ *  `avatarUrl: null` clears the avatar (back to initials). */
+export interface MeProfileUpdateRequest {
+  displayName?: string;
+  avatarUrl?: string | null;
+}
+
 export interface BffHomeResponse {
   upcomingEvents: EventSummary[];
   unreadCount: number;

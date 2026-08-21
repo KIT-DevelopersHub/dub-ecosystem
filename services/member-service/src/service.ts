@@ -175,6 +175,7 @@ export class MemberService {
       lastNameRomaji: null,
       firstNameRomaji: null,
       phone: null,
+      desiredActivity: null,
       note: optText(body.note, "note"),
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
@@ -539,6 +540,7 @@ export class MemberService {
       lastNameRomaji: match.lastNameRomaji ?? p.lastNameRomaji,
       firstNameRomaji: match.firstNameRomaji ?? p.firstNameRomaji,
       phone: match.phone ?? p.phone,
+      desiredActivity: match.desiredActivity ?? p.desiredActivity,
       note: match.note ?? p.note,
       version: match.version + 1,
       updatedAt: this.deps.now(),
@@ -573,6 +575,7 @@ export class MemberService {
       lastNameRomaji: p.lastNameRomaji,
       firstNameRomaji: p.firstNameRomaji,
       phone: p.phone,
+      desiredActivity: p.desiredActivity,
       note: p.note,
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
@@ -588,6 +591,161 @@ export class MemberService {
   async listParticipations(_ctx: ReqCtx): Promise<member.ListParticipationsResponse> {
     const rows = await this.deps.repo.listParticipations(this.deps.orgId);
     return { participations: rows.map(toParticipation) };
+  }
+
+  // ---- self 参加届 (アカウント設定 → 参加情報) -------------------------------------
+  // The signed-in 運営 member reads/edits their OWN 参加届 (session-scoped — the gateway
+  // forwards their identity userId as x-dub-user-id). Resolved via the identity link to
+  // their member_people row, so edits round-trip to the real roster (実DB) and survive a
+  // reload — distinct from the admin submit/review pipeline (submitParticipation).
+  private toSelfParticipation(p: PersonRow): member.SelfParticipation {
+    return {
+      lastName: p.lastName,
+      firstName: p.firstName,
+      lastNameKana: p.lastNameKana,
+      firstNameKana: p.firstNameKana,
+      lastNameRomaji: p.lastNameRomaji,
+      firstNameRomaji: p.firstNameRomaji,
+      schoolEmail: p.schoolEmail,
+      gmail: p.gmail,
+      phone: p.phone,
+      grade: (p.grade as member.Grade | null) ?? null,
+      department: p.department,
+      desiredActivity: p.desiredActivity,
+      note: p.note,
+    };
+  }
+
+  private emptySelfParticipation(): member.SelfParticipation {
+    return {
+      lastName: null,
+      firstName: null,
+      lastNameKana: null,
+      firstNameKana: null,
+      lastNameRomaji: null,
+      firstNameRomaji: null,
+      schoolEmail: null,
+      gmail: null,
+      phone: null,
+      grade: null,
+      department: null,
+      desiredActivity: null,
+      note: null,
+    };
+  }
+
+  /** The signed-in user's OWN 参加届, resolved via their identity link to a member_people
+   *  row. All-null when the caller has no linked roster entry yet. */
+  async getSelfParticipation(identityUserId: string): Promise<member.SelfParticipation> {
+    const p = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, identityUserId);
+    return p ? this.toSelfParticipation(p) : this.emptySelfParticipation();
+  }
+
+  /** Fold a self 参加届 patch onto a PersonRow's editable fields. Only keys present in
+   *  `patch` are touched; strings are trimmed ("" → null); grade / desiredActivity are
+   *  enum-checked; romaji fields are format-checked (アルファベットのみ). */
+  private applySelfPatch(base: PersonRow, patch: member.SelfParticipationUpdateRequest): PersonRow {
+    const next: PersonRow = { ...base };
+    const textKeys = [
+      "lastName",
+      "firstName",
+      "lastNameKana",
+      "firstNameKana",
+      "schoolEmail",
+      "gmail",
+      "phone",
+      "department",
+      "note",
+    ] as const;
+    for (const k of textKeys) {
+      if (k in patch) next[k] = optText(patch[k], k);
+    }
+    for (const k of ["lastNameRomaji", "firstNameRomaji"] as const) {
+      if (k in patch) {
+        const v = optText(patch[k], k);
+        if (v !== null && !isRomaji(v)) invalid(k);
+        next[k] = v;
+      }
+    }
+    if ("grade" in patch) {
+      // Value may arrive as "" from an empty <select> — treat blank as a clear.
+      const g = patch.grade as unknown;
+      if (g === null || g === undefined || g === "") next.grade = null;
+      else if (isGrade(g)) next.grade = g;
+      else invalid("grade");
+    }
+    if ("desiredActivity" in patch) {
+      const d = patch.desiredActivity as unknown;
+      if (d === null || d === undefined || d === "") next.desiredActivity = null;
+      else if (isDesiredActivity(d)) next.desiredActivity = d;
+      else invalid("desiredActivity");
+    }
+    return next;
+  }
+
+  /** Patch the signed-in user's OWN 参加届. Updates the caller's linked member_people row
+   *  (optimistic version). When the caller has no linked roster entry yet, creates one
+   *  (追加済) linked to their identity account, seeded from the patch — so a signed-in
+   *  member's 参加情報 always has a durable home. TODO(本番課題): prefer linking to an
+   *  existing 招待中 entry (name/email突合) over creating a fresh row. */
+  async updateSelfParticipation(
+    ctx: ReqCtx,
+    identityUserId: string,
+    patch: member.SelfParticipationUpdateRequest,
+  ): Promise<member.SelfParticipation> {
+    const orgId = this.deps.orgId;
+    const cur = await this.deps.repo.getPersonByIdentityUserId(orgId, identityUserId);
+    if (cur) {
+      const applied = this.applySelfPatch(cur, patch);
+      const composed = composeName(applied.lastName, applied.firstName);
+      const next: PersonRow = {
+        ...applied,
+        // keep the composed "姓 名" name in sync when 姓/名 changed; never blank it out.
+        name: composed || cur.name,
+        version: cur.version + 1,
+        updatedAt: this.deps.now(),
+      };
+      const ok = await this.deps.repo.updatePerson(next, cur.version);
+      if (!ok) throw errVersionConflict(cur.id);
+      return this.toSelfParticipation(next);
+    }
+
+    // No linked roster entry yet — create one linked to the caller's identity account.
+    const now = this.deps.now();
+    const blank: PersonRow = {
+      id: this.deps.newMemberId(),
+      orgId,
+      name: "",
+      roleTitle: null,
+      status: "added",
+      department: null,
+      grade: null,
+      identityUserId,
+      contact: null,
+      schoolEmail: null,
+      gmail: null,
+      lastName: null,
+      firstName: null,
+      lastNameKana: null,
+      firstNameKana: null,
+      lastNameRomaji: null,
+      firstNameRomaji: null,
+      phone: null,
+      desiredActivity: null,
+      note: null,
+      sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
+      version: 1,
+      archivedAt: null,
+      createdBy: ctx.userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const seed = this.applySelfPatch(blank, patch);
+    const composed = composeName(seed.lastName, seed.firstName);
+    const fallbackLocal = (seed.gmail ?? seed.schoolEmail ?? "").split("@")[0] ?? "";
+    const row: PersonRow = { ...seed, name: (composed || fallbackLocal || "メンバー").slice(0, MAX_NAME_LEN) };
+    await this.deps.repo.createPerson(row, []);
+    return this.toSelfParticipation(row);
   }
 }
 

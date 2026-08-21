@@ -37,7 +37,6 @@ import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.ts
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
-import { MemberRosterNav } from "../features/members/MemberRosterNav.tsx";
 import { participationRoutes } from "../features/participation/index.tsx";
 import { ParticipationProvider } from "../features/participation/ParticipationProvider.tsx";
 import {
@@ -104,10 +103,11 @@ function providerWrapper(Provider: ProviderComponent, api: ApiClient): ElementWr
   return (node) => createElement(Provider, { api, children: node });
 }
 
-/** 運営メンバー・名簿 統合アプリの共有サブナビ帯でセクション本体を包む（Provider の外側）。
- *  members(member-service) と admin(identity-roster) の両セクションに同じ帯を敷き、
- *  ランチャー 1 タイルの中で横断できるようにする（合体後も両ルート/Providerは維持）。 */
-const rosterChromeWrapper: ElementWrapper = (node) => createElement(MemberRosterNav, { children: node });
+// 運営メンバー・名簿 統合アプリの共有サブナビ帯は、以前は各ルートを個別に包む wrapper として
+// 本体と一緒に描画していたが、タブ切替のたびに Tabs ごと remount され「バーごとリフレッシュ」して
+// 見えた（＋スライド下線リセット）。バーはシェルのレイアウト(shell/router.tsx の ShellRouteContent)で
+// 永続マウントし、タブ下の本体だけ Outlet で差し替える方式に移行したため、ここでの chrome ラップは廃止。
+// 各セクションは Provider だけで包む（帯はシェル側が pathname で出し分ける）。
 
 /** Wrap a canonical `lazy` loader so the resolved Component mounts inside `wrap`. */
 function wrapLazy(lazy: FeatureRoute["lazy"], wrap: ElementWrapper): FeatureRoute["lazy"] {
@@ -287,9 +287,8 @@ function adaptGantt(api: ApiClient): FeatureModule {
 // Route gate = identity:read; write actions are re-authorized server-side (identity:admin).
 function adaptMembers(api: ApiClient): FeatureModule {
   const provider = providerWrapper(MembersProvider, api);
-  // chrome(サブナビ) は Provider の外側: (node) => <MemberRosterNav>{<MembersProvider>node</MembersProvider>}</MemberRosterNav>
-  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
-  const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  // サブナビ帯はシェルのレイアウトで永続表示するので、ここは Provider だけで包む（帯は敷かない）。
+  const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, provider));
   // 統合タイル「運営メンバー・名簿」。運営メンバー(member-service) と 名簿(FE7 /admin/users) と
   // 参加届＋回答(participation) を同じアプリとして開く。名簿/参加届/回答 の個別タイルは廃止し、この
   // タイル内の共有サブナビ(MemberRosterNav)から横断する。ロール管理(/admin/roles) だけは独立タイル
@@ -307,10 +306,9 @@ function adaptMembers(api: ApiClient): FeatureModule {
 // write is re-authorized server-side by member-service.
 function adaptParticipation(api: ApiClient): FeatureModule {
   const provider = providerWrapper(ParticipationProvider, api);
-  // 参加届(提出) と 参加届の回答(管理) は「運営メンバー・名簿」統合アプリのセクションに畳む。
-  // 共有サブナビ(MemberRosterNav) を Provider の外側に敷き、名簿/運営メンバーと同じ帯で横断する。
-  const wrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
-  const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  // 参加届(提出) と 参加届の回答(管理) は「運営メンバー・名簿」統合アプリのセクション。共有サブナビ帯は
+  // シェルのレイアウトで永続表示するので、ここは Provider だけで包む（帯はシェルが pathname で出す）。
+  const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, provider));
   // 個別ランチャータイルは廃止（nav=[]）。参加届は運営メンバー・名簿タイル内のサブナビからのみ横断する
   // （ユーザー明示指示: 参加届＋回答管理を運営メンバーにまとめる）。ルート/Provider は維持し deep-link も生存。
   const nav: NavEntry[] = [];
@@ -333,14 +331,11 @@ function adaptDriveShare(api: ApiClient): FeatureModule {
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const provider = providerWrapper(RosterProviders, api);
-  // 名簿(/admin/users*) は「運営メンバー・名簿」統合タイルの一部 → 共有サブナビ(chrome)を Provider の
-  // 外側に敷き、そのタブから横断する（個別タイルは出さない）。ロール管理(/admin/roles*) はユーザー明示
-  // 指示で独立ランチャータイル「ロール管理」として単独で開く → chrome は敷かず単独アプリとして成立させる。
-  const rosterWrap: ElementWrapper = (node) => rosterChromeWrapper(provider(node));
+  // 名簿(/admin/users*) は「運営メンバー・名簿」統合タイルの一部。共有サブナビ帯はシェルのレイアウトで
+  // 永続表示するので Provider だけで包む（帯はシェルが pathname=/admin/users で出し、/admin/roles では
+  // 出さない）。ロール管理(/admin/roles*) は独立タイルとして単独で成立する（従来どおり帯なし）。
   const src = adminModule.routes as readonly SourceRoute[];
-  const routes = src.map((r) =>
-    r.path.startsWith("/admin/roles") ? wrapRoute(r, provider) : wrapRoute(r, rosterWrap),
-  );
+  const routes = src.map((r) => wrapRoute(r, provider));
   // 独立ランチャータイルは「ロール管理」(/admin/roles) の 1 つだけ。名簿(/admin/users) は運営メンバー・
   // 名簿タイル内の共有サブナビ(MemberRosterNav)から開くので個別タイルを出さない。変更履歴(/admin/history)
   // の UI は撤去済み（ルート/コンポーネントごと削除・監査ログのデータ基盤は残置）。route ガード

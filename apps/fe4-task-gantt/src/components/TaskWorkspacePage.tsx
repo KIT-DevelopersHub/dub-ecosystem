@@ -17,7 +17,7 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
-import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
+import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
@@ -665,6 +665,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   const onCreate = async (draft: TaskDraft) => {
     const linkPredecessorFor = createPredecessorFor;
+    // 親子は同一チーム: 子タスク作成時はチームを親のチームに強制する（作成モーダルのチーム欄も
+    // 親でロックするが、送信値もここで親に確定＝二重の担保）。親なし通常作成では draft の値。
+    const teamId: common.TeamId | null = draft.parentTaskId ? teamOf(scopeTasks, draft.parentTaskId) : draft.teamId;
     // Optimistic create: show a provisional task + its bar on the timeline the same
     // tick, then reconcile with the server row (rolled back + surfaced on failure).
     const tempId = provisionalTaskId();
@@ -676,7 +679,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         status: draft.status,
         priority: draft.priority,
         assigneeId: draft.assigneeId,
-        teamId: draft.teamId,
+        teamId,
         startAt: draft.startAt,
         dueAt: draft.dueAt,
         parentTaskId: draft.parentTaskId,
@@ -693,7 +696,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         title: draft.title,
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
-        ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(teamId ? { teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
         ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
