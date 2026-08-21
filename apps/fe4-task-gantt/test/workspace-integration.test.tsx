@@ -65,6 +65,26 @@ describe("TaskWorkspacePage — gantt-only workspace", () => {
     expect((await screen.findAllByText("新しい打合せ")).length).toBeGreaterThan(0);
   });
 
+  it("③ gantt発行ダイアログは 対象イベント欄を出さず、作成タスクにヘッダーのeventIdを裏で自動セットする", async () => {
+    const client = seedClient();
+    render(<App client={client} eventId={EVENT} permissions={PERMS} />);
+    await screen.findByTestId("fe4-gantt-row-t1");
+    fireEvent.click(screen.getByTestId("fe4-create-open"));
+    const modal = await screen.findByTestId("fe4-mytask-create-modal");
+    // 対象イベント欄は非表示（ヘッダー選択中イベントで確定）
+    expect(within(modal).queryByTestId("fe4-mytask-create-event")).toBeNull();
+    // 開始日・終了日は横並びの2フィールドとして存在
+    expect(within(modal).getByTestId("fe4-mytask-create-start")).toBeInTheDocument();
+    expect(within(modal).getByTestId("fe4-mytask-create-due")).toBeInTheDocument();
+    fireEvent.change(within(modal).getByTestId("fe4-mytask-create-title"), { target: { value: "撤収作業" } });
+    fireEvent.click(within(modal).getByTestId("fe4-mytask-create-submit"));
+    await waitFor(() => {
+      const post = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
+      expect(post).toBeTruthy();
+      expect((post?.body as { eventId?: string }).eventId).toBe(EVENT);
+    });
+  });
+
   it("edits a task from the detail panel", async () => {
     renderApp();
     fireEvent.click(await screen.findByTestId("fe4-gantt-row-t2"));

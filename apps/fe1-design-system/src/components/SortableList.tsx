@@ -3,6 +3,7 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
+  MeasuringStrategy,
   PointerSensor,
   closestCenter,
   defaultDropAnimationSideEffects,
@@ -87,6 +88,14 @@ export interface SortableListProps<T> {
    *  transition — so a whole marquee selection slides into place at once (honoured
    *  against prefers-reduced-motion). */
   computeNextOrder?: (activeId: string, overId: string, currentIds: string[]) => string[] | null;
+  /** Ids that ride together as ONE group when any of them is grabbed (e.g. a marquee
+   *  multi-selection). When a drag starts on a member and the group has >1 id, the OTHER
+   *  members collapse to zero height (they "join the floating deck") and the grabbed row's
+   *  placeholder grows to the group's row-count — so the reflow opens a MULTI-row gap that
+   *  matches how many rows are floating, not a fixed single row (⑤a). Omit / length ≤ 1 ⇒
+   *  classic single-row behaviour (unchanged). Pair with `computeNextOrder` for the drop
+   *  order + `renderOverlay` for the stacked deck clone. */
+  liftedIds?: readonly string[];
   /** Turn dragging off entirely (handles inert, no reflow). */
   disabled?: boolean;
   /** Class on the list wrapper. */
@@ -131,6 +140,8 @@ function SortableRow<T>({
   renderItem,
   registerNode,
   activeId,
+  collapsed,
+  placeholderHeight,
 }: {
   id: string;
   item: T;
@@ -140,6 +151,14 @@ function SortableRow<T>({
   registerNode: (id: string, el: HTMLElement | null) => void;
   /** id of the row currently grabbed (list-wide), forwarded to renderItem's ctx. */
   activeId: string | null;
+  /** true while a GROUP drag is in flight and this is a lifted row OTHER than the
+   *  grabbed one — it collapses to zero height so it "joins the floating deck" and
+   *  leaves no phantom gap at its origin (⑤a). */
+  collapsed: boolean;
+  /** When set, this is the grabbed row of a GROUP drag: its hidden placeholder slot
+   *  grows to this height (= liftedCount rows) so the reflow opens a MULTI-row gap
+   *  that follows the cursor — sized to how many rows are floating (⑤a). */
+  placeholderHeight: number | null;
 }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id, disabled });
   // Compose dnd-kit's node ref with the list's node registry (used by the group-move
@@ -157,13 +176,25 @@ function SortableRow<T>({
   // carries) fades IN, so the clone→row hand-off reads as one continuous settle instead
   // of a hard pop at the final frame. Composed onto dnd-kit's own transition (never
   // replacing it) and dropped under prefers-reduced-motion (the reveal is then instant).
-  const opacityTransition = prefersReducedMotion() ? null : `opacity ${SORTABLE_DROP_REVEAL_MS}ms ${SORTABLE_DROP_EASING}`;
+  const reduced = prefersReducedMotion();
+  const opacityTransition = reduced ? null : `opacity ${SORTABLE_DROP_REVEAL_MS}ms ${SORTABLE_DROP_EASING}`;
+  // A group drag collapses/expands the lifted rows' HEIGHT; animate that too (unless
+  // reduced-motion) so rows fold into the deck on pickup and unfold into the open gap on
+  // drop as one continuous motion instead of popping.
+  const heightTransition = reduced ? null : `height ${SORTABLE_DROP_REVEAL_MS}ms ${SORTABLE_DROP_EASING}`;
+  const groupHeight = collapsed || placeholderHeight != null;
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
-    transition: [transition, opacityTransition].filter(Boolean).join(", ") || undefined,
+    transition:
+      [transition, opacityTransition, groupHeight ? heightTransition : null].filter(Boolean).join(", ") || undefined,
     // Hide the picked-up row so its reserved slot IS the gap the neighbours open and
     // the floating clone drops into (the clone carries the visible content instead).
     ...(isDragging ? { opacity: 0 } : null),
+    // Group drag (⑤a): lifted non-grabbed rows collapse to 0; the grabbed row's hidden
+    // placeholder grows to `placeholderHeight` (= liftedCount rows) so the moving gap is
+    // as tall as the floating deck. overflow:hidden clips the (invisible) inner content.
+    ...(collapsed ? { height: 0, minHeight: 0, paddingTop: 0, paddingBottom: 0, overflow: "hidden", pointerEvents: "none" as const } : null),
+    ...(placeholderHeight != null ? { height: placeholderHeight, overflow: "hidden" as const } : null),
   };
   const dragHandleProps = (disabled ? {} : { ...attributes, ...(listeners ?? {}) }) as SortableDragHandleProps;
   return (
@@ -185,6 +216,7 @@ export function SortableList<T>({
   renderOverlay,
   onReorder,
   computeNextOrder,
+  liftedIds,
   disabled = false,
   className,
   overlayClassName,
@@ -193,6 +225,13 @@ export function SortableList<T>({
 }: SortableListProps<T>) {
   const ariaLabel = rest["aria-label"];
   const [activeId, setActiveId] = useState<string | null>(null);
+  // The lifted group as a Set (stable per liftedIds content). A drag on a member with
+  // group size > 1 triggers the multi-row-gap behaviour (⑤a).
+  const liftedSet = useMemo(() => new Set(liftedIds ?? []), [liftedIds]);
+  // Height (px) the grabbed row's hidden placeholder takes during a GROUP drag: the
+  // measured row height × the number of lifted rows, so the moving gap is that many rows
+  // tall. null ⇒ no group drag in flight (classic single-row gap).
+  const [groupGapPx, setGroupGapPx] = useState<number | null>(null);
 
   // ---- group-move FLIP ----
   // Registry of each rendered row's DOM node (keyed by id) so a multi-row drop can
@@ -263,15 +302,30 @@ export function SortableList<T>({
   }, [propOrderKey]);
   useEffect(() => () => clearOverrideTimer(), []);
 
-  const onDragStart = useCallback((e: DragStartEvent) => {
-    clearOverrideTimer();
-    setOverrideIds(null);
-    setActiveId(e.active ? String(e.active.id) : null);
-  }, []);
+  const onDragStart = useCallback(
+    (e: DragStartEvent) => {
+      clearOverrideTimer();
+      setOverrideIds(null);
+      const id = e.active ? String(e.active.id) : null;
+      setActiveId(id);
+      // Group drag (⑤a): when the grabbed row is a member of a >1 lifted set, size the
+      // moving gap to the whole deck — measure the grabbed row's height and reserve
+      // liftedCount × that as its placeholder slot (the other members collapse to 0).
+      if (id && liftedSet.has(id) && liftedSet.size > 1) {
+        const el = nodeMap.current.get(id);
+        const h = el ? el.getBoundingClientRect().height : 0;
+        setGroupGapPx(h > 0 ? h * liftedSet.size : null);
+      } else {
+        setGroupGapPx(null);
+      }
+    },
+    [liftedSet],
+  );
 
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {
       setActiveId(null);
+      setGroupGapPx(null);
       const activeId = e.active ? String(e.active.id) : null;
       const overId = e.over ? String(e.over.id) : null;
       if (!activeId || !overId || activeId === overId) return;
@@ -285,7 +339,12 @@ export function SortableList<T>({
       // clone). Fall back to the single-row arrayMove otherwise.
       const custom = computeNextOrder ? computeNextOrder(activeId, overId, [...currentIds]) : null;
       if (custom) {
-        if (!prefersReducedMotion()) {
+        // With the multi-row-gap approach (liftedIds) the lifted rows were collapsed to 0
+        // and the gap already held the whole deck, so they simply unfold into that open
+        // gap on drop — no FLIP (measuring collapsed tops would be wrong). The classic path
+        // (no liftedIds) still FLIPs the scattered rows into place.
+        const liftedActive = liftedSet.has(activeId) && liftedSet.size > 1;
+        if (!prefersReducedMotion() && !liftedActive) {
           const prevTops = new Map<string, number>();
           for (const [id, el] of nodeMap.current) prevTops.set(id, el.getBoundingClientRect().top);
           flipPlanRef.current = { prevTops, grabbedId: activeId };
@@ -307,7 +366,7 @@ export function SortableList<T>({
       overrideTimer.current = setTimeout(() => setOverrideIds(null), 400);
       onReorder({ activeId, overId, oldIndex, newIndex });
     },
-    [orderedItems, getItemId, onReorder, computeNextOrder],
+    [orderedItems, getItemId, onReorder, computeNextOrder, liftedSet],
   );
 
   // Play the group-move FLIP after the reorder commit: every moved row (except the
@@ -344,7 +403,13 @@ export function SortableList<T>({
     return () => cancelAnimationFrame(raf);
   }, [renderedOrderKey]);
 
-  const onDragCancel = useCallback(() => setActiveId(null), []);
+  const onDragCancel = useCallback(() => {
+    setActiveId(null);
+    setGroupGapPx(null);
+  }, []);
+
+  // A group drag is in flight when we've reserved a multi-row gap for the grabbed row.
+  const groupActive = activeId != null && groupGapPx != null;
 
   const activeItem = activeId != null ? orderedItems.find((it) => getItemId(it) === activeId) ?? null : null;
 
@@ -363,15 +428,32 @@ export function SortableList<T>({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      // While a group drag reshapes row heights (collapse + multi-row placeholder), keep
+      // measuring droppables so the reflow gap tracks the live heights (⑤a); otherwise the
+      // default (measure once at drag start) is fine.
+      measuring={groupActive ? { droppable: { strategy: MeasuringStrategy.Always } } : undefined}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragCancel={onDragCancel}
     >
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         <div className={className} data-testid={testId} aria-label={ariaLabel}>
-          {orderedItems.map((item) => (
-            <SortableRow key={getItemId(item)} id={getItemId(item)} item={item} disabled={disabled} renderItem={renderItem} registerNode={registerNode} activeId={activeId} />
-          ))}
+          {orderedItems.map((item) => {
+            const rid = getItemId(item);
+            return (
+              <SortableRow
+                key={rid}
+                id={rid}
+                item={item}
+                disabled={disabled}
+                renderItem={renderItem}
+                registerNode={registerNode}
+                activeId={activeId}
+                collapsed={groupActive && liftedSet.has(rid) && rid !== activeId}
+                placeholderHeight={groupActive && rid === activeId ? groupGapPx : null}
+              />
+            );
+          })}
         </div>
       </SortableContext>
       {/* The clone eases (~200ms ease-out) from where it was released into its new slot

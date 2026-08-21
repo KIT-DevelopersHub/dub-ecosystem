@@ -79,6 +79,11 @@ export interface MyTaskCreateModalProps {
    *  the modal opens it seeds チーム to this (when it is one of `teams`); the requester can
    *  still change it. Null / unknown ⇒ start 未割当. */
   defaultTeamId?: common.TeamId | null;
+  /** ③ ガントからの発行では 対象イベント を選ばせない — ヘッダーで選択中のイベント
+   *  (defaultEventId) で確定し、他イベント混在を防ぐ。true のとき「対象イベント」欄を
+   *  出さず、作成時は defaultEventId を裏で自動セットする（ユーザーには見せない）。
+   *  false（既定）＝マイタスクの発行のように 対象イベント を選べる（紐付けない も可）。 */
+  lockEventToDefault?: boolean;
   /** 終了日の初期値 (YYYY-MM-DD) — seeded each time the modal opens. Used by the ガント
    *  "＋子タスクを作成 / ＋先行タスクを作成 / タイムラインのセルから作成" entry points, which
    *  compute an end so the new bar lands relative to its parent/successor. When it is
@@ -99,7 +104,7 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 const NO_PRIORITY = ""; // sentinel for the "未設定" priority Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, initialDue }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, lockEventToDefault = false, initialDue }: MyTaskCreateModalProps) {
   // The header-selected event is the initial 対象イベント, but only when it is a real
   // option in `events` (guards against a stale/foreign id) — otherwise start unlinked.
   const seedEventId = (): common.EventId | "" =>
@@ -207,7 +212,9 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setSaving(true);
     try {
       await onCreate({
-        eventId: eventId === NO_EVENT ? null : (eventId as common.EventId),
+        // ③ 発行を「ヘッダー選択中イベント」で確定する（欄を隠しても DB 上の eventId は必須）。
+        // lock 時は表示せず defaultEventId を裏で自動セット。非 lock 時は選択値（未選択=紐付けない）。
+        eventId: lockEventToDefault ? (defaultEventId ?? null) : eventId === NO_EVENT ? null : (eventId as common.EventId),
         title: title.trim(),
         description: description.trim() ? description.trim() : null,
         priority: priority === NO_PRIORITY ? null : (priority as task.TaskPriority),
@@ -263,21 +270,24 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-event">
-            対象イベント（任意）
-          </label>
-          <Select
-            id="fe4-mytask-event"
-            value={eventId}
-            onChange={(v) => setEventId(v as common.EventId | "")}
-            options={[
-              { value: NO_EVENT, label: "紐付けない" },
-              ...events.map((e) => ({ value: e.id, label: e.name })),
-            ]}
-            testId="fe4-mytask-create-event"
-          />
-        </div>
+        {/* ③ 対象イベント欄は lock 時に出さない（ヘッダー選択中イベントで確定・裏で自動セット）。 */}
+        {!lockEventToDefault && (
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-mytask-event">
+              対象イベント（任意）
+            </label>
+            <Select
+              id="fe4-mytask-event"
+              value={eventId}
+              onChange={(v) => setEventId(v as common.EventId | "")}
+              options={[
+                { value: NO_EVENT, label: "紐付けない" },
+                ...events.map((e) => ({ value: e.id, label: e.name })),
+              ]}
+              testId="fe4-mytask-create-event"
+            />
+          </div>
+        )}
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-mytask-assignee">
@@ -308,18 +318,23 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-start">
-            開始日
-          </label>
-          <DateField id="fe4-mytask-start" value={startDate} onChange={setStartDate} testId="fe4-mytask-create-start" />
-        </div>
+        {/* ③ 開始日・終了日 は同じ行に横並び（左=開始 / 右=終了）。縦積みをやめて一目で範囲が読める。 */}
+        <div className={styles.formFieldFull}>
+          <div className={styles.formDateRow}>
+            <div className={styles.formField}>
+              <label className={styles.formLabel} htmlFor="fe4-mytask-start">
+                開始日
+              </label>
+              <DateField id="fe4-mytask-start" value={startDate} onChange={setStartDate} testId="fe4-mytask-create-start" />
+            </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-due">
-            終了日
-          </label>
-          <DateField id="fe4-mytask-due" value={endDate} onChange={setEndDate} testId="fe4-mytask-create-due" />
+            <div className={styles.formField}>
+              <label className={styles.formLabel} htmlFor="fe4-mytask-due">
+                終了日
+              </label>
+              <DateField id="fe4-mytask-due" value={endDate} onChange={setEndDate} testId="fe4-mytask-create-due" />
+            </div>
+          </div>
           {!datesValid && (
             <p className={styles.fieldError} data-testid="fe4-mytask-create-date-error">
               終了日は開始日以降にしてください
