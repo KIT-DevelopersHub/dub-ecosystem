@@ -3,6 +3,7 @@
 // channel name, author, and a snippet. Clicking a hit navigates to that channel.
 import type { common, identity } from "@dub/types";
 import type { SearchHit } from "../api/contract";
+import { authorNameOf } from "../lib/author";
 import styles from "../styles/chat.module.css";
 
 export interface SearchResultsProps {
@@ -26,7 +27,7 @@ function timeShort(iso: string): string {
 }
 
 export function SearchResults({ query, loading, results, resolveUser, onSelect, onClose }: SearchResultsProps) {
-  const nameOf = (id: common.UserId): string => resolveUser?.(id)?.displayName ?? id;
+  const nameOf = (id: common.UserId | null): string => authorNameOf(id, resolveUser);
   return (
     <div className={styles.searchResults} data-testid="fe6-search-results">
       <div className={styles.searchResultsHead}>

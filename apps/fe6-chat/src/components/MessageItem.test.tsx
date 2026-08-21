@@ -49,6 +49,16 @@ describe("MessageItem authorization UI", () => {
     expect(screen.queryByTestId("fe6-timeline-delete")).toBeNull();
   });
 
+  it("renders a system post (authorId=null) without crashing and shows no author affordances", () => {
+    // Regression: chat-service system posts carry authorId=null; the avatar/name
+    // path used to call null.trim() and crash the whole /chat screen.
+    render(<MessageItem message={msg({ authorId: null })} currentUserId={ME} canModerate={true} />);
+    expect(screen.getByTestId("fe6-timeline-body")).toBeInTheDocument();
+    expect(screen.getByText("システム")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe6-timeline-edit")).toBeNull();
+    expect(screen.queryByTestId("fe6-timeline-delete")).toBeNull(); // system posts are not moderatable
+  });
+
   it("renders a mention with the resolved display name", () => {
     render(
       <MessageItem
