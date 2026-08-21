@@ -21,6 +21,20 @@ type Row = gantt.GanttRow;
 
 export type GanttSortMode = "manual" | "priority" | "schedule" | "team";
 
+/** The composable automatic sort keys (everything except "manual", which is a
+ *  passthrough drag mode, not a comparable key). These are the building blocks of a
+ *  multi-key (多段) sort. */
+export type SortKey = "priority" | "schedule" | "team";
+
+export type SortDirection = "asc" | "desc";
+
+/** One condition in a multi-key sort: which key, and its direction. A list of these
+ *  is applied in order — the first is the primary key, the next breaks its ties, etc. */
+export interface SortSpec {
+  key: SortKey;
+  dir: SortDirection;
+}
+
 export interface SortContext {
   /** taskId → priority (defaults to "medium" when absent). */
   priorityById: ReadonlyMap<common.TaskId, task.TaskPriority>;
@@ -84,47 +98,31 @@ function effectiveDateMap(
   return memo;
 }
 
-/**
- * Re-order `rows` by an automatic `mode`. Pure + stable + idempotent, and it never
- * drops or re-parents a row. "manual" returns the input unchanged (the caller layers
- * the drag overlay via row-order.applyManualOrder instead).
- */
-export function sortRows(rows: readonly Row[], mode: GanttSortMode, ctx: SortContext): Row[] {
-  if (rows.length === 0) return [];
-  if (mode === "manual") return [...rows];
-
-  const byId = new Map(rows.map((r) => [r.taskId, r] as const));
-  const groups = groupByParent(rows);
-  const dateMap = mode === "schedule" ? effectiveDateMap(rows, byId, groups) : null;
-
-  const keyOf = (r: Row): number => {
-    switch (mode) {
-      case "priority":
-        return PRIORITY_RANK[ctx.priorityById.get(r.taskId) ?? "medium"] ?? DEFAULT_PRIORITY_RANK;
-      case "schedule":
-        return dateMap!.get(r.taskId) ?? LAST;
-      case "team": {
+/** Build a numeric ranking function for a single sort key (lower = earlier).
+ *  `dateMap` is required for "schedule" (the memoized subtree-earliest date map). */
+function keyGetter(
+  key: SortKey,
+  ctx: SortContext,
+  dateMap: ReadonlyMap<common.TaskId, number> | null,
+): (r: Row) => number {
+  switch (key) {
+    case "priority":
+      return (r) =>
+        PRIORITY_RANK[ctx.priorityById.get(r.taskId) ?? "medium"] ?? DEFAULT_PRIORITY_RANK;
+    case "schedule":
+      return (r) => dateMap?.get(r.taskId) ?? LAST;
+    case "team":
+      return (r) => {
         const teamId = ctx.teamIdById.get(r.taskId) ?? null;
         if (teamId == null) return LAST;
         return ctx.teamOrder.get(teamId) ?? Number.MAX_SAFE_INTEGER;
-      }
-      default:
-        return 0;
-    }
-  };
-
-  // Stable sort each sibling group by (key, original index) — ties keep server order.
-  for (const [, arr] of groups) {
-    const origIndex = new Map(arr.map((r, i) => [r.taskId, i] as const));
-    arr.sort((a, b) => {
-      const ka = keyOf(a);
-      const kb = keyOf(b);
-      if (ka !== kb) return ka - kb;
-      return origIndex.get(a.taskId)! - origIndex.get(b.taskId)!;
-    });
+      };
   }
+}
 
-  // Re-linearize: parent, then its (now sorted) children block, recursively.
+/** Re-linearize sorted sibling groups back into a flat list: parent, then its (now
+ *  sorted) children block, recursively. Never drops or re-parents a row. */
+function linearize(rows: readonly Row[], groups: ReadonlyMap<common.TaskId | null, Row[]>): Row[] {
   const out: Row[] = [];
   const emitted = new Set<common.TaskId>();
   const walk = (parent: common.TaskId | null): void => {
@@ -141,4 +139,56 @@ export function sortRows(rows: readonly Row[], mode: GanttSortMode, ctx: SortCon
     for (const r of rows) if (!emitted.has(r.taskId)) out.push(r);
   }
   return out;
+}
+
+/**
+ * Multi-key (多段) automatic ordering. Sort by `specs` applied in priority order: the
+ * first spec is the primary key, the next breaks its ties, and so on; any remaining
+ * ties keep the input (server/WBS default) order, so the result is stable + idempotent.
+ * Each spec carries its own asc/desc direction.
+ *
+ * Like `sortRows`, this preserves the WBS contiguity invariant (only re-sorts within
+ * each sibling group, then re-linearizes) and never drops or re-parents a row. An
+ * empty `specs` list is the server/WBS default order (input unchanged).
+ *
+ * Note on missing values: a row lacking the key (dateless in 時期, team-less in チーム,
+ * priority defaults to medium) ranks LAST in ascending order; with `desc` such rows
+ * flip to the top, mirroring a numeric reverse of the same ranking.
+ */
+export function sortRowsMulti(rows: readonly Row[], specs: readonly SortSpec[], ctx: SortContext): Row[] {
+  if (rows.length === 0) return [];
+  if (specs.length === 0) return [...rows];
+
+  const byId = new Map(rows.map((r) => [r.taskId, r] as const));
+  const groups = groupByParent(rows);
+  const needsDate = specs.some((s) => s.key === "schedule");
+  const dateMap = needsDate ? effectiveDateMap(rows, byId, groups) : null;
+  const getters = specs.map((s) => ({ get: keyGetter(s.key, ctx, dateMap), desc: s.dir === "desc" }));
+
+  // Stable sort each sibling group by (spec₁, spec₂, …, original index).
+  for (const [, arr] of groups) {
+    const origIndex = new Map(arr.map((r, i) => [r.taskId, i] as const));
+    arr.sort((a, b) => {
+      for (const g of getters) {
+        const ka = g.get(a);
+        const kb = g.get(b);
+        if (ka !== kb) return g.desc ? kb - ka : ka - kb;
+      }
+      return origIndex.get(a.taskId)! - origIndex.get(b.taskId)!;
+    });
+  }
+
+  return linearize(rows, groups);
+}
+
+/**
+ * Re-order `rows` by a single automatic `mode`. Pure + stable + idempotent, and it
+ * never drops or re-parents a row. "manual" returns the input unchanged (the caller
+ * layers the drag overlay via row-order.applyManualOrder instead). Kept for the
+ * single-key call sites; delegates to the multi-key core (single ascending spec).
+ */
+export function sortRows(rows: readonly Row[], mode: GanttSortMode, ctx: SortContext): Row[] {
+  if (rows.length === 0) return [];
+  if (mode === "manual") return [...rows];
+  return sortRowsMulti(rows, [{ key: mode, dir: "asc" }], ctx);
 }

@@ -76,7 +76,7 @@ describe("marquee multi-select", () => {
   it("ArrowUp / ArrowDown reorder the selection only in 手動 mode", () => {
     const onBulkMoveVertical = vi.fn();
     const { rerender } = render(
-      <GanttView dto={flatDto} zoom="day" canWrite sortMode="manual" onBulkMoveVertical={onBulkMoveVertical} />,
+      <GanttView dto={flatDto} zoom="day" canWrite sortState={{ manual: true, keys: [] }} onBulkMoveVertical={onBulkMoveVertical} />,
     );
     marqueeRows0And1();
     fireEvent.keyDown(window, { key: "ArrowUp" });
@@ -85,7 +85,7 @@ describe("marquee multi-select", () => {
     // switch to an automatic sort → vertical reorder is suppressed
     onBulkMoveVertical.mockClear();
     rerender(
-      <GanttView dto={flatDto} zoom="day" canWrite sortMode="priority" onBulkMoveVertical={onBulkMoveVertical} />,
+      <GanttView dto={flatDto} zoom="day" canWrite sortState={{ manual: false, keys: [{ key: "priority", dir: "asc" }] }} onBulkMoveVertical={onBulkMoveVertical} />,
     );
     fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(onBulkMoveVertical).not.toHaveBeenCalled();
