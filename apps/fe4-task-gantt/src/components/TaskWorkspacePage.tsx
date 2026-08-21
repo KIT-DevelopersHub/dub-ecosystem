@@ -398,13 +398,6 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
     () => (selected ? directParentOf(scopeTasks, selected) : null),
     [selected, scopeTasks],
   );
-  // 子タスク作成時に固定する親のチーム。「＋子タスクを作成」で親をプリセットして開いたとき、
-  // 子のチームは必ずこの親のチームになる（親が未割当なら null=未割当）。親子でチームが
-  // 食い違う状態を作らせないための固定先で、作成モーダルのチーム欄をこの値でロックする。
-  const createParentTeamId = useMemo(
-    () => (createPresetParent ? teamOf(scopeTasks, createPresetParent) : null),
-    [createPresetParent, scopeTasks],
-  );
   // parent options for the detail panel exclude the task itself.
   const detailParentOptions = useMemo(
     () => (selected ? allTaskOptions.filter((o) => o.id !== selected) : allTaskOptions),
@@ -750,9 +743,13 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
   // (親タスク・先行タスク・タイムラインのセル由来の期限) ride along invisibly from page state, set by
   // the 子タスク/先行タスク作成 entry points, so those flows keep working with the unified dialog.
   const onCreate = async (draft: MyTaskDraft) => {
+    // 親タスク・先行タスクは共通モーダル(MyTaskCreateModal)の入力値から受け取る。ガントの
+    // 「＋子タスク/先行タスクを作成」プリセットは initialParentId/initialDependsOn でモーダルに
+    // 種を渡してあるので、ここでは draft の値を一次ソースとして読む（ユーザーがモーダル内で
+    // 親/先行を選び直した場合もそのまま反映される）。
     const linkPredecessorFor = createPredecessorFor;
-    const parentTaskId = createPresetParent;
-    const presetDeps = createPresetDeps;
+    const parentTaskId = draft.parentId;
+    const presetDeps = draft.dependsOnIds;
     // 親子でチームが食い違わないよう、子タスク作成時はチームを親のチームに強制する（モーダルの
     // チーム欄は disabled だが、送信値もここで親に確定＝二重の担保）。親なし通常作成では draft の値。
     const teamId: common.TeamId | null = parentTaskId ? teamOf(scopeTasks, parentTaskId) : draft.teamId;
@@ -1324,8 +1321,10 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
         {...(requesterName ? { requesterName } : {})}
         defaultEventId={eventId}
         defaultTeamId={issueDefaultTeamId}
-        lockTeamToParent={createPresetParent != null}
-        parentTeamId={createParentTeamId}
+        scopeTasks={scopeTasks}
+        scopeEventId={eventId}
+        initialParentId={createPresetParent}
+        initialDependsOn={createPresetDeps}
         lockEventToDefault
         initialDue={createPresetDue}
       />

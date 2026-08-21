@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
+import { TaskSearchSelect } from "@dub/app-ui";
 import { PRIORITY_LABEL, isoFromDateInput, todayDateInput } from "../domain/task-form";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
+import { PredecessorPicker } from "./PredecessorPicker";
 import { AttachmentField, type AttachmentChip } from "./AttachmentField";
 import styles from "../styles/app.module.css";
 
@@ -36,6 +39,11 @@ export interface MyTaskDraft {
   priority: task.TaskPriority | null;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  /** WBS 親タスク（親子関係）. null ⇒ トップレベル（親なし）. 子は親と同じチームに固定される
+   *  （親子でチームが食い違う状態は作れない・ADR-0006/0007 と整合）。 */
+  parentId: common.TaskId | null;
+  /** 先行タスク（依存＝この新規タスクが待つタスク）. 同一チーム内のタスクのみ（クロスチーム依存不可）。 */
+  dependsOnIds: common.TaskId[];
   /** 開始日 (planned start). Maps to Task.startAt. null ⇒ 開始日なし. */
   startAt: common.ISODateTime | null;
   /** 終了日 (旧「期限」相当). Maps to Task.dueAt — the deadline / gantt bar end. When
@@ -86,6 +94,22 @@ export interface MyTaskCreateModalProps {
   lockTeamToParent?: boolean;
   /** 親タスクのチーム — `lockTeamToParent` が true のときの固定先。 */
   parentTeamId?: common.TeamId | null;
+  /** ③ 先行タスク・親タスクを選ぶための候補（現在の対象イベントのタスク一覧・チーム情報つき）。
+   *  非空のとき、モーダルに「親タスク」検索と「先行タスク」ピッカーを表示する。空/未指定なら両欄を
+   *  出さない（イベント未確定のマイタスク発行など、スコープが無い場面では出さない）。親子・依存は
+   *  同一チーム制約に従い、親を選ぶとチームは親のチームに固定される。 */
+  scopeTasks?: readonly ScopeTask[];
+  /** `scopeTasks` が属する対象イベント。モーダルで選択中の対象イベントがこれと一致するときだけ
+   *  親/先行の候補を出す（別イベントの親子・依存を作らせない）。ガントのように常にイベント固定
+   *  （`lockEventToDefault`）なら無視される。 */
+  scopeEventId?: common.EventId | null;
+  /** 親タスクの初期選択（ガント「＋子タスクを作成」からのプリセット）。 */
+  initialParentId?: common.TaskId | null;
+  /** 先行タスクの初期選択（ガントのセル/先行プリセット）。 */
+  initialDependsOn?: readonly common.TaskId[];
+  /** 対象イベントが変わったら親（呼び出し側）へ通知する。マイタスクは候補（scopeTasks）を
+   *  そのイベントで再ロードするために使う。 */
+  onEventChange?: (eventId: common.EventId | null) => void;
   /** ③ ガントからの発行では 対象イベント を選ばせない — ヘッダーで選択中のイベント
    *  (defaultEventId) で確定し、他イベント混在を防ぐ。true のとき「対象イベント」欄を
    *  出さず、作成時は defaultEventId を裏で自動セットする（ユーザーには見せない）。
@@ -115,7 +139,7 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 const NO_PRIORITY = ""; // sentinel for the "未設定" priority Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, lockTeamToParent = false, parentTeamId = null, lockEventToDefault = false, initialDue, title: modalTitle = "タスクを発行", submitLabel = "発行する" }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, lockTeamToParent = false, parentTeamId = null, scopeTasks, scopeEventId = null, initialParentId = null, initialDependsOn, onEventChange, lockEventToDefault = false, initialDue, title: modalTitle = "タスクを発行", submitLabel = "発行する" }: MyTaskCreateModalProps) {
   // The header-selected event is the initial 対象イベント, but only when it is a real
   // option in `events` (guards against a stale/foreign id) — otherwise start unlinked.
   const seedEventId = (): common.EventId | "" =>
@@ -124,10 +148,16 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   // `teams` (guards against a stale/foreign id) — otherwise start 未割当. When creating a
   // 子タスク (lockTeamToParent) the seed is the PARENT's team instead, and the field is
   // locked below so 親子でチームが食い違う状態を作れない (親が未割当なら null=未割当で固定)。
+  const seedParentId = (): common.TaskId | null => initialParentId ?? null;
   const seedTeamId = (): common.TeamId | null => {
+    // ロック（ガントの子作成プリセット）は明示された親チームで固定。
     if (lockTeamToParent) return parentTeamId ?? null;
+    // 親をプリセット選択している場合は、その親のチームに合わせる（親子で同一チーム）。
+    const p = seedParentId();
+    if (p) return teamOf(scopeTasks ?? [], p);
     return defaultTeamId && teams.some((t) => t.id === defaultTeamId) ? defaultTeamId : null;
   };
+  const seedDeps = (): common.TaskId[] => (initialDependsOn ? [...initialDependsOn] : []);
   // 開始日/終了日 の初期値。プレーンな 発行/新規 では両方とも「今日」。ガントのプリセット
   // (親/先行/セル由来の initialDue) では 終了日=そのプリセット・開始日=min(今日, プリセット)
   // として範囲が逆転しないようにする。
@@ -142,6 +172,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority | "">(NO_PRIORITY);
   const [teamId, setTeamId] = useState<common.TeamId | null>(seedTeamId);
+  const [parentId, setParentId] = useState<common.TaskId | null>(seedParentId);
+  const [deps, setDeps] = useState<common.TaskId[]>(seedDeps);
   const [startDate, setStartDate] = useState<string | null>(seedStart);
   const [endDate, setEndDate] = useState<string | null>(seedEnd);
   const [description, setDescription] = useState("");
@@ -158,12 +190,14 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   useEffect(() => {
     if (open) {
       setEventId(seedEventId());
+      setParentId(seedParentId());
       setTeamId(seedTeamId());
+      setDeps(seedDeps());
       setStartDate(seedStart());
       setEndDate(seedEnd());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultEventId, defaultTeamId, teams, initialDue, lockTeamToParent, parentTeamId]);
+  }, [open, defaultEventId, defaultTeamId, teams, initialDue, lockTeamToParent, parentTeamId, initialParentId, initialDependsOn, scopeTasks]);
 
   const reset = () => {
     setEventId(seedEventId());
@@ -171,6 +205,8 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setAssigneeId(null);
     setPriority(NO_PRIORITY);
     setTeamId(seedTeamId());
+    setParentId(seedParentId());
+    setDeps(seedDeps());
     setStartDate(seedStart());
     setEndDate(seedEnd());
     setDescription("");
@@ -216,6 +252,47 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     onClose();
   };
 
+  // ③ 親タスク・先行タスク（親子/依存）を選ぶための候補とロック状態を導出する。
+  // scope = 対象イベントのタスク（チーム情報つき）。空/未指定なら関係欄は出さない。
+  const scope = scopeTasks ?? [];
+  // 別イベントの親子・依存を作らせない: ガント（lockEventToDefault）は常に固定イベントなので表示。
+  // マイタスクは「選択中の対象イベント」が候補の属するイベント(scopeEventId)と一致するときだけ表示。
+  const selectedEventId: common.EventId | null =
+    lockEventToDefault ? (defaultEventId ?? null) : eventId === NO_EVENT ? null : (eventId as common.EventId);
+  const scopeMatchesEvent = lockEventToDefault || (selectedEventId != null && selectedEventId === scopeEventId);
+  const showRelationFields = scope.length > 0 && scopeMatchesEvent;
+
+  // チームのロック: ガントの子作成プリセット(lockTeamToParent) か、モーダルで親を選んだとき。
+  // どちらの場合も子は親と同じチームに固定する（親子でチーム不一致を作らせない）。
+  const lockedParentTeam: common.TeamId | null = lockTeamToParent
+    ? (parentTeamId ?? null)
+    : parentId
+      ? teamOf(scope, parentId)
+      : null;
+  const teamLocked = lockTeamToParent || parentId != null;
+  // 依存（先行）のスコープ境界＝チーム。ロック時は親のチーム、非ロック時は選択中チーム。
+  const effectiveTeam: common.TeamId | null = teamLocked ? lockedParentTeam : teamId;
+
+  const parentOptions = scope.map((s) => ({ id: s.id, title: s.title }));
+  const predecessorOptions = dependencyScopeOptions(scope, effectiveTeam, parentId ?? null);
+
+  // 親タスクを選ぶ/外すと、子のチームを親のチームへ合わせ、別チームになった先行（依存）を落とす。
+  const onChangeParent = (next: common.TaskId | null) => {
+    setParentId(next);
+    if (next) {
+      const nextTeam = teamOf(scope, next);
+      setTeamId(nextTeam);
+      setDeps((d) => pruneToScope(scope, nextTeam, d).filter((id) => id !== next));
+    }
+  };
+  // 対象イベントを変えたら親（呼び出し側）へ通知（候補の再ロード用）＋現在の親/先行を解除。
+  const onChangeEvent = (next: common.EventId | "") => {
+    setEventId(next);
+    setParentId(null);
+    setDeps([]);
+    onEventChange?.(next === NO_EVENT ? null : (next as common.EventId));
+  };
+
   // 開始日 must not be after 終了日 (both default to 今日, so this only blocks a manual
   // inversion). An empty side is always fine (開始日なし / 終了日なし).
   const datesValid = !(startDate && endDate && startDate > endDate);
@@ -235,7 +312,10 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         priority: priority === NO_PRIORITY ? null : (priority as task.TaskPriority),
         assigneeId,
         // 子タスク作成時はチームを親に固定（UIは disabled だが念のため送信値も親で確定）。
-        teamId: lockTeamToParent ? (parentTeamId ?? null) : teamId,
+        teamId: teamLocked ? lockedParentTeam : teamId,
+        // ③ 親子（親タスク）・依存（先行タスク）。関係欄を出していない場面では null / 空で送る。
+        parentId: showRelationFields || lockTeamToParent ? parentId : null,
+        dependsOnIds: showRelationFields ? deps : [],
         startAt: isoFromDateInput(startDate),
         dueAt: isoFromDateInput(endDate),
         attachments: { files, urls },
@@ -295,7 +375,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             <Select
               id="fe4-mytask-event"
               value={eventId}
-              onChange={(v) => setEventId(v as common.EventId | "")}
+              onChange={(v) => onChangeEvent(v as common.EventId | "")}
               options={[
                 { value: NO_EVENT, label: "紐付けない" },
                 ...events.map((e) => ({ value: e.id, label: e.name })),
@@ -366,16 +446,48 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
             <Select
               id="fe4-mytask-team"
               value={teamId ?? ""}
-              disabled={lockTeamToParent}
+              disabled={teamLocked}
               onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
               options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
               testId="fe4-mytask-create-team"
             />
-            {lockTeamToParent && (
+            {teamLocked && (
               <p className={styles.fieldHint} data-testid="fe4-mytask-create-team-locked">
                 親タスクと同じチームになります（変更できません）
               </p>
             )}
+          </div>
+        )}
+
+        {/* ③ 親タスク（親子関係）: 現在のイベントのタスクから検索して親を選べる。親を選ぶと
+            チームは親のチームに固定される（親子で同一チーム）。空欄＝親なし（トップレベル）。
+            ガント・マイタスク共通（同一 MyTaskCreateModal）。scope が無い場面では出さない。 */}
+        {showRelationFields && (
+          <div className={styles.formFieldFull}>
+            <span className={styles.formLabel}>親タスク（親子関係・任意）</span>
+            <TaskSearchSelect<common.TaskId>
+              value={parentId}
+              options={parentOptions}
+              placeholder="タスク名で検索・一覧から選択…"
+              emptyOptionsLabel="親にできるタスクがありません"
+              hint="空欄のままなら親なし（トップレベル）。親を選ぶとチームは親に合わせます。"
+              onChange={onChangeParent}
+              testId="fe4-mytask-create-parent"
+            />
+          </div>
+        )}
+
+        {/* ③ 先行タスク（依存）: この新規タスクが待つ先行タスクを、同じチーム内のタスクから選べる。
+            クロスチーム依存は不可（options が同一チームに絞られる）。ガント・マイタスク共通。 */}
+        {showRelationFields && (
+          <div className={styles.formFieldFull}>
+            <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク・任意）</span>
+            <PredecessorPicker
+              options={predecessorOptions}
+              value={deps}
+              onChange={setDeps}
+              testId="fe4-mytask-create-deps"
+            />
           </div>
         )}
 
