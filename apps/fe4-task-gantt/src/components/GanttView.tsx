@@ -39,6 +39,7 @@ import {
   withGranularity,
 } from "../domain/timeline-axis";
 import { reorderSelectionWithinSiblings } from "../domain/row-order";
+import { visibleTreeRows } from "../domain/gantt-layout";
 import styles from "../styles/app.module.css";
 
 const HEADER_TOP = 28;
@@ -407,11 +408,12 @@ export function GanttView({
   // a child auto-grows the parent bar (and, via the window effect, the axis).
   const rolledRows = useMemo(() => rollupRowDates(rowsTitled), [rowsTitled]);
 
-  // Rows actually shown: a child (has a parent) is hidden unless its parent is open.
-  const rows = useMemo(
-    () => rolledRows.filter((r) => !(r.parentTaskId && !openParents.has(r.parentTaskId))),
-    [rolledRows, openParents],
-  );
+  // Rows actually shown: a row is hidden unless EVERY ancestor on its parent chain
+  // is open — collapsing any ancestor hides the whole subtree, so a grandchild can
+  // never stay visible under a collapsed grandparent (checking only the direct
+  // parent left deep descendants stranded). Each node's own toggle state is kept, so
+  // re-opening an ancestor restores the subtree exactly as the user left it.
+  const rows = useMemo(() => visibleTreeRows(rolledRows, openParents), [rolledRows, openParents]);
   visibleRowsRef.current = rows;
 
   // taskId -> true when the row is a WBS parent (its bar spans its children via

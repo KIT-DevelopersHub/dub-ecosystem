@@ -159,6 +159,31 @@ export function isCollapsed(taskId: common.TaskId, collapsed: readonly common.Ta
   return collapsed.includes(taskId);
 }
 
+/** WBS visibility over the FULL ancestor chain. A row is shown only when EVERY
+ *  ancestor on its `parentTaskId` chain is open (present in `openParents`). Any
+ *  collapsed ancestor hides the whole subtree — regardless of a descendant's own
+ *  toggle state, so a grandchild can never outlive a collapsed grandparent
+ *  ("祖先が閉じていれば子孫は絶対に見えない"). Each node's own open/closed state is
+ *  left untouched, so re-opening an ancestor restores the subtree exactly as the
+ *  user last left it (a child that was open comes back open). Pure; cycle-guarded. */
+export function visibleTreeRows<R extends { taskId: common.TaskId; parentTaskId?: common.TaskId | null }>(
+  rows: readonly R[],
+  openParents: ReadonlySet<common.TaskId>,
+): R[] {
+  const byId = new Map(rows.map((r) => [r.taskId, r] as const));
+  return rows.filter((r) => {
+    let pid = r.parentTaskId ?? null;
+    const seen = new Set<common.TaskId>();
+    while (pid) {
+      if (!openParents.has(pid)) return false; // a collapsed ancestor hides this row
+      if (seen.has(pid)) break; // defensive: never loop on a malformed cycle
+      seen.add(pid);
+      pid = byId.get(pid)?.parentTaskId ?? null;
+    }
+    return true;
+  });
+}
+
 /** Bar D&D: shift start/end by a day delta, returning the new ISO dates. Used to
  *  build the PATCH dueAt (and startAt when task gains it — 8-10/§9). */
 export function shiftDatesByDays(
