@@ -1314,6 +1314,7 @@ export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskW
         {...(requesterName ? { requesterName } : {})}
         defaultEventId={eventId}
         defaultTeamId={issueDefaultTeamId}
+        lockEventToDefault
         initialDue={createPresetDue}
       />
 

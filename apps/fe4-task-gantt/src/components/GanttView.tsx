@@ -877,15 +877,22 @@ export function GanttView({
       marqueeConsumedClickRef.current = false;
       return;
     }
-    if (e.target !== e.currentTarget) return; // ignore clicks that bubbled from a bar
-    // An empty-canvas click with an active selection clears it (PowerPoint-style),
-    // taking priority over create so a mis-aimed deselect never spawns a task.
+    // ⑤b: while a selection is active, a click anywhere on the timeline that is NOT on a
+    // bar (or a kept-selection element) clears it — including the decorative layers that
+    // fill the canvas (row lines / weekend shading / 内包ゾーン / today line / connectors),
+    // whose clicks previously did nothing because they aren't the exact canvas node. Only
+    // bar / selected-row / action-bar clicks are excluded from deselect.
     if (selectedIds.size > 0) {
+      const el = e.target as HTMLElement | null;
+      const onBar = !!el?.closest?.('[data-testid^="fe4-gantt-bar-"]');
+      const keep = !!el?.closest?.("[data-fe4-keep-selection]");
+      if (onBar || keep) return;
       clearSelection();
       return;
     }
 
     if (!editing || !onCreateOnDate) return;
+    if (e.target !== e.currentTarget) return; // create only on the bare canvas, never a bar
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const day = dayAtX(x, win);
@@ -1099,6 +1106,10 @@ export function GanttView({
                   disabled={!reorderEnabled}
                   onReorder={onRowReorder}
                   computeNextOrder={computeGroupOrder}
+                  // ⑤a: when a marquee multi-selection is grabbed, the whole set rides as one
+                  // deck — tell SortableList so the reflow opens a gap as tall as the number of
+                  // floating rows (not a fixed single row). Only meaningful while >1 is selected.
+                  liftedIds={selectedIds.size > 1 ? [...selectedIds] : undefined}
                   aria-label="タスクの並び替え"
                   renderItem={(r, ctx) => {
                     // Group drag in flight: the grabbed row rides the floating overlay (hidden

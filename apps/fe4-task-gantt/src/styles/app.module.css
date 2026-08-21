@@ -1092,6 +1092,9 @@
    a 150px min lets 開始日/期日 each keep enough width to render 「日付を選択」 on
    ONE line instead of wrapping to two (bug B); wide surfaces stay side-by-side. */
 .formRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--dub-space-3); max-width: 100%; }
+/* ③ 開始日/終了日 を必ず横並び（左=開始・右=終了）にする 2 カラム。auto-fit と違い
+   幅が縮んでも段落ちさせず常に同じ行に置く（発行ダイアログは十分な横幅を持つ）。 */
+.formDateRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--dub-space-3); max-width: 100%; }
 .formField { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .formField input, .formField select, .formField textarea { max-width: 100%; box-sizing: border-box; }
 .formFieldFull { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
