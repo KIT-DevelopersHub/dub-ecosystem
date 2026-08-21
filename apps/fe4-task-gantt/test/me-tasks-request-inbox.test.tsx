@@ -94,6 +94,31 @@ describe("MyTasksPage — 依頼インボックス (受け取る)", () => {
     });
   });
 
+  it("詳細ダイヤログはガント同等の編集フィールドを備える(タイトル/ステータス/優先度/開始・期日/詳細/添付+保存)", async () => {
+    const client = new MockApiClient({
+      currentUserId: ME,
+      requests: [req({ id: "treq_in", fromUserId: "usr_alice", toUserId: ME, title: "編集できる依頼" })],
+    });
+    renderPage(client);
+    fireEvent.click(await screen.findByTestId("fe4-request-card-treq_in")); // open detail
+    // ガントのタスク詳細と同じ編集フィールド群がその場に出る。
+    expect(await screen.findByTestId("fe4-request-detail-title-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-detail-status-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-detail-priority-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-detail-start-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-detail-due-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-detail-desc-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-attach-treq_in-section")).toBeInTheDocument();
+    // 承諾/却下 も同じ詳細内に残る。
+    expect(screen.getByTestId("fe4-request-accept-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-decline-treq_in")).toBeInTheDocument();
+    // タイトルを編集して保存すると、カードのタイトルが楽観的に更新される(セッション内)。
+    const titleInput = screen.getByTestId("fe4-request-detail-title-treq_in") as HTMLInputElement;
+    fireEvent.change(titleInput, { target: { value: "編集後タイトル" } });
+    fireEvent.click(screen.getByTestId("fe4-request-save-treq_in"));
+    await waitFor(() => expect(screen.getByTestId("fe4-request-in-treq_in")).toHaveTextContent("編集後タイトル"));
+  });
+
   it("ボール保持で左右が決まる: 自分がボール=右(self) / 渡した=左(other・←)", async () => {
     const client = new MockApiClient({
       currentUserId: ME,

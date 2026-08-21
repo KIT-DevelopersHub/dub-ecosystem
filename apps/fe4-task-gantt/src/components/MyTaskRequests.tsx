@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task } from "@dub/types";
-import { Avatar, Badge, Button, Modal, useToast } from "@dub/ui";
+import { Avatar, Button, Modal, Select, TextField, Textarea, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
 import { listTaskRequests, acceptTaskRequest, declineTaskRequest, cancelTaskRequest, resolveUsers } from "../api/endpoints";
 import { createUserCache, ensureUsers, displayName, type UserCache } from "../domain/user-cache";
-import { PRIORITY_LABEL } from "../domain/task-form";
+import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
+import { MAX_ATTACHMENT_BYTES, readFileAsDataUrl } from "../domain/attachments";
+import { AttachmentField, type AttachmentChip } from "./AttachmentField";
+import { DateField } from "./DateField";
 import styles from "../styles/app.module.css";
 
 export interface MyTaskRequestsProps {
@@ -23,14 +26,39 @@ interface ChatItem {
   dir: Dir;
 }
 
-const PRIORITY_TONE: Record<task.TaskPriority, "neutral" | "info" | "warning" | "danger"> = {
-  low: "neutral",
-  medium: "info",
-  high: "warning",
-  urgent: "danger",
-};
+const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
+const STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 
-/** 依頼日を短く。今日なら HH:mm、それ以外は M/D。 */
+/**
+ * The gantt タスク詳細 lets you edit タイトル/詳細/📎添付/開始・終了日/ステータス/優先度 in place.
+ * The 送る・受け取る request has no backend PATCH (accept/decline/cancel only) and no
+ * startAt/status columns — so the same edit experience is mirrored here as an optimistic,
+ * session-local draft (the card + reopened dialog reflect it immediately; the backend is
+ * untouched). Kept per-request so edits survive close/reopen within a session.
+ */
+interface RequestDraft {
+  title: string;
+  description: string; // "" ⇒ 内容なし
+  priority: task.TaskPriority;
+  status: task.TaskStatus; // demo-only: TaskRequest にステータス列は無い（承認後タスクの初期状態）
+  start: string | null; // yyyy-mm-dd, demo-only（TaskRequest に startAt は無い）
+  due: string | null; // yyyy-mm-dd（TaskRequest.dueAt に対応）
+  attachments: AttachmentChip[];
+}
+
+function draftFromRequest(r: task.TaskRequest): RequestDraft {
+  return {
+    title: r.title,
+    description: r.description ?? "",
+    priority: r.priority,
+    status: "todo",
+    start: null,
+    due: dateInputFromIso(r.dueAt),
+    attachments: [],
+  };
+}
+
+/** 依頼日を短く。今日なら HH:mm、それ以外は M/D HH:mm。 */
 function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -41,22 +69,14 @@ function formatTime(iso: string): string {
   return sameDay ? `${hh}:${mm}` : `${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`;
 }
 
-/** 期限を YYYY/M/D で。 */
-function formatDue(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
-}
-
 /**
  * 送る・受け取る — the マイタスク request timeline, laid out like a chat (LINE/TaskTalk 風)。
  * すべての依頼を1本の時系列に並べ、「いまボールを持っている人」で左右を決める:
  *   - 他人から自分に依頼され承諾/却下する番 → ボールは自分 → 右（自分がボール）
  *   - 自分が誰かに依頼して相手の承諾待ち   → ボールは相手 → 左（渡したので自分側に ←）
- * カード上はタイトルと相手アイコン（＋名前）だけに絞り、本文・優先度・状態・承諾/却下/取消は
- * カードをクリックした詳細モーダルに逃がす（キュッとコンパクトに）。承諾/却下/取消でボールが
- * 移ったら行が消える（サーバーが確定・ここは楽観的にドロップして再取得）。バックエンドは不変。
+ * カード上はタイトルと相手アイコン（＋名前）だけに絞り、編集・本文・優先度・状態・承諾/却下/取消は
+ * カードをクリックした詳細ダイヤログ（中央モーダル・ガントのタスク詳細と同等の編集体験）に逃がす。
+ * 承諾/却下/取消でボールが移ったら行が消える（楽観的にドロップして再取得）。バックエンドは不変。
  */
 export function MyTaskRequests({ seedUsers, onChanged }: MyTaskRequestsProps) {
   const client = useApiClient();
@@ -67,6 +87,9 @@ export function MyTaskRequests({ seedUsers, onChanged }: MyTaskRequestsProps) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [openItem, setOpenItem] = useState<ChatItem | null>(null);
+  // Session-local edit drafts (see RequestDraft) keyed by request id — the backend has no
+  // request PATCH, so 保存 commits here (optimistic) and the card/dialog read from it.
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, RequestDraft>>(new Map());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,6 +167,21 @@ export function MyTaskRequests({ seedUsers, onChanged }: MyTaskRequestsProps) {
   const onCancel = (r: task.TaskRequest) =>
     act(r, "out", () => cancelTaskRequest(client, r.id, { version: r.version }), "依頼を取り消しました", undefined, "取り消しに失敗しました");
 
+  // 保存: commit the dialog's edits as an optimistic session-local draft (see RequestDraft).
+  // The title also mirrors back onto the request row so the card + list update immediately.
+  const onSaveDraft = (r: task.TaskRequest, dir: Dir, next: RequestDraft) => {
+    setDrafts((prev) => new Map(prev).set(r.id, next));
+    const setList = dir === "in" ? setIncoming : setOutgoing;
+    setList((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? { ...x, title: next.title, description: next.description === "" ? null : next.description, priority: next.priority, dueAt: isoFromDateInput(next.due) }
+          : x,
+      ),
+    );
+    toast.show({ kind: "success", title: "変更を保存しました" });
+  };
+
   if (loading) {
     return (
       <div className={styles.chatInbox} data-testid="fe4-request-inbox-loading" aria-hidden>
@@ -155,6 +193,7 @@ export function MyTaskRequests({ seedUsers, onChanged }: MyTaskRequestsProps) {
   }
 
   const nameOf = (id: common.UserId) => displayName(users, id);
+  const titleOf = (r: task.TaskRequest) => drafts.get(r.id)?.title ?? r.title;
 
   if (timeline.length === 0) {
     return (
@@ -189,13 +228,13 @@ export function MyTaskRequests({ seedUsers, onChanged }: MyTaskRequestsProps) {
                 className={styles.chatCard}
                 onClick={() => setOpenItem(item)}
                 data-testid={`fe4-request-card-${r.id}`}
-                aria-label={`${counterpart} ${isSelf ? "からの依頼" : "への依頼"}: ${r.title}（詳細を開く）`}
+                aria-label={`${counterpart} ${isSelf ? "からの依頼" : "への依頼"}: ${titleOf(r)}（詳細を開く）`}
               >
                 <span className={styles.chatWho}>
                   <Avatar name={counterpart} size="sm" testId={`fe4-request-avatar-${r.id}`} />
                   <span className={styles.chatWhoName}>{counterpart}</span>
                 </span>
-                <span className={styles.chatCardTitle}>{r.title}</span>
+                <span className={styles.chatCardTitle}>{titleOf(r)}</span>
               </button>
             </li>
           );
@@ -203,11 +242,14 @@ export function MyTaskRequests({ seedUsers, onChanged }: MyTaskRequestsProps) {
       </ol>
 
       {openItem && (
-        <RequestDetailModal
+        <RequestDetailDialog
+          key={openItem.r.id}
           item={openItem}
           counterpartName={nameOf(openItem.dir === "in" ? openItem.r.fromUserId : openItem.r.toUserId)}
+          seed={drafts.get(openItem.r.id) ?? draftFromRequest(openItem.r)}
           busy={busy.has(openItem.r.id)}
           onClose={() => setOpenItem(null)}
+          onSave={(next) => onSaveDraft(openItem.r, openItem.dir, next)}
           onAccept={() => onAccept(openItem.r)}
           onDecline={() => onDecline(openItem.r)}
           onCancel={() => onCancel(openItem.r)}
@@ -217,79 +259,203 @@ export function MyTaskRequests({ seedUsers, onChanged }: MyTaskRequestsProps) {
   );
 }
 
-interface RequestDetailModalProps {
+interface RequestDetailDialogProps {
   item: ChatItem;
   counterpartName: string;
+  seed: RequestDraft;
   busy: boolean;
   onClose: () => void;
+  onSave: (next: RequestDraft) => void;
   onAccept: () => void;
   onDecline: () => void;
   onCancel: () => void;
 }
 
-/** クリックで開く詳細。カードに出さない情報（本文・優先度・状態・アクション）をここに集約。 */
-function RequestDetailModal({ item, counterpartName, busy, onClose, onAccept, onDecline, onCancel }: RequestDetailModalProps) {
+/**
+ * 詳細ダイヤログ（中央モーダル）— ガントのタスク詳細(TaskDetailPanel)と同じ編集体験を、
+ * サイドバーではなく中央ダイヤログに載せたもの。フィールド群は同じ @dub/ui プリミティブ
+ * (TextField/Select/Textarea) ＋ 同じ DateField / AttachmentField / CSS クラスで統一。
+ * タイトル/ステータス/優先度/開始日/期日/詳細/📎添付をその場で編集（楽観的・セッション内）し、
+ * フッターに承諾/却下（受け取り側）・取消（送り側）＋保存を置く。
+ */
+function RequestDetailDialog({ item, counterpartName, seed, busy, onClose, onSave, onAccept, onDecline, onCancel }: RequestDetailDialogProps) {
   const { r, dir } = item;
   const isSelf = dir === "in";
-  const due = formatDue(r.dueAt);
-  const footer = isSelf ? (
-    <div className={styles.chatDetailActions}>
-      <Button variant="ghost" onClick={onDecline} disabled={busy} testId={`fe4-request-decline-${r.id}`}>
-        却下
-      </Button>
-      <Button onClick={onAccept} loading={busy} testId={`fe4-request-accept-${r.id}`}>
-        承諾
-      </Button>
-    </div>
-  ) : (
-    <div className={styles.chatDetailActions}>
-      <Button variant="ghost" onClick={onCancel} disabled={busy} testId={`fe4-request-cancel-${r.id}`}>
-        依頼を取り消す
-      </Button>
+  const toast = useToast();
+
+  const [title, setTitle] = useState(seed.title);
+  const [description, setDescription] = useState(seed.description);
+  const [priority, setPriority] = useState<task.TaskPriority>(seed.priority);
+  const [status, setStatus] = useState<task.TaskStatus>(seed.status);
+  const [start, setStart] = useState<string | null>(seed.start);
+  const [due, setDue] = useState<string | null>(seed.due);
+  const [attachments, setAttachments] = useState<AttachmentChip[]>(seed.attachments);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const initial = useRef(seed);
+
+  const dirty =
+    title !== initial.current.title ||
+    description !== initial.current.description ||
+    priority !== initial.current.priority ||
+    status !== initial.current.status ||
+    start !== initial.current.start ||
+    due !== initial.current.due ||
+    attachments !== initial.current.attachments;
+
+  const save = () => {
+    const next: RequestDraft = { title, description, priority, status, start, due, attachments };
+    initial.current = next;
+    onSave(next);
+  };
+
+  // 📎添付: file → self-contained data URL chip (同 マイタスク発行/詳細の $0 パス), or external URL.
+  //  Request にはまだタスクが無い(承認前)ため /tasks/:id/attachments は叩けない → セッション内ローカル。
+  const addFiles = async (list: FileList) => {
+    if (list.length === 0) return;
+    setAttachError(null);
+    setAttachBusy(true);
+    try {
+      for (const file of Array.from(list)) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          setAttachError(`「${file.name}」は1MBを超えています（添付できるのは1MBまで）`);
+          continue;
+        }
+        const dataUrl = await readFileAsDataUrl(file);
+        setAttachments((prev) => [
+          { id: `att_${Date.now()}_${prev.length}`, kind: "file", name: file.name, href: dataUrl, download: true, sizeBytes: file.size },
+          ...prev,
+        ]);
+        toast.show({ kind: "success", title: `「${file.name}」を添付しました` });
+      }
+    } finally {
+      setAttachBusy(false);
+    }
+  };
+  const addUrl = (url: string, name: string) => {
+    setAttachError(null);
+    setAttachments((prev) => [{ id: `att_${Date.now()}_${prev.length}`, kind: "url", name: name || url, href: url }, ...prev]);
+    toast.show({ kind: "success", title: "URLを添付しました" });
+  };
+  const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
+
+  const footer = (
+    <div className={styles.requestDetailFooter}>
+      {isSelf ? (
+        <Button variant="ghost" onClick={onDecline} disabled={busy} testId={`fe4-request-decline-${r.id}`}>
+          却下
+        </Button>
+      ) : (
+        <Button variant="ghost" onClick={onCancel} disabled={busy} testId={`fe4-request-cancel-${r.id}`}>
+          依頼を取り消す
+        </Button>
+      )}
+      <div className={styles.requestDetailFooterEnd}>
+        <Button variant="secondary" onClick={save} disabled={busy || !dirty} testId={`fe4-request-save-${r.id}`}>
+          保存
+        </Button>
+        {isSelf && (
+          <Button onClick={onAccept} loading={busy} testId={`fe4-request-accept-${r.id}`}>
+            承諾
+          </Button>
+        )}
+      </div>
     </div>
   );
+
   return (
-    <Modal open onClose={onClose} title={r.title} size="sm" footer={footer} testId={`fe4-request-detail-${r.id}`}>
-      <div className={styles.chatDetail}>
-        <div className={styles.chatDetailWho}>
+    <Modal open onClose={onClose} title="依頼の詳細" size="md" footer={footer} testId={`fe4-request-detail-${r.id}`}>
+      <div className={styles.detailPanelBody} aria-label="依頼の詳細">
+        {/* 相手 + 承認状態（TaskRequest 固有: 相手/状態/依頼日） */}
+        <div className={styles.requestDetailWho}>
           <Avatar name={counterpartName} size="md" />
           <div>
             <p className={styles.chatDetailName}>{counterpartName}</p>
             <p className={styles.chatDetailRel}>{isSelf ? "さんからの依頼" : "さんへの依頼"}</p>
           </div>
         </div>
+        <div className={styles.panelHeadInfo}>
+          <span className={`${styles.chatDetailState} ${isSelf ? styles.chatDetailStateSelf : styles.chatDetailStateOther}`}>
+            {isSelf ? "あなたの承諾待ち" : "相手の承諾待ち"}
+          </span>
+          <span className={styles.chatDetailRel}>依頼日 {formatTime(r.createdAt)}</span>
+        </div>
 
-        <dl className={styles.chatDetailMeta}>
-          <div className={styles.chatDetailMetaRow}>
-            <dt>状態</dt>
-            <dd>
-              <span className={`${styles.chatDetailState} ${isSelf ? styles.chatDetailStateSelf : styles.chatDetailStateOther}`}>
-                {isSelf ? "あなたの承諾待ち" : "相手の承諾待ち"}
-              </span>
-            </dd>
-          </div>
-          <div className={styles.chatDetailMetaRow}>
-            <dt>優先度</dt>
-            <dd><Badge tone={PRIORITY_TONE[r.priority]}>{PRIORITY_LABEL[r.priority]}</Badge></dd>
-          </div>
-          {due && (
-            <div className={styles.chatDetailMetaRow}>
-              <dt>期限</dt>
-              <dd>{due}</dd>
-            </div>
-          )}
-          <div className={styles.chatDetailMetaRow}>
-            <dt>依頼日</dt>
-            <dd>{formatTime(r.createdAt)}</dd>
-          </div>
-        </dl>
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor={`fe4-request-title-${r.id}`}>
+            タイトル
+          </label>
+          <TextField id={`fe4-request-title-${r.id}`} value={title} onChange={setTitle} testId={`fe4-request-detail-title-${r.id}`} />
+        </div>
 
-        {r.description ? (
-          <div className={styles.chatDetailBody}>
-            <p className={styles.chatDetailBodyLabel}>内容</p>
-            <p className={styles.chatDetailBodyText}>{r.description}</p>
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor={`fe4-request-status-${r.id}`}>
+              ステータス
+            </label>
+            <Select
+              id={`fe4-request-status-${r.id}`}
+              value={status}
+              onChange={(v) => setStatus(v as task.TaskStatus)}
+              options={STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+              testId={`fe4-request-detail-status-${r.id}`}
+            />
           </div>
-        ) : null}
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor={`fe4-request-priority-${r.id}`}>
+              優先度
+            </label>
+            <Select
+              id={`fe4-request-priority-${r.id}`}
+              value={priority}
+              onChange={(v) => setPriority(v as task.TaskPriority)}
+              options={PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABEL[p] }))}
+              testId={`fe4-request-detail-priority-${r.id}`}
+            />
+          </div>
+        </div>
+
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor={`fe4-request-start-${r.id}`}>
+              開始日
+            </label>
+            <DateField id={`fe4-request-start-${r.id}`} value={start} onChange={setStart} testId={`fe4-request-detail-start-${r.id}`} />
+          </div>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor={`fe4-request-due-${r.id}`}>
+              期日
+            </label>
+            <DateField id={`fe4-request-due-${r.id}`} value={due} onChange={setDue} testId={`fe4-request-detail-due-${r.id}`} />
+          </div>
+        </div>
+
+        {/* 📎添付（ファイル・URL）: ガント詳細と同じ AttachmentField。承認前はセッション内ローカル。 */}
+        <AttachmentField
+          chips={attachments}
+          canWrite
+          busy={attachBusy}
+          error={attachError}
+          onPickFiles={(l) => void addFiles(l)}
+          onAddUrl={addUrl}
+          onRemove={removeAttachment}
+          testIdPrefix={`fe4-request-attach-${r.id}`}
+        />
+
+        {/* 詳細（メモ）: free-text body/notes（ガント詳細と同じ Textarea・最下部）。 */}
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor={`fe4-request-desc-${r.id}`}>
+            詳細
+          </label>
+          <Textarea
+            id={`fe4-request-desc-${r.id}`}
+            value={description}
+            onChange={setDescription}
+            rows={4}
+            placeholder="依頼の背景・手順・補足などを書けます"
+            testId={`fe4-request-detail-desc-${r.id}`}
+          />
+        </div>
       </div>
     </Modal>
   );
