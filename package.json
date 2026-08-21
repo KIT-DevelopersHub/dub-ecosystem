@@ -13,6 +13,8 @@
     "test": "turbo run test",
     "build": "turbo run build",
     "check": "pnpm typecheck && pnpm test",
+    "verify:live": "bash scripts/verify-live.sh",
+    "deploy:demo": "bash scripts/deploy-demo.sh",
     "db:lint": "pnpm --filter @dub/infra-d1 d1:lint",
     "db:migrate": "pnpm --filter @dub/infra-d1 d1:migrate",
     "db:seed": "pnpm --filter @dub/infra-d1 d1:seed",
