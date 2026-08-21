@@ -1058,14 +1058,6 @@
   padding: var(--dub-space-3);
   background: var(--dub-color-surface-subtle, transparent);
 }
-.confirmBox {
-  margin-top: var(--dub-space-2);
-  padding: var(--dub-space-3);
-  border: 1px solid var(--dub-color-danger-300, var(--dub-color-danger-500));
-  background: var(--dub-color-danger-50, var(--dub-color-danger-100));
-  border-radius: var(--dub-radius-md, 8px);
-}
-.confirmText { margin: 0 0 var(--dub-space-2); font-size: var(--dub-font-size-sm, 0.85rem); color: var(--dub-color-danger-700, var(--dub-color-danger-900)); }
 
 /* ---- form (create modal + detail panel) ---- */
 /* minmax(0,1fr) so a wide child (native date/select) never blows the column out
