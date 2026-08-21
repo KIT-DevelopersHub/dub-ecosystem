@@ -984,8 +984,11 @@ export function GanttView({
                       </marker>
                     </defs>
                     {segs.map((s) => {
-                      const midX = Math.max(s.x1 + 10, s.x2 - 10);
-                      const d = `M ${s.x1} ${s.y1} H ${midX} V ${s.y2} H ${s.x2}`;
+                      // Vertical-first L routing (縦→横): drop DOWN/UP out of the
+                      // predecessor end first, then run horizontally into the successor's
+                      // left edge — the elbow's corner sits near the predecessor, not the
+                      // successor. Head still enters the successor horizontally, as before.
+                      const d = `M ${s.x1} ${s.y1} V ${s.y2} H ${s.x2}`;
                       const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
                       return (
                         <path
