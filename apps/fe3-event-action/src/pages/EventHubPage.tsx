@@ -1,9 +1,11 @@
-// EventHubPage — the Event app's home. The header switcher picks the current event
-// (global, persisted); the body shows that event as the primary subject: a hero
-// (title / phase / schedule / description) plus the free-form detail store where
-// anything about the event can be kept. Switching events in the header swaps the body.
+// EventHubPage — the Event app's home. The current event is picked from the shell's
+// always-visible global イベント switcher (GCP-style header widget); the body shows
+// that event as the primary subject: a hero (title / phase / schedule / description)
+// plus the free-form detail store where anything about the event can be kept.
+// NOTE: this page does NOT render its own event switcher — the shell header already
+// carries the global one, so an in-body switcher would double the header (判断36⑤).
+// The standalone dev harness (main.tsx) supplies EventAppHeader itself.
 import { Button, Icon, EmptyState, SkeletonLoader } from "@dub/ui";
-import { EventAppHeader } from "../components/EventAppHeader";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { EventDetailsPanel } from "../components/EventDetailsPanel";
 import { PhaseBadge } from "../components/PhaseBadge";
@@ -88,7 +90,6 @@ export function EventHubPage() {
 
   return (
     <div data-testid="fe3-hub">
-      <EventAppHeader />
       {eventId ? (
         <EventContextProvider
           eventId={eventId}

@@ -17,6 +17,7 @@ import { EventDetailPage } from "./pages/EventDetailPage";
 import { ActionDetailPage } from "./pages/ActionDetailPage";
 import { EventSettingsPage } from "./pages/EventSettingsPage";
 import { EventHubPage } from "./pages/EventHubPage";
+import { EventAppHeader } from "./components/EventAppHeader";
 
 function matchRoute(path: string): { render: () => JSX.Element; params: Record<string, string> } {
   const detail = path.match(/^\/events\/([^/]+)\/settings$/);
@@ -77,7 +78,14 @@ function App() {
     <EventApiProvider api={api}>
       <RegistryProvider registry={actionTypeRegistry}>
         <NavigationProvider value={nav}>
-          <ToastProvider>{render()}</ToastProvider>
+          <ToastProvider>
+            {/* Standalone-only chrome: in production the FE2 shell carries the global
+                イベント switcher in its header; here the harness supplies EventAppHeader
+                so every event screen stays switchable. (EventHubPage no longer renders
+                its own switcher — that would double the header inside the shell.) */}
+            <EventAppHeader />
+            {render()}
+          </ToastProvider>
         </NavigationProvider>
       </RegistryProvider>
     </EventApiProvider>
