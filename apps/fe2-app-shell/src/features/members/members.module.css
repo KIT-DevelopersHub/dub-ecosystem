@@ -92,6 +92,12 @@
   overflow-x: auto;
 }
 
+/* タブ下本体の読み込み中スケルトン。バー(rosterSubnav)は残したまま、この領域だけが
+   差し替わる。ページ本文と同じ左右余白でガタつきを抑える（FE1 §5 loading principle）。 */
+.rosterContentSkeleton {
+  padding: var(--dub-space-2) var(--dub-space-4) var(--dub-space-6);
+}
+
 .unassignedSection {
   grid-column: 1 / -1;
   border: 1px dashed var(--dub-color-border-default);
