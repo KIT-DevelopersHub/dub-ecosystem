@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, resolveUsers, createTaskAttachment } from "../api/endpoints";
+import { listTasks, createTask, resolveUsers, createTaskAttachment, getGantt, replaceDependencies } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
+import { scopeTasksFromRows, type ScopeTask } from "../domain/task-hierarchy";
 import {
   type MyTasksFilter,
   type MyTasksLens,
@@ -54,6 +55,30 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<task.Task | null>(null);
   const reqSeq = useRef(0);
+
+  // ③ 親タスク・先行タスクの候補は「作成モーダルで選択中の対象イベント」のタスク（＝そのイベントの
+  // ガント読み取りモデル）。モーダルで対象イベントを選ぶ/変えると onEventChange で scopeEventId が
+  // 差し替わり、候補を読み直す（親子・依存は同一イベント内でのみ・別チーム依存は不可）。
+  const [scopeEventId, setScopeEventId] = useState<common.EventId | null>(null);
+  const [scopeTasks, setScopeTasks] = useState<readonly ScopeTask[]>([]);
+  useEffect(() => {
+    if (!scopeEventId) {
+      setScopeTasks([]);
+      return;
+    }
+    let live = true;
+    void getGantt(client, scopeEventId)
+      .then((dto) => {
+        if (live) setScopeTasks(scopeTasksFromRows(dto.rows));
+      })
+      .catch(() => {
+        // イベントにガントが無い/未紐付け等 → 候補なし（親/先行欄は出さない）。degrade gracefully。
+        if (live) setScopeTasks([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, scopeEventId]);
 
   const teamNames = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
 
@@ -158,7 +183,21 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+        // ③ 親タスク（親子関係）。子は親と同じチーム（モーダルで固定済み）。
+        ...(draft.parentId ? { parentTaskId: draft.parentId } : {}),
       });
+      // ③ 先行タスク（依存）。タスク作成後に別途反映（同じ親スコープ内のみ）。失敗しても作成は取り消さない。
+      if (draft.dependsOnIds.length > 0) {
+        try {
+          await replaceDependencies(client, created.id, { version: created.version, dependsOnIds: draft.dependsOnIds });
+        } catch {
+          toast.show({
+            kind: "error",
+            title: "一部の先行タスクを設定できませんでした",
+            description: "タスクは作成済みです。詳細から設定し直せます。",
+          });
+        }
+      }
       // Persist attachments after the task exists (they need its real id). Best-effort:
       // a failed attachment must not undo an already-created task.
       const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
@@ -259,6 +298,9 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         teams={teams}
         onCreate={onCreate}
         requesterName={currentUserName}
+        scopeTasks={scopeTasks}
+        scopeEventId={scopeEventId}
+        onEventChange={setScopeEventId}
       />
     </section>
   );
