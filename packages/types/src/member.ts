@@ -293,6 +293,15 @@ export interface LinkIdentityRequest {
   version: number;
 }
 
+/** Response of GET /members/people/by-identity/:identityUserId — the member whose
+ *  `identityUserId` matches (with its `teamIds`), or `null` when no member is linked
+ *  to that login. This is the reverse lookup other services use to resolve a login
+ *  account → its 運営メンバー + team memberships (e.g. task-service's self/other-team
+ *  routing for 送る・受け取る). Named here so producer + consumers share one contract. */
+export interface MemberByIdentityResponse {
+  member: Member | null;
+}
+
 /** Internal id alias (plain string, like the other common ids). */
 export type MemberId = string;
 export type TeamId = string;

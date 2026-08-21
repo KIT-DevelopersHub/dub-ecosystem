@@ -46,6 +46,9 @@ export interface MockSeed {
   hierarchy?: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }>;
   /** "current user" the mock stamps as createdBy on POST /tasks (from→to "from"). */
   currentUserId?: common.UserId;
+  /** send / receive (送る・受け取る): seed pending/decided requests + cross-links. */
+  requests?: task.TaskRequest[];
+  crossLinks?: task.TaskCrossLink[];
 }
 
 export class MockApiClient implements ApiClient {
@@ -61,6 +64,8 @@ export class MockApiClient implements ApiClient {
   private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
   private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
+  private requestsById = new Map<string, task.TaskRequest>();
+  private crossLinks: task.TaskCrossLink[] = [];
 
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
@@ -83,6 +88,8 @@ export class MockApiClient implements ApiClient {
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
     this.hierarchy = seed.hierarchy ?? {};
     this.currentUserId = seed.currentUserId ?? "usr_me";
+    for (const r of seed.requests ?? []) this.requestsById.set(r.id, r);
+    this.crossLinks = seed.crossLinks ?? [];
   }
 
   /** Set of task ids that appear as some row's parent (⇒ they render a toggle). */
@@ -114,6 +121,22 @@ export class MockApiClient implements ApiClient {
       throw e;
     }
     const path = req.path;
+    // --- send / receive (task-requests + cross-links). Match BEFORE the /tasks/:id
+    //     and /task-requests/:id catch-alls so the literal sub-paths aren't shadowed. ---
+    if (path === "/api/v1/tasks/cross-links" && req.method === "GET")
+      return ({ items: this.listCrossLinks(String(req.query?.eventId)) } as task.ListTaskCrossLinksResponse) as T;
+    if (path === "/api/v1/task-requests") {
+      if (req.method === "POST") return this.issueRequest(req.body as task.IssueTaskRequestBody) as T;
+      if (req.method === "GET") return this.listRequests(req.query ?? {}) as T;
+    }
+    const trAccept = path.match(/^\/api\/v1\/task-requests\/([^/]+)\/accept$/);
+    if (trAccept && req.method === "POST") return this.acceptRequest(trAccept[1]!, req.body as task.AcceptTaskRequestBody) as T;
+    const trDecline = path.match(/^\/api\/v1\/task-requests\/([^/]+)\/decline$/);
+    if (trDecline && req.method === "POST") return this.declineRequest(trDecline[1]!, req.body as task.DeclineTaskRequestBody) as T;
+    const trCancel = path.match(/^\/api\/v1\/task-requests\/([^/]+)\/cancel$/);
+    if (trCancel && req.method === "POST") return this.cancelRequest(trCancel[1]!, req.body as task.CancelTaskRequestBody) as T;
+    const trId = path.match(/^\/api\/v1\/task-requests\/([^/]+)$/);
+    if (trId && req.method === "GET") return this.getRequest(trId[1]!) as T;
     // --- tasks ---
     if (path === "/api/v1/tasks" && req.method === "GET") return this.listTasks(req) as T;
     if (path === "/api/v1/tasks" && req.method === "POST") return this.createTask(req.body as task.CreateTaskRequest) as T;
@@ -374,6 +397,157 @@ export class MockApiClient implements ApiClient {
     // only the wire shape { taskId, dependsOnIds }.
     this.taskById.set(id, { ...cur, version: cur.version + 1, updatedAt: new Date().toISOString() });
     return { taskId: id, dependsOnIds: [...body.dependsOnIds] };
+  }
+
+  // ---- send / receive handlers (simplified mock; the server does the real team/role
+  //      decisions. Here: self→task, anyone-else→pending request; accept materialises
+  //      both tasks + the cross-link. State + version are enforced so optimistic-UI
+  //      rollback paths exercise real branches, matching the tasks/deps handlers). ----
+  private issueRequest(body: task.IssueTaskRequestBody): task.IssueTaskRequestResponse {
+    if (body.toUserId === this.currentUserId) {
+      const t = this.createTask({
+        ...(body.eventId != null ? { eventId: body.eventId } : {}),
+        title: body.title,
+        ...(body.description != null ? { description: body.description } : {}),
+        ...(body.priority !== undefined ? { priority: body.priority } : {}),
+        assigneeId: body.toUserId,
+        ...(body.dueAt != null ? { dueAt: body.dueAt } : {}),
+        ...(body.targetTeamId != null ? { teamId: body.targetTeamId } : {}),
+      });
+      return { kind: "task", task: t };
+    }
+    const now = new Date().toISOString();
+    const r: task.TaskRequest = {
+      id: mintId("treq"),
+      eventId: body.eventId ?? null,
+      fromUserId: this.currentUserId,
+      toUserId: body.toUserId,
+      fromTeamId: null,
+      toTeamId: body.targetTeamId ?? null,
+      title: body.title,
+      description: body.description ?? null,
+      priority: body.priority ?? "medium",
+      dueAt: body.dueAt ?? null,
+      sourceTaskId: body.sourceTaskId ?? null,
+      state: "pending",
+      declineReason: null,
+      createdTaskId: null,
+      version: 1,
+      createdAt: now,
+      decidedAt: null,
+      updatedAt: now,
+    };
+    this.requestsById.set(r.id, r);
+    return { kind: "request", request: r };
+  }
+
+  private listRequests(query: Record<string, string | number | boolean | undefined>): task.ListTaskRequestsResponse {
+    const box = String(query.box ?? "incoming");
+    let items = [...this.requestsById.values()].filter((r) =>
+      box === "incoming" ? r.toUserId === this.currentUserId : r.fromUserId === this.currentUserId,
+    );
+    if (query.state) {
+      const states = String(query.state).split(",");
+      items = items.filter((r) => states.includes(r.state));
+    }
+    if (query.eventId) items = items.filter((r) => (r.eventId ?? null) === query.eventId);
+    items.sort((a, b) => b.id.localeCompare(a.id));
+    return { items, nextCursor: null };
+  }
+
+  private getRequest(id: string): task.TaskRequest {
+    const r = this.requestsById.get(id);
+    if (!r) throw err(404, "TASK_REQUEST_NOT_FOUND", `request not found: ${id}`);
+    return r;
+  }
+
+  private acceptRequest(id: string, body: task.AcceptTaskRequestBody): task.AcceptTaskRequestResponse {
+    const r = this.requirePending(id, body.version);
+    const now = new Date().toISOString();
+    const toTeam = body.targetTeamId ?? r.toTeamId ?? null;
+    // receiver task ("受け負った")
+    const createdTask = this.createTask({
+      ...(r.eventId != null ? { eventId: r.eventId } : {}),
+      title: r.title,
+      ...(r.description != null ? { description: r.description } : {}),
+      priority: r.priority,
+      assigneeId: r.toUserId,
+      ...(r.dueAt != null ? { dueAt: r.dueAt } : {}),
+      ...(toTeam != null ? { teamId: toTeam } : {}),
+    });
+    // requester tracking task ("お願いした"): reuse sourceTaskId, else generate one.
+    let requesterTaskId = r.sourceTaskId ?? null;
+    if (!requesterTaskId) {
+      const rt = this.createTask({
+        ...(r.eventId != null ? { eventId: r.eventId } : {}),
+        title: r.title,
+        priority: r.priority,
+        assigneeId: r.fromUserId,
+        ...(r.dueAt != null ? { dueAt: r.dueAt } : {}),
+        ...(r.fromTeamId != null ? { teamId: r.fromTeamId } : {}),
+      });
+      requesterTaskId = rt.id;
+    }
+    const crossLink: task.TaskCrossLink = {
+      id: mintId("txl"),
+      requestId: id,
+      requesterTaskId,
+      requesteeTaskId: createdTask.id,
+      eventId: r.eventId ?? null,
+      createdAt: now,
+    };
+    this.crossLinks.push(crossLink);
+    const request: task.TaskRequest = {
+      ...r,
+      state: "accepted",
+      createdTaskId: createdTask.id,
+      toTeamId: toTeam,
+      version: r.version + 1,
+      decidedAt: now,
+      updatedAt: now,
+    };
+    this.requestsById.set(id, request);
+    return { request, createdTask, crossLink };
+  }
+
+  private declineRequest(id: string, body: task.DeclineTaskRequestBody): task.TaskRequest {
+    return this.decideRequest(id, body.version, "declined", body.reason ?? null);
+  }
+
+  private cancelRequest(id: string, body: task.CancelTaskRequestBody): task.TaskRequest {
+    return this.decideRequest(id, body.version, "cancelled", null);
+  }
+
+  private requirePending(id: string, version: number): task.TaskRequest {
+    const r = this.requestsById.get(id);
+    if (!r) throw err(404, "TASK_REQUEST_NOT_FOUND", `request not found: ${id}`);
+    if (r.state !== "pending") throw err(409, "TASK_REQUEST_INVALID_STATE", `request is ${r.state}, not pending`);
+    if (version !== r.version) throw err(409, "TASK_VERSION_CONFLICT", "version conflict", { current: r.version });
+    return r;
+  }
+
+  private decideRequest(
+    id: string,
+    version: number,
+    state: task.TaskRequestState,
+    reason: string | null,
+  ): task.TaskRequest {
+    const r = this.requirePending(id, version);
+    const now = new Date().toISOString();
+    const updated: task.TaskRequest = {
+      ...r,
+      state,
+      ...(reason !== null ? { declineReason: reason } : {}),
+      version: r.version + 1,
+      decidedAt: now,
+      updatedAt: now,
+    };
+    this.requestsById.set(id, updated);
+    return updated;
+  }
+
+  private listCrossLinks(eventId: string): task.TaskCrossLink[] {
+    return this.crossLinks.filter((c) => (c.eventId ?? null) === eventId);
   }
 
   // ---- gantt handlers ----

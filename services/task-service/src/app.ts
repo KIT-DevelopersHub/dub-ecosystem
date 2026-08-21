@@ -111,6 +111,21 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res);
   });
 
+  // ---- GET /tasks/cross-links (LITERAL route registered before :id) ----
+  // The event's arrow-less cross-team links (送る・受け取る). Same wire shape as
+  // /tasks/dependencies; gantt/My Tasks read this to badge rows「お願いした/受け負った」
+  // WITHOUT drawing an arrow (these never enter task_dependencies / CPM).
+  app.get("/tasks/cross-links", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:read");
+    const eventId = c.req.query("eventId");
+    if (!eventId) throw errors.validationFailed([{ field: "eventId", reason: "required" }]);
+    const items = await deps.repo.listCrossLinksByEvent(eventId);
+    const res: task.ListTaskCrossLinksResponse = { items };
+    return c.json(res);
+  });
+
   // ---- GET /tasks (list; cursor paging) ----
   app.get("/tasks", async (c) => {
     const ctx = ctxOf(c);
@@ -199,6 +214,19 @@ export function buildApp(deps: Deps): Hono {
     if (body.assigneeId) {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
+
+      // D4 (ADR-0007): a task must not be assigned directly to someone on another team —
+      // that would bypass the request/approval flow (送る・受け取る). This guard fires ONLY
+      // when the task HAS a team (team_id non-null) AND the assignee's teams are KNOWN and
+      // do NOT include it. Teamless tasks (team_id=null) and assignees whose teams are
+      // unresolvable (no linked member ⇒ []) pass through unchanged — back-compat.
+      const teamId = body.teamId ?? null;
+      if (teamId) {
+        const assigneeTeams = await deps.member.teamsOfUser(ctx, body.assigneeId);
+        if (assigneeTeams.length > 0 && !assigneeTeams.includes(teamId)) {
+          throw taskErrors.crossTeamAssignee(body.assigneeId, teamId);
+        }
+      }
     }
 
     const now = nowIso();
@@ -546,6 +574,372 @@ export function buildApp(deps: Deps): Hono {
     );
 
     return c.json({ taskId: id, dependsOnIds });
+  });
+
+  // ---- POST /task-requests (send / 送る) ----
+  // Issue a task request. The server (never the client) resolves the destination's
+  // team membership and branches (ADR-0007): self / same-team → a task is created
+  // immediately (D1, {kind:"task"}); other team → a pending TaskRequest is created and
+  // the receiver is notified ({kind:"request"}).
+  app.post("/task-requests", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    // Issuing is a human action — the requester is the "from". A service principal has
+    // no identity to route by, so it cannot issue a request.
+    if (principal.kind !== "user") {
+      throw errors.validationFailed([{ field: "toUserId", reason: "requester_must_be_user" }]);
+    }
+    const fromUserId = principal.userId;
+    const body = await readJson<Partial<task.IssueTaskRequestBody>>(c);
+
+    const fe: FieldError[] = [];
+    if (typeof body.toUserId !== "string" || body.toUserId.length === 0) {
+      fe.push({ field: "toUserId", reason: "required" });
+    }
+    checkTitle(body.title, fe);
+    checkPriority(body.priority, fe);
+    checkIso(body.dueAt, "dueAt", fe);
+    if (body.description !== undefined && body.description !== null && typeof body.description !== "string") {
+      fe.push({ field: "description", reason: "invalid_type" });
+    }
+    checkOptString(body.targetTeamId, "targetTeamId", fe);
+    checkOptString(body.sourceTaskId, "sourceTaskId", fe);
+    if (body.eventId !== undefined && body.eventId !== null && typeof body.eventId !== "string") {
+      fe.push({ field: "eventId", reason: "invalid_type" });
+    }
+    assertValid(fe);
+
+    const toUserId = body.toUserId!;
+    const eventId: common.EventId | null = body.eventId ?? null;
+    if (eventId) {
+      const ref = await deps.eventClient.getEvent(ctx, eventId);
+      if (!ref) throw taskErrors.eventNotFound(eventId);
+      if (ref.archivedAt) throw taskErrors.eventArchived(eventId);
+    }
+    if (!(await deps.identity.userExists(ctx, toUserId))) {
+      throw errors.validationFailed([{ field: "toUserId", reason: "not_found" }]);
+    }
+
+    // Server-side self/other-team decision. A client-supplied team hint is UX-only and
+    // never trusted — the branch is decided here from member-service memberships.
+    const fromTeams = await deps.member.teamsOfUser(ctx, fromUserId);
+    const toTeams = toUserId === fromUserId ? fromTeams : await deps.member.teamsOfUser(ctx, toUserId);
+    const shared = fromTeams.filter((t) => toTeams.includes(t));
+    const sameTeam = toUserId === fromUserId || shared.length > 0;
+
+    const now = nowIso();
+    const priority = body.priority ?? "medium";
+
+    if (sameTeam) {
+      // D1: self / same-team → materialise a normal task now (no approval). The existing
+      // task.created/task.assigned events drive gantt + My Tasks sync (no new event).
+      const teamId: common.TeamId | null = body.targetTeamId ?? shared[0] ?? fromTeams[0] ?? null;
+      const id = newId("task");
+      const created = await deps.repo.insert({
+        id,
+        eventId,
+        title: body.title!,
+        description: body.description ?? null,
+        status: "todo",
+        priority,
+        assigneeId: toUserId,
+        teamId,
+        parentId: null,
+        wbs: null,
+        startAt: null,
+        dueAt: body.dueAt ?? null,
+        origin: "internal",
+        createdBy: fromUserId,
+        now,
+      });
+      const evt = eventId ? { eventId } : {};
+      const specs: EventSpec[] = [
+        { name: "task.created", payload: { taskId: id, ...evt } },
+        { name: "task.assigned", payload: { taskId: id, ...evt, assigneeId: toUserId } },
+      ];
+      await emit(deps.events, { requestId: ctx.requestId, actorId: fromUserId }, specs);
+      await deps.audit.record(
+        auditRecord("task.request.materialized", fromUserId, config.orgId, ctx.requestId, id, {
+          toUserId,
+          teamId,
+          via: toUserId === fromUserId ? "self" : "same_team",
+        }),
+      );
+      const res: task.IssueTaskRequestResponse = { kind: "task", task: created };
+      return c.json(res, 201);
+    }
+
+    // Other team → pending request; a task only materialises when the receiver accepts.
+    const id = newId("treq");
+    const request = await deps.repo.insertRequest({
+      id,
+      eventId,
+      fromUserId,
+      toUserId,
+      fromTeamId: fromTeams[0] ?? null,
+      toTeamId: body.targetTeamId ?? toTeams[0] ?? null,
+      title: body.title!,
+      description: body.description ?? null,
+      priority,
+      dueAt: body.dueAt ?? null,
+      sourceTaskId: body.sourceTaskId ?? null,
+      now,
+    });
+    await emit(deps.events, { requestId: ctx.requestId, actorId: fromUserId }, [
+      { name: "task.request.created", payload: { requestId: id, fromUserId, toUserId, ...(eventId ? { eventId } : {}) } },
+    ]);
+    await deps.audit.record(
+      auditRecord("task.request.created", fromUserId, config.orgId, ctx.requestId, id, {
+        toUserId,
+        eventId: eventId ?? null,
+      }),
+    );
+    const res: task.IssueTaskRequestResponse = { kind: "request", request };
+    return c.json(res, 201);
+  });
+
+  // ---- GET /task-requests (my incoming / outgoing) ----
+  app.get("/task-requests", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:read");
+    // incoming/outgoing are self-scoped ("my" requests), so a caller identity is required.
+    if (principal.kind !== "user") {
+      throw errors.validationFailed([{ field: "box", reason: "requires_user" }]);
+    }
+    const box = c.req.query("box");
+    if (box !== "incoming" && box !== "outgoing") {
+      throw errors.validationFailed([{ field: "box", reason: "required" }]);
+    }
+    const statesRaw = (c.req.queries("state") ?? []).flatMap((s) => s.split(",")).filter(Boolean);
+    const valid = new Set<task.TaskRequestState>(["pending", "accepted", "declined", "cancelled"]);
+    const fe: FieldError[] = [];
+    for (const s of statesRaw) if (!valid.has(s as task.TaskRequestState)) fe.push({ field: "state", reason: "invalid" });
+    assertValid(fe);
+
+    const eventId = c.req.query("eventId");
+    const cursorRaw = c.req.query("cursor");
+    const page = await deps.repo.listRequests({
+      box,
+      userId: principal.userId,
+      limit: normalizeLimit(c.req.query("limit")),
+      ...(statesRaw.length > 0 ? { states: statesRaw as task.TaskRequestState[] } : {}),
+      ...(eventId ? { eventId } : {}),
+      ...(cursorRaw ? { cursorId: decodeCursor(cursorRaw) } : {}),
+    });
+    const res: task.ListTaskRequestsResponse = { items: page.items, nextCursor: page.nextCursor };
+    return c.json(res);
+  });
+
+  // ---- GET /task-requests/:id ----
+  app.get("/task-requests/:id", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:read");
+    const id = c.req.param("id");
+    const found = await deps.repo.getRequestById(id);
+    if (!found) throw taskErrors.requestNotFound(id);
+    // Only the two participants (requester / receiver) may read a request; to anyone else
+    // it is 404 (never leak its existence). Service-role reads (mobile-bff) are trusted.
+    if (principal.kind === "user" && principal.userId !== found.fromUserId && principal.userId !== found.toUserId) {
+      throw taskErrors.requestNotFound(id);
+    }
+    return c.json(found);
+  });
+
+  // ---- POST /task-requests/:id/accept (受け取る) ----
+  // The receiver accepts a pending cross-team request. This materialises BOTH sides:
+  // the receiver's task ("受け負った"), the requester's tracking task ("お願いした" —
+  // the request's sourceTaskId if given, else auto-generated per D3), and the arrow-less
+  // cross-link joining them. Receiver-only (403) and pending-only (409, atomic).
+  app.post("/task-requests/:id/accept", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    const body = await readJson<Partial<task.AcceptTaskRequestBody>>(c);
+
+    const fe: FieldError[] = [];
+    if (typeof body.version !== "number") fe.push({ field: "version", reason: "required" });
+    checkOptString(body.targetTeamId, "targetTeamId", fe);
+    assertValid(fe);
+
+    const req = await deps.repo.getRequestById(id);
+    if (!req) throw taskErrors.requestNotFound(id);
+    // Only the receiver may accept.
+    if (principal.kind === "user" && principal.userId !== req.toUserId) {
+      throw taskErrors.requestForbiddenRole("accept");
+    }
+    if (req.state !== "pending") throw taskErrors.requestInvalidState(req.state, "accept");
+    if (body.version !== req.version) throw taskErrors.versionConflict();
+
+    const now = nowIso();
+    const evt = req.eventId ? { eventId: req.eventId } : {};
+    const toTeam: common.TeamId | null = body.targetTeamId ?? req.toTeamId ?? null;
+    const actorId = actorIdOf(principal);
+    const specs: EventSpec[] = [];
+
+    // 1) Receiver task — the "受け負った" side (assignee = receiver, team = receiver team).
+    const receiverTaskId = newId("task");
+    const createdTask = await deps.repo.insert({
+      id: receiverTaskId,
+      eventId: req.eventId ?? null,
+      title: req.title,
+      description: req.description,
+      status: "todo",
+      priority: req.priority,
+      assigneeId: req.toUserId,
+      teamId: toTeam,
+      parentId: null,
+      wbs: null,
+      startAt: null,
+      dueAt: req.dueAt,
+      origin: "internal",
+      createdBy: req.fromUserId, // issued by the requester (powers the 依頼 lens)
+      now,
+    });
+    specs.push({ name: "task.created", payload: { taskId: receiverTaskId, ...evt } });
+    specs.push({ name: "task.assigned", payload: { taskId: receiverTaskId, ...evt, assigneeId: req.toUserId } });
+
+    // 2) Requester tracking task — the "お願いした" side. Reuse sourceTaskId when the
+    //    request came from a specific task, else auto-generate one (D3) so BOTH sides
+    //    always have a task to badge.
+    let requesterTaskId: common.TaskId;
+    if (req.sourceTaskId) {
+      requesterTaskId = req.sourceTaskId;
+    } else {
+      requesterTaskId = newId("task");
+      await deps.repo.insert({
+        id: requesterTaskId,
+        eventId: req.eventId ?? null,
+        title: req.title,
+        description: req.description,
+        status: "todo",
+        priority: req.priority,
+        assigneeId: req.fromUserId,
+        teamId: req.fromTeamId ?? null,
+        parentId: null,
+        wbs: null,
+        startAt: null,
+        dueAt: req.dueAt,
+        origin: "internal",
+        createdBy: req.fromUserId,
+        now,
+      });
+      specs.push({ name: "task.created", payload: { taskId: requesterTaskId, ...evt } });
+      specs.push({ name: "task.assigned", payload: { taskId: requesterTaskId, ...evt, assigneeId: req.fromUserId } });
+    }
+
+    // 3) Arrow-less cross-link joining the two tasks (NOT a dependency).
+    const crossLinkId = newId("txl");
+    const crossLink = await deps.repo.insertCrossLink({
+      id: crossLinkId,
+      requestId: id,
+      requesterTaskId,
+      requesteeTaskId: receiverTaskId,
+      eventId: req.eventId ?? null,
+      now,
+    });
+
+    // 4) Atomic gate: pending→accepted with the version guard. A concurrent accept /
+    //    stale version loses here (state is no longer pending) → 409.
+    const moved = await deps.repo.decideRequest(
+      id,
+      { state: "accepted", createdTaskId: receiverTaskId, toTeamId: toTeam },
+      req.version,
+      now,
+    );
+    if (!moved) throw taskErrors.requestInvalidState("accepted", "accept");
+
+    specs.push({
+      name: "task.request.accepted",
+      payload: { requestId: id, createdTaskId: receiverTaskId, sourceTaskId: requesterTaskId, ...evt },
+    });
+    specs.push({
+      name: "task.cross_link.created",
+      payload: { crossLinkId, requesterTaskId, requesteeTaskId: receiverTaskId, ...evt },
+    });
+    await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);
+    await deps.audit.record(
+      auditRecord("task.request.accepted", actorId, config.orgId, ctx.requestId, id, {
+        createdTaskId: receiverTaskId,
+        requesterTaskId,
+        crossLinkId,
+      }),
+    );
+
+    const updated = await deps.repo.getRequestById(id);
+    const res: task.AcceptTaskRequestResponse = { request: updated!, createdTask, crossLink };
+    return c.json(res);
+  });
+
+  // ---- POST /task-requests/:id/decline (receiver rejects a pending request) ----
+  app.post("/task-requests/:id/decline", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    const body = await readJson<Partial<task.DeclineTaskRequestBody>>(c);
+    if (typeof body.version !== "number") {
+      throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    }
+    if (body.reason !== undefined && typeof body.reason !== "string") {
+      throw errors.validationFailed([{ field: "reason", reason: "invalid_type" }]);
+    }
+    const req = await deps.repo.getRequestById(id);
+    if (!req) throw taskErrors.requestNotFound(id);
+    if (principal.kind === "user" && principal.userId !== req.toUserId) {
+      throw taskErrors.requestForbiddenRole("decline");
+    }
+    if (req.state !== "pending") throw taskErrors.requestInvalidState(req.state, "decline");
+    if (body.version !== req.version) throw taskErrors.versionConflict();
+
+    const now = nowIso();
+    const actorId = actorIdOf(principal);
+    const moved = await deps.repo.decideRequest(id, { state: "declined", declineReason: body.reason ?? null }, req.version, now);
+    if (!moved) throw taskErrors.requestInvalidState("declined", "decline");
+    const evt = req.eventId ? { eventId: req.eventId } : {};
+    await emit(deps.events, { requestId: ctx.requestId, actorId }, [
+      { name: "task.request.declined", payload: { requestId: id, ...evt } },
+    ]);
+    await deps.audit.record(
+      auditRecord("task.request.declined", actorId, config.orgId, ctx.requestId, id, { eventId: req.eventId ?? null }),
+    );
+    return c.json((await deps.repo.getRequestById(id))!);
+  });
+
+  // ---- POST /task-requests/:id/cancel (requester withdraws a pending request) ----
+  app.post("/task-requests/:id/cancel", async (c) => {
+    const ctx = ctxOf(c);
+    const principal = principalOf(c);
+    await deps.authz.require(ctx, principal, "task:write");
+    const id = c.req.param("id");
+    const body = await readJson<Partial<task.CancelTaskRequestBody>>(c);
+    if (typeof body.version !== "number") {
+      throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    }
+    const req = await deps.repo.getRequestById(id);
+    if (!req) throw taskErrors.requestNotFound(id);
+    // Only the requester may cancel their own request.
+    if (principal.kind === "user" && principal.userId !== req.fromUserId) {
+      throw taskErrors.requestForbiddenRole("cancel");
+    }
+    if (req.state !== "pending") throw taskErrors.requestInvalidState(req.state, "cancel");
+    if (body.version !== req.version) throw taskErrors.versionConflict();
+
+    const now = nowIso();
+    const actorId = actorIdOf(principal);
+    const moved = await deps.repo.decideRequest(id, { state: "cancelled" }, req.version, now);
+    if (!moved) throw taskErrors.requestInvalidState("cancelled", "cancel");
+    const evt = req.eventId ? { eventId: req.eventId } : {};
+    await emit(deps.events, { requestId: ctx.requestId, actorId }, [
+      { name: "task.request.cancelled", payload: { requestId: id, ...evt } },
+    ]);
+    await deps.audit.record(
+      auditRecord("task.request.cancelled", actorId, config.orgId, ctx.requestId, id, { eventId: req.eventId ?? null }),
+    );
+    return c.json((await deps.repo.getRequestById(id))!);
   });
 
   return app;

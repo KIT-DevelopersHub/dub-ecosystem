@@ -166,3 +166,138 @@ export const DEPENDENCY_REJECT_REASONS = {
 } as const;
 export type DependencyRejectReason =
   (typeof DEPENDENCY_REJECT_REASONS)[keyof typeof DEPENDENCY_REJECT_REASONS];
+
+// ── send / receive: cross-team task requests + cross-links ───────────────────
+// The "送る・受け取る" feature. Same-team work stays arrow-linked dependencies
+// (task_dependencies); cross-team work is a request → approval → cross-link that
+// draws NO arrow. All additive to the frozen Task shape (new tables + interfaces).
+// Design SoT: docs/design/send-receive-task-requests.md / ADR-0007.
+
+export type TaskRequestState = "pending" | "accepted" | "declined" | "cancelled";
+
+/** A cross-team task request (task_requests). Carries the approval state; a task
+ *  only materialises for the receiver's team once it is `accepted`. */
+export interface TaskRequest extends Versioned {
+  id: string; // treq_ ULID
+  eventId?: EventId | null;
+  fromUserId: UserId; // 依頼者 (createdBy)
+  toUserId: UserId; // 受け手 (承認後の assignee)
+  fromTeamId?: TeamId | null;
+  toTeamId?: TeamId | null;
+  title: string;
+  description: string | null;
+  priority: TaskPriority;
+  dueAt: ISODateTime | null;
+  sourceTaskId?: TaskId | null; // 依頼者側の追跡タスク (無ければ承認で自動生成)
+  state: TaskRequestState;
+  declineReason?: string | null;
+  createdTaskId?: TaskId | null; // 承認で生まれた受け手タスク
+  createdAt: ISODateTime;
+  decidedAt: ISODateTime | null;
+  updatedAt: ISODateTime;
+}
+
+/** Body of POST /task-requests. The destination's team membership is resolved
+ *  server-side (self / same-team → immediate task; other team → pending request);
+ *  any client-side team hint is UX-only and never trusted. */
+export interface IssueTaskRequestBody {
+  toUserId: UserId;
+  title: string;
+  description?: string | null;
+  priority?: TaskPriority; // default "medium"
+  dueAt?: ISODateTime | null;
+  eventId?: EventId | null;
+  sourceTaskId?: TaskId | null; // omit ⇒ auto-generated on accept
+  targetTeamId?: TeamId | null; // when the receiver belongs to multiple teams
+}
+
+/** Discriminated result of POST /task-requests so the caller can tell whether the
+ *  request became a task immediately (self / same-team) or is awaiting approval. */
+export type IssueTaskRequestResponse =
+  | { kind: "task"; task: Task } // self / same-team → materialised now
+  | { kind: "request"; request: TaskRequest }; // other team → pending approval
+
+export interface AcceptTaskRequestBody extends Versioned {
+  targetTeamId?: TeamId | null; // receiver picks the owning team at accept-time
+}
+export interface DeclineTaskRequestBody extends Versioned {
+  reason?: string;
+}
+export type CancelTaskRequestBody = Versioned;
+
+export interface ListTaskRequestsQuery extends CursorQuery {
+  box: "incoming" | "outgoing"; // incoming = to_user=self / outgoing = from_user=self
+  state?: TaskRequestState[];
+  eventId?: EventId;
+}
+export type ListTaskRequestsResponse = Paginated<TaskRequest>;
+
+/** Result of POST /task-requests/:id/accept — the receiver's new task, the
+ *  requester's tracking task link, and the arrow-less cross-link joining them. */
+export interface AcceptTaskRequestResponse {
+  request: TaskRequest;
+  createdTask: Task; // 受け手チームに生まれたタスク (受け負った側)
+  crossLink: TaskCrossLink;
+}
+
+/** Role a task plays in a cross-team link. `requested` = the "お願いした" side
+ *  (requester), `accepted` = the "受け負った" side (receiver). The status label is
+ *  DERIVED from this role (never stored) so it is always in sync + i18n-swappable. */
+export type TaskCrossRole = "requested" | "accepted";
+
+/** Auto-generated cross-team status label, derived from role (never persisted).
+ *  Single source for the「タスクをお願いした / 受け負った」wording both views render. */
+export const TASK_CROSS_ROLE_STATUS_LABEL: Record<TaskCrossRole, string> = {
+  requested: "タスクをお願いした",
+  accepted: "タスクを受け負った",
+};
+
+/** An arrow-less cross-team link (task_cross_links). NOT a dependency — it never
+ *  enters task_dependencies, so gantt draws no line and CPM never sees it. */
+export interface TaskCrossLink {
+  id: string; // txl_ ULID
+  requestId: string;
+  requesterTaskId: TaskId; // お願いした側
+  requesteeTaskId: TaskId; // 受け負った側
+  eventId?: EventId | null;
+  createdAt: ISODateTime;
+}
+export interface ListTaskCrossLinksQuery {
+  eventId: EventId; // required (same shape as GET /tasks/dependencies)
+}
+export interface ListTaskCrossLinksResponse {
+  items: TaskCrossLink[];
+}
+
+// ── Wire contract (query params) ─────────────────────────────────────────────
+// SINGLE source of truth for the query-parameter *names* the send/receive read
+// endpoints put on the wire. The FE client (apps/fe4 endpoints.ts), the server
+// (task-service), and the OpenAPI spec (docs/openapi/task-service.yaml) all derive
+// from — and are reconciled against — this one map. Keyed by operationId to match
+// the spec. `path` is the gateway path AFTER the /api/v1 prefix strip. Endpoints
+// with no query carry `query: []` so the descriptor still documents method+path.
+// See docs/api-contracts/_wire-contract-enforcement.md — do not hand-map keys.
+export const TASK_REQUEST_WIRE = {
+  issueTaskRequest: { method: "POST", path: "/task-requests", query: [] },
+  listTaskRequests: {
+    method: "GET",
+    path: "/task-requests",
+    query: ["cursor", "limit", "box", "state", "eventId"],
+  },
+  getTaskRequest: { method: "GET", path: "/task-requests/{id}", query: [] },
+  acceptTaskRequest: { method: "POST", path: "/task-requests/{id}/accept", query: [] },
+  declineTaskRequest: { method: "POST", path: "/task-requests/{id}/decline", query: [] },
+  cancelTaskRequest: { method: "POST", path: "/task-requests/{id}/cancel", query: [] },
+  listTaskCrossLinks: { method: "GET", path: "/tasks/cross-links", query: ["eventId"] },
+} as const;
+
+// Compile-time tie: each endpoint's query keys must be real keys of its query type,
+// so the runtime descriptor and the hand-written query interfaces can never drift.
+type _TaskRequestWireKeysAreTyped =
+  (typeof TASK_REQUEST_WIRE.listTaskRequests.query)[number] extends keyof ListTaskRequestsQuery
+    ? (typeof TASK_REQUEST_WIRE.listTaskCrossLinks.query)[number] extends keyof ListTaskCrossLinksQuery
+      ? true
+      : never
+    : never;
+const _taskRequestWireKeyGuard: _TaskRequestWireKeysAreTyped = true;
+void _taskRequestWireKeyGuard;

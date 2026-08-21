@@ -23,6 +23,7 @@ export interface Env {
   // --- service bindings ---
   SVC_IDENTITY: Fetcher; // identity-roster (POST /authz/check, GET /users/:id)
   SVC_EVENT: Fetcher; // event-service (GET /events/:id)
+  SVC_MEMBER: Fetcher; // member-service (GET /members/people/by-identity/:id — user→teamIds for 送る・受け取る)
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain defers audit
 
   // --- vars ---

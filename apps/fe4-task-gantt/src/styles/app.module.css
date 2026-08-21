@@ -1375,6 +1375,60 @@
 }
 .colFromTo { min-width: 220px; }
 .cellTitle { font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); }
+.cellTitleRow { display: inline-flex; align-items: center; gap: var(--dub-space-2, 8px); flex-wrap: wrap; }
+/* 受け取る — request inbox (受け取った依頼 / 送った依頼). Cards with generous spacing. */
+.requestInbox { display: flex; flex-direction: column; gap: var(--dub-space-5, 20px); margin-bottom: var(--dub-space-5, 20px); }
+.requestGroup { display: flex; flex-direction: column; gap: var(--dub-space-3, 12px); }
+.requestSectionTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  font-weight: 700;
+  color: var(--dub-color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2, 8px);
+}
+.requestCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--dub-color-accent-500, var(--dub-color-brand-500, #2563eb));
+  color: #fff;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 700;
+}
+.requestList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--dub-space-3, 12px); }
+.requestCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4, 16px);
+  padding: var(--dub-space-4, 16px);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg, 12px);
+  background: var(--dub-color-surface-default, var(--dub-color-surface-raised));
+}
+.requestMain { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.requestTitle { margin: 0; font-weight: var(--dub-font-weight-medium, 600); color: var(--dub-color-text-primary); }
+.requestMeta { margin: 0; font-size: var(--dub-font-size-xs, 0.75rem); color: var(--dub-color-text-secondary); }
+.requestActions { display: flex; align-items: center; gap: var(--dub-space-2, 8px); flex-shrink: 0; }
+.requestSkeleton {
+  height: 64px;
+  border-radius: var(--dub-radius-lg, 12px);
+  background: linear-gradient(90deg, var(--dub-color-surface-sunken) 25%, var(--dub-color-surface-raised) 50%, var(--dub-color-surface-sunken) 75%);
+  background-size: 200% 100%;
+  animation: requestShimmer 1.2s ease-in-out infinite;
+}
+@keyframes requestShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (max-width: 640px) {
+  .requestCard { flex-direction: column; align-items: stretch; }
+  .requestActions { justify-content: flex-end; }
+}
+
 .myRow { cursor: pointer; transition: background 0.1s ease; }
 .myRow:hover { background: var(--dub-color-surface-sunken); }
 .myRow:focus-visible { outline: 2px solid var(--dub-color-border-focus); outline-offset: -2px; }
