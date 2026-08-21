@@ -92,7 +92,11 @@ jobs:
         shell: pwsh
         run: |
           $bundle = "$PWD\build\windows\x64\runner\Release"
-          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" `
+          # ${env:ProgramFiles(x86)} — the braces are REQUIRED: PowerShell parses
+          # a bare $env:ProgramFiles(x86) as the var $env:ProgramFiles followed by
+          # literal "(x86)", yielding "C:\Program Files(x86)" (no space) and a
+          # "term not recognized" error. ISCC.exe ships on the windows-2022 image.
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
             /DMyAppVersion=${{ steps.ver.outputs.version }} `
             /DBundleDir=$bundle `
             /Ooutput_installer `
