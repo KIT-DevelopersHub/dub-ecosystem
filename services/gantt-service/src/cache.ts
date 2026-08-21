@@ -1,16 +1,19 @@
-// DTO short-lived cache (KV). Key `gantt:dto:<eventId>`, TTL 60s. Purge is
-// idempotent (§4: naturally idempotent DELETE, no IdempotencyStore needed).
+// DTO short-lived cache (KV). Key `gantt:dto:<eventId>`, TTL 60s.
 //
-// BEST-EFFORT by contract: this is a 60s optimization, never a source of truth, so a
-// KV failure must NEVER fail the request that touched it. Before, `put`/`purge` were
-// unguarded `await`s — a KV write error (free-tier daily write/delete quota exhausted
-// under heavy testing, or a transient KV hiccup) threw, and @dub/errors normalized the
-// raw throw to INTERNAL/500. The concrete bug: a timeline bar move/resize's task write
-// commits (task-service persists start_at/due_at + emits task.updated), but then the
-// PATCH's inline `purge` — or the no-cache GET /gantt rebuild's `put` fired by the
-// FE's post-write refetch — 500'd, so the FE showed "サーバーエラー…時間をおいて再試行"
-// and rolled the bar back: the user saw "error + not saved" for a save that DID persist.
-// Every op now swallows KV errors (logs a structured warning) and degrades to "no cache".
+// BEST-EFFORT by contract (#359/#376): this is a 60s optimization, never a source of
+// truth, so a KV failure must NEVER fail the request that touched it. `get`/`put` swallow
+// KV errors (log a structured warning) and degrade to "no cache". Before, an unguarded
+// put/purge could throw when the free-tier daily KV write quota was exhausted under heavy
+// testing, and @dub/errors normalized that raw throw to INTERNAL/500 — so a timeline bar
+// move/resize showed "サーバーエラー…時間をおいて再試行" and rolled the bar back for a
+// save that DID persist.
+//
+// Purge is TTL-based, NOT an eager KV delete (#399). On the Workers FREE plan a KV
+// `delete` counts against the same 1,000/day write budget as a `put`; the eager
+// delete-on-every-event purge was the dominant consumer of it. A mutation only reaches
+// gantt via the freeq-drain (~5 min latency), so the 60s TTL already bounds read-staleness
+// tighter than event delivery — TTL expiry gives equivalent freshness with zero
+// write-class ops. `purge` therefore no-ops; keys self-expire in ≤60s.
 import type { KVNamespace } from "@cloudflare/workers-types";
 import type { gantt, common } from "@dub/types";
 import type { DtoCache } from "./ports";
@@ -61,14 +64,11 @@ export function createKvCache(kv: KVNamespace): DtoCache {
         warnKvFailure("put", eventId, err);
       }
     },
-    async purge(eventId) {
-      // Purge is a stale-entry eviction; the 60s TTL and the event-driven purge cover us
-      // if this fails, so it must never fail the write that triggered it.
-      try {
-        await kv.delete(keyOf(eventId));
-      } catch (err) {
-        warnKvFailure("purge", eventId, err);
-      }
+    // Intentionally no KV delete — freshness is handled by TTL_SECONDS expiry (#399). See
+    // the module header for why the eager delete was removed (free-tier write-budget storm).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async purge(_eventId) {
+      /* no-op: TTL expiry supersedes eager invalidation on the free plan */
     },
   };
 }

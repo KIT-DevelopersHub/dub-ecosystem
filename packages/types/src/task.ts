@@ -149,7 +149,7 @@ export interface ListTaskAttachmentsResponse {
   items: TaskAttachment[];
 }
 
-// ── dependency rejection reasons (cross-scope deps / ADR-0006) ────────────────
+// ── dependency rejection reasons (cross-scope deps / ADR-0007) ────────────────
 /**
  * Reason codes a `PUT /tasks/:id/dependencies` rejection can carry in the
  * VALIDATION_FAILED FieldError[]. `cross_team_not_allowed` = a dependsOn target whose

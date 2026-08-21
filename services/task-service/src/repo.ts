@@ -165,8 +165,10 @@ export interface TaskRepo {
    * other unlinked tasks (and vice-versa).
    */
   listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]>;
-  /** Ids of every live (non-archived) task in a bucket — the valid dependsOn target set. */
-  listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]>;
+  /** Every live (non-archived) task in a bucket with its `team_id` — the valid dependsOn
+   *  target set plus the team each belongs to. The dependency门番 (ADR-0007) compares
+   *  `team_id` to reject cross-team edges; ids alone come from `.map(t => t.id)`. */
+  listLiveTasksByEvent(eventId: string | null): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>>;
   /** Version-checked full replace of a task's dependsOn edges. */
   replaceDependencies(
     taskId: string,
@@ -363,17 +365,19 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       return rows.map((r) => ({ taskId: r.task_id, dependsOnId: r.depends_on_id }));
     },
 
-    async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
+    async listLiveTasksByEvent(
+      eventId: string | null,
+    ): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>> {
       const rows =
         eventId === null
-          ? await db.all<{ id: string }>(
-              `SELECT id FROM task_tasks WHERE event_id IS NULL AND archived_at IS NULL`,
+          ? await db.all<{ id: string; team_id: string | null }>(
+              `SELECT id, team_id FROM task_tasks WHERE event_id IS NULL AND archived_at IS NULL`,
             )
-          : await db.all<{ id: string }>(
-              `SELECT id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
+          : await db.all<{ id: string; team_id: string | null }>(
+              `SELECT id, team_id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
               eventId,
             );
-      return rows.map((r) => r.id);
+      return rows.map((r) => ({ id: r.id, teamId: r.team_id }));
     },
 
     async replaceDependencies(

@@ -8,7 +8,10 @@ import { extractContext, type RequestContext } from "@dub/http";
 import { newId, nowIso } from "@dub/db";
 import { HEADERS } from "@dub/observability";
 import type { DubEventEnvelope } from "@dub/events";
-import type { task, common, auditLog } from "@dub/types";
+import type { common, auditLog } from "@dub/types";
+// value import: needs the runtime DEPENDENCY_REJECT_REASONS constant (also gives the
+// `task.*` types). Mirrors validate.ts using `task.TASK_STATUS_TRANSITIONS`.
+import { task } from "@dub/types";
 import type { Deps } from "./deps";
 import { taskErrors } from "./errors";
 import { resolvePrincipal, isServiceRole, actorIdOf, type Principal } from "./principal";
@@ -489,8 +492,31 @@ export function buildApp(deps: Deps): Hono {
     // graph is the bucket's edges with this task's swapped for the requested ones (409
     // on cycle).
     const bucket = current.eventId ?? null;
-    const liveIds = await deps.repo.listLiveTaskIdsByEvent(bucket);
+    const bucketTasks = await deps.repo.listLiveTasksByEvent(bucket);
+    const liveIds = bucketTasks.map((t) => t.id);
     const liveSet = new Set(liveIds);
+
+    // Team gate (ADR-0007): a dependency (arrow) may only join tasks of the SAME team.
+    // `team_id === null` counts as its own "no team" bucket, so two teamless tasks may
+    // still depend (back-compat); a one-sided null is a mismatch. Cross-team links go
+    // through the 送る・受け取る request/approval flow instead — never a dependency arrow.
+    // We only flag candidates that exist in this bucket; unknown ids fall through to the
+    // gantt-calc `unknownTaskIds` check below (so they surface as unknown_task_ref).
+    const teamOf = new Map(bucketTasks.map((t) => [t.id, t.teamId ?? null]));
+    const currentTeam = current.teamId ?? null;
+    const crossTeamIds = dependsOnIds.filter(
+      (dep) => liveSet.has(dep) && teamOf.get(dep) !== currentTeam,
+    );
+    if (crossTeamIds.length > 0) {
+      throw errors.validationFailed(
+        crossTeamIds.map((dep) => ({
+          field: "dependsOnIds",
+          reason: task.DEPENDENCY_REJECT_REASONS.crossTeamNotAllowed,
+          message: `cross-team dependency not allowed: ${dep}`,
+        })),
+      );
+    }
+
     const dependencies: task.TaskDependency[] = (await deps.repo.listDependenciesByEvent(bucket))
       .filter((e) => e.taskId !== id && liveSet.has(e.taskId) && liveSet.has(e.dependsOnId))
       .concat(dependsOnIds.map((dep) => ({ taskId: id, dependsOnId: dep })));

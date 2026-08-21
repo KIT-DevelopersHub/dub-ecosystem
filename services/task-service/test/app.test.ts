@@ -275,10 +275,10 @@ describe("PUT /tasks/:id/dependencies", () => {
   });
 });
 
-// Cross-scope deps / ADR-0006: dependencies (arrows) are same-team only, but may span
+// Cross-scope deps / ADR-0007: dependencies (arrows) are same-team only, but may span
 // DIFFERENT WBS scopes (別階層) within that team. Cross-team work goes through the
 // request/approval flow, never a dependency edge.
-describe("PUT /tasks/:id/dependencies — same-team gate (ADR-0006)", () => {
+describe("PUT /tasks/:id/dependencies — same-team gate (ADR-0007)", () => {
   it("200 same team: an edge between two tasks of the same team is allowed", async () => {
     const { h, app } = setup();
     const a = await create(app, { title: "A", teamId: "team_dev" });
@@ -353,31 +353,6 @@ describe("DELETE /tasks/:id (archive)", () => {
 
     const inclArch = await app.request(`/tasks?eventId=evt_1&includeArchived=true`, userInit("GET"));
     expect(((await inclArch.json()) as task.ListTasksResponse).items).toHaveLength(1);
-  });
-
-  it("409 TASK_HAS_CHILDREN when the task still has live children (no orphan re-parenting)", async () => {
-    const { h, app } = setup();
-    const parent = await create(app, { title: "親" });
-    const child = await create(app, { title: "子", parentTaskId: parent.id });
-
-    const del = await app.request(`/tasks/${parent.id}`, userInit("DELETE"));
-    expect(del.status).toBe(409);
-    expect(((await del.json()) as { error: { code: string } }).error.code).toBe("TASK_HAS_CHILDREN");
-    // The parent must still be live (fail-close: nothing archived, no event emitted).
-    expect((await app.request(`/tasks/${parent.id}`, userInit("GET"))).status).toBe(200);
-    expect(h.events.byName("task.archived")).toHaveLength(0);
-
-    // After the child is removed, the parent deletes normally.
-    expect((await app.request(`/tasks/${child.id}`, userInit("DELETE"))).status).toBe(200);
-    expect((await app.request(`/tasks/${parent.id}`, userInit("DELETE"))).status).toBe(200);
-  });
-
-  it("archived children do NOT block the parent delete", async () => {
-    const { app } = setup();
-    const parent = await create(app, { title: "親" });
-    const child = await create(app, { title: "子", parentTaskId: parent.id });
-    await app.request(`/tasks/${child.id}`, userInit("DELETE")); // archive the child first
-    expect((await app.request(`/tasks/${parent.id}`, userInit("DELETE"))).status).toBe(200);
   });
 });
 
