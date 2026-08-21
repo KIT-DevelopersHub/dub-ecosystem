@@ -1297,12 +1297,16 @@ export function GanttView({
                       </marker>
                     </defs>
                     {segs.map((s) => {
-                      // Folded-parent target → run to the bar's horizontal middle then drop
-                      // VERTICALLY onto its top/bottom edge (head meets the edge, no pierce).
-                      // Normal FS target → the classic elbow into the left edge.
+                      // Vertical-first routing (縦→横): drop DOWN/UP out of the predecessor
+                      // end first, then run horizontally into the successor — the elbow's
+                      // corner sits near the predecessor, not the successor.
+                      // Folded-parent target → drop out vertically, cross at mid-height, then
+                      // meet the bar's top/bottom edge with a final vertical drop (head touches
+                      // the edge, no pierce). Normal FS target → vertical then horizontal into
+                      // the left edge (head still enters horizontally, as before).
                       const d = s.dropOntoBar
-                        ? `M ${s.x1} ${s.y1} H ${s.x2} V ${s.dropEdgeY}`
-                        : `M ${s.x1} ${s.y1} H ${Math.max(s.x1 + 10, s.x2 - 10)} V ${s.y2} H ${s.x2}`;
+                        ? `M ${s.x1} ${s.y1} V ${(s.y1 + s.dropEdgeY) / 2} H ${s.x2} V ${s.dropEdgeY}`
+                        : `M ${s.x1} ${s.y1} V ${s.y2} H ${s.x2}`;
                       const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
                       return (
                         <path
