@@ -13,6 +13,7 @@ DevHub (Dub) エコシステムの運用手順書。**手順のみ** をまと�
 | [03-oncall.md](./03-oncall.md) | オンコール/障害対応の初動。ログ・health/ready・レート制限 |
 | [04-staging-label-gate.md](./04-staging-label-gate.md) | 3環境デプロイ。staging 全複製・「stagingへ」/「確認した」ラベル運用・二重ゲート・無料枠実数・カットオーバー |
 | [05-liveness-verification.md](./05-liveness-verification.md) | 「確認して」の前に配信バンドルへ機能マーカー実在を機械検証。demo 直列化(`deploy:demo`)・`verify:live`・`deploy-state/` 台帳・staging CI liveness ゲート |
+| [06-parallel-demo-staging-flow.md](./06-parallel-demo-staging-flow.md) | 並行開発フロー。使い捨て per-feature demo(`deploy:demo:feature`)→承認→`teardown:demo`→staging キュー(`staging:queue`)5件バッチ flush→統合ブランチ反映 |
 
 ## 前提知識（3 runbook 共通）
 

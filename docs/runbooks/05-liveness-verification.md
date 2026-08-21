@@ -88,4 +88,11 @@ liveness 証跡: verify-live PASS（マーカー: <string>） / deploy-state/<en
 - 単一スロットは早い者勝ちで奪い合う。デプロイ前に `deploy-state/<env>.json` を見て、
   レビュー中を上書きしないか確認する。
 
-関連: [04-staging-label-gate.md](./04-staging-label-gate.md) / [01-deploy.md](./01-deploy.md) / [../DEPLOY.md](../DEPLOY.md)
+## 5. 並行開発フロー（使い捨て per-feature demo → staging バッチ）
+
+複数エージェントが並行で開発する場合、共有 `fe2-demo` 単一スロットを奪い合う代わりに、**機能ごとに
+使い捨ての専用 demo Worker `dub-demo-<slug>`** を立てて単独レビューし、承認後は削除する。承認済みは
+staging キューに貯めて**5件 / 24h / 手動**で一括フラッシュする。手順は [06-parallel-demo-staging-flow.md](./06-parallel-demo-staging-flow.md)（`deploy:demo:feature` / `teardown:demo` / `staging:queue`）。
+本 runbook の verify-live / deploy-state 台帳がその土台。
+
+関連: [06-parallel-demo-staging-flow.md](./06-parallel-demo-staging-flow.md) / [04-staging-label-gate.md](./04-staging-label-gate.md) / [01-deploy.md](./01-deploy.md) / [../DEPLOY.md](../DEPLOY.md)

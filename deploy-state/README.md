@@ -6,9 +6,28 @@ actually looking at.
 
 | file | slot | written by |
 |---|---|---|
-| `demo.json`    | the `fe2-demo` Worker (backend-free mock SPA) | `scripts/deploy-demo.sh` |
+| `demo.json`    | the shared `fe2-demo` Worker (backend-free mock SPA) | `scripts/deploy-demo.sh` |
+| `demo-<slug>.json` | a **disposable per-feature** demo Worker `dub-demo-<slug>` (backend-free mock SPA) | `scripts/deploy-demo-feature.sh` (removed by `scripts/teardown-demo.sh`) |
+| `staging-queue.json` | the batch of **demo-approved features** waiting to be flushed to staging together | `scripts/staging-queue.sh` |
 | `staging.json` | the shared `-staging` Worker set               | `.github/workflows/staging.yml` (commented into the sticky PR comment; see note) |
 | `prod.json`    | production                                     | `deploy.yml` on merge to `main`  |
+
+## Parallel-development flow (per-feature demos + staging queue)
+
+For parallel work we avoid the single shared `fe2-demo` slot entirely: each feature gets its
+OWN throwaway Worker so reviews never clobber each other.
+
+1. `deploy-demo-feature.sh --slug <s> --markers ...` → deploys `dub-demo-<s>`, verifies live,
+   writes `demo-<s>.json`, prints a shareable URL. **1 demo = 1 feature.**
+2. review the URL → OK → `staging-queue.sh add <s> --branch <b> --markers ...` (records the
+   approval into `staging-queue.json`).
+3. `teardown-demo.sh <s>` deletes the throwaway Worker + its `demo-<s>.json` (frees the
+   free-plan Worker slot — no orphans).
+4. when a flush condition trips (≥5 queued / oldest ≥24h / manual flag), `staging-queue.sh flush`
+   prints the integration-branch merge+deploy plan; staging then equals all demo-approved
+   features (demo=staging parity). See [runbook 06](../docs/runbooks/06-parallel-demo-staging-flow.md).
+
+`demo-<slug>.json` adds `kind: "demo-feature"`, `slug`, and `worker` on top of the fields below.
 
 ## Why this exists
 
