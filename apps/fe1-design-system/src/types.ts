@@ -299,6 +299,17 @@ export interface DataTableProps<Row> extends TestableProps {
    * table exactly as before (all columns always visible, no toolbar).
    */
   columnHiding?: { storageKey: string; label?: string };
+  /**
+   * P02 可読性. Pin the header row (position: sticky) while the body scrolls
+   * inside a bounded (max-height) container, so column labels stay visible while
+   * scrolling long lists (e.g. 名簿). Omit to keep page-level scroll unchanged.
+   */
+  stickyHeader?: boolean;
+  /**
+   * P02 可読性. Alternating row background (zebra striping) for easier row
+   * tracking on wide tables. Pairs with the built-in hover row highlight.
+   */
+  zebra?: boolean;
 }
 
 // offset paging — only for totalCount APIs (凍結案 1-6-3). cursor lists use LoadMore.

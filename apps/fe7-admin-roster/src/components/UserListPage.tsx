@@ -278,6 +278,8 @@ export function UserListPage() {
               rows={items}
               rowKey={(u) => u.id}
               onRowClick={(u) => setSelectedId(u.id)}
+              stickyHeader
+              zebra
               testId="fe7-users-table"
             />
             <LoadMore
