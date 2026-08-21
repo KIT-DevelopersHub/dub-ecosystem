@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, Modal, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
+import { Button, Drawer, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
@@ -167,34 +167,11 @@ export function TaskDetailPanel({
   };
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title="タスクの詳細"
-      size="lg"
-      testId="fe4-detail-panel"
-      footer={
-        <div className={styles.modalFooter}>
-          {canDelete && !confirming && (
-            <Button
-              variant="danger"
-              // A task with children cannot be deleted (it would orphan them). Hand the block
-              // to the host as a bottom-right warning toast (#375) instead of confirming.
-              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
-              testId="fe4-detail-delete"
-            >
-              削除
-            </Button>
-          )}
-          <Button variant="ghost" onClick={onClose} testId="fe4-detail-close">
-            閉じる
-          </Button>
-          <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
-            保存
-          </Button>
-        </div>
-      }
-    >
+    // 詳細は右サイドバー(Drawer)。Drawer が自前でヘッダー(タイトル＋×閉じる)を描くので、
+    // 本文をスクロール領域に、保存/削除/閉じるは常時見える固定フッターに置く(判断75②)。
+    <Drawer open onClose={onClose} title="タスクの詳細" side="right" testId="fe4-detail-panel">
+      <div className={styles.detailDrawer}>
+        <div className={styles.detailDrawerScroll}>
       <div className={styles.detailPanelBody} aria-label="タスク詳細">
         <div className={styles.panelHeadInfo}>
           <TaskStatusBadge status={t.status} />
@@ -391,21 +368,46 @@ export function TaskDetailPanel({
           />
         </div>
 
-        {/* Leaf (no children) delete confirm — a ConfirmDialog modal (#375), unified with
-            運営メンバー削除 etc. A parent-with-children NEVER reaches here — its 削除 fires
-            onDeleteBlocked (bottom-right warning toast), never a confirm. */}
-        <ConfirmDialog
-          open={confirming}
-          title="タスクを削除しますか？"
-          message="このタスクを削除します。この操作は取り消せません。"
-          confirmLabel="削除する"
-          cancelLabel="やめる"
-          danger
-          onConfirm={onDelete}
-          onCancel={() => setConfirming(false)}
-          testId="fe4-confirm-delete"
-        />
       </div>
-    </Modal>
+        </div>
+
+        {/* 固定フッター: 本文スクロールと独立して常に見える(判断75②)。 */}
+        <div className={styles.detailDrawerFooter}>
+          {canDelete && !confirming && (
+            <Button
+              variant="danger"
+              // A task with children cannot be deleted (it would orphan them). Hand the block
+              // to the host as a bottom-right warning toast (#375) instead of confirming.
+              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
+              testId="fe4-detail-delete"
+            >
+              削除
+            </Button>
+          )}
+          <Button variant="ghost" onClick={onClose} testId="fe4-detail-close">
+            閉じる
+          </Button>
+          <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
+            保存
+          </Button>
+        </div>
+      </div>
+
+      {/* Leaf (no children) delete confirm — a ConfirmDialog modal (#375), unified with
+          運営メンバー削除 etc. A parent-with-children NEVER reaches here — its 削除 fires
+          onDeleteBlocked (bottom-right warning toast), never a confirm. Rendered outside the
+          Drawer's scroll region (it portals to <body> anyway). */}
+      <ConfirmDialog
+        open={confirming}
+        title="タスクを削除しますか？"
+        message="このタスクを削除します。この操作は取り消せません。"
+        confirmLabel="削除する"
+        cancelLabel="やめる"
+        danger
+        onConfirm={onDelete}
+        onCancel={() => setConfirming(false)}
+        testId="fe4-confirm-delete"
+      />
+    </Drawer>
   );
 }
