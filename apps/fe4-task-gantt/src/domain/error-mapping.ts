@@ -46,6 +46,8 @@ export function mapError(e: DisplayableError): ErrorUx {
       return { action: "rollback_transition", message: "その状態へは移動できません" };
     case "TASK_HAS_CHILDREN":
       return { action: "toast_generic", message: "子タスクがあるため削除できません。先に子タスクを削除または移動してください" };
+    case "TASK_PARENT_CHILD_TEAM_MISMATCH":
+      return { action: "toast_generic", message: "子タスクのチームは親タスクと同じにしてください" };
     case "GANTT_DEPENDENCY_CYCLE":
       return { action: "gantt_cycle_banner", message: "依存関係に循環があります" };
     case CommonErrorCodes.RATE_LIMITED:

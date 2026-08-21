@@ -175,3 +175,12 @@
 .drawer[data-side="left"] {
   left: 0;
 }
+/* A drawer body is a flex child of the full-height column. Its default min-height
+   is `auto` (= content height), so a tall panel (long memo / many attachments) makes
+   the body grow past the viewport and any height:100% scroll region inside it can
+   never bound → nothing scrolls. min-height:0 lets the body settle to the free space
+   so its children can own the scroll (fe4 TaskDetailPanel: scrollable body + fixed
+   footer, 判断75②). Scoped to .drawer so the modal .dialog (own overflow) is untouched. */
+.drawer .body {
+  min-height: 0;
+}

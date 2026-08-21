@@ -93,6 +93,7 @@ export function toMember(r: PersonRow, teamIds: string[]): member.Member {
     lastNameRomaji: r.lastNameRomaji,
     firstNameRomaji: r.firstNameRomaji,
     phone: r.phone,
+    desiredActivity: r.desiredActivity,
     note: r.note,
     sortOrder: r.sortOrder,
     version: r.version,

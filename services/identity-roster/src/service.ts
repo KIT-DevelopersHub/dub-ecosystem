@@ -33,6 +33,10 @@ const MAX_BATCH_CHECKS = 20;
 const MAX_IDS = 50;
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+const MAX_DISPLAY_NAME_LEN = 80;
+// Stop-gap cap for an inline data: URL avatar (≈512KB of base64). 本番課題(TODO): store
+// avatar images in R2 and persist only the object URL, dropping this inline path.
+const MAX_AVATAR_URL_LEN = 700_000;
 
 export class IdentityService {
   constructor(private readonly d: Deps) {}
@@ -251,6 +255,57 @@ export class IdentityService {
 
     await this.d.repo.updateUser(userId, patch, this.d.now());
     await this.d.audit.publish(this.record("identity.user.updated", "success", ctx, orgId, "user", userId, { fields: Object.keys(patch) }));
+    const updated = (await this.d.repo.getUser(userId))!;
+    const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    return this.toIdentityUser(updated, assignments);
+  }
+
+  /**
+   * Self profile edit (アカウント設定 → 表示名/アバター). The signed-in user updates their
+   * OWN display name and/or avatar. The gateway scopes this to the caller's session id
+   * (no admin gate, no target id from the client), and this method NEVER touches
+   * status/roles/source — so it can neither escalate nor lock the org out. Separate from
+   * the admin `updateUser` on purpose. Validation: displayName (when present) must be a
+   * non-empty ≤80 chars; avatarUrl accepts a URL or an inline `data:` URL string
+   * (最小実装), or null to clear it. 本番課題(TODO): move avatar images to an R2 object
+   * store and persist only the object URL — the length cap below is a stop-gap so an
+   * oversized inline data URL can't bloat the D1 TEXT column.
+   */
+  async updateOwnProfile(
+    userId: string,
+    orgId: string,
+    req: { displayName?: string; avatarUrl?: string | null },
+    ctx: RequestCtx,
+  ): Promise<identity.IdentityUser> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+
+    const patch: Partial<Pick<UserRow, "displayName" | "avatarUrl">> = {};
+    if (req.displayName !== undefined) {
+      if (typeof req.displayName !== "string") throw errors.validationFailed([{ field: "displayName", reason: "invalid" }]);
+      const dn = req.displayName.trim();
+      if (!dn) throw errors.validationFailed([{ field: "displayName", reason: "required" }]);
+      if (dn.length > MAX_DISPLAY_NAME_LEN) throw errors.validationFailed([{ field: "displayName", reason: "too_long" }]);
+      patch.displayName = dn;
+    }
+    if (req.avatarUrl !== undefined) {
+      if (req.avatarUrl === null) {
+        patch.avatarUrl = null;
+      } else if (typeof req.avatarUrl !== "string") {
+        throw errors.validationFailed([{ field: "avatarUrl", reason: "invalid" }]);
+      } else if (req.avatarUrl.length > MAX_AVATAR_URL_LEN) {
+        throw errors.validationFailed([{ field: "avatarUrl", reason: "too_long" }]);
+      } else {
+        patch.avatarUrl = req.avatarUrl;
+      }
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await this.d.repo.updateUser(userId, patch, this.d.now());
+      await this.d.audit.publish(
+        this.record("identity.user.profile_updated", "success", ctx, orgId, "user", userId, { fields: Object.keys(patch) }),
+      );
+    }
     const updated = (await this.d.repo.getUser(userId))!;
     const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
     return this.toIdentityUser(updated, assignments);

@@ -165,6 +165,10 @@ export interface TaskRepo {
    *  target set plus the team each belongs to. The dependency门番 (ADR-0007) compares
    *  `team_id` to reject cross-team edges; ids alone come from `.map(t => t.id)`. */
   listLiveTasksByEvent(eventId: string | null): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>>;
+  /** Distinct owning-team ids of the LIVE (non-archived) direct children of `parentId`
+   *  (`null` = a child with no team). Guards a parent's team change: a parent must not be
+   *  moved to a team that differs from any of its children (親子は同一チーム). */
+  liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>>;
   /** Version-checked full replace of a task's dependsOn edges. */
   replaceDependencies(
     taskId: string,
@@ -366,6 +370,14 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
               eventId,
             );
       return rows.map((r) => ({ id: r.id, teamId: r.team_id }));
+    },
+
+    async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+      const rows = await db.all<{ team_id: string | null }>(
+        `SELECT DISTINCT team_id FROM task_tasks WHERE parent_id = ? AND archived_at IS NULL`,
+        parentId,
+      );
+      return rows.map((r) => (r.team_id ?? null) as common.TeamId | null);
     },
 
     async replaceDependencies(

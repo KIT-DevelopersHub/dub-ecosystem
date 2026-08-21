@@ -2,8 +2,12 @@
   "api-gateway": {
     "missingInSpec": [
       "GET /api/v1/admin/users/{}/password",
+      "GET /api/v1/me/participation",
+      "GET /api/v1/me/profile",
       "POST /api/v1/admin/users/{}/password",
+      "POST /api/v1/me/participation",
       "POST /api/v1/me/password",
+      "POST /api/v1/me/profile",
       "POST /api/v1/public/participation"
     ],
     "missingInCode": [
@@ -13,6 +17,7 @@
   "auth-service": {
     "missingInSpec": [
       "GET /internal/admin/users/{}/password",
+      "POST /auth/demo-login",
       "POST /auth/password",
       "POST /internal/admin/users/{}/password"
     ],
@@ -32,6 +37,7 @@
   },
   "drive-proxy": {
     "missingInSpec": [
+      "GET /internal/health",
       "POST /drive/watch",
       "POST /drive/watch/{}/stop"
     ],
@@ -45,6 +51,7 @@
   },
   "github-sync": {
     "missingInSpec": [
+      "GET /internal/health",
       "POST /internal/events-async",
       "POST /internal/reconcile/kick",
       "POST /internal/webhooks-async"
@@ -57,7 +64,8 @@
       "POST /identity/users/sync-email-routing",
       "POST /identity/users/sync-email-routing/preview",
       "POST /identity/users/{}/offboard",
-      "POST /internal/users/lookup"
+      "POST /internal/users/lookup",
+      "POST /internal/users/{}/profile"
     ],
     "missingInCode": []
   },
@@ -98,7 +106,9 @@
       "GET /notifications/inbox/unread-count",
       "GET /notifications/manage",
       "GET /notifications/preferences",
+      "PATCH /inbox/{}/unread",
       "PATCH /notifications/inbox/{}/read",
+      "PATCH /notifications/inbox/{}/unread",
       "PATCH /notifications/preferences",
       "POST /manage/publish-batch",
       "POST /manage/unpublish-batch",

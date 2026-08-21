@@ -8,6 +8,16 @@ export { PublicParticipationPage } from "./PublicParticipationPage.tsx";
 export { ParticipationForm } from "./ParticipationForm.tsx";
 export { PUBLIC_PARTICIPATION_PATH, participationRoutes, participationNav } from "./module.tsx";
 export type { ParticipationSourceRoute, ParticipationNavEntry } from "./module.tsx";
+export {
+  PARTICIPATION_PROFILE_FIELDS,
+  emptySelfParticipation,
+} from "./profileFields.ts";
+export type {
+  SelfParticipation,
+  SelfParticipationKey,
+  ParticipationFieldDescriptor,
+  ParticipationFieldKind,
+} from "./profileFields.ts";
 export type {
   Participation,
   ParticipationMatchKind,

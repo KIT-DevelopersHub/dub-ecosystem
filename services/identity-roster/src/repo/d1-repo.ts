@@ -178,7 +178,7 @@ export class D1IdentityRepo implements IdentityRepo {
   }
   async updateUser(
     userId: string,
-    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source">>,
+    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source" | "avatarUrl">>,
     updatedAt: string,
   ): Promise<void> {
     const sets: string[] = [];
@@ -186,6 +186,10 @@ export class D1IdentityRepo implements IdentityRepo {
     if (patch.displayName !== undefined) {
       sets.push("display_name = ?");
       binds.push(patch.displayName);
+    }
+    if (patch.avatarUrl !== undefined) {
+      sets.push("avatar_url = ?");
+      binds.push(patch.avatarUrl);
     }
     if (patch.githubLogin !== undefined) {
       sets.push("github_login = ?");
