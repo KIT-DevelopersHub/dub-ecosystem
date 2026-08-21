@@ -411,6 +411,46 @@ describe("inbox detail (body + read state)", () => {
     expect(res.status).toBe(403);
   });
 
+  it("POST /messages/:id/unread clears read back to false (idempotently) and 404s an unknown id", async () => {
+    const { env, raw } = makeEnv();
+    seedInbound(raw, { readAt: "2026-08-10T02:00:00.000Z" }); // start READ
+
+    const unread = await app.fetch(new Request("https://svc/mail/messages/mailin_1/unread", { method: "POST", headers: h() }), env);
+    expect(unread.status).toBe(200);
+    expect(await unread.json()).toEqual({ read: false });
+
+    // The list + detail now report the message as unread (read_at cleared to NULL).
+    const list = await app.fetch(new Request("https://svc/mail/messages", { headers: h() }), env);
+    expect(((await list.json()) as { items: mail.MailMessageListItem[] }).items[0]!.read).toBe(false);
+    const detail = await app.fetch(new Request("https://svc/mail/messages/mailin_1", { headers: h() }), env);
+    expect(((await detail.json()) as mail.MailMessageDetail).read).toBe(false);
+
+    // second call is a no-op (still 200) — already unread
+    const again = await app.fetch(new Request("https://svc/mail/messages/mailin_1/unread", { method: "POST", headers: h() }), env);
+    expect(again.status).toBe(200);
+
+    const missing = await app.fetch(new Request("https://svc/mail/messages/nope/unread", { method: "POST", headers: h() }), env);
+    expect(missing.status).toBe(404);
+  });
+
+  it("read → unread round-trip flips read_at back and forth", async () => {
+    const { env, raw } = makeEnv();
+    seedInbound(raw); // starts unread
+    await app.fetch(new Request("https://svc/mail/messages/mailin_1/read", { method: "POST", headers: h() }), env);
+    const afterRead = await app.fetch(new Request("https://svc/mail/messages/mailin_1", { headers: h() }), env);
+    expect(((await afterRead.json()) as mail.MailMessageDetail).read).toBe(true);
+    await app.fetch(new Request("https://svc/mail/messages/mailin_1/unread", { method: "POST", headers: h() }), env);
+    const afterUnread = await app.fetch(new Request("https://svc/mail/messages/mailin_1", { headers: h() }), env);
+    expect(((await afterUnread.json()) as mail.MailMessageDetail).read).toBe(false);
+  });
+
+  it("POST /messages/:id/unread requires mail:read (403 when denied)", async () => {
+    const { env, raw } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(false) });
+    seedInbound(raw, { readAt: "2026-08-10T02:00:00.000Z" });
+    const res = await app.fetch(new Request("https://svc/mail/messages/mailin_1/unread", { method: "POST", headers: h() }), env);
+    expect(res.status).toBe(403);
+  });
+
   it("GET /threads/:id returns every message in the thread with bodies (oldest→newest)", async () => {
     const { env, raw } = makeEnv();
     seedInbound(raw, { id: "mailin_a", messageId: "<a@x>", threadId: "thr_9", bodyText: "first", receivedAt: "2026-08-10T00:00:00.000Z" });
@@ -585,6 +625,19 @@ describe("account isolation (per-user scope)", () => {
 
     const aDetail = (await (await app.fetch(new Request("https://svc/mail/messages/in_a2", { headers: asUser("usr_alice") }), env)).json()) as mail.MailMessageDetail;
     expect(aDetail.read).toBe(false); // B's attempt did not touch A's message
+  });
+
+  it("Mark-unread: B cannot flip A's message unread (404, and it stays read for A)", async () => {
+    const { env, raw } = makeEnv();
+    seedOwned(raw, { id: "in_a3", ownerUserId: "usr_alice" });
+    // A reads it first, so there is a read_at to (attempt to) clear.
+    await app.fetch(new Request("https://svc/mail/messages/in_a3/read", { method: "POST", headers: asUser("usr_alice") }), env);
+
+    const bUnmark = await app.fetch(new Request("https://svc/mail/messages/in_a3/unread", { method: "POST", headers: asUser("usr_bob") }), env);
+    expect(bUnmark.status).toBe(404);
+
+    const aDetail = (await (await app.fetch(new Request("https://svc/mail/messages/in_a3", { headers: asUser("usr_alice") }), env)).json()) as mail.MailMessageDetail;
+    expect(aDetail.read).toBe(true); // B's attempt did not clear A's read_at
   });
 
   it("legacy rows with no owner are invisible to everyone (fail-closed)", async () => {
