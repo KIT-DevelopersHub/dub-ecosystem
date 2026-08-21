@@ -27,3 +27,12 @@ export function dateInputFromIso(iso: common.ISODateTime | null): string | null 
   if (!iso) return null;
   return iso.slice(0, 10);
 }
+
+/** Today as a <input type="date"> value (yyyy-mm-dd) in the viewer's local time —
+ *  matches the DateField calendar's own "today" (local getFullYear/Month/Date), so a
+ *  field seeded to this highlights the 今日 cell. Used as the 開始日/終了日 initial value. */
+export function todayDateInput(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}

@@ -151,6 +151,7 @@ function LeftPaneRow({
   dragEnabled,
   grouped,
   selected,
+  lifting,
   dragHandleProps,
   number,
   onSelect,
@@ -165,6 +166,9 @@ function LeftPaneRow({
   grouped: boolean;
   /** true when this row is part of the marquee multi-selection. */
   selected: boolean;
+  /** true while a GROUP drag is in flight and this is a selected row OTHER than the
+   *  grabbed one — it dims in place so it reads as "picked up" into the floating stack. */
+  lifting?: boolean;
   /** from SortableList.renderItem — spread on the drag handle to arm pointer/keyboard. */
   dragHandleProps: SortableItemContext["dragHandleProps"];
   /** WBS number label (e.g. "AA-1-1"); absent ⇒ no badge. */
@@ -184,12 +188,13 @@ function LeftPaneRow({
   return (
     <button
       type="button"
-      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""} ${selected ? styles.tlRowSelected : ""}`}
+      className={`${styles.tlRow} ${depth > 0 ? styles.tlRowChild : ""} ${grouped ? styles.tlRowGrouped : ""} ${selected ? styles.tlRowSelected : ""} ${lifting ? styles.tlRowLifting : ""}`}
       style={style}
       aria-pressed={selected}
       title={r.title}
       onClick={() => onSelect?.(r.taskId)}
       data-testid={`fe4-gantt-row-${r.taskId}`}
+      {...(selected ? { "data-fe4-keep-selection": "true" } : {})}
     >
       {dragEnabled && (
         <span
@@ -775,6 +780,30 @@ export function GanttView({
     setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
   }, []);
 
+  // ---- 外側クリックで選択解除 (⑤b) ----
+  // Once a marquee selection exists, a pointer-down anywhere that is NOT a selected row/
+  // bar, the bulk-action bar, or an additive (Shift/⌘/Ctrl) gesture clears it — so a stray
+  // click on empty space or another task drops the selection instead of it lingering.
+  // Capture phase so it runs regardless of a target's own stopPropagation (bars do), and
+  // BEFORE dnd-kit arms a group drag off a selected row (which is data-marked to be kept).
+  // Skipped while the bulk-delete confirm is open (its buttons act on the selection).
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const onDown = (e: PointerEvent) => {
+      if (bulkDeleteOpen) return;
+      if (e.button !== 0) return;
+      if (e.shiftKey || e.metaKey || e.ctrlKey) return; // additive — keep building the set
+      const el = e.target as HTMLElement | null;
+      if (el && el.closest("[data-fe4-keep-selection]")) return; // selected row/bar or the action bar
+      // The timeline canvas owns its own clear/create priority (onCanvasBackgroundClick +
+      // the marquee session) — defer to it so a deselect-click there never spawns a task.
+      if (el && el.closest("[data-fe4-gantt-canvas]")) return;
+      clearSelection();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [selectedIds, bulkDeleteOpen, clearSelection]);
+
   // ---- marquee (範囲ドラッグ) pointer session on the timeline body ----
   // Starts on a pointer-down over the empty canvas (bars stopPropagation their own
   // pointer-down, so this only fires on background). While dragging we draw the
@@ -1044,34 +1073,61 @@ export function GanttView({
                   onReorder={onRowReorder}
                   computeNextOrder={computeGroupOrder}
                   aria-label="タスクの並び替え"
-                  renderItem={(r, ctx) => (
-                    <LeftPaneRow
-                      r={r}
-                      isOpen={openParents.has(r.taskId)}
-                      dragEnabled={reorderEnabled}
-                      grouped={hasGroupRail}
-                      selected={selectedIds.has(r.taskId)}
-                      dragHandleProps={ctx.dragHandleProps}
-                      number={numberById?.get(r.taskId)}
-                      onSelect={interactive ? onSelect : undefined}
-                      toggleParent={toggleParent}
-                      statusById={statusById}
-                      assigneeNameById={assigneeNameById}
-                    />
-                  )}
-                  renderOverlay={(r) => (
-                    <div className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }} data-testid="fe4-gantt-drag-overlay">
-                      <span className={styles.tlRowDrag} aria-hidden>⠿</span>
-                      {teamColorById?.get(r.taskId) && (
-                        <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(r.taskId) }} aria-hidden />
-                      )}
-                      <span className={`${styles.tlDot} ${statusById?.get(r.taskId) ? STATUS_BAR_CLASS[statusById.get(r.taskId)!] : ""}`} aria-hidden />
-                      {numberById?.get(r.taskId) && (
-                        <span className={styles.tlRowNum}>{numberById.get(r.taskId)}</span>
-                      )}
-                      <span className={styles.tlRowName}>{r.title}</span>
-                    </div>
-                  )}
+                  renderItem={(r, ctx) => {
+                    // Group drag in flight: the grabbed row rides the floating overlay (hidden
+                    // in place by SortableList); every OTHER selected row dims in place so the
+                    // whole marquee selection reads as "lifted" together (⑤a).
+                    const groupDragging =
+                      ctx.dragActiveId != null &&
+                      selectedIds.size > 1 &&
+                      selectedIds.has(ctx.dragActiveId as common.TaskId);
+                    const lifting = groupDragging && selectedIds.has(r.taskId) && r.taskId !== ctx.dragActiveId;
+                    return (
+                      <LeftPaneRow
+                        r={r}
+                        isOpen={openParents.has(r.taskId)}
+                        dragEnabled={reorderEnabled}
+                        grouped={hasGroupRail}
+                        selected={selectedIds.has(r.taskId)}
+                        lifting={lifting}
+                        dragHandleProps={ctx.dragHandleProps}
+                        number={numberById?.get(r.taskId)}
+                        onSelect={interactive ? onSelect : undefined}
+                        toggleParent={toggleParent}
+                        statusById={statusById}
+                        assigneeNameById={assigneeNameById}
+                      />
+                    );
+                  }}
+                  renderOverlay={(r) => {
+                    // A single mini-row clone (the visual used both alone and stacked).
+                    const cloneRow = (row: gantt.GanttRow, key?: string) => (
+                      <div key={key} className={styles.tlRowOverlay} style={{ width: leftW, height: ROW_HEIGHT }}>
+                        <span className={styles.tlRowDrag} aria-hidden>⠿</span>
+                        {teamColorById?.get(row.taskId) && (
+                          <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(row.taskId) }} aria-hidden />
+                        )}
+                        <span className={`${styles.tlDot} ${statusById?.get(row.taskId) ? STATUS_BAR_CLASS[statusById.get(row.taskId)!] : ""}`} aria-hidden />
+                        {numberById?.get(row.taskId) && <span className={styles.tlRowNum}>{numberById.get(row.taskId)}</span>}
+                        <span className={styles.tlRowName}>{row.title}</span>
+                      </div>
+                    );
+                    // Group drag (⑤a): float the WHOLE selection as a stacked deck under the
+                    // cursor — every selected row (in visible order) lifts, not just the grabbed
+                    // one. A count badge names how many are moving.
+                    if (selectedIds.size > 1 && selectedIds.has(r.taskId)) {
+                      const picked = rows.filter((row) => selectedIds.has(row.taskId));
+                      return (
+                        <div className={styles.tlRowOverlayStack} style={{ width: leftW }} data-testid="fe4-gantt-drag-overlay">
+                          <span className={styles.tlRowOverlayCount} data-testid="fe4-gantt-drag-overlay-count">{picked.length}</span>
+                          {picked.map((row) => cloneRow(row, row.taskId))}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div data-testid="fe4-gantt-drag-overlay">{cloneRow(r)}</div>
+                    );
+                  }}
                 />
                 {/* team accent rail: fixed-x straight segments (one per contiguous team run) */}
                 {teamRailRuns.length > 0 && (
@@ -1151,6 +1207,7 @@ export function GanttView({
                 onClick={onCanvasBackgroundClick}
                 onPointerDown={onBodyPointerDown}
                 data-testid="fe4-gantt-body"
+                data-fe4-gantt-canvas="true"
               >
                 {/* weekend shading (painted FIRST, behind the parent enclosure) */}
                 {weekends.map((b) => (
@@ -1241,6 +1298,7 @@ export function GanttView({
                       title={titleById.get(b.taskId) ?? ""}
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
+                      {...(selectedIds.has(b.taskId) ? { "data-fe4-keep-selection": "true" } : {})}
                     >
                       {teamColorById?.get(b.taskId) && (
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
@@ -1285,7 +1343,7 @@ export function GanttView({
 
       {/* selection action hint — surfaces the available bulk ops (keyboard/drag) */}
       {selectedIds.size > 0 && (
-        <div className={styles.tlSelectionBar} role="status" data-testid="fe4-gantt-selection-bar">
+        <div className={styles.tlSelectionBar} role="status" data-testid="fe4-gantt-selection-bar" data-fe4-keep-selection="true">
           <span className={styles.tlSelectionCount} data-testid="fe4-gantt-selection-count">
             {selectedIds.size} 件選択中
           </span>
