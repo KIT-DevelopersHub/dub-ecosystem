@@ -858,6 +858,7 @@ export function GanttView({
       clearSelection();
       return;
     }
+
     if (!editing || !onCreateOnDate) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
