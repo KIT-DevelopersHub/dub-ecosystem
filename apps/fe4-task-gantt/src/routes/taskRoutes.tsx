@@ -13,7 +13,7 @@ import { useApiClient } from "../api/client-context";
 import { listTeams, listEvents, toDomainTeams } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
-import type { EventOption } from "../components/MyTaskCreateModal";
+import type { EventOption } from "../components/TaskCreateModal";
 import styles from "../styles/app.module.css";
 
 export interface TaskRouteContextValue {

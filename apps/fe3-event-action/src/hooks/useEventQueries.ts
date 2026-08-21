@@ -29,6 +29,9 @@ export function useEventDetailsQuery(eventId: common.EventId | null) {
     queryKey: eventId ? eventKeys.eventDetails(eventId) : eventKeys.details(),
     queryFn: () => api.getEventDetails(eventId as common.EventId),
     enabled: eventId !== null,
+    // Settle fast on a hard failure so the panel degrades to its empty state
+    // instead of holding the skeleton across long default back-off (⑤).
+    retry: 1,
   });
 }
 

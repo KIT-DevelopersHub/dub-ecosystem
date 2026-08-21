@@ -2,8 +2,9 @@ import { useCallback, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { createTask, createTaskAttachment, issueTaskRequest } from "../api/endpoints";
-import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
+import { createTask, createTaskAttachment, issueTaskRequest, listTasks } from "../api/endpoints";
+import { TaskCreateModal, type TaskDraft, type EventOption } from "./TaskCreateModal";
+import type { ScopeTask } from "../domain/task-hierarchy";
 import { MyTaskRequests } from "./MyTaskRequests";
 import styles from "../styles/app.module.css";
 
@@ -33,6 +34,36 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((n) => n + 1), []);
 
+  // 親/先行の候補は「選択中の対象イベント」のタスク一覧から作る。対象イベントを選ぶと
+  // その場でロードして、共通の作成モーダルにガントと同じ 親/先行 UI を出す（③ 共通化）。
+  const [scopeTasks, setScopeTasks] = useState<readonly ScopeTask[]>([]);
+  const loadScopeForEvent = useCallback(
+    async (eventId: common.EventId | null) => {
+      if (!eventId) {
+        setScopeTasks([]);
+        return;
+      }
+      try {
+        const res = await listTasks(client, { eventId });
+        setScopeTasks(
+          res.items.map((t) => ({
+            id: t.id,
+            title: t.title,
+            parentTaskId: t.parentTaskId ?? null,
+            teamId: t.teamId ?? null,
+          })),
+        );
+      } catch {
+        setScopeTasks([]); // 候補が取れなければ 親/先行 欄は出さない（degrade gracefully）。
+      }
+    },
+    [client],
+  );
+  const parentOptions = useMemo(
+    () => scopeTasks.map((t) => ({ id: t.id, title: t.title })),
+    [scopeTasks],
+  );
+
   // Fallbacks so the hub works in the shell too, where the caller may not hand a
   // full roster / event list: people/events fall back to empty (the modal then
   // shows just「紐付けない」/未割当, and the チャット resolves names on demand).
@@ -45,7 +76,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
 
   // Best-effort attachment persistence after a task exists (needs its real id). A failed
   // attachment must never undo an already-created task.
-  const attachBestEffort = async (taskId: common.TaskId, attachments: MyTaskDraft["attachments"]) => {
+  const attachBestEffort = async (taskId: common.TaskId, attachments: TaskDraft["attachments"]) => {
     if (attachments.files.length + attachments.urls.length === 0) return;
     try {
       for (const f of attachments.files) {
@@ -62,7 +93,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   // 送る (依頼): when a 依頼先 is chosen, the submit goes through POST /task-requests. The
   // SERVER decides (never the client): 自分/自チーム → タスク即作成 (task), 他チーム →
   // 承認待ちの依頼 (request). Cross-team work therefore can be requested from マイタスク.
-  const onIssueRequest = async (draft: MyTaskDraft, toUserId: common.UserId) => {
+  const onIssueRequest = async (draft: TaskDraft, toUserId: common.UserId) => {
     try {
       const res = await issueTaskRequest(client, {
         toUserId,
@@ -89,11 +120,12 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     }
   };
 
-  const onCreate = async (draft: MyTaskDraft) => {
+  const onCreate = async (draft: TaskDraft) => {
     // A 依頼先 (assignee) → route through the request flow (server branches self/team/other).
     if (draft.assigneeId) return onIssueRequest(draft, draft.assigneeId);
 
     // No assignee → a personal/team task: direct create (no list to reconcile).
+    // 対象イベントを選び 親タスク を指定していれば WBS 親も引き継ぐ（③ 親/先行 共通化）。
     try {
       const created = await createTask(client, {
         ...(draft.eventId ? { eventId: draft.eventId } : {}),
@@ -101,7 +133,9 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.description !== null ? { description: draft.description } : {}),
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+        ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
       });
       await attachBestEffort(created.id, draft.attachments);
       toast.show({ kind: "success", title: "タスクを作成しました" });
@@ -122,16 +156,28 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
 
       <MyTaskRequests key={reloadKey} seedUsers={effectivePeople} onChanged={reload} />
 
-      <MyTaskCreateModal
+      <TaskCreateModal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        events={effectiveEvents}
-        people={effectivePeople}
+        onClose={() => {
+          setCreateOpen(false);
+          setScopeTasks([]);
+        }}
+        users={effectivePeople}
         teams={teams}
+        parentOptions={parentOptions}
+        scopeTasks={scopeTasks}
         onCreate={onCreate}
         requesterName={currentUserName}
         title="タスクを依頼"
         submitLabel="依頼する"
+        testIdPrefix="fe4-mytask-create"
+        showStatus={false}
+        showStart={false}
+        showEvent
+        showDescription
+        showAttachments
+        events={effectiveEvents}
+        onEventChange={loadScopeForEvent}
       />
     </section>
   );

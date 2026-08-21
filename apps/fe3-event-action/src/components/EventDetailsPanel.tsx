@@ -12,13 +12,14 @@ import { useEventDetailsQuery } from "../hooks/useEventQueries";
 import { useSaveEventDetails } from "../hooks/useEventMutations";
 import {
   EMPTY_EVENT_DETAILS_DATA,
+  emptyEventDetails,
   type EventDetailsData,
   type EventDetailLink,
   type EventDetailContact,
   type EventScheduleItem,
   type EventSpeaker,
-  type EventSponsor,
   type EventChecklistItem,
+  type EventSponsor,
 } from "../api/detailsContracts";
 import styles from "./components.module.css";
 
@@ -67,12 +68,17 @@ export function EventDetailsPanel({
   eventId: common.EventId;
   canWrite: boolean;
 }) {
-  const { data, isLoading } = useEventDetailsQuery(eventId);
+  const { data, isPending, isError } = useEventDetailsQuery(eventId);
   const save = useSaveEventDetails(eventId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EventDetailsData>(EMPTY_EVENT_DETAILS_DATA);
 
-  if (isLoading || !data) {
+  // Skeleton ONLY on the first, still-pending fetch. Never gate on `!data`: if the
+  // details request fails (e.g. store not yet provisioned), react-query settles to
+  // isError with data=undefined — the old `!data` guard then held the skeleton
+  // forever (⑤ 無限「読み込み中」). Fall back to an empty (never-saved) document so
+  // the sections render their「未記入」state instead of hanging.
+  if (isPending) {
     return (
       <div className={styles.detailGrid} data-testid="fe3-details-skeleton">
         {[0, 1, 2, 3].map((i) => (
@@ -84,7 +90,8 @@ export function EventDetailsPanel({
     );
   }
 
-  const d = data.data;
+  const details = data ?? emptyEventDetails(eventId);
+  const d = details.data;
   const doneCount = d.checklist.filter((c) => c.done).length;
 
   const startEdit = () => {
@@ -102,7 +109,7 @@ export function EventDetailsPanel({
   };
 
   const commit = () => {
-    save.mutate({ data: draft, version: data.version }, { onSuccess: () => setEditing(false) });
+    save.mutate({ data: draft, version: details.version }, { onSuccess: () => setEditing(false) });
   };
 
   // ---- read (view) mode ----
@@ -112,9 +119,13 @@ export function EventDetailsPanel({
         <div className={styles.pageHeader}>
           <h2 className={styles.pageTitle}>イベント詳細</h2>
           <div className={styles.heroMeta}>
-            {data.updatedAt ? (
+            {isError ? (
+              <span className={styles.savedHint} data-testid="fe3-details-load-error">
+                詳細を読み込めませんでした（未保存として表示）
+              </span>
+            ) : details.updatedAt ? (
               <span className={styles.savedHint} data-testid="fe3-details-updated">
-                最終更新 {new Date(data.updatedAt).toLocaleString("ja-JP")}
+                最終更新 {new Date(details.updatedAt).toLocaleString("ja-JP")}
               </span>
             ) : (
               <Badge>未記入</Badge>
