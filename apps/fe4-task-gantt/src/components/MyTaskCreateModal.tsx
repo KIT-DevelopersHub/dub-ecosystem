@@ -75,6 +75,10 @@ export interface MyTaskCreateModalProps {
    *  the modal opens it seeds チーム to this (when it is one of `teams`); the requester can
    *  still change it. Null / unknown ⇒ start 未割当. */
   defaultTeamId?: common.TeamId | null;
+  /** 期限の初期値 (YYYY-MM-DD) — seeded each time the modal opens. Used by the ガント
+   *  "＋子タスクを作成 / ＋先行タスクを作成 / タイムラインのセルから作成" entry points, which
+   *  compute a due so the new bar lands relative to its parent/successor. Null ⇒ 期限なし. */
+  initialDue?: string | null;
 }
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -89,7 +93,7 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 const NO_PRIORITY = ""; // sentinel for the "未設定" priority Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId, initialDue }: MyTaskCreateModalProps) {
   // The header-selected event is the initial 対象イベント, but only when it is a real
   // option in `events` (guards against a stale/foreign id) — otherwise start unlinked.
   const seedEventId = (): common.EventId | "" =>
@@ -104,7 +108,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority | "">(NO_PRIORITY);
   const [teamId, setTeamId] = useState<common.TeamId | null>(seedTeamId);
-  const [due, setDue] = useState<string | null>(null);
+  const [due, setDue] = useState<string | null>(initialDue ?? null);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
   const [urls, setUrls] = useState<DraftUrlAttachment[]>([]);
@@ -120,9 +124,10 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     if (open) {
       setEventId(seedEventId());
       setTeamId(seedTeamId());
+      setDue(initialDue ?? null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultEventId, defaultTeamId, teams]);
+  }, [open, defaultEventId, defaultTeamId, teams, initialDue]);
 
   const reset = () => {
     setEventId(seedEventId());
@@ -130,7 +135,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setAssigneeId(null);
     setPriority(NO_PRIORITY);
     setTeamId(seedTeamId());
-    setDue(null);
+    setDue(initialDue ?? null);
     setDescription("");
     setFiles([]);
     setUrls([]);
@@ -193,6 +198,9 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
       });
       reset();
       onClose();
+    } catch {
+      // Create failed — keep the modal open (with its input) so the requester can retry.
+      // The reason is surfaced by the caller (toast / ErrorDialog); nothing to do here.
     } finally {
       setSaving(false);
     }

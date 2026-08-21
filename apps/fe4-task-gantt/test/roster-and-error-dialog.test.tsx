@@ -33,8 +33,8 @@ describe("assignee roster in the create modal (bug 1b)", () => {
     render(<App client={makeClient()} eventId={EVENT} permissions={PERMS} />);
     await screen.findByTestId("fe4-gantt-row-t2");
     fireEvent.click(screen.getByTestId("fe4-create-open"));
-    const modal = await screen.findByTestId("fe4-create-modal");
-    const assignee = within(modal).getByTestId("fe4-create-assignee");
+    const modal = await screen.findByTestId("fe4-mytask-create-modal");
+    const assignee = within(modal).getByTestId("fe4-mytask-create-assignee");
     await waitFor(() => expect(within(assignee).getByRole("option", { name: "久米" })).toBeInTheDocument());
     expect(within(assignee).getByRole("option", { name: "荒木" })).toBeInTheDocument();
     // and still keeps the 未割当 option

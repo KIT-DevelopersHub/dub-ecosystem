@@ -58,10 +58,10 @@ describe("TaskWorkspacePage — gantt-only workspace", () => {
     renderApp();
     await screen.findByTestId("fe4-gantt-row-t1");
     fireEvent.click(screen.getByTestId("fe4-create-open"));
-    const modal = await screen.findByTestId("fe4-create-modal");
-    fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "新しい打合せ" } });
-    fireEvent.change(within(modal).getByTestId("fe4-create-due"), { target: { value: "2026-08-25" } });
-    fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
+    const modal = await screen.findByTestId("fe4-mytask-create-modal");
+    fireEvent.change(within(modal).getByTestId("fe4-mytask-create-title"), { target: { value: "新しい打合せ" } });
+    fireEvent.change(within(modal).getByTestId("fe4-mytask-create-due"), { target: { value: "2026-08-25" } });
+    fireEvent.click(within(modal).getByTestId("fe4-mytask-create-submit"));
     expect((await screen.findAllByText("新しい打合せ")).length).toBeGreaterThan(0);
   });
 

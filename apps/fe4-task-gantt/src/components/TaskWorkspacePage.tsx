@@ -5,7 +5,7 @@ import { Button, ErrorDialog, useToast } from "@dub/ui";
 import type { ErrorDialogDetail } from "@dub/ui";
 import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
-import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
+import { createTaskAttachment, getMembersOverview, getTask, listEvents, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
@@ -31,13 +31,17 @@ import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
 import { TaskDetailPanel, type RelationEdit } from "./TaskDetailPanel";
-import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
+import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
 import styles from "../styles/app.module.css";
 
 export interface TaskWorkspacePageProps {
   eventId: common.EventId;
   /** effectivePermissions from GET /api/v1/me (null = still loading -> deny). */
   permissions: readonly identity.PermissionKey[] | null;
+  /** current user id (FE2 /me). Lets the shared 「タスクを発行」 modal seed チーム to the
+   *  requester's own team + label the 依頼主 hint. Absent (standalone/dev) ⇒ those defaults
+   *  degrade to 未割当 / no hint, exactly like マイタスク without a resolved user. */
+  currentUserId?: common.UserId | null;
 }
 
 // Solid fill colours for the sort-group brackets (@dub/tokens hex). Priorities map to
@@ -72,7 +76,7 @@ const FIELD_LABEL: Record<string, string> = {
  * edit/delete) wired through the optimistic store. The former list/board view
  * switch was removed — the gantt is the one canvas.
  */
-export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePageProps) {
+export function TaskWorkspacePage({ eventId, permissions, currentUserId }: TaskWorkspacePageProps) {
   const client = useApiClient();
   const toast = useToast();
   const feedback = useWriteFeedback();
@@ -119,6 +123,44 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // "未割当" (bug 1b). Best-effort: an organizer lacking identity:read falls back
   // to the resolved-from-tasks list.
   const roster = useRoster().data ?? [];
+
+  // Shared 「タスクを発行」 modal data (③=マイタスクの発行ダイアログと同一UIに統一). The gantt's
+  // 新規タスク作成 now uses the SAME MyTaskCreateModal, so it needs the same inputs: the 対象
+  // イベント options (defaulting to THIS event) and the requester's own team (チーム初期値=自
+  // チーム). Both best-effort — each degrades gracefully to the modal's own fallbacks.
+  const [issueEvents, setIssueEvents] = useState<readonly EventOption[]>([]);
+  const [issueDefaultTeamId, setIssueDefaultTeamId] = useState<common.TeamId | null>(null);
+  useEffect(() => {
+    let live = true;
+    void listEvents(client)
+      .then((res) => {
+        if (live) setIssueEvents(res.items.map((e) => ({ id: e.id, name: e.title })));
+      })
+      .catch(() => {
+        /* events are optional; the current event is injected below as a fallback */
+      });
+    if (currentUserId) {
+      void getMembersOverview(client)
+        .then((ov) => {
+          if (!live) return;
+          const me = ov.members.find((m) => m.identityUserId === currentUserId);
+          const teamId = me?.teamIds.find((id) => ov.teams.some((t) => t.id === id));
+          if (teamId) setIssueDefaultTeamId(teamId as common.TeamId);
+        })
+        .catch(() => {
+          /* overview is optional; the modal falls back to 未割当 */
+        });
+    }
+    return () => {
+      live = false;
+    };
+  }, [client, currentUserId]);
+  // Guarantee THIS event is a selectable 対象イベント (so it can be the default) even before
+  // /events resolves — fall back to the id as the label.
+  const issueEventOptions = useMemo<readonly EventOption[]>(
+    () => (issueEvents.some((e) => e.id === eventId) ? issueEvents : [{ id: eventId, name: eventId }, ...issueEvents]),
+    [issueEvents, eventId],
+  );
 
   // Undo/redo (判断57). A reusable command stack (@dub/app-ui) — every state-
   // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
@@ -190,6 +232,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     for (const u of userList) if (!byId.has(u.id)) byId.set(u.id, u);
     return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "ja"));
   }, [roster, userList]);
+  // 依頼主 label for the shared 発行 modal — the current user's display name (resolved from
+  // the roster/cache). Undefined ⇒ the modal simply omits the hint (as in standalone/dev).
+  const requesterName = useMemo(
+    () => (currentUserId ? assignableUsers.find((u) => u.id === currentUserId)?.displayName : undefined),
+    [assignableUsers, currentUserId],
+  );
   const statusById = useMemo(() => new Map(tasks.map((t) => [t.id, t.status] as const)), [tasks]);
   // team accent colour per task (team-grouped rows), and a legend of the teams
   // actually present on the board — drives the row stripe / bar cap / legend chips.
@@ -663,8 +711,15 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     openCreate({ due: predDue, parent, predecessorFor: taskId });
   };
 
-  const onCreate = async (draft: TaskDraft) => {
+  // Create from the SHARED 「タスクを発行」 modal (③=マイタスクと同一UI). The visible form is the
+  // 発行 field set (title/対象イベント/依頼先/優先度/期限/チーム/添付/詳細); the ガント-only presets
+  // (親タスク・先行タスク・タイムラインのセル由来の期限) ride along invisibly from page state, set by
+  // the 子タスク/先行タスク作成 entry points, so those flows keep working with the unified dialog.
+  const onCreate = async (draft: MyTaskDraft) => {
     const linkPredecessorFor = createPredecessorFor;
+    const parentTaskId = createPresetParent;
+    const presetDeps = createPresetDeps;
+    const provisionalPriority: task.TaskPriority = draft.priority ?? "medium";
     // Optimistic create: show a provisional task + its bar on the timeline the same
     // tick, then reconcile with the server row (rolled back + surfaced on failure).
     const tempId = provisionalTaskId();
@@ -673,58 +728,77 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       tempId,
       {
         title: draft.title,
-        status: draft.status,
-        priority: draft.priority,
+        status: "todo",
+        priority: provisionalPriority,
         assigneeId: draft.assigneeId,
         teamId: draft.teamId,
-        startAt: draft.startAt,
+        startAt: null,
         dueAt: draft.dueAt,
-        parentTaskId: draft.parentTaskId,
+        parentTaskId,
       },
       eventId,
       now,
     );
-    gantt.upsertRowOptimistic(provisionalGanttRow(provisional, draft.parentTaskId));
+    gantt.upsertRowOptimistic(provisionalGanttRow(provisional, parentTaskId));
 
     const created = await store.create(
       client,
       {
         eventId,
         title: draft.title,
+        ...(draft.description !== null ? { description: draft.description } : {}),
+        // Omit 優先度 when 未設定 so the server applies its "medium" default (both マイタスク
+        // and ガント read the resulting task, keeping the two views consistent).
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
-        ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
-        ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
+        ...(parentTaskId ? { parentTaskId } : {}),
       },
       provisional,
     );
     if (!created) {
       gantt.removeRowOptimistic(tempId); // create failed (reason already surfaced) — drop the provisional bar
-      return false;
+      // Throw so the shared modal stays OPEN (its submit closes only on a resolved create);
+      // the reason is already surfaced in the ErrorDialog.
+      throw new Error("create failed");
     }
     // Swap the provisional bar onto the real id so it stays visible (no flicker)
     // through the follow-up calls until the authoritative refetch replaces it.
     gantt.removeRowOptimistic(tempId);
-    gantt.upsertRowOptimistic(provisionalGanttRow({ ...created }, draft.parentTaskId));
+    gantt.upsertRowOptimistic(provisionalGanttRow({ ...created }, parentTaskId));
 
-    let version = created.version;
-    if (draft.status !== "todo") {
-      const patched = await store.patchOptimistic(
-        client,
-        created.id,
-        { status: draft.status },
-        version,
-        { version, status: draft.status },
-      );
-      if (patched) version = patched.version;
+    const version = created.version;
+    // Persist attachments after the task exists (they need its real id). Best-effort:
+    // a failed attachment must not undo an already-created task (mirrors マイタスク発行).
+    const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
+    if (attachCount > 0) {
+      try {
+        for (const f of draft.attachments.files) {
+          await createTaskAttachment(client, created.id, {
+            kind: "file",
+            name: f.name,
+            url: f.url,
+            mimeType: f.mimeType,
+            sizeBytes: f.sizeBytes,
+          });
+        }
+        for (const u of draft.attachments.urls) {
+          await createTaskAttachment(client, created.id, { kind: "url", name: u.name, url: u.url });
+        }
+      } catch {
+        toast.show({
+          kind: "error",
+          title: "一部の添付を保存できませんでした",
+          description: "タスクは作成済みです。詳細から再度添付できます。",
+        });
+      }
     }
-    if (draft.dependsOnIds.length > 0) {
+    if (presetDeps.length > 0) {
       try {
         // NOTE: the deps endpoint returns { taskId, dependsOnIds } (NOT a Task), so it
-        // carries no version — do not read one off it. `version` is unused afterwards.
-        await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
+        // carries no version — do not read one off it.
+        await replaceDependencies(client, created.id, { version, dependsOnIds: presetDeps });
       } catch (e) {
         // dependency cycle / out-of-scope — the task IS created; tell the user why
         // the dependency didn't take instead of dropping it on the floor.
@@ -757,7 +831,6 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     } catch {
       /* reconcile hiccup — the task exists; the next load/refetch will catch up */
     }
-    return true;
   };
 
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
@@ -1169,17 +1242,20 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         />
       )}
 
-      <TaskCreateModal
+      {/* ③ 新規タスク作成 = マイタスク「タスクを発行」と同一UI (共通コンポーネント MyTaskCreateModal)。
+          対象イベントはこのガントのイベントを既定に、チームは発行者の自チームを既定に。ガント固有の
+          親タスク/先行タスク/期限プリセットは page state から onCreate 内で適用される。 */}
+      <MyTaskCreateModal
         open={creating}
-        initialDue={createPresetDue}
-        initialParentId={createPresetParent}
-        initialDependsOn={createPresetDeps}
         onClose={closeCreate}
-        users={assignableUsers}
+        events={issueEventOptions}
+        people={assignableUsers}
         teams={teams}
-        parentOptions={allTaskOptions}
-        scopeTasks={scopeTasks}
         onCreate={onCreate}
+        {...(requesterName ? { requesterName } : {})}
+        defaultEventId={eventId}
+        defaultTeamId={issueDefaultTeamId}
+        initialDue={createPresetDue}
       />
 
       {selectedTask && (

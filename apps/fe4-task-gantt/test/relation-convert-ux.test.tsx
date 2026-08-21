@@ -23,8 +23,8 @@ describe("relation-type conversion in the detail pane", () => {
     const onSave = vi.fn();
     // self + P are top-level siblings, so P is a valid predecessor of self.
     const scope: ScopeTask[] = [
-      { id: "self", title: "対象タスク", parentTaskId: null },
-      { id: "P", title: "親候補P", parentTaskId: null },
+      { id: "self", title: "対象タスク", parentTaskId: null, teamId: null },
+      { id: "P", title: "親候補P", parentTaskId: null, teamId: null },
     ];
     render(
       <TaskDetailPanel
@@ -54,8 +54,8 @@ describe("relation-type conversion in the detail pane", () => {
   it("親子→依存: 「先行に変換」 detaches the parent and keeps it as a predecessor", () => {
     const onSave = vi.fn();
     const scope: ScopeTask[] = [
-      { id: "self", title: "対象タスク", parentTaskId: "P" },
-      { id: "P", title: "親P", parentTaskId: null },
+      { id: "self", title: "対象タスク", parentTaskId: "P", teamId: null },
+      { id: "P", title: "親P", parentTaskId: null, teamId: null },
     ];
     render(
       <TaskDetailPanel
@@ -86,7 +86,7 @@ describe("relation-type conversion in the detail pane", () => {
     const base = {
       task: mkTask("self"), users: [] as identity.UserSummary[], canWrite: true, canDelete: true,
       onSave: () => {}, onDelete: () => {}, onClose: () => {},
-      scopeTasks: [{ id: "self", title: "対象タスク", parentTaskId: null }] as ScopeTask[],
+      scopeTasks: [{ id: "self", title: "対象タスク", parentTaskId: null, teamId: null }] as ScopeTask[],
     };
     const { rerender } = render(<TaskDetailPanel {...base} parentTaskId={null} />);
     expect(screen.queryByTestId("fe4-detail-parent-to-dep")).toBeNull();
@@ -109,14 +109,14 @@ describe("create UI feedback (success toast + close-on-success)", () => {
     render(<App client={seed()} eventId={EVENT} permissions={PERMS} />);
     await screen.findByTestId("fe4-gantt-view");
     fireEvent.click(screen.getByTestId("fe4-create-open"));
-    const modal = await screen.findByTestId("fe4-create-modal");
-    fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "新規タスク" } });
-    fireEvent.change(within(modal).getByTestId("fe4-create-due"), { target: { value: "2026-09-01" } });
-    fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
+    const modal = await screen.findByTestId("fe4-mytask-create-modal");
+    fireEvent.change(within(modal).getByTestId("fe4-mytask-create-title"), { target: { value: "新規タスク" } });
+    fireEvent.change(within(modal).getByTestId("fe4-mytask-create-due"), { target: { value: "2026-09-01" } });
+    fireEvent.click(within(modal).getByTestId("fe4-mytask-create-submit"));
     // success toast appears…
     expect(await screen.findByTestId("toast-success")).toHaveTextContent("タスクを作成しました");
     // …and the modal closes
-    await waitFor(() => expect(screen.queryByTestId("fe4-create-modal")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("fe4-mytask-create-modal")).toBeNull());
   });
 
   it("keeps the modal open (no success toast) when the create fails", async () => {
@@ -124,13 +124,13 @@ describe("create UI feedback (success toast + close-on-success)", () => {
     render(<App client={client} eventId={EVENT} permissions={PERMS} />);
     await screen.findByTestId("fe4-gantt-view");
     fireEvent.click(screen.getByTestId("fe4-create-open"));
-    const modal = await screen.findByTestId("fe4-create-modal");
-    fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "失敗する作成" } });
+    const modal = await screen.findByTestId("fe4-mytask-create-modal");
+    fireEvent.change(within(modal).getByTestId("fe4-mytask-create-title"), { target: { value: "失敗する作成" } });
     client.failNext = new ApiError(400, { error: { code: "TASK_VALIDATION_FAILED", message: "入力内容を確認してください", retryable: false } });
-    fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
+    fireEvent.click(within(modal).getByTestId("fe4-mytask-create-submit"));
     // error dialog surfaces, modal stays open, no success toast
     await screen.findByTestId("fe4-error-dialog");
-    expect(screen.getByTestId("fe4-create-modal")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-mytask-create-modal")).toBeInTheDocument();
     expect(screen.queryByTestId("toast-success")).toBeNull();
   });
 });

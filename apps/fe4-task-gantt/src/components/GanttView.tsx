@@ -36,6 +36,7 @@ import {
   weekendBands,
   withGranularity,
 } from "../domain/timeline-axis";
+import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import styles from "../styles/app.module.css";
 
 const HEADER_TOP = 28;
@@ -349,6 +350,25 @@ export function GanttView({
       }
     },
     [onReorder, onBulkReorderTo, selectedIds],
+  );
+
+  // Group-move animation (⑤): for a marquee multi-selection drag, give the SortableList
+  // the FULL next order up front (the same block move the host commits) so it can render
+  // the drop in ONE step and FLIP every moved row into place TOGETHER — instead of only
+  // the grabbed row sliding while the rest jump. Single-row drags return null (default
+  // arrayMove). Uses the visible rows + current selection so the optimistic order matches
+  // what onBulkReorderTo persists.
+  const computeGroupOrder = useCallback(
+    (activeId: string, overId: string): string[] | null => {
+      if (!(onBulkReorderTo && selectedIds.size > 1 && selectedIds.has(activeId as common.TaskId))) return null;
+      return reorderSelectionWithinSiblings(
+        visibleRowsRef.current,
+        selectedIds,
+        activeId as common.TaskId,
+        overId as common.TaskId,
+      );
+    },
+    [onBulkReorderTo, selectedIds],
   );
 
   // Swap in the store's (authoritative + optimistic) title before any geometry runs,
@@ -1022,6 +1042,7 @@ export function GanttView({
                   getItemId={(r) => r.taskId}
                   disabled={!reorderEnabled}
                   onReorder={onRowReorder}
+                  computeNextOrder={computeGroupOrder}
                   aria-label="タスクの並び替え"
                   renderItem={(r, ctx) => (
                     <LeftPaneRow

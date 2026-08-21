@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type CSSProperties, type HTMLAttributes } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type CSSProperties, type HTMLAttributes } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -74,6 +74,14 @@ export interface SortableListProps<T> {
   /** Commit the reorder. Receives raw indices/ids so the caller owns the ordering rule
    *  (flat arrayMove, or a sibling-scoped move in a tree). */
   onReorder: (event: SortableReorderEvent) => void;
+  /** Optional: compute the FULL next id order for a drop — used for MULTI-row (group)
+   *  drops where the default single-item `arrayMove` is wrong. Return the complete
+   *  ordered id list to render optimistically, or `null` to fall back to the single-row
+   *  arrayMove. When this returns a custom order, the rows that move (other than the
+   *  grabbed one, which the floating clone settles) animate together via a FLIP
+   *  transition — so a whole marquee selection slides into place at once (honoured
+   *  against prefers-reduced-motion). */
+  computeNextOrder?: (activeId: string, overId: string, currentIds: string[]) => string[] | null;
   /** Turn dragging off entirely (handles inert, no reflow). */
   disabled?: boolean;
   /** Class on the list wrapper. */
@@ -116,13 +124,25 @@ function SortableRow<T>({
   item,
   disabled,
   renderItem,
+  registerNode,
 }: {
   id: string;
   item: T;
   disabled: boolean;
   renderItem: (item: T, ctx: SortableItemContext) => ReactNode;
+  /** Register/unregister this row's DOM node so the list can FLIP a group move. */
+  registerNode: (id: string, el: HTMLElement | null) => void;
 }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id, disabled });
+  // Compose dnd-kit's node ref with the list's node registry (used by the group-move
+  // FLIP to measure before/after positions). Both see the same element.
+  const composedRef = useCallback(
+    (el: HTMLElement | null) => {
+      setNodeRef(el);
+      registerNode(id, el);
+    },
+    [setNodeRef, registerNode, id],
+  );
   // Fade the row's opacity as well as its transform: on pickup the source row fades out
   // (rather than blinking to a gap), and on drop — when dnd-kit unmounts the floating
   // clone and reveals this real row — the row (and any hover/selected background it now
@@ -139,11 +159,16 @@ function SortableRow<T>({
   };
   const dragHandleProps = (disabled ? {} : { ...attributes, ...(listeners ?? {}) }) as SortableDragHandleProps;
   return (
-    <div ref={setNodeRef} style={style} className={styles.item} data-dragging={isDragging || undefined}>
+    <div ref={composedRef} style={style} className={styles.item} data-dragging={isDragging || undefined}>
       {renderItem(item, { isDragging, dragHandleProps })}
     </div>
   );
 }
+
+// Group-move FLIP tuning: how long the block of moved rows slides into place. Matched
+// to the single-row drop settle (SORTABLE_DROP_DURATION_MS) so a group move and a
+// single move read as the same motion. Easing is shared too.
+const FLIP_DURATION_MS = SORTABLE_DROP_DURATION_MS;
 
 export function SortableList<T>({
   items,
@@ -151,6 +176,7 @@ export function SortableList<T>({
   renderItem,
   renderOverlay,
   onReorder,
+  computeNextOrder,
   disabled = false,
   className,
   overlayClassName,
@@ -159,6 +185,19 @@ export function SortableList<T>({
 }: SortableListProps<T>) {
   const ariaLabel = rest["aria-label"];
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  // ---- group-move FLIP ----
+  // Registry of each rendered row's DOM node (keyed by id) so a multi-row drop can
+  // measure First (pre-commit) and Last (post-commit) positions and animate the delta.
+  const nodeMap = useRef<Map<string, HTMLElement>>(new Map());
+  const registerNode = useCallback((id: string, el: HTMLElement | null) => {
+    if (el) nodeMap.current.set(id, el);
+    else nodeMap.current.delete(id);
+  }, []);
+  // Set on a group drop (computeNextOrder returned a custom order): the pre-commit row
+  // tops + the grabbed id (excluded — the floating clone settles it). The layout effect
+  // after the reorder commit plays the FLIP and clears this.
+  const flipPlanRef = useRef<{ prevTops: Map<string, number>; grabbedId: string } | null>(null);
   // Optimistic drop: on release the RENDERED list is reordered synchronously (in the
   // same React commit as clearing activeId), so the dropped row is already in its new
   // slot when the overlay's drop animation measures — the clone then settles INTO that
@@ -232,6 +271,23 @@ export function SortableList<T>({
       const oldIndex = currentIds.indexOf(activeId);
       const newIndex = currentIds.indexOf(overId);
       if (oldIndex < 0 || newIndex < 0) return;
+      // Group (multi-row) drop: let the consumer supply the FULL next order — a single
+      // arrayMove would move only the grabbed row. When it does, arm a FLIP so every OTHER
+      // moved row slides to its new slot together (the grabbed row rides the floating
+      // clone). Fall back to the single-row arrayMove otherwise.
+      const custom = computeNextOrder ? computeNextOrder(activeId, overId, [...currentIds]) : null;
+      if (custom) {
+        if (!prefersReducedMotion()) {
+          const prevTops = new Map<string, number>();
+          for (const [id, el] of nodeMap.current) prevTops.set(id, el.getBoundingClientRect().top);
+          flipPlanRef.current = { prevTops, grabbedId: activeId };
+        }
+        setOverrideIds(custom);
+        clearOverrideTimer();
+        overrideTimer.current = setTimeout(() => setOverrideIds(null), 400);
+        onReorder({ activeId, overId, oldIndex, newIndex });
+        return;
+      }
       // Apply the reorder to the rendered list NOW (batched with setActiveId above) so
       // the drop settles smoothly into place; persist via the consumer.
       const next = arrayMove(currentIds, oldIndex, newIndex);
@@ -243,8 +299,42 @@ export function SortableList<T>({
       overrideTimer.current = setTimeout(() => setOverrideIds(null), 400);
       onReorder({ activeId, overId, oldIndex, newIndex });
     },
-    [orderedItems, getItemId, onReorder],
+    [orderedItems, getItemId, onReorder, computeNextOrder],
   );
+
+  // Play the group-move FLIP after the reorder commit: every moved row (except the
+  // grabbed one, settled by the floating clone) is inverted to its OLD position then
+  // released, so the whole selected block slides to its new slot in one motion. Keyed on
+  // the rendered id order so it runs exactly on the commit that applied the new order.
+  const renderedOrderKey = ids.join(" ");
+  useLayoutEffect(() => {
+    const plan = flipPlanRef.current;
+    if (!plan) return;
+    flipPlanRef.current = null;
+    const anims: { el: HTMLElement; dy: number }[] = [];
+    for (const [id, el] of nodeMap.current) {
+      if (id === plan.grabbedId) continue; // the clone settles the grabbed row
+      const prevTop = plan.prevTops.get(id);
+      if (prevTop === undefined) continue;
+      const dy = prevTop - el.getBoundingClientRect().top;
+      if (Math.abs(dy) < 0.5) continue;
+      anims.push({ el, dy });
+    }
+    if (anims.length === 0) return;
+    // Invert: jump each moved row back to where it was (no transition), then...
+    for (const { el, dy } of anims) {
+      el.style.transition = "none";
+      el.style.transform = `translateY(${dy}px)`;
+    }
+    // ...play: on the next frame, release to the real position with a transition.
+    const raf = requestAnimationFrame(() => {
+      for (const { el } of anims) {
+        el.style.transition = `transform ${FLIP_DURATION_MS}ms ${SORTABLE_DROP_EASING}`;
+        el.style.transform = "";
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [renderedOrderKey]);
 
   const onDragCancel = useCallback(() => setActiveId(null), []);
 
@@ -272,7 +362,7 @@ export function SortableList<T>({
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         <div className={className} data-testid={testId} aria-label={ariaLabel}>
           {orderedItems.map((item) => (
-            <SortableRow key={getItemId(item)} id={getItemId(item)} item={item} disabled={disabled} renderItem={renderItem} />
+            <SortableRow key={getItemId(item)} id={getItemId(item)} item={item} disabled={disabled} renderItem={renderItem} registerNode={registerNode} />
           ))}
         </div>
       </SortableContext>
