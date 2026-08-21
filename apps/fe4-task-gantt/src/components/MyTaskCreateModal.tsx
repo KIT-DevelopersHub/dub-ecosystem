@@ -71,6 +71,10 @@ export interface MyTaskCreateModalProps {
    *  to this (when it is one of `events`); the requester can still change it. Null /
    *  unknown ⇒ start unlinked (「紐付けない」). */
   defaultEventId?: common.EventId | null;
+  /** チームの初期値 — the team the logged-in requester belongs to (名簿より解決). Each time
+   *  the modal opens it seeds チーム to this (when it is one of `teams`); the requester can
+   *  still change it. Null / unknown ⇒ start 未割当. */
+  defaultTeamId?: common.TeamId | null;
 }
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
@@ -85,17 +89,21 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 const NO_PRIORITY = ""; // sentinel for the "未設定" priority Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName, defaultEventId, defaultTeamId }: MyTaskCreateModalProps) {
   // The header-selected event is the initial 対象イベント, but only when it is a real
   // option in `events` (guards against a stale/foreign id) — otherwise start unlinked.
   const seedEventId = (): common.EventId | "" =>
     defaultEventId && events.some((e) => e.id === defaultEventId) ? defaultEventId : NO_EVENT;
+  // The requester's own team is the initial チーム, but only when it is a real option in
+  // `teams` (guards against a stale/foreign id) — otherwise start 未割当.
+  const seedTeamId = (): common.TeamId | null =>
+    defaultTeamId && teams.some((t) => t.id === defaultTeamId) ? defaultTeamId : null;
 
   const [eventId, setEventId] = useState<common.EventId | "">(seedEventId);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority | "">(NO_PRIORITY);
-  const [teamId, setTeamId] = useState<common.TeamId | null>(null);
+  const [teamId, setTeamId] = useState<common.TeamId | null>(seedTeamId);
   const [due, setDue] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
@@ -103,20 +111,25 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [attachError, setAttachError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Re-seed 対象イベント to the current header selection each time the modal opens,
-  // so it always reflects the latest グローバルなイベント選択状態 (the user can then
-  // still change it). Only the event field is re-seeded — the rest keeps its state.
+  // Re-seed 対象イベント / チーム to the current defaults each time the modal opens, so they
+  // reflect the latest グローバルなイベント選択状態 / the requester's team (which resolves from
+  // the 名簿 asynchronously — re-seed on defaultTeamId/teams too so it lands once available).
+  // The user can still change them. Only these two seeded fields are re-seeded; the rest keeps
+  // its state.
   useEffect(() => {
-    if (open) setEventId(seedEventId());
+    if (open) {
+      setEventId(seedEventId());
+      setTeamId(seedTeamId());
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultEventId]);
+  }, [open, defaultEventId, defaultTeamId, teams]);
 
   const reset = () => {
     setEventId(seedEventId());
     setTitle("");
     setAssigneeId(null);
     setPriority(NO_PRIORITY);
-    setTeamId(null);
+    setTeamId(seedTeamId());
     setDue(null);
     setDescription("");
     setFiles([]);

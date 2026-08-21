@@ -187,6 +187,16 @@ export function listTeams(client: ApiClient): Promise<member.ListTeamsResponse> 
 }
 
 /**
+ * Members overview (member-service): the 運営メンバー roster WITH their team memberships
+ * and identity-account links. Used to seed 「タスクを発行」's チーム default to the team the
+ * logged-in user belongs to (matched via member.identityUserId === current userId). Same
+ * source the 名簿 screens read (GET /api/v1/members/overview). Best-effort at the call site.
+ */
+export function getMembersOverview(client: ApiClient): Promise<member.MembersOverview> {
+  return client.request<member.MembersOverview>({ method: "GET", path: `${P}/members/overview` });
+}
+
+/**
  * Adapt member-service's wire Team ({ color/description: string | null }) to the fe4
  * domain team.Team ({ color/description?: string }). Every fe4 consumer (switcher,
  * legend, selects) speaks team.Team; centralizing the unwrap+normalize here keeps the

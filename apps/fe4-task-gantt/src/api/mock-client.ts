@@ -46,6 +46,9 @@ export interface MockSeed {
   hierarchy?: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }>;
   /** "current user" the mock stamps as createdBy on POST /tasks (from→to "from"). */
   currentUserId?: common.UserId;
+  /** 運営メンバー roster (with team memberships + identity links) served at
+   *  GET /members/overview — backs the 「タスクを発行」 team default (③). */
+  members?: member.Member[];
 }
 
 export class MockApiClient implements ApiClient {
@@ -60,6 +63,7 @@ export class MockApiClient implements ApiClient {
   private criticalTaskIds: common.TaskId[] = [];
   private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
+  private members: member.Member[] = [];
   private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
 
   /** force the next matching call to throw (test 11 / error branches). */
@@ -83,6 +87,7 @@ export class MockApiClient implements ApiClient {
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
     this.hierarchy = seed.hierarchy ?? {};
     this.currentUserId = seed.currentUserId ?? "usr_me";
+    this.members = seed.members ?? [];
   }
 
   /** Set of task ids that appear as some row's parent (⇒ they render a toggle). */
@@ -150,6 +155,10 @@ export class MockApiClient implements ApiClient {
       // Mirror member-service's canonical { teams } envelope so the mock and prod
       // agree (previously { items }, which hid a prod-only empty team switcher).
       return ({ teams: this.teams } as member.ListTeamsResponse) as T;
+    // 運営メンバー overview (roster + team memberships + identity links). Backs the
+    // 「タスクを発行」 team default (③): find the member whose identityUserId === current user.
+    if (path === "/api/v1/members/overview" && req.method === "GET")
+      return ({ teams: this.teams, members: this.members } as unknown as member.MembersOverview) as T;
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(req.query ?? {}) as T;
     // --- events ---

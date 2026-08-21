@@ -36,6 +36,9 @@ export interface MyTasksPageProps {
   /** 対象イベントの初期値 for 「タスクを発行」 — the globally header-selected event.
    *  Passed straight to the create modal; null = start unlinked. */
   initialEventId?: common.EventId | null;
+  /** チームの初期値 for 「タスクを発行」 — the team the logged-in user belongs to. Passed to
+   *  the create modal; null = start 未割当. */
+  defaultTeamId?: common.TeamId | null;
 }
 
 /**
@@ -44,7 +47,7 @@ export interface MyTasksPageProps {
  * 「すべて」, unified into one list that shows 依頼→担当 (from→to). Create is
  * optimistic (the new task appears instantly, rolls back on error).
  */
-export function MyTasksPage({ currentUserId, people, teams, events, initialEventId }: MyTasksPageProps) {
+export function MyTasksPage({ currentUserId, people, teams, events, initialEventId, defaultTeamId }: MyTasksPageProps) {
   const client = useApiClient();
   const toast = useToast();
 
@@ -267,6 +270,7 @@ export function MyTasksPage({ currentUserId, people, teams, events, initialEvent
         onCreate={onCreate}
         requesterName={currentUserName}
         defaultEventId={initialEventId ?? null}
+        defaultTeamId={defaultTeamId ?? null}
       />
     </section>
   );

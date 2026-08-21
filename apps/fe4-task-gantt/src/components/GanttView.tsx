@@ -107,6 +107,10 @@ export interface GanttViewProps {
   onBulkShiftDays?: (ids: readonly common.TaskId[], deltaDays: number) => void;
   /** Move a marquee-selected set up/down one slot (手動 mode only). */
   onBulkMoveVertical?: (ids: readonly common.TaskId[], dir: -1 | 1) => void;
+  /** Group drag-reorder (⑤): drop a marquee-selected block at `overId`; the whole selection
+   *  moves together, contiguous + in order. `draggedId` = grabbed row, `overId` = drop target.
+   *  手動 mode only. Absent ⇒ a group drag falls back to a single-row `onReorder`. */
+  onBulkReorderTo?: (ids: readonly common.TaskId[], draggedId: common.TaskId, overId: common.TaskId) => void;
   canWrite?: boolean;
 }
 
@@ -260,6 +264,7 @@ export function GanttView({
   onBulkDelete,
   onBulkShiftDays,
   onBulkMoveVertical,
+  onBulkReorderTo,
   canWrite = true,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
@@ -312,6 +317,13 @@ export function GanttView({
     (e: SortableReorderEvent) => {
       const activeId = e.activeId as common.TaskId;
       const overId = e.overId as common.TaskId;
+      // Group drag (⑤): when the grabbed row is part of a marquee multi-selection, move the
+      // WHOLE selected block together (contiguous, in order) to the drop target — not just the
+      // one row. Hands the raw active/over ids to the host, which computes the block move.
+      if (onBulkReorderTo && selectedIds.size > 1 && selectedIds.has(activeId)) {
+        onBulkReorderTo([...selectedIds], activeId, overId);
+        return;
+      }
       // Translate the drop into the container's "place before X" contract so the
       // committed order equals the sortable PREVIEW (no post-drop jump). Same-parent
       // only: move the sibling id list, then whichever id ends up right AFTER the
@@ -336,7 +348,7 @@ export function GanttView({
         onReorder?.(activeId, overId);
       }
     },
-    [onReorder],
+    [onReorder, onBulkReorderTo, selectedIds],
   );
 
   // Swap in the store's (authoritative + optimistic) title before any geometry runs,

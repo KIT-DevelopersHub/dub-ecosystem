@@ -175,3 +175,13 @@
 .drawer[data-side="left"] {
   left: 0;
 }
+/* The drawer is a fixed-height flex column (header + body). `.body { flex:1 }` alone
+   keeps min-height:auto, so long content grows the body past the viewport and its
+   bottom (詳細フィールド・📎添付) becomes unreachable — nothing scrolls. Bound the body
+   (min-height:0) and let it own the vertical scroll so every field is reachable. A
+   panel that renders its own header/scroll/footer (TaskDetailPanel) fits at height:100%
+   and scrolls inside itself; a plain drawer body just scrolls here. */
+.drawer > .body {
+  min-height: 0;
+  overflow-y: auto;
+}

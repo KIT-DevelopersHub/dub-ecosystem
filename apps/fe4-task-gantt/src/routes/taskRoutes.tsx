@@ -10,7 +10,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTeams, listEvents, listRoster, toDomainTeams } from "../api/endpoints";
+import { listTeams, listEvents, listRoster, toDomainTeams, getMembersOverview } from "../api/endpoints";
 import { getCurrentEventId, setCurrentEventId } from "../domain/current-event";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
@@ -86,6 +86,10 @@ export function MeTasksRoute() {
   const [teams, setTeams] = useState<readonly team.Team[]>([]);
   const [events, setEvents] = useState<readonly EventOption[]>([]);
   const [people, setPeople] = useState<readonly identity.UserSummary[]>([]);
+  // チームの初期値 for 「タスクを発行」 = the team the logged-in user belongs to. Resolved
+  // from the 名簿 (member.identityUserId === currentUserId → その人の teamIds[0]). null until
+  // resolved / when the user is on no team; the modal then starts 未割当 as before.
+  const [defaultTeamId, setDefaultTeamId] = useState<common.TeamId | null>(null);
   // 対象イベントの初期値 = the globally-selected event (グローバルなイベント選択状態),
   // read once on mount. null ⇒ the create modal starts unlinked (紐付けない).
   const [initialEventId] = useState<common.EventId | null>(() => getCurrentEventId());
@@ -119,10 +123,24 @@ export function MeTasksRoute() {
       .catch(() => {
         /* events are optional; the hub falls back to task-derived events */
       });
+    // Resolve the logged-in user's own team from the 名簿 so 「タスクを発行」 defaults its
+    // チーム to it. Degrades gracefully: on failure/no-membership, the modal stays 未割当.
+    if (currentUserId) {
+      void getMembersOverview(client)
+        .then((ov) => {
+          if (!live) return;
+          const me = ov.members.find((m) => m.identityUserId === currentUserId);
+          const teamId = me?.teamIds.find((id) => ov.teams.some((t) => t.id === id));
+          if (teamId) setDefaultTeamId(teamId as common.TeamId);
+        })
+        .catch(() => {
+          /* overview is optional; the modal falls back to 未割当 */
+        });
+    }
     return () => {
       live = false;
     };
-  }, [client]);
+  }, [client, currentUserId]);
 
   if (!currentUserId) return <p className={styles.banner}>ユーザー情報を読み込んでいます…</p>;
 
@@ -134,6 +152,7 @@ export function MeTasksRoute() {
         teams={teams}
         events={events}
         initialEventId={initialEventId}
+        defaultTeamId={defaultTeamId}
       />
     </ToastProvider>
   );

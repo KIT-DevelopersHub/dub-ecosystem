@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { common, gantt } from "@dub/types";
-import { applyManualOrder, reorderWithinSiblings } from "../src/domain/row-order";
+import { applyManualOrder, reorderWithinSiblings, reorderSelectionWithinSiblings } from "../src/domain/row-order";
 
 // Minimal row factory (only the fields row-order reads: taskId + parentTaskId).
 function row(id: string, parent: string | null = null, depth = parent ? 1 : 0): gantt.GanttRow {
@@ -84,5 +84,48 @@ describe("reorderWithinSiblings", () => {
 
   it("returns null for a no-op (drop on itself)", () => {
     expect(reorderWithinSiblings(rows, "b" as common.TaskId, "b" as common.TaskId)).toBeNull();
+  });
+});
+
+describe("reorderSelectionWithinSiblings (⑤ group drag)", () => {
+  const set = (...s: string[]) => new Set(s as common.TaskId[]);
+
+  it("moves a 3-row selection together, contiguous, keeping their order (drag down)", () => {
+    // a,b,c selected; e is the grab; drop the block after f by dropping e onto g.
+    const rows = [row("a"), row("b"), row("c"), row("d"), row("e"), row("f"), row("g")];
+    // grab e (selected? no) — pick a selected member as the dragged row instead.
+    // select a,b,c and drag a onto e (moving down): the block lands where a lands, contiguous.
+    const out = reorderSelectionWithinSiblings(rows, set("a", "b", "c"), "a" as common.TaskId, "e" as common.TaskId);
+    // a's single-row move to e's slot lands it after d; the block a,b,c follows contiguously.
+    expect(out).toEqual(["d", "e", "a", "b", "c", "f", "g"]);
+  });
+
+  it("moves a selection UP together (drag up)", () => {
+    const rows = [row("a"), row("b"), row("c"), row("d"), row("e")];
+    // select c,d,e and drag e onto a (moving up): block lands at a's slot, in order c,d,e.
+    const out = reorderSelectionWithinSiblings(rows, set("c", "d", "e"), "e" as common.TaskId, "a" as common.TaskId);
+    expect(out).toEqual(["c", "d", "e", "a", "b"]);
+  });
+
+  it("always includes the grabbed row even if not in the selection set", () => {
+    const rows = [row("a"), row("b"), row("c"), row("d")];
+    // selection {b} but grab a (a is dragged) — a is added to the block.
+    const out = reorderSelectionWithinSiblings(rows, set("b"), "a" as common.TaskId, "d" as common.TaskId);
+    // block = a,b (sibling order); a lands at d's slot; b follows.
+    expect(out).toEqual(["c", "d", "a", "b"]);
+  });
+
+  it("only reorders the dragged row's own sibling group (other-group selections stay)", () => {
+    const rows = [row("p1"), row("c1", "p1"), row("c2", "p1"), row("p2"), row("c3", "p2")];
+    // select c1 and c3 (different groups), drag c1 onto c2 — only p1's group reorders.
+    const out = reorderSelectionWithinSiblings(rows, set("c1", "c3"), "c1" as common.TaskId, "c2" as common.TaskId);
+    expect(out).toEqual(["p1", "c2", "c1", "p2", "c3"]);
+  });
+
+  it("refuses a cross-group drop (returns null)", () => {
+    const rows = [row("p1"), row("c1", "p1"), row("p2"), row("c2", "p2")];
+    expect(
+      reorderSelectionWithinSiblings(rows, set("c1"), "c1" as common.TaskId, "c2" as common.TaskId),
+    ).toBeNull();
   });
 });

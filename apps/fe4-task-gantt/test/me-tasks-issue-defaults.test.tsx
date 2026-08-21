@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import type { common, event, identity } from "@dub/types";
+import type { common, event, identity, member, team } from "@dub/types";
 import { ApiClientProvider } from "../src/api/client-context";
 import { MockApiClient } from "../src/api/mock-client";
 import { getGantt } from "../src/api/endpoints";
@@ -38,8 +38,31 @@ function renderRoute(client: MockApiClient): ReactElement {
   ) as unknown as ReactElement;
 }
 
+const TEAMS: team.Team[] = [
+  { id: "team_hq" as common.TeamId, key: "hq", name: "統括チーム" },
+  { id: "team_dev" as common.TeamId, key: "dev", name: "開発チーム" },
+];
+
+// A 名簿 where the current user (usr_me) belongs to 開発チーム — the 「タスクを発行」 team
+// default should resolve to it (via member.identityUserId === current user).
+function member_(id: string, identityUserId: string | null, teamIds: string[]): member.Member {
+  return {
+    id, orgId: "org_demo" as common.OrgId, name: id, roleTitle: null, status: "added", teamIds,
+    department: null, grade: null, identityUserId, contact: null, note: null, sortOrder: 0, version: 1,
+    createdAt: "t" as common.ISODateTime, updatedAt: "t" as common.ISODateTime,
+  };
+}
+const MEMBERS: member.Member[] = [
+  member_("m_me", ME, ["team_dev"]),
+  member_("m_other", "usr_hanako", ["team_hq"]),
+];
+
 function newClient(): MockApiClient {
   return new MockApiClient({ events: EVENTS, users: ROSTER, currentUserId: ME });
+}
+
+function newClientWithTeams(): MockApiClient {
+  return new MockApiClient({ events: EVENTS, users: ROSTER, teams: TEAMS, members: MEMBERS, currentUserId: ME });
 }
 
 describe("マイタスク「タスクを発行」 — defaults + ガント parity", () => {
@@ -67,6 +90,31 @@ describe("マイタスク「タスクを発行」 — defaults + ガント parit
     const priority = screen.getByTestId("fe4-mytask-create-priority") as HTMLSelectElement;
     expect(priority.value).toBe("");
     expect(priority).toHaveTextContent("未設定");
+  });
+
+  it("seeds チーム to the team the logged-in user belongs to (③)", async () => {
+    setCurrentEventId(EVT);
+    const client = newClientWithTeams();
+    renderRoute(client);
+
+    fireEvent.click(await screen.findByTestId("fe4-mytasks-create-open"));
+
+    // チーム初期値 = 開発チーム (usr_me's team via member.identityUserId), resolved async
+    // from /members/overview after the modal opens.
+    const teamSelect = (await screen.findByTestId("fe4-mytask-create-team")) as HTMLSelectElement;
+    await waitFor(() => expect(teamSelect.value).toBe("team_dev"));
+  });
+
+  it("leaves チーム 未割当 when the user is on no team", async () => {
+    setCurrentEventId(EVT);
+    // roster/overview without a membership for usr_me → no default.
+    const client = new MockApiClient({ events: EVENTS, users: ROSTER, teams: TEAMS, members: [member_("m_other", "usr_hanako", ["team_hq"])], currentUserId: ME });
+    renderRoute(client);
+    fireEvent.click(await screen.findByTestId("fe4-mytasks-create-open"));
+    const teamSelect = (await screen.findByTestId("fe4-mytask-create-team")) as HTMLSelectElement;
+    // it stays 未割当 (blank) — assert it never flips to a team.
+    await waitFor(() => expect((screen.getByTestId("fe4-mytask-create-event") as HTMLSelectElement).value).toBe(EVT));
+    expect(teamSelect.value).toBe("");
   });
 
   it("starts unlinked when no event is globally selected", async () => {
