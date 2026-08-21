@@ -47,7 +47,7 @@ function renderPage(client: MockApiClient) {
 }
 
 describe("MyTasksPage — 依頼インボックス (受け取る)", () => {
-  it("shows incoming (承諾/却下) and outgoing (取消) pending requests", async () => {
+  it("カードにタイトルが出て、クリックした詳細に承諾/却下・取消が入る", async () => {
     const client = new MockApiClient({
       currentUserId: ME,
       requests: [
@@ -56,11 +56,15 @@ describe("MyTasksPage — 依頼インボックス (受け取る)", () => {
       ],
     });
     renderPage(client);
+    // カード自体はタイトル＋相手名だけ（本文/優先度/アクションは出さない）。
     expect(await screen.findByTestId("fe4-request-in-treq_in")).toHaveTextContent("スポンサー資料の確認");
-    expect(screen.getByTestId("fe4-request-accept-treq_in")).toBeInTheDocument();
-    expect(screen.getByTestId("fe4-request-decline-treq_in")).toBeInTheDocument();
     expect(screen.getByTestId("fe4-request-out-treq_out")).toHaveTextContent("ロゴ提供のお願い");
-    expect(screen.getByTestId("fe4-request-cancel-treq_out")).toBeInTheDocument();
+    // アクションはカード上にはなく、クリックした詳細モーダルに集約される。
+    expect(screen.queryByTestId("fe4-request-accept-treq_in")).not.toBeInTheDocument();
+    // 受け取り(自分がボール)のカードを開くと承諾/却下が出る。
+    fireEvent.click(screen.getByTestId("fe4-request-card-treq_in"));
+    expect(await screen.findByTestId("fe4-request-accept-treq_in")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-request-decline-treq_in")).toBeInTheDocument();
   });
 
   it("承諾 calls POST /task-requests/:id/accept and removes the row", async () => {
@@ -69,6 +73,7 @@ describe("MyTasksPage — 依頼インボックス (受け取る)", () => {
       requests: [req({ id: "treq_in", fromUserId: "usr_alice", toUserId: ME, title: "承諾する依頼" })],
     });
     renderPage(client);
+    fireEvent.click(await screen.findByTestId("fe4-request-card-treq_in")); // open detail
     fireEvent.click(await screen.findByTestId("fe4-request-accept-treq_in"));
     await waitFor(() => {
       expect(client.calls.some((c) => c.path === "/api/v1/task-requests/treq_in/accept" && c.method === "POST")).toBe(true);
@@ -82,32 +87,31 @@ describe("MyTasksPage — 依頼インボックス (受け取る)", () => {
       requests: [req({ id: "treq_out", fromUserId: ME, toUserId: "usr_bob", title: "取り消す依頼" })],
     });
     renderPage(client);
+    fireEvent.click(await screen.findByTestId("fe4-request-card-treq_out")); // open detail
     fireEvent.click(await screen.findByTestId("fe4-request-cancel-treq_out"));
     await waitFor(() => {
       expect(client.calls.some((c) => c.path === "/api/v1/task-requests/treq_out/cancel" && c.method === "POST")).toBe(true);
     });
   });
 
-  it("ボール保持で左右が決まる: 自分の番=右(self) / 相手の番=左(other)", async () => {
+  it("ボール保持で左右が決まる: 自分がボール=右(self) / 渡した=左(other・←)", async () => {
     const client = new MockApiClient({
       currentUserId: ME,
       requests: [
         // 他人→自分・自分が承諾/却下する番 → ボールは自分 → 右
-        req({ id: "treq_in", fromUserId: "usr_alice", toUserId: ME, title: "自分の番" }),
-        // 自分→他人・相手の承諾待ち → ボールは相手 → 左
-        req({ id: "treq_out", fromUserId: ME, toUserId: "usr_bob", title: "相手の番" }),
+        req({ id: "treq_in", fromUserId: "usr_alice", toUserId: ME, title: "自分がボール" }),
+        // 自分→他人・相手の承諾待ち → ボールは相手 → 左（自分側に ←）
+        req({ id: "treq_out", fromUserId: ME, toUserId: "usr_bob", title: "渡した依頼" }),
       ],
     });
     renderPage(client);
     const incomingRow = await screen.findByTestId("fe4-request-in-treq_in");
     const outgoingRow = screen.getByTestId("fe4-request-out-treq_out");
-    // 受け取り(自分の番)は右=self、送り(相手の番)は左=other。
+    // 受け取り(自分がボール)は右=self、送り(渡した)は左=other。
     expect(incomingRow).toHaveAttribute("data-side", "self");
     expect(outgoingRow).toHaveAttribute("data-side", "other");
-    // 承諾/却下ボタンは自分側(右)の吹き出し内にある。
-    expect(incomingRow).toContainElement(screen.getByTestId("fe4-request-accept-treq_in"));
-    expect(incomingRow).toContainElement(screen.getByTestId("fe4-request-decline-treq_in"));
-    // 取消ボタンは相手側(左)の吹き出し内にある。
-    expect(outgoingRow).toContainElement(screen.getByTestId("fe4-request-cancel-treq_out"));
+    // 渡した依頼(左)には「あなたが渡した」← が自分側に描かれる。受け取り(右)には無い。
+    expect(outgoingRow).toContainElement(screen.getByLabelText("あなたが渡した依頼"));
+    expect(incomingRow.querySelector('[aria-label="あなたが渡した依頼"]')).toBeNull();
   });
 });
