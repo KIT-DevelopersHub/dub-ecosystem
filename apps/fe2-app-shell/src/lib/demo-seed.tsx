@@ -969,8 +969,9 @@ function createRosterStore() {
 // the sidebar renders 全体 / チーム別 / 役割別 channels out of the box. Channel names
 // stay romaji for consistency (#7); Japanese topics describe each one. Team channels
 // mirror member-service's real 運営チーム (統括/開発/当日進行/スポンサー/会場/集客広報)
-// — no invented teams. Messages/WS are not seeded (no WS in demo): channels open to a
-// clean empty timeline; the sidebar list is the enriched surface.
+// — no invented teams. Channels open to a short seeded conversation (chatSeedMessages,
+// P05) that shows the existing consecutive-sender grouping; the sidebar list is the
+// enriched surface.
 interface DemoChatChannel {
   id: string;
   type: "topic" | "event" | "dm";
@@ -978,6 +979,44 @@ interface DemoChatChannel {
   topic: string | null;
   eventId: string | null;
   memberCount: number;
+}
+
+// P05 (demo): a short seeded conversation so the chat timeline demonstrates the
+// existing Slack-style consecutive-sender grouping (2件目以降 hides avatar/name).
+// Runs of the same author are spaced <5min so they group; author changes are
+// spaced wider. Authors are roster ids (resolve to real names/avatars). ids use
+// the "msg_conv_" prefix and are zero-padded so they sort in send order.
+const CHAT_SEED_BASE_MS = Date.parse("2026-08-21T09:00:00.000Z");
+const CHAT_SEED_SCRIPT: Array<{ author: string; body: string; min: number }> = [
+  { author: "usr_bob", body: "会場設営、17時から入れます 🙌", min: 0 },
+  { author: "usr_bob", body: "配信機材は僕が持ち込みますね", min: 1 },
+  { author: "usr_bob", body: "あと受付テーブルの数だけ最終確認させてください", min: 2 },
+  { author: "usr_carol", body: "ありがとうございます。受付は3卓で確定です", min: 5 },
+  { author: "usr_dave", body: "登壇者スライド、共有フォルダに上げました！", min: 8 },
+  { author: "usr_dave", body: "タイムテーブルの最新版も同じフォルダにあります", min: 9 },
+  { author: ME_ID, body: "助かります、確認します 👍", min: 12 },
+  { author: ME_ID, body: "スポンサーロゴの掲示位置、あとで図で共有します", min: 13 },
+  { author: "usr_bob", body: "了解です！", min: 16 },
+  { author: "usr_bob", body: "当日は朝8時に会場集合で大丈夫そうですか？", min: 17 },
+  { author: "usr_carol", body: "8時集合でOKです。よろしくお願いします 🙏", min: 20 },
+];
+
+/** Build the seeded timeline (ascending by id/time) for a given channel. */
+function chatSeedMessages(channelId: string) {
+  return CHAT_SEED_SCRIPT.map((m, i) => ({
+    id: `msg_conv_${String(i + 1).padStart(2, "0")}`,
+    channelId,
+    authorId: m.author,
+    body: m.body,
+    threadRootId: null,
+    replyCount: 0,
+    reactions: [],
+    attachments: [],
+    editedAt: null,
+    deletedAt: null,
+    createdAt: new Date(CHAT_SEED_BASE_MS + m.min * 60_000).toISOString(),
+    version: 1,
+  }));
 }
 
 function createChatStore() {
@@ -1050,7 +1089,12 @@ function createChatStore() {
       if (m && method === "POST") return json(null, 204);
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
-      return json(page([])); // empty timeline (Paginated envelope)
+      // P05: seed a short conversation (with consecutive same-author runs) so the
+      // timeline's Slack-style grouping is visible. Threads open to their root only.
+      const channelId = url.searchParams.get("channelId") ?? "chn_general";
+      const threadRootId = url.searchParams.get("threadRootId");
+      if (threadRootId) return json(page([])); // no seeded thread replies
+      return json(page(chatSeedMessages(channelId)));
     }
     return null;
   }
