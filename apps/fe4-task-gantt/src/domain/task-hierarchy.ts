@@ -15,16 +15,25 @@ export interface ScopeTask {
   id: common.TaskId;
   title: string;
   parentTaskId: common.TaskId | null;
+  /** Owning team (null = 未割当). Carried so 親子でチームを一致させる導線が、親のチームを
+   *  引ける（子作成時にチームを親に固定・再親付けで親のチームへ追従）。省略時は未割当扱い。 */
+  teamId?: common.TeamId | null;
 }
 
 /** Project the gantt rows down to the minimal scope info the pickers need. */
 export function scopeTasksFromRows(rows: readonly gantt.GanttRow[]): ScopeTask[] {
-  return rows.map((r) => ({ id: r.taskId, title: r.title, parentTaskId: r.parentTaskId ?? null }));
+  return rows.map((r) => ({ id: r.taskId, title: r.title, parentTaskId: r.parentTaskId ?? null, teamId: r.teamId ?? null }));
 }
 
 /** Direct parent of a task (null = top-level / not found). */
 export function directParentOf(tasks: readonly ScopeTask[], taskId: common.TaskId): common.TaskId | null {
   return tasks.find((t) => t.id === taskId)?.parentTaskId ?? null;
+}
+
+/** Owning team of a task (null = 未割当 / not found). Used to fix a child's team to its
+ *  parent — 親子でチームが食い違う状態を作らせない（作成時プリフィル・再親付けで追従）。 */
+export function teamOf(tasks: readonly ScopeTask[], taskId: common.TaskId): common.TeamId | null {
+  return tasks.find((t) => t.id === taskId)?.teamId ?? null;
 }
 
 /** Two tasks may share a dependency iff they have the same direct parent. */
