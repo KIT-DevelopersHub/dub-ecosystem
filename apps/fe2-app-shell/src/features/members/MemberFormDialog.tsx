@@ -7,7 +7,11 @@ import { STATUS_LABEL } from "./MemberStatusBadge.tsx";
 import { useCreateMember, useUpdateMember } from "./hooks.ts";
 import styles from "./members.module.css";
 
-const STATUS_OPTIONS: SelectOption<MemberStatus>[] = MEMBER_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }));
+// 「削除済み」は作成/編集フォームでは選ばせない（削除は専用の「メンバーを削除」アクション経由）。
+const STATUS_OPTIONS: SelectOption<MemberStatus>[] = MEMBER_STATUSES.filter((s) => s !== "deleted").map((s) => ({
+  value: s,
+  label: STATUS_LABEL[s],
+}));
 
 export function MemberFormDialog({
   open,

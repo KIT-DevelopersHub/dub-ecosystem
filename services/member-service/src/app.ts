@@ -140,6 +140,11 @@ export function createApp(deps: AppDeps): Hono {
     await svc.deleteMember(reqCtx(c), c.req.param("id"));
     return c.json({ ok: true });
   });
+  // 物理削除(完全削除・不可逆): status="deleted" の行のみ許可 (それ以外は 409)。
+  app.delete("/members/people/:id/purge", authz.requirePermission(WRITE), async (c) => {
+    await svc.hardDeleteMember(reqCtx(c), c.req.param("id"));
+    return c.json({ ok: true });
+  });
 
   // ---- 参加届 (participation) ----
   // Submit is open to any authenticated 運営 (they file their own 届, which self-

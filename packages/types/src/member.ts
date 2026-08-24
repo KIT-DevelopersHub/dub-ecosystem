@@ -7,8 +7,10 @@
 import type { OrgId, UserId, ISODateTime } from "./common";
 
 /** Invite / participation status of an 運営メンバー. Closed union (contract change to extend). */
-export type MemberStatus = "added" | "invited" | "considering" | "declined";
-export const MEMBER_STATUSES: readonly MemberStatus[] = ["added", "invited", "considering", "declined"];
+// "deleted" = 論理削除(ソフトデリート)。名簿からは物理削除せず「削除済み」として保持し、
+// 組織図など他ビューでは非表示（declined と同様）。在籍(added)へ戻して復帰できる。
+export type MemberStatus = "added" | "invited" | "considering" | "declined" | "deleted";
+export const MEMBER_STATUSES: readonly MemberStatus[] = ["added", "invited", "considering", "declined", "deleted"];
 
 /**
  * A team / 班. The canonical shared entity — this exact shape is what every app

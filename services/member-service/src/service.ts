@@ -226,6 +226,31 @@ export class MemberService {
     await this.deps.repo.archivePerson(id);
   }
 
+  /**
+   * 物理削除(完全削除・不可逆)。**論理削除済み(status="deleted")の行のみ許可**し、
+   * それ以外は 409（在籍中の人をいきなり物理削除させない = fail-safe）。参加届の紐付けは
+   * 外して(member_id=NULL・reviewState="skipped")関連データを壊さずに、名簿行ごと削除する。
+   */
+  async hardDeleteMember(_ctx: ReqCtx, id: string): Promise<void> {
+    const cur = await this.deps.repo.getPerson(id);
+    if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
+    if (cur.status !== "deleted") {
+      throw new DubError("MEMBER_NOT_SOFT_DELETED", "physical delete requires a soft-deleted (削除済み) member", {
+        status: 409,
+        details: [{ field: "status", reason: "not_deleted", message: cur.status }],
+      });
+    }
+    // 参加届の紐付けを外す(反映先が消えるので「対象外」に戻す)。外部キーの dangling を防ぐ。
+    const parts = await this.deps.repo.listParticipations(this.deps.orgId);
+    const now = this.deps.now();
+    for (const p of parts) {
+      if (p.memberId === id) {
+        await this.deps.repo.upsertParticipation({ ...p, memberId: null, reviewState: "skipped", updatedAt: now });
+      }
+    }
+    await this.deps.repo.hardDeletePerson(id);
+  }
+
   // ---- identity linking (#1: bridge 組織図 <-> RBAC 真実) ----
   /**
    * Validate an identityUserId assignment for `personId`. `null` unlinks. A non-empty

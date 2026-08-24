@@ -1624,7 +1624,7 @@ interface DemoMember {
   orgId: string;
   name: string;
   roleTitle: string | null;
-  status: "added" | "invited" | "considering" | "declined";
+  status: "added" | "invited" | "considering" | "declined" | "deleted";
   teamIds: string[];
   department: string | null;
   grade: string | null;
@@ -1698,6 +1698,8 @@ function createMembersStore() {
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
     mk("member_6", "田村 未", "メンバー", "invited", [], 17, null, "情報工学科", "1年"),
+    // 削除済み(論理削除)メンバー — 「削除済み」バッジ表示＋「在籍に戻す」復帰の確認用。組織図には出ない。
+    mk("member_7", "退 太郎", "メンバー", "deleted", ["team_pr"], 18, null, "情報工学科", "2年"),
   ];
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
@@ -1820,6 +1822,25 @@ function createMembersStore() {
       mem.version += 1;
       mem.updatedAt = isoNow();
       return json({ ...mem, teamIds: [...mem.teamIds] });
+    }
+    // 物理削除(完全削除): status="deleted" の行のみ許可。参加届の紐付けを外して名簿ごと削除。
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/purge$/.exec(pathname);
+    if (m && method === "DELETE") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (mem.status !== "deleted") {
+        const err: ErrorResponse = { error: { code: "MEMBER_NOT_SOFT_DELETED", message: "先に削除済みにしてください", retryable: false } };
+        return json(err, 409);
+      }
+      for (const p of participations) {
+        if (p.memberId === mem.id) {
+          p.memberId = null;
+          p.reviewState = "skipped";
+          p.updatedAt = isoNow();
+        }
+      }
+      members.splice(members.indexOf(mem), 1);
+      return json({ ok: true });
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
