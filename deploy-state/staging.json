@@ -1,0 +1,12 @@
+{
+  "env": "staging",
+  "url": "https://dub-fe2-app-shell-staging.developershub-site.workers.dev",
+  "deployedSha": null,
+  "branch": null,
+  "actor": null,
+  "markers": [],
+  "live": false,
+  "verifiedAt": null,
+  "updatedAt": null,
+  "note": "seed — staging preview state is reported in the sticky PR comment (see .github/workflows/staging.yml)."
+}

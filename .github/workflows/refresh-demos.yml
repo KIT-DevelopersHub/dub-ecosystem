@@ -1,0 +1,76 @@
+name: refresh per-feature demos
+
+# WHY (判断87): every per-feature demo (`dub-demo-<slug>`) is rebuilt as `origin/main + its
+# one feature`, so the surrounding UI a reviewer is NOT reviewing is always the latest main
+# (= prod/staging) state — never the stale snapshot the feature branch was cut from. This
+# workflow does that rebuild on a schedule (and on demand) so the whole demo fleet keeps
+# absorbing the newest main automatically, WITHOUT running heavy builds on the local PC.
+#
+# It reuses the same Cloudflare secrets the deploy workflow already uses. Worker names are
+# unchanged (URLs stable); a refresh overwrites `dub-demo-<slug>` in place — it never
+# multiplies Worker slots. Updated deploy-state/demo-*.json manifests (the "what is live"
+# bookkeeping) are committed back so the recorded live-state stays current.
+on:
+  schedule:
+    # 21:00 UTC daily = 06:00 JST (before the workday). Tune or remove as desired.
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Refresh only this slug (blank = every demo in the registry)'
+        required: false
+        default: ''
+
+concurrency:
+  # never let two refreshes race on the same disposable Worker names
+  group: refresh-demos
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: rebuild demos on latest main
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # full history so refresh-demos.sh can create a scratch worktree and merge branches
+          fetch-depth: 0
+      - name: Guard — Cloudflare token present
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Refresh demos (main + each feature → redeploy → verify-live)
+        run: |
+          if [ -n "${{ github.event.inputs.only }}" ]; then
+            pnpm run refresh:demos --only "${{ github.event.inputs.only }}"
+          else
+            pnpm run refresh:demos
+          fi
+      - name: Commit refreshed live-state manifests
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- deploy-state/; then
+            git add deploy-state/demo-*.json
+            git commit -m "chore(deploy): refresh per-feature demos on latest main [skip ci]"
+            git push
+          else
+            echo "no manifest changes to commit"
+          fi

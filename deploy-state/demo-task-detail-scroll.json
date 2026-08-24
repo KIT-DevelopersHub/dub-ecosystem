@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "task-detail-scroll",
+  "worker": "dub-demo-task-detail-scroll",
+  "url": "https://dub-demo-task-detail-scroll.developershub-site.workers.dev",
+  "deployedSha": "fa743ce",
+  "branch": "HEAD",
+  "actor": "ko-tarou",
+  "markers": ["タスクの背景・手順・補足などを書けます"],
+  "live": true,
+  "verifiedAt": "2026-08-21T19:53:37Z",
+  "updatedAt": "2026-08-21T19:53:37Z",
+  "note": "refresh-demos: origin/main(e71c140)+fe4/task-detail-dialog-clean — task detail dialog (memo + file/URL attachments, scrollable body, fixed footer) in fe4"
+}
