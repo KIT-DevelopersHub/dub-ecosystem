@@ -18,7 +18,7 @@ const mkTask = (id: string, over: Partial<task.Task> = {}): task.Task => ({
 });
 
 describe("relation-type conversion in the detail pane", () => {
-  it("依存→親子: 「親に」 promotes a predecessor to the parent and drops it from deps", () => {
+  it("依存→親子: 「親に」 promotes a predecessor to the parent and drops it from deps", async () => {
     const onSave = vi.fn();
     // self + P are top-level siblings, so P is a valid predecessor of self.
     const scope: ScopeTask[] = [
@@ -38,10 +38,11 @@ describe("relation-type conversion in the detail pane", () => {
         parentTaskId={null}
         dependsOnIds={["P"]}
         scopeTasks={scope}
+        autosaveDebounceMs={0}
       />,
     );
     fireEvent.click(screen.getByTestId("fe4-detail-deps-promote-P"));
-    fireEvent.click(screen.getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
     const [patch, relations] = onSave.mock.calls[0]!;
     expect(patch.parentTaskId).toBe("P");           // P is now the parent
     expect(relations.parentChanged).toBe(true);
@@ -50,7 +51,7 @@ describe("relation-type conversion in the detail pane", () => {
     expect(relations.dependsOnIds).toEqual([]);      // P removed from predecessors
   });
 
-  it("親子→依存: 「先行に変換」 detaches the parent and keeps it as a predecessor", () => {
+  it("親子→依存: 「先行に変換」 detaches the parent and keeps it as a predecessor", async () => {
     const onSave = vi.fn();
     const scope: ScopeTask[] = [
       { id: "self", title: "対象タスク", parentTaskId: "P", teamId: null },
@@ -69,10 +70,11 @@ describe("relation-type conversion in the detail pane", () => {
         parentTaskId={"P"}
         dependsOnIds={[]}
         scopeTasks={scope}
+        autosaveDebounceMs={0}
       />,
     );
     fireEvent.click(screen.getByTestId("fe4-detail-parent-to-dep"));
-    fireEvent.click(screen.getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
     const [patch, relations] = onSave.mock.calls[0]!;
     expect(patch.parentTaskId).toBeNull();            // detached to top-level
     expect(relations.parentChanged).toBe(true);

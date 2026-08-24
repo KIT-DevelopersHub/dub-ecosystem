@@ -97,7 +97,7 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
     expect(onCreatePredecessor).toHaveBeenCalledWith("self");
   });
 
-  it("changing the parent flags a re-parent in the save payload", () => {
+  it("changing the parent flags a re-parent in the save payload", async () => {
     const onSave = vi.fn();
     render(
       <TaskDetailPanel
@@ -111,18 +111,18 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         parentOptions={[{ id: "P", title: "親P" }, { id: "Q", title: "親Q" }]}
         parentTaskId={null}
         scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null, teamId: null }, { id: "P", title: "親P", parentTaskId: null, teamId: null }]}
+        autosaveDebounceMs={0}
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-detail-parent"), { target: { value: "P" } });
-    fireEvent.click(screen.getByTestId("fe4-detail-save"));
-    expect(onSave).toHaveBeenCalled();
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
     const [patch, relations] = onSave.mock.calls[0]!;
     expect(patch.parentTaskId).toBe("P");
     expect(relations.parentChanged).toBe(true);
     expect(relations.parentTaskId).toBe("P");
   });
 
-  it("adding a predecessor flags a dependency change (先行タスク編集)", () => {
+  it("adding a predecessor flags a dependency change (先行タスク編集)", async () => {
     const onSave = vi.fn();
     render(
       <TaskDetailPanel
@@ -139,13 +139,14 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
           { id: "self", title: "対象タスク", parentTaskId: null, teamId: null },
           { id: "sib", title: "兄弟タスク", parentTaskId: null, teamId: null },
         ]}
+        autosaveDebounceMs={0}
       />,
     );
     const input = screen.getByTestId("fe4-detail-deps-input");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "兄弟" } });
     fireEvent.mouseDown(screen.getByTestId("fe4-detail-deps-opt-sib"));
-    fireEvent.click(screen.getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
     const [, relations] = onSave.mock.calls[0]!;
     expect(relations.depsChanged).toBe(true);
     expect(relations.dependsOnIds).toContain("sib");
@@ -190,7 +191,7 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "会場" } }); // t1 = 会場予約 (same top-level scope)
     fireEvent.mouseDown(within(panel).getByTestId("fe4-detail-deps-opt-t1"));
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // no save button: selecting the predecessor auto-saves after the debounce
     // t1 -> t2 dependency now rendered on the timeline
     expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
   });
@@ -203,7 +204,7 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "会場" } });
     fireEvent.mouseDown(within(panel).getByTestId("fe4-detail-deps-opt-t1"));
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // no save button: selecting the predecessor auto-saves after the debounce
     // the dependency arrow + a success toast both appear (no silent, latent save)
     expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
     expect(await screen.findByTestId("toast-success")).toBeInTheDocument();

@@ -5,7 +5,7 @@
 // bar and the axis. And any date edit must materialise BOTH edges so the saved task
 // carries an explicit window (bar == value with no re-derivation drift).
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { task } from "@dub/types";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 
@@ -51,7 +51,7 @@ describe("TaskDetailPanel — seeds date fields from the bar window (real-path �
     expect(val("fe4-detail-due")).toBe("2026-09-15");
   });
 
-  it("editing 期日 materialises BOTH startAt+dueAt so the saved window is explicit (no drift)", () => {
+  it("editing 期日 materialises BOTH startAt+dueAt so the saved window is explicit (no drift)", async () => {
     const onSave = vi.fn();
     render(
       <TaskDetailPanel
@@ -64,12 +64,12 @@ describe("TaskDetailPanel — seeds date fields from the bar window (real-path �
         onClose={() => {}}
         barStartsAt={"2026-09-12T00:00:00.000Z"}
         barEndsAt={"2026-09-15T00:00:00.000Z"}
+        autosaveDebounceMs={0}
       />,
     );
-    // move the 期日 out by changing the hidden native date input
+    // move the 期日 out by changing the hidden native date input — auto-save (no button) fires
     fireEvent.change(screen.getByTestId("fe4-detail-due"), { target: { value: "2026-09-29" } });
-    fireEvent.click(screen.getByTestId("fe4-detail-save"));
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const [patch] = onSave.mock.calls[0]!;
     // BOTH edges are persisted: the derived start becomes explicit (so the bar keeps its
     // start instead of re-deriving to newDue−3d), and the new due is applied.
@@ -154,7 +154,7 @@ describe("TaskDetailPanel — seeds date fields from the bar window (real-path �
     expect(val("fe4-detail-due")).toBe("2026-09-15");
   });
 
-  it("no date edit ⇒ the seeded window is NOT written back (clean save, no spurious dates)", () => {
+  it("no date edit ⇒ the seeded window is NOT written back (clean save, no spurious dates)", async () => {
     const onSave = vi.fn();
     render(
       <TaskDetailPanel
@@ -167,11 +167,12 @@ describe("TaskDetailPanel — seeds date fields from the bar window (real-path �
         onClose={() => {}}
         barStartsAt={"2026-09-12T00:00:00.000Z"}
         barEndsAt={"2026-09-15T00:00:00.000Z"}
+        autosaveDebounceMs={0}
       />,
     );
-    // change only the title, then save
+    // change only the title — auto-save persists just that field
     fireEvent.change(screen.getByTestId("fe4-detail-title"), { target: { value: "改題" } });
-    fireEvent.click(screen.getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
     const [patch] = onSave.mock.calls[0]!;
     expect(patch.title).toBe("改題");
     expect(patch.startAt).toBeUndefined();
