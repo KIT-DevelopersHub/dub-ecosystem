@@ -262,7 +262,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
           />
         </div>
 
-        <div className={styles.formFieldFull}>
+        <div className={styles.formFieldFull} data-testid="fe4-dep-408-sameteam">
           <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク）</span>
           <PredecessorPicker options={depOptions} value={deps} onChange={setDeps} testId="fe4-create-deps" />
         </div>
