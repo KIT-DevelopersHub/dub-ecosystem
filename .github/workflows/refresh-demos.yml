@@ -53,6 +53,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Configure git identity (needed for the --no-ff merge commits refresh-demos.sh creates)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
       - name: Install workspace deps
         run: pnpm install --frozen-lockfile
       - name: Refresh demos (main + each feature → redeploy → verify-live)
