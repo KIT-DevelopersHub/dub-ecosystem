@@ -1,0 +1,12 @@
+{
+  "env": "prod",
+  "url": "https://dub-fe2-app-shell.developershub-site.workers.dev",
+  "deployedSha": null,
+  "branch": "main",
+  "actor": null,
+  "markers": [],
+  "live": false,
+  "verifiedAt": null,
+  "updatedAt": null,
+  "note": "seed — production tracks main HEAD via .github/workflows/deploy.yml."
+}

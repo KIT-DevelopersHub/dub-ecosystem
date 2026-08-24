@@ -1,0 +1,12 @@
+{
+  "env": "demo",
+  "url": "https://fe2-demo.developershub-site.workers.dev",
+  "deployedSha": null,
+  "branch": null,
+  "actor": null,
+  "markers": [],
+  "live": false,
+  "verifiedAt": null,
+  "updatedAt": null,
+  "note": "seed — no deploy recorded yet. Written by scripts/deploy-demo.sh."
+}

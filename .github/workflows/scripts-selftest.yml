@@ -1,0 +1,48 @@
+name: scripts self-test
+
+# Offline self-tests for the deploy/verify/queue shell scripts. No Cloudflare token, no
+# network, no wrangler — pure logic (slugify, marker AND-grep, queue flush conditions). Keeps
+# the parallel-env-flow tooling honest without touching any live Worker.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'deploy-state/**'
+      - '.github/workflows/scripts-selftest.yml'
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'deploy-state/**'
+      - '.github/workflows/scripts-selftest.yml'
+
+concurrency:
+  group: scripts-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: shell script self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: bash syntax check
+        run: |
+          for f in scripts/*.sh; do bash -n "$f" && echo "  ok syntax $f"; done
+      - name: verify-live self-test
+        run: bash scripts/verify-live.sh --self-test
+      - name: deploy-demo-feature self-test
+        run: bash scripts/deploy-demo-feature.sh --self-test
+      - name: teardown-demo self-test
+        run: bash scripts/teardown-demo.sh --self-test
+      - name: staging-queue self-test
+        run: bash scripts/staging-queue.sh --self-test
+      - name: staging-queue seed ledger is valid JSON
+        run: node -e 'JSON.parse(require("fs").readFileSync("deploy-state/staging-queue.json","utf8")); console.log("staging-queue.json OK")'
