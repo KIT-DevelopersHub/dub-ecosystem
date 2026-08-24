@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-autosave",
+  "worker": "dub-demo-gantt-autosave",
+  "url": "https://dub-demo-gantt-autosave.developershub-site.workers.dev",
+  "deployedSha": "3f4eb4d",
+  "branch": "feat/fe4-gantt-autosave",
+  "actor": "Claude (kota)",
+  "markers": ["変更は自動保存されます"],
+  "live": true,
+  "verifiedAt": "2026-08-24T14:32:42Z",
+  "updatedAt": "2026-08-24T14:32:42Z",
+  "note": "fe4 task detail auto-save (no 保存 button)"
+}
