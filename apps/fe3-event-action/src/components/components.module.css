@@ -176,3 +176,295 @@
   word-break: break-word;
   color: var(--dub-color-text-secondary);
 }
+
+/* ---- Event app header (current-event switcher) ---- */
+.appHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+  padding: var(--dub-space-4) var(--dub-space-6);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+}
+.appHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  color: var(--dub-color-text-muted);
+}
+.appHeaderTitle {
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.appHeaderPicker {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+.appHeaderPickerLabel {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+/* ---- Event hero (selected event, primary) ---- */
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-6);
+  border-radius: var(--dub-radius-lg);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+  box-shadow: var(--dub-shadow-sm);
+  margin-bottom: var(--dub-space-6);
+}
+.heroTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+}
+.heroTitle {
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.heroMeta {
+  display: flex;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+.heroMetaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+}
+.heroDesc {
+  color: var(--dub-color-text-secondary);
+  line-height: var(--dub-line-height-relaxed, 1.6);
+}
+
+/* ---- Detail sections ("何でも貯める" store) ---- */
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--dub-space-4);
+  align-items: start;
+}
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-5);
+  border-radius: var(--dub-radius-lg);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+}
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  color: var(--dub-color-text-primary);
+}
+.sectionHeadTitle {
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+}
+.sectionBody {
+  color: var(--dub-color-text-primary);
+  line-height: var(--dub-line-height-relaxed, 1.6);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sectionEmpty {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  font-style: italic;
+}
+.textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  resize: vertical;
+}
+.linkList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.linkItem {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+.linkItem a {
+  color: var(--dub-color-text-link);
+  text-decoration: none;
+  word-break: break-all;
+}
+.linkItem a:hover {
+  text-decoration: underline;
+}
+.editRow {
+  display: flex;
+  gap: var(--dub-space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.editRow .input {
+  flex: 1;
+  min-width: 120px;
+}
+.detailActions {
+  display: flex;
+  gap: var(--dub-space-2);
+  justify-content: flex-end;
+  margin-top: var(--dub-space-2);
+}
+.savedHint {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+/* A section that should span the whole detail grid (tables/timelines read better wide). */
+.sectionWide {
+  grid-column: 1 / -1;
+}
+
+/* Grouping heading between blocks of related sections (開催情報 / 当日 など). */
+.groupHeading {
+  grid-column: 1 / -1;
+  margin: var(--dub-space-4) 0 calc(-1 * var(--dub-space-1));
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.groupHeading:first-child {
+  margin-top: 0;
+}
+
+/* Small muted count chip next to a section title (e.g. 登壇者 3 / チェック 2/5). */
+.countChip {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+}
+
+/* ---- Timetable ---- */
+.timeRow {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-3) 0;
+  border-top: 1px solid var(--dub-color-border-subtle, var(--dub-color-border-default));
+}
+.timeRow:first-child {
+  border-top: none;
+}
+.timeSlot {
+  color: var(--dub-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--dub-font-weight-medium);
+}
+.timeMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.timeTitle {
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-medium);
+}
+.timeNote {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+/* ---- Record list (speakers / sponsors) ---- */
+.recordList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.recordItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+}
+.recordTop {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  flex-wrap: wrap;
+}
+.recordName {
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-bold);
+}
+.recordSub {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+/* ---- Checklist ---- */
+.checkList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.checkItem {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2) 0;
+  color: var(--dub-color-text-primary);
+}
+.checkItemDone {
+  color: var(--dub-color-text-muted);
+  text-decoration: line-through;
+}
+.checkIcon {
+  color: var(--dub-color-text-muted);
+  flex-shrink: 0;
+}
+.checkIconDone {
+  color: var(--dub-color-success-600, var(--dub-color-brand-600));
+}
+
+/* Toggle-as-checkbox button in edit mode. */
+.checkToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.checkToggleOn {
+  background: var(--dub-color-success-100, var(--dub-color-brand-100));
+  border-color: var(--dub-color-success-600, var(--dub-color-brand-600));
+  color: var(--dub-color-success-700, var(--dub-color-brand-700));
+}
