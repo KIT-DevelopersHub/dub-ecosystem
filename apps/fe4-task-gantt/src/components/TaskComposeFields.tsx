@@ -219,11 +219,6 @@ export function TaskComposeFields(p: TaskComposeFieldsProps) {
           ]}
           testId={`${tid}-event`}
         />
-        {p.eventMode === "locked" && (
-          <p className={styles.fieldHint} data-testid={`${tid}-event-locked`}>
-            このガントのイベントに追加されます（変更できません）
-          </p>
-        )}
       </div>
 
       {/* ステータス */}

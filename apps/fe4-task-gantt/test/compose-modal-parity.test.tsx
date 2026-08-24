@@ -31,9 +31,9 @@ describe("③ 作成/発行モーダルの完全共通化: 同一フィールド
     for (const s of SHARED_SUFFIXES) {
       expect(screen.getByTestId(`fe4-create-${s}`)).toBeInTheDocument();
     }
-    // 対象イベントは gantt では現在のイベントに固定（disabled）＋ロック注記。
+    // 対象イベントは gantt では現在のイベントに固定（disabled）。説明テキスト行は出さない。
     expect((screen.getByTestId("fe4-create-event") as HTMLSelectElement).disabled).toBe(true);
-    expect(screen.getByTestId("fe4-create-event-locked")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-create-event-locked")).toBeNull();
   });
 
   it("マイタスク発行モーダルに union の全フィールドが出る（新規: ステータス/開始日）", () => {
