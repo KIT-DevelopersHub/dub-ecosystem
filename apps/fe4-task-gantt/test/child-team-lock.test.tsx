@@ -30,6 +30,7 @@ describe("タスク作成モーダル: 親をプリセットするとチーム�
         teams={TEAMS}
         parentOptions={[{ id: "p" as common.TaskId, title: "親" }]}
         scopeTasks={SCOPE}
+        eventId={"evt_1" as common.EventId}
         onCreate={async () => {}}
         initialParentId={"p" as common.TaskId}
       />,
@@ -52,6 +53,7 @@ describe("タスク作成モーダル: 親をプリセットするとチーム�
         teams={TEAMS}
         parentOptions={[{ id: "p" as common.TaskId, title: "親" }]}
         scopeTasks={SCOPE}
+        eventId={"evt_1" as common.EventId}
         onCreate={onCreate}
         initialParentId={"p" as common.TaskId}
       />,
@@ -73,6 +75,7 @@ describe("タスク作成モーダル: 親をプリセットするとチーム�
         teams={TEAMS}
         parentOptions={[]}
         scopeTasks={[]}
+        eventId={"evt_1" as common.EventId}
         onCreate={async () => {}}
       />,
     );

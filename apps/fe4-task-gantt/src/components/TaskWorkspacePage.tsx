@@ -5,7 +5,7 @@ import { Button, ErrorDialog, useToast } from "@dub/ui";
 import type { ErrorDialogDetail } from "@dub/ui";
 import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
-import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
+import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask, listEvents, createTaskAttachment } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
@@ -114,6 +114,25 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // prefix/桁数 inputs, but keeps their saved values for when it's turned back on.
   const [numberVisible, setNumberVisible] = useTaskNumberVisible(eventId);
   const teams = useTeams().data ?? [];
+  // Resolve the current event's title so the create modal can show 対象イベント
+  // (locked to this gantt's event) for parity with the 発行 modal. Best-effort —
+  // the label degrades to a generic "このイベント" when the list can't be read.
+  const [eventName, setEventName] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void listEvents(client)
+      .then((res) => {
+        if (!live) return;
+        const found = res.items.find((e) => e.id === eventId);
+        if (found) setEventName(found.title);
+      })
+      .catch(() => {
+        /* event title is optional; the modal falls back to a generic label */
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, eventId]);
   // Org member roster — the source for the assignee dropdown. Without it the only
   // options were users ALREADY assigned to a task, so a fresh event showed just
   // "未割当" (bug 1b). Best-effort: an organizer lacking identity:read falls back
@@ -750,6 +769,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
         ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
+        ...(draft.description ? { description: draft.description } : {}),
       },
       provisional,
     );
@@ -771,54 +791,88 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       buildProvisionalDeps(created.id, draft.dependsOnIds, linkPredecessorFor),
     );
 
-    let version = created.version;
-    if (draft.status !== "todo") {
-      const patched = await store.patchOptimistic(
-        client,
-        created.id,
-        { status: draft.status },
-        version,
-        { version, status: draft.status },
-      );
-      if (patched) version = patched.version;
-    }
-    if (draft.dependsOnIds.length > 0) {
-      try {
-        // NOTE: the deps endpoint returns { taskId, dependsOnIds } (NOT a Task), so it
-        // carries no version — do not read one off it. `version` is unused afterwards.
-        await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
-      } catch (e) {
-        // dependency cycle / out-of-scope — the task IS created; tell the user why
-        // the dependency didn't take instead of dropping it on the floor.
-        store.reportError(e);
-      }
-    }
-    // "先行タスクを作成": add the new task as a predecessor of the source task. Fetch the
-    // source task FRESH for its current version — the render-snapshot `tasks` list can be
-    // stale (and, before F3, omitted tasks past #200 entirely), which sent a stale version
-    // and 409'd: the task was created but linking errored ("作られるのにエラー").
-    if (linkPredecessorFor) {
-      try {
-        const target = await getTask(client, linkPredecessorFor);
-        const curDeps = gantt.data?.dependencies.filter((d) => d.toTaskId === linkPredecessorFor).map((d) => d.fromTaskId) ?? [];
-        await replaceDependencies(client, linkPredecessorFor, {
-          version: target.version,
-          dependsOnIds: [...curDeps, created.id],
-        });
-      } catch (e) {
-        store.reportError(e); // not-found / out-of-scope / cycle — surfaced; the new task still exists
-      }
-    }
-    // The task IS created — confirm it to the user (楽観的UIと整合: ダイアログを閉じ
-    // 成功トーストを出す). Reconciling reload/refetch runs after and must never turn a
-    // successful create into a thrown error that keeps the modal open.
+    // ⏩ #430 体感速度: the row + bar + 先行(依存) connector lines are already painted and
+    // the primary create SUCCEEDED. Confirm it and close the modal NOW — then finish the
+    // rest OFF the close-path. Previously every follow-up below (status patch, dependency
+    // writes, 「先行タスクを作成」back-link, 添付 uploads, and the authoritative reconcile
+    // refetch) was awaited *before* returning, so the dialog sat spinning through several
+    // sequential round-trips even though the bar was already on the timeline. That serial
+    // tail was the residual「モーダル閉じ〜行確定」latency; moving it to a background
+    // continuation lets the modal close on the single create round-trip.
     toast.show({ kind: "success", title: "タスクを作成しました" });
-    try {
-      await store.loadAll(client, query);
-      await gantt.refetchFresh();
-    } catch {
-      /* reconcile hiccup — the task exists; the next load/refetch will catch up */
-    }
+    const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
+    void (async () => {
+      let version = created.version;
+      if (draft.status !== "todo") {
+        const patched = await store.patchOptimistic(
+          client,
+          created.id,
+          { status: draft.status },
+          version,
+          { version, status: draft.status },
+        );
+        if (patched) version = patched.version;
+      }
+      if (draft.dependsOnIds.length > 0) {
+        try {
+          // NOTE: the deps endpoint returns { taskId, dependsOnIds } (NOT a Task), so it
+          // carries no version — do not read one off it. `version` is unused afterwards.
+          await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
+        } catch (e) {
+          // dependency cycle / out-of-scope — the task IS created; tell the user why
+          // the dependency didn't take instead of dropping it on the floor.
+          store.reportError(e);
+        }
+      }
+      // "先行タスクを作成": add the new task as a predecessor of the source task. Fetch the
+      // source task FRESH for its current version — the render-snapshot `tasks` list can be
+      // stale (and, before F3, omitted tasks past #200 entirely), which sent a stale version
+      // and 409'd: the task was created but linking errored ("作られるのにエラー").
+      if (linkPredecessorFor) {
+        try {
+          const target = await getTask(client, linkPredecessorFor);
+          const curDeps = gantt.data?.dependencies.filter((d) => d.toTaskId === linkPredecessorFor).map((d) => d.fromTaskId) ?? [];
+          await replaceDependencies(client, linkPredecessorFor, {
+            version: target.version,
+            dependsOnIds: [...curDeps, created.id],
+          });
+        } catch (e) {
+          store.reportError(e); // not-found / out-of-scope / cycle — surfaced; the new task still exists
+        }
+      }
+      // ③ 添付（ファイル・URL）を作成後に永続化する（実 id が要る）。ベストエフォート:
+      // 添付の失敗で作成済みタスクを巻き戻さない。
+      if (attachCount > 0) {
+        try {
+          for (const f of draft.attachments.files) {
+            await createTaskAttachment(client, created.id, {
+              kind: "file",
+              name: f.name,
+              url: f.url,
+              mimeType: f.mimeType,
+              sizeBytes: f.sizeBytes,
+            });
+          }
+          for (const u of draft.attachments.urls) {
+            await createTaskAttachment(client, created.id, { kind: "url", name: u.name, url: u.url });
+          }
+        } catch {
+          toast.show({
+            kind: "error",
+            title: "一部の添付を保存できませんでした",
+            description: "タスクは作成済みです。詳細から再度添付できます。",
+          });
+        }
+      }
+      // Reconciling reload/refetch runs LAST and must never turn a successful create into a
+      // thrown error (the modal is already closed; the optimistic row bridges the gap).
+      try {
+        await store.loadAll(client, query);
+        await gantt.refetchFresh();
+      } catch {
+        /* reconcile hiccup — the task exists; the next load/refetch will catch up */
+      }
+    })();
     return true;
   };
 
@@ -1258,6 +1312,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         teams={teams}
         parentOptions={rootParentOptions}
         scopeTasks={scopeTasks}
+        eventId={eventId}
+        eventName={eventName}
         onCreate={onCreate}
       />
 

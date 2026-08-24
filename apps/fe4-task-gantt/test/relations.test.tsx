@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import type { identity, task } from "@dub/types";
+import type { common, identity, task } from "@dub/types";
 import { TaskCreateModal, type TaskDraft } from "../src/components/TaskCreateModal";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
@@ -30,6 +30,7 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + �
         teams={[]}
         parentOptions={PARENT_OPTS}
         scopeTasks={SCOPE}
+        eventId={"evt_1" as common.EventId}
         onCreate={async () => {}}
       />,
     );
@@ -57,6 +58,7 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + �
         teams={[]}
         parentOptions={PARENT_OPTS}
         scopeTasks={SCOPE}
+        eventId={"evt_1" as common.EventId}
         onCreate={onCreate}
       />,
     );

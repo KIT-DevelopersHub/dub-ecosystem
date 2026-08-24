@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, resolveUsers, createTaskAttachment, getGantt, replaceDependencies } from "../api/endpoints";
+import { listTasks, createTask, updateTask, resolveUsers, createTaskAttachment, getGantt, replaceDependencies } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import { scopeTasksFromRows, type ScopeTask } from "../domain/task-hierarchy";
 import {
@@ -159,11 +159,12 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       eventId: draft.eventId,
       title: draft.title,
       description: draft.description,
-      status: "todo",
+      status: draft.status,
       priority: draft.priority,
       assigneeId: draft.assigneeId,
       teamId: draft.teamId,
       createdBy: currentUserId,
+      startAt: draft.startAt,
       dueAt: draft.dueAt,
       origin: "internal",
       archivedAt: null,
@@ -182,14 +183,30 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         priority: draft.priority,
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
         // ③ 親タスク（親子関係）。子は親と同じチーム（モーダルで固定済み）。
         ...(draft.parentId ? { parentTaskId: draft.parentId } : {}),
       });
+      // ③ ステータス: CreateTaskRequest は status を持たない（新規は todo 起点）。
+      // todo 以外を選んだら作成後に patch する。失敗しても作成は取り消さない。
+      let version = created.version;
+      if (draft.status !== "todo") {
+        try {
+          const patched = await updateTask(client, created.id, { version, status: draft.status });
+          version = patched.version;
+        } catch {
+          toast.show({
+            kind: "error",
+            title: "ステータスを設定できませんでした",
+            description: "タスクは作成済みです。詳細から設定し直せます。",
+          });
+        }
+      }
       // ③ 先行タスク（依存）。タスク作成後に別途反映（同じ親スコープ内のみ）。失敗しても作成は取り消さない。
       if (draft.dependsOnIds.length > 0) {
         try {
-          await replaceDependencies(client, created.id, { version: created.version, dependsOnIds: draft.dependsOnIds });
+          await replaceDependencies(client, created.id, { version, dependsOnIds: draft.dependsOnIds });
         } catch {
           toast.show({
             kind: "error",
