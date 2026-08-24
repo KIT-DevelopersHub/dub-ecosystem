@@ -74,7 +74,13 @@ jobs:
           if ! git diff --quiet -- deploy-state/; then
             git add deploy-state/demo-*.json
             git commit -m "chore(deploy): refresh per-feature demos on latest main [skip ci]"
-            git push
+            # main is a protected branch (PR + `確認した` label required), so a direct push from CI
+            # is rejected (GH006). These manifests are bookkeeping only — every demo is already live
+            # and was verified inline by verify-live — so the push is best-effort and must NEVER fail
+            # the run. A fully-refreshed fleet should report green even when the manifest push can't land.
+            if ! git push; then
+              echo "::warning::could not push refreshed manifests to protected main (GH006). Demos are live/verified regardless; deploy-state/demo-*.json left unchanged on main."
+            fi
           else
             echo "no manifest changes to commit"
           fi
