@@ -156,6 +156,12 @@ function toRow(
     progressPercent: progressOf(t.status),
     assigneeId: t.assigneeId,
     teamId: t.teamId ?? null,
+    // Stable creation-order basis for the task's ID number. The FE numbers tasks
+    // `<team code>-<global creation sequence>` by sorting rows on this attribute, so
+    // filtering/sorting the gantt never re-numbers a task. (`idSeqAt` — the team-change
+    // re-sequencing override — will project here once task-service adds that additive
+    // column; until then a team change re-numbers only in the client/mock.)
+    createdAt: t.createdAt,
     parentTaskId: h.parentOf.get(t.id) ?? null,
     depth: h.depthOf.get(t.id) ?? 0,
     hasChildren: isParent,

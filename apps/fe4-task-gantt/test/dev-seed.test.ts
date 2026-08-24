@@ -13,12 +13,16 @@ async function getDto(): Promise<gantt.GanttChartDTO> {
 }
 
 describe("dev-seed (real LMB conference data)", () => {
-  it("exposes the 7 real conference teams with colours", async () => {
+  it("exposes the 8 official conference teams with colours + 2-letter ID codes", async () => {
     const client = createDevClient();
     const res = await client.request<member.ListTeamsResponse>({ method: "GET", path: "/api/v1/teams" });
     const names = res.teams.map((t) => t.name).sort();
-    expect(names).toEqual(["会場", "会計", "全体進行", "集客告知", "スポンサー", "開発", "本部"].sort());
+    expect(names).toEqual(
+      ["統括", "法務会計", "会場", "当日進行", "スポンサー", "集客広報", "デザイン", "法人メンバー"].sort(),
+    );
     expect(res.teams.every((t) => typeof t.color === "string")).toBe(true);
+    // Every team carries its contractual 2-letter task-ID prefix code.
+    expect(res.teams.every((t) => typeof t.code === "string" && /^[A-Z]{2}$/.test(t.code!))).toBe(true);
   });
 
   it("renders the 41 work-packages + 128 WBS leaves as a two-level tree, each with a bar", async () => {

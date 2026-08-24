@@ -97,6 +97,9 @@ export function provisionalGanttRow(
     progressPercent: progressOf(t.status),
     assigneeId: t.assigneeId,
     teamId: t.teamId ?? null,
+    // Carry createdAt so the optimistic row sorts to the tail of the global creation
+    // sequence and shows its final ID number immediately (no jump when the row lands).
+    createdAt: t.createdAt,
     parentTaskId,
     depth: parentTaskId ? 1 : 0,
     hasChildren: false,

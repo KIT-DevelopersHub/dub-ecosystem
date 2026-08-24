@@ -2,106 +2,126 @@ import { describe, it, expect } from "vitest";
 import type { gantt } from "@dub/types";
 import {
   computeTaskNumbers,
-  sanitizePrefix,
   clampPadWidth,
-  DEFAULT_PREFIX,
   DEFAULT_PAD_WIDTH,
   MAX_PAD_WIDTH,
 } from "../src/domain/task-number";
 
-const row = (id: string, parentTaskId: string | null = null): gantt.GanttRow => ({
+// Row helper: `createdAt` fixes the creation-order rank; `team` is turned into the
+// 2-letter prefix by the resolver passed to computeTaskNumbers.
+const row = (
+  id: string,
+  createdAt: string | null = null,
+  team = "",
+  idSeqAt: string | null = null,
+): gantt.GanttRow => ({
   taskId: id,
   title: id,
   startsAt: null,
   endsAt: null,
   progressPercent: 0,
   assigneeId: null,
-  ...(parentTaskId ? { parentTaskId } : {}),
+  teamId: team || null,
+  ...(createdAt ? { createdAt } : {}),
+  ...(idSeqAt ? { idSeqAt } : {}),
 });
 
-describe("computeTaskNumbers", () => {
-  it("numbers a flat list AA-1, AA-2, AA-3 by display order", () => {
-    const n = computeTaskNumbers([row("a"), row("b"), row("c")], "AA");
-    expect(n.get("a")).toBe("AA-1");
-    expect(n.get("b")).toBe("AA-2");
-    expect(n.get("c")).toBe("AA-3");
-  });
+// Trivial resolver: the row's teamId IS the code (upper-cased) for these unit tests.
+const codeOf = (r: gantt.GanttRow) => (r.teamId ?? "").toUpperCase();
 
-  it("nests children as parent-number + sibling index (AA-1-1, AA-1-2, AA-2)", () => {
+describe("computeTaskNumbers — global creation-order + team prefix", () => {
+  it("numbers by creation order (createdAt), prefixed by team", () => {
     const rows = [
-      row("p1"),
-      row("c1", "p1"),
-      row("c2", "p1"),
-      row("p2"),
-      row("c3", "p2"),
+      row("a", "2026-01-01T00:00:00Z", "tk"),
+      row("b", "2026-01-02T00:00:00Z", "sp"),
+      row("c", "2026-01-03T00:00:00Z", "tk"),
     ];
-    const n = computeTaskNumbers(rows, "AA");
-    expect(n.get("p1")).toBe("AA-1");
-    expect(n.get("c1")).toBe("AA-1-1");
-    expect(n.get("c2")).toBe("AA-1-2");
-    expect(n.get("p2")).toBe("AA-2");
-    expect(n.get("c3")).toBe("AA-2-1");
+    const n = computeTaskNumbers(rows, codeOf);
+    expect(n.get("a")).toBe("TK-1");
+    expect(n.get("b")).toBe("SP-2");
+    expect(n.get("c")).toBe("TK-3");
   });
 
-  it("supports 3+ levels of depth", () => {
-    const rows = [row("a"), row("b", "a"), row("c", "b")];
-    const n = computeTaskNumbers(rows, "AA");
-    expect(n.get("a")).toBe("AA-1");
-    expect(n.get("b")).toBe("AA-1-1");
-    expect(n.get("c")).toBe("AA-1-1-1");
+  it("is INDEPENDENT of the incoming row order (stable under sort/filter)", () => {
+    const rows = [
+      row("a", "2026-01-01T00:00:00Z", "tk"),
+      row("b", "2026-01-02T00:00:00Z", "sp"),
+      row("c", "2026-01-03T00:00:00Z", "hk"),
+    ];
+    const forward = computeTaskNumbers(rows, codeOf);
+    const shuffled = computeTaskNumbers([rows[2]!, rows[0]!, rows[1]!], codeOf);
+    // Same numbers regardless of display order — this is the stability property.
+    for (const id of ["a", "b", "c"]) expect(shuffled.get(id)).toBe(forward.get(id));
+    expect(forward.get("a")).toBe("TK-1");
+    expect(forward.get("c")).toBe("HK-3");
   });
 
-  it("re-numbers when the order changes (order-dependent WBS)", () => {
-    const before = computeTaskNumbers([row("a"), row("b")], "AA");
-    const after = computeTaskNumbers([row("b"), row("a")], "AA");
-    expect(before.get("a")).toBe("AA-1");
-    expect(after.get("a")).toBe("AA-2");
-    expect(after.get("b")).toBe("AA-1");
+  it("filtering out rows keeps each remaining task's GLOBAL number", () => {
+    const all = [
+      row("a", "2026-01-01T00:00:00Z", "tk"),
+      row("b", "2026-01-02T00:00:00Z", "sp"),
+      row("c", "2026-01-03T00:00:00Z", "tk"),
+    ];
+    const full = computeTaskNumbers(all, codeOf);
+    // The caller computes over the FULL set, then looks up displayed rows — so a
+    // team filter that shows only "tk" tasks still reads TK-1 / TK-3 (not renumbered).
+    expect(full.get("a")).toBe("TK-1");
+    expect(full.get("c")).toBe("TK-3");
   });
 
-  it("honours a custom prefix and an empty prefix (bare code)", () => {
-    expect(computeTaskNumbers([row("a")], "P").get("a")).toBe("P-1");
-    expect(computeTaskNumbers([row("a"), row("b", "a")], "").get("b")).toBe("1-1");
+  it("idSeqAt overrides createdAt → team change moves a task to the tail", () => {
+    const rows = [
+      row("a", "2026-01-01T00:00:00Z", "tk"),
+      // 'b' was created 2nd but its team changed later (idSeqAt bumped) → now tail,
+      // renumbered under its new team code.
+      row("b", "2026-01-02T00:00:00Z", "hk", "2026-06-01T00:00:00Z"),
+      row("c", "2026-01-03T00:00:00Z", "sp"),
+    ];
+    const n = computeTaskNumbers(rows, codeOf);
+    expect(n.get("a")).toBe("TK-1");
+    expect(n.get("c")).toBe("SP-2");
+    expect(n.get("b")).toBe("HK-3"); // retired old ID; re-numbered at the tail
   });
 
-  it("falls back to a top-level number for an orphan (parent absent / forward ref)", () => {
-    // child listed with a parent that isn't in the row set → treated as top-level
-    const n = computeTaskNumbers([row("only", "missing")], "AA");
-    expect(n.get("only")).toBe("AA-1");
+  it("deterministic tie-break by taskId when the basis is equal/absent", () => {
+    const n = computeTaskNumbers([row("b"), row("a"), row("c")], codeOf);
+    expect(n.get("a")).toBe("1");
+    expect(n.get("b")).toBe("2");
+    expect(n.get("c")).toBe("3");
   });
 
-  it("does not crash on a self-referential parent (cycle-proof)", () => {
-    const n = computeTaskNumbers([row("x", "x")], "AA");
-    // parent not yet numbered when the row is visited → top-level
-    expect(n.get("x")).toBe("AA-1");
+  it("omits the prefix for a team-less (unresolvable) row", () => {
+    const n = computeTaskNumbers([row("a", "2026-01-01T00:00:00Z", "")], codeOf);
+    expect(n.get("a")).toBe("1");
   });
 });
 
 describe("computeTaskNumbers — zero padding", () => {
-  it("zero-pads each segment to a fixed width (4 -> AA-0001, AA-0001-0001)", () => {
-    const rows = [row("p1"), row("c1", "p1"), row("c2", "p1"), row("p2")];
-    const n = computeTaskNumbers(rows, "AA", 4);
-    expect(n.get("p1")).toBe("AA-0001");
-    expect(n.get("c1")).toBe("AA-0001-0001");
-    expect(n.get("c2")).toBe("AA-0001-0002");
-    expect(n.get("p2")).toBe("AA-0002");
+  const rows = Array.from({ length: 12 }, (_, i) =>
+    row(`t${String(i).padStart(2, "0")}`, `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`, "tk"),
+  );
+
+  it("zero-pads the number to a fixed width (4 -> TK-0001)", () => {
+    const n = computeTaskNumbers(rows, codeOf, 4);
+    expect(n.get("t00")).toBe("TK-0001");
+    expect(n.get("t11")).toBe("TK-0012");
   });
 
   it("does not truncate a number longer than the pad width", () => {
-    const rows = Array.from({ length: 12 }, (_, i) => row(`t${i}`));
-    const n = computeTaskNumbers(rows, "AA", 2);
-    expect(n.get("t0")).toBe("AA-01");
-    expect(n.get("t11")).toBe("AA-12");
+    const n = computeTaskNumbers(rows, codeOf, 2);
+    expect(n.get("t00")).toBe("TK-01");
+    expect(n.get("t11")).toBe("TK-12");
   });
 
-  it("width 0 or 1 leaves numbers unpadded", () => {
-    expect(computeTaskNumbers([row("a")], "AA", 0).get("a")).toBe("AA-1");
-    expect(computeTaskNumbers([row("a")], "AA", 1).get("a")).toBe("AA-1");
+  it("width 0 or 1 leaves the number unpadded", () => {
+    const one = [row("a", "2026-01-01T00:00:00Z", "tk")];
+    expect(computeTaskNumbers(one, codeOf, 0).get("a")).toBe("TK-1");
+    expect(computeTaskNumbers(one, codeOf, 1).get("a")).toBe("TK-1");
   });
 
-  it("padding works with an empty prefix (bare padded code)", () => {
-    const n = computeTaskNumbers([row("a"), row("b", "a")], "", 3);
-    expect(n.get("b")).toBe("001-001");
+  it("padding works with no prefix (bare padded number)", () => {
+    const n = computeTaskNumbers([row("a", "2026-01-01T00:00:00Z", "")], codeOf, 3);
+    expect(n.get("a")).toBe("001");
   });
 });
 
@@ -114,15 +134,5 @@ describe("clampPadWidth", () => {
   });
   it("default pad width is 4", () => {
     expect(DEFAULT_PAD_WIDTH).toBe(4);
-  });
-});
-
-describe("sanitizePrefix", () => {
-  it("strips whitespace and caps length", () => {
-    expect(sanitizePrefix("  A B  ")).toBe("AB");
-    expect(sanitizePrefix("ABCDEFGHIJK")).toBe("ABCDEFGH");
-  });
-  it("default prefix is AA", () => {
-    expect(DEFAULT_PREFIX).toBe("AA");
   });
 });
