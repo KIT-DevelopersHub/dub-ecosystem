@@ -1,0 +1,12 @@
+# Per-feature DEMO Worker for 判断99: 作成/発行モーダルの完全共通化(③) + ガント作成
+# の体感速度(#430). Separate Worker name so the shared `fe2-demo` slot and staging/
+# prod are never touched. Backend-free (VITE_DEMO=1 mock/seed).
+name = "dub-demo-modal-unify"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = true

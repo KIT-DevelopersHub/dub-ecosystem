@@ -1217,6 +1217,82 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         return r ? json(r) : notFound(`POST ${pathname}`);
       }
     }
+    // ③/#430 DEMO: create a task so the 作成/発行モーダルが実際に効き、ガントに楽観的に行が
+    // 生える様子を確認できる（実 backend は叩かない・in-session・reload でリセット）。
+    if (pathname === "/api/v1/tasks") {
+      const b = (body ?? {}) as Partial<task.CreateTaskRequest>;
+      const now = new Date().toISOString();
+      const id = `tsk_demo_${Date.now()}` as task.Task["id"];
+      const created: task.Task = {
+        id,
+        eventId: (b.eventId ?? null) as task.Task["eventId"],
+        title: b.title ?? "新規タスク",
+        description: b.description ?? null,
+        status: "todo",
+        priority: b.priority ?? "medium",
+        assigneeId: b.assigneeId ?? null,
+        teamId: b.teamId ?? null,
+        createdBy: ME_ID,
+        startAt: b.startAt ?? null,
+        dueAt: b.dueAt ?? null,
+        origin: "internal",
+        archivedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+      };
+      TASKS.unshift(created);
+      // Mirror onto the event's gantt so the bar shows up on refetch (parity with gantt-service).
+      const evKey = b.eventId ? String(b.eventId) : null;
+      if (evKey) {
+        const dto = GANTT[evKey] ?? (GANTT[evKey] = { eventId: evKey as gantt.GanttChartDTO["eventId"], rows: [], dependencies: [] });
+        dto.rows.push({
+          taskId: id,
+          title: created.title,
+          startsAt: created.startAt ?? null,
+          endsAt: created.dueAt ?? null,
+          progressPercent: 0,
+          assigneeId: created.assigneeId,
+          teamId: created.teamId ?? null,
+          ...(b.parentTaskId ? { parentTaskId: b.parentTaskId, depth: 1 } : {}),
+        } as gantt.GanttChartDTO["rows"][number]);
+      }
+      return json(created);
+    }
+    // ③/#430 DEMO: persist 先行タスク(依存) so the connector line survives the refetch.
+    {
+      const depId = seg(/^\/api\/v1\/tasks\/([^/]+)\/dependencies$/);
+      if (depId) {
+        const b = (body ?? {}) as { dependsOnIds?: string[] };
+        const t = TASKS.find((x) => x.id === depId);
+        const evKey = t?.eventId ? String(t.eventId) : null;
+        if (evKey && GANTT[evKey]) {
+          const dto = GANTT[evKey];
+          dto.dependencies = dto.dependencies.filter((d) => d.toTaskId !== depId);
+          for (const from of b.dependsOnIds ?? []) {
+            dto.dependencies.push({ id: `${from}->${depId}`, fromTaskId: from as gantt.GanttDependencyLine["fromTaskId"], toTaskId: depId as gantt.GanttDependencyLine["toTaskId"], type: "FS", lagDays: 0 });
+          }
+        }
+        return json({ taskId: depId, dependsOnIds: b.dependsOnIds ?? [] });
+      }
+    }
+    // ③ DEMO: accept a task attachment (echoes it back; in-session only).
+    {
+      const attId = seg(/^\/api\/v1\/tasks\/([^/]+)\/attachments$/);
+      if (attId) {
+        const b = (body ?? {}) as { kind?: string; name?: string; url?: string; mimeType?: string; sizeBytes?: number };
+        return json({
+          id: `att_demo_${Date.now()}`,
+          taskId: attId,
+          kind: b.kind ?? "url",
+          name: b.name ?? "添付",
+          url: b.url ?? "",
+          ...(b.mimeType ? { mimeType: b.mimeType } : {}),
+          ...(b.sizeBytes ? { sizeBytes: b.sizeBytes } : {}),
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
   }
 
   if (method === "PATCH") {
