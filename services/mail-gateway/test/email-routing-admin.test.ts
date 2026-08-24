@@ -170,3 +170,86 @@ describe("email-routing admin — rules CRUD", () => {
     expect(sends.audit[0]!.payload).toMatchObject({ action: "mail.email_routing.rule.create", result: "failure" });
   });
 });
+
+// A stub that answers the two-step issue flow: GET rules (list) then POST rule (create).
+// `existingWorkers` seeds the pre-existing rules' worker action targets; `onCreate`
+// captures the POST body so tests can assert what rule was created.
+function stubIssueCf(existingWorkers: string[], onCreate: (body: unknown) => void) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.includes("/email/routing/rules") && method === "GET") {
+        const rules = existingWorkers.map((w, i) => ({
+          id: `r${i}`,
+          name: `existing-${i}`,
+          enabled: true,
+          priority: 0,
+          matchers: [{ type: "literal", field: "to", value: `x${i}@developershub.jp` }],
+          actions: [{ type: "worker", value: [w] }],
+        }));
+        return ok(rules);
+      }
+      if (url.includes("/email/routing/rules") && method === "POST") {
+        onCreate(JSON.parse(String(init.body)));
+        return ok({ id: "r_new", name: "new", enabled: true, priority: 0, matchers: [], actions: [] });
+      }
+      throw new Error(`unexpected CF call ${method} ${url}`);
+    }),
+  );
+}
+
+describe("email-routing admin — issue receiving address (no forward destination)", () => {
+  it("routes a new address to the SAME Worker existing rules use (auto-detected), 201 + audit", async () => {
+    let created: any = null;
+    stubIssueCf(["dub-mail-gateway", "dub-mail-gateway", "other-worker"], (b) => (created = b));
+    const { env, sends } = wiredEnv();
+    const res = await app.fetch(
+      new Request("https://svc/mail/admin/email-routing/addresses/issue", {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ localPart: "newteam" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { address: string; destination: string | null; localPart: string };
+    expect(body.address).toBe("newteam@developershub.jp");
+    expect(body.destination).toBeNull(); // Worker-routed, no forward target
+    expect(created.matchers).toEqual([{ type: "literal", field: "to", value: "newteam@developershub.jp" }]);
+    expect(created.actions).toEqual([{ type: "worker", value: ["dub-mail-gateway"] }]); // most common
+    expect(sends.audit[0]!.payload).toMatchObject({ action: "mail.email_routing.address.issue", result: "success" });
+  });
+
+  it("falls back to the configured worker name when no rule routes to a Worker yet", async () => {
+    let created: any = null;
+    stubIssueCf([], (b) => (created = b)); // no existing worker rules
+    const { env } = wiredEnv({ CF_EMAIL_ROUTING_WORKER: "custom-inbox-worker" } as Partial<Env>);
+    const res = await app.fetch(
+      new Request("https://svc/mail/admin/email-routing/addresses/issue", {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ localPart: "info" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    expect(created.actions).toEqual([{ type: "worker", value: ["custom-inbox-worker"] }]);
+  });
+
+  it("rejects an invalid local part (400) before any CF call", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { env } = wiredEnv();
+    const res = await app.fetch(
+      new Request("https://svc/mail/admin/email-routing/addresses/issue", {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ localPart: "Bad Local Part!" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

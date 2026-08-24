@@ -56,6 +56,11 @@ export interface Env {
   CF_EMAIL_ROUTING_ZONE_ID?: string; // developershub.jp zone id (rules API)
   CF_EMAIL_ROUTING_ACCOUNT_ID?: string; // account id (destination addresses API)
   CF_EMAIL_ROUTING_ZONE_NAME?: string; // zone apex, default developershub.jp (anti-spoof matcher check)
+  // The Email Worker every issued receiving address is routed to (Worker action target),
+  // default "dub-mail-gateway" (this service's deployed name). Address issuance no longer
+  // asks for a forward destination — a new address is bound to the SAME Worker existing
+  // rules use, auto-detected from live rules and falling back to this constant.
+  CF_EMAIL_ROUTING_WORKER?: string;
 
   // --- send resilience tuning (non-secret [vars]; optional, sane defaults) ---
   MAIL_SEND_MAX_ATTEMPTS?: string; // integer 1..6 (default 3)
