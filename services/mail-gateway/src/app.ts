@@ -23,7 +23,7 @@ import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, type MailScope } from "./repo";
+import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, markInboundUnread, upsertMailbox, upsertUserFlags, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -170,6 +170,16 @@ export function createApp() {
     const { found } = await markInboundRead(dbOf(c), c.req.param("id"), await scopeOf(c));
     if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json({ read: true } satisfies mail.MailMessageState);
+  });
+
+  // Mark a message UNREAD again (Gmail's "未読にする"). The exact inverse of /read:
+  // idempotent (re-issuing is a no-op), same mail:read scope + owner fail-close via the
+  // ext.use("/messages/*", withAuth("mail:read")) guard, so a user can only flip their own
+  // (or, under oversight, any) message and a foreign/unknown id 404s.
+  ext.post("/messages/:id/unread", async (c) => {
+    const { found } = await markInboundUnread(dbOf(c), c.req.param("id"), await scopeOf(c));
+    if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
+    return c.json({ read: false } satisfies mail.MailMessageState);
   });
 
   // ---- Sent folder (mail:read): the send-log projected as a Gmail-style Sent list +

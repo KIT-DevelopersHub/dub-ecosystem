@@ -29,17 +29,39 @@ export function useMailSync(): void {
   const flagBaseline = useRef<Map<string, { starred: boolean; archived: boolean; trashed: boolean }>>(new Map());
   const flagsReady = useRef(false);
 
+  // Server-persisted read/unread (this slice). `readBaseline` is the last read-state we KNOW
+  // the server holds per thread (true = every received message read); the persist effect
+  // below POSTs only the deltas — /messages/:id/read when a thread becomes read,
+  // /messages/:id/unread when it is flipped back to unread. Seeded from the hydrated list
+  // (which carries each message's read flag) and gated by `readReady` so the reload itself
+  // never POSTs a spurious flip. This covers EVERY read-toggle path (row hover / bulk /
+  // reading-pane header / open-thread) uniformly with no change to the dispatch sites.
+  const readBaseline = useRef<Map<string, boolean>>(new Map());
+  const readReady = useRef(false);
+
   // Load inbox + sent on mount and on every requested sync (post-send). A failure leaves
   // the current threads in place (empty on first load) rather than blowing up the pane.
   useEffect(() => {
     let alive = true;
     flagsReady.current = false; // pause flag persistence while we (re)load
+    readReady.current = false; // pause read persistence while we (re)load
     void (async () => {
       try {
         const [inbox, sent] = await Promise.all([api.listInbox({ limit: 50 }), api.listSent({ limit: 50 })]);
         if (!alive) return;
-        dispatch({ type: "HYDRATE", threads: combineThreads(inbox.items, sent.items, me) });
+        const combined = combineThreads(inbox.items, sent.items, me);
+        dispatch({ type: "HYDRATE", threads: combined });
         loaded.current.clear(); // force the open thread to re-fetch its full body (+ any new reply)
+        // Arm read persistence with the server's read-state as the baseline (a received
+        // thread is "read" when every received message is read), so hydrating is not itself
+        // seen as a change to push back.
+        const rbase = new Map<string, boolean>();
+        for (const t of combined) {
+          const recv = t.messages.filter((m) => !m.outbound);
+          if (recv.length > 0) rbase.set(t.id, recv.every((m) => m.read));
+        }
+        readBaseline.current = rbase;
+        readReady.current = true;
         // Restore persisted flags on top of the freshly hydrated threads, then arm the
         // persist effect with the server's flag-state as the baseline (so applying them is
         // not itself seen as a change to push back).
@@ -75,6 +97,39 @@ export function useMailSync(): void {
     }
   }, [threads, api]);
 
+  // Persist read/unread changes (optimistic). Whenever a received thread's read-state
+  // diverges from what the server last knew, POST the delta (markRead / markUnread on each
+  // received message) and advance the baseline. On failure we roll BOTH the baseline and the
+  // optimistic UI back and surface a toast ([[optimistic-ui-principle]]) — the exact failure
+  // path the star/archive slice omits, because a silently-lost unread would look persisted
+  // yet reappear on reload. markRead/markUnread are idempotent, so a redundant call is safe.
+  useEffect(() => {
+    if (!readReady.current) return;
+    for (const t of threads) {
+      const recv = t.messages.filter((m) => !m.outbound);
+      if (recv.length === 0) continue; // sent-only thread: no server read-state to track
+      const cur = recv.every((m) => m.read);
+      const prev = readBaseline.current.get(t.id);
+      if (prev === undefined) {
+        readBaseline.current.set(t.id, cur); // first sighting (e.g. via getThread): adopt, don't POST
+        continue;
+      }
+      if (cur === prev) continue;
+      readBaseline.current.set(t.id, cur);
+      const ids = recv.map((m) => m.id);
+      const threadId = t.id;
+      void (async () => {
+        try {
+          await Promise.all(ids.map((id) => (cur ? api.markRead(id) : api.markUnread(id))));
+        } catch {
+          readBaseline.current.set(threadId, prev); // undo the optimistic baseline advance
+          dispatch({ type: "SET_READ", ids: [threadId], read: prev }); // roll the UI back
+          dispatch({ type: "SHOW_TOAST", message: cur ? "既読にできませんでした" : "未読に戻せませんでした" });
+        }
+      })();
+    }
+  }, [threads, api, dispatch]);
+
   // Lazily fill the full body when a thread is opened (list APIs carry only a snippet).
   useEffect(() => {
     if (!openThreadId || loaded.current.has(openThreadId)) return;
@@ -89,12 +144,10 @@ export function useMailSync(): void {
           const detail = await api.getSent(thread.id);
           if (alive) dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages: [sentDetailToMessage(detail, me)] });
         } else {
-          // Persist read-state on the server so it survives a reload (mirrors InboxScreen).
-          // Opening reads the whole thread; OPEN_THREAD already flipped the local flags, so
-          // we mark every received message read server-side (markRead is idempotent, and a
-          // maillog id would 404). Best-effort — a failure never blocks opening the thread.
+          // Read-state is persisted by the read-persist effect above: OPEN_THREAD already
+          // flipped the thread's local read flags, which the effect POSTs as markRead. We
+          // only need the full bodies here.
           const known = thread.messages;
-          for (const m of known) if (!m.outbound) void api.markRead(m.id).catch(() => undefined);
           const full = await api.getThread(thread.id);
           // getThread returns RECEIVED messages only. Preserve our own replies (folded Sent
           // rows, outbound=true) that it omits, so a sent reply stays visible in the thread

@@ -438,6 +438,25 @@ export async function markInboundRead(db: DbClient, id: string, scope: MailScope
   return { found: true };
 }
 
+/** Mark a message UNREAD (idempotent): clears read_at back to NULL — the exact inverse of
+ *  markInboundRead. Same fail-closed owner scope (a user can never flip another account's
+ *  read state; a foreign/unknown id reads as not-found so the route 404s) and the same
+ *  mail:read_all oversight bypass. Only touches an already-read row (WHERE read_at IS NOT
+ *  NULL) so re-issuing on an already-unread message is a no-op. Returns whether the message
+ *  exists FOR THIS OWNER. */
+export async function markInboundUnread(db: DbClient, id: string, scope: MailScope): Promise<{ found: boolean }> {
+  const readAll = isReadAll(scope);
+  const selSql = readAll ? `SELECT id FROM mail_inbound WHERE id = ?` : `SELECT id FROM mail_inbound WHERE id = ? AND owner_user_id = ?`;
+  const row = readAll ? await db.first<{ id: string }>(selSql, id) : await db.first<{ id: string }>(selSql, id, scope);
+  if (!row) return { found: false };
+  if (readAll) {
+    await db.run(`UPDATE mail_inbound SET read_at = NULL WHERE id = ? AND read_at IS NOT NULL`, id);
+  } else {
+    await db.run(`UPDATE mail_inbound SET read_at = NULL WHERE id = ? AND owner_user_id = ? AND read_at IS NOT NULL`, id, scope);
+  }
+  return { found: true };
+}
+
 export async function listInbound(
   db: DbClient,
   q: { ownerUserId: MailScope; threadId?: string; cursor?: string; limit: number },

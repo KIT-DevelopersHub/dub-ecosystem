@@ -195,6 +195,14 @@ function createMailMock() {
       if (found) found.read = true;
       return json({ read: true });
     }
+    // mark-unread (inverse of /read). The read flag lives on the in-memory row, so a
+    // subsequent GET /messages re-list keeps it unread (poll-safe within the session).
+    if (method === "POST" && /^\/api\/v1\/mail\/messages\/([^/]+)\/unread$/.test(pathname)) {
+      const id = /messages\/([^/]+)\/unread$/.exec(pathname)![1]!;
+      const found = received.find((r) => r.id === decodeURIComponent(id));
+      if (found) found.read = false;
+      return json({ read: false });
+    }
     // thread detail (ThreadDetail): every received message in the thread, bodies included.
     {
       const m = /^\/api\/v1\/mail\/threads\/([^/]+)$/.exec(pathname);
