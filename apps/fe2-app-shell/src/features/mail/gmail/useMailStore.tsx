@@ -57,6 +57,7 @@ export type MailAction =
   | { type: "SET_READ"; ids: string[]; read: boolean }
   | { type: "ARCHIVE"; ids: string[] }
   | { type: "TRASH"; ids: string[] }
+  | { type: "RESTORE"; ids: string[] }
   | { type: "TOGGLE_LABEL"; id: string; label: string }
   | { type: "TOGGLE_CHECK"; id: string }
   | { type: "CHECK_ALL"; ids: string[] }
@@ -122,6 +123,23 @@ export function reducer(state: MailState, action: MailAction): MailState {
         ...state,
         undo: { label: `${ids.size}件のスレッドをゴミ箱に移動しました`, prevThreads: state.threads },
         threads: state.threads.map((t) => (ids.has(t.id) ? { ...t, folder: "trash" } : t)),
+        checked: new Set(),
+        openThreadId: state.openThreadId && ids.has(state.openThreadId) ? null : state.openThreadId,
+      };
+    }
+    case "RESTORE": {
+      // Move threads OUT of Trash back to their home folder. A thread whose messages are
+      // all our own sends returns to "sent"; anything with a received message returns to
+      // the inbox. The persist effect (useMailSync) sees folder!=="trash" and POSTs
+      // setFlags(trashed:false), so the restore survives a reload (改善#8 flag store). The
+      // undo snapshot lets the toast bounce it straight back to Trash.
+      const ids = new Set(action.ids);
+      return {
+        ...state,
+        undo: { label: `${ids.size}件のスレッドを受信トレイに戻しました`, prevThreads: state.threads },
+        threads: state.threads.map((t) =>
+          ids.has(t.id) ? { ...t, folder: t.messages.every((m) => m.outbound) ? "sent" : "inbox" } : t,
+        ),
         checked: new Set(),
         openThreadId: state.openThreadId && ids.has(state.openThreadId) ? null : state.openThreadId,
       };

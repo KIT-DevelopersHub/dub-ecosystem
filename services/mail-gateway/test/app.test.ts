@@ -274,6 +274,28 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
     expect(await get.json()).toEqual({ items: [{ threadId: "thr_1", starred: true, archived: false, trashed: false }] });
   });
 
+  it("trash then restore round-trips the trashed flag (ゴミ箱→復元), body never deleted", async () => {
+    const { env } = makeEnv();
+    const h = headers({ "x-dub-user-id": "usr_carol" });
+    // Trash: the per-user soft-delete. Only this user's flag changes; no message row is touched.
+    const trash = await app.fetch(new Request("https://svc/mail/flags/thr_trash", { method: "POST", headers: h, body: JSON.stringify({ trashed: true }) }), env);
+    expect(await trash.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: true });
+    // Restore: flips the same personal flag back off.
+    const restore = await app.fetch(new Request("https://svc/mail/flags/thr_trash", { method: "POST", headers: h, body: JSON.stringify({ trashed: false }) }), env);
+    expect(await restore.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: false });
+    // Persisted state reads back as not-trashed (survives a reload).
+    const get = await app.fetch(new Request("https://svc/mail/flags", { headers: h }), env);
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_trash", starred: false, archived: false, trashed: false }] });
+  });
+
+  it("one user's trash is invisible to another (admin/other sees mail unaffected)", async () => {
+    const { env } = makeEnv();
+    await app.fetch(new Request("https://svc/mail/flags/thr_shared", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ trashed: true }) }), env);
+    // Another account (e.g. an admin viewing the same conversation) has no trashed flag for it.
+    const other = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_admin" }) }), env);
+    expect(await other.json()).toEqual({ items: [] });
+  });
+
   it("PATCH semantics: a later archive keeps the earlier star", async () => {
     const { env } = makeEnv();
     const h = headers({ "x-dub-user-id": "usr_bob" });

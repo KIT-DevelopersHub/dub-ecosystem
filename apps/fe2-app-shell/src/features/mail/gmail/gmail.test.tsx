@@ -110,6 +110,27 @@ describe("mail store reducer", () => {
     expect(next.threads.find((t) => t.id === id)!.folder).toBe("trash");
   });
 
+  it("restore moves a trashed received thread back to the inbox (with undo)", () => {
+    const s = base();
+    const id = s.threads.find((t) => t.folder === "inbox")!.id;
+    const trashed = reducer(s, { type: "TRASH", ids: [id] });
+    expect(trashed.threads.find((t) => t.id === id)!.folder).toBe("trash");
+    const restored = reducer(trashed, { type: "RESTORE", ids: [id] });
+    expect(restored.threads.find((t) => t.id === id)!.folder).toBe("inbox");
+    // Undo bounces it straight back to Trash.
+    expect(restored.undo).not.toBeNull();
+    expect(reducer(restored, { type: "UNDO" }).threads.find((t) => t.id === id)!.folder).toBe("trash");
+  });
+
+  it("restore returns an all-outbound (sent) thread to the Sent folder, not the inbox", () => {
+    const s = base();
+    const sent = reducer(s, { type: "SEND", to: [{ email: "a@x.com" }], cc: [], subject: "Hi", body: "yo" });
+    const id = sent.threads[0]!.id;
+    const trashed = reducer(sent, { type: "TRASH", ids: [id] });
+    const restored = reducer(trashed, { type: "RESTORE", ids: [id] });
+    expect(restored.threads.find((t) => t.id === id)!.folder).toBe("sent");
+  });
+
   it("SEND prepends a new thread into the Sent folder", () => {
     const s = base();
     const n = s.threads.length;
