@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
-import { Button, ErrorDialog, useToast } from "@dub/ui";
+import { Button, ConfirmDialog, ErrorDialog, useToast } from "@dub/ui";
 import type { ErrorDialogDetail } from "@dub/ui";
-import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
+import { useUndoRedo, useUndoRedoHotkeys, type UndoConfirm } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
 import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
@@ -124,6 +124,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
   // hotkey is off for read-only users and never steals a focused field's own undo.
   const history = useUndoRedo();
+  // When the next undo is a HEAVY inverse (delete → restore, which re-writes to the
+  // server), the command carries a `confirm` descriptor. We hold it here to raise a
+  // ConfirmDialog before running the undo (判断: 削除の取り消しは即実行せず一段確認).
+  // Non-delete undos have no `confirm`, so they still reverse instantly.
+  const [pendingUndo, setPendingUndo] = useState<UndoConfirm | null>(null);
   // Coalesce the "nothing to undo/redo" notice so a held-down ⌘Z on an empty stack
   // (which returns synchronously — no API round-trip to rate-limit it) can't spam the
   // toast. A successful undo/redo awaits its API inverse, so those are naturally paced.
@@ -134,16 +139,26 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     lastBoundaryToast.current = now;
     toast.show({ kind: "info", title: message });
   };
-  // Run undo/redo AND tell the user what happened (判断: 戻した/やり直したのが見えるように).
-  // Reads the label of the command about to be reversed (undoLabel/redoLabel) so the
-  // toast names the operation ("並び替えを元に戻しました"); falls back to a generic line.
-  // Both the hotkeys and the header buttons route through these, so the copy is one place.
-  const runUndo = async (): Promise<boolean> => {
+  // Actually reverse the top command AND tell the user what happened (判断: 戻したのが
+  // 見えるように). Reads the label about to be reversed so the toast names the operation
+  // ("並び替えを元に戻しました"); falls back to a generic line.
+  const performUndo = async (): Promise<boolean> => {
     const label = history.undoLabel;
     const ok = await history.undo();
     if (ok) toast.show({ kind: "info", title: label ? `${label}を元に戻しました` : "元に戻しました" });
     else notifyBoundary("これ以上戻せません");
     return ok;
+  };
+  // Undo entry point for BOTH the hotkey and the header button, so keyboard and click
+  // behave identically. A command that requests confirmation (delete-restore) opens the
+  // dialog instead of reversing; every other command reverses immediately.
+  const runUndo = async (): Promise<boolean> => {
+    const top = history.peekUndo();
+    if (top?.confirm) {
+      setPendingUndo(top.confirm);
+      return false;
+    }
+    return performUndo();
   };
   const runRedo = async (): Promise<boolean> => {
     const label = history.redoLabel;
@@ -851,9 +866,43 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     });
   };
 
+  // ---- delete + its undo (restore) ----
+  // Delete is a SOFT delete (server archives the row; parent/assignee/dependencies are
+  // preserved), so its inverse is a真の復元 — un-archiving the same task via the restore
+  // endpoint, not a re-create. Both directions are optimistic + reconciled.
+
+  // Raw delete — the reversible primitive the delete action and a redo both re-issue.
+  const applyDeleteRaw = async (id: common.TaskId): Promise<boolean> => {
+    gantt.removeRowOptimistic(id);
+    const ok = await store.removeTask(client, id);
+    if (ok) {
+      await store.loadAll(client, query);
+      await gantt.refetchFresh();
+    } else {
+      void gantt.refetchFresh(); // delete failed — restore the bar (reason surfaced by the store)
+    }
+    return ok;
+  };
+
+  // Raw restore — un-archives the task on the server so the row truly returns, seeding
+  // the snapshot optimistically for a snappy undo, then reconciling to server truth.
+  const applyRestoreRaw = async (snapshot: task.Task, row: ganttNs.GanttRow | null): Promise<boolean> => {
+    if (row) gantt.upsertRowOptimistic(row);
+    const ok = await store.restoreTask(client, snapshot.id, snapshot);
+    if (ok) {
+      await store.loadAll(client, query);
+      await gantt.refetchFresh();
+    } else {
+      gantt.removeRowOptimistic(snapshot.id); // restore failed — drop it again (reason surfaced)
+      void gantt.refetchFresh();
+    }
+    return ok;
+  };
+
   const onDeleteDetail = () => {
     if (!selectedTask) return;
-    const id = selectedTask.id;
+    const snapshot = selectedTask;
+    const id = snapshot.id;
     // Guard (defense-in-depth over the panel's own block): never delete a task that
     // still has live children. Deleting it would orphan the children and the read model
     // would silently re-parent them under the previous row. Block + explain instead of
@@ -866,18 +915,30 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       });
       return;
     }
+    // Snapshot the bar row so undo can re-seed it instantly (reconcile fixes any drift).
+    const row = gantt.data?.rows.find((r) => r.taskId === id) ?? null;
     // Optimistic: close the panel + drop the bar instantly; the store removes the
     // row immediately and restores it on failure (with the reason surfaced).
     setSelected(null);
-    gantt.removeRowOptimistic(id);
-    void store.removeTask(client, id).then(async (ok) => {
-      if (ok) {
-        feedback.success("タスクを削除しました");
-        await store.loadAll(client, query);
-        await gantt.refetchFresh();
-      } else {
-        void gantt.refetchFresh(); // delete failed — restore the bar (reason surfaced by the store)
-      }
+    void applyDeleteRaw(id).then((ok) => {
+      if (ok) feedback.success("タスクを削除しました");
+    });
+    // Record it as an undoable command. `confirm` makes Ctrl/⌘-Z (and the toolbar 元に戻す)
+    // ask before restoring — delete is heavy, so we never un-delete silently.
+    history.push({
+      label: "タスクの削除",
+      confirm: {
+        title: "削除を元に戻しますか？",
+        message: `「${snapshot.title}」を復元します。よろしいですか？`,
+        confirmLabel: "戻す",
+        cancelLabel: "キャンセル",
+      },
+      undo: async () => {
+        await applyRestoreRaw(snapshot, row);
+      },
+      redo: async () => {
+        await applyDeleteRaw(id);
+      },
     });
   };
 
@@ -1213,6 +1274,25 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onCreateChild={onCreateChild}
           onCreatePredecessor={onCreatePredecessor}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {/* Confirm before undoing a delete (restore). Same @dub/ui ConfirmDialog tone as
+          the other confirm surfaces; keyboard (Ctrl/⌘-Z) and the toolbar 元に戻す both
+          route here, so the two paths behave identically. 戻す runs the actual restore. */}
+      {pendingUndo && (
+        <ConfirmDialog
+          open
+          title={pendingUndo.title ?? "元に戻しますか？"}
+          message={pendingUndo.message}
+          confirmLabel={pendingUndo.confirmLabel ?? "戻す"}
+          cancelLabel={pendingUndo.cancelLabel ?? "キャンセル"}
+          onConfirm={async () => {
+            await performUndo(); // keep the dialog (loading) until the restore resolves
+            setPendingUndo(null);
+          }}
+          onCancel={() => setPendingUndo(null)}
+          testId="fe4-undo-confirm"
         />
       )}
 
