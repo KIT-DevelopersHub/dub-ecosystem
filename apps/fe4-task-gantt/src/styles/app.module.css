@@ -421,6 +421,13 @@
   transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
+/* marquee multi-select: tint the left-pane row + a brand left edge so the list and
+   the bars agree on what's selected. */
+.tlRowSelected,
+.tlRowSelected:hover {
+  background: var(--dub-color-brand-100, var(--dub-color-surface-sunken));
+  box-shadow: inset 3px 0 0 0 var(--dub-color-brand-500);
+}
 @media (prefers-reduced-motion: reduce) {
   .tlRow { transition: none; }
 }
@@ -465,6 +472,42 @@
 }
 .tlRowOverlay .tlRowDrag { opacity: 0.9; cursor: grabbing; }
 .tlRowOverlay .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ⑤a group drag: the OTHER selected rows dim in place while their clones ride the
+   floating stack, so the whole marquee selection reads as "picked up" together (not
+   just the grabbed row). Honoured against reduced-motion (opacity is instant there). */
+.tlRowLifting { opacity: 0.4; }
+
+/* ⑤a group-drag floating stack: every selected row clones into a small deck under the
+   cursor. Each clone keeps the row-card look (.tlRowOverlay); a slight negative gap
+   overlaps them into a tidy stack, and a count badge names how many are moving. */
+.tlRowOverlayStack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tlRowOverlayStack .tlRowOverlay {
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.35);
+}
+.tlRowOverlayCount {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 1;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-on-brand, #fff);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
 
 /* ---- sort grouping brackets (right edge of the task list) ---- */
 /* A per-run vertical bracket that hugs the right edge of each contiguous same-group
@@ -845,6 +888,58 @@
 .barCancelled .barLabel, .barCancelled .barLabelOut { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
 .barDragging { cursor: grabbing; z-index: 6; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
+
+/* marquee multi-select highlight: a brand ring + faint wash so a selected bar reads
+   as "picked" over any status fill, without hiding its own colour. */
+.barSelected {
+  z-index: 5;
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dub-color-brand-500) 22%, transparent);
+}
+
+/* the marquee rectangle the user drags out over the empty canvas */
+.tlMarquee {
+  position: absolute;
+  z-index: 7;
+  border: 1px solid var(--dub-color-brand-500);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
+  border-radius: var(--dub-radius-sm, 4px);
+  pointer-events: none;
+}
+
+/* selection action bar (below the chart) — count + key hints + delete/clear */
+.tlSelectionBar {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3, 12px);
+  margin-top: var(--dub-space-2, 8px);
+  padding: var(--dub-space-2, 8px) var(--dub-space-3, 12px);
+  border: 1px solid var(--dub-color-brand-500);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-brand-100, var(--dub-color-surface-sunken));
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+}
+.tlSelectionCount { font-weight: var(--dub-font-weight-bold, 700); color: var(--dub-color-brand-700, var(--dub-color-brand-600)); }
+.tlSelectionHint { color: var(--dub-color-text-secondary); flex: 1 1 auto; }
+.tlSelectionDelete,
+.tlSelectionClear {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-radius: var(--dub-radius-sm, 6px);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  cursor: pointer;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+}
+.tlSelectionDelete {
+  border-color: var(--dub-color-danger-500, #d92d20);
+  color: var(--dub-color-danger-600, #d92d20);
+}
+.tlSelectionDelete:hover { background: var(--dub-color-danger-100, var(--dub-color-surface-sunken)); }
+.tlSelectionClear:hover { background: var(--dub-color-surface-sunken); }
 
 /* Parent (work-package) bars render like any other task bar — the hollow "bracket
    summary" style was reverted per feedback #97 (見づらい). Rollup still applies, so

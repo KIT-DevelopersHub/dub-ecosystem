@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ToastProvider } from "@dub/ui";
 import type { gateway } from "@dub/types";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { AuthProvider } from "../auth/AuthProvider.tsx";
@@ -14,6 +15,12 @@ const ME: gateway.MeResponse = {
   orgId: "org_devhub",
   permissions: [],
   sessionExpiresAt: Date.now() + 60_000,
+};
+
+const EMPTY_PARTICIPATION = {
+  lastName: null, firstName: null, lastNameKana: null, firstNameKana: null,
+  lastNameRomaji: null, firstNameRomaji: null, schoolEmail: null, gmail: null,
+  phone: null, grade: null, department: null, desiredActivity: null, note: null,
 };
 
 function api(): ApiClient {
@@ -104,54 +111,61 @@ describe("AppShellLayout", () => {
     expect(screen.getByText("Chat")).toBeInTheDocument();
   });
 
-  it("hides パスワード変更 behind the 設定 (⚙) menu, opening the dialog from inside it", async () => {
+  it("hides アカウント設定 behind the 設定 (⚙) menu, opening the dialog (with nested パスワード変更) from inside it", async () => {
     // The self-settings导线 only mounts when a shared api-client is wired (showAccount),
     // so this case passes `api` to the layout — unlike renderShell().
     const changePassword = vi.fn(() => Promise.resolve());
     const shellApi = {
-      auth: { me: () => Promise.resolve(ME), changePassword },
+      auth: { me: () => Promise.resolve(ME), changePassword, updateProfile: vi.fn(() => Promise.resolve({ displayName: ME.user.displayName, avatarUrl: null })), getSelfParticipation: vi.fn(() => Promise.resolve(EMPTY_PARTICIPATION)), updateSelfParticipation: vi.fn((p) => Promise.resolve(p)) },
     } as unknown as ApiClient;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
-        <AuthProvider api={shellApi}>
-          <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={vi.fn()}>
-            <div data-testid="outlet">content</div>
-          </AppShellLayout>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider api={shellApi}>
+            <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={vi.fn()}>
+              <div data-testid="outlet">content</div>
+            </AppShellLayout>
+          </AuthProvider>
+        </ToastProvider>
       </QueryClientProvider>,
     );
-    // The password-change trigger is no longer bare in the header — it lives inside
-    // the 設定 dropdown. Closed menu => the item is not shown.
+    // The account-settings trigger is not bare in the header — it lives inside the 設定
+    // dropdown. Closed menu => the item is not shown.
     expect(await screen.findByTestId("fe2-settings-menu-trigger")).toBeInTheDocument();
-    expect(screen.queryByTestId("fe2-change-password-open")).not.toBeInTheDocument();
-    // Open 設定 -> the パスワード変更 item appears; clicking it opens the existing dialog.
+    expect(screen.queryByTestId("fe2-account-settings-open")).not.toBeInTheDocument();
+    // Open 設定 -> アカウント設定 appears; clicking it opens the account dialog. パスワード変更
+    // is unified INSIDE that dialog (a パスワードを変更 button opening the existing dialog).
     await userEvent.click(screen.getByTestId("fe2-settings-menu-trigger"));
-    const item = screen.getByTestId("fe2-change-password-open");
-    expect(item).toHaveTextContent("パスワード変更");
+    const item = screen.getByTestId("fe2-account-settings-open");
+    expect(item).toHaveTextContent("アカウント設定");
     await userEvent.click(item);
+    expect(await screen.findByTestId("fe2-account-settings")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe2-account-password-open"));
     expect(await screen.findByTestId("fe2-change-password")).toBeInTheDocument();
   });
 
-  it("puts ログアウト inside the 設定 menu as a danger item below パスワード変更", async () => {
+  it("puts ログアウト inside the 設定 menu as a danger item below アカウント設定", async () => {
     const shellApi = {
-      auth: { me: () => Promise.resolve(ME), changePassword: vi.fn(() => Promise.resolve()) },
+      auth: { me: () => Promise.resolve(ME), changePassword: vi.fn(() => Promise.resolve()), updateProfile: vi.fn(() => Promise.resolve({ displayName: ME.user.displayName, avatarUrl: null })), getSelfParticipation: vi.fn(() => Promise.resolve(EMPTY_PARTICIPATION)), updateSelfParticipation: vi.fn((p) => Promise.resolve(p)) },
     } as unknown as ApiClient;
     const onLogout = vi.fn();
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
-        <AuthProvider api={shellApi}>
-          <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={onLogout}>
-            <div data-testid="outlet">content</div>
-          </AppShellLayout>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider api={shellApi}>
+            <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={onLogout}>
+              <div data-testid="outlet">content</div>
+            </AppShellLayout>
+          </AuthProvider>
+        </ToastProvider>
       </QueryClientProvider>,
     );
     await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
-    // Both items present; logout is danger-toned and ordered AFTER password change.
+    // Both items present; logout is danger-toned and ordered AFTER account settings.
     const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
-    expect(items).toEqual(["fe2-change-password-open", "fe2-logout"]);
+    expect(items).toEqual(["fe2-account-settings-open", "fe2-logout"]);
     const logout = screen.getByTestId("fe2-logout");
     expect(logout).toHaveAttribute("data-tone", "danger");
     // A separator divides the safe settings from the 離脱 action.
