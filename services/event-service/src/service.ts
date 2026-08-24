@@ -11,6 +11,9 @@ import type {
   UpdateActionRequest,
   ListActionsResponse,
   ListParticipantsResponse,
+  EventDetailsRow,
+  EventDetailsResponse,
+  SaveEventDetailsRequest,
   Keyset,
 } from "./types";
 import {
@@ -22,6 +25,8 @@ import {
   toEventDetail,
   encodeCursor,
   decodeCursor,
+  normalizeEventDetails,
+  EMPTY_EVENT_DETAILS,
   DEFAULT_LIMIT,
   MAX_LIMIT,
   INCLUDE_ACTIONS_CAP,
@@ -243,6 +248,47 @@ export class EventService {
     for (const a of actions) set.add(a.createdBy);
     for (const u of taskAssignees) set.add(u);
     return { userIds: [...set] };
+  }
+
+  // ---- event details (free-form "何でも貯める" store) ----
+  async getEventDetails(_ctx: ReqCtx, id: common.EventId): Promise<EventDetailsResponse> {
+    await this.loadEvent(id); // 404 if missing / cross-org
+    const row = await this.deps.repo.getEventDetails(id);
+    if (!row) {
+      return { eventId: id, data: { ...EMPTY_EVENT_DETAILS }, version: 0, updatedAt: null };
+    }
+    return { eventId: id, data: row.data, version: row.version, updatedAt: row.updatedAt };
+  }
+
+  async saveEventDetails(
+    ctx: ReqCtx,
+    id: common.EventId,
+    body: SaveEventDetailsRequest,
+  ): Promise<EventDetailsResponse> {
+    if (typeof body.version !== "number") {
+      throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    }
+    const ev = await this.loadEvent(id);
+    if (ev.archivedAt) throw errArchivedImmutable(id);
+
+    const current = await this.deps.repo.getEventDetails(id);
+    const currentVersion = current?.version ?? 0;
+    if (body.version !== currentVersion) throw errVersionConflict(id);
+
+    const next: EventDetailsRow = {
+      eventId: id,
+      data: normalizeEventDetails(body.data),
+      version: currentVersion + 1,
+      updatedBy: ctx.userId,
+      updatedAt: this.deps.now(),
+    };
+    const ok = await this.deps.repo.upsertEventDetails(next, currentVersion);
+    if (!ok) throw errVersionConflict(id);
+
+    await this.auditWrite(ctx, "event.event.details_updated", "event", id, {
+      version: next.version,
+    });
+    return { eventId: id, data: next.data, version: next.version, updatedAt: next.updatedAt };
   }
 
   // ---- actions (hierarchy: only created under an existing, non-archived event) ----
