@@ -169,6 +169,6 @@ export { ChatService } from "./service";
 export { createD1ChatRepo } from "./d1-repo";
 export { InMemoryChatRepo } from "./memory-repo";
 export { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
-export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION } from "./schema";
+export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SETTINGS_PROTECT_REACTED_MIGRATION } from "./schema";
 export { signWsTicket, verifyWsTicket, ticketExpiryMs } from "./wsticket";
 export type { AppDeps } from "./types";

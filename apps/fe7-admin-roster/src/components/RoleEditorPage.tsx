@@ -2,11 +2,13 @@ import { useMemo, useState } from "react";
 import type { identity } from "@dub/types";
 import { PageHeader, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { PermissionMatrix } from "./PermissionMatrix";
-import { useRoles, usePermissionCatalog, useCreateRole, useUpdateRole } from "../hooks/useRosterApi";
+import { useRoles, usePermissionCatalog, useCreateRole, useUpdateRole, useChatDeletionPolicy, useUpdateChatDeletionPolicy } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
+import { chatDeleteRight, chatDeletionTier } from "../lib/chatDeleteRight";
 import { errorMessage } from "../lib/errorDisplay";
+import type { chat } from "@dub/types";
 
 // roleId omitted -> create mode.
 export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: () => void }) {
@@ -14,6 +16,8 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   const roles = useRoles();
   const create = useCreateRole();
   const update = useUpdateRole(roleId ?? "");
+  const policy = useChatDeletionPolicy();
+  const updatePolicy = useUpdateChatDeletionPolicy();
   const { can } = usePermissions();
   const { toast } = useToast();
 
@@ -35,6 +39,26 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   // Renaming a system role is still disallowed (its name identifies it, e.g. "admin").
   const nameDisabled = readOnly || !!existing?.isSystem;
   const lockedKeys = existing ? lockedKeysForRole(existing) : [];
+
+  const deleteTier = chatDeletionTier(chatDeleteRight(perms));
+  const chatDeletion = policy.data
+    ? {
+        behavior: policy.data.policy[deleteTier],
+        onBehaviorChange: (mode: chat.MessageDeletionMode) => {
+          const cur = policy.data!;
+          if (cur.policy[deleteTier] === mode) return;
+          updatePolicy.mutate({ policy: { ...cur.policy, [deleteTier]: mode }, version: cur.version });
+        },
+        behaviorDisabled: readOnly || updatePolicy.isPending,
+        protectReacted: policy.data.policy.protectReacted,
+        onProtectReactedChange: (next: boolean) => {
+          const cur = policy.data!;
+          if (cur.policy.protectReacted === next) return;
+          updatePolicy.mutate({ policy: { ...cur.policy, protectReacted: next }, version: cur.version });
+        },
+        protectDisabled: readOnly || updatePolicy.isPending,
+      }
+    : undefined;
 
   function save() {
     setConfirmSave(false);
@@ -65,7 +89,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
           <TextField id="fe7-role-name" value={name} onChange={(v) => setName(v)} disabled={nameDisabled} testId="fe7-role-name" />
         </FormField>
         {catalog.data ? (
-          <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} lockedKeys={lockedKeys} />
+          <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} lockedKeys={lockedKeys} {...(chatDeletion ? { chatDeletion } : {})} />
         ) : (
           <p>権限カタログを読み込み中…</p>
         )}

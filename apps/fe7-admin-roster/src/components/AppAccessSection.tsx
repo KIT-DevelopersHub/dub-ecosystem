@@ -1,5 +1,6 @@
-import type { identity } from "@dub/types";
+import type { identity, chat } from "@dub/types";
 import { Badge, SegmentedControl, Switch } from "@dub/ui";
+import type { SegmentedOption } from "@dub/ui";
 import {
   appAccessRows,
   appAccessLevel,
@@ -9,6 +10,42 @@ import {
   type AppAccessLevel,
   type AppAccessRow,
 } from "../lib/appAccessMatrix";
+import {
+  chatDeleteRight,
+  chatDeleteChoice,
+  applyChatDeleteChoice,
+  type ChatDeleteChoice,
+} from "../lib/chatDeleteRight";
+
+// Chat-only extras folded into the チャット row: the 削除権限 selector (owns
+// chat:delete / chat:moderate in `selected`) + the 削除時の挙動 toggle (org-wide policy,
+// tier-bound — passed in because it is NOT a role permission key). The 誤削除防止
+// (protectReacted) workspace flag is folded INTO the 削除権限 selector as its 2nd step,
+// so there is no separate toggle: picking「リアクション付きは削除不可」sets it, picking
+// 「自分の投稿のみ削除」clears it. Moderators/admin are exempt regardless.
+export interface ChatDeletionControls {
+  behavior: chat.MessageDeletionMode; // current mode for this role's tier (org policy)
+  onBehaviorChange: (mode: chat.MessageDeletionMode) => void;
+  behaviorDisabled?: boolean;
+  // 誤削除防止: workspace-wide flag — a reacted message can't be deleted by non-moderators.
+  protectReacted: boolean;
+  onProtectReactedChange: (next: boolean) => void;
+  protectDisabled?: boolean;
+}
+
+// Ordered least→most permissive. own_protected sits between 削除不可 and 自分のみ削除 per
+// the coordinator's 4-step spec. It is only offered when the org policy is available
+// (chatDeletion) — without it protectReacted can't be read/written, so we drop that step.
+const DELETE_CHOICE_OPTIONS: { value: ChatDeleteChoice; label: string }[] = [
+  { value: "none", label: "削除不可" },
+  { value: "own_protected", label: "リアクション付きは削除不可" },
+  { value: "own", label: "自分の投稿のみ削除" },
+  { value: "any", label: "全員の投稿を削除（モデレート）" },
+];
+const DELETE_MODE_OPTIONS: { value: chat.MessageDeletionMode; label: string }[] = [
+  { value: "tombstone", label: "痕跡を残す" },
+  { value: "hard", label: "完全に消す" },
+];
 
 // PER-APP access tier of the role matrix (catalog domain "app"). Instead of showing
 // the 22 flat app:<id>:view / app:<id>:edit toggles, this folds them into the product
@@ -84,6 +121,7 @@ export function AppAccessSection({
   onChange,
   idPrefix = "fe7",
   lockedKeys = [],
+  chatDeletion,
 }: {
   selected: readonly identity.PermissionKey[];
   disabled?: boolean;
@@ -92,13 +130,30 @@ export function AppAccessSection({
   // Per-app access keys that must stay granted (e.g. app:admin:view/edit on the admin
   // role) — the enable toggle + level selector are frozen ON to prevent self-lockout.
   lockedKeys?: readonly identity.PermissionKey[];
+  // Chat-only: the 削除時の挙動 toggle (org-wide policy). Omit to hide it (e.g. no policy loaded).
+  chatDeletion?: ChatDeletionControls;
 }) {
   const rows = appAccessRows();
   const locked = new Set(lockedKeys);
   const summary = appAccessSummary(selected);
+  const deleteRight = chatDeleteRight(selected);
+  // Fold the workspace protectReacted flag into the 削除権限 selector's current value.
+  const protectReacted = chatDeletion?.protectReacted ?? false;
+  const deleteChoice = chatDeleteChoice(selected, protectReacted);
+  // Offer the「リアクション付きは削除不可」step only when the org policy is loaded.
+  const deleteChoiceOptions = chatDeletion
+    ? DELETE_CHOICE_OPTIONS
+    : DELETE_CHOICE_OPTIONS.filter((o) => o.value !== "own_protected");
 
   const setLevel = (row: AppAccessRow, level: AppAccessLevel) => onChange(setAppAccessLevel(selected, row, level));
   const setEnabled = (row: AppAccessRow, enabled: boolean) => onChange(toggleAppEnabled(selected, row, enabled));
+  // A 削除権限 pick writes both the role's key set (saved with the role) and — for the two
+  // 自分の投稿 steps — the workspace protectReacted flag (saved optimistically, like 挙動).
+  const setDeleteChoice = (next: ChatDeleteChoice) => {
+    const { keys, protectReacted: nextProtect } = applyChatDeleteChoice(selected, next, protectReacted);
+    onChange(keys);
+    if (chatDeletion && nextProtect !== chatDeletion.protectReacted) chatDeletion.onProtectReactedChange(nextProtect);
+  };
 
   return (
     <fieldset style={cardStyle} data-testid={`${idPrefix}-app-access-section`}>
@@ -163,6 +218,53 @@ export function AppAccessSection({
                     }))}
                     testId={`${idPrefix}-app-level-seg-${row.id}`}
                   />
+                  {row.id === "chat" ? (
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }} data-testid={`${idPrefix}-chatdel`}>
+                      <span style={nestLabelStyle}>削除権限</span>
+                      <SegmentedControl<ChatDeleteChoice>
+                        size="sm"
+                        aria-label="チャットの削除権限"
+                        value={deleteChoice}
+                        onChange={(next) => setDeleteChoice(next)}
+                        caption={
+                          chatDeletion
+                            ? "「リアクション付きは削除不可」= 自分の投稿でもリアクションが付いたら削除できません（誤削除防止・管理者は対象外）。"
+                            : undefined
+                        }
+                        captionTestId={`${idPrefix}-chatdel-right-caption`}
+                        options={deleteChoiceOptions.map((o): SegmentedOption<ChatDeleteChoice> => ({
+                          value: o.value,
+                          label: o.label,
+                          disabled: disabled || (o.value === "own_protected" ? chatDeletion?.protectDisabled : false),
+                          testId: `${idPrefix}-chatdel-right-${o.value}`,
+                        }))}
+                        testId={`${idPrefix}-chatdel-right`}
+                      />
+                      {/* 削除時の挙動 = org-wide policy (tier-bound). Only meaningful once the
+                          role can delete something; hidden for 削除権限なし. */}
+                      {chatDeletion && deleteRight !== "none" ? (
+                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                          <span style={nestLabelStyle}>
+                            削除時の挙動
+                            <span style={{ marginLeft: 6, opacity: 0.8 }}>（ワークスペース共通）</span>
+                          </span>
+                          <SegmentedControl<chat.MessageDeletionMode>
+                            size="sm"
+                            aria-label="削除時の挙動"
+                            value={chatDeletion.behavior}
+                            onChange={(next) => chatDeletion.onBehaviorChange(next)}
+                            options={DELETE_MODE_OPTIONS.map((o): SegmentedOption<chat.MessageDeletionMode> => ({
+                              value: o.value,
+                              label: o.label,
+                              disabled: disabled || chatDeletion.behaviorDisabled,
+                              testId: `${idPrefix}-chatdel-mode-${o.value}`,
+                            }))}
+                            testId={`${idPrefix}-chatdel-mode`}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

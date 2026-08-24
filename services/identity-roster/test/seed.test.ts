@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { identity, appRegistry } from "@dub/types";
 import { MemIdentityRepo } from "../src/repo/mem-repo";
-import { seedReferenceData, backfillAppAccessKeys, computeAppAccessKeys } from "../src/seed";
+import { seedReferenceData, backfillAppAccessKeys, backfillChatDelete, computeAppAccessKeys } from "../src/seed";
 import { ORG_ID } from "./harness";
 
 function makeDeps(repo: MemIdentityRepo) {
@@ -127,5 +127,34 @@ describe("per-app access backfill (non-breaking rollout)", () => {
     // second run is a no-op
     const again = await backfillAppAccessKeys(makeDeps(repo), ORG_ID);
     expect(again).not.toContain("legacy-ops");
+  });
+});
+
+describe("chat:delete backfill (own-message delete gate rollout)", () => {
+  it("seeded system roles carry chat:delete (member/organizer/maintainer/admin)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    for (const name of ["admin", "maintainer", "organizer", "member"]) {
+      const perms = new Set((await repo.getRoleByName(ORG_ID, name))!.permissions);
+      expect(perms.has("chat:delete"), `${name} should hold chat:delete`).toBe(true);
+    }
+  });
+
+  it("grants chat:delete to a PRE-EXISTING chat-capable role, skips non-chat roles, idempotent", async () => {
+    const repo = new MemIdentityRepo();
+    await repo.createOrg({ id: ORG_ID, name: "DevHub", createdAt: "t" });
+    // legacy chat-capable role (has chat:create) — created before the gate
+    await repo.createRole({ id: "role_chat", orgId: ORG_ID, name: "legacy-chat", isSystem: false, permissions: ["chat:create"], createdAt: "t", updatedAt: "t" });
+    // a role that cannot reach chat — must NOT get chat:delete
+    await repo.createRole({ id: "role_nochat", orgId: ORG_ID, name: "no-chat", isSystem: false, permissions: ["task:read"], createdAt: "t", updatedAt: "t" });
+
+    const updated = await backfillChatDelete(makeDeps(repo), ORG_ID);
+    expect(updated).toContain("legacy-chat");
+    expect(updated).not.toContain("no-chat");
+    expect(new Set((await repo.getRole("role_chat"))!.permissions).has("chat:delete")).toBe(true);
+    expect(new Set((await repo.getRole("role_nochat"))!.permissions).has("chat:delete")).toBe(false);
+
+    // idempotent
+    expect(await backfillChatDelete(makeDeps(repo), ORG_ID)).not.toContain("legacy-chat");
   });
 });

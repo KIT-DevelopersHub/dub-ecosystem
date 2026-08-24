@@ -58,6 +58,10 @@ const errArchived = (id: string): DubError =>
   new DubError("CHAT_CHANNEL_ARCHIVED", `Channel is archived: ${id}`, { status: 409 });
 const errVersionConflict = (id: string): DubError =>
   new DubError("CHAT_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
+// 誤削除防止: a reacted message can't be deleted by a non-moderator when the workspace
+// policy has protectReacted on. Moderators (chat:moderate) are exempt.
+const errReacted = (id: string): DubError =>
+  new DubError("CHAT_MESSAGE_REACTED", `Message has reactions and cannot be deleted: ${id}`, { status: 409 });
 
 function nonEmptyString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -88,7 +92,12 @@ function requireMode(value: unknown, field: string): MessageDeletionMode {
 function requirePolicy(raw: unknown): MessageDeletionPolicy {
   if (typeof raw !== "object" || raw === null) throw errors.validationFailed([{ field: "policy", reason: "required" }]);
   const p = raw as Record<string, unknown>;
-  return { member: requireMode(p.member, "policy.member"), moderator: requireMode(p.moderator, "policy.moderator") };
+  return {
+    member: requireMode(p.member, "policy.member"),
+    moderator: requireMode(p.moderator, "policy.moderator"),
+    // Optional/tolerant: absent or non-boolean => false (protection off, backward-compat).
+    protectReacted: p.protectReacted === true,
+  };
 }
 
 export class ChatService {
@@ -469,16 +478,25 @@ export class ChatService {
     const channel = await this.deps.repo.getChannel(msg.channelId);
     if (!channel) throw errors.notFound("message", id);
     const isAuthor = msg.authorId === ctx.userId;
-    // Moderator tier = channel admin OR the chat:moderate permission (admin/maintainer).
-    // Resolved server-side — the client never asserts its own tier (fail-close authz).
+    // Moderator tier = channel admin OR the chat:moderate permission (admin/maintainer):
+    // may delete ANY message. Otherwise deleting one's OWN message requires chat:delete
+    // (the per-role "削除権限" — 削除あり). A role with neither (削除権限なし) cannot delete,
+    // not even its own. Resolved server-side — the client never asserts its tier (fail-close).
     const isModerator = await this.isChannelAdmin(ctx, channel);
-    if (!isAuthor && !isModerator) {
-      throw new DubError(CommonErrorCodes.FORBIDDEN, "author or channel admin required", { status: 403 });
+    const canDeleteOwn =
+      isAuthor && (await this.deps.authz.hasPermission(ctx.userId, this.deps.orgId, { permission: "chat:delete" }));
+    if (!isModerator && !canDeleteOwn) {
+      throw new DubError(CommonErrorCodes.FORBIDDEN, "message delete permission required", { status: 403 });
     }
     // Idempotent: an already-tombstoned message stays a tombstone.
     if (msg.deletedAt) return { mode: "tombstone", message: toMessage(msg, {}) };
 
     const policy = await this.resolvePolicy();
+    // 誤削除防止: when the workspace protects reacted messages, a non-moderator cannot
+    // delete a message that already has a reaction (moderators / admin are exempt).
+    if (policy.protectReacted && !isModerator && (await this.deps.repo.messageHasReactions(id))) {
+      throw errReacted(id);
+    }
     const mode: MessageDeletionMode = isModerator ? policy.moderator : policy.member;
     const now = this.deps.now();
 
