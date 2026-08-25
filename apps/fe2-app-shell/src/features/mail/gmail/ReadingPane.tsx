@@ -356,8 +356,14 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
       <div style={{ display: "flex", alignItems: "center", gap: 8, height: 44, padding: "0 12px", borderBottom: "1px solid var(--dub-color-border-default)" }}>
         <HeaderButton label="一覧に戻る" icon="reply" onClick={() => dispatch({ type: "CLOSE_THREAD" })} testId="fe2-mail-thread-back" />
         <div style={{ width: 1, height: 20, background: "var(--dub-color-border-default)" }} />
-        <HeaderButton label="アーカイブ" icon="archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })} />
-        <HeaderButton label="削除" icon="trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })} />
+        {state.folder === "trash" ? (
+          <HeaderButton label="受信トレイに戻す" icon="inbox" onClick={() => dispatch({ type: "RESTORE", ids: [thread.id] })} testId="fe2-mail-restore" />
+        ) : (
+          <>
+            <HeaderButton label="アーカイブ" icon="archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })} />
+            <HeaderButton label="削除" icon="trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })} />
+          </>
+        )}
         <HeaderButton
           label={threadUnread(thread) ? "既読にする" : "未読にする"}
           icon="mail-open"
