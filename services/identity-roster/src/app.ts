@@ -179,6 +179,15 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.getUser(c.req.param("id"), orgId));
   });
 
+  // Self profile edit (アカウント設定 → 表示名/アバター) — internal S2S write. The gateway's
+  // POST /api/v1/me/profile authenticates the session and forwards here scoped to the
+  // caller's OWN userId (no admin gate, no client-supplied target). updateOwnProfile only
+  // touches display_name / avatar_url, so it can never escalate roles or disable accounts.
+  app.post("/internal/users/:id/profile", requireInternal, async (c) => {
+    const body = await readJson<{ displayName?: string; avatarUrl?: string | null }>(c);
+    return c.json(await svc.updateOwnProfile(c.req.param("id"), orgId, body, ctxOf(c)));
+  });
+
   // Role → members expansion — internal S2S read for notification-service fan-out
   // (e.g. feedback → admin/maintainer inboxes). Mirrors the external GET /identity/users
   // role filter but is gated by x-dub-internal ONLY, not identity:read: the caller acts

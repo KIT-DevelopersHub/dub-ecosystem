@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ConfirmDialogProps, DrawerProps, ModalProps } from "../types";
+import type { ConfirmDialogProps, DrawerProps, ErrorDialogProps, ModalProps } from "../types";
 import styles from "./Modal.module.css";
 import { cx } from "../utils/cx";
 import { Button, IconButton } from "./Button";
+import { Icon } from "./Icon";
 
 function useEscToClose(open: boolean, onClose: () => void) {
   useEffect(() => {
@@ -162,6 +163,63 @@ export function ConfirmDialog({
         </Button>
         <Button variant={danger ? "danger" : "primary"} loading={pending} onClick={handleConfirm}>
           {confirmLabel}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Blocking error dialog — the loud counterpart to an inline field error. Surfaces
+ * a failed action's REASON so it can never be silently swallowed. Reusable: feed
+ * any DisplayableError, optionally a validation breakdown + a retry.
+ */
+export function ErrorDialog({
+  open,
+  title = "処理できませんでした",
+  error,
+  details,
+  hint,
+  onClose,
+  closeLabel = "閉じる",
+  onRetry,
+  retryLabel = "再試行",
+  testId,
+}: ErrorDialogProps) {
+  return (
+    <Modal open={open} onClose={onClose} title={title} size="sm" testId={testId} closeOnOverlayClick={false}>
+      <div className={cx(styles.errorBody)} role="alert" data-error-code={error.code}>
+        <span className={cx(styles.errorIcon)} aria-hidden>
+          <Icon name={error.code === "FORBIDDEN" ? "shield" : "alert-triangle"} size="lg" />
+        </span>
+        <div className={cx(styles.errorContent)}>
+          <p className={cx(styles.errorMessage)} data-testid={testId ? `${testId}-message` : undefined}>
+            {error.message}
+          </p>
+          {details && details.length > 0 && (
+            <ul className={cx(styles.errorDetails)} data-testid={testId ? `${testId}-details` : undefined}>
+              {details.map((d, i) => (
+                <li key={i} className={cx(styles.errorDetailItem)}>
+                  {d.label && <span className={cx(styles.errorDetailLabel)}>{d.label}</span>}
+                  <span>{d.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {hint && <p className={cx(styles.errorHint)}>{hint}</p>}
+          {error.correlationId && (
+            <p className={cx(styles.errorCorrelation)}>エラーID: {error.correlationId}</p>
+          )}
+        </div>
+      </div>
+      <div className={cx(styles.confirmActions)}>
+        {onRetry && (
+          <Button variant="secondary" onClick={onRetry} testId={testId ? `${testId}-retry` : undefined}>
+            {retryLabel}
+          </Button>
+        )}
+        <Button variant="primary" onClick={onClose} testId={testId ? `${testId}-close` : undefined}>
+          {closeLabel}
         </Button>
       </div>
     </Modal>

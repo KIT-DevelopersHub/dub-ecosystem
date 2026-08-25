@@ -78,6 +78,45 @@
   flex-wrap: wrap;
 }
 
+/* task-number prefix input (view setting). Compact, sits inline in the toolbar. */
+.numPrefix { display: inline-flex; align-items: center; gap: var(--dub-space-1, 4px); }
+/* task-number show/hide toggle (view setting). */
+.numToggle { display: inline-flex; align-items: center; gap: var(--dub-space-1, 4px); cursor: pointer; }
+.numToggleInput { width: 15px; height: 15px; accent-color: var(--dub-color-brand-500); cursor: pointer; }
+.numPrefixLabel {
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+  white-space: nowrap;
+}
+.numPrefixInput {
+  width: 72px;
+  padding: var(--dub-space-1, 4px) var(--dub-space-2, 8px);
+  font-family: var(--dub-font-family-mono, monospace);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 6px);
+}
+.numPrefixInput:focus-visible {
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 1px;
+}
+.numPadInput {
+  width: 56px;
+  padding: var(--dub-space-1, 4px) var(--dub-space-2, 8px);
+  font-family: var(--dub-font-family-mono, monospace);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 6px);
+}
+.numPadInput:focus-visible {
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 1px;
+}
+
 .filterBar {
   display: flex;
   gap: var(--dub-space-2);
@@ -196,6 +235,70 @@
 /* ================= Notion-style timeline ================= */
 .ganttView { display: flex; flex-direction: column; gap: var(--dub-space-3); }
 
+/* ---- 拡大（全画面）閲覧モード ----
+   みんなで投影して「見るだけ」の大画面。Fullscreen API が使えれば要素自体が全画面に
+   なるが、非対応/失敗時のフォールバックとして position:fixed で viewport を覆う。両方の
+   経路で背景・レイアウトが崩れないよう、同じ .ganttPresenting クラスで統一して装飾する。 */
+.ganttPresenting {
+  position: fixed;
+  inset: 0;
+  z-index: var(--dub-z-modal, 1000);
+  margin: 0;
+  padding: var(--dub-space-4, 16px);
+  background: var(--dub-color-surface-base);
+  gap: var(--dub-space-2);
+  overflow: hidden; /* the inner .tlScroll owns scrolling */
+}
+/* Native fullscreen target: some browsers paint a black backdrop unless we set one. */
+.ganttView:fullscreen { background: var(--dub-color-surface-base); }
+/* Let the timeline frame grow to fill the whole screen instead of the 72vh cap. */
+.ganttPresenting .tlFrame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ganttPresenting .tlScroll { max-height: none; flex: 1 1 auto; }
+/* Projector legibility: bump the key text a touch (geometry/px are unchanged so the
+   concurrent bar-resize work is untouched). Bars are look-only here — no grab cursor. */
+.ganttPresenting .tlRowName { font-size: var(--dub-font-size-sm, 0.9rem); }
+.ganttPresenting .barLabel,
+.ganttPresenting .barLabelOut { font-size: var(--dub-font-size-sm, 0.82rem); }
+.ganttPresenting .tlMonthLabel { font-size: var(--dub-font-size-sm, 0.85rem); }
+.ganttPresenting .bar { cursor: default; }
+
+/* 閲覧モードバッジ（編集不可の明示） */
+.tlViewBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--dub-space-2, 8px);
+  border-radius: var(--dub-radius-sm, 5px);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+  border: 1px solid var(--dub-color-border-default);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: var(--dub-font-weight-medium, 600);
+  white-space: nowrap;
+}
+
+/* 拡大/閉じる ボタン（今日ボタンと同じ trim で、アイコン＋ラベル） */
+.tlPresentBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1, 5px);
+  padding: 5px var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 7px);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  font-weight: var(--dub-font-weight-medium, 600);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.tlPresentBtn:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); border-color: var(--dub-color-border-strong); }
+.tlPresentBtn svg { display: block; }
+
 /* ---- toolbar (view name + today + granularity) ---- */
 .tlToolbar {
   display: flex;
@@ -206,6 +309,17 @@
 }
 .tlToolbarLeft { display: inline-flex; align-items: baseline; gap: var(--dub-space-2); }
 .tlToolbarRight { display: inline-flex; align-items: center; gap: var(--dub-space-2); }
+/* 並び替え selector — a compact inline label + @dub/ui Select. The Select carries the
+ * design-system input styling; we only constrain its width so it sits neatly beside
+ * the granularity chips. */
+.tlSort { display: inline-flex; align-items: center; gap: var(--dub-space-1, 4px); }
+.tlSortLabel {
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: var(--dub-font-weight-medium, 600);
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+  white-space: nowrap;
+}
+.tlSort select { min-width: 128px; }
 .tlViewName { font-size: var(--dub-font-size-md, 0.95rem); font-weight: var(--dub-font-weight-bold, 700); color: var(--dub-color-text-primary); }
 .tlCount { font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
@@ -300,9 +414,143 @@
   text-align: left;
   font-size: var(--dub-font-size-sm, 0.85rem);
   cursor: pointer;
-  transition: background 0.1s ease;
+  /* Fade the row background (hover / the selected-task grey) rather than snapping it.
+     Tuned to ride in with @dub/ui SortableList's ~280ms drop settle so a row dropped
+     under the cursor eases into its grey instead of popping to it the instant the
+     floating clone lands (feedback: 着地後にグレーへ瞬間的に変わって違和感). */
+  transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .tlRow:hover { background: var(--dub-color-surface-sunken); }
+/* marquee multi-select: tint the left-pane row + a brand left edge so the list and
+   the bars agree on what's selected. */
+.tlRowSelected,
+.tlRowSelected:hover {
+  background: var(--dub-color-brand-100, var(--dub-color-surface-sunken));
+  box-shadow: inset 3px 0 0 0 var(--dub-color-brand-500);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tlRow { transition: none; }
+}
+/* ---- drag-to-reorder (left pane) ---- */
+/* Drag handle (⠿): appears on the row, grabs the pointer to reorder. Kept subtle
+   until row hover so the list stays calm; the handle itself is always grab-cursored. */
+.tlRowDrag {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  margin-left: -2px;
+  color: var(--dub-color-text-tertiary, var(--dub-color-text-secondary));
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: grab;
+  opacity: 0.35;
+  touch-action: none; /* let the pointer sensor own vertical drags */
+  transition: opacity 0.1s ease;
+}
+.tlRow:hover .tlRowDrag { opacity: 0.75; }
+.tlRowDrag:active { cursor: grabbing; }
+/* Drop target: a crisp top edge marks "the dragged row will land here (before me)". */
+.tlRowDropOver { box-shadow: inset 0 2px 0 0 var(--dub-color-accent-solid, var(--dub-color-border-strong)); }
+.tlRowDragging { opacity: 0.5; }
+
+/* The row content inside @dub/ui SortableList's floating clone. The lift itself —
+   elevation (shadow) + slight scale + grabbing cursor — is provided by SortableList's
+   overlay wrapper; this only styles the card surface so the clone matches a list row. */
+.tlRowOverlay {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--dub-space-3);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-strong, var(--dub-color-border-default));
+  border-radius: var(--dub-radius-md, 8px);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+}
+.tlRowOverlay .tlRowDrag { opacity: 0.9; cursor: grabbing; }
+.tlRowOverlay .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ⑤a group drag: the OTHER selected rows dim in place while their clones ride the
+   floating stack, so the whole marquee selection reads as "picked up" together (not
+   just the grabbed row). Honoured against reduced-motion (opacity is instant there). */
+.tlRowLifting { opacity: 0.4; }
+
+/* ⑤a group-drag floating stack: every selected row clones into a small deck under the
+   cursor. Each clone keeps the row-card look (.tlRowOverlay); a slight negative gap
+   overlaps them into a tidy stack, and a count badge names how many are moving. */
+.tlRowOverlayStack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tlRowOverlayStack .tlRowOverlay {
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.35);
+}
+.tlRowOverlayCount {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 1;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-on-brand, #fff);
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* ---- sort grouping brackets (right edge of the task list) ---- */
+/* A per-run vertical bracket that hugs the right edge of each contiguous same-group
+   run and carries a vertical label ("統括チーム" / "高" …). Overlays the sticky left
+   pane, pointer-events: none so it never blocks row clicks or the resizer. Rows get
+   `.tlRowGrouped` right-padding so their assignee meta never slides under the rail. */
+.tlGroupRail {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 26px;
+  z-index: 4;
+  pointer-events: none;
+}
+.tlRowGrouped { padding-right: 30px; }
+.tlGroupBracket {
+  position: absolute;
+  right: 4px;
+  width: 22px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* filled solid with the group colour (set inline); rounded so it reads as a chip.
+     top + height are set inline with a 3px inset so consecutive pills stay separate. */
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--dub-radius-md, 8px);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+.tlGroupBracketLabel {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  max-height: calc(100% - 10px);
+  padding: 4px 0;
+  overflow: hidden;
+  font-size: var(--dub-font-size-xs, 0.7rem);
+  font-weight: var(--dub-font-weight-bold, 700);
+  letter-spacing: 0.02em;
+  line-height: 1.05;
+  white-space: nowrap;
+  /* colour set inline to the WCAG-legible pole for the fill */
+}
 /* WBS leaf rows read a touch lighter than their work-package parent, and carry a
    vertical tree guide so the parent-child nesting is legible at a glance (this is
    the "親子" affordance — dependency is shown only by arrows on the timeline). */
@@ -352,7 +600,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  min-width: 30px;
+  min-width: 36px;
   padding-right: 6px;
   margin-right: 2px;
   cursor: pointer;
@@ -362,20 +610,44 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--dub-radius-sm, 4px);
-  color: var(--dub-color-text-secondary);
-  font-size: 0.7rem;
+  /* Bigger + higher-contrast so the open (▾) vs closed (▸) direction reads at a
+     glance even from a distance (feedback: 20px still felt too small). 26px glyph
+     sits comfortably inside the 44px row without changing row height. */
+  color: var(--dub-color-text-primary);
+  font-size: 1.25rem;
   line-height: 1;
 }
-.tlToggleWide:hover .tlToggleGlyph { color: var(--dub-color-text-primary); }
+.tlToggleWide:hover .tlToggleGlyph { color: var(--dub-color-text-primary); background: var(--dub-color-surface-raised, var(--dub-color-surface-base)); }
 /* keeps childless top-level rows' text aligned with rows that have a chevron. */
-.tlToggleSpacer { flex: 0 0 auto; width: 16px; margin-right: 2px; }
+.tlToggleSpacer { flex: 0 0 auto; width: 26px; margin-right: 2px; }
 .tlDot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; background: var(--dub-color-gray-300); }
-/* team accent stripe on a row (team-grouped rows are ordered by team; the stripe
-   makes each group's boundary legible without a heavyweight section header). */
+/* WBS number badge shown before the task title (gantt left pane + list view). Mono +
+   tabular so codes like "AA-0001-0012" stay column-aligned and read as an identifier. */
+.tlRowNum {
+  flex: 0 0 auto;
+  font-family: var(--dub-font-family-mono, monospace);
+  font-size: var(--dub-font-size-xs, 0.7rem);
+  font-variant-numeric: tabular-nums;
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 4px);
+  padding: 0 5px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+/* team accent stripe — inline variant, kept ONLY for the drag-overlay clone (a single
+   floating row, so no alignment issue). In-list rows use the fixed-x .tlTeamRail. */
 .tlTeamStripe { flex: 0 0 auto; width: 3px; align-self: stretch; border-radius: 2px; margin-right: 2px; background: var(--dub-color-gray-300); }
+/* team accent as a fixed-x LEFT rail: pinned to the pane's left edge so contiguous
+   same-team rows draw ONE straight vertical line, independent of each row's WBS indent
+   (the old inline stripe stepped horizontally with the indent). Non-interactive overlay
+   above the rows; the faint drag handle's glyph is centred and clears the 3px rail. */
+.tlTeamRail { position: absolute; left: 0; width: 3px; z-index: 4; pointer-events: none; }
+.tlTeamRailSeg { position: absolute; left: 0; width: 3px; border-radius: 0 2px 2px 0; }
 /* team legend chips under the toolbar. */
 .tlLegend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px var(--dub-space-3); border-bottom: 1px solid var(--dub-color-border-default); }
 .tlLegendItem { display: inline-flex; align-items: center; gap: 5px; font-size: var(--dub-font-size-xs, 0.72rem); color: var(--dub-color-text-secondary); }
@@ -413,9 +685,12 @@
 }
 .tlGuideSummary {
   width: 24px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--dub-color-brand-500);
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--dub-color-brand-500) 34%, var(--dub-color-border-default));
+  border-left: 3px solid var(--dub-color-brand-500);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
 }
 .tlGuideDepIcon { display: inline-block; vertical-align: middle; }
 /* thin team-coloured cap at the left edge of each bar. */
@@ -511,17 +786,42 @@
    "8月 / 2026年" labels (vertical-overlay fix). Ordering is guaranteed at the
    component level, not by tuning individual bar z-indexes. */
 .tlBody { position: relative; z-index: 1; isolation: isolate; }
-/* faint enclosure behind an open parent + its children — reads as "these rows
-   belong together" (parent-child), visually separate from dependency arrows. */
-.tlGroupBand {
+/* 内包ゾーン: an open parent's bar grows into a rounded CARD that ENCLOSES its
+   subtree — the parent period runs horizontally, its descendant rows are wrapped
+   vertically, so「ここが親ゾーン」reads straight off the chart. Redesign (#369):
+   the old 1px/34% border + 5% fill was too faint to see. Now the zone is a crisp
+   solid brand border + a header-lane gradient fill (親行が濃く子が淡い) + a bold
+   left accent rail + a soft card shadow — the boundary and "どこからどこまでが親"
+   are unmistakable, and nested boxes step up in tint to read as "inside". Purely
+   visual (pointer-events:none) so drag/resize/toggle/deps are untouched. */
+.tlEncl {
   position: absolute;
-  left: 0;
   box-sizing: border-box;
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md, 8px);
-  background: color-mix(in srgb, var(--dub-color-brand-500) 5%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--dub-color-brand-500) 58%, var(--dub-color-border-default));
+  border-radius: var(--dub-radius-lg, 10px);
+  /* header-lane gradient fill is set inline; this is the fallback. */
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
+  /* crisp inner hairline + a soft card lift so the zone边界 separates from the grid. */
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--dub-color-brand-500) 20%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 3px 10px color-mix(in srgb, var(--dub-color-brand-500) 14%, transparent);
+  overflow: hidden;
   z-index: 0;
   pointer-events: none;
+}
+/* Left accent rail — the「ここが親ゾーン」anchor. A solid brand spine down the zone's
+   left edge, inset top/bottom so it reads as a rounded handle rather than a plain
+   border, and thick enough to catch the eye immediately. */
+.tlEncl::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 var(--dub-radius-sm, 4px) var(--dub-radius-sm, 4px) 0;
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
 }
 .tlWeekend { position: absolute; top: 0; background: var(--dub-color-gray-50); z-index: 0; }
 .tlRowLine {
@@ -532,12 +832,20 @@
   border-bottom: 1px solid var(--dub-color-border-default);
   z-index: 0;
 }
-.tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+/* Dependency connectors sit ABOVE the bars (z-index 4 > .bar's 3) so an arrow is never
+   hidden behind a bar it crosses — part of the correct gantt overlay order:
+   weekend/grid → 親ゾーン塗り+枠(.tlEncl z0) → バー(.bar z3) → コネクタ/当日ライン(front). */
+.tlSvg { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 /* dependency connectors: a distinct indigo (not the gray gridline colour), so a
    dependency arrow never reads as a border. Paired with the legend + a hover
    tooltip so the meaning is unambiguous vs the parent-child grouping. */
-.tlDep { stroke: var(--dub-color-brand-500); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.85; }
-.tlDepArrow { fill: var(--dub-color-brand-500); }
+/* Dependency connector (前工程 → 後工程). Bumped for legibility — the 1.5px/85%
+   dashed line read as "ほぼ見えない", especially for long top-level spans. */
+.tlDep { stroke: var(--dub-color-brand-600, var(--dub-color-brand-500)); stroke-width: 2.25; stroke-dasharray: 6 3; opacity: 1; stroke-linejoin: round; stroke-linecap: round; }
+/* Aggregated edge (an endpoint hidden in a collapsed parent) — denser dashes hint it
+   stands for one-or-more folded-away dependencies. */
+.tlDepAgg { stroke-dasharray: 2 3; }
+.tlDepArrow { fill: var(--dub-color-brand-600, var(--dub-color-brand-500)); }
 
 .tlToday {
   position: absolute;
@@ -547,7 +855,9 @@
   background: var(--dub-color-brand-500);
   opacity: 0.7;
   pointer-events: none;
-  z-index: 2;
+  /* Today line is the FRONTMOST timeline marker (above bars z3 and connectors z4) so it
+     reads as one continuous vertical line, never chopped by the bars it crosses. */
+  z-index: 5;
 }
 
 /* ---- bars (soft, rounded, Notion-style) ---- */
@@ -578,6 +888,58 @@
 .barCancelled .barLabel, .barCancelled .barLabelOut { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
 .barDragging { cursor: grabbing; z-index: 6; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
+
+/* marquee multi-select highlight: a brand ring + faint wash so a selected bar reads
+   as "picked" over any status fill, without hiding its own colour. */
+.barSelected {
+  z-index: 5;
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dub-color-brand-500) 22%, transparent);
+}
+
+/* the marquee rectangle the user drags out over the empty canvas */
+.tlMarquee {
+  position: absolute;
+  z-index: 7;
+  border: 1px solid var(--dub-color-brand-500);
+  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
+  border-radius: var(--dub-radius-sm, 4px);
+  pointer-events: none;
+}
+
+/* selection action bar (below the chart) — count + key hints + delete/clear */
+.tlSelectionBar {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3, 12px);
+  margin-top: var(--dub-space-2, 8px);
+  padding: var(--dub-space-2, 8px) var(--dub-space-3, 12px);
+  border: 1px solid var(--dub-color-brand-500);
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-brand-100, var(--dub-color-surface-sunken));
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm, 0.85rem);
+}
+.tlSelectionCount { font-weight: var(--dub-font-weight-bold, 700); color: var(--dub-color-brand-700, var(--dub-color-brand-600)); }
+.tlSelectionHint { color: var(--dub-color-text-secondary); flex: 1 1 auto; }
+.tlSelectionDelete,
+.tlSelectionClear {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-radius: var(--dub-radius-sm, 6px);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  cursor: pointer;
+  font-size: var(--dub-font-size-sm, 0.85rem);
+}
+.tlSelectionDelete {
+  border-color: var(--dub-color-danger-500, #d92d20);
+  color: var(--dub-color-danger-600, #d92d20);
+}
+.tlSelectionDelete:hover { background: var(--dub-color-danger-100, var(--dub-color-surface-sunken)); }
+.tlSelectionClear:hover { background: var(--dub-color-surface-sunken); }
 
 /* Parent (work-package) bars render like any other task bar — the hollow "bracket
    summary" style was reverted per feedback #97 (見づらい). Rollup still applies, so
@@ -698,7 +1060,11 @@
 /* minmax(0,1fr) so a wide child (native date/select) never blows the column out
    and forces the dialog to scroll horizontally (bug fix #2). */
 .formGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--dub-space-3); max-width: 100%; }
-.formRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--dub-space-3); max-width: 100%; }
+/* Two-up field row that degrades to one column when the container is too narrow
+   (e.g. the right-docked detail panel at min(440px,92vw) on a phone). auto-fit +
+   a 150px min lets 開始日/期日 each keep enough width to render 「日付を選択」 on
+   ONE line instead of wrapping to two (bug B); wide surfaces stay side-by-side. */
+.formRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--dub-space-3); max-width: 100%; }
 .formField { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .formField input, .formField select, .formField textarea { max-width: 100%; box-sizing: border-box; }
 .formFieldFull { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -710,6 +1076,7 @@
 }
 .req { color: var(--dub-color-danger-500); margin-left: 2px; }
 .fieldError { color: var(--dub-color-danger-500); font-size: var(--dub-font-size-xs, 0.78rem); }
+.fieldHint { margin: 4px 0 0; color: var(--dub-color-text-secondary); font-size: var(--dub-font-size-xs, 0.78rem); }
 .modalFooter { display: flex; justify-content: flex-end; gap: var(--dub-space-2); }
 
 .depPicker {
@@ -785,7 +1152,7 @@
 .dfTrigger:disabled { background: var(--dub-color-surface-sunken); opacity: 0.7; cursor: not-allowed; }
 .dfIcon { flex: 0 0 auto; color: var(--dub-color-text-secondary); }
 .dfValue { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dfPlaceholder { flex: 1 1 auto; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
+.dfPlaceholder { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 .dfClear {
   flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center;
@@ -874,6 +1241,31 @@
   cursor: pointer; font-size: 0.85rem; line-height: 1;
 }
 .ppChipX:hover { background: var(--dub-color-brand-100); }
+/* 依存→親子 変換アクション (chip 内の小ボタン) */
+.ppChipPromote {
+  border: 1px solid var(--dub-color-brand-300, var(--dub-color-brand-200));
+  border-radius: var(--dub-radius-full, 999px);
+  background: transparent;
+  color: var(--dub-color-brand-700);
+  cursor: pointer;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  line-height: 1;
+  padding: 2px 6px;
+}
+.ppChipPromote:hover { background: var(--dub-color-brand-100); border-color: var(--dub-color-brand-400); }
+/* 親子→依存 変換ボタン (親セレクトの下) */
+.relConvertBtn {
+  margin-top: var(--dub-space-2);
+  align-self: flex-start;
+  border: 1px dashed var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md, 8px);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  cursor: pointer;
+  font-size: var(--dub-font-size-sm, 0.8rem);
+  padding: 4px 8px;
+}
+.relConvertBtn:hover { background: var(--dub-color-surface-sunken, var(--dub-color-brand-50)); color: var(--dub-color-text-primary); border-color: var(--dub-color-brand-400); }
 .ppInputWrap { position: relative; min-width: 0; }
 .ppInput {
   box-sizing: border-box;

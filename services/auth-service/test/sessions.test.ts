@@ -98,4 +98,51 @@ describe("SessionService", () => {
     const refreshed = await h.deps.sessions.refresh(created.token);
     expect("token" in refreshed).toBe(true);
   });
+
+  // --- rotation race (session-expiry bug): a duplicate refresh with the SAME
+  // pre-rotation token (multi-tab load / Promise.all 401 burst / retry sent before
+  // the rotated Set-Cookie applied) must NOT hard-fail with "Invalid token". ---
+  it("duplicate refresh with the pre-rotation token converges on the same successor (idempotent)", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_1", "web");
+
+    const first = await h.deps.sessions.refresh(created.token);
+    if (!("token" in first)) throw new Error("first refresh must succeed");
+
+    // Second refresh still carries the original token (the browser had not yet
+    // applied the rotated cookie). Previously this returned { error: "revoked" }.
+    const second = await h.deps.sessions.refresh(created.token);
+    expect("token" in second).toBe(true);
+    if (!("token" in second)) throw new Error("second refresh must not hard-fail");
+    expect(second.token).toBe(first.token); // same successor — no orphaned second token
+    expect(second.absoluteExpiresAt).toBe(first.absoluteExpiresAt);
+
+    // The successor authenticates; the old token does not (reuse detection intact).
+    expect((await h.deps.sessions.verify(first.token)).valid).toBe(true);
+    expect((await h.deps.sessions.verify(created.token)).reason).toBe("revoked");
+  });
+
+  it("parallel refresh burst never hard-fails and every issued token is usable", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_1", "web");
+    const results = await Promise.all([
+      h.deps.sessions.refresh(created.token),
+      h.deps.sessions.refresh(created.token),
+      h.deps.sessions.refresh(created.token),
+    ]);
+    for (const r of results) {
+      expect("token" in r).toBe(true);
+      if ("token" in r) expect((await h.deps.sessions.verify(r.token)).valid).toBe(true);
+    }
+  });
+
+  it("refresh past the grace window (old record evicted) resolves to revoked", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_1", "web");
+    const first = await h.deps.sessions.refresh(created.token);
+    if (!("token" in first)) throw new Error("first refresh must succeed");
+    // Simulate KV grace-TTL eviction of the old pointer record.
+    h.kv.store.delete(`session:${created.token}`);
+    expect(await h.deps.sessions.refresh(created.token)).toEqual({ error: "revoked" });
+  });
 });

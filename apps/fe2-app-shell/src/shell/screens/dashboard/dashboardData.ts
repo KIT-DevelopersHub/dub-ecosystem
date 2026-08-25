@@ -1,17 +1,15 @@
-// Dashboard model + demo data (design 2-1 "ダッシュボード" revamp). Pure, React-free.
+// Dashboard model + pure derivations (design 2-1 "ダッシュボード" revamp). React-free.
 //
-// The Home screen shows two kinds of number:
-//   • LIVE — derived from /bff/home (upcoming-event count, unread count) and from
-//     the wall clock (countdown to the conference). These are real.
-//   • DEMO — free-tier usage %, task-completion breakdown, member/team counts.
-//     /bff/home does not aggregate these yet, so the dashboard renders illustrative
-//     values flagged with a "デモ" tag. They are never presented as live figures.
-//
-// Keeping the demo values + the status/threshold mapping here (not inline in the
-// screen) means the component tree stays presentational and every threshold is
+// Every headline number on the Home screen is now LIVE: the free-tier usage %,
+// task-completion breakdown and member/team counts come from /bff/home (aggregated
+// from usage-meter / task-service / member-service), and the conference countdown
+// comes from the wall clock. This module holds only the pure status/threshold
+// mapping and the small builders that reshape the BFF projection into the chart
+// props — so the component tree stays presentational and every threshold is
 // unit-tested. Colors are dotted @dub/tokens paths the chart components resolve via
 // toCssVarName — no ad-hoc hex, so light/dark both track the theme.
 import type { BadgeTone } from "@dub/ui";
+import type { task } from "@dub/types";
 
 /** A metric health level. Drives both color and the ja status label so wording and
  *  hue never drift apart (mirrors the usage dashboard's ok/warn/critical language). */
@@ -81,50 +79,66 @@ export const CONFERENCE = {
   dateLabel: "2026/08/22",
 } as const;
 
-// ── DEMO: free-tier usage (Cloudflare / Resend) ────────────────────────────────
-// Illustrative snapshot — same shape/values family as the 無料枠 dashboard's mock.
+// ── free-tier usage (Cloudflare / Resend), live from usage-meter via /bff/home ──
 export interface FreeTierMetric {
   key: string;
   label: string;
   pct: number;
 }
-export const FREE_TIER: FreeTierMetric[] = [
-  { key: "kv_reads", label: "KV 読み取り(日)", pct: 96.5 },
-  { key: "d1_rows", label: "D1 行読み取り(日)", pct: 76.0 },
-  { key: "workers", label: "Workers リクエスト(日)", pct: 12.3 },
-  { key: "emails", label: "メール送信(月)", pct: 40.0 },
-];
 
-/** The most-stressed free-tier metric (drives the headline 無料枠 KPI). */
-export function worstFreeTier(metrics: FreeTierMetric[] = FREE_TIER): FreeTierMetric {
+/** Reshape the BFF usage projection (pct may be null when unmeasured → 0) into the
+ *  meter/KPI props, sorted most-stressed first so the card reads top-down. */
+export function freeTierFromMetrics(
+  metrics: ReadonlyArray<{ key: string; label: string; pct: number | null }>,
+): FreeTierMetric[] {
+  return metrics
+    .map((m) => ({ key: m.key, label: m.label, pct: m.pct ?? 0 }))
+    .sort((a, b) => b.pct - a.pct);
+}
+
+/** The most-stressed free-tier metric (drives the headline 無料枠 KPI); null when
+ *  there are no metrics. */
+export function worstFreeTier(metrics: FreeTierMetric[]): FreeTierMetric | null {
+  if (metrics.length === 0) return null;
   return metrics.reduce((worst, m) => (m.pct > worst.pct ? m : worst), metrics[0]!);
 }
 
-// ── DEMO: task completion breakdown ─────────────────────────────────────────────
+// ── task completion breakdown, live from task-service via /bff/home ─────────────
 export interface TaskSegment {
   key: string;
   label: string;
   count: number;
   status: MetricStatus;
 }
-export const TASK_SEGMENTS: TaskSegment[] = [
-  { key: "done", label: "完了", count: 30, status: "good" },
-  { key: "in_progress", label: "進行中", count: 10, status: "info" },
-  { key: "todo", label: "未着手", count: 6, status: "warn" },
-  { key: "blocked", label: "ブロック", count: 2, status: "critical" },
+
+/** The active statuses shown in the タスクの内訳 bar / 完了率 gauge, in display order.
+ *  `cancelled` is intentionally excluded — it is neither active work nor progress,
+ *  so it never dilutes the completion percentage. */
+const VISIBLE_TASK_STATUSES: ReadonlyArray<{ key: task.TaskStatus; label: string; status: MetricStatus }> = [
+  { key: "done", label: "完了", status: "good" },
+  { key: "in_progress", label: "進行中", status: "info" },
+  { key: "todo", label: "未着手", status: "warn" },
+  { key: "blocked", label: "ブロック", status: "critical" },
 ];
 
-export function taskTotal(segments: TaskSegment[] = TASK_SEGMENTS): number {
+/** Build the ordered segments from the BFF's per-status counts. */
+export function taskSegmentsFromCounts(byStatus: Partial<Record<task.TaskStatus, number>>): TaskSegment[] {
+  return VISIBLE_TASK_STATUSES.map(({ key, label, status }) => ({
+    key,
+    label,
+    status,
+    count: byStatus[key] ?? 0,
+  }));
+}
+
+export function taskTotal(segments: TaskSegment[]): number {
   return segments.reduce((sum, s) => sum + s.count, 0);
 }
 
 /** Completion % = done / total (0 when there are no tasks). */
-export function taskCompletionPct(segments: TaskSegment[] = TASK_SEGMENTS): number {
+export function taskCompletionPct(segments: TaskSegment[]): number {
   const total = taskTotal(segments);
   if (total === 0) return 0;
   const done = segments.find((s) => s.key === "done")?.count ?? 0;
   return (done / total) * 100;
 }
-
-// ── DEMO: 運営メンバー / チーム ───────────────────────────────────────────────
-export const TEAM_STATS = { members: 18, teams: 5 } as const;

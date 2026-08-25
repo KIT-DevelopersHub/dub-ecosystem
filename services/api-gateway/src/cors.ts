@@ -5,10 +5,18 @@ import type { GatewayEnv } from "./env";
 
 const DEFAULT_ORIGINS = ["https://app.developershub.jp", "http://localhost:5173", "http://localhost:3000"];
 
-const ALLOW_METHODS = "GET,POST,PATCH,DELETE,OPTIONS";
+// PUT is required: the SPA persists gantt dependencies (PUT /tasks/:id/dependencies),
+// gantt view state (PUT /gantt/views) and drive-share links (PUT /driveshare/.../link)
+// with it. Omitting PUT made the browser's CORS preflight block those saves cross-origin
+// (e.g. 依存矢印を張る / ガントのビュー保存 silently failed on prod).
+const ALLOW_METHODS = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
 // x-dub-request-id is sent by the SPA api-client on every request (correlation id),
 // so it must be preflight-allowed or the browser blocks all cross-origin calls.
-const ALLOW_HEADERS = "authorization,content-type,x-dub-idempotency-key,x-dub-request-id";
+// cache-control is sent by the gantt no-cache refetch (getGanttFresh, `Cache-Control:
+// no-cache`) right after a bar move/resize; omitting it made the preflight fail so the
+// refetch was net::ERR_FAILED cross-origin — the drag PERSISTED but the FE showed a
+// spurious "サーバーでエラー" toast (same bug class as the PUT omission above).
+const ALLOW_HEADERS = "authorization,cache-control,content-type,x-dub-idempotency-key,x-dub-request-id";
 const MAX_AGE = "600";
 
 export function allowedOrigins(env: GatewayEnv): string[] {

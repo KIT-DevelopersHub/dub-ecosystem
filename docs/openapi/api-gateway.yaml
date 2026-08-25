@@ -274,7 +274,10 @@ components:
           type: string
     BffHomeResponse:
       type: object
-      description: BFF aggregation tolerates partial upstream failure (partialErrors lists the degraded sources).
+      description: >-
+        BFF aggregation tolerates partial upstream failure (partialErrors lists the degraded sources).
+        taskSummary / usageSummary / orgStats are small BFF-owned projections of task-service /
+        usage-meter / member-service; each is omitted when its source is degraded (listed in partialErrors).
       required:
         - upcomingEvents
         - unreadCount
@@ -286,10 +289,86 @@ components:
             $ref: '#/components/schemas/EventSummary'
         unreadCount:
           type: integer
+        taskSummary:
+          $ref: '#/components/schemas/HomeTaskSummary'
+        usageSummary:
+          $ref: '#/components/schemas/HomeUsageSummary'
+        orgStats:
+          $ref: '#/components/schemas/HomeOrgStats'
         partialErrors:
           type: array
           items:
             $ref: '#/components/schemas/UpstreamPartialError'
+    HomeTaskSummary:
+      type: object
+      description: Breakdown of the caller's own tasks by status (source task-service /tasks).
+      required:
+        - total
+        - byStatus
+      properties:
+        total:
+          type: integer
+        byStatus:
+          type: object
+          required:
+            - todo
+            - in_progress
+            - blocked
+            - done
+            - cancelled
+          properties:
+            todo:
+              type: integer
+            in_progress:
+              type: integer
+            blocked:
+              type: integer
+            done:
+              type: integer
+            cancelled:
+              type: integer
+    HomeUsageMetric:
+      type: object
+      required:
+        - key
+        - label
+        - pct
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        pct:
+          type: number
+          nullable: true
+          description: 0-100 utilisation, precomputed on the wire; null when unmeasured.
+    HomeUsageSummary:
+      type: object
+      description: Free-tier usage snapshot (source usage-meter /usage/summary), projected to home fields.
+      required:
+        - metrics
+        - worst
+      properties:
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeUsageMetric'
+        worst:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HomeUsageMetric'
+          description: The single most-stressed metric; null when none measured.
+    HomeOrgStats:
+      type: object
+      description: 運営メンバー / チーム の総数 (source member-service /members/overview).
+      required:
+        - members
+        - teams
+      properties:
+        members:
+          type: integer
+        teams:
+          type: integer
     PublicInquiryRequest:
       type: object
       required:

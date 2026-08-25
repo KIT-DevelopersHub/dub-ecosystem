@@ -22,7 +22,11 @@ name = "dub-chat-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
-workers_dev = false
+# Enabled so browsers can open the DO-direct realtime WebSocket (wss://<this
+# worker>/ws/:id). The public surface is WS-only: src/index.ts rejects every non-/ws
+# (and non-/health) request that did NOT arrive over the api-gateway service binding
+# (host "svc"), so the header-trusting HTTP API stays gateway-only. See index.ts.
+workers_dev = true
 
 [observability]
 enabled = true
@@ -68,11 +72,15 @@ service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/aud
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
 # Absolute base for the ws-ticket doUrl (gateway-bypassing / DO-direct). ":id" is
-# replaced with the channel id.
-CHAT_RT_DO_URL_BASE = "wss://chat-rt.developershub.jp/ws/:id"
+# replaced with the channel id. Points at THIS worker's workers.dev subdomain (the DO
+# is co-hosted here); the dedicated chat-rt.developershub.jp domain was never
+# provisioned. Switch to a custom domain later without touching the DO/contract.
+CHAT_RT_DO_URL_BASE = "wss://dub-chat-service.developershub-site.workers.dev/ws/:id"
 # Origin allow-list enforced by the ChatRoom DO (comma-separated). Browser clients
-# must match; native/mobile clients send no Origin and are allowed.
-CHAT_RT_ALLOWED_ORIGINS = "https://app.developershub.jp"
+# must match; native/mobile clients send no Origin and are allowed. Includes the
+# current delivery origin (the fe2 app-shell workers.dev subdomain) AND the future
+# custom domain, so realtime keeps working across the domain cutover.
+CHAT_RT_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
 
 # NOTE: WS_TICKET_SECRET is a Worker Secret (never in this toml). Set via
 # `wrangler secret put WS_TICKET_SECRET` at Apply. The ChatRoom DO verifies with

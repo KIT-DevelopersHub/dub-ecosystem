@@ -42,3 +42,20 @@ CREATE INDEX idx_event_actions_event ON event_actions(event_id, sort_order) WHER
 CREATE INDEX idx_event_actions_kind ON event_actions(event_id, kind);
 `.trim(),
 };
+
+// Additive follow-up migration (theme-12): the free-form per-event detail store.
+// Kept in lockstep with infra/d1/migrations/event/0002_event_details.sql (guarded
+// by schema-lockstep.test.ts, same as 0001).
+export const EVENT_DETAILS_SCHEMA_MIGRATION: Migration = {
+  namespace: "event",
+  id: "0002_event_details",
+  up: `
+CREATE TABLE event_event_details (
+  event_id   TEXT PRIMARY KEY REFERENCES event_events(id),
+  data       TEXT NOT NULL,
+  version    INTEGER NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`.trim(),
+};

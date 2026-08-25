@@ -5,6 +5,7 @@ import { StrictMode, useMemo, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cssText } from "@dub/tokens/css";
+import "@dub/ui/style.css"; // @dub/ui component CSS (Modal overlay, ConfirmDialog, etc.) — standalone only
 import { ToastProvider } from "@dub/ui";
 import { useAuthStore } from "./contracts/fe2";
 import { NavigationProvider, type NavigationApi } from "./contracts/navigation";
@@ -15,6 +16,7 @@ import { EventListPage } from "./pages/EventListPage";
 import { EventDetailPage } from "./pages/EventDetailPage";
 import { ActionDetailPage } from "./pages/ActionDetailPage";
 import { EventSettingsPage } from "./pages/EventSettingsPage";
+import { EventHubPage } from "./pages/EventHubPage";
 
 function matchRoute(path: string): { render: () => JSX.Element; params: Record<string, string> } {
   const detail = path.match(/^\/events\/([^/]+)\/settings$/);
@@ -23,7 +25,9 @@ function matchRoute(path: string): { render: () => JSX.Element; params: Record<s
   if (action) return { render: () => <ActionDetailPage />, params: { eventId: action[1]!, actionId: action[2]! } };
   const ev = path.match(/^\/events\/([^/]+)$/);
   if (ev) return { render: () => <EventDetailPage />, params: { eventId: ev[1]! } };
-  return { render: () => <EventListPage />, params: {} };
+  if (path === "/events/list") return { render: () => <EventListPage />, params: {} };
+  // Default = the Event app home (header switcher + selected event's detail store).
+  return { render: () => <EventHubPage />, params: {} };
 }
 
 function parseHash(): { path: string; search: string } {

@@ -61,18 +61,88 @@ function deriveSchedule(
   }
 }
 
-/** Build a gantt row, deriving the bar window (see file header). */
+/** WBS hierarchy projected from the task set (all additive; a task with no live
+ *  parent is a flat top-level row, so a flat event keeps rendering unchanged). */
+interface Hierarchy {
+  /** effective parent (null when absent or pointing outside the live set). */
+  parentOf: Map<common.TaskId, common.TaskId | null>;
+  /** ids that are some live row's effective parent (→ collapse/expand toggle). */
+  hasChildren: Set<common.TaskId>;
+  /** depth in the tree (0 = top-level / work-package, 1 = leaf, …). */
+  depthOf: Map<common.TaskId, number>;
+}
+
+function buildHierarchy(live: task.Task[]): Hierarchy {
+  const liveIds = new Set(live.map((t) => t.id));
+  const parentOf = new Map<common.TaskId, common.TaskId | null>();
+  const hasChildren = new Set<common.TaskId>();
+  for (const t of live) {
+    // Ignore a parent that isn't itself a live row (avoids orphaned/dangling nests).
+    const p = t.parentTaskId && liveIds.has(t.parentTaskId) ? t.parentTaskId : null;
+    parentOf.set(t.id, p);
+    if (p) hasChildren.add(p);
+  }
+  // Depth by walking the parent chain (cycle-guarded so a bad edge can't hang).
+  const depthOf = new Map<common.TaskId, number>();
+  const depth = (id: common.TaskId, guard: Set<common.TaskId>): number => {
+    const cached = depthOf.get(id);
+    if (cached !== undefined) return cached;
+    const p = parentOf.get(id) ?? null;
+    if (!p || guard.has(id)) {
+      depthOf.set(id, 0);
+      return 0;
+    }
+    guard.add(id);
+    const d = depth(p, guard) + 1;
+    depthOf.set(id, d);
+    return d;
+  };
+  for (const t of live) depth(t.id, new Set());
+  return { parentOf, hasChildren, depthOf };
+}
+
+/** Numeric-aware WBS comparator ("1.2.10" > "1.2.9"). Missing wbs sorts last. */
+function compareWbs(a: string | null | undefined, b: string | null | undefined): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const pa = a.split(".").map((n) => Number.parseInt(n, 10));
+  const pb = b.split(".").map((n) => Number.parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? -1;
+    const y = pb[i] ?? -1;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+/** Build a gantt row, deriving the bar window (see file header). A work-package
+ *  (hasChildren) carries NO own dates — the UI rolls its span up from its children
+ *  so the parent bar always exactly encloses them. */
 function toRow(
   t: task.Task,
   anchorDay: number,
   esOffsetByTask: Record<common.TaskId, number>,
+  h: Hierarchy,
 ): gantt.GanttRow {
+  const isParent = h.hasChildren.has(t.id);
   const dur = durationDaysOf(t.priority);
   let startsAt: common.ISODateTime | null = null;
   let endsAt: common.ISODateTime | null = null;
-  if (t.dueAt) {
+  if (isParent) {
+    // parent span is derived from children (rollup on the client); leave null.
+  } else if (t.startAt && t.dueAt) {
+    // Both explicit ⇒ the bar spans exactly [startAt, dueAt] (PR-C: real dates win
+    // over the derived window, so a user-set start/due gives an arrow-linkable bar).
+    startsAt = t.startAt;
+    endsAt = t.dueAt;
+  } else if (t.dueAt) {
     endsAt = t.dueAt;
     startsAt = isoAtDay(dayOf(t.dueAt) - dur);
+  } else if (t.startAt) {
+    // Start only ⇒ anchor a nominal-duration bar at the real start.
+    startsAt = t.startAt;
+    endsAt = isoAtDay(dayOf(t.startAt) + dur);
   } else if (t.id in esOffsetByTask) {
     const start = anchorDay + esOffsetByTask[t.id]!;
     startsAt = isoAtDay(start);
@@ -85,16 +155,24 @@ function toRow(
     endsAt,
     progressPercent: progressOf(t.status),
     assigneeId: t.assigneeId,
+    teamId: t.teamId ?? null,
+    parentTaskId: h.parentOf.get(t.id) ?? null,
+    depth: h.depthOf.get(t.id) ?? 0,
+    hasChildren: isParent,
+    ...(t.wbs ? { wbs: t.wbs } : {}),
   };
 }
 
 /** Project start day: earliest deadline-anchored start, else earliest createdAt,
  *  else today. Anchors CPM-derived (dueAt-less) bars onto the real calendar. */
 function anchorDayOf(live: task.Task[]): number {
+  // Earliest real anchor: an explicit startAt, or a deadline-anchored derived start.
+  const explicitStarts = live.filter((t) => t.startAt).map((t) => dayOf(t.startAt!));
   const dueStarts = live
     .filter((t) => t.dueAt !== null)
     .map((t) => dayOf(t.dueAt!) - durationDaysOf(t.priority));
-  if (dueStarts.length > 0) return Math.min(...dueStarts);
+  const anchored = [...explicitStarts, ...dueStarts];
+  if (anchored.length > 0) return Math.min(...anchored);
   const created = live.map((t) => dayOf(t.createdAt));
   if (created.length > 0) return Math.min(...created);
   return dayOf(new Date().toISOString());
@@ -128,7 +206,42 @@ export function buildGanttChartDTO(
 
   const { esOffsetByTask, criticalTaskIds } = deriveSchedule(live, lines);
   const anchorDay = anchorDayOf(live);
-  const rows = live.map((t) => toRow(t, anchorDay, esOffsetByTask));
+  const h = buildHierarchy(live);
+
+  // Pre-order the rows so every parent is immediately followed by its own children
+  // block (the client's group-band + contiguous-run assumptions rely on it). Roots
+  // and each sibling group are ordered by WBS, then title as a stable tiebreak.
+  const byId = new Map(live.map((t) => [t.id, t]));
+  const childrenByParent = new Map<common.TaskId | null, task.Task[]>();
+  for (const t of live) {
+    const p = h.parentOf.get(t.id) ?? null;
+    const arr = childrenByParent.get(p);
+    if (arr) arr.push(t);
+    else childrenByParent.set(p, [t]);
+  }
+  const sortSiblings = (a: task.Task, b: task.Task): number => {
+    const w = compareWbs(a.wbs, b.wbs);
+    return w !== 0 ? w : a.title.localeCompare(b.title);
+  };
+  const ordered: task.Task[] = [];
+  const emitted = new Set<common.TaskId>();
+  const walk = (parent: common.TaskId | null): void => {
+    const kids = (childrenByParent.get(parent) ?? []).slice().sort(sortSiblings);
+    for (const t of kids) {
+      if (emitted.has(t.id)) continue; // cycle-guard
+      emitted.add(t.id);
+      ordered.push(t);
+      walk(t.id);
+    }
+  };
+  walk(null);
+  // Safety net: any row not reached (shouldn't happen) still ships, appended in
+  // WBS order, so no task is silently dropped from the chart.
+  if (ordered.length < live.length) {
+    for (const t of [...live].sort(sortSiblings)) if (!emitted.has(t.id)) ordered.push(t);
+  }
+
+  const rows = ordered.map((t) => toRow(byId.get(t.id)!, anchorDay, esOffsetByTask, h));
 
   return { eventId, rows, dependencies: lines, criticalTaskIds };
 }

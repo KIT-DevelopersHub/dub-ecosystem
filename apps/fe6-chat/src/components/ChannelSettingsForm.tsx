@@ -1,6 +1,7 @@
 // Channel settings + member management (design §2-2, admin only). Archive is a
 // destructive toggle -> confirmed. Optimistic-lock version is carried on save.
 import { useState } from "react";
+import { ConfirmDialog } from "@dub/ui";
 import type { common } from "@dub/types";
 import type { Channel } from "../api/contract";
 import styles from "../styles/chat.module.css";
@@ -16,6 +17,7 @@ export interface ChannelSettingsFormProps {
 export function ChannelSettingsForm({ channel, onSave, onArchiveToggle }: ChannelSettingsFormProps) {
   const [name, setName] = useState(channel.name);
   const [topic, setTopic] = useState(channel.topic ?? "");
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
 
   return (
     <form
@@ -42,15 +44,28 @@ export function ChannelSettingsForm({ channel, onSave, onArchiveToggle }: Channe
         <button
           type="button"
           data-testid="fe6-settings-archive"
-          onClick={() => {
-            if (globalThis.confirm?.(channel.archived ? "アーカイブを解除しますか？" : "このチャネルをアーカイブしますか？")) {
-              void onArchiveToggle(!channel.archived, channel.version);
-            }
-          }}
+          onClick={() => setArchiveConfirmOpen(true)}
         >
           {channel.archived ? "アーカイブ解除" : "アーカイブ"}
         </button>
       </div>
+      <ConfirmDialog
+        open={archiveConfirmOpen}
+        title={channel.archived ? "アーカイブを解除しますか？" : "チャネルをアーカイブしますか？"}
+        message={
+          channel.archived
+            ? "このチャネルをアクティブに戻します。"
+            : "アーカイブすると一覧から隠れ、投稿できなくなります。"
+        }
+        confirmLabel={channel.archived ? "解除する" : "アーカイブする"}
+        danger={!channel.archived}
+        onConfirm={() => {
+          setArchiveConfirmOpen(false);
+          void onArchiveToggle(!channel.archived, channel.version);
+        }}
+        onCancel={() => setArchiveConfirmOpen(false)}
+        testId="fe6-settings-archive-confirm"
+      />
     </form>
   );
 }

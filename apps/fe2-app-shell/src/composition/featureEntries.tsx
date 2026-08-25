@@ -16,7 +16,7 @@
 // ── FE4 (@dub/fe4-task-gantt) ────────────────────────────────────────────────
 export { taskModule, eventTaskRoutes, registerTaskActionPlugin } from "@dub/fe4-task-gantt/src/features/task-gantt/public";
 export { ApiClientProvider as TaskApiClientProvider } from "@dub/fe4-task-gantt/src/api/client-context";
-export { TaskRouteProvider } from "@dub/fe4-task-gantt/src/routes/taskRoutes";
+export { TaskRouteProvider, useTaskRoute } from "@dub/fe4-task-gantt/src/routes/taskRoutes";
 export type { TaskRouteContextValue } from "@dub/fe4-task-gantt/src/routes/taskRoutes";
 export type { ApiClient as Fe4ApiClient } from "@dub/fe4-task-gantt/src/contracts/spa-shell";
 
@@ -29,6 +29,8 @@ export type {
   Channel,
   ChannelMember,
   CreateChannelRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   EditMessageRequest,
   GetChannelResponse,
   ListMessagesRequest,
@@ -36,7 +38,9 @@ export type {
   Message,
   PostMessageRequest,
   PostMessageResponse,
+  Reaction,
   ReactionToggleRequest,
+  ReactionToggleResponse,
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,

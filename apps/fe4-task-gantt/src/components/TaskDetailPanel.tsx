@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, IconButton, TextField, Select } from "@dub/ui";
+import { Button, IconButton, TextField, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
-import { dependencyScopeOptions, pruneToScope, type ScopeTask } from "../domain/task-hierarchy";
+import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
@@ -25,6 +25,10 @@ export interface TaskDetailPanelProps {
   teams?: readonly team.Team[];
   onSave: (patch: task.UpdateTaskRequest, relations: RelationEdit) => void;
   onDelete: () => void;
+  /** Called instead of opening the delete confirm when the task still has children
+   *  (deleting would orphan them). The host surfaces this as a bottom-right warning
+   *  toast (#375) — the old inline block message under the button was hard to notice. */
+  onDeleteBlocked?: (childCount: number) => void;
   onClose: () => void;
   /** "ここから子タスクを作成": open the create modal with this task preset as the parent. */
   onCreateChild?: (parentId: common.TaskId) => void;
@@ -34,11 +38,21 @@ export interface TaskDetailPanelProps {
   parentOptions?: readonly { id: common.TaskId; title: string }[];
   /** This task's current WBS parent (親タスク), or null if top-level. */
   parentTaskId?: common.TaskId | null;
-  /** every task with its direct parent — predecessors are scoped to same-parent
-   *  siblings of the (possibly re-parented) task (判断10). */
+  /** every task with its team — predecessors are scoped to the task's team
+   *  (ADR-0007: 同一チーム内なら別スコープ/別階層も依存可・別チームは不可). */
   scopeTasks?: readonly ScopeTask[];
   /** This task's current predecessors (先行タスク＝依存元). */
   dependsOnIds?: readonly common.TaskId[];
+  /** The bar's DISPLAYED window (gantt row startsAt/endsAt). Seeds 開始日/期日 when the
+   *  task has no explicit startAt/dueAt column yet — the gantt read model derives a bar
+   *  window from dueAt (＋priority/CPM), so a task with only dueAt still SHOWS a start on
+   *  its bar while its startAt column is null. Seeding from here makes 値(詳細)=バー=横軸. */
+  barStartsAt?: common.ISODateTime | null;
+  barEndsAt?: common.ISODateTime | null;
+  /** True when this task is a WBS parent (work-package). A parent's bar span is the
+   *  ROLLUP of its children, so the rolled bar window — not the parent's own (possibly
+   *  stale) start_at/due_at column — is the authoritative value to show (症状#7 値ズレ). */
+  hasChildren?: boolean;
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
@@ -51,6 +65,7 @@ export function TaskDetailPanel({
   teams = [],
   onSave,
   onDelete,
+  onDeleteBlocked,
   onClose,
   onCreateChild,
   onCreatePredecessor,
@@ -58,6 +73,9 @@ export function TaskDetailPanel({
   parentTaskId = null,
   scopeTasks = [],
   dependsOnIds = [],
+  barStartsAt = null,
+  barEndsAt = null,
+  hasChildren = false,
   fieldErrors,
   canWrite,
   canDelete,
@@ -67,28 +85,50 @@ export function TaskDetailPanel({
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
   const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
-  const [due, setDue] = useState<string | null>(dateInputFromIso(t.dueAt));
+  // Seed the date fields so 開始日/期日 always equal what the bar (and the axis) show.
+  //  - LEAF task: prefer its own start_at/due_at column, falling back to the bar's derived
+  //    window when the column is still null (real seed sets only due_at).
+  //  - PARENT (work-package): its bar is the ROLLUP of its children, and its own
+  //    start_at/due_at column is authoritatively null in the read model — but a stale value
+  //    can linger in the task row from before it had children. The rolled bar window is the
+  //    single source of truth, so it WINS over the stored column (症状#7 親子の値ズレ: detail
+  //    /save must never show a parent date that disagrees with its children's rollup).
+  const startInputSeed = dateInputFromIso(
+    hasChildren ? barStartsAt ?? t.startAt ?? null : t.startAt ?? barStartsAt ?? null,
+  );
+  const dueInputSeed = dateInputFromIso(
+    hasChildren ? barEndsAt ?? t.dueAt ?? null : t.dueAt ?? barEndsAt ?? null,
+  );
+  const [start, setStart] = useState<string | null>(startInputSeed);
+  const [due, setDue] = useState<string | null>(dueInputSeed);
   // Relations (親子 / 先行タスク). Seeded from the gantt read model via props; the
   // panel is remounted per task (keyed on id) so these never go stale.
   const [parentId, setParentId] = useState<common.TaskId | null>(parentTaskId);
   const [deps, setDeps] = useState<common.TaskId[]>([...dependsOnIds]);
   const [confirming, setConfirming] = useState(false);
 
-  // Predecessors are limited to this task's siblings under its (possibly changed)
-  // parent — same scope only (判断10). Excludes self.
+  // Predecessors are limited to this task's TEAM (ADR-0007): same-team tasks across any
+  // hierarchy level, minus self. Cross-team tasks are excluded. Recomputes on team change.
   const depOptions = useMemo(
-    () => dependencyScopeOptions(scopeTasks, parentId, t.id),
-    [scopeTasks, parentId, t.id],
+    () => dependencyScopeOptions(scopeTasks, teamId, t.id),
+    [scopeTasks, teamId, t.id],
   );
   // How many tasks hang directly under this one (親タスクなら子の数を明示・feedback #39).
   const childCount = useMemo(
     () => scopeTasks.filter((s) => s.parentTaskId === t.id).length,
     [scopeTasks, t.id],
   );
+  // 親子は同一チーム: このタスクが子（親を持つ）なら、チームは親のチームに固定し編集させない。
+  // 親の付け替えで親のチームへ追従する（下の親セレクトの onChange）。親なし＝トップレベルなら自由。
+  // サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保。
+  const teamLockedToParent = parentId != null;
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
+  const nextStartIso = isoFromDateInput(start);
   const nextDueIso = isoFromDateInput(due);
+  // A date edit relative to the seeded (displayed) window.
+  const datesChanged = start !== startInputSeed || due !== dueInputSeed;
   const curTeam = t.teamId ?? null;
   const parentChanged = parentId !== parentTaskId;
   const sameDeps =
@@ -100,7 +140,7 @@ export function TaskDetailPanel({
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
     teamId !== curTeam ||
-    nextDueIso !== t.dueAt ||
+    datesChanged ||
     parentChanged ||
     depsChanged;
 
@@ -111,7 +151,14 @@ export function TaskDetailPanel({
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
     if (teamId !== curTeam) patch.teamId = teamId;
-    if (nextDueIso !== t.dueAt) patch.dueAt = nextDueIso;
+    // Any 開始日/期日 change materialises BOTH edges (startsAt↔startAt, endsAt↔dueAt) so the
+    // saved task carries an explicit window. The gantt bar then equals the detail values
+    // exactly (no re-derivation drift when startAt was previously null), and the optimistic
+    // bar move matches the authoritative refetch — no post-save jump.
+    if (datesChanged) {
+      patch.startAt = nextStartIso;
+      patch.dueAt = nextDueIso;
+    }
     if (parentChanged) patch.parentTaskId = parentId;
     onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
   };
@@ -169,19 +216,27 @@ export function TaskDetailPanel({
           </div>
         </div>
 
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
+            担当
+          </label>
+          <Select
+            id="fe4-detail-assignee"
+            value={assigneeId ?? ""}
+            disabled={!canWrite}
+            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
+            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+            testId="fe4-detail-assignee"
+          />
+        </div>
+
+        {/* 開始日 / 期日: a task with both gets an exact gantt bar (arrow-linkable). */}
         <div className={styles.formRow}>
           <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
-              担当
+            <label className={styles.formLabel} htmlFor="fe4-detail-start">
+              開始日
             </label>
-            <Select
-              id="fe4-detail-assignee"
-              value={assigneeId ?? ""}
-              disabled={!canWrite}
-              onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-              options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
-              testId="fe4-detail-assignee"
-            />
+            <DateField id="fe4-detail-start" value={start} disabled={!canWrite} onChange={setStart} testId="fe4-detail-start" />
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-due">
@@ -199,11 +254,22 @@ export function TaskDetailPanel({
             <Select
               id="fe4-detail-team"
               value={teamId ?? ""}
-              disabled={!canWrite}
-              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
+              disabled={!canWrite || teamLockedToParent}
+              onChange={(v) => {
+                const next = v ? (v as common.TeamId) : null;
+                setTeamId(next);
+                // dependencies are same-team only (ADR-0007) — drop predecessors that are
+                // now on another team.
+                setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
+              }}
               options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
               testId="fe4-detail-team"
             />
+            {teamLockedToParent && (
+              <p className={styles.fieldHint} data-testid="fe4-detail-team-locked">
+                親タスクと同じチームです（子タスクのチームは変更できません）
+              </p>
+            )}
           </div>
         )}
 
@@ -227,21 +293,55 @@ export function TaskDetailPanel({
             onChange={(v) => {
               const next = v ? (v as common.TaskId) : null;
               setParentId(next);
-              // dependencies must stay within the new scope — drop out-of-scope ones.
-              setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
+              // 親子は同一チーム: 親を付け替えたら子のチームを新しい親のチームへ合わせる（親子で
+              // チームが食い違う状態を作らせない）。トップレベルへ分離（next=null）ならチームは維持。
+              const parentTeam = next ? teamOf(scopeTasks, next) : teamId;
+              if (next) setTeamId(parentTeam);
+              // deps are team-scoped (ADR-0007): re-scope predecessors to the (parent's) team.
+              setDeps((d) => pruneToScope(scopeTasks, parentTeam, d).filter((id) => id !== t.id));
             }}
             options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
             testId="fe4-detail-parent"
           />
+          {/* 関係タイプの変換: 親（親子）→ 先行（依存）。保存で親子/依存を一括反映。 */}
+          {canWrite && parentId && (
+            <button
+              type="button"
+              className={styles.relConvertBtn}
+              onClick={() => {
+                const p = parentId;
+                setParentId(null);
+                // detach to top-level, then keep p as a predecessor. The parent is the same
+                // team as this task (親子は同一チーム), so it stays a valid same-team dep
+                // (ADR-0007). Prune to this task's team to drop any cross-team leftovers.
+                setDeps((d) => pruneToScope(scopeTasks, teamId, [...new Set([...d, p])]).filter((id) => id !== t.id));
+              }}
+              data-testid="fe4-detail-parent-to-dep"
+            >
+              ⇄ 先行タスク（依存）に変換
+            </button>
+          )}
         </div>
 
-        {/* 先行タスク（依存）: add/remove predecessors after the fact (same scope only). */}
+        {/* 先行タスク（依存）: add/remove predecessors after the fact (same team only).
+            Each chip can be promoted to the 親タスク (依存→親子) via 「親に」. */}
         <div className={styles.formField}>
-          <span className={styles.formLabel}>先行タスク（依存・同じ親のタスクのみ）</span>
+          <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク）</span>
           <PredecessorPicker
             options={canWrite ? depOptions : []}
             value={deps}
             onChange={(next) => canWrite && setDeps(next)}
+            {...(canWrite
+              ? {
+                  onPromoteToParent: (id: common.TaskId) => {
+                    // 依存 → 親子: this predecessor becomes the parent; drop it from deps.
+                    // Promoting a parent does not change this task's team, so the remaining
+                    // predecessors stay same-team and are preserved (ADR-0007).
+                    setParentId(id);
+                    setDeps((d) => pruneToScope(scopeTasks, teamId, d.filter((x) => x !== id)).filter((x) => x !== t.id));
+                  },
+                }
+              : {})}
             testId="fe4-detail-deps"
           />
         </div>
@@ -268,26 +368,38 @@ export function TaskDetailPanel({
             保存
           </Button>
           {canDelete && !confirming && (
-            <Button variant="danger" onClick={() => setConfirming(true)} testId="fe4-detail-delete">
+            <Button
+              variant="danger"
+              // A task with children cannot be deleted (deleting it would orphan the
+              // children and the read model would silently re-parent them). Instead of the
+              // old inline block message (hard to notice under the button, #375), hand the
+              // block to the host, which shows a bottom-right warning toast.
+              onClick={() => (childCount > 0 ? onDeleteBlocked?.(childCount) : setConfirming(true))}
+              testId="fe4-detail-delete"
+            >
               削除
             </Button>
           )}
         </div>
 
-        {confirming && (
-          <div className={styles.confirmBox} data-testid="fe4-confirm-delete">
-            <p className={styles.confirmText}>このタスクを削除しますか？この操作は取り消せません。</p>
-            <div className={styles.panelActions}>
-              <Button variant="danger" onClick={onDelete} testId="fe4-confirm-yes">
-                削除する
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirming(false)} testId="fe4-confirm-no">
-                やめる
-              </Button>
-            </div>
-          </div>
-        )}
       </aside>
+
+      {/* Leaf (no children) delete confirm — a centered MODAL dialog (@dub/ui ConfirmDialog),
+          unified with 運営メンバー削除 etc. The old inline box under the button was easy to
+          miss and kept regressing on merges; a modal is unmissable and lives outside the
+          panel <aside>. A parent-with-children NEVER reaches here — its 削除 fires
+          onDeleteBlocked (bottom-right warning toast), never a confirm. */}
+      <ConfirmDialog
+        open={confirming}
+        title="タスクを削除しますか？"
+        message="このタスクを削除します。この操作は取り消せません。"
+        confirmLabel="削除する"
+        cancelLabel="やめる"
+        danger
+        onConfirm={onDelete}
+        onCancel={() => setConfirming(false)}
+        testId="fe4-confirm-delete"
+      />
     </>
   );
 }

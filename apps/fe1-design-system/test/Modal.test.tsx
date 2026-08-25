@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ConfirmDialog, Modal } from "../src/components/Modal";
+import { ConfirmDialog, ErrorDialog, Modal } from "../src/components/Modal";
 
 describe("Modal", () => {
   it("does not render when closed", () => {
@@ -133,5 +133,46 @@ describe("ConfirmDialog", () => {
     await act(async () => {
       resolve();
     });
+  });
+});
+
+describe("ErrorDialog", () => {
+  const error = { code: "TASK_VALIDATION_FAILED", message: "入力内容を確認してください", correlationId: "req_abc" };
+
+  it("shows the failure reason, validation details and correlation id", () => {
+    render(
+      <ErrorDialog
+        open
+        error={error}
+        details={[{ label: "期間", message: "期間（時期）が未入力です" }]}
+        onClose={() => {}}
+        testId="err"
+      />,
+    );
+    expect(screen.getByTestId("err-message")).toHaveTextContent("入力内容を確認してください");
+    expect(screen.getByTestId("err-details")).toHaveTextContent("期間（時期）が未入力です");
+    expect(screen.getByRole("alert")).toHaveAttribute("data-error-code", "TASK_VALIDATION_FAILED");
+    expect(screen.getByText(/req_abc/)).toBeInTheDocument();
+  });
+
+  it("close button invokes onClose", async () => {
+    const onClose = vi.fn();
+    render(<ErrorDialog open error={error} onClose={onClose} testId="err" />);
+    await userEvent.click(screen.getByTestId("err-close"));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("renders a retry button only when onRetry is given", async () => {
+    const onRetry = vi.fn();
+    const { rerender } = render(<ErrorDialog open error={error} onClose={() => {}} testId="err" />);
+    expect(screen.queryByTestId("err-retry")).not.toBeInTheDocument();
+    rerender(<ErrorDialog open error={error} onClose={() => {}} onRetry={onRetry} testId="err" />);
+    await userEvent.click(screen.getByTestId("err-retry"));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("is not rendered when closed", () => {
+    render(<ErrorDialog open={false} error={error} onClose={() => {}} testId="err" />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

@@ -11,6 +11,7 @@ export const TaskErrorCodes = {
   INVALID_STATUS_TRANSITION: "TASK_INVALID_STATUS_TRANSITION", // 409 not in transition table
   GITHUB_ORIGIN_READONLY: "TASK_GITHUB_ORIGIN_READONLY", // 422 protected github field write
   EVENT_ARCHIVED: "TASK_EVENT_ARCHIVED", // 422 create/update under archived event
+  PARENT_CHILD_TEAM_MISMATCH: "TASK_PARENT_CHILD_TEAM_MISMATCH", // 422 parent と child のチーム不一致（親子は同一チーム）
 } as const;
 
 export const taskErrors = {
@@ -46,5 +47,14 @@ export const taskErrors = {
       status: 422,
       details: { eventId },
     });
+  },
+  // 親子は必ず同一チーム: 子タスクは親と別チームにできない（親から作る導線はチームを親に固定
+  // する。整合はサーバでも担保）。`parentTeamId`/`childTeamId` は不一致の両チーム（null=未割当）。
+  parentChildTeamMismatch(parentTeamId: string | null, childTeamId: string | null): DubError {
+    return new DubError(
+      TaskErrorCodes.PARENT_CHILD_TEAM_MISMATCH,
+      "A child task must belong to the same team as its parent",
+      { status: 422, details: { parentTeamId, childTeamId } },
+    );
   },
 };

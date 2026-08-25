@@ -396,6 +396,54 @@ paths:
           description: Unread counts
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /chat/settings/deletion-policy:
+    get:
+      operationId: getDeletionPolicy
+      summary: Get the workspace message deletion policy (RBAC-configurable delete behaviour)
+      tags:
+        - chat
+      responses:
+        '200':
+          description: The current deletion policy (version 0 = in-code default in effect)
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    patch:
+      operationId: updateDeletionPolicy
+      summary: Update the workspace message deletion policy (requires chat:moderate)
+      tags:
+        - chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy, version]
+              properties:
+                version:
+                  type: integer
+                  description: Optimistic-concurrency guard; 0 for the first write.
+                policy:
+                  type: object
+                  required: [member, moderator]
+                  properties:
+                    member:
+                      type: string
+                      enum: [hard, tombstone]
+                    moderator:
+                      type: string
+                      enum: [hard, tombstone]
+      responses:
+        '200':
+          description: The updated deletion policy
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /chat/messages:
     get:
       operationId: listMessages

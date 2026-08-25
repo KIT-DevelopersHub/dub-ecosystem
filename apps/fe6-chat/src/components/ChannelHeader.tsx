@@ -3,7 +3,7 @@
 // popover, pinned-messages popover, and in-channel search. Presentational — all
 // data + async come from ChannelPage via props. Slack-style layout, tokens/CSS.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Avatar } from "@dub/ui";
+import { Avatar, Icon } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Channel, ChannelMember, Message } from "../api/contract";
 import { getPresence } from "../lib/presence";
@@ -120,7 +120,7 @@ export function ChannelHeader({
         <Dropdown
           trigger={
             <>
-              <span aria-hidden>👥</span>
+              <Icon name="users" size="sm" />
               <span>{channel.memberCount}</span>
             </>
           }
@@ -149,7 +149,7 @@ export function ChannelHeader({
         <Dropdown
           trigger={
             <>
-              📌{pinned.length > 0 && <span className={styles.pinCount}>{pinned.length}</span>}
+              <Icon name="pin" size="sm" />{pinned.length > 0 && <span className={styles.pinCount}>{pinned.length}</span>}
             </>
           }
           triggerClassName={styles.iconBtn}
@@ -194,7 +194,7 @@ export function ChannelHeader({
         </Dropdown>
 
         <label className={styles.searchBox}>
-          <span aria-hidden>🔍</span>
+          <Icon name="search" size="sm" />
           <input
             type="search"
             placeholder="検索"

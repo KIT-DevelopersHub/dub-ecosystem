@@ -37,8 +37,9 @@ const MOCK_ME: gateway.MeResponse = {
   user: { id: "user_alice", displayName: "Alice Admin", avatarUrl: null },
   orgId: "org_devhub",
   // mail:admin lets the harness exercise the Email Routing surfaces (roster sync,
-  // address issue) — the mock admin role grants it in production too.
-  permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"],
+  // address issue); chat:moderate lets it edit the メッセージ削除ポリシー section — the
+  // mock admin role grants both in production too.
+  permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "chat:moderate"],
   sessionExpiresAt: Date.now() + 3600_000,
 };
 

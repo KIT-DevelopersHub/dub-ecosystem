@@ -116,4 +116,52 @@ describe("useUndoRedoHotkeys", () => {
     await act(async () => {});
     expect(undo).not.toHaveBeenCalled();
   });
+
+  it("Cmd-Z (mac) triggers undo, Shift-Cmd-Z triggers redo", async () => {
+    let hist: UndoRedo | null = null;
+    render(<Harness onReady={(h) => { hist = h; }} />);
+    const undo = vi.fn();
+    const redo = vi.fn();
+    act(() => hist!.push({ undo, redo }));
+    fireEvent.keyDown(window, { key: "z", metaKey: true }); // ⌘Z
+    await act(async () => {});
+    expect(undo).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: "z", metaKey: true, shiftKey: true }); // ⇧⌘Z
+    await act(async () => {});
+    expect(redo).toHaveBeenCalledTimes(1);
+  });
+
+  it("Ctrl-Y (windows/linux) triggers redo", async () => {
+    let hist: UndoRedo | null = null;
+    render(<Harness onReady={(h) => { hist = h; }} />);
+    const undo = vi.fn();
+    const redo = vi.fn();
+    act(() => hist!.push({ undo, redo }));
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await act(async () => {});
+    fireEvent.keyDown(window, { key: "y", ctrlKey: true }); // conventional Windows redo
+    await act(async () => {});
+    expect(redo).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT hijack Ctrl-Z while an IME is composing (変換確定中)", async () => {
+    let hist: UndoRedo | null = null;
+    render(<Harness onReady={(h) => { hist = h; }} />);
+    const undo = vi.fn();
+    act(() => hist!.push({ undo, redo: () => {} }));
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, isComposing: true });
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, keyCode: 229 }); // legacy browsers
+    await act(async () => {});
+    expect(undo).not.toHaveBeenCalled();
+  });
+
+  it("Alt+Ctrl-Z is ignored (reserved modifier combo)", async () => {
+    let hist: UndoRedo | null = null;
+    render(<Harness onReady={(h) => { hist = h; }} />);
+    const undo = vi.fn();
+    act(() => hist!.push({ undo, redo: () => {} }));
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, altKey: true });
+    await act(async () => {});
+    expect(undo).not.toHaveBeenCalled();
+  });
 });

@@ -48,7 +48,15 @@ function guard(client: AuthClient): MiddlewareHandler {
   });
   return async (c, next) => {
     await requireAuth(c, async () => {
-      await requirePerm(c, next);
+      // The row-write path (PATCH /gantt/rows/:id) is task-scoped, not event-scoped —
+      // it carries no eventId to check event:read against. Authorization is enforced
+      // downstream: gantt-service forwards to task-service, which requires task:write
+      // on the propagated principal. So here we only require authentication.
+      if (c.req.method === "PATCH" && c.req.path.includes("/gantt/rows/")) {
+        await next();
+      } else {
+        await requirePerm(c, next);
+      }
     });
   };
 }
@@ -146,5 +154,45 @@ export function createApp(deps: AppDeps = defaultDeps): App {
     return c.json(state satisfies gantt.GanttViewState);
   });
 
+  // ---- PATCH /gantt/rows/:taskId (persist a bar's window: startsAt/endsAt) ----
+  // The write path a timeline drag/resize OR a start/due edit uses. gantt maps the
+  // window onto the underlying task (startsAt→startAt, endsAt→dueAt) via task-service
+  // (read-modify-write, optimistic-locked; task:write enforced there). On success the
+  // event's cached DTO is purged so the next read reflects the move immediately.
+  app.patch("/gantt/rows/:taskId", async (c) => {
+    const ctx = c.get("dubCtx");
+    const taskId = c.req.param("taskId");
+    const body = validatePatchRowBody(await c.req.json().catch(() => ({})));
+    const upstream = deps.upstream(c.env);
+    const updated = await upstream.updateTaskDates(ctx, taskId, body);
+    if (updated.eventId) await deps.cache(c.env).purge(updated.eventId);
+    const row: gantt.GanttRow = {
+      taskId: updated.id,
+      title: updated.title,
+      startsAt: body.startsAt,
+      endsAt: body.endsAt,
+      progressPercent: updated.status === "done" ? 100 : 0,
+      assigneeId: updated.assigneeId,
+      teamId: updated.teamId ?? null,
+    };
+    return c.json(row satisfies gantt.GanttRow);
+  });
+
   return app;
 }
+
+/** Validate the PATCH /gantt/rows body: startsAt/endsAt each ISO8601 or null. */
+export function validatePatchRowBody(body: unknown): gantt.PatchGanttRowRequest {
+  const o = (body ?? {}) as Partial<gantt.PatchGanttRowRequest>;
+  const isIsoOrNull = (v: unknown): v is common.ISODateTime | null =>
+    v === null || (typeof v === "string" && ISO_RE.test(v));
+  const fe: { field: string; reason: string }[] = [];
+  if (!("startsAt" in o) || !isIsoOrNull(o.startsAt)) fe.push({ field: "startsAt", reason: "invalid_format" });
+  if (!("endsAt" in o) || !isIsoOrNull(o.endsAt)) fe.push({ field: "endsAt", reason: "invalid_format" });
+  if (fe.length > 0) {
+    throw new DubError(CommonErrorCodes.VALIDATION_FAILED, "invalid row schedule", { status: 400, details: fe });
+  }
+  return { startsAt: o.startsAt ?? null, endsAt: o.endsAt ?? null };
+}
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;

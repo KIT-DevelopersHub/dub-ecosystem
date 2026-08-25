@@ -11,6 +11,9 @@ export interface PredecessorPickerProps {
   options: readonly PredecessorOption[];
   value: readonly common.TaskId[];
   onChange: (next: common.TaskId[]) => void;
+  /** When provided, each selected chip gets a 「親に」 action to convert that
+   *  predecessor (依存) into the task's parent (親子) — relation-type switching. */
+  onPromoteToParent?: (id: common.TaskId) => void;
   testId?: string;
 }
 
@@ -41,7 +44,7 @@ export function rememberPredecessors(ids: readonly common.TaskId[]): void {
  * (which grows unbounded), it offers an autocomplete search plus a small set of
  * recently-chosen suggestions — Notion-style combobox behaviour.
  */
-export function PredecessorPicker({ options, value, onChange, testId }: PredecessorPickerProps) {
+export function PredecessorPicker({ options, value, onChange, onPromoteToParent, testId }: PredecessorPickerProps) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -78,6 +81,18 @@ export function PredecessorPicker({ options, value, onChange, testId }: Predeces
           {selected.map((o) => (
             <span key={o.id} className={styles.ppChip} data-testid={testId ? `${testId}-chip-${o.id}` : undefined}>
               <span className={styles.ppChipText}>{o.title}</span>
+              {onPromoteToParent && (
+                <button
+                  type="button"
+                  className={styles.ppChipPromote}
+                  onClick={() => onPromoteToParent(o.id)}
+                  title={`「${o.title}」を親タスク（親子）に変換`}
+                  aria-label={`${o.title} を親タスクに変換`}
+                  data-testid={testId ? `${testId}-promote-${o.id}` : undefined}
+                >
+                  親に
+                </button>
+              )}
               <button type="button" className={styles.ppChipX} onClick={() => remove(o.id)} aria-label={`${o.title} を外す`}>
                 ×
               </button>

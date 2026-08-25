@@ -42,6 +42,16 @@ export interface AppManifestEntry {
    */
   permissions: readonly PermissionKey[];
   /**
+   * The PER-APP graded access keys that INDIVIDUALLY govern this app (domain "app").
+   * `view` = 有効化 (the app can be opened/viewed) — the actual launcher-grey + route-guard
+   * gate; `edit` implies view and additionally allows create/edit inside the app (write
+   * UIs gate on it). Every app has its OWN pair (unlike `permissions` above, which for
+   * gantt/participation is a SHARED domain key), so an admin can turn each app on/off per
+   * role without collateral. Both keys are `PermissionKey` (closed union) so a typo is a
+   * compile error; the CI test asserts they exist in PERMISSION_CATALOG under domain "app".
+   */
+  access: { view: PermissionKey; edit: PermissionKey };
+  /**
    * True when the launcher tile is shown to every authenticated user regardless of the
    * permission above (the permission still exists for matrix representation + future
    * enforcement). Documentation of intent; not an authz decision.
@@ -53,17 +63,17 @@ export interface AppManifestEntry {
 // assembleFeatureModules() id list (composition/featureModules.tsx) — the CI cross-check
 // enforces it.
 export const APP_MANIFEST = [
-  { id: "events", label: "イベント", navPath: "/events", domain: "event", permissions: ["event:read"] },
-  { id: "tasks", label: "マイタスク", navPath: "/me/tasks", domain: "task", permissions: ["task:read"] },
-  { id: "gantt", label: "ガントチャート", navPath: "/gantt", domain: "task", permissions: ["task:read"] },
-  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"] },
-  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"] },
-  { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"] },
-  { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], openToAllAuthenticated: true },
-  { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"] },
-  { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], openToAllAuthenticated: true },
-  { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], openToAllAuthenticated: true },
-  { id: "admin", label: "管理", navPath: "/admin/users", domain: "identity", permissions: ["identity:admin"] },
+  { id: "events", label: "イベント", navPath: "/events", domain: "event", permissions: ["event:read"], access: { view: "app:events:view", edit: "app:events:edit" } },
+  { id: "tasks", label: "マイタスク", navPath: "/me/tasks", domain: "task", permissions: ["task:read"], access: { view: "app:tasks:view", edit: "app:tasks:edit" } },
+  { id: "gantt", label: "ガントチャート", navPath: "/gantt", domain: "task", permissions: ["task:read"], access: { view: "app:gantt:view", edit: "app:gantt:edit" } },
+  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" } },
+  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" } },
+  { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" } },
+  { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true },
+  { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"], access: { view: "app:members:view", edit: "app:members:edit" } },
+  { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], access: { view: "app:participation:view", edit: "app:participation:edit" }, openToAllAuthenticated: true },
+  { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true },
+  { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" } },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */
@@ -85,4 +95,24 @@ export function isCanonicalAppId(id: string): id is AppId {
 /** The union of every per-app permission key referenced by the manifest. */
 export function manifestPermissionKeys(): PermissionKey[] {
   return [...new Set(APP_MANIFEST.flatMap((a) => a.permissions))];
+}
+
+/** The per-app graded access key(s) for one app (view = open/閲覧, edit = 編集・作成). */
+export function appAccessKeys(id: string): { view: PermissionKey; edit: PermissionKey } | undefined {
+  return getApp(id)?.access;
+}
+
+/** Every per-app access key (view+edit for all apps), in launcher order. */
+export function allAppAccessKeys(): PermissionKey[] {
+  return APP_MANIFEST.flatMap((a) => [a.access.view, a.access.edit]);
+}
+
+/** The `app:<id>:view` gate key for one app (undefined for an unknown id). */
+export function appViewKey(id: string): PermissionKey | undefined {
+  return getApp(id)?.access.view;
+}
+
+/** The `app:<id>:edit` gate key for one app (undefined for an unknown id). */
+export function appEditKey(id: string): PermissionKey | undefined {
+  return getApp(id)?.access.edit;
 }

@@ -3,10 +3,12 @@
 // can't point at one Gantt directly; this screen lists the user's events (from the
 // same /bff/home aggregate the Home screen uses) and opens the chosen event's
 // Gantt. No new backend — reuses useBffHome + @dub/ui.
+import { useEffect, useRef } from "react";
 import { Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { useBffHome } from "../../bff/useBffHome.tsx";
 import { useGanttApi } from "./GanttProvider.tsx";
+import { loadSelectedEvent } from "./selectedEventStore.ts";
 
 export function GanttLandingScreen(): JSX.Element {
   const api = useGanttApi();
@@ -14,6 +16,19 @@ export function GanttLandingScreen(): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
   const eventsError = errorFor("event-service");
   const events = data?.upcomingEvents ?? [];
+
+  // Resume the last-selected event once (first visit / no pick still shows the
+  // picker below). Guarded so it only redirects a single time per mount. From the
+  // resumed gantt the global header イベント switcher handles further switching.
+  const redirected = useRef(false);
+  useEffect(() => {
+    if (redirected.current) return;
+    const last = loadSelectedEvent();
+    if (last) {
+      redirected.current = true;
+      void navigate({ to: `/events/${last}/tasks/gantt`, replace: true });
+    }
+  }, [navigate]);
 
   return (
     <main data-testid="fe2-gantt-landing" className="fe2-page">

@@ -72,7 +72,7 @@ export class MemIdentityRepo implements IdentityRepo {
   }
   async updateUser(
     userId: string,
-    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source">>,
+    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source" | "avatarUrl">>,
     updatedAt: string,
   ): Promise<void> {
     const u = this.users.get(userId);

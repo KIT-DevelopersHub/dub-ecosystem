@@ -1,0 +1,24 @@
+/* The floating clone shown under the cursor while a row is dragged. This is the
+   design-system's "picked-up" elevation — a soft two-layer shadow plus a hair of
+   scale so the row reads as lifted off the list. The consumer's item markup renders
+   inside; this wrapper only adds the lift. */
+.overlay {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.26), 0 2px 6px rgba(15, 23, 42, 0.16);
+  border-radius: var(--dub-radius-md, 8px);
+  transform: scale(1.03);
+  cursor: grabbing;
+}
+
+/* Respect reduced-motion: keep the shadow (it conveys "lifted") but drop the scale
+   so nothing zooms for users who opt out of motion. */
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    transform: none;
+  }
+}
+
+/* Per-row wrapper carrying the dnd-kit transform/transition (set inline). Kept layout-
+   neutral so it never shifts the consumer's own row metrics. */
+.item {
+  touch-action: manipulation;
+}

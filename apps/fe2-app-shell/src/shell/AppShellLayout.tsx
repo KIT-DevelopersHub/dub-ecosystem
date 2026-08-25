@@ -7,17 +7,16 @@
 // (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
 // with no nested/double sidebar.
 import { useState, type ComponentType, type ReactNode } from "react";
-import { AppShell, PageHeader, AppLauncher, Button, Icon } from "@dub/ui";
-import type { AppLauncherItem } from "@dub/ui";
+import { AppShell, PageHeader, AppLauncher, Menu } from "@dub/ui";
+import type { AppLauncherItem, MenuItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
-import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
+import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import {
-  isAppPublished,
-  isPrivilegedViewer,
+  isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
   UNAUTHORIZED_TILE_REASON,
 } from "../lib/releaseGate.ts";
@@ -48,6 +47,9 @@ function accountEmail(auth: ReturnType<typeof useAuth>): string | null {
 export interface AppShellLayoutProps {
   navEntries: NavEntry[];
   headerWidgets?: ComponentType[];
+  // Widgets rendered BEFORE the 9-dot AppLauncher (e.g. the gantt event switcher),
+  // so a context selector sits left of the app/utility icon cluster.
+  leadingHeaderWidgets?: ComponentType[];
   onNavigate?: (path: string) => void;
   onLogout?: () => void;
   title?: string;
@@ -67,8 +69,9 @@ export interface AppShellLayoutProps {
 // deep-link stay consistent — an app greyed here 403s on direct navigation, and vice
 // versa. Two gates decide it:
 //   1. Member release gate (社長決定 2026-08-14, see lib/releaseGate / RequirePublished):
-//      an app not member-published is greyed for general members; admins/maintainers
-//      (isPrivilegedViewer) bypass it. メールのみ published as of 2026-08-14.
+//      an app not member-published is greyed for general members; only full admins
+//      (isPrivilegedViewer = identity:admin) bypass it — non-admin operator roles
+//      (maintainer/organizer) are gated too (#255). メールのみ published as of 2026-08-14.
 //   2. Permission gate (RequirePermission): an app whose requiredPermissions the viewer
 //      does not hold is greyed for EVERYONE — admins included — exactly matching the
 //      route's own requiredPermissions guard (e.g. a maintainer without identity:admin
@@ -77,7 +80,6 @@ export interface AppShellLayoutProps {
 // Sort order: usable apps first, greyed apps last; the existing order-based sequence is
 // preserved within each group (a stable partition), and nothing is removed.
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
-  const privileged = isPrivilegedViewer(can);
   const items = [...navEntries]
     .sort((a, b) => a.order - b.order)
     .map((entry) => {
@@ -89,7 +91,7 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
-      const releaseGated = !privileged && !isAppPublished(entry.appId);
+      const releaseGated = isReleaseGatedFor(entry.appId, can);
       const lacksPermission =
         entry.requiredPermissions !== undefined &&
         entry.requiredPermissions.length > 0 &&
@@ -110,6 +112,7 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
 export function AppShellLayout({
   navEntries,
   headerWidgets = [],
+  leadingHeaderWidgets = [],
   onNavigate,
   onLogout,
   title = "DevHub",
@@ -118,10 +121,39 @@ export function AppShellLayout({
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
   const { can } = usePermissions();
-  const [pwOpen, setPwOpen] = useState(false);
+  const [acctOpen, setAcctOpen] = useState(false);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
+  const authed = auth.status === "authenticated";
+
+  // The ⚙ menu's contents. アカウント設定 (display name / avatar / password) needs the
+  // api-client; ログアウト only needs the onLogout handler, so logout stays available to
+  // any signed-in viewer even if no api is wired. Logout sits last, under a divider,
+  // danger-toned — a 離脱/destructive action set apart from the safe settings above it.
+  // パスワード変更 is no longer a separate item: it lives INSIDE アカウント設定, unifying
+  // all self-service account actions under one entry.
+  const settingsItems: MenuItem[] = [];
+  if (showAccount) {
+    settingsItems.push({
+      id: "account-settings",
+      label: "アカウント設定",
+      icon: "user",
+      onSelect: () => setAcctOpen(true),
+      testId: "fe2-account-settings-open",
+    });
+  }
+  if (authed && onLogout) {
+    settingsItems.push({
+      id: "logout",
+      label: "ログアウト",
+      icon: "log-out",
+      tone: "danger",
+      dividerBefore: settingsItems.length > 0,
+      onSelect: onLogout,
+      testId: "fe2-logout",
+    });
+  }
 
   const email = accountEmail(auth);
   // Brand-first header: "DevHub" (bold, primary) is the app label AND the home导线
@@ -156,6 +188,10 @@ export function AppShellLayout({
       title={brand}
       actions={
         <>
+          {/* Leading widgets (e.g. the gantt event switcher) sit LEFT of the 9-dot. */}
+          {leadingHeaderWidgets.map((Widget, i) => (
+            <Widget key={`lead-${i}`} />
+          ))}
           <AppLauncher
             testId="fe2-app-launcher"
             title="アプリ"
@@ -166,24 +202,22 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
-          {showAccount ? (
-            <Button
-              testId="fe2-change-password-open"
-              variant="ghost"
-              iconLeft={<Icon name="settings" />}
-              onClick={() => setPwOpen(true)}
-            >
-              パスワード変更
-            </Button>
+          {settingsItems.length > 0 ? (
+            // Settings (⚙) dropdown — the account self-service container. アカウント設定
+            // (display name / avatar / password change) and ログアウト live INSIDE it, so
+            // the header is just 9-dot / bell / ⚙ (uniform icon row, no bare
+            // buttons). パスワード変更 is now nested within アカウント設定 (unified), and the
+            // logout flow's behaviour/API/authz are unchanged.
+            <Menu
+              testId="fe2-settings-menu"
+              label="設定"
+              menuLabel="設定"
+              icon="settings"
+              align="end"
+              iconOnly
+              items={settingsItems}
+            />
           ) : null}
-          <Button
-            testId="fe2-logout"
-            variant="secondary"
-            iconLeft={<Icon name="log-out" />}
-            onClick={onLogout}
-          >
-            ログアウト
-          </Button>
         </>
       }
     />
@@ -194,7 +228,7 @@ export function AppShellLayout({
     <AppShell header={header} testId="fe2-shell">
       {children}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
-      {showAccount && api ? <ChangePasswordDialog api={api} open={pwOpen} onClose={() => setPwOpen(false)} /> : null}
+      {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
     </AppShell>
   );
 }
