@@ -29,6 +29,12 @@ export class InMemoryTaskRepo implements TaskRepo {
       status: input.status,
       priority: input.priority,
       assigneeId: input.assigneeId,
+      // WBS/team columns (mirror the D1 repo — the old in-memory fake dropped these,
+      // so parent/team/wbs persistence went untested and #260's bug could slip by).
+      teamId: input.teamId ?? null,
+      parentTaskId: input.parentId ?? null,
+      wbs: input.wbs ?? null,
+      startAt: input.startAt ?? null,
       dueAt: input.dueAt,
       origin: input.origin,
       version: 1,
@@ -85,6 +91,10 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (patch.status !== undefined) r.status = patch.status;
     if (patch.priority !== undefined) r.priority = patch.priority;
     if (patch.assigneeId !== undefined) r.assigneeId = patch.assigneeId;
+    if (patch.teamId !== undefined) r.teamId = patch.teamId;
+    if (patch.parentId !== undefined) r.parentTaskId = patch.parentId;
+    if (patch.wbs !== undefined) r.wbs = patch.wbs;
+    if (patch.startAt !== undefined) r.startAt = patch.startAt;
     if (patch.dueAt !== undefined) r.dueAt = patch.dueAt;
     r.version += 1;
     r.updatedAt = now;
@@ -123,10 +133,20 @@ export class InMemoryTaskRepo implements TaskRepo {
       .map((d) => ({ ...d }));
   }
 
-  async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
+  async listLiveTasksByEvent(
+    eventId: string | null,
+  ): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>> {
     return [...this.rows.values()]
       .filter((r) => (r.eventId ?? null) === eventId && r.archivedAt === null)
-      .map((r) => r.id);
+      .map((r) => ({ id: r.id, teamId: r.teamId ?? null }));
+  }
+
+  async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+    const teams = new Set<common.TeamId | null>();
+    for (const r of this.rows.values()) {
+      if (r.parentTaskId === parentId && r.archivedAt === null) teams.add(r.teamId ?? null);
+    }
+    return [...teams];
   }
 
   async replaceDependencies(

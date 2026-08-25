@@ -45,4 +45,83 @@ describe("Undo wiring in the gantt workspace (判断57)", () => {
     // and redo is now available to re-apply it
     await waitFor(() => expect(screen.getByTestId("fe4-redo")).toBeEnabled());
   });
+
+  it("a field edit (title) can be undone and redone (Ctrl-Z / Shift-Ctrl-Z)", async () => {
+    render(<App client={client()} eventId={EVENT} permissions={PERMS} />);
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "会場を確定する" } });
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+
+    // the row title updates and undo becomes available
+    await waitFor(() =>
+      expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("会場を確定する")).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(screen.getByTestId("fe4-undo")).toBeEnabled());
+
+    // Ctrl-Z restores the previous title
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() =>
+      expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("会場予約")).toBeInTheDocument(),
+    );
+
+    // Shift-Ctrl-Z re-applies it (redo)
+    await waitFor(() => expect(screen.getByTestId("fe4-redo")).toBeEnabled());
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+    await waitFor(() =>
+      expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("会場を確定する")).toBeInTheDocument(),
+    );
+  });
+
+  it("field edits stack — multiple Ctrl-Z reverse them newest-first (multi-level history)", async () => {
+    render(<App client={client()} eventId={EVENT} permissions={PERMS} />);
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+
+    // edit 1: 会場予約 -> 一次案
+    fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "一次案" } });
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("一次案")).toBeInTheDocument());
+
+    // edit 2: 一次案 -> 二次案 (same panel stays open)
+    fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "二次案" } });
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("二次案")).toBeInTheDocument());
+
+    // Ctrl-Z → back to 一次案 (newest first)
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("一次案")).toBeInTheDocument());
+
+    // Ctrl-Z → back to the original title (two levels deep)
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("会場予約")).toBeInTheDocument());
+  });
+
+  it("Undo/Redo show a user-visible toast naming the operation", async () => {
+    render(<App client={client()} eventId={EVENT} permissions={PERMS} />);
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "会場を確定する" } });
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    await waitFor(() => expect(screen.getByTestId("fe4-undo")).toBeEnabled());
+
+    // Ctrl-Z → toast "タスクの編集を元に戻しました"
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(await screen.findByText("タスクの編集を元に戻しました")).toBeInTheDocument();
+
+    // Shift-Ctrl-Z → toast "タスクの編集をやり直しました"
+    await waitFor(() => expect(screen.getByTestId("fe4-redo")).toBeEnabled());
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByText("タスクの編集をやり直しました")).toBeInTheDocument();
+  });
+
+  it("pressing Ctrl-Z with nothing to undo shows a subtle boundary toast", async () => {
+    render(<App client={client()} eventId={EVENT} permissions={PERMS} />);
+    await screen.findByTestId("fe4-gantt-row-t1");
+    expect(screen.getByTestId("fe4-undo")).toBeDisabled();
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(await screen.findByText("これ以上戻せません")).toBeInTheDocument();
+    // no error surfaced — it's an info toast, not an error banner
+    expect(screen.queryByTestId("fe4-error-banner")).toBeNull();
+  });
 });

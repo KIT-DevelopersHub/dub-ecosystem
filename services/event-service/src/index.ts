@@ -80,5 +80,5 @@ export { createApp } from "./app";
 export { EventService } from "./service";
 export { createD1EventRepo } from "./d1-repo";
 export { InMemoryEventRepo } from "./memory-repo";
-export { EVENT_SCHEMA_MIGRATION } from "./schema";
+export { EVENT_SCHEMA_MIGRATION, EVENT_DETAILS_SCHEMA_MIGRATION } from "./schema";
 export type { AppDeps } from "./types";

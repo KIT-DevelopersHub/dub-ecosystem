@@ -10,7 +10,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTeams, listEvents } from "../api/endpoints";
+import { listTeams, listEvents, toDomainTeams } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
 import type { EventOption } from "../components/MyTaskCreateModal";
@@ -21,6 +21,13 @@ export interface TaskRouteContextValue {
   currentUserId: common.UserId | null;
   /** effectivePermissions from GET /api/v1/me (null = loading -> fail-closed). */
   permissions: readonly identity.PermissionKey[] | null;
+  /** Active event id for the event-scoped gantt, supplied REACTIVELY by the shell
+   *  from the route param (`/events/:eventId/...`). Preferred over a one-off
+   *  window.location parse so the gantt reloads when the shell's global イベント
+   *  header switcher navigates the param (a same-route param change does NOT
+   *  re-run window.location parsing on its own). Optional/undefined for standalone
+   *  or the マイタスク route. */
+  eventId?: common.EventId | null;
 }
 
 const TaskRouteContext = createContext<TaskRouteContextValue>({
@@ -49,9 +56,12 @@ export function parseEventIdFromPath(pathname: string): common.EventId | null {
  * permissions come from TaskRouteContext.
  */
 export function TaskWorkspaceRoute() {
-  const { permissions } = useTaskRoute();
+  const { permissions, eventId: ctxEventId } = useTaskRoute();
+  // Prefer the shell-supplied reactive event id (updates the same render when the
+  // global header switcher navigates to another event); fall back to a
+  // window.location parse for standalone mounts / shells that don't feed it.
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
-  const eventId = parseEventIdFromPath(pathname);
+  const eventId = ctxEventId ?? parseEventIdFromPath(pathname);
   if (!eventId) return <p className={styles.banner}>イベントが指定されていません。</p>;
   return <TaskWorkspacePage eventId={eventId} permissions={permissions} />;
 }
@@ -74,7 +84,7 @@ export function MeTasksRoute() {
     let live = true;
     void listTeams(client)
       .then((res) => {
-        if (live) setTeams(res.items);
+        if (live) setTeams(toDomainTeams(res));
       })
       .catch(() => {
         /* teams are optional; the hub degrades gracefully without them */

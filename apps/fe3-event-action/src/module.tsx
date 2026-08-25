@@ -25,7 +25,17 @@ export const eventFeatureModule: FeatureModule = {
   ],
   routes: [
     {
+      // Event app home: the detail hub (header switcher + selected event's detail
+      // store). Mirrors the standalone harness (main.tsx), where `/events` = the hub
+      // and `/events/list` = the grid. The hub links OUT to `/events/:eventId`
+      // (ActionBoard) via its "アクション" button, so the hub cannot BE that route.
       path: routePaths.list,
+      lazy: () => import("./pages/EventHubPage").then((m) => ({ Component: m.EventHubPage })),
+      auth: "required",
+      requiredPermissions: ["event:read"],
+    },
+    {
+      path: routePaths.listAll,
       lazy: () => import("./pages/EventListPage").then((m) => ({ Component: m.EventListPage })),
       auth: "required",
       requiredPermissions: ["event:read"],

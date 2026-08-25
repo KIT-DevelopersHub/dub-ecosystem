@@ -43,6 +43,18 @@ export interface SharePermission {
   displayName: string | null;
   /** Present for `domain` grantees. */
   domain: string | null;
+  /** True when this permission is inherited from an ancestor folder (or shared drive)
+   *  and therefore CANNOT be changed or removed on this item directly — Google returns
+   *  403 `cannotDeletePermission` for such a delete. Derived from Drive
+   *  `permissionDetails[].inherited` (every detail entry inherited). The manager
+   *  disables the role change / revoke for these rows and explains why. */
+  inherited: boolean;
+  /** Only set (true) on a permission just created via the notification fallback: the
+   *  grantee had NO Google account, so Drive would not accept a silent share and an
+   *  invite email was sent instead. The permission exists but stays PENDING — it cannot
+   *  actually grant access until that address signs in to a Google account. Undefined for
+   *  listed/normal permissions. */
+  invited?: boolean;
 }
 
 export interface ListPermissionsResult {
@@ -83,6 +95,30 @@ export type AssignableDriveRole = "reader" | "commenter" | "writer";
  *  those members now have a Drive permission in place (created by us OR a recorded
  *  pre-existing individual share). They diverge when role membership changes after the
  *  last apply — the SPA renders that drift and offers "re-apply". */
+/** A role member the fan-out could NOT apply to Drive (e.g. the email has no Google
+ *  account and even a notified invite failed, or the address is malformed). The apply /
+ *  reapply is a PARTIAL success: the other members are granted, and these are reported
+ *  with a reason so the manager can show "M人はスキップ（理由）" instead of failing wholesale. */
+export interface SkippedMember {
+  email: string;
+  reason: string;
+}
+
+/** A role member that WAS shared, but only via an invite because the address has no
+ *  Google account (e.g. a Cloudflare Email-Routing alias like info@developershub.jp).
+ *  The Drive permission exists yet stays pending — it won't grant real edit access until
+ *  that address is backed by a Google account. Surfaced so the operator can instead share
+ *  with the person's real Google account / the routing target. */
+export interface InvitedMember {
+  email: string;
+}
+
+/** A role→file grant as shown by the file-list chips + the detail panel. `memberCount`
+ *  is the number of active emails currently in the role; `appliedCount` is how many of
+ *  those members now have a Drive permission in place (created by us OR a recorded
+ *  pre-existing individual share). They diverge when role membership changes after the
+ *  last apply — the SPA renders that drift and offers "re-apply". `skipped` (present only
+ *  on the apply/reapply response) lists members Drive refused, with a reason each. */
 export interface RoleFileGrant {
   id: string;
   fileId: string;
@@ -93,6 +129,10 @@ export interface RoleFileGrant {
   appliedCount: number;
   grantedBy: string;
   grantedAt: string;
+  skipped?: SkippedMember[];
+  /** Members shared only via an invite (no Google account yet) — present on the
+   *  apply/reapply response so the manager can warn that their access is pending. */
+  invited?: InvitedMember[];
 }
 
 /** POST /driveshare/files/:id/role-grants body. */

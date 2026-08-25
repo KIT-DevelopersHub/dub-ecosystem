@@ -144,7 +144,14 @@ export function useUndoRedoHotkeys(
     if (!el) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      // Never hijack the keystroke while an IME is composing (変換確定中): its
+      // keydown reports isComposing=true (legacy browsers: keyCode 229). Mirrors the
+      // IME guard in fe1-design-system/utils/keyboard.ts so undo doesn't fire mid-変換.
+      if (e.isComposing || (e as unknown as { keyCode?: number }).keyCode === 229) return;
       const key = e.key.toLowerCase();
+      // OS-standard: undo = ⌘Z (mac) / Ctrl+Z (win/linux). redo = ⇧⌘Z / ⇧Ctrl+Z, plus
+      // Ctrl+Y (the conventional Windows/Linux redo). metaKey||ctrlKey covers both
+      // platforms without a userAgent sniff.
       const isUndo = key === "z" && !e.shiftKey;
       const isRedo = (key === "z" && e.shiftKey) || key === "y";
       if (!isUndo && !isRedo) return;

@@ -15,7 +15,16 @@ export default defineConfig({
       formats: ["es"],
     },
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime", "@dub/tokens", "lucide-react"],
+      external: [
+        "react",
+        "react-dom",
+        "react/jsx-runtime",
+        "@dub/tokens",
+        "lucide-react",
+        "@dnd-kit/core",
+        "@dnd-kit/sortable",
+        "@dnd-kit/utilities",
+      ],
     },
     sourcemap: true,
   },

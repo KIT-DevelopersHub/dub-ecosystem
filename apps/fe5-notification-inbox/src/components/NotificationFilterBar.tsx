@@ -1,16 +1,17 @@
-// NotificationFilterBar — unread-only toggle + type-group filter (prefix match).
-// Emits filter changes; URL sync is handled by the page (FE5 §2-2, test 3).
+// NotificationFilterBar — category tabs (All / アプリアップデート / メール / 参加届) + an
+// unread-only toggle. Emits filter changes; URL sync is handled by the page (FE5 §2-2, test 3).
+// The tabs derive from the single-source category taxonomy in type-dictionary.
 
 import type { ReactNode } from "react";
 import { Switch, Tabs, type TabItem } from "@dub/ui";
 import type { InboxFilter } from "../lib/inbox-filter";
-import { NOTIFICATION_GROUP_PREFIXES } from "../lib/type-dictionary";
+import { NOTIFICATION_CATEGORY_TABS, type CategoryFilter } from "../lib/type-dictionary";
 
-// TabItem.id carries the filter value ("" = All, else the type-group prefix).
-const TYPE_OPTIONS: TabItem[] = [
-  { id: "", label: "All" },
-  ...NOTIFICATION_GROUP_PREFIXES.map((g) => ({ id: g.prefix, label: g.label })),
-];
+// TabItem.id carries the CategoryFilter value ("all" | "app_update" | "mail" | "participation").
+const CATEGORY_OPTIONS: TabItem[] = NOTIFICATION_CATEGORY_TABS.map((t) => ({
+  id: t.id,
+  label: t.label,
+}));
 
 export interface NotificationFilterBarProps {
   filter: InboxFilter;
@@ -22,10 +23,10 @@ export function NotificationFilterBar(props: NotificationFilterBarProps): ReactN
   return (
     <div data-testid="fe5-inbox-filterbar">
       <Tabs
-        items={TYPE_OPTIONS}
-        activeId={filter.type}
-        onChange={(type) => onChange({ ...filter, type })}
-        testId="fe5-inbox-typefilter"
+        items={CATEGORY_OPTIONS}
+        activeId={filter.category}
+        onChange={(id) => onChange({ ...filter, category: id as CategoryFilter })}
+        testId="fe5-inbox-catfilter"
       />
       <Switch
         id="fe5-inbox-unreadonly"

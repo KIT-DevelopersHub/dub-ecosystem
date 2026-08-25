@@ -7,17 +7,38 @@ import cssText from "@dub/tokens/css";
 import "@dub/ui/style.css";
 import { DemoApp } from "./DemoApp";
 import { createDevClient } from "./dev-seed";
+import { ApiError } from "./contracts/spa-shell";
+import { useTaskStore } from "./store/useTaskStore";
 
 // inject design tokens (@dub/tokens CSS variables) once
 const style = document.createElement("style");
 style.textContent = cssText;
 document.head.appendChild(style);
 
+// Dev/E2E only: `?tasks=N` pads the demo event to N tasks (F3 verification).
+const padTo = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get("tasks")) || undefined : undefined;
+// Demo shows the 3-level WBS nest so the 内包バー (parent-encloses-children) is
+// visible end-to-end; `?flat=1` opts back to the plain 2-level real-data seed.
+const deepNest = new URLSearchParams(location.search).get("flat") !== "1";
+const client = createDevClient({ ...(padTo ? { padTo } : {}), deepNest });
+
+// Dev-only test seam (tree-shaken from production via import.meta.env.DEV): lets a
+// real-browser E2E force the next mock mutation to fail so the error-handling UI
+// (ErrorDialog) can be exercised end-to-end. Never present in a prod build.
+if (import.meta.env.DEV) {
+  (window as unknown as { __fe4?: unknown }).__fe4 = {
+    failNext: (status: number, body: unknown) => {
+      (client as unknown as { failNext: ApiError }).failNext = new ApiError(status, body as never);
+    },
+    storeSize: () => useTaskStore.getState().list().length,
+  };
+}
+
 const el = document.getElementById("root");
 if (el) {
   createRoot(el).render(
     <StrictMode>
-      <DemoApp client={createDevClient()} />
+      <DemoApp client={client} />
     </StrictMode>,
   );
 }

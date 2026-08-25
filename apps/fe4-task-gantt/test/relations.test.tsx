@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import type { identity, task } from "@dub/types";
+import type { identity, task, team } from "@dub/types";
 import { TaskCreateModal, type TaskDraft } from "../src/components/TaskCreateModal";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
@@ -9,36 +9,40 @@ import { MockApiClient } from "../src/api/mock-client";
 
 beforeEach(() => localStorage.clear());
 
-// P(top) ┐ Q(top) ┐
-//   c1,c2┘   d1   ┘
+// Team A: P(top) ┐   Team B: Q(top) ┐
+//         c1,c2 ┘            d1      ┘
 const SCOPE: ScopeTask[] = [
-  { id: "P", title: "親P", parentTaskId: null },
-  { id: "Q", title: "親Q", parentTaskId: null },
-  { id: "c1", title: "子1", parentTaskId: "P" },
-  { id: "c2", title: "子2", parentTaskId: "P" },
-  { id: "d1", title: "子D", parentTaskId: "Q" },
+  { id: "P", title: "親P", parentTaskId: null, teamId: "A" },
+  { id: "Q", title: "親Q", parentTaskId: null, teamId: "B" },
+  { id: "c1", title: "子1", parentTaskId: "P", teamId: "A" },
+  { id: "c2", title: "子2", parentTaskId: "P", teamId: "A" },
+  { id: "d1", title: "子D", parentTaskId: "Q", teamId: "B" },
 ];
 const PARENT_OPTS = SCOPE.map((s) => ({ id: s.id, title: s.title }));
+const TEAMS: team.Team[] = [
+  { id: "A", key: "a", name: "チームA" },
+  { id: "B", key: "b", name: "チームB" },
+];
 
-describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + 判断10 scope)", () => {
-  it("selecting a parent scopes the predecessor options to that parent's children", () => {
+describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + ADR-0007 team scope)", () => {
+  it("selecting a team scopes the predecessor options to that team (across scopes)", () => {
     render(
       <TaskCreateModal
         open
         onClose={() => {}}
         users={[]}
-        teams={[]}
+        teams={TEAMS}
         parentOptions={PARENT_OPTS}
         scopeTasks={SCOPE}
         onCreate={async () => {}}
       />,
     );
-    // choose parent P
-    fireEvent.change(screen.getByTestId("fe4-create-parent"), { target: { value: "P" } });
+    // choose team A (the dependency boundary — parent no longer scopes deps)
+    fireEvent.change(screen.getByTestId("fe4-create-team"), { target: { value: "A" } });
     const depInput = screen.getByTestId("fe4-create-deps-input");
     fireEvent.focus(depInput);
     fireEvent.change(depInput, { target: { value: "子" } }); // matches 子1/子2/子D by title
-    // only P's children are offered; d1 (under Q) is out of scope
+    // team-A tasks across scopes are offered; d1 (team B) is excluded
     expect(screen.getByTestId("fe4-create-deps-opt-c1")).toBeInTheDocument();
     expect(screen.getByTestId("fe4-create-deps-opt-c2")).toBeInTheDocument();
     expect(screen.queryByTestId("fe4-create-deps-opt-d1")).toBeNull();
@@ -106,7 +110,7 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         onClose={() => {}}
         parentOptions={[{ id: "P", title: "親P" }, { id: "Q", title: "親Q" }]}
         parentTaskId={null}
-        scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null }, { id: "P", title: "親P", parentTaskId: null }]}
+        scopeTasks={[{ id: "self", title: "対象タスク", parentTaskId: null, teamId: null }, { id: "P", title: "親P", parentTaskId: null, teamId: null }]}
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-detail-parent"), { target: { value: "P" } });
@@ -132,8 +136,8 @@ describe("TaskDetailPanel — edit 先行/親子 + create predecessor (feature #
         parentTaskId={null}
         dependsOnIds={[]}
         scopeTasks={[
-          { id: "self", title: "対象タスク", parentTaskId: null },
-          { id: "sib", title: "兄弟タスク", parentTaskId: null },
+          { id: "self", title: "対象タスク", parentTaskId: null, teamId: null },
+          { id: "sib", title: "兄弟タスク", parentTaskId: null, teamId: null },
         ]}
       />,
     );
@@ -169,9 +173,13 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     // t1 now owns a child → renders the expand/collapse toggle
     expect(await screen.findByTestId("fe4-gantt-toggle-t1")).toBeInTheDocument();
-    // expand → the new child row is revealed
-    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-t1"));
+    // a task that JUST became a parent auto-expands, so the new child is visible at
+    // once — no extra click needed (regression: the toggle used to stay collapsed and
+    // the freshly-added child was hidden with no way to see it optimistically).
     expect((await screen.findAllByText("小タスク")).length).toBeGreaterThan(0);
+    // and the toggle still works: collapsing it hides the child again.
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-t1"));
+    await waitFor(() => expect(screen.queryByText("小タスク")).not.toBeInTheDocument());
   });
 
   it("adding a predecessor from the detail panel draws the dependency arrow", async () => {
@@ -185,5 +193,19 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
     // t1 -> t2 dependency now rendered on the timeline
     expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
+  });
+
+  it("confirms a saved predecessor edit with a success toast (楽観的UIの成功フィードバック)", async () => {
+    render(<App client={wsClient()} eventId={EVENT} permissions={PERMS} />);
+    fireEvent.click(await screen.findByTestId("fe4-gantt-row-t2"));
+    const panel = await screen.findByTestId("fe4-detail-panel");
+    const input = within(panel).getByTestId("fe4-detail-deps-input");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "会場" } });
+    fireEvent.mouseDown(within(panel).getByTestId("fe4-detail-deps-opt-t1"));
+    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // the dependency arrow + a success toast both appear (no silent, latent save)
+    expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
+    expect(await screen.findByTestId("toast-success")).toBeInTheDocument();
   });
 });

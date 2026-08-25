@@ -11,6 +11,8 @@ import { bffHomeHandler } from "./handlers/bff-home";
 import { createPublicInquiryHandler } from "./handlers/public-inquiry";
 import { createPublicParticipationHandler } from "./handlers/public-participation";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
+import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self-profile";
+import { getSelfParticipationHandler, updateSelfParticipationHandler } from "./handlers/self-participation";
 import { gatewayRouteHandler } from "./gateway-route";
 import { API_PREFIX } from "./routes";
 import type { TurnstileVerifier } from "./turnstile";
@@ -55,6 +57,15 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.post(`${API_PREFIX}/me/password`, selfPasswordHandler);
   app.post(`${API_PREFIX}/admin/users/:userId/password`, adminSetPasswordHandler);
   app.get(`${API_PREFIX}/admin/users/:userId/password`, adminViewPasswordHandler);
+
+  // Self service (アカウント設定): the signed-in user reads/edits their OWN profile (表示名/
+  // アバター → identity-roster) and 参加届 (参加情報 → member-service). Gateway-owned because
+  // both back-ends expose only internal (admin- or s2s-gated) writes; these compose entry
+  // verify + a genuine internal forward scoped to the caller's session id (no target id).
+  app.get(`${API_PREFIX}/me/profile`, getSelfProfileHandler);
+  app.post(`${API_PREFIX}/me/profile`, updateSelfProfileHandler);
+  app.get(`${API_PREFIX}/me/participation`, getSelfParticipationHandler);
+  app.post(`${API_PREFIX}/me/participation`, updateSelfParticipationHandler);
 
   // transparent routing for everything else under the API prefix
   app.all(`${API_PREFIX}/*`, gatewayRouteHandler);

@@ -25,7 +25,11 @@ const DEFAULT_SEED: MockSeed = {
     user: { id: "usr_demo", displayName: "デモ ユーザー", avatarUrl: null, email: "demo@developershub.jp" },
     orgId: "org_demo",
     // Broad-but-not-admin permission set so the primary nav + self-service
-    // routes render under the mock. Matches PERMISSION_CATALOG keys.
+    // routes render under the mock. Matches PERMISSION_CATALOG keys. Includes the
+    // per-app access grants (app:<id>:view, #270) for the apps this non-admin role was
+    // "granted" in ロール管理 — so the launcher shows them ACTIVE (not greyed) exactly as a
+    // granted organizer should. Apps left ungranted (usage/members/participation/
+    // driveshare/admin) stay greyed, demonstrating the per-app gate both ways.
     permissions: [
       "identity:read",
       "event:read",
@@ -37,6 +41,12 @@ const DEFAULT_SEED: MockSeed = {
       "notif:prefs:self",
       "mail:read",
       "chat:create",
+      "app:events:view",
+      "app:tasks:view",
+      "app:gantt:view",
+      "app:notifications:view",
+      "app:mail:view",
+      "app:chat:view",
     ],
     sessionExpiresAt: Date.now() + 60 * 60 * 1000,
   },
@@ -46,6 +56,20 @@ const DEFAULT_SEED: MockSeed = {
       { id: "evt_demo_2", title: "運営定例ミーティング", phase: "planning", startsAt: "2026-08-12T09:00:00Z" },
     ],
     unreadCount: 2,
+    taskSummary: {
+      total: 21,
+      byStatus: { todo: 5, in_progress: 4, blocked: 1, done: 11, cancelled: 0 },
+    },
+    usageSummary: {
+      metrics: [
+        { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 62.4 },
+        { key: "d1_rows_read_day", label: "D1 行読み取り(日)", pct: 48.1 },
+        { key: "workers_requests_day", label: "Workers リクエスト(日)", pct: 12.3 },
+        { key: "emails_month", label: "メール送信(月)", pct: 30.0 },
+      ],
+      worst: { key: "kv_reads_day", label: "KV 読み取り(日)", pct: 62.4 },
+    },
+    orgStats: { members: 12, teams: 4 },
     partialErrors: [],
   },
 };
@@ -295,6 +319,23 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
       // Self password change (#5b): acknowledge so the demo/offline build shows success.
       case "POST /api/v1/me/password":
         return json({ ok: true }, 200);
+      // Self profile edit (アカウント設定): echo the seed user so the offline/CI build shows
+      // success. In staging/prod the real gateway POST /me/profile persists the change.
+      case "POST /api/v1/me/profile":
+        return json({ displayName: data.me.user.displayName, avatarUrl: data.me.user.avatarUrl ?? null }, 200);
+      // Self 参加届 (アカウント設定 → 参加情報): the boot mock stays stateless — GET returns an
+      // empty submission, POST echoes an empty one. In staging/prod the real gateway
+      // GET/POST /me/participation reads/persists the caller's own 参加届.
+      case "GET /api/v1/me/participation":
+      case "POST /api/v1/me/participation":
+        return json(
+          {
+            lastName: null, firstName: null, lastNameKana: null, firstNameKana: null,
+            lastNameRomaji: null, firstNameRomaji: null, schoolEmail: null, gmail: null,
+            phone: null, grade: null, department: null, desiredActivity: null, note: null,
+          },
+          200,
+        );
       // Feedback widget (shell chrome): acknowledge so the offline/demo build shows
       // the success state. No real feedback leaves the browser under the mock.
       case "POST /api/v1/feedback":

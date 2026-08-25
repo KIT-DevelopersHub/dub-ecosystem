@@ -4,7 +4,7 @@
 // task.ListTasksQuery) — NEVER hand-renamed here. gantt uses `eventId`, same as task:
 // the old `?event=` here silently disagreed with the server's `?eventId=` and shipped a
 // prod "Validation failed". A contract-conformance test now reconciles these keys in CI.
-import type { task, gantt, identity, event, common, team } from "@dub/types";
+import type { task, gantt, identity, event, common, team, member } from "@dub/types";
 import type { ApiClient, ApiPath } from "../contracts/spa-shell";
 
 const P = "/api/v1"; // === common.API_PREFIX (kept literal for ApiPath template)
@@ -81,12 +81,21 @@ export function deleteTaskAttachment(
   });
 }
 
+/** Wire response of PUT /tasks/:id/dependencies. The server returns ONLY this
+ *  (NOT a full task.Task) — it bumps the task's version internally but does not
+ *  echo it back, so callers must NOT read `.version` here and should re-fetch the
+ *  task (getTask) when a fresh version is needed for a chained write. */
+export interface ReplaceDependenciesResult {
+  taskId: common.TaskId;
+  dependsOnIds: common.TaskId[];
+}
+
 export function replaceDependencies(
   client: ApiClient,
   id: common.TaskId,
   body: task.ReplaceDependenciesRequest,
-): Promise<task.Task> {
-  return client.request<task.Task>({
+): Promise<ReplaceDependenciesResult> {
+  return client.request<ReplaceDependenciesResult>({
     method: "PUT",
     path: `${P}/tasks/${id}/dependencies` as ApiPath,
     body,
@@ -166,8 +175,31 @@ export function putGanttView(
 
 // ---- teams (canonical team.Team). Single fetch source: swap this to the
 //      member-service team list API later without touching consumers. ----
-export function listTeams(client: ApiClient): Promise<team.ListTeamsResponse> {
-  return client.request<team.ListTeamsResponse>({ method: "GET", path: `${P}/teams` });
+export function listTeams(client: ApiClient): Promise<member.ListTeamsResponse> {
+  // Canonical team list is owned by member-service and exposed at the gateway
+  // "members" segment (GET /api/v1/members/teams). The api-gateway has NO bare
+  // "teams" segment, so `${P}/teams` 404s in prod — which silently emptied the
+  // gantt team switcher/legend. Route through /members/teams (the real source).
+  // member-service's canonical envelope is { teams: Team[] } (member.ListTeamsResponse),
+  // NOT { items } — the mock previously returned { items }, so the switcher rendered
+  // locally but stayed empty in prod. Consume the real shape here.
+  return client.request<member.ListTeamsResponse>({ method: "GET", path: `${P}/members/teams` });
+}
+
+/**
+ * Adapt member-service's wire Team ({ color/description: string | null }) to the fe4
+ * domain team.Team ({ color/description?: string }). Every fe4 consumer (switcher,
+ * legend, selects) speaks team.Team; centralizing the unwrap+normalize here keeps the
+ * mock and prod on one shape.
+ */
+export function toDomainTeams(res: member.ListTeamsResponse): team.Team[] {
+  return res.teams.map((t) => ({
+    id: t.id as common.TeamId,
+    key: t.key,
+    name: t.name,
+    ...(t.color != null ? { color: t.color } : {}),
+    ...(t.description != null ? { description: t.description } : {}),
+  }));
 }
 
 // ---- identity-roster (batch user resolve; ?ids=, max 50) ----
@@ -181,6 +213,24 @@ export function resolveUsers(
     method: "GET",
     path: `${P}/identity/users`,
     query: { ids: ids.join(",") },
+  });
+}
+
+/** List the org roster (member names) so an assignee can be picked from real
+ *  members — not only users already assigned to some task. Same endpoint as
+ *  resolveUsers but WITHOUT `ids` (list mode); scoped to active members. */
+export function listRosterUsers(
+  client: ApiClient,
+  opts: { status?: identity.UserStatus; limit?: number; q?: string } = {},
+): Promise<common.Paginated<identity.UserSummary>> {
+  return client.request<common.Paginated<identity.UserSummary>>({
+    method: "GET",
+    path: `${P}/identity/users`,
+    query: {
+      status: opts.status ?? "active",
+      limit: opts.limit ?? 200,
+      ...(opts.q ? { q: opts.q } : {}),
+    },
   });
 }
 

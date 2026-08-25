@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { identity } from "@dub/types";
+import { identity, appRegistry } from "@dub/types";
 import { MemIdentityRepo } from "../src/repo/mem-repo";
-import { seedReferenceData } from "../src/seed";
+import { seedReferenceData, backfillAppAccessKeys, computeAppAccessKeys } from "../src/seed";
 import { ORG_ID } from "./harness";
 
 function makeDeps(repo: MemIdentityRepo) {
@@ -66,5 +66,66 @@ describe("seedReferenceData / system roles", () => {
 
     expect(after.id).toBe(before.id);
     expect([...after.permissions].sort()).toEqual([...before.permissions].sort());
+  });
+});
+
+describe("per-app access backfill (non-breaking rollout)", () => {
+  it("computeAppAccessKeys grants view for reachable apps + edit for writable ones", () => {
+    // a member-ish bundle: can read/write tasks, read events, chat, usage
+    const keys = new Set(computeAppAccessKeys(["task:read", "task:write", "event:read", "chat:create", "usage:view"]));
+    expect(keys.has("app:tasks:view")).toBe(true);
+    expect(keys.has("app:tasks:edit")).toBe(true); // has task:write
+    expect(keys.has("app:gantt:view")).toBe(true); // gantt rides task:read — now its OWN key
+    expect(keys.has("app:gantt:edit")).toBe(true);
+    expect(keys.has("app:events:view")).toBe(true);
+    expect(keys.has("app:events:edit")).toBe(false); // no event:write
+    expect(keys.has("app:usage:view")).toBe(true); // open to all
+    // apps it cannot reach today stay OFF
+    expect(keys.has("app:mail:view")).toBe(false);
+    expect(keys.has("app:admin:view")).toBe(false);
+    // open-to-all apps grant view even without the domain perm
+    expect(keys.has("app:participation:view")).toBe(true);
+    expect(keys.has("app:driveshare:view")).toBe(true);
+  });
+
+  it("seeded system roles already carry their per-app keys (member can reach gantt individually)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    const member = new Set((await repo.getRoleByName(ORG_ID, "member"))!.permissions);
+    expect(member.has("app:gantt:view")).toBe(true);
+    expect(member.has("app:tasks:view")).toBe(true);
+    expect(member.has("app:mail:view")).toBe(false); // member can't read mail today
+    const admin = new Set((await repo.getRoleByName(ORG_ID, "admin"))!.permissions);
+    for (const k of appRegistry.allAppAccessKeys()) expect(admin.has(k)).toBe(true);
+  });
+
+  it("backfill adds missing per-app keys to a PRE-EXISTING role without dropping anything (idempotent)", async () => {
+    const repo = new MemIdentityRepo();
+    // simulate a legacy role created before the per-app tier: domain perms only
+    await repo.createOrg({ id: ORG_ID, name: "DevHub", createdAt: "t" });
+    await repo.createRole({
+      id: "role_legacy",
+      orgId: ORG_ID,
+      name: "legacy-ops",
+      isSystem: false,
+      permissions: ["task:read", "task:write", "mail:read"],
+      createdAt: "t",
+      updatedAt: "t",
+    });
+    const updated = await backfillAppAccessKeys(makeDeps(repo), ORG_ID);
+    expect(updated).toContain("legacy-ops");
+    const perms = new Set((await repo.getRole("role_legacy"))!.permissions);
+    // original domain perms preserved
+    expect(perms.has("task:read")).toBe(true);
+    expect(perms.has("mail:read")).toBe(true);
+    // per-app keys added for what it could already do
+    expect(perms.has("app:tasks:view")).toBe(true);
+    expect(perms.has("app:tasks:edit")).toBe(true);
+    expect(perms.has("app:gantt:view")).toBe(true);
+    expect(perms.has("app:mail:view")).toBe(true);
+    expect(perms.has("app:mail:edit")).toBe(false); // no mail:send
+    // second run is a no-op
+    const again = await backfillAppAccessKeys(makeDeps(repo), ORG_ID);
+    expect(again).not.toContain("legacy-ops");
   });
 });

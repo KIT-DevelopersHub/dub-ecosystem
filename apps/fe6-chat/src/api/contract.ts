@@ -119,8 +119,29 @@ export interface EditMessageRequest {
   version: number;
 }
 
+// Message deletion policy (RBAC-configurable). `hard` erases the row (client drops it
+// from the timeline); `tombstone` redacts it in place ("削除されました"). Shape frozen in
+// @dub/types (single source); re-exported for the unit's import surface.
+export type MessageDeletionMode = chat.MessageDeletionMode;
+export type MessageDeletionPolicy = chat.MessageDeletionPolicy;
+export type DeletionPolicyResponse = chat.DeletionPolicyResponse;
+
+// DELETE /messages/:id result: how the policy resolved the delete + the tombstone
+// (mode "tombstone") or null (mode "hard", the row is gone).
+export interface DeleteMessageResult {
+  mode: MessageDeletionMode;
+  message: Message | null;
+}
+
 export interface ReactionToggleRequest {
   emoji: string;
+}
+// A reaction toggle returns only the affected message's authoritative reaction set
+// (not the whole message) — chat-service's ReactionToggleResponse. The client applies
+// these onto the existing timeline message (see store/timeline applyReactions).
+export interface ReactionToggleResponse {
+  messageId: common.MessageId;
+  reactions: Reaction[];
 }
 
 export interface ReadStateUpdateRequest {

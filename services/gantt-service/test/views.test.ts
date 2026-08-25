@@ -57,6 +57,24 @@ describe("validatePutBody", () => {
       expect(isDubError(e) && e.status).toBe(400);
     }
   });
+  it("accepts an additive orderedTaskIds and passes it through", () => {
+    expect(validatePutBody({ zoom: "week", collapsedTaskIds: [], orderedTaskIds: ["t_2", "t_1"] })).toEqual({
+      zoom: "week",
+      collapsedTaskIds: [],
+      orderedTaskIds: ["t_2", "t_1"],
+    });
+  });
+  it("omits orderedTaskIds entirely when absent (back-compat shape)", () => {
+    expect(validatePutBody({ zoom: "week", collapsedTaskIds: [] })).toEqual({ zoom: "week", collapsedTaskIds: [] });
+  });
+  it("rejects non-string orderedTaskIds (400)", () => {
+    try {
+      validatePutBody({ zoom: "week", collapsedTaskIds: [], orderedTaskIds: [1, 2] });
+      expect.unreachable();
+    } catch (e) {
+      expect(isDubError(e) && e.status).toBe(400);
+    }
+  });
 });
 
 describe("createViewRepo", () => {
@@ -70,6 +88,17 @@ describe("createViewRepo", () => {
     const saved = await repo.put("user_a", "event_1", { zoom: "day", collapsedTaskIds: ["task_a", "task_b"] });
     expect(saved).toEqual({ eventId: "event_1", zoom: "day", collapsedTaskIds: ["task_a", "task_b"] });
     expect(await repo.get("user_a", "event_1")).toEqual(saved);
+  });
+
+  it("round-trips the manual order (orderedTaskIds) and dedupes/filters ids", async () => {
+    const repo = createViewRepo(fakeDb());
+    const saved = await repo.put("user_a", "event_1", {
+      zoom: "week",
+      collapsedTaskIds: [],
+      orderedTaskIds: ["t_2", "t_1", "t_2"], // dup dropped by normalize
+    });
+    expect(saved.orderedTaskIds).toEqual(["t_2", "t_1"]);
+    expect((await repo.get("user_a", "event_1")).orderedTaskIds).toEqual(["t_2", "t_1"]);
   });
 
   it("isolates state per user (another user still sees default)", async () => {

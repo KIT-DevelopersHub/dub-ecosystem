@@ -9,13 +9,23 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (35 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (57 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
 // webhook-ingest) into the closed union so /authz/check no longer default-denies
 // them as unknown keys. notif:inbox:self / notif:prefs:self back FE5's
 // self-service inbox + preference routes (promoted from the shell composition).
+//
+// `app:<id>:view` / `app:<id>:edit` (domain "app") — the PER-APP access tier.
+// EVERY launcher app (APP_MANIFEST) gets its OWN graded access pair so an admin can
+// turn each app on/off for a role INDIVIDUALLY, even apps that used to ride a shared
+// domain permission (gantt rode task:read alongside マイタスク; 参加届 rode identity:read
+// alongside 運営メンバー — toggling the domain key hit both). `:view` = 有効化 (open/閲覧
+// できる); `:edit` IMPLIES view and additionally allows create/edit inside the app
+// (編集・作成まで). These keys are the actual FE gate: the shell launcher greys and the
+// route guard 403s an app whose `app:<id>:view` the role lacks; write UIs are gated on
+// `app:<id>:edit`. Kept in lockstep with APP_MANIFEST by the app-registry CI test.
 export const PERMISSION_CATALOG = [
   { key: "identity:read", name: "Read roster", description: "View roster, roles and the permission catalog", domain: "identity", dangerous: false },
   { key: "identity:admin", name: "Administer identity", description: "Update users, invite, role CRUD, grant/revoke", domain: "identity", dangerous: true },
@@ -52,9 +62,32 @@ export const PERMISSION_CATALOG = [
   { key: "drive:read", name: "Read Drive", description: "View/search Google Drive metadata and download content", domain: "drive", dangerous: false },
   { key: "drive:write", name: "Write Drive", description: "Upload/update Google Drive files", domain: "drive", dangerous: false },
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
+  // ── per-app access tier (domain "app") — one graded pair per launcher app ──────
+  { key: "app:events:view", name: "Open イベント app", description: "Open and view the イベント app", domain: "app", dangerous: false },
+  { key: "app:events:edit", name: "Edit in イベント app", description: "Create/edit inside the イベント app (implies view)", domain: "app", dangerous: false },
+  { key: "app:tasks:view", name: "Open マイタスク app", description: "Open and view the マイタスク app", domain: "app", dangerous: false },
+  { key: "app:tasks:edit", name: "Edit in マイタスク app", description: "Create/edit inside the マイタスク app (implies view)", domain: "app", dangerous: false },
+  { key: "app:gantt:view", name: "Open ガントチャート app", description: "Open and view the ガントチャート app", domain: "app", dangerous: false },
+  { key: "app:gantt:edit", name: "Edit in ガントチャート app", description: "Create/edit inside the ガントチャート app (implies view)", domain: "app", dangerous: false },
+  { key: "app:notifications:view", name: "Open 通知 app", description: "Open and view the 通知 app", domain: "app", dangerous: false },
+  { key: "app:notifications:edit", name: "Edit in 通知 app", description: "Manage/act inside the 通知 app (implies view)", domain: "app", dangerous: false },
+  { key: "app:chat:view", name: "Open チャット app", description: "Open and view the チャット app", domain: "app", dangerous: false },
+  { key: "app:chat:edit", name: "Edit in チャット app", description: "Create/post/manage inside the チャット app (implies view)", domain: "app", dangerous: false },
+  { key: "app:mail:view", name: "Open メール app", description: "Open and view the メール app", domain: "app", dangerous: false },
+  { key: "app:mail:edit", name: "Edit in メール app", description: "Compose/send inside the メール app (implies view)", domain: "app", dangerous: false },
+  { key: "app:usage:view", name: "Open 無料枠/課金ガード app", description: "Open and view the 無料枠 / 課金ガード app", domain: "app", dangerous: false },
+  { key: "app:usage:edit", name: "Edit in 無料枠/課金ガード app", description: "Act inside the 無料枠 / 課金ガード app (implies view)", domain: "app", dangerous: false },
+  { key: "app:members:view", name: "Open 運営メンバー app", description: "Open and view the 運営メンバー app", domain: "app", dangerous: false },
+  { key: "app:members:edit", name: "Edit in 運営メンバー app", description: "Edit inside the 運営メンバー app (implies view)", domain: "app", dangerous: false },
+  { key: "app:participation:view", name: "Open 参加届 app", description: "Open and view the 参加届 app", domain: "app", dangerous: false },
+  { key: "app:participation:edit", name: "Edit in 参加届 app", description: "Manage responses inside the 参加届 app (implies view)", domain: "app", dangerous: false },
+  { key: "app:driveshare:view", name: "Open Drive共有 app", description: "Open and view the Drive共有 app", domain: "app", dangerous: false },
+  { key: "app:driveshare:edit", name: "Edit in Drive共有 app", description: "Manage sharing inside the Drive共有 app (implies view)", domain: "app", dangerous: false },
+  { key: "app:admin:view", name: "Open 管理 app", description: "Open and view the 管理 app", domain: "app", dangerous: false },
+  { key: "app:admin:edit", name: "Edit in 管理 app", description: "Act inside the 管理 app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 35 keys (open `${string}:${string}` template retired).
+// Closed union of the 57 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

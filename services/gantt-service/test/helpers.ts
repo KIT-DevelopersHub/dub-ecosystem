@@ -13,6 +13,7 @@ export function mkTask(over: Partial<task.Task> & { id: string }): task.Task {
     status: over.status ?? "todo",
     priority: "medium",
     assigneeId: over.assigneeId ?? null,
+    startAt: over.startAt ?? null,
     dueAt: over.dueAt ?? null,
     origin: "internal",
     archivedAt: over.archivedAt ?? null,
@@ -50,19 +51,34 @@ export function fakeUpstream(init: {
   tasks?: task.Task[];
   dependencies?: task.TaskDependency[];
   eventExists?: boolean;
-}): UpstreamPort & { calls: { listTasks: number } } {
-  const state = { calls: { listTasks: 0 } };
+}): UpstreamPort & { calls: { listTasks: number; updateTaskDates: number } } {
+  const state = { calls: { listTasks: 0, updateTaskDates: 0 } };
+  const byId = new Map<string, task.Task>((init.tasks ?? []).map((t) => [t.id, t]));
   return {
     calls: state.calls,
     async listTasks() {
       state.calls.listTasks++;
-      return init.tasks ?? [];
+      return [...byId.values()];
     },
     async listDependencies() {
       return init.dependencies ?? [];
     },
     async eventExists() {
       return init.eventExists ?? true;
+    },
+    async updateTaskDates(_ctx, taskId, dates) {
+      state.calls.updateTaskDates++;
+      const cur = byId.get(taskId);
+      if (!cur) throw new DubError(CommonErrorCodes.NOT_FOUND, `task not found: ${taskId}`, { status: 404 });
+      const next: task.Task = {
+        ...cur,
+        startAt: dates.startsAt,
+        dueAt: dates.endsAt,
+        version: cur.version + 1,
+        updatedAt: "2026-08-18T00:00:00Z",
+      };
+      byId.set(taskId, next);
+      return next;
     },
   };
 }

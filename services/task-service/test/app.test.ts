@@ -184,6 +184,41 @@ describe("PUT /tasks/:id/dependencies", () => {
     expect(h.audit.records.some((r) => r.action === "task.dependency.replaced")).toBe(true);
   });
 
+  it("supports seeded task ids without the task_ prefix (GET + first dependency add persists) [regression]", async () => {
+    // Real conference data was seeded with human-readable ids (e.g. "lmbconf-wp-01"),
+    // NOT the task_<ULID> the API mints. A premature `id.startsWith("task_")` guard
+    // 404'd every single-item route on those tasks, so 「先行タスクを保存」 silently
+    // failed for 212/215 conference tasks. Ids are opaque; the DB is the source of truth.
+    const { h, app } = setup();
+    const now = "2026-08-19T00:00:00.000Z";
+    const base = {
+      eventId: "evt_1",
+      description: null,
+      status: "todo" as const,
+      priority: "medium" as const,
+      assigneeId: null,
+      dueAt: null,
+      origin: "internal" as const,
+      createdBy: "usr_alice",
+      now,
+    };
+    const pred = await h.repo.insert({ ...base, id: "lmbconf-wp-00", title: "会計: 法人設立" });
+    const succ = await h.repo.insert({ ...base, id: "lmbconf-wp-01", title: "会計: 設立後の届出" });
+
+    // GET on a non-task_ id must resolve (was 404 via the prefix guard).
+    const got = await app.request(`/tasks/${succ.id}`, userInit("GET"));
+    expect(got.status).toBe(200);
+
+    // First dependency add on a task that had none must persist.
+    const res = await app.request(
+      `/tasks/${succ.id}/dependencies`,
+      userInit("PUT", { version: succ.version, dependsOnIds: [pred.id] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await h.repo.getDependsOn(succ.id)).toEqual([pred.id]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(1);
+  });
+
   it("409 TASK_DEPENDENCY_CYCLE (A->B->C->A); dependencies unchanged, no event", async () => {
     const { h, app } = setup();
     const a = await create(app, { title: "A" });
@@ -237,6 +272,154 @@ describe("PUT /tasks/:id/dependencies", () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
     expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+  });
+});
+
+// Cross-scope deps / ADR-0007: dependencies (arrows) are same-team only, but may span
+// DIFFERENT WBS scopes (別階層) within that team. Cross-team work goes through the
+// request/approval flow, never a dependency edge.
+describe("PUT /tasks/:id/dependencies — same-team gate (ADR-0007)", () => {
+  it("200 same team: an edge between two tasks of the same team is allowed", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A", teamId: "team_dev" });
+    const b = await create(app, { title: "B", teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await h.repo.getDependsOn(a.id)).toEqual([b.id]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(1);
+  });
+
+  it("400 cross_team_not_allowed: a task cannot depend on another team's task", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A", teamId: "team_dev" });
+    const b = await create(app, { title: "B", teamId: "team_sponsor" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; details?: Array<{ field: string; reason: string }> } };
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.details).toEqual([
+      expect.objectContaining({ field: "dependsOnIds", reason: "cross_team_not_allowed" }),
+    ]);
+    // 门番 rejected: nothing persisted, no event emitted.
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+    expect(h.events.byName("task.dependency_changed")).toHaveLength(0);
+  });
+
+  it("200 null teams: two team-less (team_id=null) tasks may still depend (back-compat)", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A" }); // no teamId ⇒ null
+    const b = await create(app, { title: "B" });
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await h.repo.getDependsOn(a.id)).toEqual([b.id]);
+  });
+
+  it("400 cross_team_not_allowed: a one-sided null team is a mismatch", async () => {
+    const { h, app } = setup();
+    const a = await create(app, { title: "A", teamId: "team_dev" });
+    const b = await create(app, { title: "B" }); // team_id=null
+    const res = await app.request(
+      `/tasks/${a.id}/dependencies`,
+      userInit("PUT", { version: a.version, dependsOnIds: [b.id] }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+    expect(await h.repo.getDependsOn(a.id)).toEqual([]);
+  });
+});
+
+// 親子は必ず同一チーム: 子タスクは親と別チームにできない（親から作る導線はチームを親に固定
+// する。整合はサーバでも担保）。既存のクロスチーム依存制約と同じチーム境界・null semantics。
+describe("親子タスクの同一チーム制約 (PARENT_CHILD_TEAM_MISMATCH)", () => {
+  it("201: 親と同じチームの子タスクは作成できる", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_dev" }),
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as task.Task).teamId).toBe("team_dev");
+  });
+
+  it("201: 親子ともにチームなし(null)なら作成できる (back-compat)", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親" }); // team=null
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("422: 親と別チームの子タスクは作成できない", async () => {
+    const { h, app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_sponsor" }),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+    // 门番 rejected: only the parent's task.created was emitted.
+    expect(h.events.byName("task.created")).toHaveLength(1);
+  });
+
+  it("422: 親にチームあり・子がチームなし(片側null)も不一致で弾く", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const res = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id }), // team=null
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+  });
+
+  it("422: PATCH で子のチームを親と別チームへ変更できない", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const child = await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${child.id}`,
+      userInit("PATCH", { version: child.version, teamId: "team_sponsor" }),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+  });
+
+  it("422: PATCH で親のチームを変えると子が別チームになるため弾く", async () => {
+    const { app } = setup();
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${parent.id}`,
+      userInit("PATCH", { version: parent.version, teamId: "team_sponsor" }),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
+  });
+
+  it("200: PATCH で同一チームの親へ付け替えは許可", async () => {
+    const { app } = setup();
+    const p1 = await create(app, { title: "親1", teamId: "team_dev" });
+    const p2 = await create(app, { title: "親2", teamId: "team_dev" });
+    const child = await create(app, { title: "子", parentTaskId: p1.id, teamId: "team_dev" });
+    const res = await app.request(
+      `/tasks/${child.id}`,
+      userInit("PATCH", { version: child.version, parentTaskId: p2.id }),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(p2.id);
   });
 });
 
@@ -569,5 +752,64 @@ describe("task attachments", () => {
       userInit("POST", { kind: "url", name: "x", url: "https://example.com" }),
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory repo dropped them)", () => {
+  async function get(app: Hono, id: string) {
+    const res = await app.request(`/tasks/${id}`, userInit("GET"));
+    return { status: res.status, body: (await res.json()) as task.Task & { parentTaskId?: string | null; teamId?: string | null; wbs?: string | null } };
+  }
+
+  it("persists parentTaskId/teamId/wbs on create and echoes them on read", async () => {
+    const { app } = setup();
+    // 親子は同一チーム制約に合わせ、親も team_dev で作る（永続化の検証が目的）。
+    const parent = await create(app, { title: "親", teamId: "team_dev" });
+    const child = await create(app, { title: "子", parentTaskId: parent.id, teamId: "team_dev", wbs: "1.2.3" } as Partial<task.CreateTaskRequest>);
+    const read = await get(app, child.id);
+    expect(read.status).toBe(200);
+    expect(read.body.parentTaskId).toBe(parent.id);
+    expect(read.body.teamId).toBe("team_dev");
+    expect(read.body.wbs).toBe("1.2.3");
+  });
+
+  it("re-parents and detaches via PATCH parentTaskId", async () => {
+    const { app } = setup();
+    const a = await create(app, { title: "A" });
+    const b = await create(app, { title: "B" });
+    const c = await create(app, { title: "C" });
+    // attach C under A
+    let res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version, parentTaskId: a.id }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(a.id);
+    // move C under B
+    res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version + 1, parentTaskId: b.id }));
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBe(b.id);
+    // detach to top-level
+    res = await app.request(`/tasks/${c.id}`, userInit("PATCH", { version: c.version + 2, parentTaskId: null }));
+    expect(((await res.json()) as { parentTaskId?: string | null }).parentTaskId).toBeNull();
+  });
+
+  it("persists startAt on create, updates + clears it via PATCH, and echoes it on read (PR-C)", async () => {
+    const { h, app } = setup();
+    const t = await create(app, { startAt: "2026-08-05T00:00:00Z", dueAt: "2026-08-10T00:00:00Z" } as Partial<task.CreateTaskRequest>);
+    expect((await get(app, t.id)).body.startAt).toBe("2026-08-05T00:00:00Z");
+
+    // move the start; task.updated must report startAt as a changed field (→ gantt cache purge)
+    let res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1, startAt: "2026-08-07T00:00:00Z" }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as task.Task).startAt).toBe("2026-08-07T00:00:00Z");
+    expect(h.events.byName("task.updated").at(-1)!.payload).toMatchObject({ changed: ["startAt"] });
+
+    // clear it (null)
+    res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 2, startAt: null }));
+    expect(((await res.json()) as task.Task).startAt).toBeNull();
+  });
+
+  it("400 on a non-ISO startAt", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", startAt: "nope" }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
 });

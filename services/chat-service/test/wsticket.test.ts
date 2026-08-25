@@ -40,10 +40,18 @@ describe("GET /channels/:id/ws-ticket", () => {
     expect(claims?.userId).toBe("user_caller");
   });
 
-  it("non-member cannot get a ws-ticket", async () => {
+  it("non-member CAN get a ws-ticket on a public channel -> 200 (public subscribe without join)", async () => {
     const app = createApp(makeDeps());
     const c = await call(app, "POST", "/chat/channels", { body: topic });
     const res = await call(app, "GET", `/chat/channels/${c.json.id}/ws-ticket`, { userId: "user_stranger" });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(typeof res.json.ticket).toBe("string");
+  });
+
+  it("non-member cannot get a ws-ticket on a PRIVATE channel -> 404 (hidden)", async () => {
+    const app = createApp(makeDeps());
+    const c = await call(app, "POST", "/chat/channels", { body: { ...topic, visibility: "private" } });
+    const res = await call(app, "GET", `/chat/channels/${c.json.id}/ws-ticket`, { userId: "user_stranger" });
+    expect(res.status).toBe(404);
   });
 });

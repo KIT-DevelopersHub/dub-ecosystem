@@ -6,7 +6,7 @@
 // (post-commit) so a failed write never emits. Audit for delete/archive uses
 // Queue publishAudit (design §4 / theme13).
 import { DubError, CommonErrorCodes, errors } from "@dub/errors";
-import type { common, auditLog } from "@dub/types";
+import { chat, type common, type auditLog } from "@dub/types";
 import type {
   AppDeps,
   Channel,
@@ -14,12 +14,16 @@ import type {
   CreateChannelRequest,
   UpdateChannelRequest,
   AddMemberRequest,
+  DeleteMessageResult,
+  DeletionPolicyResponse,
   GetChannelResponse,
   ListChannelsResponse,
   ListMessagesResponse,
   Message,
   MessageRow,
   MemberRow,
+  MessageDeletionMode,
+  MessageDeletionPolicy,
   PostMessageRequest,
   PostSystemMessageRequest,
   ReactionToggleResponse,
@@ -28,6 +32,7 @@ import type {
   SearchHit,
   UnreadResponse,
   UnreadSummary,
+  UpdateDeletionPolicyRequest,
   WsTicketResponse,
 } from "./types";
 import {
@@ -73,6 +78,19 @@ function requireLimit(raw?: number): number {
   return raw;
 }
 
+const DELETION_MODES: readonly MessageDeletionMode[] = ["hard", "tombstone"];
+function requireMode(value: unknown, field: string): MessageDeletionMode {
+  if (typeof value !== "string" || !DELETION_MODES.includes(value as MessageDeletionMode)) {
+    throw errors.validationFailed([{ field, reason: "invalid" }]);
+  }
+  return value as MessageDeletionMode;
+}
+function requirePolicy(raw: unknown): MessageDeletionPolicy {
+  if (typeof raw !== "object" || raw === null) throw errors.validationFailed([{ field: "policy", reason: "required" }]);
+  const p = raw as Record<string, unknown>;
+  return { member: requireMode(p.member, "policy.member"), moderator: requireMode(p.moderator, "policy.moderator") };
+}
+
 export class ChatService {
   constructor(private readonly deps: AppDeps) {}
 
@@ -110,11 +128,22 @@ export class ChatService {
     return { channel, membership };
   }
 
-  // Require WRITE membership (post / react / read / ws). Non-member -> 403.
-  private async requireMember(channel: ChannelRow, userId: common.UserId): Promise<MemberRow> {
-    const m = await this.deps.repo.getMember(channel.id, userId);
-    if (!m) throw new DubError(CommonErrorCodes.FORBIDDEN, "not a channel member", { status: 403 });
-    return m;
+  // Write access. Members can always write. On a PUBLIC channel a non-member is
+  // auto-joined on their first write (Slack-style "posting joins the channel"), so
+  // send / react / pin work without an explicit join step — the base channels
+  // (general/random/運営連絡) ship with no membership rows, so this is what makes
+  // sending work at all. PRIVATE channels stay members-only (callers run loadReadable
+  // first, which 404s private non-members before this point; the guard below is a
+  // belt-and-braces 403 for any direct write path).
+  private async ensureCanWrite(channel: ChannelRow, userId: common.UserId): Promise<MemberRow> {
+    const existing = await this.deps.repo.getMember(channel.id, userId);
+    if (existing) return existing;
+    if (channel.visibility !== "public") {
+      throw new DubError(CommonErrorCodes.FORBIDDEN, "not a channel member", { status: 403 });
+    }
+    const row: MemberRow = { channelId: channel.id, userId, role: "member", joinedAt: this.deps.now() };
+    await this.deps.repo.addMember(row); // INSERT OR IGNORE — idempotent auto-join
+    return row;
   }
 
   private async isChannelAdmin(ctx: ReqCtx, channel: ChannelRow, membership?: MemberRow | null): Promise<boolean> {
@@ -291,7 +320,7 @@ export class ChatService {
   async postMessage(ctx: ReqCtx, body: PostMessageRequest): Promise<Message> {
     const text = requireBody(body.body);
     const { channel } = await this.loadReadable(body.channelId, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    await this.ensureCanWrite(channel, ctx.userId);
     if (channel.archivedAt) throw errArchived(channel.id);
 
     if (body.threadRootId !== undefined) {
@@ -333,6 +362,7 @@ export class ChatService {
       authorId: ctx.userId,
       body: text,
       at: now,
+      threadRootId: row.threadRootId,
     });
     return toMessage(row, {});
   }
@@ -344,8 +374,10 @@ export class ChatService {
     if (q.cursor !== undefined && q.afterMessageId !== undefined) {
       throw errors.validationFailed([{ field: "cursor", reason: "exclusive_with_afterMessageId" }]);
     }
+    // Reading is open on public channels (no join needed) — loadReadable already
+    // blocks private channels for non-members (404, existence hidden). Membership is
+    // only required to WRITE (post/react/pin), never to read a public channel.
     const { channel } = await this.loadReadable(q.channelId, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
     const limit = requireLimit(q.limit);
 
     if (q.afterMessageId !== undefined) {
@@ -356,8 +388,7 @@ export class ChatService {
         afterMessageId: q.afterMessageId,
         limit,
       });
-      const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.id));
-      return { items: rows.map((r) => toMessage(r, reactions.get(r.id) ?? {})), nextCursor: null };
+      return { items: await this.decorate(rows, q.threadRootId === undefined), nextCursor: null };
     }
 
     const beforeId = q.cursor ? decodeCursor(q.cursor) ?? invalidCursor(q.cursor) : undefined;
@@ -370,11 +401,18 @@ export class ChatService {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
-    const reactions = await this.deps.repo.reactionsFor(page.map((r) => r.id));
     return {
-      items: page.map((r) => toMessage(r, reactions.get(r.id) ?? {})),
+      items: await this.decorate(page, q.threadRootId === undefined),
       nextCursor: hasMore && last ? encodeCursor(last.id) : null,
     };
+  }
+
+  // Map rows -> wire messages with reactions and (for the top-level list only) each
+  // message's thread reply count, so the client can show the "N 件の返信" summary.
+  private async decorate(rows: MessageRow[], withReplyCounts: boolean): Promise<Message[]> {
+    const reactions = await this.deps.repo.reactionsFor(rows.map((r) => r.id));
+    const counts = withReplyCounts ? await this.deps.repo.replyCounts(rows.map((r) => r.id)) : undefined;
+    return rows.map((r) => toMessage(r, reactions.get(r.id) ?? {}, counts?.get(r.id) ?? 0));
   }
 
   async editMessage(ctx: ReqCtx, id: common.MessageId, body: { version?: number; body?: string }): Promise<Message> {
@@ -396,23 +434,71 @@ export class ChatService {
     return toMessage(next, reactions.get(id) ?? {});
   }
 
-  async deleteMessage(ctx: ReqCtx, id: common.MessageId): Promise<void> {
+  // Resolve the org's effective deletion policy (in-code default when unset).
+  private async resolvePolicy(): Promise<MessageDeletionPolicy> {
+    const row = await this.deps.repo.getDeletionPolicy(this.deps.orgId);
+    return row?.policy ?? chat.DEFAULT_MESSAGE_DELETION_POLICY;
+  }
+
+  // GET /chat/settings/deletion-policy — version 0 signals "no override, default in effect".
+  async getDeletionPolicy(_ctx: ReqCtx): Promise<DeletionPolicyResponse> {
+    const row = await this.deps.repo.getDeletionPolicy(this.deps.orgId);
+    return row ? { policy: row.policy, version: row.version } : { policy: chat.DEFAULT_MESSAGE_DELETION_POLICY, version: 0 };
+  }
+
+  // PATCH /chat/settings/deletion-policy — optimistic-concurrency on `version`. Authz
+  // (chat:moderate) is enforced at the route (fail-close); this only validates + writes.
+  async updateDeletionPolicy(ctx: ReqCtx, body: UpdateDeletionPolicyRequest): Promise<DeletionPolicyResponse> {
+    if (typeof body.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    const policy = requirePolicy(body.policy);
+    const res = await this.deps.repo.setDeletionPolicy({
+      orgId: this.deps.orgId,
+      policy,
+      expectedVersion: body.version,
+      updatedBy: ctx.userId,
+      at: this.deps.now(),
+    });
+    if (!res) throw errVersionConflict("deletion-policy");
+    await this.audit(ctx, "chat.settings.deletion_policy.update", "org", this.deps.orgId, { policy, version: res.version });
+    return { policy, version: res.version };
+  }
+
+  async deleteMessage(ctx: ReqCtx, id: common.MessageId): Promise<DeleteMessageResult> {
     const msg = await this.deps.repo.getMessage(id);
     if (!msg) throw errors.notFound("message", id);
     const channel = await this.deps.repo.getChannel(msg.channelId);
     if (!channel) throw errors.notFound("message", id);
     const isAuthor = msg.authorId === ctx.userId;
-    if (!isAuthor && !(await this.isChannelAdmin(ctx, channel))) {
+    // Moderator tier = channel admin OR the chat:moderate permission (admin/maintainer).
+    // Resolved server-side — the client never asserts its own tier (fail-close authz).
+    const isModerator = await this.isChannelAdmin(ctx, channel);
+    if (!isAuthor && !isModerator) {
       throw new DubError(CommonErrorCodes.FORBIDDEN, "author or channel admin required", { status: 403 });
     }
-    if (msg.deletedAt) return; // idempotent
+    // Idempotent: an already-tombstoned message stays a tombstone.
+    if (msg.deletedAt) return { mode: "tombstone", message: toMessage(msg, {}) };
+
+    const policy = await this.resolvePolicy();
+    const mode: MessageDeletionMode = isModerator ? policy.moderator : policy.member;
     const now = this.deps.now();
-    const next: MessageRow = { ...msg, deletedAt: now, version: msg.version + 1 };
-    if (!(await this.deps.repo.updateMessage(next, msg.version))) throw errVersionConflict(id);
+
+    let outMessage: Message | null;
+    if (mode === "hard") {
+      // Physical erase: the row (and its reactions / pins / thread replies) is gone —
+      // it vanishes from the timeline, lists and unread counts. No tombstone remains.
+      await this.deps.repo.hardDeleteMessage(id);
+      outMessage = null;
+    } else {
+      const next: MessageRow = { ...msg, deletedAt: now, version: msg.version + 1 };
+      if (!(await this.deps.repo.updateMessage(next, msg.version))) throw errVersionConflict(id);
+      outMessage = toMessage(next, {});
+    }
 
     await this.deps.publisher.publish("chat.message.deleted", { channelId: channel.id, messageId: id }, this.actor(ctx));
-    await this.deps.realtime.publishToChannel(channel.id, { kind: "message.deleted", channelId: channel.id, messageId: id, at: now });
-    await this.audit(ctx, "chat.message.delete", "message", id, { channelId: channel.id, byAuthor: isAuthor });
+    await this.deps.realtime.publishToChannel(channel.id, { kind: "message.deleted", channelId: channel.id, messageId: id, at: now, mode });
+    // Audit always records who/when/mode (server-side, never surfaced in the UI).
+    await this.audit(ctx, "chat.message.delete", "message", id, { channelId: channel.id, byAuthor: isAuthor, mode });
+    return { mode, message: outMessage };
   }
 
   async toggleReaction(ctx: ReqCtx, id: common.MessageId, emoji: string): Promise<ReactionToggleResponse> {
@@ -420,7 +506,7 @@ export class ChatService {
     const msg = await this.deps.repo.getMessage(id);
     if (!msg || msg.deletedAt) throw errors.notFound("message", id);
     const { channel } = await this.loadReadable(msg.channelId, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    await this.ensureCanWrite(channel, ctx.userId);
 
     const has = await this.deps.repo.hasReaction(id, clean, ctx.userId);
     if (has) await this.deps.repo.removeReaction(id, clean, ctx.userId);
@@ -468,7 +554,7 @@ export class ChatService {
   async togglePin(ctx: ReqCtx, id: common.ChannelId, messageId: common.MessageId): Promise<Message[]> {
     const cleanMessageId = nonEmptyString(messageId, "messageId");
     const { channel } = await this.loadReadable(id, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    await this.ensureCanWrite(channel, ctx.userId);
     if (channel.archivedAt) throw errArchived(channel.id);
 
     const msg = await this.deps.repo.getMessage(cleanMessageId);
@@ -486,8 +572,9 @@ export class ChatService {
   // ---- read state / unread ----
   async updateReadState(ctx: ReqCtx, id: common.ChannelId, body: ReadStateUpdateRequest): Promise<UnreadSummary> {
     const lastReadMessageId = nonEmptyString(body.lastReadMessageId, "lastReadMessageId");
-    const { channel } = await this.loadReadable(id, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    // Marking read is a read-side action: allowed on any readable channel (public
+    // without join; private members-only via loadReadable). No write membership gate.
+    await this.loadReadable(id, ctx.userId);
     await this.deps.repo.setReadState(id, ctx.userId, lastReadMessageId, this.deps.now());
     const unreadCount = await this.deps.repo.countUnread(id, ctx.userId, lastReadMessageId);
     return { channelId: id, unreadCount, lastReadMessageId };
@@ -507,8 +594,10 @@ export class ChatService {
 
   // ---- ws-ticket (RT connect; DO-direct) ----
   async issueWsTicket(ctx: ReqCtx, id: common.ChannelId): Promise<WsTicketResponse> {
-    const { channel } = await this.loadReadable(id, ctx.userId);
-    await this.requireMember(channel, ctx.userId);
+    // Realtime subscribe follows read access: public channels are open to any
+    // authenticated user (loadReadable blocks private non-members). The ChatRoom DO
+    // still verifies the HMAC ticket + Origin, so this issuance is the read gate.
+    await this.loadReadable(id, ctx.userId);
     const expEpochMs = ticketExpiryMs(Date.now());
     const ticket = await signWsTicket(this.deps.wsTicketSecret, { channelId: id, userId: ctx.userId, expEpochMs });
     return { ticket, doUrl: buildDoUrl(this.deps.doUrlBase, id), expiresAt: new Date(expEpochMs).toISOString() };

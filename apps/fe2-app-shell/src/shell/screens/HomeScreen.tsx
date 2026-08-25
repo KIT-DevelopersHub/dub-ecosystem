@@ -7,11 +7,13 @@
 // this is the daily workspace), and a right rail of live panels (直近のイベント・未読の
 // 通知) unchanged from the launchpad.
 //
-// Data honesty: the countdown (wall clock), unread count and upcoming-event list come
-// from /bff/home and are LIVE. Task-completion, free-tier usage and member/team counts
-// are not aggregated by /bff/home yet, so they render illustrative values tagged "デモ".
-// Partial upstream failure is surfaced per-frame via useBffHome().errorFor — no global
-// toast. FE3–FE7 may still contribute a homeWidget; each renders in its own boundary.
+// Data honesty: every figure is LIVE. The countdown comes from the wall clock; the
+// unread count, upcoming events, task-completion breakdown, free-tier usage and
+// member/team counts are all aggregated by /bff/home (from notification / event /
+// task-service / usage-meter / member-service). Partial upstream failure is surfaced
+// per-frame via useBffHome().errorFor — the affected tile/card shows "取得できませんでした"
+// while the rest stay live; no global toast. FE3–FE7 may still contribute a
+// homeWidget; each renders in its own boundary.
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
@@ -23,12 +25,11 @@ import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
   CONFERENCE,
-  FREE_TIER,
-  TASK_SEGMENTS,
-  TEAM_STATS,
   daysUntil,
+  freeTierFromMetrics,
   statusMeta,
   taskCompletionPct,
+  taskSegmentsFromCounts,
   taskTotal,
   usageStatusFromPct,
   worstFreeTier,
@@ -164,9 +165,21 @@ export function HomeScreen({
   // "取得できませんでした" card when notification-service degrades — previously the mismatched
   // "notification" key silently left the card at 未読 0 件 (bugfix).
   const notificationsError = errorFor("notification-service");
+  const taskError = errorFor("task-service");
+  const usageError = errorFor("usage-meter");
+  const membersError = errorFor("member-service");
 
   const events = data?.upcomingEvents ?? [];
   const unread = data?.unreadCount ?? 0;
+
+  // Live dashboard aggregates from /bff/home. A source in partialErrors leaves its
+  // field undefined → we show "—"/an in-frame error rather than a misleading 0.
+  const segments = taskSegmentsFromCounts(data?.taskSummary?.byStatus ?? {});
+  const hasTasks = data?.taskSummary !== undefined && !taskError;
+  const freeTier = usageError ? [] : freeTierFromMetrics(data?.usageSummary?.metrics ?? []);
+  const worst = worstFreeTier(freeTier);
+  const orgMembers = membersError ? undefined : data?.orgStats?.members;
+  const orgTeams = membersError ? undefined : data?.orgStats?.teams;
 
   // Live counts injected onto the matching tile (only when that aggregate is
   // healthy — a partial error hides the number rather than showing a wrong 0).
@@ -187,10 +200,9 @@ export function HomeScreen({
   // ── derived KPI values ────────────────────────────────────────────────────────
   const days = daysUntil(CONFERENCE.dateISO);
   const cdStatus = days === null ? "info" : countdownStatus(days);
-  const completion = taskCompletionPct();
+  const completion = taskCompletionPct(segments);
   const compStatus = completionStatus(completion);
-  const worst = worstFreeTier();
-  const worstStatus = usageStatusFromPct(worst.pct);
+  const worstStatus = worst ? usageStatusFromPct(worst.pct) : "info";
   const unreadStatus: MetricStatus = notificationsError ? "info" : unread > 0 ? "warn" : "good";
 
   const rootRef = useViewportFit<HTMLElement>();
@@ -228,21 +240,19 @@ export function HomeScreen({
               testId="fe2-kpi-tasks"
               icon="check-square"
               label="タスク完了率"
-              value={`${Math.round(completion)}%`}
-              status={compStatus}
-              demo
-              ring={{ pct: completion, status: compStatus, ariaLabel: "タスク完了率" }}
-              hint={`全 ${taskTotal()} 件`}
+              value={hasTasks ? `${Math.round(completion)}%` : "—"}
+              status={hasTasks ? compStatus : "info"}
+              {...(hasTasks ? { ring: { pct: completion, status: compStatus, ariaLabel: "タスク完了率" } } : {})}
+              hint={taskError ? "取得できませんでした" : hasTasks ? `自分の担当 全 ${taskTotal(segments)} 件` : "—"}
             />
             <KpiTile
               testId="fe2-kpi-freetier"
               icon="shield"
               label="無料枠 最逼迫"
-              value={`${Math.round(worst.pct)}%`}
+              value={worst ? `${Math.round(worst.pct)}%` : "—"}
               status={worstStatus}
-              demo
-              meter={{ pct: worst.pct, status: worstStatus, ariaLabel: "無料枠の最逼迫指標" }}
-              hint={worst.label}
+              {...(worst ? { meter: { pct: worst.pct, status: worstStatus, ariaLabel: "無料枠の最逼迫指標" } } : {})}
+              hint={usageError ? "取得できませんでした" : worst ? worst.label : "データがありません"}
             />
             <KpiTile
               testId="fe2-kpi-unread"
@@ -266,11 +276,10 @@ export function HomeScreen({
               testId="fe2-kpi-members"
               icon="users"
               label="運営メンバー"
-              value={String(TEAM_STATS.members)}
-              unit="名"
+              value={orgMembers !== undefined ? String(orgMembers) : "—"}
+              {...(orgMembers !== undefined ? { unit: "名" } : {})}
               status="info"
-              demo
-              hint={`${TEAM_STATS.teams} チーム`}
+              hint={membersError ? "取得できませんでした" : orgTeams !== undefined ? `${orgTeams} チーム` : "—"}
             />
           </>
         )}
@@ -287,7 +296,6 @@ export function HomeScreen({
                 <span className="fe2-stat-label">
                   <Icon name="shield" />
                   無料枠の使用状況
-                  <span className="fe2-kpi-demo">デモ</span>
                 </span>
                 <a href="/usage" className="fe2-home-cardlink" data-testid="fe2-home-usage-all" onClick={go("/usage")}>
                   詳細
@@ -296,23 +304,36 @@ export function HomeScreen({
               </div>
             }
           >
-            <ul className="fe2-usage-list">
-              {FREE_TIER.map((m) => {
-                const st = usageStatusFromPct(m.pct);
-                const meta = statusMeta(st);
-                return (
-                  <li key={m.key} className="fe2-usage-row" data-testid={`fe2-usage-${m.key}`}>
-                    <div className="fe2-usage-top">
-                      <span className="fe2-usage-label">{m.label}</span>
-                      <span className="fe2-usage-pct" style={{ color: toCssVarName(meta.colorPath) }}>
-                        {m.pct.toFixed(1)}%
-                      </span>
-                    </div>
-                    <Meter pct={m.pct} status={st} ariaLabel={m.label} />
-                  </li>
-                );
-              })}
-            </ul>
+            {isPending ? (
+              <SkeletonLoader lines={4} />
+            ) : usageError ? (
+              <div role="alert" data-testid="fe2-home-usage-error" className="fe2-inline-error">
+                <p>使用状況を取得できませんでした。</p>
+                <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                  再試行
+                </Button>
+              </div>
+            ) : freeTier.length === 0 ? (
+              <p className="fe2-stat-hint">使用状況のデータがありません。</p>
+            ) : (
+              <ul className="fe2-usage-list">
+                {freeTier.map((m) => {
+                  const st = usageStatusFromPct(m.pct);
+                  const meta = statusMeta(st);
+                  return (
+                    <li key={m.key} className="fe2-usage-row" data-testid={`fe2-usage-${m.key}`}>
+                      <div className="fe2-usage-top">
+                        <span className="fe2-usage-label">{m.label}</span>
+                        <span className="fe2-usage-pct" style={{ color: toCssVarName(meta.colorPath) }}>
+                          {m.pct.toFixed(1)}%
+                        </span>
+                      </div>
+                      <Meter pct={m.pct} status={st} ariaLabel={m.label} />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Card>
 
           <Card
@@ -322,7 +343,6 @@ export function HomeScreen({
                 <span className="fe2-stat-label">
                   <Icon name="check-square" />
                   タスクの内訳
-                  <span className="fe2-kpi-demo">デモ</span>
                 </span>
                 <a href="/me/tasks" className="fe2-home-cardlink" data-testid="fe2-home-tasks-all" onClick={go("/me/tasks")}>
                   詳細
@@ -331,7 +351,20 @@ export function HomeScreen({
               </div>
             }
           >
-            <SegmentBar segments={TASK_SEGMENTS} testId="fe2-home-task-segbar" />
+            {isPending ? (
+              <SkeletonLoader lines={3} />
+            ) : taskError ? (
+              <div role="alert" data-testid="fe2-home-tasks-error" className="fe2-inline-error">
+                <p>タスクを取得できませんでした。</p>
+                <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                  再試行
+                </Button>
+              </div>
+            ) : !hasTasks || taskTotal(segments) === 0 ? (
+              <p className="fe2-stat-hint">担当しているタスクはありません。</p>
+            ) : (
+              <SegmentBar segments={segments} testId="fe2-home-task-segbar" />
+            )}
           </Card>
           </div>
 

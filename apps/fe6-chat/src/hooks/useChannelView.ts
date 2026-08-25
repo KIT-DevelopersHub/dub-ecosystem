@@ -1,7 +1,8 @@
 // useChannelView — integration hook binding a channel's timeline to the API +
-// realtime client. Optimistic post/edit/reaction go through runOptimistic
-// (FE2 createOptimisticMutation contract); delete/archive are non-optimistic
-// (ConfirmDialog in the UI). RT gap-fill on reconnect uses afterMessageId.
+// realtime client. ALL mutations (post/edit/reaction/DELETE) are optimistic and go
+// through runOptimistic (FE2 createOptimisticMutation contract): apply immediately →
+// mutate → reconcile on success | rollback on failure (FRONTEND_GUIDE §Optimistic UI).
+// RT gap-fill on reconnect uses afterMessageId.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { common } from "@dub/types";
 import { useChatRuntime } from "../context";
@@ -10,16 +11,19 @@ import { runOptimistic, type StateBox } from "../store/optimistic";
 import {
   ackPending,
   addPending,
+  applyReactions,
   applyRealtimeEvent,
   failPending,
+  markDeleted,
   mergeMessages,
+  removeMessage,
   toggleReactionLocal,
   upsertMessage,
 } from "../store/timeline";
 import { emptyChannelView, type ChannelViewState, type PendingMessage } from "../types";
 import { newClientTempId } from "../lib/ulid";
 import type { ChatRealtimeClient } from "../realtime/client";
-import type { Attachment } from "../api/contract";
+import type { Attachment, MessageDeletionPolicy } from "../api/contract";
 
 const PAGE_SIZE = 50;
 
@@ -36,7 +40,7 @@ export interface UseChannelView {
 }
 
 export function useChannelView(channelId: common.ChannelId): UseChannelView {
-  const { api, currentUserId, createRealtimeClient } = useChatRuntime();
+  const { api, can, currentUserId, createRealtimeClient } = useChatRuntime();
   const applyStoreEvent = useChatStore((s) => s.applyEvent);
   const setActiveChannel = useChatStore((s) => s.setActiveChannel);
 
@@ -44,6 +48,10 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
   const [loading, setLoading] = useState(true);
   const stateRef = useRef(state);
   const rtRef = useRef<ChatRealtimeClient | null>(null);
+  // Cached workspace deletion policy — lets the optimistic delete predict the mode
+  // (hard=drop vs tombstone=redact) BEFORE the request resolves, so the row updates the
+  // instant the user clicks. The server's authoritative `mode` reconciles any misguess.
+  const policyRef = useRef<MessageDeletionPolicy | null>(null);
 
   const setState = useCallback((next: ChannelViewState) => {
     stateRef.current = next;
@@ -71,6 +79,16 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
       } finally {
         if (!cancelled) setLoading(false);
       }
+
+      // Cache the workspace deletion policy for optimistic-delete mode prediction.
+      // Best-effort: on failure we predict `hard` (the product default) and still
+      // reconcile against the server's authoritative mode.
+      void api
+        .getDeletionPolicy()
+        .then((res) => {
+          if (!cancelled) policyRef.current = res.policy;
+        })
+        .catch(() => undefined);
 
       const rt = createRealtimeClient();
       rtRef.current = rt;
@@ -199,13 +217,33 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
     [api], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Delete is destructive => non-optimistic (design: ConfirmDialog then apply).
+  // Delete is OPTIMISTIC (FRONTEND_GUIDE §Optimistic UI — no exception for delete):
+  // the row updates the instant the user confirms, then the DELETE is confirmed in the
+  // background. We predict the mode from the cached policy + the caller's tier
+  // (chat:moderate => moderator, else member; default `hard` when the policy hasn't
+  // loaded) so `hard` disappears immediately and `tombstone` shows "削除されました"
+  // immediately. `reconcile` applies the server's authoritative mode (correcting any
+  // misprediction — e.g. re-inserting as a tombstone), and on failure the default
+  // rollback restores the snapshot so the message reappears; the caller shows an error
+  // toast. The RT echo carries the same mode so other clients converge identically.
   const deleteMessage = useCallback(
     async (id: common.MessageId, _version: number) => {
-      const res = await api.deleteMessage(id);
-      setState({ ...stateRef.current, messages: upsertMessage(stateRef.current.messages, res) });
+      const policy = policyRef.current;
+      const predicted = policy ? (can("chat:moderate") ? policy.moderator : policy.member) : "hard";
+      await runOptimistic(box, {
+        apply: (s) =>
+          predicted === "hard"
+            ? { ...s, messages: removeMessage(s.messages, id) }
+            : { ...s, messages: markDeleted(s.messages, id, new Date().toISOString()) },
+        mutate: () => api.deleteMessage(id),
+        reconcile: (s, _v, res) =>
+          res.mode === "hard" || res.message === null
+            ? { ...s, messages: removeMessage(s.messages, id) }
+            : { ...s, messages: upsertMessage(s.messages, res.message) },
+        // rollback: default snapshot restore — the deleted row reappears on failure.
+      }, { id });
     },
-    [api, setState],
+    [api, can], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const toggleReaction = useCallback(
@@ -213,7 +251,10 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
       await runOptimistic(box, {
         apply: (s) => ({ ...s, messages: toggleReactionLocal(s.messages, id, emoji, currentUserId) }),
         mutate: () => api.toggleReaction(id, { emoji }),
-        reconcile: (s, _v, res) => ({ ...s, messages: upsertMessage(s.messages, res) }),
+        // A toggle returns only { messageId, reactions } — apply the server's
+        // authoritative reaction set onto the message (NOT upsertMessage, which
+        // expects a full Message and would inject a phantom id=undefined entry).
+        reconcile: (s, _v, res) => ({ ...s, messages: applyReactions(s.messages, res.messageId, res.reactions) }),
       }, { id, emoji });
     },
     [api, currentUserId], // eslint-disable-line react-hooks/exhaustive-deps

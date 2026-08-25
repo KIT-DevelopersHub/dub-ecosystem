@@ -148,4 +148,23 @@ if [ "${SKIP_HEALTHCHECK:-0}" != "1" ] && [ -n "${MOBILE_BFF_HEALTH_URL:-}" ]; t
   check "mobile-bff /healthz" "${M}/healthz" 200
 fi
 
+# --- 7. app-health-monitor (死活監視). Deployed LAST: it binds every upstream it probes, so all
+#     of them must already exist. Hourly polling runs on the MonitorDO alarm (no cron slot). ---
+deploy dub-app-health-monitor services/app-health-monitor/wrangler.free.toml
+
+# --- 7b. arm the hourly poll alarm (idempotent). The monitor's /internal/monitor/kick is gated
+#     by MONITOR_ADMIN_TOKEN; when that secret is provided in the env we arm it over the public
+#     origin. Skipped (with a note) when unset — arm it once manually per wrangler.free.toml. ---
+if [ -n "${MONITOR_ADMIN_TOKEN:-}" ]; then
+  MON="${MONITOR_HEALTH_URL:-https://dub-app-health-monitor.developershub-site.workers.dev}"
+  MON="${MON%/}"
+  echo "arming app-health-monitor alarm: ${MON}/internal/monitor/kick"
+  curl -sS -X POST -H "x-monitor-token: ${MONITOR_ADMIN_TOKEN}" \
+    --retry 4 --retry-delay 3 --retry-all-errors --max-time 25 \
+    "${MON}/internal/monitor/kick" || echo "::warning::app-health-monitor kick failed (arm manually; see wrangler.free.toml)"
+  echo
+else
+  echo "note: MONITOR_ADMIN_TOKEN unset — app-health-monitor alarm NOT auto-armed (arm once manually per services/app-health-monitor/wrangler.free.toml)."
+fi
+
 echo "production deploy complete."

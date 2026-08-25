@@ -3,6 +3,7 @@
 // in-memory grant store, so the exact same code paths that run on the real Drive client
 // are exercised with zero network.
 import { describe, it, expect } from "vitest";
+import { errors } from "@dub/errors";
 import { createMockDriveShareClient } from "../src/mock-client";
 import type { DriveShareClient, CreatePermissionParams, ListFilesParams } from "../src/drive-client";
 import { createInMemoryRoleGrantStore } from "../src/role-grants-store";
@@ -181,5 +182,99 @@ describe("validation", () => {
     const spy = spyClient(createMockDriveShareClient());
     const { service } = buildRoleGrants({ drive: spy.client, roster: fakeRoster({}) });
     await expect(service.apply(FILE, "u", "  ", "reader")).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+});
+
+describe("partial success: Drive refuses a member (no Google account / invalid email)", () => {
+  const BAD = "ghost-no-account@example.invalid";
+  const MSG = "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。";
+
+  /** A Drive client that throws (like the real 400 invalidSharingRequest) for one email. */
+  function refusingClient(inner: DriveShareClient, badEmail: string): DriveShareClient {
+    return {
+      listFiles: (p) => inner.listFiles(p),
+      listPermissions: (fileId) => inner.listPermissions(fileId),
+      async createPermission(fileId, p) {
+        if (p.emailAddress === badEmail) {
+          throw errors.validationFailed([{ field: "request", reason: "invalidSharingRequest" }], MSG);
+        }
+        return inner.createPermission(fileId, p);
+      },
+      updatePermission: (fileId, id, role) => inner.updatePermission(fileId, id, role),
+      deletePermission: (fileId, id) => inner.deletePermission(fileId, id),
+    };
+  }
+
+  it("apply skips the refused member with a reason and still applies the rest", async () => {
+    const client = refusingClient(createMockDriveShareClient(), BAD);
+    const roster = fakeRoster({ role_a: ["volunteer@example.com", BAD] });
+    const { service } = buildRoleGrants({ drive: client, roster });
+
+    const grant = await service.apply("fld_designs", "usr_admin", "role_a", "writer");
+
+    expect(grant.memberCount).toBe(2);
+    expect(grant.appliedCount).toBe(1); // only the good member applied
+    expect(grant.skipped).toEqual([{ email: BAD, reason: MSG }]);
+    expect((await permOf(client, "fld_designs", "volunteer@example.com"))!.role).toBe("writer");
+  });
+
+  it("reapply also reports the refused member and does not throw", async () => {
+    const client = refusingClient(createMockDriveShareClient(), BAD);
+    const roster = fakeRoster({ role_a: ["volunteer@example.com", BAD] });
+    const { service } = buildRoleGrants({ drive: client, roster });
+
+    await service.apply("fld_designs", "usr_admin", "role_a", "reader");
+    const grant = await service.reapply("fld_designs", "role_a");
+
+    expect(grant.appliedCount).toBe(1);
+    expect(grant.skipped).toEqual([{ email: BAD, reason: MSG }]);
+  });
+
+  it("omits `skipped` entirely when every member applies", async () => {
+    const spy = spyClient(createMockDriveShareClient());
+    const { service } = buildRoleGrants({ drive: spy.client, roster: fakeRoster({ role_a: ["volunteer@example.com"] }) });
+    const grant = await service.apply("fld_designs", "usr_admin", "role_a", "writer");
+    expect(grant.skipped).toBeUndefined();
+  });
+});
+
+describe("invited members: no Google account → shared via invite (pending)", () => {
+  const NOACCT = "info@developershub.jp";
+
+  /** A Drive client whose createPermission flags a given email as `invited` (mirrors the
+   *  real client's notify=true fallback for a grantee with no Google account). */
+  function invitingClient(inner: DriveShareClient, invitedEmail: string): DriveShareClient {
+    return {
+      listFiles: (p) => inner.listFiles(p),
+      listPermissions: (fileId) => inner.listPermissions(fileId),
+      async createPermission(fileId, p) {
+        const created = await inner.createPermission(fileId, p);
+        return p.emailAddress === invitedEmail ? { ...created, invited: true } : created;
+      },
+      updatePermission: (fileId, id, role) => inner.updatePermission(fileId, id, role),
+      deletePermission: (fileId, id) => inner.deletePermission(fileId, id),
+    };
+  }
+
+  it("applies the member AND reports it in `invited`", async () => {
+    const client = invitingClient(createMockDriveShareClient(), NOACCT);
+    const roster = fakeRoster({ role_a: ["volunteer@example.com", NOACCT] });
+    const { service } = buildRoleGrants({ drive: client, roster });
+
+    const grant = await service.apply("fld_designs", "usr_admin", "role_a", "writer");
+
+    expect(grant.memberCount).toBe(2);
+    expect(grant.appliedCount).toBe(2); // BOTH applied (invited is still applied)
+    expect(grant.skipped).toBeUndefined();
+    expect(grant.invited).toEqual([{ email: NOACCT }]);
+    // the invited member's permission really exists on the file
+    expect((await permOf(client, "fld_designs", NOACCT))!.role).toBe("writer");
+  });
+
+  it("omits `invited` when every member has a Google account", async () => {
+    const spy = spyClient(createMockDriveShareClient());
+    const { service } = buildRoleGrants({ drive: spy.client, roster: fakeRoster({ role_a: ["volunteer@example.com"] }) });
+    const grant = await service.apply("fld_designs", "usr_admin", "role_a", "writer");
+    expect(grant.invited).toBeUndefined();
   });
 });

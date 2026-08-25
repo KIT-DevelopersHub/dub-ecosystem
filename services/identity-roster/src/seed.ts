@@ -1,8 +1,60 @@
 // Reference-data seed: the default org + the system roles (admin / maintainer /
 // organizer / member). Idempotent. Demo USERS are #28 seedDemo's job (kept out of
 // here so no demo rows leak into prod). Role permission bundles are an α-decision.
-import { identity } from "@dub/types";
+import { identity, appRegistry } from "@dub/types";
 import type { IdentityRepo } from "./repo/types";
+
+type PermissionKey = identity.PermissionKey;
+
+// ── per-app access backfill policy (non-breaking rollout) ─────────────────────
+// Opening/using an app is now gated on its own `app:<id>:view` / `app:<id>:edit` key
+// (shell launcher + route guard). To ensure NOBODY loses access when this ships, every
+// role is granted the per-app keys equivalent to what it can ALREADY do today, derived
+// from its current DOMAIN permissions: `view` iff the role can currently reach the app
+// (holds the app's read/primary perm, or the app is open to all authenticated users),
+// `edit` iff it currently holds the app's write perm. Additive + idempotent (union). The
+// admin system role is granted ALL per-app keys unconditionally (it is all-powerful).
+interface AppAccessRule {
+  id: string;
+  read?: PermissionKey; // holding this ⇒ can currently open the app ⇒ grant view
+  write?: PermissionKey; // holding this ⇒ can currently edit in the app ⇒ grant edit
+  openToAll?: boolean; // launcher tile open to any authenticated user ⇒ grant view to all
+}
+const APP_ACCESS_RULES: AppAccessRule[] = [
+  { id: "events", read: "event:read", write: "event:write" },
+  { id: "tasks", read: "task:read", write: "task:write" },
+  { id: "gantt", read: "task:read", write: "task:write" },
+  { id: "notifications", read: "notif:inbox:self" },
+  { id: "chat", read: "chat:create", write: "chat:moderate" },
+  { id: "mail", read: "mail:read", write: "mail:send" },
+  { id: "usage", openToAll: true },
+  { id: "members", read: "identity:read", write: "identity:admin" },
+  { id: "participation", openToAll: true, write: "identity:admin" },
+  { id: "driveshare", openToAll: true, write: "drive:write" },
+  { id: "admin", read: "identity:admin", write: "identity:admin" },
+];
+
+/** The per-app access keys a role should hold given its current domain permissions
+ *  (edit co-carries view). Pure; used for both fresh seeds and the backfill. */
+export function computeAppAccessKeys(perms: readonly PermissionKey[]): PermissionKey[] {
+  const has = new Set(perms);
+  const out = new Set<PermissionKey>();
+  for (const rule of APP_ACCESS_RULES) {
+    const view = appRegistry.appViewKey(rule.id);
+    const edit = appRegistry.appEditKey(rule.id);
+    if (!view || !edit) continue;
+    const canEdit = rule.write !== undefined && has.has(rule.write);
+    const canView = rule.openToAll === true || (rule.read !== undefined && has.has(rule.read)) || canEdit;
+    if (canView) out.add(view);
+    if (canEdit) out.add(edit);
+  }
+  return [...out];
+}
+
+/** A role's base (domain) permission bundle plus its computed per-app access keys. */
+function withAppAccess(base: PermissionKey[]): PermissionKey[] {
+  return [...new Set([...base, ...computeAppAccessKeys(base)])];
+}
 
 // admin is genuinely all-powerful in P0: derive every key from the frozen
 // catalog so a catalog change (e.g. github:* / drive:* / webhook:read) can never
@@ -31,19 +83,23 @@ const MAINTAINER_KEYS: identity.PermissionKey[] = [
   "webhook:read",
 ];
 
+// ALL_KEYS() already includes every per-app access key (they live in the catalog), so
+// admin is fully covered; the other tiers get their per-app keys computed from their
+// domain bundle via withAppAccess (non-breaking: they can reach today exactly what they
+// could before, now expressed as explicit per-app toggles).
 const SYSTEM_ROLES: { name: string; permissions: identity.PermissionKey[] }[] = [
   { name: "admin", permissions: ALL_KEYS() },
   {
     name: "maintainer",
-    permissions: MAINTAINER_KEYS,
+    permissions: withAppAccess(MAINTAINER_KEYS),
   },
   {
     name: "organizer",
-    permissions: ["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "usage:view", "infra:read", "audit:read"],
+    permissions: withAppAccess(["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "chat:create", "usage:view", "infra:read", "audit:read"]),
   },
   {
     name: "member",
-    permissions: ["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create", "usage:view"],
+    permissions: withAppAccess(["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "chat:create", "usage:view"]),
   },
 ];
 
@@ -62,6 +118,38 @@ export async function seedReferenceData(d: SeedDeps, orgId: string, orgName = "D
     const now = d.now();
     await d.repo.createRole({ id: d.newId("role"), orgId, name: sr.name, isSystem: true, permissions: sr.permissions, createdAt: now, updatedAt: now });
   }
+  // Backfill the per-app access keys onto EXISTING roles (created before this change) so
+  // the new gate never removes access a role already has. Runs on every seed (idempotent).
+  await backfillAppAccessKeys(d, orgId);
+}
+
+/**
+ * Idempotent, additive backfill: ensure every role holds the per-app access keys implied
+ * by its current domain permissions (admin system role ⇒ ALL per-app keys). Only writes a
+ * role whose set actually changes, so re-running is a no-op. Safe to call standalone during
+ * a deploy (the production rollout path for the per-app gate).
+ * @returns the names of roles that were updated (empty when already up to date).
+ */
+export async function backfillAppAccessKeys(d: SeedDeps, orgId: string): Promise<string[]> {
+  const updated: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await d.repo.listRoles(orgId, 100, cursor);
+    for (const role of page.items) {
+      const current = new Set(role.permissions as PermissionKey[]);
+      const grant =
+        role.isSystem && role.name === "admin"
+          ? appRegistry.allAppAccessKeys()
+          : computeAppAccessKeys(role.permissions as PermissionKey[]);
+      const missing = grant.filter((k) => !current.has(k));
+      if (missing.length === 0) continue;
+      const next = [...current, ...missing];
+      await d.repo.updateRolePermissions(role.id, undefined, next, d.now());
+      updated.push(role.name);
+    }
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return updated;
 }
 
 // ---- demo users -------------------------------------------------------------

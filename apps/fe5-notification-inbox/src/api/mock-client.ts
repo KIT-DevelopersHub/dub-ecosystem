@@ -119,6 +119,17 @@ function seedItems(): InboxItem[] {
     mk(4, "system.announcement", "Scheduled maintenance tonight", true),
     mk(5, "task.completed", "“Write tests” was completed", true, { type: "task", id: "task_tests" }),
     mk(6, "event.reminder", "Standup in 10 minutes", true, { type: "event", id: "event_standup" }),
+    // メール (mail) category — inbound mail relayed by mail-gateway. Seeded read so the default
+    // unread count is unchanged; the item still populates the "メール" tab for the demo.
+    mk(9, "mail.message.received", "新着メール: 参加者からのお問い合わせ", true, {
+      type: "mail_message",
+      id: "mail_0001",
+    }),
+    // 参加届 (participation) category — a 参加届 submission notified to admins (#326).
+    mk(10, "member.participation.submitted", "新しい参加届: 山田 太郎", true, {
+      type: "participation",
+      id: "part_0001",
+    }),
   ];
 }
 
@@ -325,6 +336,16 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
           throw new MockApiError("NOTIF_INBOX_ITEM_NOT_FOUND", 404, `Inbox item not found: ${id}`);
         }
         if (item.readAt === null) item.readAt = new Date().toISOString();
+        return undefined as T;
+      }
+      const unreadMatch = path.match(new RegExp(`^${BASE}/inbox/([^/]+)/unread$`));
+      if (unreadMatch) {
+        const id = decodeURIComponent(unreadMatch[1]!);
+        const item = store.items.find((i) => i.id === id);
+        if (!item) {
+          throw new MockApiError("NOTIF_INBOX_ITEM_NOT_FOUND", 404, `Inbox item not found: ${id}`);
+        }
+        item.readAt = null;
         return undefined as T;
       }
       if (path === `${BASE}/preferences`) {

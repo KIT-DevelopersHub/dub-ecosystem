@@ -12,6 +12,10 @@ export interface TaskRow {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assignee_id: string | null;
+  team_id: string | null;
+  parent_id: string | null;
+  wbs: string | null;
+  start_at: string | null;
   due_at: string | null;
   origin: task.TaskOrigin;
   version: number;
@@ -31,7 +35,11 @@ export function rowToTask(r: TaskRow): task.Task {
     status: r.status,
     priority: r.priority,
     assigneeId: r.assignee_id,
+    teamId: r.team_id,
+    parentTaskId: r.parent_id,
+    wbs: r.wbs,
     createdBy: r.created_by,
+    startAt: r.start_at,
     dueAt: r.due_at,
     origin: r.origin,
     version: r.version,
@@ -49,6 +57,10 @@ export interface InsertTaskInput {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  teamId?: common.TeamId | null;
+  parentId?: common.TaskId | null;
+  wbs?: string | null;
+  startAt?: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
   origin: task.TaskOrigin;
   createdBy: common.UserId;
@@ -62,12 +74,18 @@ export interface TaskPatch {
   status?: task.TaskStatus;
   priority?: task.TaskPriority;
   assigneeId?: common.UserId | null;
+  teamId?: common.TeamId | null;
+  parentId?: common.TaskId | null;
+  wbs?: string | null;
+  startAt?: common.ISODateTime | null;
   dueAt?: common.ISODateTime | null;
 }
 
 export interface ListFilter {
   eventId?: string;
   assigneeId?: string;
+  /** WBS/team scope (task_tasks.team_id). Powers the gantt team filter. */
+  teamId?: string;
   /** Requester filter (task_tasks.created_by). Powers the "issued by me" lens. */
   createdById?: string;
   statuses?: task.TaskStatus[];
@@ -143,8 +161,14 @@ export interface TaskRepo {
    * other unlinked tasks (and vice-versa).
    */
   listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]>;
-  /** Ids of every live (non-archived) task in a bucket — the valid dependsOn target set. */
-  listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]>;
+  /** Every live (non-archived) task in a bucket with its `team_id` — the valid dependsOn
+   *  target set plus the team each belongs to. The dependency门番 (ADR-0007) compares
+   *  `team_id` to reject cross-team edges; ids alone come from `.map(t => t.id)`. */
+  listLiveTasksByEvent(eventId: string | null): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>>;
+  /** Distinct owning-team ids of the LIVE (non-archived) direct children of `parentId`
+   *  (`null` = a child with no team). Guards a parent's team change: a parent must not be
+   *  moved to a team that differs from any of its children (親子は同一チーム). */
+  liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>>;
   /** Version-checked full replace of a task's dependsOn edges. */
   replaceDependencies(
     taskId: string,
@@ -174,14 +198,14 @@ export function decodeCursor(cursor: string): string {
 }
 
 const ALL_COLUMNS =
-  "id, event_id, title, description, status, priority, assignee_id, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at";
+  "id, event_id, title, description, status, priority, assignee_id, team_id, parent_id, wbs, start_at, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at";
 
 export function createD1TaskRepo(db: DbClient): TaskRepo {
   return {
     async insert(input: InsertTaskInput): Promise<task.Task> {
       await db.run(
         `INSERT INTO task_tasks (${ALL_COLUMNS})
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL)`,
         input.id,
         input.eventId,
         input.title,
@@ -189,6 +213,10 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         input.status,
         input.priority,
         input.assigneeId,
+        input.teamId ?? null,
+        input.parentId ?? null,
+        input.wbs ?? null,
+        input.startAt ?? null,
         input.dueAt,
         input.origin,
         input.createdBy,
@@ -219,6 +247,10 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (filter.assigneeId) {
         where.push("assignee_id = ?");
         binds.push(filter.assigneeId);
+      }
+      if (filter.teamId) {
+        where.push("team_id = ?");
+        binds.push(filter.teamId);
       }
       if (filter.createdById) {
         where.push("created_by = ?");
@@ -259,6 +291,10 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (patch.status !== undefined) col("status", patch.status);
       if (patch.priority !== undefined) col("priority", patch.priority);
       if (patch.assigneeId !== undefined) col("assignee_id", patch.assigneeId);
+      if (patch.teamId !== undefined) col("team_id", patch.teamId);
+      if (patch.parentId !== undefined) col("parent_id", patch.parentId);
+      if (patch.wbs !== undefined) col("wbs", patch.wbs);
+      if (patch.startAt !== undefined) col("start_at", patch.startAt);
       if (patch.dueAt !== undefined) col("due_at", patch.dueAt);
       col("updated_at", now);
       sets.push("version = version + 1");
@@ -321,17 +357,27 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       return rows.map((r) => ({ taskId: r.task_id, dependsOnId: r.depends_on_id }));
     },
 
-    async listLiveTaskIdsByEvent(eventId: string | null): Promise<common.TaskId[]> {
+    async listLiveTasksByEvent(
+      eventId: string | null,
+    ): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>> {
       const rows =
         eventId === null
-          ? await db.all<{ id: string }>(
-              `SELECT id FROM task_tasks WHERE event_id IS NULL AND archived_at IS NULL`,
+          ? await db.all<{ id: string; team_id: string | null }>(
+              `SELECT id, team_id FROM task_tasks WHERE event_id IS NULL AND archived_at IS NULL`,
             )
-          : await db.all<{ id: string }>(
-              `SELECT id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
+          : await db.all<{ id: string; team_id: string | null }>(
+              `SELECT id, team_id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
               eventId,
             );
-      return rows.map((r) => r.id);
+      return rows.map((r) => ({ id: r.id, teamId: r.team_id }));
+    },
+
+    async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+      const rows = await db.all<{ team_id: string | null }>(
+        `SELECT DISTINCT team_id FROM task_tasks WHERE parent_id = ? AND archived_at IS NULL`,
+        parentId,
+      );
+      return rows.map((r) => (r.team_id ?? null) as common.TeamId | null);
     },
 
     async replaceDependencies(

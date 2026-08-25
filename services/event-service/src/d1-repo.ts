@@ -2,7 +2,8 @@
 // client). All timestamps come from the service (nowIso), never DDL DEFAULT (D2).
 import type { DbClient } from "@dub/db";
 import type { common, event } from "@dub/types";
-import type { EventRepo, EventRow, ActionRow, Keyset } from "./types";
+import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventDetailsData, Keyset } from "./types";
+import { EMPTY_EVENT_DETAILS, normalizeEventDetails } from "./domain";
 
 interface EventDbRow {
   id: string;
@@ -29,6 +30,33 @@ interface ActionDbRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+interface EventDetailsDbRow {
+  event_id: string;
+  data: string;
+  version: number;
+  updated_by: string;
+  updated_at: string;
+}
+
+function parseDetailsData(json: string): EventDetailsData {
+  try {
+    // Single source of truth for coercion/bounds — also fills in any fields added
+    // after this row was written (the store is additive; no migration on new keys).
+    return normalizeEventDetails(JSON.parse(json) as Partial<EventDetailsData>);
+  } catch {
+    return { ...EMPTY_EVENT_DETAILS };
+  }
+}
+function toDetailsRow(r: EventDetailsDbRow): EventDetailsRow {
+  return {
+    eventId: r.event_id,
+    data: parseDetailsData(r.data),
+    version: r.version,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+  };
 }
 
 function toEventRow(r: EventDbRow): EventRow {
@@ -194,6 +222,35 @@ export function createD1EventRepo(db: DbClient): EventRepo {
         eventId,
       );
       return r?.m ?? 0;
+    },
+
+    async getEventDetails(eventId: common.EventId): Promise<EventDetailsRow | null> {
+      const r = await db.first<EventDetailsDbRow>(
+        `SELECT * FROM event_event_details WHERE event_id = ?`,
+        eventId,
+      );
+      return r ? toDetailsRow(r) : null;
+    },
+
+    async upsertEventDetails(next: EventDetailsRow, expectedVersion: number): Promise<boolean> {
+      const dataJson = JSON.stringify(next.data);
+      if (expectedVersion === 0) {
+        // Create. INSERT OR IGNORE returns changes=0 if a row already exists,
+        // which the service surfaces as a version conflict (someone raced us).
+        const res = await db.run(
+          `INSERT OR IGNORE INTO event_event_details
+             (event_id, data, version, updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          next.eventId, dataJson, next.version, next.updatedBy, next.updatedAt,
+        );
+        return res.meta.changes > 0;
+      }
+      const res = await db.run(
+        `UPDATE event_event_details SET data = ?, version = ?, updated_by = ?, updated_at = ?
+         WHERE event_id = ? AND version = ?`,
+        dataJson, next.version, next.updatedBy, next.updatedAt, next.eventId, expectedVersion,
+      );
+      return res.meta.changes > 0;
     },
   } satisfies EventRepo;
 }

@@ -14,6 +14,13 @@ export {
 
 // Shared components/hooks for other units
 export { EventPicker, type EventPickerProps } from "./components/EventPicker";
+export { EventAppHeader } from "./components/EventAppHeader";
+export { EventDetailsPanel } from "./components/EventDetailsPanel";
+export {
+  useCurrentEventId,
+  useSetCurrentEventId,
+  useCurrentEventStore,
+} from "./lib/currentEvent";
 export {
   EventContextProvider,
   useEventContext,
@@ -45,6 +52,13 @@ export type {
   ListActionsQuery,
   ListActionsResponse,
 } from "./api/actionContracts";
+export type {
+  EventDetails,
+  EventDetailsData,
+  EventDetailLink,
+  EventDetailContact,
+  SaveEventDetailsRequest,
+} from "./api/detailsContracts";
 
 // Pure helpers other units may reuse
 export {
@@ -58,6 +72,7 @@ export { eventKeys } from "./lib/queryKeys";
 export { EventErrorCodes, classifyError } from "./lib/errorMap";
 
 // Pages (FE2 registers these via eventFeatureModule; re-exported for direct mount)
+export { EventHubPage } from "./pages/EventHubPage";
 export { EventListPage } from "./pages/EventListPage";
 export { EventDetailPage } from "./pages/EventDetailPage";
 export { ActionDetailPage } from "./pages/ActionDetailPage";

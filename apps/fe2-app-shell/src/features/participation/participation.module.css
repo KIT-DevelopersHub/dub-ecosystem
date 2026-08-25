@@ -87,6 +87,83 @@
   word-break: break-word;
 }
 
+/* 回答一覧・左端「運営メンバー反映」列のセル (追加する/しない の操作 + 状態表示). */
+.reviewCell {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+/* 反映確定ダイアログ — 候補リスト / 分岐ボタン. */
+.resolveBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  color: var(--dub-color-text-primary);
+}
+.resolveLead {
+  margin: 0;
+  color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
+}
+.candidateList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.candidateRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-subtle, var(--dub-color-border));
+  border-radius: var(--dub-radius-md, 8px);
+  background: var(--dub-color-bg-subtle);
+}
+.candidateInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  min-width: 0;
+}
+.candidateName {
+  font-weight: 600;
+  color: var(--dub-color-text-primary);
+}
+.candidateMeta {
+  font-size: var(--dub-font-size-sm, var(--dub-font-size-md));
+  color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
+  word-break: break-word;
+}
+.resolveDivider {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
+  font-size: var(--dub-font-size-sm, var(--dub-font-size-md));
+}
+.resolveDivider::before,
+.resolveDivider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--dub-color-border-subtle, var(--dub-color-border));
+}
+/* 3択 (新規で追加 / 名簿から手動で紐付け / 対象外) を縦積みで見せる。 */
+.resolveActions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.manualLoading {
+  display: flex;
+  justify-content: center;
+  padding: var(--dub-space-4) 0;
+}
+
 /* アプリ内フォームから公開フォームへの導線 (共有用 URL の案内). */
 .shareHint {
   margin: 0 0 var(--dub-space-4);

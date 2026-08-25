@@ -34,7 +34,7 @@ export {
 export { ReleasePublishForm } from "./components/ReleasePublishForm";
 export type { ReleasePublishFormProps } from "./components/ReleasePublishForm";
 export { NotificationList } from "./components/NotificationList";
-export { NotificationListItem, itemLinkUrl } from "./components/NotificationListItem";
+export { NotificationCard, itemLinkUrl } from "./components/NotificationCard";
 export { NotificationFilterBar } from "./components/NotificationFilterBar";
 export { NotificationTypeLabel } from "./components/NotificationTypeLabel";
 export { PreferenceMatrix } from "./components/PreferenceMatrix";
