@@ -239,12 +239,13 @@ function createMailMock() {
         const threadId = decodeURIComponent(m[1]!);
         const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
         const flags = loadFlags();
-        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false };
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false };
         const next: mail.MailThreadFlags = {
           threadId,
           starred: patch.starred ?? prev.starred,
           archived: patch.archived ?? prev.archived,
           trashed: patch.trashed ?? prev.trashed,
+          purged: patch.purged ?? prev.purged ?? false,
         };
         saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
         return json(next);

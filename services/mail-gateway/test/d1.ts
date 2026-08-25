@@ -24,6 +24,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0006_owner_scope.sql"),
   join(HERE, "../db/0007_attachment_status.sql"),
   join(HERE, "../db/0008_user_flags.sql"),
+  join(HERE, "../db/0009_user_flags_purged.sql"),
 ];
 
 function norm(v: unknown): unknown {

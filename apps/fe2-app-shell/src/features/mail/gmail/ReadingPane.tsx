@@ -19,6 +19,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
+import { confirmPurge } from "./ThreadList.tsx";
 import { useMailStore } from "./useMailStore.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { formatBytes, saveBlob } from "../mailApi.tsx";
@@ -357,7 +358,15 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         <HeaderButton label="一覧に戻る" icon="reply" onClick={() => dispatch({ type: "CLOSE_THREAD" })} testId="fe2-mail-thread-back" />
         <div style={{ width: 1, height: 20, background: "var(--dub-color-border-default)" }} />
         {state.folder === "trash" ? (
-          <HeaderButton label="受信トレイに戻す" icon="inbox" onClick={() => dispatch({ type: "RESTORE", ids: [thread.id] })} testId="fe2-mail-restore" />
+          <>
+            <HeaderButton label="受信トレイに戻す" icon="inbox" onClick={() => dispatch({ type: "RESTORE", ids: [thread.id] })} testId="fe2-mail-restore" />
+            <HeaderButton
+              label="完全に削除"
+              icon="delete-forever"
+              onClick={() => confirmPurge(1) && dispatch({ type: "PURGE", ids: [thread.id] })}
+              testId="fe2-mail-purge"
+            />
+          </>
         ) : (
           <>
             <HeaderButton label="アーカイブ" icon="archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })} />
