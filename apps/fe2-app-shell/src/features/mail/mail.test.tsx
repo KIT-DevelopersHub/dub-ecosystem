@@ -175,7 +175,7 @@ function fullApi(over: Partial<MailApi> = {}): MailApi {
     getSent: vi.fn(),
     downloadAttachment: vi.fn().mockResolvedValue(new Blob(["x"])),
     listFlags: vi.fn().mockResolvedValue([]),
-    setFlags: vi.fn().mockResolvedValue({ threadId: "t", starred: false, archived: false, trashed: false }),
+    setFlags: vi.fn().mockResolvedValue({ threadId: "t", starred: false, archived: false, trashed: false, purged: false }),
     ...over,
   };
 }
