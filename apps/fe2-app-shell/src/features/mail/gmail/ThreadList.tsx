@@ -185,12 +185,20 @@ function ThreadRow({ thread, labels }: { thread: MailThreadModel; labels: Label[
       <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", minWidth: 96 }}>
         {hover ? (
           <span style={{ display: "inline-flex", gap: 2, color: "var(--dub-color-text-secondary)" }}>
-            <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })}>
-              <MailIcon name="archive" size={18} />
-            </StopClick>
-            <StopClick label="削除" testId="fe2-mail-trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })}>
-              <MailIcon name="trash" size={18} />
-            </StopClick>
+            {state.folder === "trash" ? (
+              <StopClick label="受信トレイに戻す" testId="fe2-mail-restore" onClick={() => dispatch({ type: "RESTORE", ids: [thread.id] })}>
+                <MailIcon name="inbox" size={18} />
+              </StopClick>
+            ) : (
+              <>
+                <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })}>
+                  <MailIcon name="archive" size={18} />
+                </StopClick>
+                <StopClick label="削除" testId="fe2-mail-trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })}>
+                  <MailIcon name="trash" size={18} />
+                </StopClick>
+              </>
+            )}
             <StopClick
               label={unread ? "既読にする" : "未読にする"}
               onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: unread })}
@@ -279,12 +287,20 @@ export function ThreadList(): JSX.Element {
 
         {someChecked ? (
           <div style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--dub-color-text-secondary)" }}>
-            <StopClick label="選択をアーカイブ" onClick={() => dispatch({ type: "ARCHIVE", ids: checkedInView })}>
-              <MailIcon name="archive" size={18} />
-            </StopClick>
-            <StopClick label="選択を削除" onClick={() => dispatch({ type: "TRASH", ids: checkedInView })}>
-              <MailIcon name="trash" size={18} />
-            </StopClick>
+            {state.folder === "trash" ? (
+              <StopClick label="選択を受信トレイに戻す" testId="fe2-mail-restore-bulk" onClick={() => dispatch({ type: "RESTORE", ids: checkedInView })}>
+                <MailIcon name="inbox" size={18} />
+              </StopClick>
+            ) : (
+              <>
+                <StopClick label="選択をアーカイブ" onClick={() => dispatch({ type: "ARCHIVE", ids: checkedInView })}>
+                  <MailIcon name="archive" size={18} />
+                </StopClick>
+                <StopClick label="選択を削除" onClick={() => dispatch({ type: "TRASH", ids: checkedInView })}>
+                  <MailIcon name="trash" size={18} />
+                </StopClick>
+              </>
+            )}
             <StopClick label="選択を既読にする" onClick={() => dispatch({ type: "SET_READ", ids: checkedInView, read: true })}>
               <MailIcon name="mail-open" size={18} />
             </StopClick>
