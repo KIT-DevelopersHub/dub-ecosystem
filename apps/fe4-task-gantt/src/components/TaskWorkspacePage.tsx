@@ -63,7 +63,7 @@ const NEUTRAL_GROUP_COLOR = "#6f7a90"; // gray.500
 /** Human labels for validation `field` keys shown in the ErrorDialog breakdown. */
 const FIELD_LABEL: Record<string, string> = {
   title: "タイトル",
-  dueAt: "期日",
+  dueAt: "終了日",
   startsAt: "開始日",
   endsAt: "終了日",
   status: "ステータス",
@@ -1097,7 +1097,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       <header className={styles.pageHeader}>
         <div className={styles.pageHeaderText}>
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
-          <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
+          <p className={styles.pageSubtitle}>終了日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
         {/* Realtime presence: the Google-Docs-style cluster of who is viewing this gantt
             right now (live). Shown to everyone — viewers included, not just writers. */}

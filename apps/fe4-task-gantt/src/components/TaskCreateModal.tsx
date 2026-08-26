@@ -206,7 +206,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-create-due">
-              期日
+              終了日
             </label>
             <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
           </div>

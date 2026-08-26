@@ -25,7 +25,7 @@ export function TaskListView({ tasks, users, hasMore, onLoadMore, onOpen, loadin
             <th>タイトル</th>
             <th>状態</th>
             <th>担当</th>
-            <th>期限</th>
+            <th>終了日</th>
           </tr>
         </thead>
         <tbody>

@@ -313,7 +313,7 @@ export function TaskDetailPanel({
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-due">
-              期日
+              終了日
             </label>
             <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
           </div>
