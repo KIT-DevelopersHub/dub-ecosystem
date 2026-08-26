@@ -635,12 +635,15 @@ function createMailStore() {
         const threadId = decodeURIComponent(m[1]!);
         const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
         const flags = loadFlags();
-        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false };
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false };
         const next: mail.MailThreadFlags = {
           threadId,
           starred: patch.starred ?? prev.starred,
           archived: patch.archived ?? prev.archived,
           trashed: patch.trashed ?? prev.trashed,
+          // purged (完全に削除): per-user permanent hide. Mirrors the gateway — the mail row is
+          // never removed; only THIS account's flag flips, so an admin/other account still sees it.
+          purged: patch.purged ?? prev.purged ?? false,
         };
         saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
         return json(next);
@@ -652,11 +655,18 @@ function createMailStore() {
   return { handle };
 }
 
-// Thread-flags persistence for the demo (localStorage; survives reload).
+// Thread-flags persistence for the demo (localStorage; survives reload). SCOPED PER ACCOUNT
+// (mirrors the gateway's per-owner_user_id flags): star/archive/trash/purge are each account's
+// OWN view of a conversation. Without this, switching accounts would share flags and the
+// per-user isolation of 完全に削除 (purge) — user purges, admin still sees it — could not be
+// demonstrated. Key = base + ":" + active account id.
 const FLAGS_KEY = "dub-demo-mail-flags";
+function flagsKey(): string {
+  return `${FLAGS_KEY}:${currentAccount().id}`;
+}
 function loadFlags(): mail.MailThreadFlags[] {
   try {
-    const raw = globalThis.localStorage?.getItem(FLAGS_KEY);
+    const raw = globalThis.localStorage?.getItem(flagsKey());
     return raw ? (JSON.parse(raw) as mail.MailThreadFlags[]) : [];
   } catch {
     return [];
@@ -664,7 +674,7 @@ function loadFlags(): mail.MailThreadFlags[] {
 }
 function saveFlags(flags: mail.MailThreadFlags[]): void {
   try {
-    globalThis.localStorage?.setItem(FLAGS_KEY, JSON.stringify(flags));
+    globalThis.localStorage?.setItem(flagsKey(), JSON.stringify(flags));
   } catch {
     /* ignore */
   }

@@ -128,7 +128,9 @@ function Shortcuts(): null {
 function GmailBody(): JSX.Element {
   const { state } = useMailStore();
   useMailSync(); // hydrate inbox + Sent from the gateway; lazy-load bodies on open
-  const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId) : undefined;
+  // A purged (完全に削除) thread is never shown, even if it was the open one when a reload's
+  // APPLY_FLAGS marked it purged — fall back to the list.
+  const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId && !t.purged) : undefined;
   const unreadInbox = state.threads.filter((t) => inFolder(t, "inbox") && threadUnread(t)).length;
 
   return (
