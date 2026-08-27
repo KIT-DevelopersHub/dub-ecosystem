@@ -11,6 +11,7 @@ import type {
   ListActionsResponse,
   UpdateActionRequest,
 } from "./actionContracts";
+import type { EventDetails, SaveEventDetailsRequest } from "./detailsContracts";
 
 export interface EventApi {
   listEvents(query: event.ListEventsQuery): Promise<event.ListEventsResponse>;
@@ -18,6 +19,10 @@ export interface EventApi {
   getEvent(id: common.EventId): Promise<event.GetEventResponse>; // include=actions
   updateEvent(id: common.EventId, req: event.UpdateEventRequest): Promise<event.DubEvent>;
   archiveEvent(id: common.EventId): Promise<void>;
+
+  // Free-form per-event detail store ("何でも貯める").
+  getEventDetails(id: common.EventId): Promise<EventDetails>;
+  saveEventDetails(id: common.EventId, req: SaveEventDetailsRequest): Promise<EventDetails>;
 
   listActions(eventId: common.EventId, query?: ListActionsQuery): Promise<ListActionsResponse>;
   createAction(eventId: common.EventId, req: CreateActionRequest): Promise<event.DubAction>;
@@ -56,6 +61,14 @@ export function createHttpEventApi(client: ApiClient): EventApi {
         body: req,
       }),
     archiveEvent: (id) => client.request<void>({ method: "DELETE", path: `/api/v1/events/${id}` }),
+    getEventDetails: (id) =>
+      client.request<EventDetails>({ method: "GET", path: `/api/v1/events/${id}/details` }),
+    saveEventDetails: (id, req) =>
+      client.request<EventDetails, SaveEventDetailsRequest>({
+        method: "PUT",
+        path: `/api/v1/events/${id}/details`,
+        body: req,
+      }),
     listActions: (eventId, query) =>
       client.request<ListActionsResponse>({
         method: "GET",

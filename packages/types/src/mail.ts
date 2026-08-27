@@ -162,18 +162,23 @@ export interface MailSentDetail extends MailSentListItem {
 // ---- ⑤ per-user thread flags (改善#8; ADDITIVE — frozen ① untouched) ----
 // Star / archive / trash persisted server-side, per user + per thread, so they survive a
 // reload (previously in-memory only). A thread with no stored row is all-false (default).
-/** One thread's flag state for the signed-in user. */
+/** One thread's flag state for the signed-in user. `purged` (完全に削除) is Gmail's
+ *  "permanently delete from MY mailbox": a per-user, one-way view state (no restore) that
+ *  hides the conversation from every folder for this viewer only — the row/body is NEVER
+ *  physically deleted, so other accounts (and admins) still see it. */
 export interface MailThreadFlags {
   threadId: string;
   starred: boolean;
   archived: boolean;
   trashed: boolean;
+  purged: boolean;
 }
 /** Partial flag update (PATCH-style): only the provided flags change. */
 export interface MailThreadFlagsPatch {
   starred?: boolean;
   archived?: boolean;
   trashed?: boolean;
+  purged?: boolean;
 }
 
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----

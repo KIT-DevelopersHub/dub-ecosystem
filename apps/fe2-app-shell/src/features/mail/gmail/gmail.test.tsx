@@ -34,7 +34,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     downloadAttachment: vi.fn().mockResolvedValue(new Blob(["x"])),
     listFlags: vi.fn().mockResolvedValue([]),
     setFlags: vi.fn().mockImplementation((threadId: string, patch: Record<string, boolean>) =>
-      Promise.resolve({ threadId, starred: false, archived: false, trashed: false, ...patch }),
+      Promise.resolve({ threadId, starred: false, archived: false, trashed: false, purged: false, ...patch }),
     ),
     ...over,
   };
@@ -76,8 +76,8 @@ describe("mail store reducer", () => {
     const next = reducer(s, {
       type: "APPLY_FLAGS",
       flags: [
-        { threadId: inbox.id, starred: true, archived: false, trashed: false },
-        { threadId: other.id, starred: false, archived: true, trashed: false },
+        { threadId: inbox.id, starred: true, archived: false, trashed: false, purged: false },
+        { threadId: other.id, starred: false, archived: true, trashed: false, purged: false },
       ],
     });
     expect(next.threads.find((t) => t.id === inbox.id)!.starred).toBe(true);
@@ -108,6 +108,49 @@ describe("mail store reducer", () => {
     const id = s.threads.find((t) => t.folder === "inbox")!.id;
     const next = reducer(s, { type: "TRASH", ids: [id] });
     expect(next.threads.find((t) => t.id === id)!.folder).toBe("trash");
+  });
+
+  it("restore moves a trashed received thread back to the inbox (with undo)", () => {
+    const s = base();
+    const id = s.threads.find((t) => t.folder === "inbox")!.id;
+    const trashed = reducer(s, { type: "TRASH", ids: [id] });
+    expect(trashed.threads.find((t) => t.id === id)!.folder).toBe("trash");
+    const restored = reducer(trashed, { type: "RESTORE", ids: [id] });
+    expect(restored.threads.find((t) => t.id === id)!.folder).toBe("inbox");
+    // Undo bounces it straight back to Trash.
+    expect(restored.undo).not.toBeNull();
+    expect(reducer(restored, { type: "UNDO" }).threads.find((t) => t.id === id)!.folder).toBe("trash");
+  });
+
+  it("restore returns an all-outbound (sent) thread to the Sent folder, not the inbox", () => {
+    const s = base();
+    const sent = reducer(s, { type: "SEND", to: [{ email: "a@x.com" }], cc: [], subject: "Hi", body: "yo" });
+    const id = sent.threads[0]!.id;
+    const trashed = reducer(sent, { type: "TRASH", ids: [id] });
+    const restored = reducer(trashed, { type: "RESTORE", ids: [id] });
+    expect(restored.threads.find((t) => t.id === id)!.folder).toBe("sent");
+  });
+
+  it("完全に削除 (PURGE) marks a thread purged (per-user hide) with NO undo — irreversible", () => {
+    const s = base();
+    const id = s.threads.find((t) => t.folder === "inbox")!.id;
+    const trashed = reducer(s, { type: "TRASH", ids: [id] });
+    const purged = reducer(trashed, { type: "PURGE", ids: [id] });
+    expect(purged.threads.find((t) => t.id === id)!.purged).toBe(true);
+    // No restore path: PURGE leaves no undo snapshot (the user cannot bring it back).
+    expect(purged.undo).toBeNull();
+    // The row is NOT removed from the store (view-only hide; server keeps the body).
+    expect(purged.threads.find((t) => t.id === id)).toBeTruthy();
+  });
+
+  it("APPLY_FLAGS restores a persisted purge so it stays hidden after a reload (per-user)", () => {
+    const s = base();
+    const id = s.threads.find((t) => t.folder === "inbox")!.id;
+    const next = reducer(s, {
+      type: "APPLY_FLAGS",
+      flags: [{ threadId: id, starred: false, archived: false, trashed: false, purged: true }],
+    });
+    expect(next.threads.find((t) => t.id === id)!.purged).toBe(true);
   });
 
   it("SEND prepends a new thread into the Sent folder", () => {
@@ -317,12 +360,63 @@ describe("GmailApp (hydrates from the gateway)", () => {
   it("restores a persisted star from GET /mail/flags on load (改善#8)", async () => {
     // The gateway reports the first inbox thread as starred; the UI must reflect it.
     const api = fakeApi({
-      listFlags: vi.fn().mockResolvedValue([{ threadId: "thr_in_1", starred: true, archived: false, trashed: false }]),
+      listFlags: vi.fn().mockResolvedValue([{ threadId: "thr_in_1", starred: true, archived: false, trashed: false, purged: false }]),
     });
     render(wrap(<GmailApp />, api));
     await userEvent.click(await screen.findByTestId("fe2-mail-folder-starred"));
     const list = screen.getByTestId("fe2-mail-inbox");
     await waitFor(() => expect(within(list).getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0));
+  });
+
+  it("完全に削除 from Trash hides the conversation and POSTs purged:true (per-user, no delete)", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    // The gateway reports thr_in_1 as trashed → it lives in the viewer's Trash.
+    const api = fakeApi({
+      listFlags: vi.fn().mockResolvedValue([{ threadId: "thr_in_1", starred: false, archived: false, trashed: true, purged: false }]),
+    });
+    render(wrap(<GmailApp />, api));
+    await waitFor(() => expect(api.listFlags).toHaveBeenCalled());
+    await userEvent.click(await screen.findByTestId("fe2-mail-folder-trash"));
+    const list = screen.getByTestId("fe2-mail-inbox");
+    await waitFor(() => expect(within(list).getAllByTestId("fe2-mail-inbox-item").length).toBe(1));
+    // Select the trashed thread, then bulk 完全に削除 (confirm dialog is accepted).
+    await userEvent.click(screen.getByTestId("fe2-mail-select-all"));
+    await userEvent.click(screen.getByTestId("fe2-mail-purge-bulk"));
+    expect(confirmSpy).toHaveBeenCalled();
+    // Gone from THIS viewer's Trash (optimistic hide) …
+    await waitFor(() => expect(within(list).queryAllByTestId("fe2-mail-inbox-item").length).toBe(0));
+    // … and persisted as purged:true so it survives a reload (the body is never deleted).
+    await waitFor(() => {
+      const call = (api.setFlags as ReturnType<typeof vi.fn>).mock.calls.find((c) => (c[1] as { purged?: boolean })?.purged === true);
+      expect(call).toBeTruthy();
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it("does NOT 完全に削除 when the confirm dialog is cancelled", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const api = fakeApi({
+      listFlags: vi.fn().mockResolvedValue([{ threadId: "thr_in_1", starred: false, archived: false, trashed: true, purged: false }]),
+    });
+    render(wrap(<GmailApp />, api));
+    await userEvent.click(await screen.findByTestId("fe2-mail-folder-trash"));
+    const list = screen.getByTestId("fe2-mail-inbox");
+    await waitFor(() => expect(within(list).getAllByTestId("fe2-mail-inbox-item").length).toBe(1));
+    await userEvent.click(screen.getByTestId("fe2-mail-select-all"));
+    await userEvent.click(screen.getByTestId("fe2-mail-purge-bulk"));
+    // Cancelled: the thread stays, and nothing is POSTed as purged.
+    expect(within(list).getAllByTestId("fe2-mail-inbox-item").length).toBe(1);
+    const purgeCall = (api.setFlags as ReturnType<typeof vi.fn>).mock.calls.find((c) => (c[1] as { purged?: boolean })?.purged === true);
+    expect(purgeCall).toBeUndefined();
+    confirmSpy.mockRestore();
+  });
+
+  it("does not offer 完全に削除 outside Trash (inbox rows have no purge action)", async () => {
+    render(wrap(<GmailApp />));
+    await screen.findAllByTestId("fe2-mail-inbox-item");
+    await userEvent.click(screen.getByTestId("fe2-mail-select-all"));
+    // Inbox bulk toolbar has archive/trash but never a 完全に削除.
+    expect(screen.queryByTestId("fe2-mail-purge-bulk")).not.toBeInTheDocument();
   });
 
   it("shows attachments in the 3-pane reading view and downloads a stored one (改善#1)", async () => {

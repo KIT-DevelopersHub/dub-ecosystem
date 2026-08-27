@@ -268,10 +268,63 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
       env,
     );
     expect(post.status).toBe(200);
-    expect(await post.json()).toEqual({ threadId: "thr_1", starred: true, archived: false, trashed: false });
+    expect(await post.json()).toEqual({ threadId: "thr_1", starred: true, archived: false, trashed: false, purged: false });
     // A fresh request (new "session") reads the persisted flag from the same DB.
     const get = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
-    expect(await get.json()).toEqual({ items: [{ threadId: "thr_1", starred: true, archived: false, trashed: false }] });
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_1", starred: true, archived: false, trashed: false, purged: false }] });
+  });
+
+  it("trash then restore round-trips the trashed flag (ゴミ箱→復元), body never deleted", async () => {
+    const { env } = makeEnv();
+    const h = headers({ "x-dub-user-id": "usr_carol" });
+    // Trash: the per-user soft-delete. Only this user's flag changes; no message row is touched.
+    const trash = await app.fetch(new Request("https://svc/mail/flags/thr_trash", { method: "POST", headers: h, body: JSON.stringify({ trashed: true }) }), env);
+    expect(await trash.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: true, purged: false });
+    // Restore: flips the same personal flag back off.
+    const restore = await app.fetch(new Request("https://svc/mail/flags/thr_trash", { method: "POST", headers: h, body: JSON.stringify({ trashed: false }) }), env);
+    expect(await restore.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: false, purged: false });
+    // Persisted state reads back as not-trashed (survives a reload).
+    const get = await app.fetch(new Request("https://svc/mail/flags", { headers: h }), env);
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_trash", starred: false, archived: false, trashed: false, purged: false }] });
+  });
+
+  it("完全に削除 (purge) persists as a per-user flag and NEVER deletes the row", async () => {
+    const { env, raw } = makeEnv();
+    const h = headers({ "x-dub-user-id": "usr_carol" });
+    // A seeded inbound message + its thread stand in for a real conversation this user purges.
+    raw.prepare(
+      `INSERT INTO mail_inbound (id, message_id, thread_id, from_json, to_json, subject, snippet, received_at, created_at, owner_user_id, body_text)
+       VALUES ('mi_p', '<p@x>', 'thr_purge', '{"email":"a@x"}', '[{"email":"me@x"}]', 's', 'sn', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', 'usr_carol', 'BODY STAYS')`,
+    ).run();
+    // Purge (完全に削除): only the per-user flag flips; the message body row is untouched.
+    const purge = await app.fetch(new Request("https://svc/mail/flags/thr_purge", { method: "POST", headers: h, body: JSON.stringify({ purged: true }) }), env);
+    expect(await purge.json()).toEqual({ threadId: "thr_purge", starred: false, archived: false, trashed: false, purged: true });
+    // Reads back (survives a reload) and stamped purged_at.
+    const get = await app.fetch(new Request("https://svc/mail/flags", { headers: h }), env);
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_purge", starred: false, archived: false, trashed: false, purged: true }] });
+    const at = raw.prepare(`SELECT purged, purged_at FROM mail_user_flags WHERE owner_user_id='usr_carol' AND thread_id='thr_purge'`).get() as { purged: number; purged_at: string | null };
+    expect(at.purged).toBe(1);
+    expect(at.purged_at).not.toBeNull();
+    // DB non-deletion: the message body row still exists (purge is a view state, not a DELETE).
+    const row = raw.prepare(`SELECT body_text FROM mail_inbound WHERE id='mi_p'`).get() as { body_text: string } | undefined;
+    expect(row?.body_text).toBe("BODY STAYS");
+  });
+
+  it("完全に削除 is per-user: one account's purge is invisible to another (admin unaffected)", async () => {
+    const { env } = makeEnv();
+    // Alice purges the shared conversation from HER mailbox.
+    await app.fetch(new Request("https://svc/mail/flags/thr_shared", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ purged: true }) }), env);
+    // The admin (viewing the same conversation) has NO purged flag for it — still sees it.
+    const admin = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_admin" }) }), env);
+    expect(await admin.json()).toEqual({ items: [] });
+  });
+
+  it("one user's trash is invisible to another (admin/other sees mail unaffected)", async () => {
+    const { env } = makeEnv();
+    await app.fetch(new Request("https://svc/mail/flags/thr_shared", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ trashed: true }) }), env);
+    // Another account (e.g. an admin viewing the same conversation) has no trashed flag for it.
+    const other = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_admin" }) }), env);
+    expect(await other.json()).toEqual({ items: [] });
   });
 
   it("PATCH semantics: a later archive keeps the earlier star", async () => {
@@ -279,7 +332,7 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
     const h = headers({ "x-dub-user-id": "usr_bob" });
     await app.fetch(new Request("https://svc/mail/flags/thr_2", { method: "POST", headers: h, body: JSON.stringify({ starred: true }) }), env);
     const res = await app.fetch(new Request("https://svc/mail/flags/thr_2", { method: "POST", headers: h, body: JSON.stringify({ archived: true }) }), env);
-    expect(await res.json()).toEqual({ threadId: "thr_2", starred: true, archived: true, trashed: false });
+    expect(await res.json()).toEqual({ threadId: "thr_2", starred: true, archived: true, trashed: false, purged: false });
   });
 
   it("flags are per-user (Bob never sees Alice's stars)", async () => {

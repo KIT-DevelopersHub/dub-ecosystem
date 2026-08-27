@@ -18,6 +18,42 @@
   background: var(--dub-color-surface-raised);
   border-left: 4px solid var(--dub-color-gray-400);
   color: var(--dub-color-text-primary);
+  /* A01: enter — slide in from the bottom-right as it appears. */
+  animation: toastIn var(--dub-motion-normal) var(--dub-motion-easing);
+}
+/* A01: leave — brief slide-right + fade before the node is removed. */
+.toast[data-leaving="true"] {
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity var(--dub-motion-normal) var(--dub-motion-easing),
+    transform var(--dub-motion-normal) var(--dub-motion-easing);
+}
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: toastInFade var(--dub-motion-normal) var(--dub-motion-easing);
+  }
+  .toast[data-leaving="true"] {
+    transform: none;
+    transition: opacity var(--dub-motion-normal) linear;
+  }
+  @keyframes toastInFade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 .toast[data-kind="success"] {
   border-left-color: var(--dub-color-success-500);

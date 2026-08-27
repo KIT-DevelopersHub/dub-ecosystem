@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { gantt, task } from "@dub/types";
 import { GanttView } from "../src/components/GanttView";
 import { ViewSwitcher } from "../src/components/ViewSwitcher";
@@ -7,6 +7,19 @@ import { TaskListView } from "../src/components/TaskListView";
 import { TaskBoardView } from "../src/components/TaskBoardView";
 import { createUserCache } from "../src/domain/user-cache";
 import { ROW_HEIGHT } from "../src/domain/timeline-axis";
+import type { GanttSortActions, GanttSortState } from "../src/domain/gantt-sort-pref";
+
+// Shared 並び替え fixtures for the GanttView tests (the container owns this state).
+const manualSort: GanttSortState = { manual: true, keys: [] };
+const autoPrioritySort: GanttSortState = { manual: false, keys: [{ key: "priority", dir: "asc" }] };
+const sortActions = (): GanttSortActions => ({
+  setManual: vi.fn(),
+  addKey: vi.fn(),
+  removeKey: vi.fn(),
+  moveKey: vi.fn(),
+  setKey: vi.fn(),
+  setDir: vi.fn(),
+});
 
 const mk = (id: string, status: task.TaskStatus = "todo"): task.Task => ({
   id, eventId: "evt_1", title: `T-${id}`, description: null, status,
@@ -127,29 +140,40 @@ describe("GanttView render (design test 4/7)", () => {
     expect(screen.getByTestId("fe4-gantt-zoom-week")).toHaveAttribute("aria-selected", "true");
   });
 
-  it("renders the 並び替え selector (all four modes) and fires onSortModeChange", () => {
-    const onSortModeChange = vi.fn();
-    render(<GanttView dto={dto} zoom="week" sortMode="manual" onSortModeChange={onSortModeChange} />);
-    const select = screen.getByTestId("fe4-gantt-sort") as HTMLSelectElement;
-    expect(select).toBeInTheDocument();
-    expect(select.value).toBe("manual");
-    // all four requested modes are offered
-    const values = [...select.options].map((o) => o.value);
-    expect(values).toEqual(["manual", "priority", "schedule", "team"]);
-    fireEvent.change(select, { target: { value: "priority" } });
-    expect(onSortModeChange).toHaveBeenCalledWith("priority");
+  it("renders the 多段ソート builder and opens the condition panel with the mode strip", () => {
+    render(<GanttView dto={dto} zoom="week" sortState={manualSort} sortActions={sortActions()} />);
+    const trigger = screen.getByTestId("fe4-gantt-sort");
+    expect(trigger).toBeInTheDocument();
+    // panel is closed until the trigger is clicked
+    expect(screen.queryByTestId("fe4-gantt-sort-panel")).toBeNull();
+    fireEvent.click(trigger.querySelector("button")!);
+    const panel = screen.getByTestId("fe4-gantt-sort-panel");
+    expect(panel).toBeInTheDocument();
+    // the 多段/手動 mode strip is offered inside the panel ("手動（ドラッグ）" also
+    // appears in the trigger summary, so scope the query to the panel).
+    expect(within(panel).getByText("多段ソート")).toBeInTheDocument();
+    expect(within(panel).getByText("手動（ドラッグ）")).toBeInTheDocument();
+  });
+
+  it("fires addKey when 条件を追加 is clicked in the panel", () => {
+    const actions = sortActions();
+    render(<GanttView dto={dto} zoom="week" sortState={manualSort} sortActions={actions} />);
+    fireEvent.click(screen.getByTestId("fe4-gantt-sort").querySelector("button")!);
+    // manual mode shows the empty-state hint; the mode strip switches to 多段
+    fireEvent.click(screen.getByText("多段ソート"));
+    expect(actions.setManual).toHaveBeenCalledWith(false);
   });
 
   it("hides the drag handles when an automatic sort is active (only 手動 allows DnD)", () => {
     const onReorder = vi.fn();
     // manual mode → drag handle present
     const { rerender } = render(
-      <GanttView dto={dto} zoom="week" canWrite sortMode="manual" onReorder={onReorder} onSortModeChange={vi.fn()} />,
+      <GanttView dto={dto} zoom="week" canWrite sortState={manualSort} sortActions={sortActions()} onReorder={onReorder} />,
     );
     expect(screen.getByTestId("fe4-gantt-drag-a")).toBeInTheDocument();
-    // switch to an automatic sort → handles gone (a re-sort would overwrite the drop)
+    // switch to an automatic (multi-key) sort → handles gone (a re-sort would overwrite the drop)
     rerender(
-      <GanttView dto={dto} zoom="week" canWrite sortMode="priority" onReorder={onReorder} onSortModeChange={vi.fn()} />,
+      <GanttView dto={dto} zoom="week" canWrite sortState={autoPrioritySort} sortActions={sortActions()} onReorder={onReorder} />,
     );
     expect(screen.queryByTestId("fe4-gantt-drag-a")).toBeNull();
   });
@@ -166,8 +190,8 @@ describe("GanttView render (design test 4/7)", () => {
         onSelect={onSelect}
         onCreateOnDate={vi.fn()}
         onReorder={vi.fn()}
-        sortMode="manual"
-        onSortModeChange={vi.fn()}
+        sortState={manualSort}
+        sortActions={sortActions()}
       />,
     );
     // editing affordances present before 拡大

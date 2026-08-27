@@ -23,8 +23,8 @@ describe("relation-type conversion in the detail pane", () => {
     const onSave = vi.fn();
     // self + P are top-level siblings, so P is a valid predecessor of self.
     const scope: ScopeTask[] = [
-      { id: "self", title: "対象タスク", parentTaskId: null },
-      { id: "P", title: "親候補P", parentTaskId: null },
+      { id: "self", title: "対象タスク", parentTaskId: null, teamId: null },
+      { id: "P", title: "親候補P", parentTaskId: null, teamId: null },
     ];
     render(
       <TaskDetailPanel
@@ -54,8 +54,8 @@ describe("relation-type conversion in the detail pane", () => {
   it("親子→依存: 「先行に変換」 detaches the parent and keeps it as a predecessor", () => {
     const onSave = vi.fn();
     const scope: ScopeTask[] = [
-      { id: "self", title: "対象タスク", parentTaskId: "P" },
-      { id: "P", title: "親P", parentTaskId: null },
+      { id: "self", title: "対象タスク", parentTaskId: "P", teamId: null },
+      { id: "P", title: "親P", parentTaskId: null, teamId: null },
     ];
     render(
       <TaskDetailPanel
@@ -86,7 +86,7 @@ describe("relation-type conversion in the detail pane", () => {
     const base = {
       task: mkTask("self"), users: [] as identity.UserSummary[], canWrite: true, canDelete: true,
       onSave: () => {}, onDelete: () => {}, onClose: () => {},
-      scopeTasks: [{ id: "self", title: "対象タスク", parentTaskId: null }] as ScopeTask[],
+      scopeTasks: [{ id: "self", title: "対象タスク", parentTaskId: null, teamId: null }] as ScopeTask[],
     };
     const { rerender } = render(<TaskDetailPanel {...base} parentTaskId={null} />);
     expect(screen.queryByTestId("fe4-detail-parent-to-dep")).toBeNull();

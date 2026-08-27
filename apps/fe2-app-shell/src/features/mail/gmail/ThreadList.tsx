@@ -19,6 +19,17 @@ import {
 import { MailIcon } from "./icons.tsx";
 import { useMailStore } from "./useMailStore.tsx";
 
+/** Confirm "完全に削除" (permanent, per-user, no restore). Returns true to proceed. Kept as a
+ *  plain window.confirm so the irreversible action always demands an explicit OK; in a
+ *  non-browser (test/SSR) context with no confirm it proceeds so unit tests can drive it. */
+export function confirmPurge(count: number): boolean {
+  const msg =
+    count > 1
+      ? `選択した${count}件の会話を完全に削除しますか？\nこの操作は取り消せません（あなたのメールボックスから完全に削除されます）。`
+      : "この会話を完全に削除しますか？\nこの操作は取り消せません（あなたのメールボックスから完全に削除されます）。";
+  return typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(msg);
+}
+
 function LabelChips({ ids, labels }: { ids: string[]; labels: Label[] }): JSX.Element | null {
   const chips = ids.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
   if (chips.length === 0) return null;
@@ -185,12 +196,29 @@ function ThreadRow({ thread, labels }: { thread: MailThreadModel; labels: Label[
       <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", minWidth: 96 }}>
         {hover ? (
           <span style={{ display: "inline-flex", gap: 2, color: "var(--dub-color-text-secondary)" }}>
-            <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })}>
-              <MailIcon name="archive" size={18} />
-            </StopClick>
-            <StopClick label="削除" testId="fe2-mail-trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })}>
-              <MailIcon name="trash" size={18} />
-            </StopClick>
+            {state.folder === "trash" ? (
+              <>
+                <StopClick label="受信トレイに戻す" testId="fe2-mail-restore" onClick={() => dispatch({ type: "RESTORE", ids: [thread.id] })}>
+                  <MailIcon name="inbox" size={18} />
+                </StopClick>
+                <StopClick
+                  label="完全に削除"
+                  testId="fe2-mail-purge"
+                  onClick={() => confirmPurge(1) && dispatch({ type: "PURGE", ids: [thread.id] })}
+                >
+                  <MailIcon name="delete-forever" size={18} style={{ color: "var(--dub-color-danger-500, #d93025)" }} />
+                </StopClick>
+              </>
+            ) : (
+              <>
+                <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })}>
+                  <MailIcon name="archive" size={18} />
+                </StopClick>
+                <StopClick label="削除" testId="fe2-mail-trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })}>
+                  <MailIcon name="trash" size={18} />
+                </StopClick>
+              </>
+            )}
             <StopClick
               label={unread ? "既読にする" : "未読にする"}
               onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: unread })}
@@ -218,6 +246,7 @@ export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
 
   const visible = state.threads.filter((t) => {
+    if (t.purged) return false; // 完全に削除: hidden from every folder for this viewer
     const scope = state.labelFilter
       ? t.labels.includes(state.labelFilter) && t.folder !== "trash"
       : inFolder(t, state.folder);
@@ -279,12 +308,29 @@ export function ThreadList(): JSX.Element {
 
         {someChecked ? (
           <div style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--dub-color-text-secondary)" }}>
-            <StopClick label="選択をアーカイブ" onClick={() => dispatch({ type: "ARCHIVE", ids: checkedInView })}>
-              <MailIcon name="archive" size={18} />
-            </StopClick>
-            <StopClick label="選択を削除" onClick={() => dispatch({ type: "TRASH", ids: checkedInView })}>
-              <MailIcon name="trash" size={18} />
-            </StopClick>
+            {state.folder === "trash" ? (
+              <>
+                <StopClick label="選択を受信トレイに戻す" testId="fe2-mail-restore-bulk" onClick={() => dispatch({ type: "RESTORE", ids: checkedInView })}>
+                  <MailIcon name="inbox" size={18} />
+                </StopClick>
+                <StopClick
+                  label="選択を完全に削除"
+                  testId="fe2-mail-purge-bulk"
+                  onClick={() => confirmPurge(checkedInView.length) && dispatch({ type: "PURGE", ids: checkedInView })}
+                >
+                  <MailIcon name="delete-forever" size={18} style={{ color: "var(--dub-color-danger-500, #d93025)" }} />
+                </StopClick>
+              </>
+            ) : (
+              <>
+                <StopClick label="選択をアーカイブ" onClick={() => dispatch({ type: "ARCHIVE", ids: checkedInView })}>
+                  <MailIcon name="archive" size={18} />
+                </StopClick>
+                <StopClick label="選択を削除" onClick={() => dispatch({ type: "TRASH", ids: checkedInView })}>
+                  <MailIcon name="trash" size={18} />
+                </StopClick>
+              </>
+            )}
             <StopClick label="選択を既読にする" onClick={() => dispatch({ type: "SET_READ", ids: checkedInView, read: true })}>
               <MailIcon name="mail-open" size={18} />
             </StopClick>

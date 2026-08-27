@@ -11,6 +11,8 @@ type Aid = common.ActionId;
 
 export const eventRoutes = {
   list: (): string => "/events",
+  /** The event grid/browser (create + filter). Hub is the `/events` home. */
+  listAll: (): string => "/events/list",
   detail: (eventId: Eid): string => `/events/${eventId}`,
   action: (eventId: Eid, actionId: Aid): string => `/events/${eventId}/actions/${actionId}`,
   settings: (eventId: Eid): string => `/events/${eventId}/settings`,
@@ -25,7 +27,8 @@ export function chatHref(eventId: Eid): string {
 
 // Route path patterns (as registered in the FeatureModule; FE2 owns the router).
 export const routePaths = {
-  list: "/events",
+  list: "/events", // the Event app home = EventHubPage (selected event's detail store)
+  listAll: "/events/list", // the event grid/browser (EventListPage)
   detail: "/events/:eventId",
   action: "/events/:eventId/actions/:actionId",
   settings: "/events/:eventId/settings",
