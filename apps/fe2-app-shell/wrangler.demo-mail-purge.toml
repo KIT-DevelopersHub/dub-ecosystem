@@ -1,0 +1,24 @@
+# fe2-demo — backend-free DEMO deployment for the 完全に削除 (mail purge) feature. A
+# SEPARATE Worker from the real `fe2-app-shell` (production is never touched) and from the
+# trash demo (`dub-demo-mail-trash`), so the purge feature gets its own throwaway URL.
+#
+# The bundle is built with VITE_DEMO=1, which swaps in the in-app demo transport
+# (src/lib/demo-seed.tsx): auto-login + seeded events/tasks/gantt/notifications/mail/roster,
+# with per-account mail flags so per-user 完全に削除 isolation is observable. MOCK only —
+# no gateway, no real data, no mail is ever sent.
+#
+# Build + deploy (assets-only, no `main`):
+#   VITE_DEMO=1 pnpm --filter @dub/fe2-app-shell build
+#   export CLOUDFLARE_API_TOKEN=$(cat /Users/kota/DubVault/secrets/cf-token.txt)
+#   npx wrangler deploy --config apps/fe2-app-shell/wrangler.demo-mail-purge.toml
+name = "dub-demo-mail-purge"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./dist"
+# SPA fallback: serve index.html for non-asset paths so client-side routes
+# (/mail, /events, /me/tasks, /admin/users, …) resolve on hard refresh.
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = true

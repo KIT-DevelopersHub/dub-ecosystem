@@ -1,4 +1,5 @@
 .tabs {
+  position: relative;
   display: flex;
   gap: var(--dub-space-1);
   border-bottom: 1px solid var(--dub-color-border-default);
@@ -23,6 +24,23 @@
 }
 .tab.active {
   color: var(--dub-color-brand-600);
-  border-bottom-color: var(--dub-color-brand-500);
   font-weight: var(--dub-font-weight-medium);
+}
+/* A03: the single sliding underline. `left`/`width` are set inline from the
+ * active tab's measured box; it glides via transform + width transitions. */
+.indicator {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--dub-color-brand-500);
+  border-radius: var(--dub-radius-full);
+  transition: transform var(--dub-motion-normal) var(--dub-motion-easing),
+    width var(--dub-motion-normal) var(--dub-motion-easing);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .indicator {
+    transition: none;
+  }
 }

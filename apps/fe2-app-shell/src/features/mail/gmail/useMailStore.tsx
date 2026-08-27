@@ -57,6 +57,8 @@ export type MailAction =
   | { type: "SET_READ"; ids: string[]; read: boolean }
   | { type: "ARCHIVE"; ids: string[] }
   | { type: "TRASH"; ids: string[] }
+  | { type: "PURGE"; ids: string[] } // 完全に削除: per-user permanent hide (no undo/restore)
+  | { type: "RESTORE"; ids: string[] }
   | { type: "TOGGLE_LABEL"; id: string; label: string }
   | { type: "TOGGLE_CHECK"; id: string }
   | { type: "CHECK_ALL"; ids: string[] }
@@ -71,7 +73,7 @@ export type MailAction =
   // ---- server sync ----
   | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
-  | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean }[] } // restore server-persisted star/archive/trash
+  | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean }[] } // restore server-persisted star/archive/trash/purge
   | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
 
 let seq = 0;
@@ -122,6 +124,38 @@ export function reducer(state: MailState, action: MailAction): MailState {
         ...state,
         undo: { label: `${ids.size}件のスレッドをゴミ箱に移動しました`, prevThreads: state.threads },
         threads: state.threads.map((t) => (ids.has(t.id) ? { ...t, folder: "trash" } : t)),
+        checked: new Set(),
+        openThreadId: state.openThreadId && ids.has(state.openThreadId) ? null : state.openThreadId,
+      };
+    }
+    case "PURGE": {
+      // 完全に削除 (Gmail "permanently delete" out of Trash). Marks the threads purged for
+      // THIS user only; the persist effect (useMailSync) POSTs setFlags(purged:true) so it
+      // survives a reload. One-way by design: NO undo snapshot (the requirement is that the
+      // user cannot restore it — the row still lives on the server for admins/others). The
+      // thread stays in the store but ThreadList/inFolder filter every purged thread out.
+      const ids = new Set(action.ids);
+      return {
+        ...state,
+        undo: null,
+        threads: state.threads.map((t) => (ids.has(t.id) ? { ...t, purged: true } : t)),
+        checked: new Set(),
+        openThreadId: state.openThreadId && ids.has(state.openThreadId) ? null : state.openThreadId,
+      };
+    }
+    case "RESTORE": {
+      // Move threads OUT of Trash back to their home folder. A thread whose messages are
+      // all our own sends returns to "sent"; anything with a received message returns to
+      // the inbox. The persist effect (useMailSync) sees folder!=="trash" and POSTs
+      // setFlags(trashed:false), so the restore survives a reload (改善#8 flag store). The
+      // undo snapshot lets the toast bounce it straight back to Trash.
+      const ids = new Set(action.ids);
+      return {
+        ...state,
+        undo: { label: `${ids.size}件のスレッドを受信トレイに戻しました`, prevThreads: state.threads },
+        threads: state.threads.map((t) =>
+          ids.has(t.id) ? { ...t, folder: t.messages.every((m) => m.outbound) ? "sent" : "inbox" } : t,
+        ),
         checked: new Set(),
         openThreadId: state.openThreadId && ids.has(state.openThreadId) ? null : state.openThreadId,
       };
@@ -261,7 +295,8 @@ export function reducer(state: MailState, action: MailAction): MailState {
           const f = byId.get(t.id);
           if (!f) return t;
           const folder = f.trashed ? "trash" : f.archived ? "archive" : t.folder;
-          return { ...t, starred: f.starred, folder };
+          // purged (完全に削除) survives the reload: hidden from every folder for this viewer.
+          return { ...t, starred: f.starred, folder, purged: f.purged };
         }),
       };
     }

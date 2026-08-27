@@ -6,7 +6,7 @@ import type { Context } from "hono";
 import { dubContext, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
 import type { event } from "@dub/types";
-import type { AppDeps, CreateActionRequest, UpdateActionRequest } from "./types";
+import type { AppDeps, CreateActionRequest, UpdateActionRequest, SaveEventDetailsRequest } from "./types";
 import { EventService, type ReqCtx } from "./service";
 
 function reqCtx(c: Context): ReqCtx {
@@ -89,6 +89,16 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/events/:id/participants", authz.requirePermission("event:read", eventIdScope), async (c) => {
     return c.json(await svc.listParticipants(reqCtx(c), c.req.param("id")));
+  });
+
+  // ---- event details (free-form per-event store) ----
+  app.get("/events/:id/details", authz.requirePermission("event:read", eventIdScope), async (c) => {
+    return c.json(await svc.getEventDetails(reqCtx(c), c.req.param("id")));
+  });
+
+  app.put("/events/:id/details", authz.requirePermission("event:write", eventIdScope), async (c) => {
+    const body = await readJson<SaveEventDetailsRequest>(c);
+    return c.json(await svc.saveEventDetails(reqCtx(c), c.req.param("id"), body));
   });
 
   // ---- actions (hierarchy: created only under an event) ----
