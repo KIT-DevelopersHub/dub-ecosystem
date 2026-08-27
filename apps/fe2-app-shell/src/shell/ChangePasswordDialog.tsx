@@ -86,7 +86,7 @@ export function ChangePasswordDialog({
           <FormField label="現在のパスワード" htmlFor="fe2-cp-current">
             <TextField id="fe2-cp-current" type="password" value={current} onChange={setCurrent} testId="fe2-cp-current" />
           </FormField>
-          <FormField label={`新しいパスワード（${MIN_LENGTH}文字以上）`} htmlFor="fe2-cp-next">
+          <FormField label="新しいパスワード" help={`${MIN_LENGTH}文字以上で設定してください`} htmlFor="fe2-cp-next">
             <TextField id="fe2-cp-next" type="password" value={next} onChange={setNext} invalid={tooShort} testId="fe2-cp-next" />
           </FormField>
           <FormField label="新しいパスワード（確認）" htmlFor="fe2-cp-confirm">

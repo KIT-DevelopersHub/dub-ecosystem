@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { Switch, Tabs, type TabItem } from "@dub/ui";
 import type { InboxFilter } from "../lib/inbox-filter";
 import { NOTIFICATION_CATEGORY_TABS, type CategoryFilter } from "../lib/type-dictionary";
+import styles from "./NotificationFilterBar.module.css";
 
 // TabItem.id carries the CategoryFilter value ("all" | "app_update" | "mail" | "participation").
 const CATEGORY_OPTIONS: TabItem[] = NOTIFICATION_CATEGORY_TABS.map((t) => ({
@@ -21,20 +22,22 @@ export interface NotificationFilterBarProps {
 export function NotificationFilterBar(props: NotificationFilterBarProps): ReactNode {
   const { filter, onChange } = props;
   return (
-    <div data-testid="fe5-inbox-filterbar">
+    <div data-testid="fe5-inbox-filterbar" className={styles.bar}>
       <Tabs
         items={CATEGORY_OPTIONS}
         activeId={filter.category}
         onChange={(id) => onChange({ ...filter, category: id as CategoryFilter })}
         testId="fe5-inbox-catfilter"
       />
-      <Switch
-        id="fe5-inbox-unreadonly"
-        checked={filter.unreadOnly}
-        onChange={(unreadOnly) => onChange({ ...filter, unreadOnly })}
-        label="Unread only"
-        testId="fe5-inbox-unreadtoggle"
-      />
+      <div className={styles.unreadRow} data-testid="fe5-filterbar-unread-row">
+        <Switch
+          id="fe5-inbox-unreadonly"
+          checked={filter.unreadOnly}
+          onChange={(unreadOnly) => onChange({ ...filter, unreadOnly })}
+          label="Unread only"
+          testId="fe5-inbox-unreadtoggle"
+        />
+      </div>
     </div>
   );
 }

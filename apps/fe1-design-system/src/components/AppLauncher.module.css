@@ -39,6 +39,17 @@
   right: 0;
   width: 320px;
   max-width: calc(100vw - 2 * var(--dub-space-4));
+  /* Clamp the popover to the viewport height and scroll internally. On short /
+     mobile screens the 3xN app grid was taller than the viewport, so the bottom
+     tiles were cut off with no way to reach them. dvh tracks the mobile URL bar;
+     vh is the fallback for engines without dvh. The 132px reserve clears the
+     (taller, stacked) mobile top bar the waffle lives in plus a margin, and the
+     80dvh cap guarantees breathing room on any height so the panel always ends
+     inside the viewport with its own scrollbar. */
+  max-height: calc(100vh - 132px);
+  max-height: min(80dvh, calc(100dvh - 132px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--dub-color-surface-raised);
   border: 1px solid var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg);
