@@ -57,6 +57,96 @@ export interface ListParticipantsResponse {
   userIds: common.UserId[];
 }
 
+// ---- event details ("何でも貯める" free-form per-event store; service-local) ----
+// A single flexible document per event, stored as one row (event_id PK) holding a
+// JSON `data` blob + an optimistic `version`. New fields need NO migration — they
+// just extend EventDetailsData. Kept OUT of the frozen @dub/types event contract on
+// purpose (additive, service-owned), mirroring how actions define their own
+// request/response shapes above.
+export interface EventDetailLink {
+  label: string;
+  url: string;
+}
+export interface EventDetailContact {
+  label: string;
+  value: string;
+}
+/** タイムテーブル項目 — one row of the day-of schedule. */
+export interface EventScheduleItem {
+  time: string;
+  title: string;
+  note: string;
+}
+/** 登壇者・ゲスト — a speaker / guest entry. */
+export interface EventSpeaker {
+  name: string;
+  role: string;
+  topic: string;
+}
+/** 協賛・スポンサー — a sponsor entry with tier + negotiation status. */
+export interface EventSponsor {
+  name: string;
+  tier: string;
+  status: string;
+}
+/** 準備チェックリスト項目 — a prep task with a done flag. */
+export interface EventChecklistItem {
+  label: string;
+  done: boolean;
+}
+export interface EventDetailsData {
+  /** 概要 — a short summary shown at the top of the event app. */
+  overview: string;
+  /** 会場 — venue / location free text. */
+  venue: string;
+  /** アクセス — 交通・最寄り駅・駐車場など. */
+  access: string;
+  /** 定員・参加予定人数 — capacity / expected headcount free text. */
+  capacity: string;
+  /** 持ち物・服装 — what staff/attendees should bring / dress code. */
+  belongings: string;
+  /** 予算・収支メモ — budget / cost notes. */
+  budget: string;
+  /** 当日運営フロー — day-of operations flow / responsibilities. */
+  operations: string;
+  /** メモ — free-form running notes (markdown-ish plain text). */
+  memo: string;
+  /** タイムテーブル — ordered day-of schedule. */
+  schedule: EventScheduleItem[];
+  /** 登壇者・ゲスト — speakers / guests. */
+  speakers: EventSpeaker[];
+  /** 協賛・スポンサー — sponsors. */
+  sponsors: EventSponsor[];
+  /** 準備チェックリスト — prep checklist. */
+  checklist: EventChecklistItem[];
+  /** 重要リンク — labelled URLs (agenda, drive folder, form, …). */
+  links: EventDetailLink[];
+  /** 連絡先 — labelled contacts (person, channel, phone, …). */
+  contacts: EventDetailContact[];
+}
+
+// Internal row (superset: carries updatedBy, absent from the response).
+export interface EventDetailsRow {
+  eventId: common.EventId;
+  data: EventDetailsData;
+  version: number;
+  updatedBy: common.UserId;
+  updatedAt: common.ISODateTime;
+}
+
+// Wire response. version 0 + updatedAt null => never saved yet (defaults returned).
+export interface EventDetailsResponse {
+  eventId: common.EventId;
+  data: EventDetailsData;
+  version: number;
+  updatedAt: common.ISODateTime | null;
+}
+
+export interface SaveEventDetailsRequest {
+  data: Partial<EventDetailsData>;
+  version: number;
+}
+
 // ---- pagination keyset ----
 export interface Keyset {
   // For events sort=startsAt, `s` is the last starts_at (null sorts last).
@@ -128,6 +218,12 @@ export interface EventRepo {
   // For EventDetail (GET /events/:id) — non-archived, ordered by sort_order, capped.
   actionsForEvent(eventId: common.EventId, cap: number): Promise<ActionRow[]>;
   maxSortOrder(eventId: common.EventId): Promise<number>;
+
+  // Free-form per-event detail store. null => no row yet (caller returns defaults).
+  getEventDetails(eventId: common.EventId): Promise<EventDetailsRow | null>;
+  // Optimistic upsert: expectedVersion 0 inserts (fails if a row already exists),
+  // >0 updates WHERE version=expectedVersion. Returns false on conflict/mismatch.
+  upsertEventDetails(next: EventDetailsRow, expectedVersion: number): Promise<boolean>;
 }
 
 export interface AppDeps {

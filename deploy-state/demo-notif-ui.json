@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "notif-ui",
+  "worker": "dub-demo-notif-ui",
+  "url": "https://dub-demo-notif-ui.developershub-site.workers.dev",
+  "deployedSha": "ffcddc3",
+  "branch": "HEAD",
+  "actor": "ko-tarou",
+  "markers": ["通知の一括既読に対応しました"],
+  "live": true,
+  "verifiedAt": "2026-08-21T19:53:04Z",
+  "updatedAt": "2026-08-21T19:53:04Z",
+  "note": "refresh-demos: origin/main(e71c140)+fe/notif-ui-fixes — notification dialog action buttons always visible + filter-bar spacing (fe2 + fe5)"
+}

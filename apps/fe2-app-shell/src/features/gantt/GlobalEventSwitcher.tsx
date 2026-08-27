@@ -14,6 +14,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import type { event } from "@dub/types";
 import { Menu } from "@dub/ui";
+import { useSetCurrentEventId } from "@dub/fe3-event-action";
 import { useGanttApi } from "./GanttProvider.tsx";
 import { loadSelectedEvent, saveSelectedEvent } from "./selectedEventStore.ts";
 import styles from "./gantt.module.css";
@@ -27,6 +28,10 @@ export function eventIdFromPath(pathname: string): string | null {
 export function GlobalEventSwitcher(): JSX.Element {
   const api = useGanttApi();
   const navigate = useNavigate();
+  // Drive FE3's global "current event" store (the always-mounted Event hub reads it).
+  // Without this the header switcher and the hub keep two independent selections and the
+  // hub is stuck on "イベントを選択してください" even after a header pick (判断77⑤).
+  const setCurrentEvent = useSetCurrentEventId();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   // The FULL selectable event catalog (GET /events) — not the Home BFF's curated
   // "upcoming" subset, so every event the user can open a gantt for is switchable.
@@ -39,10 +44,14 @@ export function GlobalEventSwitcher(): JSX.Element {
 
   const routeEventId = eventIdFromPath(pathname);
   // Remember the event the user is actually viewing so the label persists after they
-  // navigate to another app. Effect (not render) so it never writes during a render.
+  // navigate to another app, and mirror it into FE3's hub store so the Event hub shows
+  // the same event (on a gantt URL and, via loadSelectedEvent, on reload/launcher entry).
+  // Effect (not render) so it never writes during a render.
   useEffect(() => {
     if (routeEventId) saveSelectedEvent(routeEventId);
-  }, [routeEventId]);
+    const id = routeEventId ?? loadSelectedEvent();
+    if (id) setCurrentEvent(id);
+  }, [routeEventId, setCurrentEvent]);
 
   // Shown event = the URL's event on a gantt route, else the last selected one. No
   // events[0] default: off a gantt route with no prior pick we prompt to choose
@@ -54,6 +63,7 @@ export function GlobalEventSwitcher(): JSX.Element {
   const select = (id: string): void => {
     if (id === currentId) return;
     saveSelectedEvent(id);
+    setCurrentEvent(id);
     void navigate({ to: `/events/${id}/tasks/gantt` });
   };
 
@@ -66,7 +76,9 @@ export function GlobalEventSwitcher(): JSX.Element {
   }));
 
   return (
-    <div className={styles.switcher} data-testid="fe2-global-event-switcher">
+    // data-marker: staging reflection marker for 判断77 (hub-wire ⑤). Lets `verify:live`
+    // confirm this exact bundle is deployed by grepping the served JS for "j77-hub-wire".
+    <div className={styles.switcher} data-testid="fe2-global-event-switcher" data-marker="j77-hub-wire">
       <Menu
         testId="fe2-global-event-menu"
         label={label}
