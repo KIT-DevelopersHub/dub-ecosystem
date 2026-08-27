@@ -79,7 +79,7 @@ export function Menu({
           onClick={() => setOpen((v) => !v)}
           {...(triggerTestId ? { testId: triggerTestId } : {})}
         >
-          {label}
+          <span className={cx(styles.triggerLabel)}>{label}</span>
         </Button>
       )}
       {open && (

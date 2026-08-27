@@ -112,3 +112,22 @@
   flex: 1;
   line-height: var(--dub-font-line-height-tight);
 }
+
+/* Text-labelled trigger (dub-menu-trigger-label). The label sits between the
+   leading icon and the chevron; without a nowrap guard a long/CJK label (e.g.
+   the header event switcher's "イベントを選択" or a long イベント名) wrapped to two
+   lines and doubled the button height on narrow screens. Keep it to one line and
+   ellipsize when it can't fit, so the trigger stays a single tidy row. */
+.triggerLabel {
+  display: inline-block;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+@media (max-width: 640px) {
+  .triggerLabel {
+    max-width: 9rem;
+  }
+}

@@ -56,6 +56,27 @@
   box-shadow: var(--dub-shadow-lg, var(--dub-shadow-md));
   padding: var(--dub-space-3);
 }
+
+/* Mobile / narrow viewport (dub-launcher-panel-mobile). The panel is anchored
+   `right: 0` to the waffle trigger, which does NOT sit at the viewport's right
+   edge (the switcher is left of it, the bell/menu buttons right of it). A fixed
+   320px panel therefore spilled off the LEFT edge and clipped every tile label
+   ("アプリ"→"リ", "イベント"→"ベント", …). On narrow screens we detach from the
+   trigger and pin the panel to the viewport itself so it always fits: full width
+   minus an 8px gutter each side, dropped just below the stacked mobile top bar. */
+@media (max-width: 640px) {
+  .panel {
+    position: fixed;
+    top: calc(100px + var(--dub-space-2)); /* clears the ~100px stacked mobile header */
+    left: var(--dub-space-2);
+    right: var(--dub-space-2);
+    width: auto;
+    max-width: none;
+    max-height: calc(100vh - 120px);
+    max-height: min(78dvh, calc(100dvh - 120px));
+  }
+}
+
 .panelTitle {
   padding: var(--dub-space-1) var(--dub-space-2) var(--dub-space-2);
   font-size: var(--dub-font-size-sm);
