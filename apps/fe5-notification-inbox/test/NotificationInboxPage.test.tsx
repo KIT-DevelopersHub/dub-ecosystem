@@ -47,7 +47,7 @@ describe("NotificationInboxPage", () => {
     expect(window.location.search).toContain("unread=1");
   });
 
-  it("clicking an unread item optimistically marks read + navigates (tests 4,8)", async () => {
+  it("clicking an unread item optimistically marks read + opens the detail dialog, whose link button navigates (tests 4,8)", async () => {
     const { deps, harness } = makeDeps();
     useUnreadStore.setState({ count: 3, initialized: true });
     renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
@@ -58,7 +58,32 @@ describe("NotificationInboxPage", () => {
       expect(screen.getByTestId("fe5-inbox-item-notif_0001")).toHaveAttribute("data-unread", "false");
     });
     expect(useUnreadStore.getState().count).toBe(2); // optimistic decrement
+    // The full-text / detail dialog opens; navigation happens from its link button, not the click.
+    const dialog = await screen.findByTestId("fe5-notif-detail-dialog");
+    expect(harness.navigate).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByTestId("fe5-notif-detail-open"));
     expect(harness.navigate).toHaveBeenCalledWith("/tasks/task_ship_fe5");
+  });
+
+  it("feedback notification shows the resolved sender name and its full body in the detail dialog", async () => {
+    const { deps } = makeDeps();
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
+    await screen.findByTestId("fe5-inbox-list");
+    // The card surfaces the resolved display name, not the raw actor id.
+    const senderLabel = await screen.findByTestId("fe5-inbox-item-sender-notif_fb01");
+    expect(senderLabel).toHaveTextContent("差出人: 山田 花子");
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("fe5-inbox-item-notif_fb01"));
+    const dialog = await screen.findByTestId("fe5-notif-detail-dialog");
+    expect(within(dialog).getByTestId("fe5-notif-detail-sender")).toHaveTextContent("山田 花子");
+    // Full body (truncated in the card) is shown in full in the dialog.
+    expect(within(dialog).getByTestId("fe5-notif-detail-body")).toHaveTextContent("一覧の軽量化");
+    // No in-app link for feedback -> no "リンク先を開く" button, only 閉じる.
+    expect(within(dialog).queryByTestId("fe5-notif-detail-open")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByTestId("fe5-notif-detail-close"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("fe5-notif-detail-dialog")).not.toBeInTheDocument();
+    });
   });
 
   it("404 on mark-read removes the row and toasts (test 6)", async () => {

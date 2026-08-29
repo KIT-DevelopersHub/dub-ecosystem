@@ -40,7 +40,7 @@ import {
   parseUnpublishBatch,
   parseReleaseRequest,
 } from "./validation";
-import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
+import { makeMailPort, makeIdentityPort, type MailPort, type IdentityPort } from "./clients";
 import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
 import { publishRelease, seedInitialReleases } from "./release";
 import {
@@ -75,6 +75,36 @@ export interface CreateAppOptions {
   identity?: IdentityPort;
 }
 
+/**
+ * Best-effort read-time enrichment: resolve each inbox row's actorId (e.g. the feedback
+ * submitter) into a human display name via the identity roster, so the UI can show
+ * "差出人: 高岡 己太朗" instead of a raw user id. Distinct ids are looked up once and
+ * cached; any identity failure is swallowed (the row keeps actorName=null and the UI
+ * falls back to actorId). No-op when there is no identity port or no actor rows.
+ */
+async function enrichInboxActorNames(
+  identity: IdentityPort | null,
+  ctx: RequestContext,
+  items: notification.InboxItem[],
+): Promise<void> {
+  if (!identity) return;
+  const ids = [...new Set(items.map((i) => i.actorId).filter((v): v is string => !!v))];
+  if (ids.length === 0) return;
+  const names = new Map<string, string | null>();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        names.set(id, await identity.getDisplayName(id, ctx));
+      } catch {
+        names.set(id, null);
+      }
+    }),
+  );
+  for (const item of items) {
+    if (item.actorId) item.actorName = names.get(item.actorId) ?? null;
+  }
+}
+
 export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<AppBindings>();
 
@@ -87,6 +117,10 @@ export function createApp(options: CreateAppOptions = {}) {
     options.mail ?? (c.env.SVC_MAIL_GATEWAY ? makeMailPort(c.env.SVC_MAIL_GATEWAY) : null);
   const ingestDepsOf = (c: Context<AppBindings>, ctx: RequestContext) =>
     buildIngestDeps(c.env, ctx, options.identity ? { identity: options.identity } : {});
+  // Identity port for read-time enrichment (inbox actorName). Test override wins;
+  // otherwise the SVC_IDENTITY-backed port, or null when the binding is absent.
+  const identityOf = (c: Context<AppBindings>): IdentityPort | null =>
+    options.identity ?? (c.env.SVC_IDENTITY ? makeIdentityPort(c.env.SVC_IDENTITY) : null);
 
   // Is the signed-in user an admin viewer (sees BOTH audiences)? Backed by the per-request
   // auth client set by authOnly (notif:admin => admin/maintainer). Fail-closed: any error
@@ -244,6 +278,8 @@ export function createApp(options: CreateAppOptions = {}) {
       // ever missed — the "Admin には例外なく全部届く" guarantee.
       if (admin) await backfillAdminAudienceInbox(db, userId);
       const page = await listInbox(db, userId, q, admin);
+      // Resolve actor ids (feedback submitter etc.) → display names for the inbox UI.
+      await enrichInboxActorNames(identityOf(c), ctxOf(c), page.items);
       return c.json(page satisfies notification.ListInboxResponse);
     });
 
