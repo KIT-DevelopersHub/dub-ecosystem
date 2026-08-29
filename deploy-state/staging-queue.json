@@ -5,6 +5,18 @@
   "integrationBranch": "staging/demo-parity-integ",
   "manualFlush": false,
   "queue": [],
-  "lastFlushedAt": null,
-  "flushHistory": []
+  "lastFlushedAt": "2026-08-29T04:37:49.396Z",
+  "flushHistory": [
+    {
+      "flushedAt": "2026-08-29T04:37:49.396Z",
+      "reason": "manual flag set",
+      "integrationBranch": "staging/demo-parity-integ",
+      "slugs": [
+        "gantt-autosave-v2"
+      ],
+      "markers": [
+        "変更は自動保存されます"
+      ]
+    }
+  ]
 }
