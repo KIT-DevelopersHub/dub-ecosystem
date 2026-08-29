@@ -1,0 +1,73 @@
+name: Visual Baselines (seed/update)
+
+# Manually regenerates the *committed* visual-regression baselines INSIDE the same
+# pinned Playwright Docker image that `visual-regression.yml` compares against, then
+# commits them back to the PR branch. This is how the Linux (`*-linux.png`) baselines
+# get created/updated — local contributors on macOS only produce `*-darwin.png`, so
+# the Linux set that CI actually diffs against must be generated in this image.
+#
+# WHEN to run:
+#   - First time this workflow lands (seed the initial Linux baselines).
+#   - After an INTENTIONAL UI change (new/updated component or story) — the
+#     visual-regression job will be red until baselines are refreshed here.
+#   - After bumping @playwright/test / the container image tag.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to update baselines on (must be a branch, not a tag)."
+        required: true
+        default: ""
+
+concurrency:
+  group: visual-baselines-${{ github.event.inputs.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: regenerate + commit baselines
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-jammy
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static Storybook
+        run: pnpm --filter @dub/ui build-storybook
+
+      - name: Regenerate baselines (Linux)
+        run: pnpm --filter @dub/ui visual:update
+
+      - name: Commit updated baselines
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # git inside the container: mark the checkout dir safe.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git add apps/fe1-design-system/visual/__screenshots__
+          if git diff --cached --quiet; then
+            echo "No baseline changes."
+            exit 0
+          fi
+          git commit -m "chore(visual): regenerate Linux baselines [skip ci]"
+          git push origin "HEAD:${{ github.event.inputs.ref }}"
