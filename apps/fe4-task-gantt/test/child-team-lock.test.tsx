@@ -4,6 +4,9 @@ import type { common, task, team } from "@dub/types";
 import { TaskCreateModal, type TaskDraft } from "../src/components/TaskCreateModal";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
+// TaskDetailPanel now embeds the attachments editor (useApiClient) + optimistic toasts,
+// so it must render inside ApiClientProvider/ToastProvider. Use the shared test wrapper.
+import { renderWithProviders } from "./helpers-providers";
 
 // 親タスクと子タスクは必ず同じチーム:
 //   1. 親をプリセットして「タスクを作成」を開くと、子のチームは親のチームで自動入力される。
@@ -106,7 +109,7 @@ describe("タスク詳細: 子タスク（親あり）のチームは親に固�
   ];
 
   it("親を持つタスクのチーム欄は disabled＋ロック注記を表示", () => {
-    render(
+    renderWithProviders(
       <TaskDetailPanel
         task={mkTask("c", "team_dev")}
         users={[]}
@@ -127,7 +130,7 @@ describe("タスク詳細: 子タスク（親あり）のチームは親に固�
   });
 
   it("トップレベル（親なし）のタスクはチームを編集できる", () => {
-    render(
+    renderWithProviders(
       <TaskDetailPanel
         task={mkTask("t", "team_dev")}
         users={[]}

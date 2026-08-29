@@ -141,14 +141,14 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
       {t && (
         <div className={styles.detailBody} data-testid="fe4-mytask-detail-body">
           <section className={styles.detailSection}>
-            <h3 className={styles.detailHeading}>内容</h3>
+            <h3 className={styles.detailHeading}>詳細</h3>
             {hasDescription ? (
               <p className={styles.detailDesc} data-testid="fe4-mytask-detail-description">
                 {t.description}
               </p>
             ) : (
               <p className={styles.detailEmpty} data-testid="fe4-mytask-detail-description-empty">
-                内容は登録されていません。
+                詳細は登録されていません。
               </p>
             )}
           </section>

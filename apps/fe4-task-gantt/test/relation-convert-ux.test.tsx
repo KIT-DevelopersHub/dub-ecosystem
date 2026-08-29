@@ -1,7 +1,8 @@
 // UX for judgment 9-4 continuation: relation-type switching (依存↔親子), success
 // toast on create + close-on-success, all via the existing detail-pane save path.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { renderWithProviders as render } from "./helpers-providers";
 import type { task, identity } from "@dub/types";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
