@@ -91,6 +91,60 @@ describe("UserListPage", () => {
     await waitFor(() => expect(screen.queryByTestId("fe7-role-chip-user_bob-role_member")).not.toBeInTheDocument());
   });
 
+  it("shows a count summary of the loaded roster", async () => {
+    renderWithProviders(<UserListPage />);
+    // mock seed = 3 users (alice/bob/carol); pristine view shows the total.
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("全 3件"));
+  });
+
+  it("reveals the bulk action bar when rows are selected, and clears it", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-row-user_alice")).toBeInTheDocument());
+
+    // No bar until something is checked.
+    expect(screen.queryByTestId("fe7-users-bulk")).not.toBeInTheDocument();
+
+    // Check one row (each row exposes a "行を選択" checkbox from DataTable selection).
+    const rowChecks = screen.getAllByLabelText("行を選択");
+    await user.click(rowChecks[0]!);
+
+    const bar = await screen.findByTestId("fe7-users-bulk");
+    expect(within(bar).getByTestId("fe7-users-bulk-count")).toHaveTextContent("1件を選択中");
+    expect(within(bar).getByTestId("fe7-users-bulk-disable")).toBeInTheDocument();
+    expect(within(bar).getByTestId("fe7-users-bulk-role-apply")).toBeInTheDocument();
+
+    // Clearing hides the bar again.
+    await user.click(within(bar).getByTestId("fe7-users-bulk-clear"));
+    await waitFor(() => expect(screen.queryByTestId("fe7-users-bulk")).not.toBeInTheDocument());
+  });
+
+  it("does not offer selection or the bulk bar for read-only users", async () => {
+    renderWithProviders(<UserListPage />, { me: makeMe(["identity:read"]) });
+    await waitFor(() => expect(screen.getByTestId("fe7-users-table")).toBeInTheDocument());
+    // Selection column is gated on identity:admin, so no row checkboxes exist.
+    expect(screen.queryByLabelText("行を選択")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-users-bulk")).not.toBeInTheDocument();
+  });
+
+  it("bulk-disables the selected users via confirm", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-row-user_alice")).toBeInTheDocument());
+
+    // Select all rows via the header "全選択" checkbox, then bulk-disable.
+    await user.click(screen.getByLabelText("全選択"));
+    const bar = await screen.findByTestId("fe7-users-bulk");
+    await user.click(within(bar).getByTestId("fe7-users-bulk-disable"));
+
+    // Confirm dialog -> confirm.
+    await user.click(await screen.findByRole("button", { name: "利用停止する" }));
+
+    // After the bulk patch settles the roster reloads; the previously-active users
+    // now render the 停止 status badge.
+    await waitFor(() => expect(screen.getAllByText("停止").length).toBeGreaterThan(0));
+  });
+
   it("hides inline role editing for read-only users (chips stay visible)", async () => {
     renderWithProviders(<UserListPage />, { me: makeMe(["identity:read"]) });
     // Chips still render for everyone...
