@@ -33,7 +33,6 @@ describe("Undo wiring in the gantt workspace (判断57)", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "会場" } });
     fireEvent.mouseDown(within(panel).getByTestId("fe4-detail-deps-opt-t1"));
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
 
     // the dependency arrow is drawn and undo becomes available
     expect(await screen.findByTestId("fe4-gantt-dep-t1->t2")).toBeInTheDocument();
@@ -51,7 +50,6 @@ describe("Undo wiring in the gantt workspace (判断57)", () => {
     fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
     const panel = await screen.findByTestId("fe4-detail-panel");
     fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "会場を確定する" } });
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
 
     // the row title updates and undo becomes available
     await waitFor(() =>
@@ -80,12 +78,10 @@ describe("Undo wiring in the gantt workspace (判断57)", () => {
 
     // edit 1: 会場予約 -> 一次案
     fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "一次案" } });
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
     await waitFor(() => expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("一次案")).toBeInTheDocument());
 
     // edit 2: 一次案 -> 二次案 (same panel stays open)
     fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "二次案" } });
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
     await waitFor(() => expect(within(screen.getByTestId("fe4-gantt-row-t1")).getByText("二次案")).toBeInTheDocument());
 
     // Ctrl-Z → back to 一次案 (newest first)
@@ -102,7 +98,6 @@ describe("Undo wiring in the gantt workspace (判断57)", () => {
     fireEvent.click(await screen.findByTestId("fe4-gantt-row-t1"));
     const panel = await screen.findByTestId("fe4-detail-panel");
     fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "会場を確定する" } });
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
     await waitFor(() => expect(screen.getByTestId("fe4-undo")).toBeEnabled());
 
     // Ctrl-Z → toast "タスクの編集を元に戻しました"
