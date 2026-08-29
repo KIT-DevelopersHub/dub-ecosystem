@@ -1681,12 +1681,32 @@
 }
 .detailDrawerFooter {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: var(--dub-space-2);
+  gap: var(--dub-space-3);
   padding-top: var(--dub-space-3);
   margin-top: var(--dub-space-3);
   border-top: 1px solid var(--dub-color-border-default);
 }
+
+/* Auto-save indicator (保存ボタン廃止) — a subtle, live-updating status chip that
+   replaces the old 保存 button. margin-right:auto keeps it left while 削除/閉じる stay
+   right, with ample space between (ui-spacing-principle). Colors/space via @dub/tokens. */
+.saveStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1, 4px);
+  min-height: 20px;
+  margin-right: auto;
+  font-size: var(--dub-font-size-xs, 0.75rem);
+  color: var(--dub-color-text-secondary);
+}
+.saveStatus[data-state="saved"] { color: var(--dub-color-success-600, #0a5b34); }
+.saveStatus[data-state="error"] { color: var(--dub-color-danger-600, #d92d20); }
+.saveStatusHint { color: var(--dub-color-text-tertiary, var(--dub-color-text-secondary)); }
+.saveSpin { animation: dub-detail-spin 0.8s linear infinite; }
+@keyframes dub-detail-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .saveSpin { animation: none; } }
 .attachEditControls {
   display: flex;
   flex-direction: column;
