@@ -3,7 +3,7 @@ import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
-import { DateField } from "./DateField";
+import { DateRangeFields } from "./DateRangeFields";
 import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
 import styles from "../styles/app.module.css";
 
@@ -197,20 +197,13 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
           />
         </div>
 
-        <div className={styles.formRow}>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-create-start">
-              開始日
-            </label>
-            <DateField id="fe4-create-start" value={start} onChange={setStart} testId="fe4-create-start" />
-          </div>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-create-due">
-              終了日
-            </label>
-            <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
-          </div>
-        </div>
+        <DateRangeFields
+          idPrefix="fe4-create"
+          startValue={start}
+          dueValue={due}
+          onStartChange={setStart}
+          onDueChange={setDue}
+        />
 
         {teams.length > 0 && (
           <div className={styles.formField}>

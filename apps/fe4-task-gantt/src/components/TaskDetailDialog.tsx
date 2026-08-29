@@ -93,6 +93,10 @@ function formatDue(iso: common.ISODateTime | null): string {
   return iso ? iso.slice(0, 10) : "期限なし";
 }
 
+function formatStart(iso: common.ISODateTime | null | undefined): string {
+  return iso ? iso.slice(0, 10) : "未設定";
+}
+
 export interface TaskDetailDialogProps {
   /** the task to show; null closes the dialog. */
   task: task.Task | null;
@@ -170,6 +174,12 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
               <dt className={styles.detailLabel}>優先度</dt>
               <dd className={styles.detailValue}>
                 <Badge tone={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</Badge>
+              </dd>
+            </div>
+            <div className={styles.detailRow}>
+              <dt className={styles.detailLabel}>開始日</dt>
+              <dd className={styles.detailValue} data-testid="fe4-mytask-detail-start">
+                {formatStart(t.startAt)}
               </dd>
             </div>
             <div className={styles.detailRow}>

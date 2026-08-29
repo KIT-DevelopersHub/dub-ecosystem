@@ -4,7 +4,7 @@ import { Button, Drawer, Icon, TextField, Textarea, Select, ConfirmDialog } from
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
-import { DateField } from "./DateField";
+import { DateRangeFields } from "./DateRangeFields";
 import { PredecessorPicker } from "./PredecessorPicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
 import { TaskAttachmentsEditor } from "./TaskAttachmentsEditor";
@@ -303,21 +303,15 @@ export function TaskDetailPanel({
           />
         </div>
 
-        {/* 開始日 / 期日: a task with both gets an exact gantt bar (arrow-linkable). */}
-        <div className={styles.formRow}>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-start">
-              開始日
-            </label>
-            <DateField id="fe4-detail-start" value={start} disabled={!canWrite} onChange={setStart} testId="fe4-detail-start" />
-          </div>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-due">
-              終了日
-            </label>
-            <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
-          </div>
-        </div>
+        {/* 開始日 / 終了日: a task with both gets an exact gantt bar (arrow-linkable). */}
+        <DateRangeFields
+          idPrefix="fe4-detail"
+          startValue={start}
+          dueValue={due}
+          disabled={!canWrite}
+          onStartChange={setStart}
+          onDueChange={setDue}
+        />
 
         {teams.length > 0 && (
           <div className={styles.formField}>

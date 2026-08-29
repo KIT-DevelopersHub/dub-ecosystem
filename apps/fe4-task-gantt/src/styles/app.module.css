@@ -1083,6 +1083,12 @@
 .formRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--dub-space-3); max-width: 100%; }
 .formField { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .formField input, .formField select, .formField textarea { max-width: 100%; box-sizing: border-box; }
+/* Shared 開始日／終了日 row (DateRangeFields). Always spans the whole width of its
+   container — including inside the two-column .formGrid, where a bare .formRow would
+   otherwise be trapped in a single half-width cell and wrap the two calendars onto
+   two lines. grid-column:1/-1 makes it claim the full row so the pair stays 横並び;
+   the inner auto-fit still folds to one column on a genuinely narrow surface. */
+.dateRangeRow { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--dub-space-3); max-width: 100%; }
 .formFieldFull { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .formFieldFull input, .formFieldFull select, .formFieldFull textarea { max-width: 100%; box-sizing: border-box; }
 .formLabel {

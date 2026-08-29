@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
 import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
-import { DateField } from "./DateField";
+import { DateRangeFields } from "./DateRangeFields";
 import { AttachmentField, type AttachmentChip } from "./AttachmentField";
 import styles from "../styles/app.module.css";
 
@@ -31,6 +31,7 @@ export interface MyTaskDraft {
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  startAt: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
   attachments: DraftAttachments;
 }
@@ -80,6 +81,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
+  const [start, setStart] = useState<string | null>(null);
   const [due, setDue] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
@@ -93,6 +95,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setAssigneeId(null);
     setPriority("medium");
     setTeamId(null);
+    setStart(null);
     setDue(null);
     setDescription("");
     setFiles([]);
@@ -151,6 +154,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         priority,
         assigneeId,
         teamId,
+        startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
         attachments: { files, urls },
       });
@@ -239,12 +243,14 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-due">
-            終了日
-          </label>
-          <DateField id="fe4-mytask-due" value={due} onChange={setDue} testId="fe4-mytask-create-due" />
-        </div>
+        <DateRangeFields
+          idPrefix="fe4-mytask"
+          testIdPrefix="fe4-mytask-create"
+          startValue={start}
+          dueValue={due}
+          onStartChange={setStart}
+          onDueChange={setDue}
+        />
 
         {teams.length > 0 && (
           <div className={styles.formField}>
