@@ -42,7 +42,7 @@ describe("TaskDetailPanel (modal) — メモ/詳細 + 添付", () => {
     fireEvent.change(within(panel).getByTestId("fe4-detail-description"), {
       target: { value: "現地は9時集合。鍵は総務から受領。" },
     });
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // no save button: the メモ/詳細 edit auto-saves after the debounce
     await waitFor(() =>
       expect(
         client.calls.some(
