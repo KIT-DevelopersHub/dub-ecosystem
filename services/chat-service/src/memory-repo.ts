@@ -1,7 +1,7 @@
 // In-memory ChatRepo: backs unit tests and local runs. Mirrors the D1 repo's
 // keyset (by ULID id) so pagination / gap-fill tests are representative.
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow } from "./types";
+import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, MessageDeletionPolicy, DeletionPolicyRow } from "./types";
 
 function cmpStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -20,6 +20,7 @@ export class InMemoryChatRepo implements ChatRepo {
   private reactions = new Map<common.MessageId, ReactionKey[]>();
   private reads = new Map<string, { lastReadMessageId: common.MessageId | null }>(); // channelId|userId
   private pins = new Map<common.ChannelId, Map<common.MessageId, string>>(); // channelId -> (messageId -> pinnedAt)
+  private settings = new Map<common.OrgId, DeletionPolicyRow>(); // orgId -> policy + version
 
   private mkey(channelId: string, userId: string): string {
     return `${channelId}|${userId}`;
@@ -111,6 +112,7 @@ export class InMemoryChatRepo implements ChatRepo {
   }): Promise<MessageRow[]> {
     let rows = [...this.messages.values()].filter((m) => m.channelId === q.channelId);
     if (q.threadRootId !== undefined) rows = rows.filter((m) => m.threadRootId === q.threadRootId);
+    else rows = rows.filter((m) => m.threadRootId === null); // main timeline = top-level only
     if (q.afterMessageId !== undefined) {
       // asc gap-fill: id > afterMessageId
       rows = rows.filter((m) => m.id > q.afterMessageId!).sort((a, b) => cmpStr(a.id, b.id));
@@ -120,6 +122,16 @@ export class InMemoryChatRepo implements ChatRepo {
       rows.sort((a, b) => cmpStr(b.id, a.id));
     }
     return rows.slice(0, q.limit).map((m) => ({ ...m, attachmentFileIds: [...m.attachmentFileIds] }));
+  }
+  async replyCounts(rootIds: common.MessageId[]): Promise<Map<string, number>> {
+    const want = new Set(rootIds);
+    const out = new Map<string, number>();
+    for (const m of this.messages.values()) {
+      if (m.threadRootId && want.has(m.threadRootId) && m.deletedAt === null) {
+        out.set(m.threadRootId, (out.get(m.threadRootId) ?? 0) + 1);
+      }
+    }
+    return out;
   }
   async updateMessage(next: MessageRow, expectedVersion: number): Promise<boolean> {
     const cur = this.messages.get(next.id);
@@ -214,5 +226,35 @@ export class InMemoryChatRepo implements ChatRepo {
       out.push({ message: { ...m, attachmentFileIds: [...m.attachmentFileIds] }, channelName: ch.name, channelType: ch.type });
     }
     return out;
+  }
+
+  // ---- deletion policy ----
+  async getDeletionPolicy(orgId: common.OrgId): Promise<DeletionPolicyRow | null> {
+    const r = this.settings.get(orgId);
+    return r ? { policy: { ...r.policy }, version: r.version } : null;
+  }
+  async setDeletionPolicy(input: {
+    orgId: common.OrgId;
+    policy: MessageDeletionPolicy;
+    expectedVersion: number;
+    updatedBy: common.UserId | null;
+    at: common.ISODateTime;
+  }): Promise<{ version: number } | null> {
+    const cur = this.settings.get(input.orgId);
+    const curVersion = cur?.version ?? 0;
+    if (input.expectedVersion !== curVersion) return null; // optimistic-concurrency conflict
+    const version = curVersion + 1;
+    this.settings.set(input.orgId, { policy: { ...input.policy }, version });
+    return { version };
+  }
+
+  // ---- hard delete (physical removal + cascade) ----
+  async hardDeleteMessage(id: common.MessageId): Promise<void> {
+    const replyIds = [...this.messages.values()].filter((m) => m.threadRootId === id).map((m) => m.id);
+    for (const rid of [id, ...replyIds]) {
+      this.messages.delete(rid);
+      this.reactions.delete(rid);
+      for (const set of this.pins.values()) set.delete(rid);
+    }
   }
 }

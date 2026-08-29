@@ -17,12 +17,31 @@ const DOMAIN_LABELS: Record<string, string> = {
   notif: "通知",
   mail: "メール",
   chat: "チャット",
+  usage: "使用量・課金ガード",
   infra: "インフラ・デプロイ",
   audit: "監査ログ",
   github: "GitHub 連携",
   drive: "Google Drive",
   webhook: "Webhook",
+  app: "アプリのアクセス権",
 };
+
+// Per-app access keys (domain "app"). The role matrix renders these via AppAccessSection
+// (有効化トグル + 閲覧/編集作成), but effective-permission lists elsewhere render them per-key,
+// so give each a plain-Japanese label/description too.
+const APP_LABELS: { id: string; name: string }[] = [
+  { id: "events", name: "イベント" },
+  { id: "tasks", name: "マイタスク" },
+  { id: "gantt", name: "ガントチャート" },
+  { id: "notifications", name: "通知" },
+  { id: "chat", name: "チャット" },
+  { id: "mail", name: "メール" },
+  { id: "usage", name: "無料枠 / 課金ガード" },
+  { id: "members", name: "運営メンバー" },
+  { id: "participation", name: "参加届" },
+  { id: "driveshare", name: "Drive共有" },
+  { id: "admin", name: "管理" },
+];
 
 // Descriptions are written as an outcome ("オンにすると〜できるようになる") so even
 // non-obvious keys make clear what granting them lets a member do.
@@ -43,12 +62,14 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "notif:admin": { label: "通知の管理", description: "通知の配信履歴を検索・確認できるようになります。" },
   "notif:inbox:self": { label: "自分の受信箱", description: "自分あての通知を受信箱で閲覧・既読管理できるようになります。" },
   "notif:prefs:self": { label: "自分の通知設定", description: "自分の通知の受け取り方（設定）を確認・変更できるようになります。" },
+  "notif:broadcast_publish": { label: "メンバーへの通知公開", description: "管理者向けの通知を「Notification管理」画面からメンバー全体へ公開（配信）できるようになります。" },
   "mail:send": { label: "メールの送信", description: "組織のメールアドレスからメールを送信できるようになります。" },
   "mail:read": { label: "メールの閲覧", description: "メールのメッセージ・スレッド・振り分けルールを閲覧できるようになります。" },
   "mail:read_all": { label: "全メールの閲覧（監督）", description: "オンにすると全ユーザーの送受信メールを閲覧できます。" },
   "mail:admin": { label: "メールの管理", description: "メールボックスや受信監視・振り分けルールの設定を管理できるようになります。" },
   "chat:create": { label: "チャンネルの作成", description: "チャットのチャンネルを新規作成できるようになります。" },
   "chat:moderate": { label: "チャットのモデレート", description: "チャンネルの管理や、他人のメッセージの削除ができるようになります。" },
+  "usage:view": { label: "使用量ダッシュボードの閲覧", description: "無料枠の使用量・課金ガードのダッシュボードを閲覧できるようになります。" },
   "infra:read": { label: "インフラの閲覧", description: "サイト・デプロイ・DNS・ドメインの状態を閲覧できるようになります。" },
   "infra:deploy": { label: "デプロイの実行", description: "サイトのデプロイ（公開・反映）を実行できるようになります。" },
   "infra:dns": { label: "DNS の変更", description: "ドメインの DNS レコードを変更できるようになります。" },
@@ -61,6 +82,12 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "drive:read": { label: "Drive の閲覧", description: "Google Drive のファイル情報の閲覧・検索とダウンロードができるようになります。" },
   "drive:write": { label: "Drive の更新", description: "Google Drive へのファイルのアップロード・更新ができるようになります。" },
   "webhook:read": { label: "Webhook の閲覧", description: "Webhook の配信履歴を検索・確認できるようになります。" },
+  ...Object.fromEntries(
+    APP_LABELS.flatMap((a) => [
+      [`app:${a.id}:view`, { label: `${a.name}：有効化（閲覧まで）`, description: `${a.name} アプリを開いて閲覧できるようになります。` }],
+      [`app:${a.id}:edit`, { label: `${a.name}：編集・作成まで`, description: `${a.name} アプリ内での作成・編集ができるようになります（閲覧を含みます）。` }],
+    ]),
+  ),
 };
 
 /** Japanese feature-group heading for a catalog domain (English domain fallback). */

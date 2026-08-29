@@ -13,11 +13,29 @@ import type { notification } from "@dub/types";
 // Re-export the frozen primitives under stable local names.
 export type NotificationChannel = notification.NotificationChannel; // in_app|email|chat|push (closed)
 export type NotificationType = notification.NotificationType; // open vocabulary (string)
+export type NotificationAudience = notification.NotificationAudience; // admin | members
 export type InboxItem = notification.InboxItem;
 export type ListInboxQuery = notification.ListInboxQuery;
 export type ListInboxResponse = notification.ListInboxResponse; // Paginated<InboxItem>
 export type UnreadCountResponse = notification.UnreadCountResponse;
 export type PreferenceEntry = notification.PreferenceEntry;
+
+// ---- Notification management (admin) ----
+export type AdminNotificationItem = notification.AdminNotificationItem;
+export type ListAdminNotificationsResponse = notification.ListAdminNotificationsResponse;
+export type PublishBroadcastResponse = notification.PublishBroadcastResponse;
+export type PublishBroadcastBatchRequest = notification.PublishBroadcastBatchRequest;
+export type PublishBroadcastBatchResponse = notification.PublishBroadcastBatchResponse;
+export type PublishBroadcastBatchItem = notification.PublishBroadcastBatchItem;
+export type UnpublishBroadcastResponse = notification.UnpublishBroadcastResponse;
+export type UnpublishBroadcastBatchRequest = notification.UnpublishBroadcastBatchRequest;
+export type UnpublishBroadcastBatchResponse = notification.UnpublishBroadcastBatchResponse;
+export type UnpublishBroadcastBatchItem = notification.UnpublishBroadcastBatchItem;
+// GET /notifications/manage query params (cursor paging only).
+export interface ListAdminNotificationsParams {
+  cursor?: string;
+  limit?: number;
+}
 
 // Closed set of channels in display order (matches @dub/types union).
 export const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = [

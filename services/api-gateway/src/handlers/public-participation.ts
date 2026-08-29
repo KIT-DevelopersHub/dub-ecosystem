@@ -17,6 +17,7 @@ import { createServices } from "../services";
 import { createTurnstileVerifier, type TurnstileVerifier } from "../turnstile";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const PHONE_RE = /^[0-9+\-()\s]{6,20}$/;
 // System principal stamped on public submissions (member-service also defaults to this).
 const SYSTEM_ACTOR = "system:public-participation";
 
@@ -31,7 +32,11 @@ function validate(body: unknown): { value: gateway.PublicParticipationRequest } 
   const errs: FieldError[] = [];
   const b = (body ?? {}) as Record<string, unknown>;
 
-  const name = typeof b.name === "string" ? b.name.trim() : "";
+  // 氏名: 姓/名 の分割入力を優先し "姓 名" を合成。旧単一 `name` も後方互換で受ける。
+  const lastName = optStr(b.lastName);
+  const firstName = optStr(b.firstName);
+  const composed = [lastName, firstName].filter((x): x is string => !!x).join(" ");
+  const name = composed || (typeof b.name === "string" ? b.name.trim() : "");
   if (!name) errs.push({ field: "name", reason: "required" });
 
   const schoolEmail = typeof b.schoolEmail === "string" ? b.schoolEmail.trim() : "";
@@ -42,15 +47,27 @@ function validate(body: unknown): { value: gateway.PublicParticipationRequest } 
   if (!gmail) errs.push({ field: "gmail", reason: "required" });
   else if (!EMAIL_RE.test(gmail)) errs.push({ field: "gmail", reason: "invalid" });
 
+  // 電話番号は任意。渡された時だけ緩い形式チェック。
+  const phone = optStr(b.phone);
+  if (phone && !PHONE_RE.test(phone)) errs.push({ field: "phone", reason: "invalid" });
+
   const turnstileToken = optStr(b.turnstileToken);
 
   if (errs.length > 0) return { errors: errs };
   return {
     value: {
+      lastName,
+      firstName,
       name,
       schoolEmail,
       gmail,
       nameKana: optStr(b.nameKana),
+      lastNameKana: optStr(b.lastNameKana),
+      firstNameKana: optStr(b.firstNameKana),
+      nameRomaji: optStr(b.nameRomaji),
+      lastNameRomaji: optStr(b.lastNameRomaji),
+      firstNameRomaji: optStr(b.firstNameRomaji),
+      phone,
       grade: optStr(b.grade),
       department: optStr(b.department),
       desiredTeamId: optStr(b.desiredTeamId),
@@ -91,24 +108,32 @@ export function createPublicParticipationHandler(override?: TurnstileVerifier) {
     }
 
     // Forward to member-service internal route (genuine s2s: attaches x-dub-internal +
-    // a system x-dub-user-id). This performs the same non-destructive roster reflect as
-    // the authenticated path.
+    // a system x-dub-user-id). 提出は 参加届 を記録するだけで、名簿への反映は管理者が
+    // 一覧で確定する（B案）。よって公開応答は accepted のみ（解決結果は返さない）。
     const svc = createServices(c.env);
     const ctx: RequestContext = { requestId, userId: SYSTEM_ACTOR, caller: "api-gateway" };
     const submit: member.SubmitParticipationRequest = {
+      lastName: p.lastName ?? null,
+      firstName: p.firstName ?? null,
       name: p.name,
       schoolEmail: p.schoolEmail,
       gmail: p.gmail,
       nameKana: p.nameKana ?? null,
+      lastNameKana: p.lastNameKana ?? null,
+      firstNameKana: p.firstNameKana ?? null,
+      nameRomaji: p.nameRomaji ?? null,
+      lastNameRomaji: p.lastNameRomaji ?? null,
+      firstNameRomaji: p.firstNameRomaji ?? null,
+      phone: p.phone ?? null,
       grade: (p.grade as member.Grade | null) ?? null,
       department: p.department ?? null,
       desiredTeamId: p.desiredTeamId ?? null,
       desiredActivity: (p.desiredActivity as member.DesiredActivity | null) ?? null,
       note: p.note ?? null,
     };
-    const res = await svc.member.post<member.SubmitParticipationResponse>(ctx, "/members/internal/participation", submit);
+    await svc.member.post<member.SubmitParticipationResponse>(ctx, "/members/internal/participation", submit);
 
-    const body: gateway.PublicParticipationResponse = { accepted: true, matchKind: res.matchKind };
+    const body: gateway.PublicParticipationResponse = { accepted: true };
     return c.json(body);
   };
 }

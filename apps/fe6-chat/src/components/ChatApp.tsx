@@ -3,6 +3,7 @@
 // feature.tsx drive channel selection via TanStack Router params; standalone we
 // keep selection in local state and persist the last channel (design §3).
 import { useCallback, useEffect, useState } from "react";
+import { ToastProvider } from "@dub/ui";
 import type { common } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
@@ -24,9 +25,15 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const [createOpen, setCreateOpen] = useState(false);
 
   const reloadChannels = useCallback(async () => {
-    const [list, unreadList] = await Promise.all([api.listChannels(eventId), api.listUnread()]);
+    // allSettled (not all): the channel sidebar must render whenever listChannels
+    // succeeds, even if the companion unread fetch fails (e.g. a transient 401 /
+    // session refresh). Promise.all is fail-fast — one rejection blanked the whole
+    // sidebar despite channels loading fine. Unread just degrades to "no badges".
+    const [channelsRes, unreadRes] = await Promise.allSettled([api.listChannels(eventId), api.listUnread()]);
+    if (channelsRes.status === "rejected") throw channelsRes.reason;
+    const list = channelsRes.value;
     setChannels(list);
-    setUnread(unreadList);
+    if (unreadRes.status === "fulfilled") setUnread(unreadRes.value);
     return list;
   }, [api, eventId, setUnread]);
 
@@ -66,7 +73,8 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   );
 
   return (
-    <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-testid="fe6-chat-app">
+    <ToastProvider>
+    <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-app-bleed data-testid="fe6-chat-app">
       {/* leftmost workspace / team rail */}
       <div className={styles.rail} aria-label="ワークスペース">
         <button type="button" className={`${styles.railTile} ${styles.active}`} aria-label="DevHub ワークスペース" title="DevHub">
@@ -106,5 +114,6 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
 
       <CreateChannelModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={onCreateChannel} />
     </div>
+    </ToastProvider>
   );
 }

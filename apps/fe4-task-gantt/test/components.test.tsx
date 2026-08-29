@@ -1,11 +1,25 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { gantt, task } from "@dub/types";
 import { GanttView } from "../src/components/GanttView";
 import { ViewSwitcher } from "../src/components/ViewSwitcher";
 import { TaskListView } from "../src/components/TaskListView";
 import { TaskBoardView } from "../src/components/TaskBoardView";
 import { createUserCache } from "../src/domain/user-cache";
+import { ROW_HEIGHT } from "../src/domain/timeline-axis";
+import type { GanttSortActions, GanttSortState } from "../src/domain/gantt-sort-pref";
+
+// Shared 並び替え fixtures for the GanttView tests (the container owns this state).
+const manualSort: GanttSortState = { manual: true, keys: [] };
+const autoPrioritySort: GanttSortState = { manual: false, keys: [{ key: "priority", dir: "asc" }] };
+const sortActions = (): GanttSortActions => ({
+  setManual: vi.fn(),
+  addKey: vi.fn(),
+  removeKey: vi.fn(),
+  moveKey: vi.fn(),
+  setKey: vi.fn(),
+  setDir: vi.fn(),
+});
 
 const mk = (id: string, status: task.TaskStatus = "todo"): task.Task => ({
   id, eventId: "evt_1", title: `T-${id}`, description: null, status,
@@ -36,6 +50,177 @@ describe("GanttView render (design test 4/7)", () => {
   it("shows truncated banner when flagged (8-8)", () => {
     render(<GanttView dto={dto} zoom="week" truncated />);
     expect(screen.getByTestId("fe4-gantt-truncated")).toBeInTheDocument();
+  });
+
+  it("always renders the parent-child vs dependency guide legend (feedback #3)", () => {
+    render(<GanttView dto={dto} zoom="week" />);
+    const guide = screen.getByTestId("fe4-gantt-guide");
+    expect(guide).toBeInTheDocument();
+    expect(guide.textContent).toMatch(/親子/);
+    expect(guide.textContent).toMatch(/依存/);
+  });
+
+  const wbsDto: gantt.GanttChartDTO = {
+    eventId: "evt_1",
+    rows: [
+      { taskId: "p", title: "設計フェーズ", startsAt: "2026-08-12T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: null, depth: 0, hasChildren: true },
+      { taskId: "c1", title: "子1", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-09T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 1 },
+      { taskId: "c2", title: "子2", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-08-22T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 1 },
+    ],
+    dependencies: [],
+  };
+
+  it("collapses children by default and reveals them on toggle (parent-child)", () => {
+    render(<GanttView dto={wbsDto} zoom="week" />);
+    // parent visible, children hidden until expanded
+    expect(screen.getByTestId("fe4-gantt-row-p")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-gantt-row-c1")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p"));
+    expect(screen.getByTestId("fe4-gantt-row-c1")).toBeInTheDocument();
+    // expanded parent grows into its 内包バー container box (covers its children)
+    const box = screen.getByTestId("fe4-gantt-group-p");
+    expect(box).toBeInTheDocument();
+    expect(box).toHaveAttribute("data-depth", "0");
+    // container is 3 rows tall (parent + 2 children), inset by 2px top/bottom
+    expect(box.style.height).toBe(`${3 * ROW_HEIGHT - 4}px`);
+    expect(box.style.top).toBe("2px");
+    // #369 redesign: the zone fill is a header-lane gradient (親行が濃く子が淡い), not a
+    // flat faint tint — a stronger header band (20%) over the parent row stepping to the
+    // 淡い body tint (12%) over the children, both from the brand token.
+    expect(box.style.background).toContain("linear-gradient");
+    expect(box.style.background).toContain("var(--dub-color-brand-500) 20%");
+    expect(box.style.background).toContain("var(--dub-color-brand-500) 12%");
+  });
+
+  const nestedDto: gantt.GanttChartDTO = {
+    eventId: "evt_1",
+    rows: [
+      { taskId: "gp", title: "統括", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-30T00:00:00Z", progressPercent: 0, assigneeId: null, depth: 0, hasChildren: true },
+      { taskId: "p", title: "設計フェーズ", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "gp", depth: 1, hasChildren: true },
+      { taskId: "g1", title: "孫1", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 2 },
+      { taskId: "g2", title: "孫2", startsAt: "2026-08-13T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "p", depth: 2 },
+    ],
+    dependencies: [],
+  };
+
+  it("nests a container per level for a 3-level WBS (内包バーの入れ子)", () => {
+    render(<GanttView dto={nestedDto} zoom="week" />);
+    // open the grandparent, then the inner parent
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-gp"));
+    fireEvent.click(screen.getByTestId("fe4-gantt-toggle-p"));
+    const gpBox = screen.getByTestId("fe4-gantt-group-gp");
+    const pBox = screen.getByTestId("fe4-gantt-group-p");
+    // grandparent box wraps all 4 rows; inner parent box wraps its 3 — nested, deeper depth
+    expect(gpBox).toHaveAttribute("data-depth", "0");
+    expect(pBox).toHaveAttribute("data-depth", "1");
+    expect(gpBox.style.height).toBe(`${4 * ROW_HEIGHT - 4}px`);
+    expect(pBox.style.height).toBe(`${3 * ROW_HEIGHT - 4}px`);
+    // Nested zones step up in body tint so the inner box reads as "inside" its ancestor:
+    // depth0 body=12%, depth1 body=15%.
+    expect(gpBox.style.background).toContain("var(--dub-color-brand-500) 12%");
+    expect(pBox.style.background).toContain("var(--dub-color-brand-500) 15%");
+  });
+
+  it("parent bar is now draggable/resizable too (feedback #39: exposes resize handles)", () => {
+    const onSchedule = vi.fn();
+    render(<GanttView dto={wbsDto} zoom="week" onSchedule={onSchedule} canWrite />);
+    // parent bar exists AND carries drag handles (a move shifts the subtree)
+    expect(screen.getByTestId("fe4-gantt-bar-p")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-l")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-r")).toBeInTheDocument();
+  });
+
+  it("zoom SegmentedControl fires onZoomChange and reflects the active granularity", () => {
+    const onZoomChange = vi.fn();
+    render(<GanttView dto={dto} zoom="month" onZoomChange={onZoomChange} />);
+    // the shared SegmentedControl keeps the fe4-gantt-zoom-* testids + tab semantics
+    expect(screen.getByTestId("fe4-gantt-zoom-month")).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByTestId("fe4-gantt-zoom-week"));
+    expect(onZoomChange).toHaveBeenCalledWith("week");
+    expect(screen.getByTestId("fe4-gantt-zoom-week")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("renders the 多段ソート builder and opens the condition panel with the mode strip", () => {
+    render(<GanttView dto={dto} zoom="week" sortState={manualSort} sortActions={sortActions()} />);
+    const trigger = screen.getByTestId("fe4-gantt-sort");
+    expect(trigger).toBeInTheDocument();
+    // panel is closed until the trigger is clicked
+    expect(screen.queryByTestId("fe4-gantt-sort-panel")).toBeNull();
+    fireEvent.click(trigger.querySelector("button")!);
+    const panel = screen.getByTestId("fe4-gantt-sort-panel");
+    expect(panel).toBeInTheDocument();
+    // the 多段/手動 mode strip is offered inside the panel ("手動（ドラッグ）" also
+    // appears in the trigger summary, so scope the query to the panel).
+    expect(within(panel).getByText("多段ソート")).toBeInTheDocument();
+    expect(within(panel).getByText("手動（ドラッグ）")).toBeInTheDocument();
+  });
+
+  it("fires addKey when 条件を追加 is clicked in the panel", () => {
+    const actions = sortActions();
+    render(<GanttView dto={dto} zoom="week" sortState={manualSort} sortActions={actions} />);
+    fireEvent.click(screen.getByTestId("fe4-gantt-sort").querySelector("button")!);
+    // manual mode shows the empty-state hint; the mode strip switches to 多段
+    fireEvent.click(screen.getByText("多段ソート"));
+    expect(actions.setManual).toHaveBeenCalledWith(false);
+  });
+
+  it("hides the drag handles when an automatic sort is active (only 手動 allows DnD)", () => {
+    const onReorder = vi.fn();
+    // manual mode → drag handle present
+    const { rerender } = render(
+      <GanttView dto={dto} zoom="week" canWrite sortState={manualSort} sortActions={sortActions()} onReorder={onReorder} />,
+    );
+    expect(screen.getByTestId("fe4-gantt-drag-a")).toBeInTheDocument();
+    // switch to an automatic (multi-key) sort → handles gone (a re-sort would overwrite the drop)
+    rerender(
+      <GanttView dto={dto} zoom="week" canWrite sortState={autoPrioritySort} sortActions={sortActions()} onReorder={onReorder} />,
+    );
+    expect(screen.queryByTestId("fe4-gantt-drag-a")).toBeNull();
+  });
+
+  it("拡大: enters a look-only fullscreen mode that hides edit affordances, then Esc/閉じる exits", () => {
+    const onSchedule = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <GanttView
+        dto={wbsDto}
+        zoom="week"
+        canWrite
+        onSchedule={onSchedule}
+        onSelect={onSelect}
+        onCreateOnDate={vi.fn()}
+        onReorder={vi.fn()}
+        sortState={manualSort}
+        sortActions={sortActions()}
+      />,
+    );
+    // editing affordances present before 拡大
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-l")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-gantt-addrow")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-gantt-sort")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe4-gantt-viewonly-badge")).toBeNull();
+
+    // 拡大 → look-only fullscreen
+    fireEvent.click(screen.getByTestId("fe4-gantt-fullscreen-btn"));
+    const view = screen.getByTestId("fe4-gantt-view");
+    expect(view).toHaveAttribute("data-presenting", "1");
+    expect(screen.getByTestId("fe4-gantt-viewonly-badge")).toBeInTheDocument();
+    // edit affordances are gone (no resize handles, no add-row, no sort)
+    expect(screen.queryByTestId("fe4-gantt-bar-p-rz-l")).toBeNull();
+    expect(screen.queryByTestId("fe4-gantt-addrow")).toBeNull();
+    expect(screen.queryByTestId("fe4-gantt-sort")).toBeNull();
+    // tapping a bar no longer opens detail (pure viewing)
+    fireEvent.pointerDown(screen.getByTestId("fe4-gantt-bar-p"));
+    fireEvent.pointerUp(screen.getByTestId("fe4-gantt-bar-p"));
+    expect(onSelect).not.toHaveBeenCalled();
+    // zoom (a viewing operation) still works while presenting
+    expect(screen.getByTestId("fe4-gantt-zoom-day")).toBeInTheDocument();
+
+    // Esc exits back to the editable view
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByTestId("fe4-gantt-view")).not.toHaveAttribute("data-presenting");
+    expect(screen.queryByTestId("fe4-gantt-viewonly-badge")).toBeNull();
+    expect(screen.getByTestId("fe4-gantt-bar-p-rz-l")).toBeInTheDocument();
   });
 });
 

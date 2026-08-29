@@ -6,12 +6,16 @@ import type { task, common } from "@dub/types";
 // snake-cased D1 row for task_tasks.
 export interface TaskRow {
   id: string;
-  event_id: string;
+  event_id: string | null;
   title: string;
   description: string | null;
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assignee_id: string | null;
+  team_id: string | null;
+  parent_id: string | null;
+  wbs: string | null;
+  start_at: string | null;
   due_at: string | null;
   origin: task.TaskOrigin;
   version: number;
@@ -31,7 +35,11 @@ export function rowToTask(r: TaskRow): task.Task {
     status: r.status,
     priority: r.priority,
     assigneeId: r.assignee_id,
+    teamId: r.team_id,
+    parentTaskId: r.parent_id,
+    wbs: r.wbs,
     createdBy: r.created_by,
+    startAt: r.start_at,
     dueAt: r.due_at,
     origin: r.origin,
     version: r.version,
@@ -43,12 +51,16 @@ export function rowToTask(r: TaskRow): task.Task {
 
 export interface InsertTaskInput {
   id: common.TaskId;
-  eventId: common.EventId;
+  eventId: common.EventId | null;
   title: string;
   description: string | null;
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  teamId?: common.TeamId | null;
+  parentId?: common.TaskId | null;
+  wbs?: string | null;
+  startAt?: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
   origin: task.TaskOrigin;
   createdBy: common.UserId;
@@ -62,12 +74,18 @@ export interface TaskPatch {
   status?: task.TaskStatus;
   priority?: task.TaskPriority;
   assigneeId?: common.UserId | null;
+  teamId?: common.TeamId | null;
+  parentId?: common.TaskId | null;
+  wbs?: string | null;
+  startAt?: common.ISODateTime | null;
   dueAt?: common.ISODateTime | null;
 }
 
 export interface ListFilter {
   eventId?: string;
   assigneeId?: string;
+  /** WBS/team scope (task_tasks.team_id). Powers the gantt team filter. */
+  teamId?: string;
   /** Requester filter (task_tasks.created_by). Powers the "issued by me" lens. */
   createdById?: string;
   statuses?: task.TaskStatus[];
@@ -78,8 +96,51 @@ export interface ListFilter {
 
 export interface DueSoonRow {
   taskId: common.TaskId;
-  eventId: common.EventId;
+  eventId: common.EventId | null;
   dueAt: common.ISODateTime;
+}
+
+// snake-cased D1 row for task_attachments.
+export interface AttachmentRow {
+  id: string;
+  task_id: string;
+  kind: task.TaskAttachmentKind;
+  name: string;
+  url: string;
+  file_id: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_by: string;
+  created_at: string;
+  archived_at: string | null;
+}
+
+export function rowToAttachment(r: AttachmentRow): task.TaskAttachment {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    kind: r.kind,
+    name: r.name,
+    url: r.url,
+    fileId: r.file_id,
+    mimeType: r.mime_type,
+    sizeBytes: r.size_bytes,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+  };
+}
+
+export interface InsertAttachmentInput {
+  id: string;
+  taskId: common.TaskId;
+  kind: task.TaskAttachmentKind;
+  name: string;
+  url: string;
+  fileId: common.FileId | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  createdBy: common.UserId;
+  now: common.ISODateTime;
 }
 
 export interface TaskRepo {
@@ -93,9 +154,21 @@ export interface TaskRepo {
   /** Bulk-archive every live task of an event (event.archived compensation). */
   archiveByEvent(eventId: string, now: string): Promise<common.TaskId[]>;
   getDependsOn(taskId: string): Promise<common.TaskId[]>;
-  listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]>;
-  /** Ids of every live (non-archived) task in an event — the valid dependsOn target set. */
-  listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]>;
+  /**
+   * Dependencies scoped to a single "bucket": either an event (eventId) or the
+   * unlinked bucket (eventId === null → tasks with event_id IS NULL). Dependencies
+   * are only valid within the same bucket, so an unlinked task can only depend on
+   * other unlinked tasks (and vice-versa).
+   */
+  listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]>;
+  /** Every live (non-archived) task in a bucket with its `team_id` — the valid dependsOn
+   *  target set plus the team each belongs to. The dependency门番 (ADR-0007) compares
+   *  `team_id` to reject cross-team edges; ids alone come from `.map(t => t.id)`. */
+  listLiveTasksByEvent(eventId: string | null): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>>;
+  /** Distinct owning-team ids of the LIVE (non-archived) direct children of `parentId`
+   *  (`null` = a child with no team). Guards a parent's team change: a parent must not be
+   *  moved to a team that differs from any of its children (親子は同一チーム). */
+  liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>>;
   /** Version-checked full replace of a task's dependsOn edges. */
   replaceDependencies(
     taskId: string,
@@ -105,6 +178,12 @@ export interface TaskRepo {
   ): Promise<{ ok: boolean; added: common.TaskId[]; removed: common.TaskId[] }>;
   /** Find + mark tasks whose due_at is within [now, now+window] and not yet notified. */
   scanDueSoon(nowMs: number, windowMs: number, now: string): Promise<DueSoonRow[]>;
+  /** Append an attachment (file/url) to a task. */
+  addAttachment(input: InsertAttachmentInput): Promise<task.TaskAttachment>;
+  /** A task's live (non-archived) attachments, newest first. */
+  listAttachments(taskId: string): Promise<task.TaskAttachment[]>;
+  /** Soft-delete one attachment; false if not found / already archived. */
+  archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean>;
 }
 
 export function encodeCursor(id: string): string {
@@ -119,14 +198,14 @@ export function decodeCursor(cursor: string): string {
 }
 
 const ALL_COLUMNS =
-  "id, event_id, title, description, status, priority, assignee_id, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at";
+  "id, event_id, title, description, status, priority, assignee_id, team_id, parent_id, wbs, start_at, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at";
 
 export function createD1TaskRepo(db: DbClient): TaskRepo {
   return {
     async insert(input: InsertTaskInput): Promise<task.Task> {
       await db.run(
         `INSERT INTO task_tasks (${ALL_COLUMNS})
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL)`,
         input.id,
         input.eventId,
         input.title,
@@ -134,6 +213,10 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         input.status,
         input.priority,
         input.assigneeId,
+        input.teamId ?? null,
+        input.parentId ?? null,
+        input.wbs ?? null,
+        input.startAt ?? null,
         input.dueAt,
         input.origin,
         input.createdBy,
@@ -164,6 +247,10 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (filter.assigneeId) {
         where.push("assignee_id = ?");
         binds.push(filter.assigneeId);
+      }
+      if (filter.teamId) {
+        where.push("team_id = ?");
+        binds.push(filter.teamId);
       }
       if (filter.createdById) {
         where.push("created_by = ?");
@@ -204,6 +291,10 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (patch.status !== undefined) col("status", patch.status);
       if (patch.priority !== undefined) col("priority", patch.priority);
       if (patch.assigneeId !== undefined) col("assignee_id", patch.assigneeId);
+      if (patch.teamId !== undefined) col("team_id", patch.teamId);
+      if (patch.parentId !== undefined) col("parent_id", patch.parentId);
+      if (patch.wbs !== undefined) col("wbs", patch.wbs);
+      if (patch.startAt !== undefined) col("start_at", patch.startAt);
       if (patch.dueAt !== undefined) col("due_at", patch.dueAt);
       col("updated_at", now);
       sets.push("version = version + 1");
@@ -249,22 +340,44 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       return rows.map((r) => r.depends_on_id);
     },
 
-    async listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]> {
-      const rows = await db.all<{ task_id: string; depends_on_id: string }>(
-        `SELECT d.task_id, d.depends_on_id FROM task_dependencies d
-         JOIN task_tasks t ON d.task_id = t.id
-         WHERE t.event_id = ?`,
-        eventId,
-      );
+    async listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]> {
+      const rows =
+        eventId === null
+          ? await db.all<{ task_id: string; depends_on_id: string }>(
+              `SELECT d.task_id, d.depends_on_id FROM task_dependencies d
+               JOIN task_tasks t ON d.task_id = t.id
+               WHERE t.event_id IS NULL`,
+            )
+          : await db.all<{ task_id: string; depends_on_id: string }>(
+              `SELECT d.task_id, d.depends_on_id FROM task_dependencies d
+               JOIN task_tasks t ON d.task_id = t.id
+               WHERE t.event_id = ?`,
+              eventId,
+            );
       return rows.map((r) => ({ taskId: r.task_id, dependsOnId: r.depends_on_id }));
     },
 
-    async listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]> {
-      const rows = await db.all<{ id: string }>(
-        `SELECT id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
-        eventId,
+    async listLiveTasksByEvent(
+      eventId: string | null,
+    ): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>> {
+      const rows =
+        eventId === null
+          ? await db.all<{ id: string; team_id: string | null }>(
+              `SELECT id, team_id FROM task_tasks WHERE event_id IS NULL AND archived_at IS NULL`,
+            )
+          : await db.all<{ id: string; team_id: string | null }>(
+              `SELECT id, team_id FROM task_tasks WHERE event_id = ? AND archived_at IS NULL`,
+              eventId,
+            );
+      return rows.map((r) => ({ id: r.id, teamId: r.team_id }));
+    },
+
+    async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+      const rows = await db.all<{ team_id: string | null }>(
+        `SELECT DISTINCT team_id FROM task_tasks WHERE parent_id = ? AND archived_at IS NULL`,
+        parentId,
       );
-      return rows.map((r) => r.id);
+      return rows.map((r) => (r.team_id ?? null) as common.TeamId | null);
     },
 
     async replaceDependencies(
@@ -301,7 +414,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
     async scanDueSoon(nowMs: number, windowMs: number, now: string): Promise<DueSoonRow[]> {
       const windowEnd = new Date(nowMs + windowMs).toISOString();
       const nowIsoStr = new Date(nowMs).toISOString();
-      const rows = await db.all<{ id: string; event_id: string; due_at: string }>(
+      const rows = await db.all<{ id: string; event_id: string | null; due_at: string }>(
         `SELECT id, event_id, due_at FROM task_tasks
          WHERE archived_at IS NULL AND due_at IS NOT NULL AND due_soon_notified_at IS NULL
            AND status NOT IN ('done','cancelled')
@@ -316,6 +429,53 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       }));
       await db.batch(stmts);
       return rows.map((r) => ({ taskId: r.id, eventId: r.event_id, dueAt: r.due_at }));
+    },
+
+    async addAttachment(input: InsertAttachmentInput): Promise<task.TaskAttachment> {
+      await db.run(
+        `INSERT INTO task_attachments
+           (id, task_id, kind, name, url, file_id, mime_type, size_bytes, created_by, created_at, archived_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        input.id,
+        input.taskId,
+        input.kind,
+        input.name,
+        input.url,
+        input.fileId,
+        input.mimeType,
+        input.sizeBytes,
+        input.createdBy,
+        input.now,
+      );
+      const row = await db.first<AttachmentRow>(
+        `SELECT id, task_id, kind, name, url, file_id, mime_type, size_bytes, created_by, created_at, archived_at
+         FROM task_attachments WHERE id = ?`,
+        input.id,
+      );
+      if (!row) throw new Error("attachment insert readback failed");
+      return rowToAttachment(row);
+    },
+
+    async listAttachments(taskId: string): Promise<task.TaskAttachment[]> {
+      const rows = await db.all<AttachmentRow>(
+        `SELECT id, task_id, kind, name, url, file_id, mime_type, size_bytes, created_by, created_at, archived_at
+         FROM task_attachments
+         WHERE task_id = ? AND archived_at IS NULL
+         ORDER BY created_at DESC, id DESC`,
+        taskId,
+      );
+      return rows.map(rowToAttachment);
+    },
+
+    async archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean> {
+      const res = await db.run(
+        `UPDATE task_attachments SET archived_at = ?
+         WHERE id = ? AND task_id = ? AND archived_at IS NULL`,
+        now,
+        attachmentId,
+        taskId,
+      );
+      return res.meta.changes > 0;
     },
   };
 }

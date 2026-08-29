@@ -115,28 +115,69 @@ describe("assembleFeatureModules", () => {
     expect(paths.filter((p) => p === "/events/:eventId/tasks")).toHaveLength(1);
   });
 
-  it("builds nav sorted by shell-owned order (events first, admin last)", () => {
+  it("builds nav sorted by shell-owned order (events first)", () => {
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const labels = registry.nav.map((n) => n.path);
+    // イベント(order 10)を先頭に固定。
     expect(labels[0]).toBe("/events");
-    expect(labels.at(-1)).toBe("/admin/history");
     // every nav icon resolved to a valid IconName (no crash-on-unknown)
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("shows every admin tool (ロール管理 / ユーザー名簿 / メールアドレス管理 / 変更履歴) in nav", () => {
-    // 社長要望（#171 撤回）: 「アプリは絶対に減らすな」。ロール管理(/admin/roles)・
-    // ユーザー名簿(/admin/users) を含む全 admin ツールをランチャー/ナビに表示する。
+  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理 an independent tile; 変更履歴 gone", () => {
+    // 統合: 運営メンバー(member-service) + 名簿(FE7 /admin/users) + 参加届/回答(participation) を
+    // 1 タイル「運営メンバー・名簿」(/members) に合体し、共有サブナビ(MemberRosterNav)で横断する。
+    // ロール管理(/admin/roles) はそこから括り出して独立ランチャータイルに戻す。変更履歴(/admin/history)
+    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) は従前どおり未登録。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
+    // 統合アプリの単一タイル
+    expect(navPaths).toContain("/members");
+    const membersNav = registry.nav.find((n) => n.path === "/members");
+    expect(membersNav?.label).toBe("運営メンバー・名簿");
+    // ロール管理は独立タイルとして復活
+    expect(navPaths).toContain("/admin/roles");
+    const rolesNav = registry.nav.find((n) => n.path === "/admin/roles");
+    expect(rolesNav?.label).toBe("ロール管理");
+    expect(rolesNav?.appId).toBe("admin");
+    // 名簿/参加届/回答 は統合タイル内サブナビから開くので個別タイルは無い。変更履歴タイルは消滅。
+    expect(navPaths).not.toContain("/admin/users");
+    expect(navPaths).not.toContain("/admin/history");
+    expect(navPaths).not.toContain("/participation");
+    expect(navPaths).not.toContain("/participation/list");
+    expect(navPaths).not.toContain("/admin/email-routing");
+    // 他アプリは絶対に減らさない
     expect(navPaths).toEqual(
-      expect.arrayContaining(["/admin/users", "/admin/roles", "/admin/email-routing", "/admin/history"]),
+      expect.arrayContaining([
+        "/events",
+        "/me/tasks",
+        "/gantt",
+        "/notifications",
+        "/chat",
+        "/mail",
+        "/usage",
+        "/members",
+        "/driveshare",
+        "/admin/roles",
+      ]),
     );
-    // ルートも当然残る（deep-link 生存）
+    // admin/participation routes（名簿/ロール/参加届/回答）は保持（統合ナビ + deep-link 生存）。
+    // 変更履歴ルート(/admin/history) は撤去済みなので存在しないこと。
     const routePaths = registry.routes.map((r) => r.path);
-    expect(routePaths).toEqual(expect.arrayContaining(["/admin/users", "/admin/roles"]));
+    expect(routePaths).toEqual(
+      expect.arrayContaining([
+        "/admin/users",
+        "/admin/roles",
+        "/participation",
+        "/participation/list",
+        "/members",
+        "/events",
+        "/events/:eventId/tasks/gantt",
+      ]),
+    );
+    expect(routePaths).not.toContain("/admin/history");
   });
 
   it("carries badge sources through for notifications and chat", () => {
@@ -209,6 +250,62 @@ describe("app client adapters feed ApiClient.request", () => {
     const empty = await chat.resolveUsers([]);
     expect(empty).toEqual([]);
     expect(calls).toHaveLength(2); // no request for an empty batch
+  });
+
+  it("chat client unwraps the Paginated { items } envelope to an array (channels/unread/users)", async () => {
+    // Regression: the server returns common.Paginated<T> = { items, nextCursor } for
+    // channels/unread/users. Returning that object as-is made groupChannels drop it
+    // (non-array guard) → an empty sidebar despite /chat/channels 200. Must unwrap.
+    const envelope = {
+      "/api/v1/chat/channels": { items: [{ id: "c1", name: "general" }], nextCursor: null },
+      "/api/v1/chat/unread": { items: [{ channelId: "c1", unreadCount: 2 }] },
+      "/api/v1/identity/users": { items: [{ id: "u1" }, { id: "u2" }], nextCursor: null },
+    } as Record<string, unknown>;
+    const api = {
+      request: (<TRes,>(input: RequestInput): Promise<TRes> =>
+        Promise.resolve((envelope[input.path] ?? []) as TRes)),
+    } as unknown as ApiClient;
+    const chat = createChatApiClient(api);
+
+    const channels = await chat.listChannels();
+    expect(Array.isArray(channels)).toBe(true);
+    expect(channels).toHaveLength(1);
+    expect(channels[0]).toMatchObject({ id: "c1", name: "general" });
+
+    const unread = await chat.listUnread();
+    expect(Array.isArray(unread)).toBe(true);
+    expect(unread).toHaveLength(1);
+
+    const users = await chat.resolveUsers(["u1", "u2"] as never);
+    expect(Array.isArray(users)).toBe(true);
+    expect(users).toHaveLength(2);
+  });
+
+  it("toggleReaction normalizes the server's { messageId, reactions: Record } to Reaction[]", async () => {
+    const api = {
+      request: (<TRes,>(_input: RequestInput): Promise<TRes> =>
+        Promise.resolve({ messageId: "m1", reactions: { "\u{1F389}": ["u1", "u2"] } } as TRes)),
+    } as unknown as ApiClient;
+    const chat = createChatApiClient(api);
+    const res = await chat.toggleReaction("m1" as never, { emoji: "\u{1F389}" });
+    expect(res.messageId).toBe("m1");
+    expect(Array.isArray(res.reactions)).toBe(true);
+    expect(res.reactions).toEqual([{ emoji: "\u{1F389}", userIds: ["u1", "u2"] }]);
+  });
+
+  it("postMessage composes { message, clientTempId } from the server's bare Message", async () => {
+    // Regression: the server returns the created Message (bare). FE6's optimistic layer
+    // reconciles by { message, clientTempId } — if the adapter passes the bare Message
+    // through, res.clientTempId/res.message are undefined and the send shows
+    // "送信に失敗しました" despite a 201. The adapter must re-attach the sent clientTempId.
+    const serverMessage = { id: "m1", channelId: "c1", body: "hi", authorId: "u1" };
+    const api = {
+      request: (<TRes,>(_input: RequestInput): Promise<TRes> => Promise.resolve(serverMessage as TRes)),
+    } as unknown as ApiClient;
+    const chat = createChatApiClient(api);
+    const res = await chat.postMessage({ channelId: "c1" as never, body: "hi", clientTempId: "tmp-123" });
+    expect(res.clientTempId).toBe("tmp-123");
+    expect(res.message).toMatchObject({ id: "m1", body: "hi" });
   });
 });
 

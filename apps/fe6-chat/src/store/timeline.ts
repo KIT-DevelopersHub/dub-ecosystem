@@ -1,8 +1,55 @@
 // Pure timeline reducer — the heart of FE6. No React, no I/O; fully unit-tested.
 // Invariant: `messages` is ULID-ascending and deduped by id at all times.
 import type { common } from "@dub/types";
-import type { ChatRealtimeEvent, Message } from "../api/contract";
+import type { Attachment, ChatRealtimeEvent, Message, Reaction } from "../api/contract";
 import type { ChannelViewState, PendingMessage } from "../types";
+
+/**
+ * Coerce a message into the client Message contract. chat-service's wire Message uses
+ * `attachmentFileIds: string[]` + `reactions` as a `Record<emoji, userIds>` and omits
+ * `replyCount`, whereas the render layer (MessageItem) reads `attachments[].length`,
+ * `reactions[].length` and `replyCount`. Without this, a real server message crashes the
+ * app with "Cannot read properties of undefined (reading 'length')". upsertMessage is the
+ * single funnel for every server-sourced message into the timeline, so normalizing here
+ * covers list/post/edit/react/pin + RT. Idempotent: an already-client-shaped message
+ * (mock, RT-constructed, tests) passes through unchanged.
+ */
+/**
+ * Coerce a wire reaction value into the client Reaction[] contract. chat-service sends
+ * reactions as a `Record<emoji, userIds>` (on messages and in ReactionToggleResponse),
+ * whereas the client renders `Reaction[]` = { emoji, userIds }[]. Accepts either shape.
+ */
+export function reactionsFromWire(value: Reaction[] | Record<string, common.UserId[]> | undefined): Reaction[] {
+  if (Array.isArray(value)) return value;
+  return Object.entries(value ?? {}).map(([emoji, userIds]) => ({ emoji, userIds: userIds as common.UserId[] }));
+}
+
+export function normalizeMessage(m: Message): Message {
+  const wire = m as unknown as {
+    attachments?: Attachment[];
+    attachmentFileIds?: string[];
+    reactions?: Reaction[] | Record<string, common.UserId[]>;
+    replyCount?: number;
+    threadRootId?: common.MessageId | null;
+  };
+  const attachments: Attachment[] = Array.isArray(wire.attachments)
+    ? wire.attachments
+    : (wire.attachmentFileIds ?? []).map((fileId) => ({
+        fileId: fileId as common.FileId,
+        name: fileId,
+        mime: "",
+        size: 0,
+        url: null,
+      }));
+  const reactions: Reaction[] = reactionsFromWire(wire.reactions);
+  return {
+    ...m,
+    threadRootId: wire.threadRootId ?? null,
+    replyCount: typeof wire.replyCount === "number" ? wire.replyCount : 0,
+    reactions,
+    attachments,
+  };
+}
 
 /** Binary-search insert position for a ULID id in an ascending array. */
 function lowerBound(messages: Message[], id: string): number {
@@ -18,6 +65,7 @@ function lowerBound(messages: Message[], id: string): number {
 
 /** Insert or replace a message keeping ULID order. Returns a new array. */
 export function upsertMessage(messages: Message[], msg: Message): Message[] {
+  msg = normalizeMessage(msg);
   const at = lowerBound(messages, msg.id);
   const existing = messages[at];
   const next = messages.slice();
@@ -43,6 +91,16 @@ export function markDeleted(messages: Message[], id: common.MessageId, at: commo
   if (!existing || existing.id !== id) return messages;
   const next = messages.slice();
   next[idx] = { ...existing, deletedAt: at, body: "", attachments: [] };
+  return next;
+}
+
+/** Hard delete: drop a message from the timeline entirely (no tombstone remains). */
+export function removeMessage(messages: Message[], id: common.MessageId): Message[] {
+  const idx = lowerBound(messages, id);
+  const existing = messages[idx];
+  if (!existing || existing.id !== id) return messages;
+  const next = messages.slice();
+  next.splice(idx, 1);
   return next;
 }
 
@@ -77,7 +135,8 @@ export function discardPending(state: ChannelViewState, clientTempId: string): C
  * Apply a frozen ChatRealtimeEvent to the *currently viewed* channel.
  * - message.created: insert at ULID position; if it echoes one of my own pending
  *   sends (same author + identical body) drop that pending to prevent doubles.
- * - message.deleted: tombstone.
+ * - message.deleted: `hard` drops the row entirely; `tombstone` (or a legacy event
+ *   with no `mode`) redacts it in place. The mode is set server-side per the policy.
  * - member.added/removed: not a timeline mutation here (memberCount handled by the
  *   channel query); returned state is unchanged for those kinds.
  *
@@ -92,6 +151,17 @@ export function applyRealtimeEvent(
   if (event.channelId !== state.channelId) return state;
   switch (event.kind) {
     case "message.created": {
+      // A thread reply belongs in the thread pane, NOT the main timeline. Keep it out of
+      // the top-level list and instead bump the root message's reply count live so the
+      // "N 件の返信" summary updates without a reload.
+      if (event.threadRootId) {
+        const idx = lowerBound(state.messages, event.threadRootId);
+        const root = state.messages[idx];
+        if (!root || root.id !== event.threadRootId) return state;
+        const next = state.messages.slice();
+        next[idx] = { ...root, replyCount: root.replyCount + 1 };
+        return { ...state, messages: next };
+      }
       const echoed =
         event.authorId === currentUserId &&
         state.pending.find((p) => p.state !== "failed" && p.request.body === event.body);
@@ -115,7 +185,10 @@ export function applyRealtimeEvent(
       return { ...state, pending, messages: upsertMessage(state.messages, message) };
     }
     case "message.deleted":
-      return { ...state, messages: markDeleted(state.messages, event.messageId, event.at) };
+      // `hard` erases the row; `tombstone`/legacy(no mode) redacts it in place.
+      return event.mode === "hard"
+        ? { ...state, messages: removeMessage(state.messages, event.messageId) }
+        : { ...state, messages: markDeleted(state.messages, event.messageId, event.at) };
     case "member.added":
     case "member.removed":
       return state;
@@ -128,6 +201,21 @@ export function applyRealtimeEvent(
 }
 
 /** Toggle a reaction locally for optimistic UI (author-agnostic). */
+/**
+ * Replace a message's reactions with the server's authoritative set (from a reaction
+ * toggle's ReactionToggleResponse). Keeps the message otherwise intact — unlike
+ * upsertMessage, which expects a full Message and would corrupt the timeline with a
+ * partial `{ messageId, reactions }` payload. No-op if the message isn't loaded.
+ */
+export function applyReactions(messages: Message[], messageId: common.MessageId, reactions: Reaction[]): Message[] {
+  const idx = lowerBound(messages, messageId);
+  const m = messages[idx];
+  if (!m || m.id !== messageId) return messages;
+  const next = messages.slice();
+  next[idx] = { ...m, reactions };
+  return next;
+}
+
 export function toggleReactionLocal(
   messages: Message[],
   id: common.MessageId,

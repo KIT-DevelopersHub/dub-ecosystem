@@ -53,6 +53,10 @@ COOKIE_DOMAIN = ".developershub.jp"
 SESSION_ACCESS_TTL_SEC = "3600"
 SESSION_ABS_WEB_TTL_SEC = "2592000"
 SESSION_ABS_MOBILE_TTL_SEC = "15552000"
+# Grace window (s) where the pre-rotation token still resolves to its successor on
+# /auth/refresh. Absorbs concurrent refresh bursts (multi-tab loads / Promise.all
+# 401s) so a duplicate refresh returns the same new token instead of "Invalid token".
+SESSION_REFRESH_GRACE_SEC = "30"
 
 # Secrets (set via `wrangler secret put`, never committed):
 #   PASSWORD_ENC_KEY  — base64 of 32 random bytes (AES-256-GCM). Enables admin

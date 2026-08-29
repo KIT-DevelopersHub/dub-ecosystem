@@ -10,10 +10,10 @@
 // Edit/delete are gated by authorship + can("chat:moderate") (design §6).
 // Deleted messages render as a redacted tombstone. Test-ids preserved for units.
 import { useState } from "react";
-import { Avatar } from "@dub/ui";
+import { Avatar, Icon } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message } from "../api/contract";
-import { segmentBody } from "../lib/render-body";
+import { MessageBody } from "./MessageBody";
 import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
 import styles from "../styles/chat.module.css";
@@ -121,7 +121,7 @@ export function MessageItem({
             </button>
           ))}
           <button type="button" className={styles.hoverAction} aria-label="スレッドで返信" onClick={() => onReply?.(message)}>
-            💬
+            <Icon name="reply" size="sm" />
           </button>
           {onTogglePin && (
             <button
@@ -132,7 +132,7 @@ export function MessageItem({
               data-testid="fe6-timeline-pin"
               onClick={() => onTogglePin(message)}
             >
-              📌
+              <Icon name="pin" size="sm" />
             </button>
           )}
           {canEdit && (
@@ -143,7 +143,7 @@ export function MessageItem({
               data-testid="fe6-timeline-edit"
               onClick={startEdit}
             >
-              ✏️
+              <Icon name="edit" size="sm" />
             </button>
           )}
           {canDelete && (
@@ -154,7 +154,7 @@ export function MessageItem({
               data-testid="fe6-timeline-delete"
               onClick={() => onDelete?.(message)}
             >
-              🗑
+              <Icon name="trash" size="sm" />
             </button>
           )}
         </div>
@@ -222,54 +222,7 @@ export function MessageItem({
           </div>
         ) : (
           <div className={styles.textBody} data-testid="fe6-timeline-body">
-            {segmentBody(message.body).map((seg, i) => {
-              switch (seg.type) {
-                case "mention":
-                  return (
-                    <span key={i} className={styles.mention}>
-                      @{nameOf(seg.userId, resolveUser)}
-                    </span>
-                  );
-                case "code":
-                  return (
-                    <code key={i} className={styles.inlineCode}>
-                      {seg.value}
-                    </code>
-                  );
-                case "codeblock":
-                  return (
-                    <pre key={i} className={styles.codeBlock}>
-                      <code>{seg.value}</code>
-                    </pre>
-                  );
-                case "bold":
-                  return (
-                    <strong key={i} className={styles.mdBold}>
-                      {seg.value}
-                    </strong>
-                  );
-                case "italic":
-                  return (
-                    <em key={i} className={styles.mdItalic}>
-                      {seg.value}
-                    </em>
-                  );
-                case "strike":
-                  return (
-                    <s key={i} className={styles.mdStrike}>
-                      {seg.value}
-                    </s>
-                  );
-                case "link":
-                  return (
-                    <a key={i} className={styles.mdLink} href={seg.href} target="_blank" rel="noreferrer">
-                      {seg.label}
-                    </a>
-                  );
-                default:
-                  return <span key={i}>{seg.value}</span>;
-              }
-            })}
+            <MessageBody body={message.body} resolveUser={resolveUser} />
             {grouped && message.editedAt && <span className={styles.editedTag}> (編集済み)</span>}
           </div>
         )}
@@ -306,7 +259,7 @@ export function MessageItem({
         {!isDeleted && !editing && message.replyCount > 0 && (
           <button type="button" className={styles.threadSummary} onClick={() => onOpenThread?.(message)}>
             <span className={styles.threadFaces} aria-hidden>
-              <span className={styles.threadFace} style={{ background: "#4a154b" }}>
+              <span className={styles.threadFace} style={{ background: "var(--dub-color-brand-600)" }}>
                 {initials(authorName)}
               </span>
             </span>

@@ -9,7 +9,7 @@ import { makeDeps, renderWithDeps } from "./helpers";
 describe("NotificationInboxPage", () => {
   it("renders the seeded inbox with unread dots (test 1)", async () => {
     const { deps } = makeDeps();
-    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
     await screen.findByTestId("fe5-inbox-list");
     expect(screen.getByTestId("fe5-inbox-item-notif_0001")).toHaveAttribute("data-unread", "true");
     // seed has 3 unread items -> 3 dots
@@ -19,7 +19,7 @@ describe("NotificationInboxPage", () => {
   it("LoadMore appends the next page and stops at the end (test 2)", async () => {
     const { deps } = makeDeps();
     renderWithDeps(
-      <NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} pageSize={2} />,
+      <NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} pageSize={2} />,
       deps,
     );
     await screen.findByTestId("fe5-inbox-list");
@@ -35,7 +35,7 @@ describe("NotificationInboxPage", () => {
 
   it("unread-only filter refetches and syncs the URL (test 3)", async () => {
     const { deps } = makeDeps();
-    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
     await screen.findByTestId("fe5-inbox-list");
     const user = userEvent.setup();
     await user.click(screen.getByTestId("fe5-inbox-unreadtoggle"));
@@ -50,7 +50,7 @@ describe("NotificationInboxPage", () => {
   it("clicking an unread item optimistically marks read + navigates (tests 4,8)", async () => {
     const { deps, harness } = makeDeps();
     useUnreadStore.setState({ count: 3, initialized: true });
-    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
     await screen.findByTestId("fe5-inbox-list");
     const user = userEvent.setup();
     await user.click(screen.getByTestId("fe5-inbox-item-notif_0001"));
@@ -68,7 +68,7 @@ describe("NotificationInboxPage", () => {
         error: new MockApiError("NOTIF_INBOX_ITEM_NOT_FOUND", 404, "gone"),
       },
     });
-    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
     await screen.findByTestId("fe5-inbox-list");
     const user = userEvent.setup();
     await user.click(screen.getByTestId("fe5-inbox-item-notif_0001"));
@@ -83,7 +83,7 @@ describe("NotificationInboxPage", () => {
       failNext: { pathIncludes: "/read", error: new MockApiError("INTERNAL", 500, "boom", true) },
     });
     useUnreadStore.setState({ count: 3, initialized: true });
-    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
     await screen.findByTestId("fe5-inbox-list");
     const user = userEvent.setup();
     await user.click(screen.getByTestId("fe5-inbox-item-notif_0001"));
@@ -97,7 +97,7 @@ describe("NotificationInboxPage", () => {
 
   it("mark-all-read with a type filter only clears that group (test 7)", async () => {
     const { deps, harness } = makeDeps();
-    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "task." }} />, deps);
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "task." }} />, deps);
     await screen.findByTestId("fe5-inbox-list");
     const user = userEvent.setup();
     await user.click(screen.getByTestId("fe5-inbox-markall"));
@@ -109,9 +109,44 @@ describe("NotificationInboxPage", () => {
     expect(remainingUnread.every((i) => !i.type.startsWith("task."))).toBe(true);
   });
 
+  it("category tabs filter the list to their category (genre shown by tabs, not a per-card tag)", async () => {
+    const { deps } = makeDeps();
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
+    await screen.findByTestId("fe5-inbox-list");
+    const list = () => screen.getByTestId("fe5-inbox-list");
+    const user = userEvent.setup();
+
+    // メール tab -> only the mail item; genre is conveyed by the active tab + URL.
+    await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-mail"));
+    await waitFor(() => {
+      const rows = within(list()).getAllByRole("listitem");
+      expect(rows).toHaveLength(1);
+    });
+    expect(window.location.search).toContain("cat=mail");
+
+    // 参加届 tab -> only the participation item.
+    await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-participation"));
+    await waitFor(() => {
+      expect(within(list()).getAllByRole("listitem")).toHaveLength(1);
+    });
+    expect(window.location.search).toContain("cat=participation");
+
+    // アプリアップデート tab -> the two release items.
+    await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-app_update"));
+    await waitFor(() => {
+      expect(within(list()).getAllByRole("listitem")).toHaveLength(2);
+    });
+
+    // Back to すべて (All) -> everything is visible again (8 member-audience items).
+    await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-all"));
+    await waitFor(() => {
+      expect(within(list()).getAllByRole("listitem").length).toBeGreaterThan(2);
+    });
+  });
+
   it("shows an empty state when there are no notifications (test 14)", async () => {
     const { deps } = makeDeps({ items: [] });
-    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, type: "" }} />, deps);
+    renderWithDeps(<NotificationInboxPage initialFilter={{ unreadOnly: false, category: "all", type: "" }} />, deps);
     expect(await screen.findByTestId("fe5-inbox-empty")).toBeInTheDocument();
   });
 });

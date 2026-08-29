@@ -3,7 +3,33 @@
 //   ② Mailbox/Watch types: STUB pending 9-B.
 // Mail policy (判断46/50): inbound = Cloudflare Email Routing -> Worker (self-built
 // app); outbound = managed provider (SES暫定). Header stubs only in foundation.
-import type { ISODateTime } from "./common";
+import type { ISODateTime, CursorQuery } from "./common";
+
+// ---- query contract (GET /messages, GET /sent — same shape) ----
+export interface ListMailMessagesQuery extends CursorQuery {
+  threadId?: string;
+}
+
+// ── Wire contract (query params) ─────────────────────────────────────────────
+// SINGLE source of truth for the query-parameter *names* mail-gateway's messages list
+// endpoint puts on the wire. The server (mail-gateway validation.ts parseListMessagesQuery)
+// and the OpenAPI spec (docs/openapi/mail-gateway.yaml) are reconciled against this map in
+// CI (see @dub/e2e-smoke wire-params.test.ts). The Sent-folder GET (/sent) uses the SAME
+// parser, so its cursor/limit/threadId keys are covered by this same entry (it is not
+// separately spec'd — documenting it is a noted follow-up). See
+// docs/api-contracts/_wire-contract-enforcement.md.
+export const MAIL_WIRE = {
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "limit", "threadId"] },
+} as const;
+
+// Compile-time tie: every query key the descriptor lists must be a real key of the typed
+// query interface, so the descriptor and the type can never silently drift.
+type _MailWireKeysAreTyped =
+  (typeof MAIL_WIRE)[keyof typeof MAIL_WIRE]["query"][number] extends keyof ListMailMessagesQuery
+    ? true
+    : never;
+const _mailWireKeyGuard: _MailWireKeysAreTyped = true;
+void _mailWireKeyGuard;
 
 // ---- ① frozen ----
 export interface MailAddress {
@@ -136,18 +162,23 @@ export interface MailSentDetail extends MailSentListItem {
 // ---- ⑤ per-user thread flags (改善#8; ADDITIVE — frozen ① untouched) ----
 // Star / archive / trash persisted server-side, per user + per thread, so they survive a
 // reload (previously in-memory only). A thread with no stored row is all-false (default).
-/** One thread's flag state for the signed-in user. */
+/** One thread's flag state for the signed-in user. `purged` (完全に削除) is Gmail's
+ *  "permanently delete from MY mailbox": a per-user, one-way view state (no restore) that
+ *  hides the conversation from every folder for this viewer only — the row/body is NEVER
+ *  physically deleted, so other accounts (and admins) still see it. */
 export interface MailThreadFlags {
   threadId: string;
   starred: boolean;
   archived: boolean;
   trashed: boolean;
+  purged: boolean;
 }
 /** Partial flag update (PATCH-style): only the provided flags change. */
 export interface MailThreadFlagsPatch {
   starred?: boolean;
   archived?: boolean;
   trashed?: boolean;
+  purged?: boolean;
 }
 
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----

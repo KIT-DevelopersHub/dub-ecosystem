@@ -206,19 +206,20 @@ describe("feedback -> in-app admin notifications", () => {
     expect(res.status).toBe(201);
     const out = (await res.json()) as notification.CreateFeedbackResponse;
 
-    // one unread inbox item for each admin + maintainer user
-    expect(await unreadCount(h.db, "usr_admin1")).toBe(1);
-    expect(await unreadCount(h.db, "usr_admin2")).toBe(1);
-    expect(await unreadCount(h.db, "usr_maint1")).toBe(1);
+    // one unread inbox item for each admin + maintainer user (feedback is audience='admin'
+    // -> counted with the admin-viewer flag; members would never see it).
+    expect(await unreadCount(h.db, "usr_admin1", true)).toBe(1);
+    expect(await unreadCount(h.db, "usr_admin2", true)).toBe(1);
+    expect(await unreadCount(h.db, "usr_maint1", true)).toBe(1);
     // member role is never queried -> no notification; the submitter gets none either
-    expect(await unreadCount(h.db, "usr_member1")).toBe(0);
-    expect(await unreadCount(h.db, "usr_alice")).toBe(0);
+    expect(await unreadCount(h.db, "usr_member1", true)).toBe(0);
+    expect(await unreadCount(h.db, "usr_alice", true)).toBe(0);
 
     // only the admin + maintainer roles were expanded
     expect(identity.roleCalls.sort()).toEqual([ADMIN_ROLE, MAINTAINER_ROLE].sort());
 
     // the inbox item is typed + deep-links back to the feedback record
-    const inbox = await listInbox(h.db, "usr_admin1", { limit: 10 });
+    const inbox = await listInbox(h.db, "usr_admin1", { limit: 10 }, true);
     expect(inbox.items).toHaveLength(1);
     expect(inbox.items[0]).toMatchObject({ type: "feedback", resourceType: "feedback", resourceId: out.id });
     expect(inbox.items[0]!.title).toContain("検索が遅い");
@@ -257,8 +258,9 @@ describe("feedback -> in-app admin notifications", () => {
     expect(second).toBe(true);
 
     // dedupKey (feedback:<id>) makes the second ingest a no-op -> still one row each
-    expect(await unreadCount(h.db, "usr_admin1")).toBe(1);
-    expect(await unreadCount(h.db, "usr_maint1")).toBe(1);
+    // (feedback is audience='admin' -> counted with the admin-viewer flag).
+    expect(await unreadCount(h.db, "usr_admin1", true)).toBe(1);
+    expect(await unreadCount(h.db, "usr_maint1", true)).toBe(1);
   });
 
   it("buildFeedbackNotifyInput: in_app only, role-targeted, feedback-scoped dedupKey", () => {

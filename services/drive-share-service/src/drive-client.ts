@@ -62,6 +62,11 @@ interface GooglePermissionResource {
   emailAddress?: string;
   displayName?: string;
   domain?: string;
+  /** Present only when requested via the field mask (and populated by Drive for items
+   *  that inherit permissions from an ancestor folder / shared drive). Each entry is a
+   *  source of the effective permission; `inherited=true` means it comes from an
+   *  ancestor and cannot be edited/removed on this item. */
+  permissionDetails?: { inherited?: boolean }[];
 }
 
 const ROLES: ReadonlySet<string> = new Set(["reader", "commenter", "writer", "owner"]);
@@ -89,6 +94,12 @@ export function mapFile(f: GoogleFileResource): DriveFile {
 }
 
 export function mapPermission(p: GooglePermissionResource): SharePermission {
+  // A permission is "inherited" (and thus not deletable/editable on this item) only
+  // when EVERY permissionDetails source is inherited. If any source is direct
+  // (inherited=false) the grant is present on this item and can be modified — e.g. the
+  // owner row carries both an inherited `writer` detail and a direct `owner` detail.
+  const details = p.permissionDetails ?? [];
+  const inherited = details.length > 0 && details.every((d) => d.inherited === true);
   return {
     id: p.id ?? "",
     type: asType(p.type),
@@ -96,7 +107,35 @@ export function mapPermission(p: GooglePermissionResource): SharePermission {
     emailAddress: p.emailAddress ?? null,
     displayName: p.displayName ?? null,
     domain: p.domain ?? null,
+    inherited,
   };
+}
+
+// Well-known Drive 403 `reason` strings → user-facing Japanese. Anything not listed
+// falls back to a generic (reason-tagged) message so the cause is never fully hidden.
+const FORBIDDEN_REASON_JA: Record<string, string> = {
+  cannotDeletePermission:
+    "この権限は親フォルダから継承されているため、このファイル単体では剥奪できません。親フォルダの共有設定で操作してください。",
+  cannotModifyInheritedPermission:
+    "この権限は親フォルダから継承されているため、このファイル単体では変更できません。親フォルダの共有設定で操作してください。",
+  insufficientFilePermissions:
+    "この操作を行う権限がありません（このファイルのオーナーではありません）。",
+  cannotRemoveOwnerPermission: "オーナー権限は剥奪できません。",
+  cannotModifyOwnerPermission: "オーナー権限は変更できません。",
+};
+
+// Well-known Drive 400 `reason` strings → user-facing Japanese. `invalidSharingRequest`
+// is what Drive returns for an email that has no Google account or is otherwise
+// un-shareable; `invalid` for a malformed address.
+const BAD_REQUEST_REASON_JA: Record<string, string> = {
+  invalidSharingRequest:
+    "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。",
+  invalid: "メールアドレスの形式が正しくないため共有できませんでした。",
+};
+
+/** The user-facing Japanese for a bad-request reason (falls back to a generic line). */
+export function badRequestReasonJa(reason: string | undefined): string {
+  return (reason && BAD_REQUEST_REASON_JA[reason]) ?? "Drive にリクエストが拒否されました。";
 }
 
 /** Convert a non-2xx Google Drive response into a DubError (no raw Google leak). */
@@ -104,12 +143,19 @@ export function mapGoogleError(status: number, body: unknown, retryAfterSec?: nu
   const reason = extractGoogleReason(body);
   switch (status) {
     case 400:
-      return errors.validationFailed([{ field: "request", reason: reason ?? "invalid_request" }], "Drive rejected the request");
+      // Surface a clear Japanese cause (esp. invalidSharingRequest = no Google account)
+      // instead of the opaque "Drive rejected the request".
+      return errors.validationFailed([{ field: "request", reason: reason ?? "invalid_request" }], badRequestReasonJa(reason));
     case 401:
       return errors.upstreamUnavailable("google:auth");
-    case 403:
-      // insufficient scope / not the owner / sharing policy — surface as forbidden.
-      return errors.forbidden(`Drive denied the operation${reason ? `: ${reason}` : ""}`);
+    case 403: {
+      // insufficient scope / not the owner / inherited permission / sharing policy.
+      // Translate the well-known Drive reasons into a message the manager can show as-is
+      // (Japanese) instead of leaking the raw reason string to the user.
+      const ja = reason ? FORBIDDEN_REASON_JA[reason] : undefined;
+      if (ja) return errors.forbidden(ja);
+      return errors.forbidden(`Drive で操作が拒否されました${reason ? `（${reason}）` : ""}`);
+    }
     case 404:
       return errors.notFound("driveResource");
     case 429:

@@ -1,0 +1,12 @@
+/* Filter bar: category tabs stacked above the unread-only toggle. Without an
+   explicit gap the toggle sat flush against the tab row (no breathing room),
+   which read as broken on narrow (mobile) widths. Space them with a token. */
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.unreadRow {
+  display: flex;
+  align-items: center;
+}

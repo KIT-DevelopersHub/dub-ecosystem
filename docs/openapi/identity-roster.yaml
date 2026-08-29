@@ -71,7 +71,13 @@ paths:
             $ref: '#/components/schemas/UserStatus'
         - name: role
           in: query
-          description: Filter to users holding this roleId (any scope). Alias 'roleKey' is also accepted.
+          description: Canonical filter — users holding this roleId (any scope).
+          schema:
+            type: string
+        - name: roleKey
+          in: query
+          deprecated: true
+          description: Deprecated alias of `role` (FE7's original spelling). Still accepted by the server (`role ?? roleKey`); new callers must use `role`.
           schema:
             type: string
         - name: q

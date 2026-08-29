@@ -86,8 +86,8 @@ export function PageHeader({ title, description, actions, breadcrumbs, testId }:
   return (
     <header className={cx(styles.pageHeader)} data-testid={testId}>
       {breadcrumbs && <div className={cx(styles.breadcrumbs)}>{breadcrumbs}</div>}
-      <div className={cx(styles.pageHeaderRow)}>
-        <div>
+      <div className={cx(styles.pageHeaderRow)} data-testid="dub-page-header-row">
+        <div className={cx(styles.pageHeaderTitleGroup)}>
           <h1 className={cx(styles.pageTitle)}>{title}</h1>
           {description && <p className={cx(styles.pageDescription)}>{description}</p>}
         </div>

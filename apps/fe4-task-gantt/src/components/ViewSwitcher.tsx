@@ -1,28 +1,26 @@
-import styles from "../styles/app.module.css";
+import { SegmentedControl } from "@dub/ui";
+import type { SegmentedOption } from "@dub/ui";
 
 export type TaskView = "list" | "board" | "gantt";
 
-const VIEWS: { key: TaskView; label: string }[] = [
-  { key: "list", label: "一覧" },
-  { key: "board", label: "ボード" },
-  { key: "gantt", label: "ガント" },
+// List / board / gantt switch, built on the shared @dub/ui SegmentedControl
+// (sliding-pill selector) instead of a hand-rolled tablist — see
+// docs/segmented-control-unification.md. A thin wrapper keeps the TaskView-typed
+// value + onChange and the fe4-view-* testids that callers/tests rely on.
+const OPTIONS: SegmentedOption<TaskView>[] = [
+  { value: "list", label: "一覧", testId: "fe4-view-list" },
+  { value: "board", label: "ボード", testId: "fe4-view-board" },
+  { value: "gantt", label: "ガント", testId: "fe4-view-gantt" },
 ];
 
 export function ViewSwitcher({ value, onChange }: { value: TaskView; onChange: (v: TaskView) => void }) {
   return (
-    <div className={styles.switcher} role="tablist" data-testid="fe4-view-switcher">
-      {VIEWS.map((v) => (
-        <button
-          key={v.key}
-          role="tab"
-          aria-selected={value === v.key}
-          className={`${styles.switcherBtn} ${value === v.key ? styles.switcherBtnActive : ""}`}
-          onClick={() => onChange(v.key)}
-          data-testid={`fe4-view-${v.key}`}
-        >
-          {v.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      options={OPTIONS}
+      value={value}
+      onChange={onChange}
+      aria-label="表示切替"
+      testId="fe4-view-switcher"
+    />
   );
 }

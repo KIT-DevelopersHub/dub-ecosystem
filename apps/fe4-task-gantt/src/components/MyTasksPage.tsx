@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, resolveUsers } from "../api/endpoints";
+import { listTasks, createTask, resolveUsers, createTaskAttachment } from "../api/endpoints";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
   type MyTasksFilter,
@@ -67,7 +67,9 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const effectiveEvents = useMemo<readonly EventOption[]>(() => {
     if (events.length > 0) return events;
     const seen = new Map<common.EventId, EventOption>();
-    for (const t of tasks) if (!seen.has(t.eventId)) seen.set(t.eventId, { id: t.eventId, name: t.eventId });
+    for (const t of tasks) {
+      if (t.eventId && !seen.has(t.eventId)) seen.set(t.eventId, { id: t.eventId, name: t.eventId });
+    }
     return [...seen.values()];
   }, [events, tasks]);
   const currentUserName = useMemo(
@@ -115,7 +117,12 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   // the row click itself now opens the dialog (feedback #2), so this no longer
   // fires on every click and the two behaviors don't conflict.
   const openWorkspace = (t: task.Task) => {
-    if (typeof window !== "undefined") window.location.assign(`/events/${t.eventId}/tasks/${t.id}`);
+    // The ガント workspace is event-scoped (FE3 owns /events/:eventId). An unlinked
+    // task (判断44) has no event workspace, so this escape hatch only applies when the
+    // task is linked; the detail dialog already shows everything for unlinked tasks.
+    if (t.eventId && typeof window !== "undefined") {
+      window.location.assign(`/events/${t.eventId}/tasks/${t.id}`);
+    }
   };
 
   const onCreate = async (draft: MyTaskDraft) => {
@@ -144,7 +151,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     if (belongs) setTasks((prev) => [optimistic, ...prev]);
     try {
       const created = await createTask(client, {
-        eventId: draft.eventId,
+        ...(draft.eventId ? { eventId: draft.eventId } : {}),
         title: draft.title,
         ...(draft.description !== null ? { description: draft.description } : {}),
         priority: draft.priority,
@@ -152,6 +159,31 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
       });
+      // Persist attachments after the task exists (they need its real id). Best-effort:
+      // a failed attachment must not undo an already-created task.
+      const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
+      if (attachCount > 0) {
+        try {
+          for (const f of draft.attachments.files) {
+            await createTaskAttachment(client, created.id, {
+              kind: "file",
+              name: f.name,
+              url: f.url,
+              mimeType: f.mimeType,
+              sizeBytes: f.sizeBytes,
+            });
+          }
+          for (const u of draft.attachments.urls) {
+            await createTaskAttachment(client, created.id, { kind: "url", name: u.name, url: u.url });
+          }
+        } catch {
+          toast.show({
+            kind: "error",
+            title: "一部の添付を保存できませんでした",
+            description: "タスクは作成済みです。詳細から再度添付できます。",
+          });
+        }
+      }
       // reconcile the temp row with the server task (or drop it if out of lens).
       setTasks((prev) => {
         const withoutTemp = prev.filter((t) => t.id !== tempId);
@@ -172,7 +204,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           <h1 className={styles.myTitle}>マイタスク</h1>
           <p className={styles.mySubtitle}>自分に関わるタスクを、誰から誰へかが分かる一覧で管理できます。</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open" disabled={effectiveEvents.length === 0}>
+        <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open">
           ＋ タスクを発行
         </Button>
       </header>

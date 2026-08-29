@@ -1,0 +1,13 @@
+-- namespace: task | owner: task-service (#5).
+-- Planned start (開始日) for the gantt read model (北陸ITカンファレンス ガント / PR-C).
+--
+-- task_tasks previously stored only `due_at` (the deadline). The gantt bar was
+-- therefore *derived* (dueAt - durationByPriority) or CPM-scheduled, so a task with
+-- no due date rendered NO bar and could not be an endpoint of a dependency arrow.
+-- This one additive, nullable column lets a task carry a real start; when both
+-- start_at and due_at are set the gantt bar spans exactly [start_at, due_at].
+--
+-- NON-DESTRUCTIVE / additive: existing rows are untouched (start_at defaults NULL);
+-- the frozen CRUD paths keep working. ADD COLUMN is not re-runnable (it errors if the
+-- column exists), so this migration is applied exactly once via the migration ledger.
+ALTER TABLE task_tasks ADD COLUMN start_at TEXT;

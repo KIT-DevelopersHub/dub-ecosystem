@@ -16,11 +16,11 @@
 //   revoke (DELETE): delete ONLY the permissions we created, and only when no OTHER
 //     grant on the same file still needs that email; then drop the grant + ledger.
 //   reapply (reconcile): apply + remove departed members' permissions (our-only, guarded).
-import { errors } from "@dub/errors";
+import { DubError, errors } from "@dub/errors";
 import type { DriveShareClient } from "./drive-client";
 import type { GrantMemberRow, GrantRow, RoleGrantStore } from "./role-grants-store";
 import type { RoleMembership } from "./role-membership";
-import type { AssignableDriveRole, RoleFileGrant, SharePermission } from "./types";
+import type { AssignableDriveRole, InvitedMember, RoleFileGrant, SharePermission, SkippedMember } from "./types";
 
 const ASSIGNABLE: ReadonlySet<string> = new Set(["reader", "commenter", "writer"]);
 
@@ -67,12 +67,13 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
   }
 
   /** Reconcile the Drive permissions for a grant against its current role membership.
-   *  Returns the freshly computed member ledger (already persisted). */
+   *  Returns the freshly computed member ledger (already persisted) AND the members Drive
+   *  refused (partial success — one bad email never fails the whole role fan-out). */
   async function reconcile(
     grant: GrantRow,
     driveRole: AssignableDriveRole,
     opts: { removeDeparted: boolean },
-  ): Promise<GrantMemberRow[]> {
+  ): Promise<{ members: GrantMemberRow[]; skipped: SkippedMember[]; invited: InvitedMember[] }> {
     const prev = await store.listMembers(grant.id);
     const prevByEmail = new Map(prev.map((m) => [m.email, m]));
 
@@ -83,32 +84,50 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     const permByEmail = indexUserPermsByEmail(perms);
 
     const next: GrantMemberRow[] = [];
+    const skipped: SkippedMember[] = [];
+    const invited: InvitedMember[] = [];
+    // Per-member isolation: a member Drive refuses (bad/non-Google email) is recorded in
+    // `skipped` and the loop continues, so the rest of the role is still applied.
+    const reasonFor = (err: unknown): string =>
+      err instanceof DubError ? err.message : "共有できませんでした。";
+    // A create that only went through via the invite fallback (no Google account) is
+    // recorded so the operator learns the access is pending.
+    const noteInvited = (email: string, perm: SharePermission): void => {
+      if (perm.invited) invited.push({ email });
+    };
+
     for (const email of emails) {
       const previous = prevByEmail.get(email);
       const live = permByEmail.get(email);
 
-      if (previous && previous.createdByUs === 1) {
-        // We own this member's permission.
-        if (live && live.id === previous.permissionId) {
-          // Still ours — correct the role if it drifted (e.g. driveRole changed on upsert).
-          if (live.role !== driveRole) await drive.updatePermission(grant.fileId, live.id, driveRole);
-          next.push({ grantId: grant.id, email, permissionId: live.id, createdByUs: 1 });
+      try {
+        if (previous && previous.createdByUs === 1) {
+          // We own this member's permission.
+          if (live && live.id === previous.permissionId) {
+            // Still ours — correct the role if it drifted (e.g. driveRole changed on upsert).
+            if (live.role !== driveRole) await drive.updatePermission(grant.fileId, live.id, driveRole);
+            next.push({ grantId: grant.id, email, permissionId: live.id, createdByUs: 1 });
+          } else if (live) {
+            // Our recorded permission is gone but a (now pre-existing) one exists — respect it.
+            next.push({ grantId: grant.id, email, permissionId: live.id, createdByUs: 0 });
+          } else {
+            // Externally deleted — recreate ours.
+            const created = await drive.createPermission(grant.fileId, { type: "user", role: driveRole, emailAddress: email });
+            noteInvited(email, created);
+            next.push({ grantId: grant.id, email, permissionId: created.id, createdByUs: 1 });
+          }
         } else if (live) {
-          // Our recorded permission is gone but a (now pre-existing) one exists — respect it.
+          // Not previously ours and a permission already exists — pre-existing individual
+          // share. Record it (created_by_us=0) and NEVER modify it.
           next.push({ grantId: grant.id, email, permissionId: live.id, createdByUs: 0 });
         } else {
-          // Externally deleted — recreate ours.
+          // New member with no permission — create ours.
           const created = await drive.createPermission(grant.fileId, { type: "user", role: driveRole, emailAddress: email });
+          noteInvited(email, created);
           next.push({ grantId: grant.id, email, permissionId: created.id, createdByUs: 1 });
         }
-      } else if (live) {
-        // Not previously ours and a permission already exists — pre-existing individual
-        // share. Record it (created_by_us=0) and NEVER modify it.
-        next.push({ grantId: grant.id, email, permissionId: live.id, createdByUs: 0 });
-      } else {
-        // New member with no permission — create ours.
-        const created = await drive.createPermission(grant.fileId, { type: "user", role: driveRole, emailAddress: email });
-        next.push({ grantId: grant.id, email, permissionId: created.id, createdByUs: 1 });
+      } catch (err) {
+        skipped.push({ email, reason: reasonFor(err) });
       }
     }
 
@@ -125,10 +144,10 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     }
 
     await store.replaceMembers(grant.id, next);
-    return next;
+    return { members: next, skipped, invited };
   }
 
-  async function toRoleFileGrant(grant: GrantRow): Promise<RoleFileGrant> {
+  async function toRoleFileGrant(grant: GrantRow, extra?: { skipped?: SkippedMember[]; invited?: InvitedMember[] }): Promise<RoleFileGrant> {
     const [emails, members, roleName] = await Promise.all([
       roster.listActiveEmails(grant.roleId),
       store.listMembers(grant.id),
@@ -144,6 +163,8 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       appliedCount: members.length,
       grantedBy: grant.grantedBy,
       grantedAt: grant.grantedAt,
+      ...(extra?.skipped && extra.skipped.length > 0 ? { skipped: extra.skipped } : {}),
+      ...(extra?.invited && extra.invited.length > 0 ? { invited: extra.invited } : {}),
     };
   }
 
@@ -173,8 +194,8 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
         grantedAt: existing?.grantedAt ?? ts,
         updatedAt: ts,
       });
-      await reconcile(grant, driveRole, { removeDeparted: false });
-      return toRoleFileGrant(grant);
+      const { skipped, invited } = await reconcile(grant, driveRole, { removeDeparted: false });
+      return toRoleFileGrant(grant, { skipped, invited });
     },
 
     async revoke(fileId, roleId): Promise<void> {
@@ -196,8 +217,8 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       if (!grant) throw errors.notFound("driveRoleGrant", `${fileId}:${roleId}`);
       const ts = now();
       const updated = await store.upsertGrant({ ...grant, updatedAt: ts });
-      await reconcile(updated, updated.driveRole, { removeDeparted: true });
-      return toRoleFileGrant(updated);
+      const { skipped, invited } = await reconcile(updated, updated.driveRole, { removeDeparted: true });
+      return toRoleFileGrant(updated, { skipped, invited });
     },
   };
 }

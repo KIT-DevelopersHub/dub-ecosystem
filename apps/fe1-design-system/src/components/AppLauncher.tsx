@@ -74,7 +74,7 @@ export function AppLauncher({
         <WaffleGlyph />
       </button>
       {open && (
-        <div role="dialog" aria-label={title} id={panelId} className={cx(styles.panel)}>
+        <div role="dialog" aria-label={title} id={panelId} className={cx(styles.panel)} data-testid="dub-launcher-panel">
           <div className={cx(styles.panelTitle)}>{title}</div>
           <div className={cx(styles.grid)} role="menu">
             {items.map((item): ReactNode => (

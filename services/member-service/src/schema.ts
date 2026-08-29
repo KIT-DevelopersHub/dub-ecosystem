@@ -118,6 +118,72 @@ ALTER TABLE member_people ADD COLUMN gmail TEXT;
 `.trim(),
 };
 
+// 参加届: 氏名/振り仮名を 姓(last)/名(first) に分割 + 電話番号. Additive ALTER (non-
+// destructive): the legacy single `name` / `name_kana` columns are retained and kept
+// in sync by the app ("姓 名" composed into `name`), so every existing reader keeps
+// working. 姓/名 required at the app layer; 振り仮名/電話 optional. Nullable in DDL
+// (SQLite ADD COLUMN can't be NOT NULL without a default). Retained on member_people.
+export const MEMBER_PARTICIPATION_NAME_SPLIT_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0006_participation_name_split_phone",
+  up: `
+ALTER TABLE member_participations ADD COLUMN last_name TEXT;
+ALTER TABLE member_participations ADD COLUMN first_name TEXT;
+ALTER TABLE member_participations ADD COLUMN last_name_kana TEXT;
+ALTER TABLE member_participations ADD COLUMN first_name_kana TEXT;
+ALTER TABLE member_participations ADD COLUMN phone TEXT;
+ALTER TABLE member_people ADD COLUMN last_name TEXT;
+ALTER TABLE member_people ADD COLUMN first_name TEXT;
+ALTER TABLE member_people ADD COLUMN last_name_kana TEXT;
+ALTER TABLE member_people ADD COLUMN first_name_kana TEXT;
+ALTER TABLE member_people ADD COLUMN phone TEXT;
+`.trim(),
+};
+
+// 参加届: 氏名のローマ字(アルファベット)表記. Additive ALTER (non-destructive): 姓/名 を
+// ローマ字で別途保持し、アルファベットのメールアドレス発行 (例 first.last@) の候補生成に
+// 使う。任意フィールド (英字) で nullable. Retained on member_people too so the roster
+// keeps the alphabet name. Mirrors 0007_participation_romaji.sql (schema-lockstep).
+export const MEMBER_PARTICIPATION_ROMAJI_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0007_participation_romaji",
+  up: `
+ALTER TABLE member_participations ADD COLUMN last_name_romaji TEXT;
+ALTER TABLE member_participations ADD COLUMN first_name_romaji TEXT;
+ALTER TABLE member_people ADD COLUMN last_name_romaji TEXT;
+ALTER TABLE member_people ADD COLUMN first_name_romaji TEXT;
+`.trim(),
+};
+
+// 参加届: 管理者レビュー状態 (review_state). 名簿への反映を「提出時に自動」から
+// 「管理者が一覧で確定」へ変更 (B案) するための additive ALTER (non-destructive, 冪等).
+// 既存の自動反映済み行 (0007以前に提出され member_people へ反映済み) は review_state=
+// 'added' として後方互換を保つ (backfill)。以後の新規提出は app 層が 'pending' を書き、
+// 確定時に 'added'/'skipped' へ更新する。Mirrors 0008_participation_review_state.sql
+// (schema-lockstep). SQLite ADD COLUMN は NOT NULL 既定を付けられないため nullable。
+export const MEMBER_PARTICIPATION_REVIEW_STATE_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0008_participation_review_state",
+  up: `
+ALTER TABLE member_participations ADD COLUMN review_state TEXT;
+UPDATE member_participations SET review_state = 'added' WHERE review_state IS NULL;
+`.trim(),
+};
+
+// 参加届: 希望する活動(desired_activity) を名簿(member_people)にも保持する additive ALTER
+// (non-destructive)。0005〜0007 が 参加届 の各項目を member_people へミラーしたのと同じ流儀
+// で、唯一ミラーされていなかった desired_activity を足す。これにより本人が アカウント設定 →
+// 参加情報 で自分の 参加届 (希望活動 を含む) を自己 read/update でき、実DBへ往復保存できる。
+// SQLite ADD COLUMN は既定値を付けられないため nullable。Mirrors
+// 0009_person_desired_activity.sql (schema-lockstep).
+export const MEMBER_PERSON_DESIRED_ACTIVITY_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0009_person_desired_activity",
+  up: `
+ALTER TABLE member_people ADD COLUMN desired_activity TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -125,4 +191,8 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PERSON_COLS_MIGRATION,
   MEMBER_PARTICIPATION_MIGRATION,
   MEMBER_PARTICIPATION_EMAILS_MIGRATION,
+  MEMBER_PARTICIPATION_NAME_SPLIT_MIGRATION,
+  MEMBER_PARTICIPATION_ROMAJI_MIGRATION,
+  MEMBER_PARTICIPATION_REVIEW_STATE_MIGRATION,
+  MEMBER_PERSON_DESIRED_ACTIVITY_MIGRATION,
 ];

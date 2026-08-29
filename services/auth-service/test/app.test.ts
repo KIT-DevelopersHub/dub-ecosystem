@@ -66,6 +66,21 @@ describe("POST /auth/refresh", () => {
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_SESSION_REVOKED");
   });
+
+  it("duplicate refresh with the same cookie both return 200 (no spurious Invalid token)", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_1", "web");
+    const app = buildApp(h.deps);
+    const cookie = `dub_session=${created.token}`;
+    const first = await app.request("/auth/refresh", jsonInit({}, { cookie }));
+    // A second refresh still carrying the pre-rotation cookie (multi-tab / retry
+    // before the rotated Set-Cookie applied) must not 401.
+    const second = await app.request("/auth/refresh", jsonInit({}, { cookie }));
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect((await first.json() as { session?: unknown }).session).toBeTruthy();
+    expect((await second.json() as { session?: unknown }).session).toBeTruthy();
+  });
 });
 
 describe("POST /auth/logout", () => {
@@ -98,6 +113,38 @@ describe("POST /auth/test-login", () => {
     const res = await app.request("/auth/test-login", jsonInit({ userId: "usr_seed" }));
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_TEST_LOGIN_DISABLED");
+  });
+});
+
+// STAGING-ONLY one-click demo login. The route is REGISTERED only when DEMO_AUTOLOGIN=1,
+// so with the flag off (production) it does not exist at all (404) — no backdoor.
+describe("POST /auth/demo-login (staging-only)", () => {
+  it("mints a session for the fixed demo account (no password) when DEMO_AUTOLOGIN=1", async () => {
+    // Note: staging runs ENVIRONMENT=production, so the flag alone must enable it.
+    const h = makeHarness({ ENVIRONMENT: "production", DEMO_AUTOLOGIN: "1", DEMO_AUTOLOGIN_EMAIL: "demo-admin@developershub.jp" });
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({}));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { token: string; session: { userId: string } };
+    expect(body.token).toBeTruthy();
+    expect(res.headers.get("set-cookie")).toContain("dub_session=");
+    // it resolved via the roster allowlist for the configured demo email
+    expect(h.identity.lookupCalls).toContain("demo-admin@developershub.jp");
+  });
+
+  it("does NOT exist (404) when DEMO_AUTOLOGIN is unset — production has no backdoor", async () => {
+    const h = makeHarness({ ENVIRONMENT: "production" }); // DEMO_AUTOLOGIN not set
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({}));
+    expect(res.status).toBe(404);
+  });
+
+  it("still rejects when the demo account is not an active roster user", async () => {
+    const h = makeHarness({ DEMO_AUTOLOGIN: "1" });
+    h.identity.lookupUser = null; // demo email not on the allowlist
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({}));
+    expect(res.status).toBe(403);
   });
 });
 

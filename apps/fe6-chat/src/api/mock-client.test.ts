@@ -79,11 +79,23 @@ describe("MockChatClient", () => {
     expect(ok.editedAt).not.toBeNull();
   });
 
-  it("tombstones on delete", async () => {
+  it("hard-erases on delete under the default policy (no tombstone left)", async () => {
     const posted = await api.postMessage({ channelId: GENERAL, body: "del me", clientTempId: "d1" });
     const deleted = await api.deleteMessage(posted.message.id);
-    expect(deleted.deletedAt).not.toBeNull();
-    expect(deleted.body).toBe("");
+    expect(deleted.mode).toBe("hard");
+    expect(deleted.message).toBeNull();
+    // gone from the channel listing entirely
+    const list = await api.listMessages({ channelId: GENERAL });
+    expect(list.items.find((m) => m.id === posted.message.id)).toBeUndefined();
+  });
+
+  it("tombstones on delete when the policy is switched to tombstone", async () => {
+    api.setDeletionPolicy({ member: "tombstone", moderator: "tombstone" });
+    const posted = await api.postMessage({ channelId: GENERAL, body: "del me", clientTempId: "d2" });
+    const deleted = await api.deleteMessage(posted.message.id);
+    expect(deleted.mode).toBe("tombstone");
+    expect(deleted.message?.deletedAt).not.toBeNull();
+    expect(deleted.message?.body).toBe("");
   });
 
   it("caps resolveUsers batch at 50 and falls back to id for unknowns", async () => {

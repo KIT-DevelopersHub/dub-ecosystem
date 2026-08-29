@@ -1,8 +1,10 @@
 // Typed thin wrappers over the FE2 ApiClient. Every call is expressed against
 // `@dub/types` and mounted under the frozen `/api/v1` prefix (common.API_PREFIX).
-// task uses `eventId`; gantt uses `event` (design §2-3 — kept per each owner's
-// contract,取り違え防止 is the client path/type surface).
-import type { task, gantt, identity, event, common, team } from "@dub/types";
+// Query-parameter names come from the @dub/types wire contract (e.g. gantt.GetGanttQuery,
+// task.ListTasksQuery) — NEVER hand-renamed here. gantt uses `eventId`, same as task:
+// the old `?event=` here silently disagreed with the server's `?eventId=` and shipped a
+// prod "Validation failed". A contract-conformance test now reconciles these keys in CI.
+import type { task, gantt, identity, event, common, team, member } from "@dub/types";
 import type { ApiClient, ApiPath } from "../contracts/spa-shell";
 
 const P = "/api/v1"; // === common.API_PREFIX (kept literal for ApiPath template)
@@ -45,33 +47,80 @@ export function deleteTask(client: ApiClient, id: common.TaskId): Promise<void> 
   return client.request<void>({ method: "DELETE", path: `${P}/tasks/${id}` as ApiPath });
 }
 
+// ---- task attachments (task-service; task_attachments) ----
+export function listTaskAttachments(
+  client: ApiClient,
+  taskId: common.TaskId,
+): Promise<task.ListTaskAttachmentsResponse> {
+  return client.request<task.ListTaskAttachmentsResponse>({
+    method: "GET",
+    path: `${P}/tasks/${taskId}/attachments` as ApiPath,
+  });
+}
+
+export function createTaskAttachment(
+  client: ApiClient,
+  taskId: common.TaskId,
+  body: task.CreateTaskAttachmentRequest,
+): Promise<task.TaskAttachment> {
+  return client.request<task.TaskAttachment>({
+    method: "POST",
+    path: `${P}/tasks/${taskId}/attachments` as ApiPath,
+    body,
+  });
+}
+
+export function deleteTaskAttachment(
+  client: ApiClient,
+  taskId: common.TaskId,
+  attachmentId: string,
+): Promise<void> {
+  return client.request<void>({
+    method: "DELETE",
+    path: `${P}/tasks/${taskId}/attachments/${attachmentId}` as ApiPath,
+  });
+}
+
+/** Wire response of PUT /tasks/:id/dependencies. The server returns ONLY this
+ *  (NOT a full task.Task) — it bumps the task's version internally but does not
+ *  echo it back, so callers must NOT read `.version` here and should re-fetch the
+ *  task (getTask) when a fresh version is needed for a chained write. */
+export interface ReplaceDependenciesResult {
+  taskId: common.TaskId;
+  dependsOnIds: common.TaskId[];
+}
+
 export function replaceDependencies(
   client: ApiClient,
   id: common.TaskId,
   body: task.ReplaceDependenciesRequest,
-): Promise<task.Task> {
-  return client.request<task.Task>({
+): Promise<ReplaceDependenciesResult> {
+  return client.request<ReplaceDependenciesResult>({
     method: "PUT",
     path: `${P}/tasks/${id}/dependencies` as ApiPath,
     body,
   });
 }
 
-// ---- gantt-service (read-only; `?event=`) ----
+// ---- gantt-service (read-only; query key from gantt.GetGanttQuery = `eventId`) ----
+// Build the query object AS the typed contract so its keys are the SoT field names; a
+// renamed key (the old `event`) can no longer be introduced without a type error here.
 export function getGantt(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttChartDTO> {
   // edit直後の再取得はキャッシュをバイパス (design §2-2 / test 6)
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttChartDTO>({
     method: "GET",
     path: `${P}/gantt`,
-    query: { event: eventId },
+    query: { ...query },
   });
 }
 
 export function getGanttFresh(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttChartDTO> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttChartDTO>({
     method: "GET",
     path: `${P}/gantt`,
-    query: { event: eventId },
+    query: { ...query },
     headers: { "Cache-Control": "no-cache" },
   });
 }
@@ -93,18 +142,20 @@ export function getGanttDependencies(
   client: ApiClient,
   eventId: common.EventId,
 ): Promise<gantt.GanttDependencyLine[]> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttDependencyLine[]>({
     method: "GET",
     path: `${P}/gantt/dependencies`,
-    query: { event: eventId },
+    query: { ...query },
   });
 }
 
 export function getGanttView(client: ApiClient, eventId: common.EventId): Promise<gantt.GanttViewState> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttViewState>({
     method: "GET",
     path: `${P}/gantt/views`,
-    query: { event: eventId },
+    query: { ...query },
   });
 }
 
@@ -113,18 +164,42 @@ export function putGanttView(
   eventId: common.EventId,
   body: gantt.PutGanttViewRequest,
 ): Promise<gantt.GanttViewState> {
+  const query: gantt.GetGanttQuery = { eventId };
   return client.request<gantt.GanttViewState>({
     method: "PUT",
     path: `${P}/gantt/views`,
-    query: { event: eventId },
+    query: { ...query },
     body,
   });
 }
 
 // ---- teams (canonical team.Team). Single fetch source: swap this to the
 //      member-service team list API later without touching consumers. ----
-export function listTeams(client: ApiClient): Promise<team.ListTeamsResponse> {
-  return client.request<team.ListTeamsResponse>({ method: "GET", path: `${P}/teams` });
+export function listTeams(client: ApiClient): Promise<member.ListTeamsResponse> {
+  // Canonical team list is owned by member-service and exposed at the gateway
+  // "members" segment (GET /api/v1/members/teams). The api-gateway has NO bare
+  // "teams" segment, so `${P}/teams` 404s in prod — which silently emptied the
+  // gantt team switcher/legend. Route through /members/teams (the real source).
+  // member-service's canonical envelope is { teams: Team[] } (member.ListTeamsResponse),
+  // NOT { items } — the mock previously returned { items }, so the switcher rendered
+  // locally but stayed empty in prod. Consume the real shape here.
+  return client.request<member.ListTeamsResponse>({ method: "GET", path: `${P}/members/teams` });
+}
+
+/**
+ * Adapt member-service's wire Team ({ color/description: string | null }) to the fe4
+ * domain team.Team ({ color/description?: string }). Every fe4 consumer (switcher,
+ * legend, selects) speaks team.Team; centralizing the unwrap+normalize here keeps the
+ * mock and prod on one shape.
+ */
+export function toDomainTeams(res: member.ListTeamsResponse): team.Team[] {
+  return res.teams.map((t) => ({
+    id: t.id as common.TeamId,
+    key: t.key,
+    name: t.name,
+    ...(t.color != null ? { color: t.color } : {}),
+    ...(t.description != null ? { description: t.description } : {}),
+  }));
 }
 
 // ---- identity-roster (batch user resolve; ?ids=, max 50) ----
@@ -138,6 +213,24 @@ export function resolveUsers(
     method: "GET",
     path: `${P}/identity/users`,
     query: { ids: ids.join(",") },
+  });
+}
+
+/** List the org roster (member names) so an assignee can be picked from real
+ *  members — not only users already assigned to some task. Same endpoint as
+ *  resolveUsers but WITHOUT `ids` (list mode); scoped to active members. */
+export function listRosterUsers(
+  client: ApiClient,
+  opts: { status?: identity.UserStatus; limit?: number; q?: string } = {},
+): Promise<common.Paginated<identity.UserSummary>> {
+  return client.request<common.Paginated<identity.UserSummary>>({
+    method: "GET",
+    path: `${P}/identity/users`,
+    query: {
+      status: opts.status ?? "active",
+      limit: opts.limit ?? 200,
+      ...(opts.q ? { q: opts.q } : {}),
+    },
   });
 }
 

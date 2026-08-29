@@ -47,12 +47,31 @@
   gap: var(--dub-space-4);
   flex-wrap: wrap;
 }
+.pageHeaderTitleGroup {
+  min-width: 0;
+}
 .pageTitle {
   margin: 0;
   font-family: var(--dub-font-family-sans);
   font-size: var(--dub-font-size-2xl);
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-primary);
+  /* Long titles wrap on word/character boundaries instead of forcing the flex
+     row to overflow horizontally on narrow (mobile) widths. */
+  overflow-wrap: anywhere;
+}
+/* Mobile: the title (2xl) + action buttons no longer fit side-by-side, so the
+   space-between flex-wrap left an ugly ragged break. Stack them vertically and
+   shrink the title one step so the header reads cleanly on a phone. */
+@media (max-width: 640px) {
+  .pageHeaderRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--dub-space-3);
+  }
+  .pageTitle {
+    font-size: var(--dub-font-size-xl);
+  }
 }
 .pageDescription {
   margin: var(--dub-space-1) 0 0;
@@ -99,4 +118,12 @@
   padding: var(--dub-space-6);
   min-width: 0;
   background: var(--dub-color-surface-sunken);
+}
+/* Full-bleed apps (Slack-style chat / Gmail-style mail) opt out of the content
+   gutter + sunken frame by rendering an element with [data-app-bleed]. Without
+   this the 24px padding boxes an edge-to-edge app, leaving a sunken border on all
+   four sides — jarring when the app has its own dark chrome. The app then spans the
+   canvas corner-to-corner (own scroll regions handle overflow). */
+.shellContent:has([data-app-bleed]) {
+  padding: 0;
 }

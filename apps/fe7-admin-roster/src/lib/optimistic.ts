@@ -2,8 +2,8 @@
 //   Optimistic (instant apply, rollback on error): profile edit, role grant.
 //   Non-optimistic (ConfirmDialog -> await server): role revoke, permission-bundle
 //   save, status change (suspend/reactivate), role create/delete, invite.
-import type { identity } from "@dub/types";
-import type { RoleAssignment } from "../contracts/pending";
+import type { identity, common } from "@dub/types";
+import type { RoleAssignment, RosterUser } from "../contracts/pending";
 
 export type RosterOperation =
   | "user.patch"
@@ -40,6 +40,37 @@ export function applyRoleGrant(
   pending: RoleAssignment,
 ): RoleAssignment[] {
   return [...assignments, pending];
+}
+
+/** Optimistically add an ORG-WIDE role id to one user's `roleIds` inside a cached
+ *  roster page, so the list's ロール column updates instantly (idempotent). */
+export function addUserRoleId(
+  page: common.Paginated<RosterUser> | undefined,
+  userId: string,
+  roleId: string,
+): common.Paginated<RosterUser> | undefined {
+  if (!page) return page;
+  return {
+    ...page,
+    items: page.items.map((u) =>
+      u.id === userId && !u.roleIds.includes(roleId) ? { ...u, roleIds: [...u.roleIds, roleId] } : u,
+    ),
+  };
+}
+
+/** Optimistically remove a role id from one user's `roleIds` inside a cached page. */
+export function removeUserRoleId(
+  page: common.Paginated<RosterUser> | undefined,
+  userId: string,
+  roleId: string,
+): common.Paginated<RosterUser> | undefined {
+  if (!page) return page;
+  return {
+    ...page,
+    items: page.items.map((u) =>
+      u.id === userId ? { ...u, roleIds: u.roleIds.filter((r) => r !== roleId) } : u,
+    ),
+  };
 }
 
 /** Build the optimistic placeholder assignment shown before the server confirms. */

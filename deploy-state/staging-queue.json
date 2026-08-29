@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "flushThreshold": 5,
+  "maxAgeHours": 24,
+  "integrationBranch": "staging/demo-parity-integ",
+  "manualFlush": false,
+  "queue": [],
+  "lastFlushedAt": null,
+  "flushHistory": []
+}

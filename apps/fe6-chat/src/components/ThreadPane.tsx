@@ -11,6 +11,7 @@ import type { Message } from "../api/contract";
 import { newClientTempId } from "../lib/ulid";
 import { MessageItem } from "./MessageItem";
 import { MessageComposer } from "./MessageComposer";
+import { Icon } from "@dub/ui";
 import styles from "../styles/chat.module.css";
 
 export interface ThreadPaneProps {
@@ -85,7 +86,7 @@ export function ThreadPane({
           <div className={styles.threadSub}>{replies.length} 件の返信</div>
         </div>
         <button type="button" className={styles.iconBtn} aria-label="スレッドを閉じる" onClick={onClose}>
-          ✕
+          <Icon name="x" size="sm" />
         </button>
       </header>
 

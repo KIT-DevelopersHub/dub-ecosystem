@@ -13,11 +13,12 @@ import {
   serializeInboxFilter,
   type InboxFilter,
 } from "../lib/inbox-filter";
+import { matchesCategoryFilter } from "../lib/type-dictionary";
 import { resolveLinkUrl } from "../lib/routes";
 import { NotificationFilterBar } from "./NotificationFilterBar";
 import { NotificationList } from "./NotificationList";
 import { MarkAllReadButton } from "./MarkAllReadButton";
-import { itemLinkUrl } from "./NotificationListItem";
+import { itemLinkUrl } from "./NotificationCard";
 
 function readFilterFromLocation(): InboxFilter {
   if (typeof window === "undefined") return EMPTY_FILTER;
@@ -40,6 +41,10 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
   const inbox = useInbox(
     props.pageSize !== undefined ? { filter, pageSize: props.pageSize } : { filter },
   );
+
+  // Category is a client-side filter (the inbox list endpoint does not filter by type).
+  // Narrow the loaded items to the active tab before rendering + for the mark-all affordance.
+  const visibleItems = inbox.items.filter((i) => matchesCategoryFilter(i.type, filter.category));
 
   // Mirror filter -> URL (shareable / back-nav; test 3).
   useEffect(() => {
@@ -68,18 +73,19 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
         actions={
           <MarkAllReadButton
             onClick={() => void inbox.markAllRead()}
-            disabled={inbox.items.every((i) => i.readAt !== null)}
+            disabled={visibleItems.every((i) => i.readAt !== null)}
           />
         }
         testId="fe5-inbox-header"
       />
       <NotificationFilterBar filter={filter} onChange={setFilter} />
       <NotificationList
-        items={inbox.items}
+        items={visibleItems}
         hasMore={inbox.hasMore}
         loading={inbox.loading}
         error={inbox.error}
         onActivate={onActivate}
+        onMarkUnread={(item) => void inbox.markUnread(item.id)}
         onLoadMore={() => void inbox.loadMore()}
         onRetry={() => void inbox.reload()}
       />

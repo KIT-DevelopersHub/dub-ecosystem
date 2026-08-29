@@ -97,6 +97,68 @@
   justify-content: flex-end;
   gap: var(--dub-space-2);
 }
+
+/* ---- ErrorDialog: loud, unmissable failure surface ---- */
+.errorBody {
+  display: flex;
+  gap: var(--dub-space-3);
+  align-items: flex-start;
+  margin-bottom: var(--dub-space-4);
+}
+.errorIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--dub-radius-full, 999px);
+  background: var(--dub-color-danger-100);
+  color: var(--dub-color-danger-600);
+}
+.errorContent {
+  min-width: 0;
+  flex: 1;
+}
+.errorMessage {
+  margin: 0;
+  font-weight: var(--dub-font-weight-medium, 500);
+  color: var(--dub-color-text-primary);
+}
+.errorDetails {
+  margin: var(--dub-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.errorDetailItem {
+  display: flex;
+  gap: var(--dub-space-2);
+  align-items: baseline;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+.errorDetailItem::before {
+  content: "•";
+  color: var(--dub-color-danger-500);
+}
+.errorDetailLabel {
+  font-weight: var(--dub-font-weight-medium, 500);
+  color: var(--dub-color-text-primary);
+}
+.errorHint {
+  margin: var(--dub-space-3) 0 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+.errorCorrelation {
+  margin: var(--dub-space-3) 0 0;
+  font-size: var(--dub-font-size-xs, 0.75rem);
+  color: var(--dub-color-text-tertiary, var(--dub-color-text-secondary));
+  font-family: var(--dub-font-family-mono, monospace);
+}
 .drawer {
   position: fixed;
   top: 0;
@@ -112,4 +174,13 @@
 }
 .drawer[data-side="left"] {
   left: 0;
+}
+/* A drawer body is a flex child of the full-height column. Its default min-height
+   is `auto` (= content height), so a tall panel (long memo / many attachments) makes
+   the body grow past the viewport and any height:100% scroll region inside it can
+   never bound → nothing scrolls. min-height:0 lets the body settle to the free space
+   so its children can own the scroll (fe4 TaskDetailPanel: scrollable body + fixed
+   footer, 判断75②). Scoped to .drawer so the modal .dialog (own overflow) is untouched. */
+.drawer .body {
+  min-height: 0;
 }

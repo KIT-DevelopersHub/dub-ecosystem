@@ -61,8 +61,12 @@ describe("permissionMatrix — selection", () => {
     expect(isDangerous(catalog, "identity:read")).toBe(false);
   });
 
-  it("locks identity:admin only on the built-in admin role", () => {
-    expect(lockedKeysForRole({ name: "admin", isSystem: true })).toEqual(["identity:admin"]);
+  it("locks identity:admin + the 管理 app access keys only on the built-in admin role", () => {
+    expect(lockedKeysForRole({ name: "admin", isSystem: true })).toEqual([
+      "identity:admin",
+      "app:admin:view",
+      "app:admin:edit",
+    ]);
     expect(lockedKeysForRole({ name: "member", isSystem: true })).toEqual([]);
     expect(lockedKeysForRole({ name: "admin", isSystem: false })).toEqual([]);
   });

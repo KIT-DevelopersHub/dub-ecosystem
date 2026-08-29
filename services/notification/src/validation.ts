@@ -302,4 +302,45 @@ export function parseListFeedbackQuery(q: Record<string, string | undefined>): n
   return out;
 }
 
+/** Validate GET /manage query params (admin notification list; CursorQuery only). */
+export function parseListManageQuery(
+  q: Record<string, string | undefined>,
+): notification.ListAdminNotificationsQuery & { limit: number } {
+  const fe: FieldError[] = [];
+  const out: notification.ListAdminNotificationsQuery & { limit: number } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
+
+  if (q.limit !== undefined && q.limit !== "") {
+    const n = Number(q.limit);
+    if (!Number.isInteger(n) || n < 1) fe.push({ field: "limit", reason: "invalid_range" });
+    else if (n > MAX_QUERY_LIMIT) fe.push({ field: "limit", reason: "too_large", message: `<= ${MAX_QUERY_LIMIT}` });
+    else out.limit = n;
+  }
+
+  if (fe.length > 0) throw notifValidationFailed(fe);
+  return out;
+}
+
+/** Validate POST /manage/publish-batch body ({ ids: string[] }, 1..MAX_DIRECT_RECIPIENTS). */
+export function parsePublishBatch(body: unknown): notification.PublishBroadcastBatchRequest {
+  if (!isPlainObject(body)) throw notifValidationFailed([{ field: "(root)", reason: "invalid_type" }]);
+  const ids = body.ids;
+  if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string" && i.length > 0)) {
+    throw notifValidationFailed([{ field: "ids", reason: "invalid_type", message: "non-empty string array" }]);
+  }
+  if (ids.length === 0) {
+    throw notifValidationFailed([{ field: "ids", reason: "required", message: "at least one id" }]);
+  }
+  if (ids.length > MAX_DIRECT_RECIPIENTS) {
+    throw notifValidationFailed([{ field: "ids", reason: "too_long", message: `<= ${MAX_DIRECT_RECIPIENTS}` }]);
+  }
+  return { ids: ids as string[] };
+}
+
+/** Validate POST /manage/unpublish-batch body ({ ids: string[] }, same shape as publish). */
+export function parseUnpublishBatch(body: unknown): notification.UnpublishBroadcastBatchRequest {
+  return parsePublishBatch(body) as notification.UnpublishBroadcastBatchRequest;
+}
+
 export { notifValidationFailed };

@@ -6,11 +6,11 @@ import { ApiClientProvider } from "../src/api/client-context";
 import { MockApiClient } from "../src/api/mock-client";
 import { MeTasksRoute, TaskRouteProvider } from "../src/routes/taskRoutes";
 
-// Regression for「adminなのに『タスクを発行』が押せない」: the button was disabled
-// because MeTasksRoute handed events={[]} to MyTasksPage, so effectiveEvents stayed
-// empty (no tasks to derive an event from either) and the button's
-// disabled={effectiveEvents.length === 0} never cleared. The fix wires the real
-// event list into the route.
+// 判断44:「タスクを発行」is always pressable because a task's link to an event is now
+// OPTIONAL — you can issue a standalone (unlinked) task. This supersedes the earlier
+// events-driven disable (the root of「adminなのに押せない」): there is no longer any
+// data/permission precondition on issuing a task. Event linking remains available as an
+// optional「対象イベント（任意）」selector when events exist.
 
 const ME = "usr_me" as common.UserId;
 
@@ -60,7 +60,7 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     fireEvent.change(screen.getByTestId("fe4-mytask-create-title"), {
       target: { value: "登壇者へ最終案内メールを送る" },
     });
-    // event is preselected to events[0]; requested lens shows tasks the user issued.
+    // event link defaults to「紐付けない」(optional); only the title gates submission.
     const submit = screen.getByTestId("fe4-mytask-create-submit");
     expect(submit).not.toBeDisabled();
     fireEvent.click(submit);
@@ -74,12 +74,28 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     expect(await screen.findByText("登壇者へ最終案内メールを送る")).toBeInTheDocument();
   });
 
-  it("regression: with no events and no tasks the button stays disabled (fallback path)", async () => {
+  it("判断44: with no events at all, the button is still pressable and can issue an unlinked task", async () => {
     const client = new MockApiClient({ currentUserId: ME });
     renderRoute(client);
     const btn = await screen.findByTestId("fe4-mytasks-create-open");
-    // give the (empty) fetches a tick to resolve before asserting it never enabled.
+    // No events/tasks precondition — the button never gets disabled now.
     await waitFor(() => expect(client.calls.some((c) => c.path === "/api/v1/events")).toBe(true));
-    expect(btn).toBeDisabled();
+    expect(btn).not.toBeDisabled();
+
+    // Open the modal and issue a task WITHOUT selecting an event (default 紐付けない).
+    fireEvent.click(btn);
+    fireEvent.change(screen.getByTestId("fe4-mytask-create-title"), {
+      target: { value: "会場の下見をする" },
+    });
+    const submit = screen.getByTestId("fe4-mytask-create-submit");
+    expect(submit).not.toBeDisabled();
+    fireEvent.click(submit);
+
+    // POST /tasks was issued with no eventId (unlinked task).
+    await waitFor(() => {
+      const created = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
+      expect(created).toBeTruthy();
+      expect((created?.body as { eventId?: string } | undefined)?.eventId).toBeUndefined();
+    });
   });
 });

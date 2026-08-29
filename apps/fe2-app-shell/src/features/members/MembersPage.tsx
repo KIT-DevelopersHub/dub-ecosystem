@@ -1,42 +1,37 @@
-// 運営メンバー管理 top screen. Hosts the three views (一覧 / チーム別 / 組織図) behind
-// Tabs, plus the toolbar (search, メンバー追加 / チーム追加 / 印刷) and the shared
-// create/edit dialogs + destructive ConfirmDialog. Read = identity:read (route gate);
-// write actions are re-authorized server-side (identity:admin).
+// 運営メンバー管理 top screen. Hosts the two views (チーム別 / 組織図) behind Tabs,
+// plus the toolbar (メンバー追加 / チーム追加 / 印刷) and the shared create/edit dialogs
+// + destructive ConfirmDialog. Read = identity:read (route gate); write actions are
+// re-authorized server-side (identity:admin).
+// NOTE: the flat 一覧 tab was removed — the per-person list (氏名/ロール/アドレス/ログイン
+// 紐付け) is owned by the ユーザー名簿 side, which the members app is being merged into.
 import { useMemo, useState } from "react";
 import {
   PageHeader,
   Button,
   Tabs,
-  TextField,
   ConfirmDialog,
   SkeletonLoader,
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useMembersOverview, useDeleteMember, useDeleteTeam, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
-import { ListView } from "./ListView.tsx";
+import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
 import { TeamsView } from "./TeamsView.tsx";
 import { OrgChartView } from "./OrgChartView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { TeamFormDialog } from "./TeamFormDialog.tsx";
-import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import styles from "./members.module.css";
 
-type TabId = "list" | "teams" | "org";
+type TabId = "teams" | "org";
 
 export function MembersPage(): JSX.Element {
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
-  const identityUsers = useIdentityUsers();
-  const unlinkIdentity = useUnlinkIdentity();
 
-  const [tab, setTab] = useState<TabId>("list");
-  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<TabId>("teams");
   const [memberDialog, setMemberDialog] = useState<{ open: boolean; editing: OrgMember | null }>({ open: false, editing: null });
   const [teamDialog, setTeamDialog] = useState<{ open: boolean; editing: MemberTeam | null }>({ open: false, editing: null });
-  const [linkDialog, setLinkDialog] = useState<{ open: boolean; member: OrgMember | null }>({ open: false, member: null });
   const [confirm, setConfirm] = useState<
     | { kind: "member"; target: OrgMember }
     | { kind: "team"; target: MemberTeam }
@@ -45,31 +40,6 @@ export function MembersPage(): JSX.Element {
 
   const teams = overview.data?.teams ?? [];
   const members = overview.data?.members ?? [];
-  const teamsById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
-
-  // identity userId -> display label for the linked-account column, and the set of
-  // accounts already linked to some member (disabled in the link picker; 1:1 link).
-  const accountLabels = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const u of identityUsers.data?.items ?? []) map.set(u.id, u.email || u.displayName);
-    return map;
-  }, [identityUsers.data]);
-  const takenIds = useMemo(
-    () => new Set(members.map((m) => m.identityUserId).filter((id): id is string => !!id)),
-    [members],
-  );
-
-  const filteredMembers = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return members;
-    return members.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) ||
-        (m.roleTitle ?? "").toLowerCase().includes(q) ||
-        (m.department ?? "").toLowerCase().includes(q) ||
-        (m.grade ?? "").toLowerCase().includes(q),
-    );
-  }, [members, search]);
 
   const openAddMember = () => setMemberDialog({ open: true, editing: null });
   const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: m });
@@ -112,7 +82,6 @@ export function MembersPage(): JSX.Element {
         <div className={styles.toolbar}>
           <Tabs
             items={[
-              { id: "list", label: "一覧" },
               { id: "teams", label: "チーム別" },
               { id: "org", label: "組織図" },
             ]}
@@ -121,11 +90,6 @@ export function MembersPage(): JSX.Element {
             testId="members-tabs"
           />
           <div className={styles.toolbarSpacer} />
-          {tab === "list" ? (
-            <div className={styles.searchField}>
-              <TextField id="members-search" value={search} onChange={setSearch} placeholder="氏名・役割・学科・学年で検索" testId="members-search" />
-            </div>
-          ) : null}
           {tab === "org" ? (
             <Button variant="secondary" onClick={() => window.print()} testId="members-print">
               印刷 / PNG
@@ -134,17 +98,6 @@ export function MembersPage(): JSX.Element {
         </div>
       </div>
 
-      {tab === "list" ? (
-        <ListView
-          members={filteredMembers}
-          teamsById={teamsById}
-          accountLabels={accountLabels}
-          onEdit={openEditMember}
-          onDelete={(m) => setConfirm({ kind: "member", target: m })}
-          onLink={(m) => setLinkDialog({ open: true, member: m })}
-          onUnlink={(m) => unlinkIdentity.mutate({ id: m.id, version: m.version })}
-        />
-      ) : null}
       {tab === "teams" ? (
         <TeamsView
           teams={teams}
@@ -167,13 +120,6 @@ export function MembersPage(): JSX.Element {
         open={teamDialog.open}
         onClose={() => setTeamDialog({ open: false, editing: null })}
         editing={teamDialog.editing}
-      />
-
-      <LinkIdentityDialog
-        open={linkDialog.open}
-        onClose={() => setLinkDialog({ open: false, member: null })}
-        member={linkDialog.member}
-        takenIds={takenIds}
       />
 
       <ConfirmDialog

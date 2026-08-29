@@ -63,6 +63,11 @@ export interface MailThreadModel {
   folder: FolderId;
   starred: boolean;
   labels: string[]; // Label ids
+  /** 完全に削除 (purge): the signed-in user permanently removed this conversation from THEIR
+   *  mailbox (Gmail's "完全に削除" out of Trash). One-way, per-user, view-only — the thread
+   *  stays in the store but is filtered out of every folder for this viewer. Never a physical
+   *  delete: other accounts/admins still see it. Absent/false = normal. */
+  purged?: boolean;
 }
 
 // ---- pure helpers ----

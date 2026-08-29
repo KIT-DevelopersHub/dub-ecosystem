@@ -5,6 +5,7 @@
 // disable (design §2-2, §7). Attachment is a fileId hand-off (upload lives in
 // file-meta) — here it is a stubbed affordance. Test-ids preserved for units.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Icon, isImeComposing } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { common } from "@dub/types";
 import { applyMention, detectMentionTrigger } from "../lib/mentions";
@@ -53,6 +54,10 @@ export function MessageComposer({
   const [attachError, setAttachError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Tracks IME composition so the 変換確定 Enter never triggers submit / mention pick /
+  // menu nav. Backs up isImeComposing() for browsers whose confirm keydown reports
+  // isComposing=false right before compositionend.
+  const composingRef = useRef(false);
 
   useEffect(() => {
     // reset attachments when switching channels (drafts persist; files don't)
@@ -145,6 +150,27 @@ export function MessageComposer({
     [text, focusCaret],
   );
 
+  /** Prefix each line touched by the selection (blockquote / bullet / ordered list). */
+  const prefixLines = useCallback(
+    (prefix: (lineIndex: number) => string) => {
+      const el = ref.current;
+      const start = el?.selectionStart ?? text.length;
+      const end = el?.selectionEnd ?? text.length;
+      const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+      const lineEnd = text.indexOf("\n", end);
+      const blockEnd = lineEnd === -1 ? text.length : lineEnd;
+      const block = text.slice(lineStart, blockEnd);
+      const prefixed = block
+        .split("\n")
+        .map((ln, i) => `${prefix(i)}${ln}`)
+        .join("\n");
+      const next = text.slice(0, lineStart) + prefixed + text.slice(blockEnd);
+      setText(next);
+      focusCaret(lineStart + prefixed.length);
+    },
+    [text, focusCaret],
+  );
+
   const submit = useCallback(async () => {
     if (!canSend) return;
     const body = text;
@@ -158,6 +184,9 @@ export function MessageComposer({
   }, [canSend, text, attachments, channelId, onSend]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 変換確定 Enter (and any keydown mid-composition) must never submit, pick a
+    // mention, or drive menu nav — let the IME own it.
+    if (composingRef.current || isImeComposing(e)) return;
     if (candidates.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -173,6 +202,30 @@ export function MessageComposer({
         e.preventDefault();
         const pick = candidates[selected];
         if (pick) pickMention(pick);
+        return;
+      }
+    }
+    // Formatting shortcuts (Slack-style): Cmd/Ctrl + B / I / U / Shift+X (strike).
+    if (e.metaKey || e.ctrlKey) {
+      const k = e.key.toLowerCase();
+      if (k === "b") {
+        e.preventDefault();
+        wrapSelection("*");
+        return;
+      }
+      if (k === "i") {
+        e.preventDefault();
+        wrapSelection("_");
+        return;
+      }
+      if (k === "u") {
+        e.preventDefault();
+        wrapSelection("++");
+        return;
+      }
+      if (e.shiftKey && k === "x") {
+        e.preventDefault();
+        wrapSelection("~");
         return;
       }
     }
@@ -217,26 +270,41 @@ export function MessageComposer({
       <div className={styles.composerBox}>
         <div className={styles.toolbar} role="toolbar" aria-label="書式">
           <button type="button" className={`${styles.toolbarBtn} ${styles.bold}`} aria-label="太字" title="太字" disabled={disabled} onClick={() => wrapSelection("*")}>
-            B
+            <Icon name="bold" size="sm" />
           </button>
-          <button type="button" className={`${styles.toolbarBtn} ${styles.italic}`} aria-label="斜体" title="斜体" disabled={disabled} onClick={() => wrapSelection("_")}>
-            i
+          <button type="button" className={`${styles.toolbarBtn} ${styles.italic}`} aria-label="斜体" title="斜体 (Cmd+I)" disabled={disabled} onClick={() => wrapSelection("_")}>
+            <Icon name="italic" size="sm" />
+          </button>
+          <button type="button" className={`${styles.toolbarBtn} ${styles.underlineGlyph}`} aria-label="下線" title="下線 (Cmd+U)" disabled={disabled} onClick={() => wrapSelection("++")}>
+            <Icon name="underline" size="sm" />
+          </button>
+          <button type="button" className={`${styles.toolbarBtn} ${styles.strikeGlyph}`} aria-label="取り消し線" title="取り消し線 (Cmd+Shift+X)" disabled={disabled} onClick={() => wrapSelection("~")}>
+            <Icon name="strikethrough" size="sm" />
           </button>
           <button type="button" className={`${styles.toolbarBtn} ${styles.codeGlyph}`} aria-label="コード" title="インラインコード" disabled={disabled} onClick={() => wrapSelection("`")}>
-            {"</>"}
+            <Icon name="code" size="sm" />
           </button>
           <button type="button" className={`${styles.toolbarBtn} ${styles.codeGlyph}`} aria-label="コードブロック" title="コードブロック" disabled={disabled} onClick={() => wrapSelection("```", "```", true)}>
-            {"{ }"}
+            <Icon name="code-block" size="sm" />
+          </button>
+          <button type="button" className={styles.toolbarBtn} aria-label="引用" title="引用" disabled={disabled} onClick={() => prefixLines(() => "> ")}>
+            <Icon name="quote" size="sm" />
+          </button>
+          <button type="button" className={styles.toolbarBtn} aria-label="箇条書き" title="箇条書き" disabled={disabled} onClick={() => prefixLines(() => "- ")}>
+            <Icon name="list" size="sm" />
+          </button>
+          <button type="button" className={styles.toolbarBtn} aria-label="番号付きリスト" title="番号付きリスト" disabled={disabled} onClick={() => prefixLines((i) => `${i + 1}. `)}>
+            <Icon name="list-ordered" size="sm" />
           </button>
           <span className={styles.toolbarDivider} aria-hidden />
           <button type="button" className={styles.toolbarBtn} aria-label="リンク" title="リンク" disabled={disabled} onClick={() => wrapSelection("[", "](url)")}>
-            🔗
+            <Icon name="link" size="sm" />
           </button>
           <button type="button" className={styles.toolbarBtn} aria-label="絵文字" title="絵文字" disabled={disabled} onClick={() => setEmojiOpen((o) => !o)}>
-            😊
+            <Icon name="smile" size="sm" />
           </button>
           <button type="button" className={styles.toolbarBtn} aria-label="メンション" title="メンション" disabled={disabled} onClick={() => insertAt("@")}>
-            @
+            <Icon name="at-sign" size="sm" />
           </button>
           <button
             type="button"
@@ -247,7 +315,7 @@ export function MessageComposer({
             data-testid="fe6-composer-attach"
             onClick={() => fileRef.current?.click()}
           >
-            📎
+            <Icon name="paperclip" size="sm" />
           </button>
           <input
             ref={fileRef}
@@ -304,12 +372,18 @@ export function MessageComposer({
           onKeyUp={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={onKeyDown}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
         />
 
         <div className={styles.composerBottom}>
           <div className={styles.composerHints} aria-hidden />
           <button type="button" className={styles.sendButton} disabled={!canSend} data-testid="fe6-composer-send" onClick={() => void submit()}>
-            <span aria-hidden>➤</span> 送信
+            <Icon name="send" size="sm" /> 送信
           </button>
         </div>
       </div>

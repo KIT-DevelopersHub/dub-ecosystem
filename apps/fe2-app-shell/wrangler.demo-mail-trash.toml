@@ -1,0 +1,22 @@
+# fe2-demo — backend-free DEMO deployment of the admin SPA (separate Worker from
+# the real `fe2-app-shell`, so the production deploy is never touched).
+#
+# The bundle is built with VITE_DEMO=1, which swaps in the in-app demo transport
+# (src/lib/demo-seed.tsx): auto-login + seeded events/tasks/gantt/notifications/
+# mail/roster. It is a MOCK — no gateway, no real data, no mail is ever sent.
+#
+# Build + deploy (assets-only, no `main`):
+#   VITE_DEMO=1 pnpm --filter @dub/fe2-app-shell build
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config apps/fe2-app-shell/wrangler.demo.toml
+name = "dub-demo-mail-trash"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./dist"
+# SPA fallback: serve index.html for non-asset paths so client-side routes
+# (/mail, /events, /me/tasks, /admin/users, …) resolve on hard refresh.
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = true

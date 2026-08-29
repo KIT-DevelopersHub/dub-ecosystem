@@ -2,7 +2,7 @@
 // real `@dub/api-client` (gateway HTTP) lands. Enforces the same contract the
 // server does: version conflicts, status-transition rules, dependency cycles —
 // so optimistic-UI rollback paths (tests 2/3/5/9/11) exercise real branches.
-import type { gantt, identity, event, common, gateway, team } from "@dub/types";
+import type { gantt, identity, event, common, gateway, team, member } from "@dub/types";
 import { task } from "@dub/types";
 import type { ErrorResponse } from "@dub/errors";
 import { CommonErrorCodes } from "@dub/errors";
@@ -40,6 +40,10 @@ export interface MockSeed {
   rowDates?: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }>;
   /** critical-path task ids the gantt DTO reports (bar colouring). */
   criticalTaskIds?: common.TaskId[];
+  /** WBS hierarchy overlay: taskId -> {parent, depth, wbs}. The task model has no
+   *  parent column (server keeps it in gantt-service), so the mock carries it here
+   *  and projects it onto each GanttRow. `hasChildren` is derived, not stored. */
+  hierarchy?: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }>;
   /** "current user" the mock stamps as createdBy on POST /tasks (from→to "from"). */
   currentUserId?: common.UserId;
 }
@@ -54,7 +58,9 @@ export class MockApiClient implements ApiClient {
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
   private criticalTaskIds: common.TaskId[] = [];
+  private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
+  private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
 
   /** force the next matching call to throw (test 11 / error branches). */
   failNext: ApiError | null = null;
@@ -75,7 +81,29 @@ export class MockApiClient implements ApiClient {
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
+    this.hierarchy = seed.hierarchy ?? {};
     this.currentUserId = seed.currentUserId ?? "usr_me";
+  }
+
+  /** Set of task ids that appear as some row's parent (⇒ they render a toggle). */
+  private parentIdsWithChildren(): Set<common.TaskId> {
+    const set = new Set<common.TaskId>();
+    for (const h of Object.values(this.hierarchy)) if (h.parentTaskId) set.add(h.parentTaskId);
+    return set;
+  }
+
+  /** Re-parent a row in the hierarchy overlay (create/update parentTaskId). Depth
+   *  is derived from the parent's own depth so nested WBS levels read correctly;
+   *  null detaches the row to top-level (depth 0). The task model has no parent
+   *  column — the server keeps it in gantt-service, so the mock mirrors that here. */
+  private setParent(id: common.TaskId, parentTaskId: common.TaskId | null): void {
+    const prev = this.hierarchy[id];
+    if (parentTaskId === null) {
+      this.hierarchy[id] = { ...(prev ?? {}), parentTaskId: null, depth: 0 };
+      return;
+    }
+    const parentDepth = this.hierarchy[parentTaskId]?.depth ?? 0;
+    this.hierarchy[id] = { ...(prev ?? {}), parentTaskId, depth: parentDepth + 1 };
   }
 
   async request<T, TBody = unknown>(req: RequestInput<TBody>): Promise<T> {
@@ -91,6 +119,13 @@ export class MockApiClient implements ApiClient {
     if (path === "/api/v1/tasks" && req.method === "POST") return this.createTask(req.body as task.CreateTaskRequest) as T;
     const taskDeps = path.match(/^\/api\/v1\/tasks\/([^/]+)\/dependencies$/);
     if (taskDeps && req.method === "PUT") return this.replaceDeps(taskDeps[1]!, req.body as task.ReplaceDependenciesRequest) as T;
+    const taskAtts = path.match(/^\/api\/v1\/tasks\/([^/]+)\/attachments$/);
+    if (taskAtts) {
+      if (req.method === "GET") return this.listAttachments(taskAtts[1]!) as T;
+      if (req.method === "POST") return this.addAttachment(taskAtts[1]!, req.body as task.CreateTaskAttachmentRequest) as T;
+    }
+    const taskAtt = path.match(/^\/api\/v1\/tasks\/([^/]+)\/attachments\/([^/]+)$/);
+    if (taskAtt && req.method === "DELETE") return this.removeAttachment(taskAtt[1]!, taskAtt[2]!) as T;
     const taskId = path.match(/^\/api\/v1\/tasks\/([^/]+)$/);
     if (taskId) {
       const id = taskId[1]!;
@@ -102,15 +137,21 @@ export class MockApiClient implements ApiClient {
     const ganttRow = path.match(/^\/api\/v1\/gantt\/rows\/([^/]+)$/);
     if (ganttRow && req.method === "PATCH")
       return this.patchRowSchedule(ganttRow[1]!, req.body as { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }) as T;
-    if (path === "/api/v1/gantt" && req.method === "GET") return this.ganttDto(String(req.query?.event)) as T;
-    if (path === "/api/v1/gantt/dependencies" && req.method === "GET") return this.ganttDeps(String(req.query?.event)) as T;
-    if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.event)) as T;
+    // Query key is `eventId` — the @dub/types wire contract (gantt.GetGanttQuery). The mock
+    // reads the SAME key the server does; it must never mirror a FE-local rename (the old
+    // `event` here is exactly why FE unit tests stayed green while prod 400'd).
+    if (path === "/api/v1/gantt" && req.method === "GET") return this.ganttDto(String(req.query?.eventId)) as T;
+    if (path === "/api/v1/gantt/dependencies" && req.method === "GET") return this.ganttDeps(String(req.query?.eventId)) as T;
+    if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.eventId)) as T;
     if (path === "/api/v1/gantt/views" && req.method === "PUT")
-      return this.putView(String(req.query?.event), req.body as gantt.PutGanttViewRequest) as T;
+      return this.putView(String(req.query?.eventId), req.body as gantt.PutGanttViewRequest) as T;
     // --- teams (canonical team.Team; future: member-service) ---
-    if (path === "/api/v1/teams" && req.method === "GET") return ({ items: this.teams } as team.ListTeamsResponse) as T;
+    if ((path === "/api/v1/members/teams" || path === "/api/v1/teams") && req.method === "GET")
+      // Mirror member-service's canonical { teams } envelope so the mock and prod
+      // agree (previously { items }, which hid a prod-only empty team switcher).
+      return ({ teams: this.teams } as member.ListTeamsResponse) as T;
     // --- identity ---
-    if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(String(req.query?.ids ?? "")) as T;
+    if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(req.query ?? {}) as T;
     // --- events ---
     if (path === "/api/v1/events" && req.method === "GET")
       return ({ items: this.eventSummaries } as event.ListEventsResponse) as T;
@@ -186,6 +227,41 @@ export class MockApiClient implements ApiClient {
     return t;
   }
 
+  private listAttachments(taskId: string): task.ListTaskAttachmentsResponse {
+    if (!this.taskById.has(taskId)) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
+    return { items: [...(this.attachmentsByTask.get(taskId) ?? [])] };
+  }
+
+  private addAttachment(taskId: string, body: task.CreateTaskAttachmentRequest): task.TaskAttachment {
+    if (!this.taskById.has(taskId)) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
+    if (body.kind !== "file" && body.kind !== "url") throw err(400, "VALIDATION_FAILED", "invalid kind");
+    if (!body.name?.trim() || !body.url) throw err(400, "VALIDATION_FAILED", "name and url are required");
+    if (body.kind === "url" && !/^https?:\/\//i.test(body.url)) throw err(400, "VALIDATION_FAILED", "url must be http(s)");
+    const att: task.TaskAttachment = {
+      id: mintId("tatt"),
+      taskId,
+      kind: body.kind,
+      name: body.name.trim(),
+      url: body.url,
+      fileId: body.fileId ?? null,
+      mimeType: body.mimeType ?? null,
+      sizeBytes: body.sizeBytes ?? null,
+      createdBy: this.currentUserId,
+      createdAt: new Date().toISOString(),
+    };
+    const list = this.attachmentsByTask.get(taskId) ?? [];
+    this.attachmentsByTask.set(taskId, [att, ...list]);
+    return att;
+  }
+
+  private removeAttachment(taskId: string, attachmentId: string): { ok: true } {
+    const list = this.attachmentsByTask.get(taskId) ?? [];
+    const next = list.filter((a) => a.id !== attachmentId);
+    if (next.length === list.length) throw err(404, "TASK_NOT_FOUND", `attachment not found: ${attachmentId}`);
+    this.attachmentsByTask.set(taskId, next);
+    return { ok: true };
+  }
+
   private createTask(body: task.CreateTaskRequest): task.Task {
     const now = new Date().toISOString();
     const t: task.Task = {
@@ -198,6 +274,7 @@ export class MockApiClient implements ApiClient {
       assigneeId: body.assigneeId ?? null,
       teamId: body.teamId ?? null,
       createdBy: this.currentUserId, // server stamps created_by from the principal
+      startAt: body.startAt ?? null,
       dueAt: body.dueAt ?? null,
       origin: body.origin ?? "internal",
       archivedAt: null,
@@ -206,6 +283,7 @@ export class MockApiClient implements ApiClient {
       version: 1,
     };
     this.taskById.set(t.id, t);
+    if (body.parentTaskId !== undefined) this.setParent(t.id, body.parentTaskId ?? null);
     return t;
   }
 
@@ -227,40 +305,97 @@ export class MockApiClient implements ApiClient {
       ...(body.priority !== undefined ? { priority: body.priority } : {}),
       ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
       ...(body.teamId !== undefined ? { teamId: body.teamId } : {}),
+      ...(body.startAt !== undefined ? { startAt: body.startAt } : {}),
       ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),
       version: cur.version + 1,
       updatedAt: new Date().toISOString(),
     };
     this.taskById.set(id, next);
+    // Keep the gantt read-model in sync with a start/due edit. The bar reads its
+    // window from `rowDates` (a stand-in for gantt-service's derived DTO); the real
+    // gantt-service derives the bar from the task's live startAt/dueAt columns on
+    // every read, so a detail-panel date edit reflects immediately. The mock cached
+    // the seed override and never refreshed it here, so editing 開始日/期日 changed the
+    // task columns but the bar kept rendering the stale seed dates (the "詳細で日付を
+    // 変更してもバーが変わらない" bug). Re-derive the override from the updated columns.
+    if (body.startAt !== undefined || body.dueAt !== undefined) {
+      this.rowDates[id] = deriveSchedule(next, undefined);
+    }
+    // re-parent (親子関係の変更) lives in the hierarchy overlay, not on the task row.
+    if (body.parentTaskId !== undefined) this.setParent(id, body.parentTaskId ?? null);
     return next;
   }
 
   private deleteTask(id: string): void {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
+    // Mirror task-service: a task with live children cannot be deleted (else the children
+    // are orphaned and the read model silently re-parents them). Block with 409.
+    const liveChildren = [...this.taskById.values()].filter(
+      (t) => t.archivedAt === null && (this.hierarchy[t.id]?.parentTaskId ?? null) === id,
+    ).length;
+    if (liveChildren > 0) {
+      throw err(409, "TASK_HAS_CHILDREN", `task has ${liveChildren} child task(s): ${id}`, {
+        taskId: id,
+        childCount: liveChildren,
+      });
+    }
     this.taskById.set(id, { ...cur, archivedAt: new Date().toISOString(), version: cur.version + 1 });
   }
 
-  private replaceDeps(id: string, body: task.ReplaceDependenciesRequest): task.Task {
+  // Returns the SERVER wire shape { taskId, dependsOnIds } — NOT a task.Task. The
+  // real task-service replies with exactly this (it bumps the task version in the
+  // DB but does not echo the task back). The old mock returned a full Task with a
+  // `version`, which hid a real FE bug: callers read `.version` off this response
+  // (undefined in prod) and corrupted the optimistic version chain. Mirror prod.
+  private replaceDeps(id: string, body: task.ReplaceDependenciesRequest): { taskId: string; dependsOnIds: string[] } {
     const cur = this.taskById.get(id);
     if (!cur) throw err(404, "TASK_NOT_FOUND", `task not found: ${id}`);
     if (body.version !== cur.version) throw err(409, "TASK_VERSION_CONFLICT", "version conflict");
+    // scope rule (ADR-0007, supersedes 判断10): a dependency may connect tasks across
+    // DIFFERENT hierarchy levels (別スコープ/別階層) as long as they share the SAME TEAM.
+    // Cross-team edges are rejected (that work goes through the request/approval flow).
+    // `teamId === null` is one shared "no team" bucket; a one-sided null is a mismatch.
+    // Mirrors the backend门番 (`cross_team_not_allowed`).
+    const myTeam = cur.teamId ?? null;
+    for (const dep of body.dependsOnIds) {
+      if (dep === id) throw err(409, "TASK_DEPENDENCY_CYCLE", "self dependency", { taskId: id });
+      const depTeam = this.taskById.get(dep)?.teamId ?? null;
+      if (depTeam !== myTeam)
+        throw err(409, "TASK_DEPENDENCY_SCOPE", "dependency must stay within the same team", {
+          taskId: id,
+          dependsOnId: dep,
+        });
+    }
     // cycle check over the proposed graph
     const proposed = new Map(this.deps);
     proposed.set(id, body.dependsOnIds);
     if (hasCycle(proposed)) throw err(409, "TASK_DEPENDENCY_CYCLE", "dependency cycle", { taskId: id });
     this.deps.set(id, body.dependsOnIds);
-    const next: task.Task = { ...cur, version: cur.version + 1, updatedAt: new Date().toISOString() };
-    this.taskById.set(id, next);
-    return next;
+    // Bump the task version in the store (the real DB does the same) but reply with
+    // only the wire shape { taskId, dependsOnIds }.
+    this.taskById.set(id, { ...cur, version: cur.version + 1, updatedAt: new Date().toISOString() });
+    return { taskId: id, dependsOnIds: [...body.dependsOnIds] };
   }
 
   // ---- gantt handlers ----
   private ganttRows(eventId: string): gantt.GanttRow[] {
+    const parents = this.parentIdsWithChildren();
     return [...this.taskById.values()]
       .filter((t) => t.eventId === eventId && t.archivedAt === null)
       .map((t): gantt.GanttRow => {
-        const schedule = deriveSchedule(t, this.rowDates[t.id]);
+        const h = this.hierarchy[t.id];
+        // Mirror gantt-service dto.toRow: a work-package (hasChildren) row carries NO own
+        // dates — the read model returns startsAt/endsAt null and the client rolls the span
+        // up from the children. The mock previously echoed a parent's stored rowDates, so a
+        // parent bar resize appeared to persist in dev but was DISCARDED in prod on the next
+        // GET, and the parent's detail 開始/終了 looked populated in dev while blank in prod.
+        // Null the parent here so dev/tests reproduce prod exactly (the client rolls the
+        // span/detail dates up from the children).
+        const isParent = parents.has(t.id);
+        const schedule = isParent
+          ? { startsAt: null, endsAt: null }
+          : deriveSchedule(t, this.rowDates[t.id]);
         return {
           taskId: t.id,
           title: t.title,
@@ -269,6 +404,10 @@ export class MockApiClient implements ApiClient {
           progressPercent: progressForStatus(t.status),
           assigneeId: t.assigneeId,
           teamId: t.teamId ?? null,
+          parentTaskId: h?.parentTaskId ?? null,
+          depth: h?.depth ?? 0,
+          hasChildren: parents.has(t.id),
+          ...(h?.wbs ? { wbs: h.wbs } : {}),
         };
       });
   }
@@ -296,7 +435,15 @@ export class MockApiClient implements ApiClient {
     const t = this.taskById.get(taskId);
     if (!t) throw err(404, "TASK_NOT_FOUND", `task not found: ${taskId}`);
     this.rowDates[taskId] = { startsAt: body.startsAt, endsAt: body.endsAt };
-    if (body.endsAt) this.taskById.set(taskId, { ...t, dueAt: body.endsAt, updatedAt: new Date().toISOString() });
+    // Persist onto the task's real columns so list/detail views + a cache-bypassing
+    // refetch stay consistent (startsAt→startAt, endsAt→dueAt), matching the server.
+    this.taskById.set(taskId, {
+      ...t,
+      startAt: body.startsAt,
+      ...(body.endsAt ? { dueAt: body.endsAt } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    const h = this.hierarchy[taskId];
     return {
       taskId,
       title: t.title,
@@ -305,6 +452,10 @@ export class MockApiClient implements ApiClient {
       progressPercent: progressForStatus(t.status),
       assigneeId: t.assigneeId,
       teamId: t.teamId ?? null,
+      parentTaskId: h?.parentTaskId ?? null,
+      depth: h?.depth ?? 0,
+      hasChildren: this.parentIdsWithChildren().has(taskId),
+      ...(h?.wbs ? { wbs: h.wbs } : {}),
     };
   }
 
@@ -323,15 +474,40 @@ export class MockApiClient implements ApiClient {
   }
 
   private putView(eventId: string, body: gantt.PutGanttViewRequest): gantt.GanttViewState {
-    this.view = { eventId, zoom: body.zoom, collapsedTaskIds: body.collapsedTaskIds };
+    // Mirror gantt-service's normalize: orderedTaskIds is additive/optional and only
+    // attached when non-empty, so the manual drag order round-trips (mock parity).
+    const ordered = Array.isArray(body.orderedTaskIds)
+      ? body.orderedTaskIds.filter((x): x is common.TaskId => typeof x === "string")
+      : [];
+    this.view = {
+      eventId: eventId as common.EventId,
+      zoom: body.zoom,
+      collapsedTaskIds: body.collapsedTaskIds,
+      ...(ordered.length > 0 ? { orderedTaskIds: ordered } : {}),
+    };
     return this.view;
   }
 
   // ---- identity ----
-  private listUsers(idsCsv: string): common.Paginated<identity.UserSummary> {
-    const ids = idsCsv ? idsCsv.split(",") : [];
-    const items = ids.map((id) => this.users.get(id)).filter((u): u is identity.UserSummary => u !== undefined);
-    return { items, nextCursor: null };
+  // Two modes, mirroring the real GET /identity/users:
+  //   - `?ids=a,b`  → resolve exactly those users (name-batch resolve).
+  //   - no ids      → roster list (all members), honouring `q` search + `limit`.
+  // The old ids-only version returned [] for a roster query, so the assignee
+  // dropdown could only ever show "未割当" on a fresh event (bug 1b).
+  private listUsers(query: Record<string, string | number | boolean | undefined>): common.Paginated<identity.UserSummary> {
+    const idsCsv = query.ids !== undefined ? String(query.ids) : undefined;
+    if (idsCsv !== undefined) {
+      const ids = idsCsv ? idsCsv.split(",") : [];
+      const items = ids.map((id) => this.users.get(id)).filter((u): u is identity.UserSummary => u !== undefined);
+      return { items, nextCursor: null };
+    }
+    let items = [...this.users.values()];
+    if (query.q) {
+      const needle = String(query.q).toLowerCase();
+      items = items.filter((u) => u.displayName.toLowerCase().includes(needle));
+    }
+    const limit = query.limit ? Number(query.limit) : 200;
+    return { items: items.slice(0, limit), nextCursor: null };
   }
 }
 
@@ -370,10 +546,12 @@ function deriveSchedule(
   override?: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
 ): { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null } {
   if (override) return override;
-  if (!t.dueAt) return { startsAt: null, endsAt: null };
-  const end = Date.parse(t.dueAt);
-  const start = end - DURATION_DAYS_BY_PRIORITY[t.priority] * MS_PER_DAY;
-  return { startsAt: new Date(start).toISOString(), endsAt: t.dueAt };
+  const dur = DURATION_DAYS_BY_PRIORITY[t.priority] * MS_PER_DAY;
+  // Real dates win (PR-C): both explicit ⇒ exact span; else derive from whichever is set.
+  if (t.startAt && t.dueAt) return { startsAt: t.startAt, endsAt: t.dueAt };
+  if (t.dueAt) return { startsAt: new Date(Date.parse(t.dueAt) - dur).toISOString(), endsAt: t.dueAt };
+  if (t.startAt) return { startsAt: t.startAt, endsAt: new Date(Date.parse(t.startAt) + dur).toISOString() };
+  return { startsAt: null, endsAt: null };
 }
 
 /** DFS cycle detection over adjacency (node -> dependsOn). */

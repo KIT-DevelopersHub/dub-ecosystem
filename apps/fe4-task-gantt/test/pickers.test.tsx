@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
+import { renderWithProviders as render } from "./helpers-providers";
 import type { task } from "@dub/types";
 import { PredecessorPicker, rememberPredecessors } from "../src/components/PredecessorPicker";
 import { DateField } from "../src/components/DateField";

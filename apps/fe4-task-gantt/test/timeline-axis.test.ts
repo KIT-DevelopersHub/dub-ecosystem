@@ -17,6 +17,10 @@ import {
   timelineBars,
   shiftBar,
   floorDayUtc,
+  rollupRowDates,
+  scaleChildrenForParentResize,
+  parentEnclosures,
+  ROW_HEIGHT,
 } from "../src/domain/timeline-axis";
 
 const row = (id: string, s: string | null, e: string | null, pct = 0): gantt.GanttRow => ({
@@ -122,6 +126,30 @@ describe("timeline-axis — bars & drag", () => {
     expect(bars[1]!.width).toBe(0);
   });
 
+  it("bar span is INCLUSIVE of both endpoints (no off-by-one)", () => {
+    const w = withGranularity(initialWindow(rows, "day", NOW), "day");
+    // 08-05 → 08-08 covers 4 calendar days (5,6,7,8) → 4 cells, not 3.
+    const multi = timelineBars(
+      [row("m", "2026-08-05T00:00:00Z", "2026-08-08T00:00:00Z", 0)],
+      w,
+    );
+    expect(multi[0]!.width).toBeCloseTo(PX_PER_DAY.day * 4, 5);
+
+    // A same-day task fills exactly one cell.
+    const single = timelineBars(
+      [row("s", "2026-08-05T00:00:00Z", "2026-08-05T00:00:00Z", 0)],
+      w,
+    );
+    expect(single[0]!.width).toBeCloseTo(PX_PER_DAY.day, 5);
+
+    // Crossing a month boundary still counts inclusively (07-30 → 08-02 = 4 days).
+    const crossing = timelineBars(
+      [row("x", "2026-07-30T00:00:00Z", "2026-08-02T00:00:00Z", 0)],
+      w,
+    );
+    expect(crossing[0]!.width).toBeCloseTo(PX_PER_DAY.day * 4, 5);
+  });
+
   it("shiftBar: move slides both edges; resize slides one and keeps >=1 day", () => {
     const s = "2026-08-05T00:00:00Z";
     const e = "2026-08-08T00:00:00Z";
@@ -134,5 +162,136 @@ describe("timeline-axis — bars & drag", () => {
     // resize-start cannot cross the end (min 1 day)
     const clamped = shiftBar(s, e, 99, "resize-start");
     expect(Date.parse(clamped.startsAt)).toBe(Date.parse(e) - MS_PER_DAY);
+  });
+
+  it("scaleChildrenForParentResize: dragging the END edge stretches children about the start", () => {
+    // parent span = [08-10, 08-20] (10 days), two children filling it.
+    const parentSpan = { startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" };
+    const kids = [
+      { taskId: "c1", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-15T00:00:00Z" },
+      { taskId: "c2", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" },
+    ];
+    // grow the end by +10 days → span doubles (f=2), anchored at 08-10.
+    const out = scaleChildrenForParentResize(parentSpan, kids, "end", 10);
+    const byId = Object.fromEntries(out.map((o) => [o.taskId, o])) as Record<string, { startsAt: string; endsAt: string }>;
+    expect(byId.c1!.startsAt).toBe("2026-08-10T00:00:00.000Z"); // start anchor unchanged
+    expect(byId.c1!.endsAt).toBe("2026-08-20T00:00:00.000Z"); // 5d → 10d
+    expect(byId.c2!.startsAt).toBe("2026-08-20T00:00:00.000Z");
+    expect(byId.c2!.endsAt).toBe("2026-08-30T00:00:00.000Z"); // last child end reaches the new parent end
+  });
+
+  it("scaleChildrenForParentResize: dragging the START edge scales about the end; min 1-day span; no-op safe", () => {
+    const parentSpan = { startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" };
+    const kids = [{ taskId: "c1", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-08-20T00:00:00Z" }];
+    // pull the start earlier by 10 days → span doubles about the end (08-20).
+    const grown = scaleChildrenForParentResize(parentSpan, kids, "start", -10);
+    expect(grown[0]!.startsAt).toBe("2026-07-31T00:00:00.000Z"); // 08-20 − 20d
+    expect(grown[0]!.endsAt).toBe("2026-08-20T00:00:00.000Z"); // end anchor unchanged
+    // deltaDays 0 and dateless children → no changes.
+    expect(scaleChildrenForParentResize(parentSpan, kids, "end", 0)).toEqual([]);
+    expect(scaleChildrenForParentResize(parentSpan, [{ taskId: "x", startsAt: null, endsAt: null }], "end", 5)).toEqual([]);
+  });
+});
+
+// helper: a WBS row with parent/depth/hasChildren overlay
+const wrow = (
+  id: string,
+  s: string | null,
+  e: string | null,
+  extra: Partial<gantt.GanttRow> = {},
+): gantt.GanttRow => ({ ...row(id, s, e), ...extra });
+
+describe("rollupRowDates — parent bars enclose their children (feedback #2)", () => {
+  it("parent span widens to the union of its children (parent >= all children)", () => {
+    const rows = [
+      wrow("p", "2026-08-10T00:00:00Z", "2026-08-15T00:00:00Z", { hasChildren: true }),
+      wrow("c1", "2026-08-05T00:00:00Z", "2026-08-12T00:00:00Z", { parentTaskId: "p", depth: 1 }),
+      wrow("c2", "2026-08-14T00:00:00Z", "2026-08-20T00:00:00Z", { parentTaskId: "p", depth: 1 }),
+    ];
+    const out = rollupRowDates(rows);
+    const p = out.find((r) => r.taskId === "p")!;
+    // start = earliest child (8/5), end = latest child (8/20)
+    expect(p.startsAt).toBe("2026-08-05T00:00:00.000Z");
+    expect(p.endsAt).toBe("2026-08-20T00:00:00.000Z");
+    // children are untouched
+    expect(out.find((r) => r.taskId === "c1")!.startsAt).toBe("2026-08-05T00:00:00Z");
+    expect(out.find((r) => r.taskId === "c2")!.endsAt).toBe("2026-08-20T00:00:00Z");
+  });
+
+  it("a manually-narrowed parent never splits a child (union still covers all children)", () => {
+    const rows = [
+      wrow("p", "2026-08-12T00:00:00Z", "2026-08-13T00:00:00Z", { hasChildren: true }),
+      wrow("c", "2026-08-01T00:00:00Z", "2026-08-31T00:00:00Z", { parentTaskId: "p", depth: 1 }),
+    ];
+    const p = rollupRowDates(rows).find((r) => r.taskId === "p")!;
+    expect(p.startsAt).toBe("2026-08-01T00:00:00.000Z");
+    expect(p.endsAt).toBe("2026-08-31T00:00:00.000Z");
+  });
+
+  it("widening a child grows the parent (child edit propagates up)", () => {
+    const base = [
+      wrow("p", null, null, { hasChildren: true }),
+      wrow("c", "2026-08-10T00:00:00Z", "2026-08-12T00:00:00Z", { parentTaskId: "p", depth: 1 }),
+    ];
+    const before = rollupRowDates(base).find((r) => r.taskId === "p")!;
+    expect(before.endsAt).toBe("2026-08-12T00:00:00.000Z");
+    // child's end pushed out by a resize
+    base[1] = wrow("c", "2026-08-10T00:00:00Z", "2026-08-25T00:00:00Z", { parentTaskId: "p", depth: 1 });
+    const after = rollupRowDates(base).find((r) => r.taskId === "p")!;
+    expect(after.endsAt).toBe("2026-08-25T00:00:00.000Z");
+  });
+
+  it("multi-level trees roll up bottom-up (grandparent covers grandchildren)", () => {
+    const rows = [
+      wrow("gp", "2026-08-10T00:00:00Z", "2026-08-11T00:00:00Z", { hasChildren: true }),
+      wrow("p", "2026-08-10T00:00:00Z", "2026-08-11T00:00:00Z", { parentTaskId: "gp", depth: 1, hasChildren: true }),
+      wrow("gc", "2026-08-01T00:00:00Z", "2026-08-28T00:00:00Z", { parentTaskId: "p", depth: 2 }),
+    ];
+    const out = rollupRowDates(rows);
+    expect(out.find((r) => r.taskId === "p")!.endsAt).toBe("2026-08-28T00:00:00.000Z");
+    expect(out.find((r) => r.taskId === "gp")!.endsAt).toBe("2026-08-28T00:00:00.000Z");
+    expect(out.find((r) => r.taskId === "gp")!.startsAt).toBe("2026-08-01T00:00:00.000Z");
+  });
+
+  it("flat lists (no hierarchy) pass through unchanged", () => {
+    const rows = [row("a", "2026-08-05T00:00:00Z", "2026-08-08T00:00:00Z")];
+    expect(rollupRowDates(rows)).toBe(rows);
+  });
+});
+
+describe("parentEnclosures — 内包バー vertical containment geometry", () => {
+  const wbs = (id: string, depth: number, hasChildren: boolean, parent: string | null): gantt.GanttRow => ({
+    taskId: id, title: id, startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-05T00:00:00Z",
+    progressPercent: 0, assigneeId: null, depth, hasChildren, parentTaskId: parent,
+  });
+
+  it("returns nothing for a flat list (no parents)", () => {
+    expect(parentEnclosures([wbs("a", 0, false, null), wbs("b", 0, false, null)])).toEqual([]);
+  });
+
+  it("wraps an open parent + its two visible children into one box (3 rows tall)", () => {
+    const rows = [wbs("p", 0, true, null), wbs("c1", 1, false, "p"), wbs("c2", 1, false, "p")];
+    const encl = parentEnclosures(rows);
+    expect(encl).toHaveLength(1);
+    expect(encl[0]).toMatchObject({ taskId: "p", depth: 0, rowStart: 0, rowCount: 3, top: 0, height: 3 * ROW_HEIGHT });
+  });
+
+  it("emits a NESTED box per level for a 3-level WBS (grandparent covers through the inner parent's kids)", () => {
+    // gp > p > (g1,g2)  — visible order is depth-first: gp,p,g1,g2
+    const rows = [wbs("gp", 0, true, null), wbs("p", 1, true, "gp"), wbs("g1", 2, false, "p"), wbs("g2", 2, false, "p")];
+    const encl = parentEnclosures(rows);
+    expect(encl).toHaveLength(2);
+    // grandparent spans ALL 4 rows (depth-based walk continues through the inner parent's children)
+    expect(encl.find((e) => e.taskId === "gp")).toMatchObject({ rowStart: 0, rowCount: 4, height: 4 * ROW_HEIGHT });
+    // inner parent spans its own 3 rows, nested inside
+    expect(encl.find((e) => e.taskId === "p")).toMatchObject({ rowStart: 1, rowCount: 3, height: 3 * ROW_HEIGHT });
+  });
+
+  it("a collapsed parent (no visible descendants following) yields no box — falls back to a 1-row bar", () => {
+    // parent present but its children are hidden (not in the visible rows)
+    const rows = [wbs("p", 0, true, null), wbs("q", 0, true, null), wbs("qc", 1, false, "q")];
+    const encl = parentEnclosures(rows);
+    // only q (which has a visible child) gets a box; p (collapsed) does not
+    expect(encl.map((e) => e.taskId)).toEqual(["q"]);
   });
 });

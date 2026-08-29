@@ -6,7 +6,7 @@ import type { task, common, auditLog, identity } from "@dub/types";
 import { DubError, CommonErrorCodes } from "@dub/errors";
 import type { AppConfig } from "../src/env";
 import type { Deps } from "../src/deps";
-import type { TaskRepo, InsertTaskInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
+import type { TaskRepo, InsertTaskInput, InsertAttachmentInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
 import type { EventClient, EventRef, IdentityClient, Authorizer } from "../src/clients";
 import type { EventPublisher, Auditor } from "../src/events";
 import type { Principal } from "../src/principal";
@@ -29,6 +29,12 @@ export class InMemoryTaskRepo implements TaskRepo {
       status: input.status,
       priority: input.priority,
       assigneeId: input.assigneeId,
+      // WBS/team columns (mirror the D1 repo — the old in-memory fake dropped these,
+      // so parent/team/wbs persistence went untested and #260's bug could slip by).
+      teamId: input.teamId ?? null,
+      parentTaskId: input.parentId ?? null,
+      wbs: input.wbs ?? null,
+      startAt: input.startAt ?? null,
       dueAt: input.dueAt,
       origin: input.origin,
       version: 1,
@@ -85,6 +91,10 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (patch.status !== undefined) r.status = patch.status;
     if (patch.priority !== undefined) r.priority = patch.priority;
     if (patch.assigneeId !== undefined) r.assigneeId = patch.assigneeId;
+    if (patch.teamId !== undefined) r.teamId = patch.teamId;
+    if (patch.parentId !== undefined) r.parentTaskId = patch.parentId;
+    if (patch.wbs !== undefined) r.wbs = patch.wbs;
+    if (patch.startAt !== undefined) r.startAt = patch.startAt;
     if (patch.dueAt !== undefined) r.dueAt = patch.dueAt;
     r.version += 1;
     r.updatedAt = now;
@@ -117,14 +127,26 @@ export class InMemoryTaskRepo implements TaskRepo {
     return this.deps.filter((d) => d.taskId === taskId).map((d) => d.dependsOnId);
   }
 
-  async listDependenciesByEvent(eventId: string): Promise<task.TaskDependency[]> {
-    return this.deps.filter((d) => this.rows.get(d.taskId)?.eventId === eventId).map((d) => ({ ...d }));
+  async listDependenciesByEvent(eventId: string | null): Promise<task.TaskDependency[]> {
+    return this.deps
+      .filter((d) => (this.rows.get(d.taskId)?.eventId ?? null) === eventId)
+      .map((d) => ({ ...d }));
   }
 
-  async listLiveTaskIdsByEvent(eventId: string): Promise<common.TaskId[]> {
+  async listLiveTasksByEvent(
+    eventId: string | null,
+  ): Promise<Array<{ id: common.TaskId; teamId: common.TeamId | null }>> {
     return [...this.rows.values()]
-      .filter((r) => r.eventId === eventId && r.archivedAt === null)
-      .map((r) => r.id);
+      .filter((r) => (r.eventId ?? null) === eventId && r.archivedAt === null)
+      .map((r) => ({ id: r.id, teamId: r.teamId ?? null }));
+  }
+
+  async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
+    const teams = new Set<common.TeamId | null>();
+    for (const r of this.rows.values()) {
+      if (r.parentTaskId === parentId && r.archivedAt === null) teams.add(r.teamId ?? null);
+    }
+    return [...teams];
   }
 
   async replaceDependencies(
@@ -163,10 +185,51 @@ export class InMemoryTaskRepo implements TaskRepo {
         r.dueAt <= end
       ) {
         r.dueSoonNotifiedAt = now;
-        out.push({ taskId: r.id, eventId: r.eventId, dueAt: r.dueAt });
+        out.push({ taskId: r.id, eventId: r.eventId ?? null, dueAt: r.dueAt });
       }
     }
     return out;
+  }
+
+  attachments: Array<task.TaskAttachment & { archivedAt: string | null }> = [];
+
+  async addAttachment(input: InsertAttachmentInput): Promise<task.TaskAttachment> {
+    const att: task.TaskAttachment & { archivedAt: string | null } = {
+      id: input.id,
+      taskId: input.taskId,
+      kind: input.kind,
+      name: input.name,
+      url: input.url,
+      fileId: input.fileId,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      createdBy: input.createdBy,
+      createdAt: input.now,
+      archivedAt: null,
+    };
+    this.attachments.push(att);
+    const { archivedAt: _a, ...pub } = att;
+    void _a;
+    return { ...pub };
+  }
+
+  async listAttachments(taskId: string): Promise<task.TaskAttachment[]> {
+    return this.attachments
+      .filter((a) => a.taskId === taskId && a.archivedAt === null)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+      .map(({ archivedAt: _a, ...pub }) => {
+        void _a;
+        return { ...pub };
+      });
+  }
+
+  async archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean> {
+    const att = this.attachments.find(
+      (a) => a.id === attachmentId && a.taskId === taskId && a.archivedAt === null,
+    );
+    if (!att) return false;
+    att.archivedAt = now;
+    return true;
   }
 }
 

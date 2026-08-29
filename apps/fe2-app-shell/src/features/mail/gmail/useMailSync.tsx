@@ -26,7 +26,7 @@ export function useMailSync(): void {
   // seeded from GET /mail/flags right after a hydrate, and `flagsReady` gates persistence so
   // the reload itself (which momentarily shows un-flagged threads) never POSTs a spurious
   // "unstar" back to the server.
-  const flagBaseline = useRef<Map<string, { starred: boolean; archived: boolean; trashed: boolean }>>(new Map());
+  const flagBaseline = useRef<Map<string, { starred: boolean; archived: boolean; trashed: boolean; purged: boolean }>>(new Map());
   const flagsReady = useRef(false);
 
   // Load inbox + sent on mount and on every requested sync (post-send). A failure leaves
@@ -46,8 +46,8 @@ export function useMailSync(): void {
         const flags = await api.listFlags().catch(() => []);
         if (!alive) return;
         dispatch({ type: "APPLY_FLAGS", flags });
-        const base = new Map<string, { starred: boolean; archived: boolean; trashed: boolean }>();
-        for (const f of flags) base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed });
+        const base = new Map<string, { starred: boolean; archived: boolean; trashed: boolean; purged: boolean }>();
+        for (const f of flags) base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed, purged: f.purged });
         flagBaseline.current = base;
         flagsReady.current = true;
       } catch {
@@ -66,9 +66,9 @@ export function useMailSync(): void {
   useEffect(() => {
     if (!flagsReady.current) return;
     for (const t of threads) {
-      const cur = { starred: t.starred, archived: t.folder === "archive", trashed: t.folder === "trash" };
-      const prev = flagBaseline.current.get(t.id) ?? { starred: false, archived: false, trashed: false };
-      if (cur.starred !== prev.starred || cur.archived !== prev.archived || cur.trashed !== prev.trashed) {
+      const cur = { starred: t.starred, archived: t.folder === "archive", trashed: t.folder === "trash", purged: t.purged === true };
+      const prev = flagBaseline.current.get(t.id) ?? { starred: false, archived: false, trashed: false, purged: false };
+      if (cur.starred !== prev.starred || cur.archived !== prev.archived || cur.trashed !== prev.trashed || cur.purged !== prev.purged) {
         flagBaseline.current.set(t.id, cur);
         void api.setFlags(t.id, cur).catch(() => undefined);
       }

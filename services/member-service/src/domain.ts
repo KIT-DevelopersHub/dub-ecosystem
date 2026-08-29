@@ -14,6 +14,27 @@ export function isEmail(v: unknown): v is string {
   return typeof v === "string" && EMAIL_RE.test(v.trim());
 }
 
+/** Loose 電話番号 shape: digits with optional separators (space, hyphen, parens, +).
+ *  Intentionally permissive (任意フィールド) — just rejects obvious non-numbers. */
+const PHONE_RE = /^[0-9+\-()\s]{6,20}$/;
+export function isPhone(v: unknown): v is string {
+  return typeof v === "string" && PHONE_RE.test(v.trim());
+}
+
+/** ローマ字 (氏名のアルファベット表記) shape: starts with a Latin letter, then letters /
+ *  spaces / hyphens / apostrophes (e.g. "Yamada", "O'Brien", "Van Dyke"). 任意フィールド
+ *  なので緩め — アルファベットのメール発行に使う前提で、非ラテン文字だけ弾く。 */
+const ROMAJI_RE = /^[A-Za-z][A-Za-z\s'-]*$/;
+export function isRomaji(v: unknown): v is string {
+  return typeof v === "string" && ROMAJI_RE.test(v.trim());
+}
+
+/** Compose "姓 名" from the split fields, skipping empty parts. Used to keep the legacy
+ *  single `name` / `name_kana` columns in sync so every existing reader keeps working. */
+export function composeName(last: string | null, first: string | null): string {
+  return [last, first].filter((x): x is string => typeof x === "string" && x.length > 0).join(" ");
+}
+
 export function isMemberStatus(v: unknown): v is MemberStatus {
   return typeof v === "string" && (MEMBER_STATUSES as readonly string[]).includes(v);
 }
@@ -65,6 +86,14 @@ export function toMember(r: PersonRow, teamIds: string[]): member.Member {
     contact: r.contact,
     schoolEmail: r.schoolEmail,
     gmail: r.gmail,
+    lastName: r.lastName,
+    firstName: r.firstName,
+    lastNameKana: r.lastNameKana,
+    firstNameKana: r.firstNameKana,
+    lastNameRomaji: r.lastNameRomaji,
+    firstNameRomaji: r.firstNameRomaji,
+    phone: r.phone,
+    desiredActivity: r.desiredActivity,
     note: r.note,
     sortOrder: r.sortOrder,
     version: r.version,
@@ -79,10 +108,18 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     orgId: r.orgId,
     memberId: r.memberId,
     name: r.name,
+    lastName: r.lastName,
+    firstName: r.firstName,
     nameKana: r.nameKana,
+    lastNameKana: r.lastNameKana,
+    firstNameKana: r.firstNameKana,
+    nameRomaji: r.nameRomaji,
+    lastNameRomaji: r.lastNameRomaji,
+    firstNameRomaji: r.firstNameRomaji,
     grade: r.grade,
     department: r.department,
     contact: r.contact,
+    phone: r.phone,
     schoolEmail: r.schoolEmail,
     gmail: r.gmail,
     desiredTeamId: r.desiredTeamId,
@@ -90,6 +127,7 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     note: r.note,
     status: r.status,
     matchKind: r.matchKind,
+    reviewState: r.reviewState,
     submittedBy: r.submittedBy,
     submittedAt: r.submittedAt,
     createdAt: r.createdAt,

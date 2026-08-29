@@ -3,7 +3,7 @@
 // match. Unknown types fall back to the raw string + a generic icon (test 13:
 // must never crash).
 
-import type { IconName } from "@dub/ui";
+import type { BadgeTone, IconName } from "@dub/ui";
 import type { NotificationType } from "../contracts/notification-api";
 import { matchSpecificity } from "./preference-merge";
 
@@ -29,6 +29,11 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   { pattern: "event.reminder", label: "Event reminder", icon: "calendar", group: "event" },
   { pattern: "system.*", label: "System", icon: "info", group: "system" },
   { pattern: "system.announcement", label: "Announcement", icon: "megaphone", group: "system" },
+  // Admin-facing operational types (Notification管理). Grouped under システム so the genre
+  // filter classifies them without a new group; explicit patterns give a readable label
+  // instead of the raw machine name.
+  { pattern: "deploy.*", label: "デプロイ", icon: "info", group: "system" },
+  { pattern: "feedback", label: "フィードバック", icon: "alert", group: "system" },
   // Release notes (new-feature announcements). Its own group so it gets a dedicated
   // "新機能" filter chip and a distinct 🎉 badge in the inbox.
   { pattern: "release", label: "🎉 新機能", icon: "megaphone", group: "release" },
@@ -86,3 +91,79 @@ export const NOTIFICATION_GROUP_META: Record<NotificationGroup, { label: string;
   event: { label: "イベント", icon: "calendar" },
   system: { label: "システム", icon: "info" },
 };
+
+// ---------------------------------------------------------------------------
+// Notification CATEGORY (the user-facing inbox tabs + per-card label). This is the
+// SINGLE SOURCE OF TRUTH for the server-`type` → category mapping (判断: dub-api-contract-sot):
+// the filter bar tabs, the client-side tab filtering, the list section grouping, and the
+// card badge all derive from the constants below — never re-declared elsewhere. Keyed on the
+// notification `type` string produced by the services:
+//   - 参加届 (participation) = member.participation.*  (member-service participationNotify)
+//   - メール (mail)          = mail.*                  (mail-gateway / mail-automation)
+//   - アプリアップデート     = deploy.* + release/release.*  (deploy admin notifications + release notes)
+//   - その他 (other)         = everything else (tasks/events/system/…): shown only under "All"
+// The taxonomy is intentionally separate from NotificationGroup above (which stays the
+// per-app display grouping used by preferences + the type dictionary). Categories are what the
+// user asked the tabs to reflect.
+export type NotificationCategory = "app_update" | "mail" | "participation" | "other";
+
+// The tab selector value: a concrete category or "all" (no filtering).
+export type CategoryFilter = NotificationCategory | "all";
+
+// Ordered prefix rules. `match` matches a type when it equals `match` OR starts with
+// `match + "."` — so "release" matches "release" and "release.notes" but NOT "released.x".
+// First match wins; order the more specific prefixes first if they ever overlap.
+const CATEGORY_RULES: { match: string; category: NotificationCategory }[] = [
+  { match: "member.participation", category: "participation" },
+  { match: "mail", category: "mail" },
+  { match: "deploy", category: "app_update" },
+  { match: "release", category: "app_update" },
+];
+
+function ruleMatches(match: string, type: string): boolean {
+  return type === match || type.startsWith(`${match}.`);
+}
+
+// Resolve a concrete notification type to its category (the tab/badge taxonomy).
+export function resolveCategory(type: NotificationType): NotificationCategory {
+  for (const rule of CATEGORY_RULES) {
+    if (ruleMatches(rule.match, type)) return rule.category;
+  }
+  return "other";
+}
+
+export interface NotificationCategoryMeta {
+  label: string;
+  icon: IconName;
+  tone: BadgeTone; // @dub/ui Badge tone → color of the per-card label
+}
+
+// Display metadata for each category: the section header + the colored card badge.
+export const NOTIFICATION_CATEGORY_META: Record<NotificationCategory, NotificationCategoryMeta> = {
+  app_update: { label: "アプリアップデート", icon: "megaphone", tone: "brand" },
+  mail: { label: "メール", icon: "at-sign", tone: "info" },
+  participation: { label: "参加届", icon: "user", tone: "success" },
+  other: { label: "その他", icon: "bell", tone: "neutral" },
+};
+
+// Section display order for the grouped inbox (highest-signal first). "other" is last.
+export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
+  "app_update",
+  "mail",
+  "participation",
+  "other",
+];
+
+// The inbox filter-bar tabs: "All" + the three named categories. "other" is intentionally
+// NOT a tab — unclassified notifications appear only under "All" (per the design ask).
+export const NOTIFICATION_CATEGORY_TABS: { id: CategoryFilter; label: string }[] = [
+  { id: "all", label: "すべて" },
+  { id: "app_update", label: NOTIFICATION_CATEGORY_META.app_update.label },
+  { id: "mail", label: NOTIFICATION_CATEGORY_META.mail.label },
+  { id: "participation", label: NOTIFICATION_CATEGORY_META.participation.label },
+];
+
+// True when an item belongs to the active tab. "all" matches everything.
+export function matchesCategoryFilter(type: NotificationType, filter: CategoryFilter): boolean {
+  return filter === "all" || resolveCategory(type) === filter;
+}

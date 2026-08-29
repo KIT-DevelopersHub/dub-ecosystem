@@ -47,8 +47,9 @@ function wrap(ui: ReactNode, api: DriveShareApi): JSX.Element {
   );
 }
 
-const OWNER: SharePermission = { id: "p_owner", type: "user", role: "owner", emailAddress: "hackit@gmail.com", displayName: "Hackit 運営", domain: null };
-const READER: SharePermission = { id: "p_reader", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null };
+const OWNER: SharePermission = { id: "p_owner", type: "user", role: "owner", emailAddress: "hackit@gmail.com", displayName: "Hackit 運営", domain: null, inherited: false };
+const READER: SharePermission = { id: "p_reader", type: "user", role: "reader", emailAddress: "sponsor@example.com", displayName: "協賛担当", domain: null, inherited: false };
+const INHERITED: SharePermission = { id: "p_inh", type: "user", role: "writer", emailAddress: "staff-a@example.com", displayName: "スタッフA", domain: null, inherited: true };
 
 const FILES: ListFilesResult = {
   files: [
@@ -76,10 +77,10 @@ function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
   return {
     listFiles: () => Promise.resolve(FILES),
     listPermissions: () => Promise.resolve(PERMS),
-    grant: (_f, req) => Promise.resolve({ permission: { id: "p_new", type: "user", role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null } }),
+    grant: (_f, req) => Promise.resolve({ permission: { id: "p_new", type: "user", role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null, inherited: false } }),
     updateRole: (_f, id, role) => Promise.resolve({ permission: { ...READER, id, role } }),
     revoke: () => Promise.resolve({ revoked: true }),
-    setLinkSharing: (_f, req) => Promise.resolve({ fileId: "fil_budget", permissions: req.enabled ? [OWNER, READER, { id: "p_anyone", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null }] : [OWNER, READER] }),
+    setLinkSharing: (_f, req) => Promise.resolve({ fileId: "fil_budget", permissions: req.enabled ? [OWNER, READER, { id: "p_anyone", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null, inherited: false }] : [OWNER, READER] }),
     listRoles: () => Promise.resolve(ROLES),
     listAllRoleGrants: () => Promise.resolve(ROLE_GRANTS),
     listRoleGrants: () => Promise.resolve(ROLE_GRANTS),
@@ -203,7 +204,7 @@ describe("DriveShareScreen", () => {
   it("grant is disabled for an invalid email and calls grant for a valid one", async () => {
     const user = userEvent.setup();
     const grant = vi.fn((_f: string, req: { emailAddress: string; role: "reader" | "commenter" | "writer" }) =>
-      Promise.resolve({ permission: { id: "p_new", type: "user" as const, role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null } }),
+      Promise.resolve({ permission: { id: "p_new", type: "user" as const, role: req.role, emailAddress: req.emailAddress, displayName: null, domain: null, inherited: false } }),
     );
     render(wrap(<DriveShareScreen />, stubApi({ grant })));
     await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
@@ -245,6 +246,38 @@ describe("DriveShareScreen", () => {
     expect(revoke).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "剥奪する" }));
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("fil_budget", "p_reader"));
+  });
+
+  it("an inherited permission is read-only: shows the 継承 badge + reason, no role select or revoke", async () => {
+    const user = userEvent.setup();
+    const revoke = vi.fn(() => Promise.resolve({ revoked: true }));
+    const listPermissions = () => Promise.resolve({ fileId: "fil_budget", permissions: [OWNER, READER, INHERITED] });
+    render(wrap(<DriveShareScreen />, stubApi({ revoke, listPermissions })));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
+    await user.click(screen.getByRole("button", { name: /予算管理/ }));
+    const rows = await screen.findAllByTestId("fe2-driveshare-permission");
+    // rows: [OWNER, READER(direct), INHERITED]
+    const inheritedRow = rows[2]!;
+    expect(within(inheritedRow).getByTestId("fe2-driveshare-inherited-badge")).toBeInTheDocument();
+    expect(within(inheritedRow).getByTestId("fe2-driveshare-inherited-reason")).toBeInTheDocument();
+    // no actionable controls on the inherited row
+    expect(within(inheritedRow).queryByTestId("fe2-driveshare-revoke")).toBeNull();
+    expect(within(inheritedRow).queryByTestId("fe2-driveshare-role-select")).toBeNull();
+    // the direct (non-inherited) READER row still has its controls
+    expect(within(rows[1]!).getByTestId("fe2-driveshare-revoke")).toBeInTheDocument();
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it("link sharing is locked off when the anyone permission is inherited", async () => {
+    const user = userEvent.setup();
+    const inheritedAnyone: SharePermission = { id: "p_anyone_inh", type: "anyone", role: "reader", emailAddress: null, displayName: null, domain: null, inherited: true };
+    const listPermissions = () => Promise.resolve({ fileId: "fil_budget", permissions: [OWNER, inheritedAnyone] });
+    render(wrap(<DriveShareScreen />, stubApi({ listPermissions })));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
+    await user.click(screen.getByRole("button", { name: /予算管理/ }));
+    const sw = await screen.findByTestId("fe2-driveshare-link-switch");
+    expect(sw).toBeDisabled();
+    expect(screen.getByTestId("fe2-driveshare-link-inherited-reason")).toBeInTheDocument();
   });
 
   it("toggling link sharing calls setLinkSharing", async () => {

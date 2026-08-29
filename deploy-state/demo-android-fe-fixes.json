@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "android-fe-fixes",
+  "worker": "dub-demo-android-fe-fixes",
+  "url": "https://dub-demo-android-fe-fixes.developershub-site.workers.dev",
+  "deployedSha": "e5492c1",
+  "branch": "fe/mobile-responsive-fixes",
+  "actor": "Claude (kota)",
+  "markers": ["文字以上で設定してください","fe5-filterbar-unread-row","dub-page-header-row","dub-launcher-panel"],
+  "live": true,
+  "verifiedAt": "2026-08-27T13:20:36Z",
+  "updatedAt": "2026-08-27T13:20:36Z",
+  "note": "Mobile responsive fixes #2/#3/#5/#6 (refined launcher clamp)"
+}
