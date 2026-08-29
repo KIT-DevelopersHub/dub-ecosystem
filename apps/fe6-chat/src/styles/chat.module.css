@@ -1514,3 +1514,133 @@
     background: color-mix(in srgb, var(--dub-color-warning-100) 80%, transparent);
   }
 }
+
+/* ─────────────────────── Typing indicator (§2-5) ───────────────────────── */
+/* Thin strip between the timeline and the composer; takes no layout when idle
+   (the component returns null). Animated three-dot bubble + member name(s). */
+.typingIndicator {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  min-height: 22px;
+  padding: 2px var(--dub-space-4) var(--dub-space-1);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+.typingAvatars {
+  display: inline-flex;
+}
+.typingAvatars > * + * {
+  margin-left: -6px;
+}
+.typingDots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.typingDots > span {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-text-muted);
+  animation: typingBounce 1.2s infinite ease-in-out;
+}
+.typingDots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typingDots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.typingText {
+  font-style: italic;
+}
+@keyframes typingBounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .typingDots > span {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* ─────────────────────── Read receipts (既読) ──────────────────────────── */
+/* LINE-style single marker under the user's newest read message. Right-aligned,
+   sits inside the scrolling timeline so it tracks the last own message. */
+.readReceipt {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--dub-space-1);
+  padding: 2px var(--dub-space-4) var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs, 11px);
+}
+.readReceiptAvatars {
+  display: inline-flex;
+}
+.readReceiptAvatars > * + * {
+  margin-left: -6px;
+}
+.readReceiptLabel {
+  font-weight: var(--dub-font-weight-medium);
+}
+
+/* ─────────────── Workspace rail: self / presence control ───────────────── */
+.railSelfWrap {
+  position: relative;
+  display: inline-flex;
+}
+.railSelfDot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  border: 2px solid var(--dub-color-gray-900);
+}
+.railSelfMenu {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: calc(100% + 8px);
+  width: 160px;
+  padding: var(--dub-space-1);
+  background: var(--dub-color-surface-overlay);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-lg, var(--dub-shadow-md));
+  z-index: var(--dub-zIndex-dropdown);
+}
+.railSelfMenuTitle {
+  padding: var(--dub-space-2) var(--dub-space-2) var(--dub-space-1);
+  font-size: var(--dub-font-size-xs, 11px);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-muted);
+}
+.railSelfMenuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  width: 100%;
+  padding: var(--dub-space-2);
+  border: none;
+  background: transparent;
+  border-radius: var(--dub-radius-sm);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.railSelfMenuItem:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.railSelfMenuItem > span:nth-child(2) {
+  flex: 1;
+}

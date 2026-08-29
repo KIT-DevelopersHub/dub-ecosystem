@@ -15,6 +15,7 @@ import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import { TaskApiClientProvider, TaskRouteProvider, ChatRuntimeProvider, WsChatClient, type ChatRuntime, type TaskRouteContextValue } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
+import { isDemoEnabled } from "../lib/demo-seed.tsx";
 import { useBffHome } from "../bff/useBffHome.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { useToast } from "@dub/ui";
@@ -91,6 +92,10 @@ export function NotificationProviders({ api, children }: { api: ApiClient; child
 export function ChatProviders({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const { can } = usePermissions();
   const me = useMe();
+  // The demo transport has no chat WS: let FE6 drive typing / 既読 from its demo
+  // simulator so both are visible. Real deployments (VITE_DEMO unset) leave it off
+  // and the realtime channel feeds those stores instead.
+  const demoLiveness = isDemoEnabled(import.meta.env as { VITE_DEMO?: string });
   const runtime = useMemo<ChatRuntime>(() => {
     const chatApi = createChatApiClient(api);
     return {
@@ -98,8 +103,9 @@ export function ChatProviders({ api, children }: { api: ApiClient; children: Rea
       can,
       currentUserId: me?.user.id ?? ("" as gateway.MeResponse["user"]["id"]),
       createRealtimeClient: () => new WsChatClient({ getTicket: (channelId) => chatApi.getWsTicket(channelId) }),
+      demoLiveness,
     };
-  }, [api, can, me]);
+  }, [api, can, me, demoLiveness]);
   return <ChatRuntimeProvider value={runtime}>{children}</ChatRuntimeProvider>;
 }
 
