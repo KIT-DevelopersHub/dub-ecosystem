@@ -21,7 +21,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "pnpm --filter @dub/tokens build && storybook build"
+    "build-storybook": "pnpm --filter @dub/tokens build && storybook build",
+    "visual:build": "pnpm run build-storybook",
+    "visual": "playwright test -c visual/playwright.config.ts",
+    "visual:update": "playwright test -c visual/playwright.config.ts --update-snapshots",
+    "visual:report": "playwright show-report visual/.report",
+    "visual:install": "playwright install --with-deps chromium"
   },
   "peerDependencies": {
     "react": "^18",
@@ -32,6 +37,7 @@
     "lucide-react": "^0.469.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
