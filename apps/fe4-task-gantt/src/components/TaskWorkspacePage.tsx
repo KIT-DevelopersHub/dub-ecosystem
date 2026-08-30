@@ -16,7 +16,7 @@ import { emptyFilter, toListTasksQuery, type TaskFilterState } from "../domain/t
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
-import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
+import { buildProvisionalDeps, buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
@@ -692,7 +692,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       eventId,
       now,
     );
-    gantt.upsertRowOptimistic(provisionalGanttRow(provisional, draft.parentTaskId));
+    // Paint the bar AND its 先行タスク(依存) connector arrows the same tick — depends-on
+    // edges plus the「＋先行タスクを作成」back-link — so the timeline is complete before
+    // the POST + deps persist resolve. Rolled back with the row on failure.
+    const provisionalDeps = buildProvisionalDeps(tempId, draft.dependsOnIds, linkPredecessorFor);
+    gantt.addRowOptimistic(provisionalGanttRow(provisional, draft.parentTaskId), provisionalDeps);
 
     const created = await store.create(
       client,
@@ -709,13 +713,22 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       provisional,
     );
     if (!created) {
-      gantt.removeRowOptimistic(tempId); // create failed (reason already surfaced) — drop the provisional bar
+      // Roll the optimistic artefacts back and confirm the rollback with a friendly
+      // error toast (the detailed reason is ALSO surfaced via store.lastError's
+      // ErrorDialog/banner — the toast is the quick "戻しました" acknowledgement so the
+      // vanished bar never looks like a silent glitch).
+      gantt.removeRowOptimistic(tempId);
+      toast.show({ kind: "error", title: "タスクの作成に失敗しました", description: "もう一度お試しください。" });
       return false;
     }
-    // Swap the provisional bar onto the real id so it stays visible (no flicker)
-    // through the follow-up calls until the authoritative refetch replaces it.
+    // Swap the provisional bar + its connector lines onto the real id so both stay
+    // visible (no flicker) through the follow-up calls until the authoritative refetch
+    // replaces them.
     gantt.removeRowOptimistic(tempId);
-    gantt.upsertRowOptimistic(provisionalGanttRow({ ...created }, draft.parentTaskId));
+    gantt.addRowOptimistic(
+      provisionalGanttRow({ ...created }, draft.parentTaskId),
+      buildProvisionalDeps(created.id, draft.dependsOnIds, linkPredecessorFor),
+    );
 
     let version = created.version;
     if (draft.status !== "todo") {
