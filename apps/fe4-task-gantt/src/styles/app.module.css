@@ -1064,7 +1064,12 @@
    (e.g. the right-docked detail panel at min(440px,92vw) on a phone). auto-fit +
    a 150px min lets 開始日/期日 each keep enough width to render 「日付を選択」 on
    ONE line instead of wrapping to two (bug B); wide surfaces stay side-by-side. */
-.formRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--dub-space-3); max-width: 100%; }
+/* A form "row" always spans the FULL width of its container. In the flex-column
+   detail panel this is a no-op; inside .formGrid (a 2-col grid) it prevents the
+   row from being trapped in a single half-width cell — which previously squished
+   開始日/期日 so only one date was usable (症状: 日付UI崩れ). Its own auto-fit then
+   lays the paired fields side by side across the full width. */
+.formRow { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--dub-space-3); max-width: 100%; }
 .formField { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .formField input, .formField select, .formField textarea { max-width: 100%; box-sizing: border-box; }
 .formFieldFull { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }

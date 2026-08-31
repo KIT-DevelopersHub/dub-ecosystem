@@ -184,19 +184,50 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-create-assignee">
-            担当
-          </label>
-          <Select
-            id="fe4-create-assignee"
-            value={assigneeId ?? ""}
-            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
-            testId="fe4-create-assignee"
-          />
+        {/* 担当 と チーム は横並び（feedback ㉚: 担当とチームは横並びでよい）。formRow は
+            グリッド全幅を占めるので、開始日/期日とは別行に整然と2カラムで並ぶ。 */}
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-create-assignee">
+              担当
+            </label>
+            <Select
+              id="fe4-create-assignee"
+              value={assigneeId ?? ""}
+              onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
+              options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+              testId="fe4-create-assignee"
+            />
+          </div>
+          {teams.length > 0 && (
+            <div className={styles.formField}>
+              <label className={styles.formLabel} htmlFor="fe4-create-team">
+                チーム
+              </label>
+              <Select
+                id="fe4-create-team"
+                value={teamId ?? ""}
+                disabled={teamLockedToParent}
+                onChange={(v) => {
+                  const next = v ? (v as common.TeamId) : null;
+                  setTeamId(next);
+                  // dependencies are same-team only — drop predecessors on other teams.
+                  setDeps((d) => pruneToScope(scopeTasks, next, d));
+                }}
+                options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
+                testId="fe4-create-team"
+              />
+              {teamLockedToParent && (
+                <p className={styles.fieldHint} data-testid="fe4-create-team-locked">
+                  親タスクと同じチームになります（変更できません）
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
+        {/* 開始日 / 期日 は常に自分の行で横並び。formRow が全幅を占めるため両フィールドが
+            十分な幅を持ち、両方きちんと入力できる（片方だけになる崩れを解消）。 */}
         <div className={styles.formRow}>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-create-start">
@@ -211,32 +242,6 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
             <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
           </div>
         </div>
-
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-create-team">
-              チーム
-            </label>
-            <Select
-              id="fe4-create-team"
-              value={teamId ?? ""}
-              disabled={teamLockedToParent}
-              onChange={(v) => {
-                const next = v ? (v as common.TeamId) : null;
-                setTeamId(next);
-                // dependencies are same-team only — drop predecessors on other teams.
-                setDeps((d) => pruneToScope(scopeTasks, next, d));
-              }}
-              options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-              testId="fe4-create-team"
-            />
-            {teamLockedToParent && (
-              <p className={styles.fieldHint} data-testid="fe4-create-team-locked">
-                親タスクと同じチームになります（変更できません）
-              </p>
-            )}
-          </div>
-        )}
 
         {/* 親タスク → then 先行タスク: choose the WBS parent, then dependencies.
             Predecessors are limited to the chosen TEAM (any hierarchy level, ADR-0007). */}
