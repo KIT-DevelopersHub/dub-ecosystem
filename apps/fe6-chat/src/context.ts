@@ -15,6 +15,10 @@ export interface ChatRuntime {
   can: CanFn;
   currentUserId: common.UserId;
   createRealtimeClient: () => ChatRealtimeClient;
+  // When true, the display-only typing store is driven by the demo simulator (no chat
+  // WS available — standalone mock + the VITE_DEMO shell). A live deployment leaves this
+  // false and feeds the typing store from the realtime channel.
+  demoLiveness?: boolean;
 }
 
 const ChatRuntimeContext = createContext<ChatRuntime | null>(null);

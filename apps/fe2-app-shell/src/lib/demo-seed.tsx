@@ -979,8 +979,10 @@ function createRosterStore() {
 // the sidebar renders 全体 / チーム別 / 役割別 channels out of the box. Channel names
 // stay romaji for consistency (#7); Japanese topics describe each one. Team channels
 // mirror member-service's real 運営チーム (統括/開発/当日進行/スポンサー/会場/集客広報)
-// — no invented teams. Messages/WS are not seeded (no WS in demo): channels open to a
-// clean empty timeline; the sidebar list is the enriched surface.
+// — no invented teams. A message backlog IS seeded (below) so timelines are populated
+// and typing / 既読 have content to attach to; there is still no chat WS in demo, so
+// FE6 drives those display-only cues from its demo simulator (ChatProviders.demoLiveness).
+// Posting / edit / delete / reactions mutate the in-session store end-to-end.
 interface DemoChatChannel {
   id: string;
   type: "topic" | "event" | "dm";
@@ -1037,7 +1039,93 @@ function createChatStore() {
   });
   const byId = new Map(all.map((c) => [c.id, c]));
 
-  function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
+  // ── message history ─────────────────────────────────────────────────────────
+  // A believable Slack-style backlog so the timeline is populated (and typing /
+  // 既読 have something to attach to). Authors are the seeded roster users so
+  // identity /users?ids= resolves their display names. Ids are ULID-ordered
+  // ("msg_<chan><seq>"), and posted messages mint "msg_zz…" ids that sort after.
+  const A = { me: ME_ID, bob: "usr_bob", carol: "usr_carol", dave: "usr_dave" };
+  interface WireMsg {
+    id: string;
+    channelId: string;
+    authorId: string;
+    body: string;
+    threadRootId: string | null;
+    replyCount: number;
+    reactions: { emoji: string; userIds: string[] }[];
+    attachments: [];
+    editedAt: string | null;
+    deletedAt: string | null;
+    version: number;
+    createdAt: string;
+  }
+  const mt = (day: number, h: number, mn: number): string => new Date(Date.UTC(2026, 7, day, h, mn, 0)).toISOString();
+  const mk = (
+    id: string,
+    channelId: string,
+    authorId: string,
+    body: string,
+    createdAt: string,
+    reactions: { emoji: string; userIds: string[] }[] = [],
+  ): WireMsg => ({
+    id, channelId, authorId, body, threadRootId: null, replyCount: 0,
+    reactions, attachments: [], editedAt: null, deletedAt: null, version: 1, createdAt,
+  });
+
+  const SEED_MESSAGES: WireMsg[] = [
+    // #general — the channel the demo opens on (rich; includes ME messages so 既読 shows)
+    mk("msg_gen010", "chn_general", A.bob, "おはようございます！今日もよろしくお願いします 🙌", mt(20, 9, 2), [{ emoji: "👋", userIds: [A.me, A.carol, A.dave] }]),
+    mk("msg_gen020", "chn_general", A.me, "おはようございます。10:00 からスタンドアップです 📣", mt(20, 9, 4)),
+    mk("msg_gen030", "chn_general", A.carol, "承知しました！資料まとめておきます", mt(20, 9, 8), [{ emoji: "🙏", userIds: [A.me] }]),
+    mk("msg_gen040", "chn_general", A.me, "`deploy` を本番へ流しました ✅ 反映確認お願いします", mt(20, 9, 15), [{ emoji: "🚀", userIds: [A.bob, A.carol, A.dave] }]),
+    mk("msg_gen050", "chn_general", A.dave, "確認しました、問題なさそうです 👀", mt(20, 9, 22)),
+    mk("msg_gen060", "chn_general", A.bob, "ありがとうございます！助かりました 🎉", mt(20, 9, 30)),
+
+    // #dev
+    mk("msg_dev010", "chn_dev", A.dave, "APIのレート制限、こんな感じで入れました", mt(20, 11, 2)),
+    mk("msg_dev020", "chn_dev", A.dave, "```ts\nconst limiter = rateLimit({\n  windowMs: 60_000,\n  max: 100,\n});\napp.use(limiter);\n```", mt(20, 11, 3), [{ emoji: "👍", userIds: [A.me, A.carol] }, { emoji: "🔥", userIds: [A.bob] }]),
+    mk("msg_dev030", "chn_dev", A.me, "いいですね！`max` は環境変数にしておきましょう", mt(20, 11, 8)),
+    mk("msg_dev040", "chn_dev", A.carol, "レビュー投げました 🙏", mt(20, 11, 40), [{ emoji: "✅", userIds: [A.dave] }]),
+
+    // #design
+    mk("msg_des010", "chn_design", A.carol, "新しいロゴ案、3パターン用意しました。意見ください！", mt(20, 10, 30), [{ emoji: "🎨", userIds: [A.me, A.bob, A.dave] }]),
+    mk("msg_des020", "chn_design", A.bob, "B案がいいと思います！余白の取り方が好き", mt(20, 10, 35)),
+    mk("msg_des030", "chn_design", A.me, "自分もB案に一票。ダークモードでも映えそう", mt(20, 10, 41), [{ emoji: "❤️", userIds: [A.carol] }]),
+
+    // #random
+    mk("msg_rnd010", "chn_random", A.dave, "近くにいい感じのカフェ見つけた ☕️ 今度みんなで行きましょう", mt(20, 12, 15), [{ emoji: "😋", userIds: [A.me, A.bob, A.carol] }]),
+    mk("msg_rnd020", "chn_random", A.me, "いいですね！金曜どうですか？", mt(20, 12, 20)),
+
+    // event: 北陸ITカンファレンス
+    mk("msg_evt010", "chn_evt_conf", A.bob, "登壇者の確定リスト共有します。スプレッドシートは後ほど 📄", mt(20, 13, 0), [{ emoji: "🎉", userIds: [A.me, A.carol, A.dave] }]),
+    mk("msg_evt020", "chn_evt_conf", A.me, "助かります！会場レイアウトも詰めましょう", mt(20, 13, 5)),
+
+    // team-dev
+    mk("msg_tdv010", "chn_team_dev", A.dave, "今週のリリース、金曜の午前で確定でしょうか？", mt(20, 15, 0)),
+    mk("msg_tdv020", "chn_team_dev", A.me, "はい、金曜 10:00 で。前日にステージング最終確認します", mt(20, 15, 6), [{ emoji: "👍", userIds: [A.dave, A.carol] }]),
+  ];
+
+  // Mutable in-session store (fresh per createDemoFetch → tests isolated, reload resets).
+  const messagesByChannel = new Map<string, WireMsg[]>();
+  for (const c of all) messagesByChannel.set(c.id, []);
+  for (const m of SEED_MESSAGES) {
+    const arr = messagesByChannel.get(m.channelId);
+    if (arr) arr.push(m);
+  }
+  let postSeq = 0;
+  const memberIds = [A.me, A.bob, A.carol, A.dave];
+  const membersOf = (channelId: string) =>
+    memberIds.map((userId) => ({ channelId, userId, role: userId === A.me ? "admin" : "member", joinedAt: CH_TS }));
+
+  function findMsg(id: string): WireMsg | undefined {
+    for (const arr of messagesByChannel.values()) {
+      const found = arr.find((m) => m.id === id);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");
@@ -1047,12 +1135,23 @@ function createChatStore() {
     if (method === "GET" && pathname === "/api/v1/chat/unread") {
       return json([]); // no unread badges in demo
     }
+    if (method === "GET" && pathname === "/api/v1/chat/settings/deletion-policy") {
+      return json({ policy: { member: "hard", moderator: "hard" }, version: 0 });
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
+      if (m && method === "GET") return json(membersOf(decodeURIComponent(m[1]!)));
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
+      if (m && method === "GET") return json([]); // no pre-pinned items in demo
+    }
     {
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const c = byId.get(decodeURIComponent(m[1]!));
         if (!c) return notFound(`GET ${pathname}`);
-        return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "member", joinedAt: CH_TS } });
+        return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "admin", joinedAt: CH_TS } });
       }
     }
     {
@@ -1060,7 +1159,59 @@ function createChatStore() {
       if (m && method === "POST") return json(null, 204);
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
-      return json(page([])); // empty timeline (Paginated envelope)
+      const channelId = url.searchParams.get("channelId") ?? "";
+      const items = (messagesByChannel.get(channelId) ?? []).filter((m) => !m.threadRootId);
+      return json(page(items)); // ULID-ascending, Paginated envelope
+    }
+    if (method === "POST" && pathname === "/api/v1/chat/messages") {
+      const b = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string };
+      const channelId = b.channelId ?? "";
+      const arr = messagesByChannel.get(channelId);
+      if (!arr) return notFound(`POST ${pathname}`);
+      const created = mk(`msg_zz${Date.now()}${postSeq++}`, channelId, ME_ID, b.body ?? "", new Date().toISOString());
+      if (b.threadRootId) created.threadRootId = b.threadRootId;
+      arr.push(created);
+      return json(created, 201);
+    }
+    {
+      const m = /^\/api\/v1\/chat\/messages\/([^/]+)\/reactions$/.exec(pathname);
+      if (m && method === "POST") {
+        const msg = findMsg(decodeURIComponent(m[1]!));
+        if (!msg) return notFound(`POST ${pathname}`);
+        const emoji = ((body ?? {}) as { emoji?: string }).emoji ?? "👍";
+        const existing = msg.reactions.find((r) => r.emoji === emoji);
+        if (existing) {
+          existing.userIds = existing.userIds.includes(ME_ID)
+            ? existing.userIds.filter((u) => u !== ME_ID)
+            : [...existing.userIds, ME_ID];
+          if (existing.userIds.length === 0) msg.reactions = msg.reactions.filter((r) => r.emoji !== emoji);
+        } else {
+          msg.reactions.push({ emoji, userIds: [ME_ID] });
+        }
+        return json({ messageId: msg.id, reactions: msg.reactions });
+      }
+    }
+    {
+      const m = /^\/api\/v1\/chat\/messages\/([^/]+)$/.exec(pathname);
+      if (m && method === "PATCH") {
+        const msg = findMsg(decodeURIComponent(m[1]!));
+        if (!msg) return notFound(`PATCH ${pathname}`);
+        msg.body = ((body ?? {}) as { body?: string }).body ?? msg.body;
+        msg.editedAt = new Date().toISOString();
+        msg.version += 1;
+        return json(msg);
+      }
+      if (m && method === "DELETE") {
+        const id = decodeURIComponent(m[1]!);
+        for (const arr of messagesByChannel.values()) {
+          const idx = arr.findIndex((x) => x.id === id);
+          if (idx >= 0) {
+            arr.splice(idx, 1); // hard delete (demo default policy)
+            return json({ mode: "hard", message: null });
+          }
+        }
+        return notFound(`DELETE ${pathname}`);
+      }
     }
     return null;
   }

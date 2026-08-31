@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe6-chat-live",
+  "worker": "dub-demo-fe6-chat-live",
+  "url": "https://dub-demo-fe6-chat-live.developershub-site.workers.dev",
+  "deployedSha": "6c64a84",
+  "branch": "fix/fe6-chat-read-receipt-self-only",
+  "actor": "Claude (kota)",
+  "markers": ["fe6-typing-indicator","fe6-rail-self","fe6-timeline-unread-divider"],
+  "live": true,
+  "verifiedAt": "2026-08-31T05:48:54Z",
+  "updatedAt": "2026-08-31T05:48:54Z",
+  "note": "fe6-chat: 入力中表示は維持・既読はSlack風の自分視点のみ（他人の既読表示を廃止）"
+}
