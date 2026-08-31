@@ -4,17 +4,14 @@
 // Native scroll + loadOlder paging (FE6 virtualization deferred, design §8-1 #7).
 import { Avatar } from "@dub/ui";
 import type { common, identity } from "@dub/types";
-import type { ChannelType, Message } from "../api/contract";
+import type { Message } from "../api/contract";
 import type { PendingMessage } from "../types";
 import { firstUnreadIndex, needsDateDivider } from "../lib/timeline-view";
 import { isMentioned } from "../lib/mentions";
 import { MessageItem } from "./MessageItem";
-import { ReadReceipts } from "./ReadReceipts";
 import styles from "../styles/chat.module.css";
 
 export interface MessageTimelineProps {
-  channelId: common.ChannelId;
-  channelType: ChannelType;
   messages: Message[];
   pending: PendingMessage[];
   currentUserId: common.UserId;
@@ -97,14 +94,6 @@ export function MessageTimeline(props: MessageTimelineProps) {
           </div>
         );
       })}
-
-      <ReadReceipts
-        channelId={props.channelId}
-        channelType={props.channelType}
-        currentUserId={currentUserId}
-        messages={messages}
-        resolveUser={props.resolveUser}
-      />
 
       {pending.map((p) => (
         <div

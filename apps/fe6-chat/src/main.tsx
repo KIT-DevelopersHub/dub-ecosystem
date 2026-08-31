@@ -55,8 +55,8 @@ const runtime: ChatRuntime = {
   currentUserId: ME,
   can: (permission) => grants.includes(permission),
   createRealtimeClient,
-  // Standalone mock has no chat WS: drive the display-only typing / read-receipt
-  // stores from the demo simulator so both features are visible. Off in live mode.
+  // Standalone mock has no chat WS: drive the display-only typing store from the demo
+  // simulator so the typing indicator is visible. Off in live mode.
   demoLiveness: !live,
 };
 
