@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Button, Drawer, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
+import { Button, Drawer, Icon, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
@@ -11,6 +11,13 @@ import { TaskAttachmentsEditor } from "./TaskAttachmentsEditor";
 import styles from "../styles/app.module.css";
 
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
+
+/** Auto-save debounce: coalesce rapid edits (typing a title, flipping several selects)
+ *  into ONE PATCH sent after the user pauses. 500ms sits in the 300–600ms sweet spot —
+ *  long enough to batch a burst of keystrokes, short enough that "保存しました" feels instant. */
+const AUTOSAVE_DEBOUNCE_MS = 500;
+
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 /** Relation edits committed alongside the field patch (先行タスク＝依存 / 親子). */
 export interface RelationEdit {
@@ -24,7 +31,10 @@ export interface TaskDetailPanelProps {
   task: task.Task;
   users: readonly identity.UserSummary[];
   teams?: readonly team.Team[];
-  onSave: (patch: task.UpdateTaskRequest, relations: RelationEdit) => void;
+  /** Persist an edit. Auto-save awaits the returned promise (if any) to drive the
+   *  「保存中…／保存しました／保存に失敗しました」indicator: resolve `false` (or throw)
+   *  on failure, anything else counts as success. */
+  onSave: (patch: task.UpdateTaskRequest, relations: RelationEdit) => void | Promise<boolean>;
   onDelete: () => void;
   /** Called instead of opening the delete confirm when the task still has children
    *  (deleting would orphan them). The host surfaces this as a bottom-right warning
@@ -57,6 +67,9 @@ export interface TaskDetailPanelProps {
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
+  /** Debounce window (ms) before an edit auto-saves. Defaults to {@link AUTOSAVE_DEBOUNCE_MS};
+   *  tests override it (e.g. 0) to assert the save synchronously. */
+  autosaveDebounceMs?: number;
 }
 
 /** Side panel: edit form (title/status/priority/assignee/due) + delete confirm. */
@@ -80,6 +93,7 @@ export function TaskDetailPanel({
   fieldErrors,
   canWrite,
   canDelete,
+  autosaveDebounceMs = AUTOSAVE_DEBOUNCE_MS,
 }: TaskDetailPanelProps) {
   const [title, setTitle] = useState(t.title);
   const [description, setDescription] = useState(t.description ?? "");
@@ -167,8 +181,61 @@ export function TaskDetailPanel({
       patch.dueAt = nextDueIso;
     }
     if (parentChanged) patch.parentTaskId = parentId;
-    onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
+    return onSave(patch, { parentChanged, parentTaskId: parentId, depsChanged, dependsOnIds: deps });
   };
+
+  // ── Auto-save (保存ボタン廃止) ──────────────────────────────────────────────
+  // No save button: every field/relation edit is debounced and persisted for the
+  // user (optimistic reflection + rollback live in the host's onSave). A subtle
+  // 「保存中…／保存しました」indicator replaces the button so the write stays visible.
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  // A stable fingerprint of the editable state — recomputed whenever any field/relation
+  // changes, so the auto-save effect fires exactly once per distinct edit. description is
+  // included so free-text 詳細 edits auto-save too (現main版で追加された項目).
+  const signature = useMemo(
+    () =>
+      JSON.stringify([
+        title,
+        description,
+        status,
+        priority,
+        assigneeId,
+        teamId,
+        start,
+        due,
+        parentId,
+        [...deps].sort(),
+      ]),
+    [title, description, status, priority, assigneeId, teamId, start, due, parentId, deps],
+  );
+  // The signature already handed to onSave. Seeded to the mount state (== server truth),
+  // it guards against re-firing the same save after the confirmed task/props flow back in.
+  const savedSigRef = useRef(signature);
+  // Always invoke the freshest save() closure (it captures the current field values).
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  useEffect(() => {
+    if (!canWrite) return;
+    if (!dirty) return; // matches the server — nothing to persist
+    if (signature === savedSigRef.current) return; // this exact edit was already saved
+    const handle = setTimeout(() => {
+      savedSigRef.current = signature;
+      setSaveState("saving");
+      Promise.resolve(saveRef.current())
+        .then((ok) => setSaveState(ok === false ? "error" : "saved"))
+        .catch(() => setSaveState("error"));
+    }, autosaveDebounceMs);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, dirty, canWrite, autosaveDebounceMs]);
+
+  // Let 「保存しました」fade back to the idle hint so it stays a micro-indicator.
+  useEffect(() => {
+    if (saveState !== "saved") return;
+    const h = setTimeout(() => setSaveState("idle"), 1600);
+    return () => clearTimeout(h);
+  }, [saveState]);
 
   return (
     // 詳細は右サイドバー(Drawer)。Drawer が自前でヘッダー(タイトル＋×閉じる)を描くので、
@@ -396,8 +463,33 @@ export function TaskDetailPanel({
       </div>
         </div>
 
-        {/* 固定フッター: 本文スクロールと独立して常に見える(判断75②)。 */}
+        {/* 固定フッター: 本文スクロールと独立して常に見える(判断75②)。保存ボタンは廃止し、
+            自動保存の状態インジケータ(左寄せ)＋削除/閉じる(右)を置く。 */}
         <div className={styles.detailDrawerFooter}>
+          {canWrite && (
+            <div
+              className={styles.saveStatus}
+              data-testid="fe4-detail-save-status"
+              data-state={saveState}
+              role="status"
+              aria-live="polite"
+            >
+              {saveState === "saving" && (
+                <>
+                  <Icon name="refresh" size="sm" className={styles.saveSpin} />
+                  <span>保存中…</span>
+                </>
+              )}
+              {saveState === "saved" && (
+                <>
+                  <Icon name="check" size="sm" />
+                  <span>保存しました</span>
+                </>
+              )}
+              {saveState === "error" && <span>保存に失敗しました</span>}
+              {saveState === "idle" && <span className={styles.saveStatusHint}>変更は自動保存されます</span>}
+            </div>
+          )}
           {canDelete && !confirming && (
             <Button
               variant="danger"
@@ -411,9 +503,6 @@ export function TaskDetailPanel({
           )}
           <Button variant="ghost" onClick={onClose} testId="fe4-detail-close">
             閉じる
-          </Button>
-          <Button onClick={save} disabled={!canWrite || !dirty} testId="fe4-detail-save">
-            保存
           </Button>
         </div>
       </div>

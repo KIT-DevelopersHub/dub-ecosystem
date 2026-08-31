@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-autosave-v2",
+  "worker": "dub-demo-gantt-autosave-v2",
+  "url": "https://dub-demo-gantt-autosave-v2.developershub-site.workers.dev",
+  "deployedSha": "18477c1",
+  "branch": "feat/fe4-gantt-autosave-v2",
+  "actor": "Claude (kota)",
+  "markers": ["変更は自動保存されます"],
+  "live": true,
+  "verifiedAt": "2026-08-29T04:23:19Z",
+  "updatedAt": "2026-08-29T04:23:19Z",
+  "note": "fe4 gantt detail auto-save re-integrated into #411 Drawer panel"
+}
