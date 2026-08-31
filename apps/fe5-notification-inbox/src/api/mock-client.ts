@@ -108,6 +108,36 @@ function seedItems(): InboxItem[] {
     audience: "members",
   });
   return [
+    // Feedback notification — carries the submitter as a first-class actor so the inbox
+    // shows "差出人: 山田 花子" (resolved display name) instead of an opaque user id, and
+    // the click-through dialog surfaces the full body / sender / time. Seeded read so the
+    // default unread count is unchanged. audience 'admin' (only admin viewers see it).
+    {
+      id: "notif_fb01",
+      type: "feedback",
+      title: "新しいフィードバック: 検索が遅い",
+      body: "カテゴリ: idea\n発生ページ: イベント一覧\n\n検索ページの読み込みが重く、キーワードを入れてから結果が出るまで数秒かかることがあります。特に参加者数が多いイベントで顕著です。結果の遅延読み込みや一覧の軽量化をご検討いただけると助かります。よろしくお願いします。",
+      readAt: iso(3600_000),
+      createdAt: iso(30_000),
+      resourceType: "feedback",
+      resourceId: "nfb_1",
+      audience: "admin",
+      actorId: "usr_alice",
+      actorName: "山田 花子",
+    },
+    // A deliberately long announcement so the detail dialog's internal scroll (full-text
+    // view) is demonstrable on a non-feedback row. Seeded read (unread count unchanged).
+    {
+      id: "notif_long01",
+      type: "system.announcement",
+      title: "定期メンテナンスと今後の機能追加のお知らせ",
+      body: "いつもDevHubをご利用いただきありがとうございます。\n\n【メンテナンス】\n8月10日(月) 深夜1:00〜3:00 に定期メンテナンスを実施します。この時間帯は一時的にログインや通知の受信ができなくなる場合があります。作業中のデータは事前に保存してください。\n\n【今後の機能追加】\n・通知の全文表示ダイアログ(このお知らせのように長文も折りたたまずに読めます)\n・フィードバック通知への送信者名の表示\n・ガントチャートの依存関係編集の改善\n・メール添付ファイルのプレビュー\n\nご不明な点があれば運営までお問い合わせください。今後ともよろしくお願いいたします。",
+      readAt: iso(3600_000),
+      createdAt: iso(40_000),
+      resourceType: null,
+      resourceId: null,
+      audience: "members",
+    },
     // Release notes surface at the top of the inbox so the "🎉 新機能" badge is visible.
     // Seeded as read so the default unread count is unchanged; publishing via the admin
     // form (or the seed route) produces fresh unread release notes.

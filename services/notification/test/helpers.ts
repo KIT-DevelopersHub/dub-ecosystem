@@ -69,14 +69,17 @@ export function ctx(requestId = "req_test", userId?: string): RequestContext {
 export function fakeIdentity(opts: {
   byRole?: Record<string, string[]>;
   emails?: Record<string, string>;
+  displayNames?: Record<string, string>;
   allUsers?: string[];
-}): IdentityPort & { roleCalls: string[]; emailCalls: string[]; allCalls: number } {
+}): IdentityPort & { roleCalls: string[]; emailCalls: string[]; nameCalls: string[]; allCalls: number } {
   const roleCalls: string[] = [];
   const emailCalls: string[] = [];
+  const nameCalls: string[] = [];
   const state = { allCalls: 0 };
   return {
     roleCalls,
     emailCalls,
+    nameCalls,
     get allCalls() {
       return state.allCalls;
     },
@@ -91,6 +94,10 @@ export function fakeIdentity(opts: {
     async getEmail(userId) {
       emailCalls.push(userId);
       return opts.emails?.[userId] ?? null;
+    },
+    async getDisplayName(userId) {
+      nameCalls.push(userId);
+      return opts.displayNames?.[userId] ?? null;
     },
   };
 }

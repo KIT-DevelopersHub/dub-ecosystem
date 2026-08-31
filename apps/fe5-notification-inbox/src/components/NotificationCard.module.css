@@ -122,6 +122,18 @@
   color: var(--dub-color-text-muted);
 }
 
+/* Sender line ("差出人: 山田 花子") — sits between the title and the body snippet
+   for feedback / actor-bearing notifications. Muted + single-line so the card height
+   stays predictable. */
+.sender {
+  margin-top: var(--dub-space-1);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .snippet {
   margin-top: var(--dub-space-2);
   color: var(--dub-color-text-secondary);

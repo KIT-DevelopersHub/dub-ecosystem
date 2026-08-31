@@ -20,6 +20,9 @@ export interface IdentityPort {
   listAllUserIds(ctx: RequestContext): Promise<string[]>;
   /** GET /users/:id — resolve a user's email (null when absent/unknown). */
   getEmail(userId: string, ctx: RequestContext): Promise<string | null>;
+  /** GET /users/:id — resolve a user's human display name (null when absent/unknown).
+   *  Backs the inbox actorName enrichment (feedback submitter → readable name). */
+  getDisplayName(userId: string, ctx: RequestContext): Promise<string | null>;
 }
 
 // ---- event ----
@@ -86,6 +89,10 @@ export function makeIdentityPort(binding: Fetcher): IdentityPort {
     async getEmail(userId, ctx) {
       const user = await client.get<identity.IdentityUser>(ctx, `/users/${encodeURIComponent(userId)}`);
       return user.email ?? null;
+    },
+    async getDisplayName(userId, ctx) {
+      const user = await client.get<identity.IdentityUser>(ctx, `/users/${encodeURIComponent(userId)}`);
+      return user.displayName ?? null;
     },
   };
 }

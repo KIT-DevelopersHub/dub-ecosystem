@@ -407,6 +407,50 @@ describe("HTTP app", () => {
     expect((await uc.json()) as { count: number }).toEqual({ count: 1 });
   });
 
+  it("GET /inbox resolves a row's actorId to the actor's display name (actorName enrichment)", async () => {
+    // Dedicated app with an identity port that resolves display names; the notify's
+    // x-dub-user-id becomes the stored actorId, and the inbox read enriches it.
+    const identity = fakeIdentity({ displayNames: { usr_alice: "山田 花子" } });
+    const enrichApp = createApp({ identity });
+    const h = makeTestEnv();
+    const notifyRes = await enrichApp.request(
+      "/notify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-dub-internal": "1", "x-dub-user-id": "usr_alice" },
+        body: JSON.stringify({ type: "feedback", recipientIds: ["u1"], title: "新しいフィードバック", body: "検索が遅い", channels: ["in_app"] }),
+      },
+      h.env as unknown as Record<string, unknown>,
+    );
+    expect(notifyRes.status).toBe(202);
+
+    const inbox = await enrichApp.request("/inbox", { headers: { "x-dub-user-id": "u1" } }, h.env as unknown as Record<string, unknown>);
+    const page = (await inbox.json()) as { items: { actorId: string | null; actorName: string | null }[] };
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.actorId).toBe("usr_alice");
+    expect(page.items[0]!.actorName).toBe("山田 花子");
+    expect(identity.nameCalls).toContain("usr_alice");
+  });
+
+  it("GET /inbox keeps actorName null when identity cannot resolve the actor (UI falls back to id)", async () => {
+    const identity = fakeIdentity({ displayNames: {} }); // no name for the actor
+    const enrichApp = createApp({ identity });
+    const h = makeTestEnv();
+    await enrichApp.request(
+      "/notify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-dub-internal": "1", "x-dub-user-id": "usr_ghost" },
+        body: JSON.stringify({ type: "feedback", recipientIds: ["u1"], title: "fb", body: "x", channels: ["in_app"] }),
+      },
+      h.env as unknown as Record<string, unknown>,
+    );
+    const inbox = await enrichApp.request("/inbox", { headers: { "x-dub-user-id": "u1" } }, h.env as unknown as Record<string, unknown>);
+    const page = (await inbox.json()) as { items: { actorId: string | null; actorName: string | null }[] };
+    expect(page.items[0]!.actorId).toBe("usr_ghost");
+    expect(page.items[0]!.actorName).toBeNull();
+  });
+
   // A fake SVC_IDENTITY that answers GET /internal/users?roleKey= with fixed members,
   // so the /notify role fan-out expands to real inbox rows end-to-end.
   function roleIdentity(byRole: Record<string, string[]>) {

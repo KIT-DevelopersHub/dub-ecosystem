@@ -253,8 +253,18 @@ function ganttViewFor(eventId: string): gantt.GanttViewState {
 
 // ── notifications ─────────────────────────────────────────────────────────────
 const NOTIFICATIONS: notification.InboxItem[] = [
+  // Feedback notification — carries the submitter as a first-class actor so the inbox
+  // shows "差出人: 山田 花子" (resolved display name) instead of an opaque user id, and
+  // the click-through dialog surfaces the full body / sender / time.
+  { id: "ntf_fb1", type: "feedback", title: "新しいフィードバック: 検索が遅い", body: "カテゴリ: idea\n発生ページ: イベント一覧\n\n検索ページの読み込みが重く、キーワードを入れてから結果が出るまで数秒かかることがあります。特に参加者数が多いイベントで顕著です。結果の遅延読み込みや一覧の軽量化をご検討いただけると助かります。よろしくお願いします。", readAt: null, createdAt: "2026-08-02T04:00:00Z", resourceType: "feedback", resourceId: "nfb_1", audience: "admin", actorId: "usr_alice", actorName: "山田 花子" },
+  // A deliberately long announcement so the detail dialog's internal scroll (full-text
+  // view) is demonstrable on a non-feedback row.
+  { id: "ntf_long1", type: "system.announcement", title: "定期メンテナンスと今後の機能追加のお知らせ", body: "いつもDevHubをご利用いただきありがとうございます。\n\n【メンテナンス】\n8月10日(月) 深夜1:00〜3:00 に定期メンテナンスを実施します。この時間帯は一時的にログインや通知の受信ができなくなる場合があります。作業中のデータは事前に保存してください。\n\n【今後の機能追加】\n・通知の全文表示ダイアログ(このお知らせのように長文も折りたたまずに読めます)\n・フィードバック通知への送信者名の表示\n・ガントチャートの依存関係編集の改善\n・メール添付ファイルのプレビュー\n\nご不明な点があれば運営までお問い合わせください。今後ともよろしくお願いいたします。", readAt: "2026-08-02T03:30:00Z", createdAt: "2026-08-02T03:30:00Z", resourceType: null, resourceId: null },
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
   { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
+  // 参加届 (participation) — a public participation-form submission notified to admins, so the
+  // 参加届 tab shows content in the demo alongside フィードバック / アプリアップデート.
+  { id: "ntf_part1", type: "member.participation.submitted", title: "新しい参加届: 田中 太郎", body: "「北陸ITカンファレンス 2026」への参加届が届きました。\n所属: 金沢工業大学\n役割: 一般参加", readAt: null, createdAt: "2026-08-02T00:30:00Z", resourceType: "participation", resourceId: "part_1", audience: "admin", actorId: "usr_tanaka", actorName: "田中 太郎" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
 ];
 
