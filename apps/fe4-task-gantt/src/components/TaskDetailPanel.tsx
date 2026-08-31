@@ -222,18 +222,48 @@ export function TaskDetailPanel({
           </div>
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
-            担当
-          </label>
-          <Select
-            id="fe4-detail-assignee"
-            value={assigneeId ?? ""}
-            disabled={!canWrite}
-            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
-            testId="fe4-detail-assignee"
-          />
+        {/* 担当 と チーム は横並び（feedback ㉚: 担当とチームは横並びでよい）。開始日/期日と
+            同じ formRow 流儀。既存のチーム条件表示・親ロック・依存の同一チーム剪定は不変。 */}
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
+              担当
+            </label>
+            <Select
+              id="fe4-detail-assignee"
+              value={assigneeId ?? ""}
+              disabled={!canWrite}
+              onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
+              options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+              testId="fe4-detail-assignee"
+            />
+          </div>
+          {teams.length > 0 && (
+            <div className={styles.formField}>
+              <label className={styles.formLabel} htmlFor="fe4-detail-team">
+                チーム
+              </label>
+              <Select
+                id="fe4-detail-team"
+                value={teamId ?? ""}
+                disabled={!canWrite || teamLockedToParent}
+                onChange={(v) => {
+                  const next = v ? (v as common.TeamId) : null;
+                  setTeamId(next);
+                  // dependencies are same-team only (ADR-0007) — drop predecessors that are
+                  // now on another team.
+                  setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
+                }}
+                options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
+                testId="fe4-detail-team"
+              />
+              {teamLockedToParent && (
+                <p className={styles.fieldHint} data-testid="fe4-detail-team-locked">
+                  親タスクと同じチームです（子タスクのチームは変更できません）
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 開始日 / 期日: a task with both gets an exact gantt bar (arrow-linkable). */}
@@ -251,33 +281,6 @@ export function TaskDetailPanel({
             <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
           </div>
         </div>
-
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-team">
-              チーム
-            </label>
-            <Select
-              id="fe4-detail-team"
-              value={teamId ?? ""}
-              disabled={!canWrite || teamLockedToParent}
-              onChange={(v) => {
-                const next = v ? (v as common.TeamId) : null;
-                setTeamId(next);
-                // dependencies are same-team only (ADR-0007) — drop predecessors that are
-                // now on another team.
-                setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
-              }}
-              options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
-              testId="fe4-detail-team"
-            />
-            {teamLockedToParent && (
-              <p className={styles.fieldHint} data-testid="fe4-detail-team-locked">
-                親タスクと同じチームです（子タスクのチームは変更できません）
-              </p>
-            )}
-          </div>
-        )}
 
         {/* 子タスク数: shown when this task is itself a work-package (親). */}
         {childCount > 0 && (
