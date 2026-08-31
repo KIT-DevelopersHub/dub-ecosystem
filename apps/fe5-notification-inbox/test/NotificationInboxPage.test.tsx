@@ -162,6 +162,14 @@ describe("NotificationInboxPage", () => {
       expect(within(list()).getAllByRole("listitem")).toHaveLength(2);
     });
 
+    // フィードバック tab -> only the feedback item (type=feedback).
+    await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-feedback"));
+    await waitFor(() => {
+      expect(within(list()).getAllByRole("listitem")).toHaveLength(1);
+    });
+    expect(within(list()).getByTestId("fe5-inbox-item-notif_fb01")).toBeInTheDocument();
+    expect(window.location.search).toContain("cat=feedback");
+
     // Back to すべて (All) -> everything is visible again (8 member-audience items).
     await user.click(screen.getByTestId("fe5-inbox-catfilter-tab-all"));
     await waitFor(() => {
