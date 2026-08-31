@@ -26,6 +26,13 @@ import { PRIORITY_LABEL } from "../domain/task-form";
 import { useGanttSort } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
 import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
+import {
+  clearViewPref,
+  filterFromPref,
+  loadViewPref,
+  prefFromView,
+  saveViewPref,
+} from "../domain/gantt-view-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
@@ -77,7 +84,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const toast = useToast();
   const feedback = useWriteFeedback();
   const store = useTaskStore();
-  const [filter, setFilter] = useState<TaskFilterState>(() => emptyFilter(eventId));
+  // Personal VIEW state persisted per-event in localStorage (zoom + status filter +
+  // team + アーカイブ含む). Seed from the saved preference so a reload restores the
+  // last view; defaults match the pre-persistence behaviour when nothing is stored.
+  const [filter, setFilter] = useState<TaskFilterState>(() =>
+    filterFromPref(eventId, loadViewPref(eventId)),
+  );
+  const [zoom, setZoom] = useState<ganttNs.GanttZoom>(() => loadViewPref(eventId).zoom);
   const [selected, setSelected] = useState<common.TaskId | null>(null);
   const [creating, setCreating] = useState(false);
   const [createPresetDue, setCreatePresetDue] = useState<string | null>(null);
@@ -88,16 +101,30 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const [createPredecessorFor, setCreatePredecessorFor] = useState<common.TaskId | null>(null);
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
   // When the active event changes (the global header switcher navigates to another
-  // event's gantt → new eventId prop, same mounted route), drop the previous event's
-  // filter (it carries the eventId + status narrowing) and any open selection so the
-  // new event loads clean. Skip the initial mount — filter is already seeded.
+  // event's gantt → new eventId prop, same mounted route), reload THIS event's saved
+  // view preference (filter carries the eventId + status narrowing; zoom follows) and
+  // drop any open selection so the new event loads clean. Skip the initial mount —
+  // both are already seeded from storage.
   const prevEventRef = useRef(eventId);
   useEffect(() => {
     if (prevEventRef.current === eventId) return;
     prevEventRef.current = eventId;
-    setFilter(emptyFilter(eventId));
+    const pref = loadViewPref(eventId);
+    setFilter(filterFromPref(eventId, pref));
+    setZoom(pref.zoom);
     setSelected(null);
   }, [eventId]);
+  // Write-through: persist the view dimensions whenever any of them change, so every
+  // setFilter / setZoom call site is covered without wrapping each one.
+  useEffect(() => {
+    saveViewPref(eventId, prefFromView(zoom, filter));
+  }, [eventId, zoom, filter.status, filter.teamId, filter.includeArchived]);
+  // Reset all persisted view dimensions to their defaults.
+  const resetView = () => {
+    clearViewPref(eventId);
+    setFilter(emptyFilter(eventId));
+    setZoom("week");
+  };
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
   // Per-user view state — carries the personal manual row order (drag reorder).
@@ -1141,6 +1168,22 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
             </label>
           </>
         )}
+        <button
+          type="button"
+          className={styles.viewReset}
+          onClick={resetView}
+          disabled={
+            !caps.canRead ||
+            (zoom === "week" &&
+              filter.status.length === 0 &&
+              filter.teamId === undefined &&
+              !filter.includeArchived)
+          }
+          title="表示（粒度・フィルタ・チーム・アーカイブ）を初期状態に戻す"
+          data-testid="fe4-view-reset"
+        >
+          表示をリセット
+        </button>
       </div>
 
       {store.lastError && !showErrorDialog && (
@@ -1152,7 +1195,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       {filteredDto && (
         <GanttView
           dto={filteredDto}
-          zoom="week"
+          zoom={zoom}
+          onZoomChange={setZoom}
           truncated={filteredDto.rows.length >= 2000}
           onSchedule={caps.canWrite ? onSchedule : undefined}
           onScheduleShift={caps.canWrite ? onScheduleShift : undefined}
