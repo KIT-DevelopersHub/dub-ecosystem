@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": null,
-  "branch": null,
-  "actor": null,
-  "markers": [],
-  "live": false,
-  "verifiedAt": null,
-  "updatedAt": null,
-  "note": "seed — no deploy recorded yet. Written by scripts/deploy-demo.sh."
+  "deployedSha": "4f0c15b",
+  "branch": "fe5-notif-name-dialog-v2",
+  "actor": "Claude (kota)",
+  "markers": ["fe5-notif-detail-dialog", "fe5-inbox-item-sender"],
+  "live": true,
+  "verifiedAt": "2026-08-29T04:46:14Z",
+  "updatedAt": "2026-08-29T04:46:14Z",
+  "note": "fe5 sender-name + full-text detail dialog (v2, base=origin/main 2a1e6a2)"
 }

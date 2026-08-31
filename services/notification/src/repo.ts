@@ -41,6 +41,7 @@ interface InboxRow {
   resource_type: string | null;
   resource_id: string | null;
   audience: string;
+  actor_id: string | null;
 }
 
 interface PreferenceRow {
@@ -180,6 +181,7 @@ function rowToInboxItem(r: InboxRow): notification.InboxItem {
     resourceType: r.resource_type,
     resourceId: r.resource_id,
     audience: (r.audience as NotificationAudience) ?? DEFAULT_AUDIENCE,
+    actorId: r.actor_id ?? null,
   };
 }
 
@@ -207,7 +209,7 @@ export async function listInbox(
     binds.push(decodeCursor(q.cursor));
   }
   const sql = `SELECT i.id, i.notification_id, i.user_id, i.read_at, i.created_at,
-                      n.type, n.title, n.body, n.resource_type, n.resource_id, n.audience
+                      n.type, n.title, n.body, n.resource_type, n.resource_id, n.audience, n.actor_id
                FROM notif_inbox i
                JOIN notif_notifications n ON n.id = i.notification_id
                WHERE ${where.join(" AND ")}

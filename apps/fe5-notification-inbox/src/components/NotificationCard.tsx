@@ -27,6 +27,13 @@ export interface NotificationCardProps {
   onMarkUnread?: (item: InboxItem) => void;
 }
 
+// The human sender behind a notification (feedback submitter etc.): the resolved
+// display name when identity supplied one, otherwise the raw actor id, otherwise null
+// (no actor). Lets the card + detail dialog show "誰から" instead of an opaque id.
+export function itemActorName(item: InboxItem): string | null {
+  return item.actorName ?? item.actorId ?? null;
+}
+
 // Derive the in-app link target from the item's resource fields.
 export function itemLinkUrl(item: InboxItem): string | null {
   if (!item.resourceType || !item.resourceId) return null;
@@ -45,6 +52,7 @@ export function itemLinkUrl(item: InboxItem): string | null {
 export function NotificationCard(props: NotificationCardProps): ReactNode {
   const { item, onActivate, onMarkUnread } = props;
   const unread = item.readAt === null;
+  const sender = itemActorName(item);
   // A read card can be restored to unread (quiet trailing action).
   const canMarkUnread = !unread && onMarkUnread !== undefined;
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
@@ -73,6 +81,11 @@ export function NotificationCard(props: NotificationCardProps): ReactNode {
             <span className={styles.title}>{item.title}</span>
             <span className={styles.time}>{formatRelativeTime(item.createdAt)}</span>
           </div>
+          {sender ? (
+            <div className={styles.sender} data-testid={`fe5-inbox-item-sender-${item.id}`}>
+              差出人: {sender}
+            </div>
+          ) : null}
           <div className={styles.snippet}>{item.body}</div>
         </div>
       </button>
