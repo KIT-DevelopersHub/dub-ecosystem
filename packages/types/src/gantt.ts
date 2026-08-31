@@ -33,6 +33,19 @@ export interface GanttDependencyLine {
   lagDays: number; // P0 constant 0
 }
 
+/** A named schedule milestone (a key date / 節目) rendered as a diamond marker on the
+ *  timeline. Optional & additive. A milestone MAY pin to a task (its bar's end) via
+ *  `taskId`, or stand free on a bare `date` (e.g. an external deadline / 開催日). */
+export interface GanttMilestone {
+  id: string;
+  /** Date the diamond sits on (day-resolution; time ignored by the axis). */
+  date: ISODateTime;
+  /** Short label shown beside the diamond (e.g. "登壇者確定", "カンファレンス開催"). */
+  label: string;
+  /** Optional task this milestone marks — for pinning/tooltips. Free dates omit it. */
+  taskId?: TaskId | null;
+}
+
 export interface GanttChartDTO {
   eventId: EventId;
   rows: GanttRow[];
@@ -40,6 +53,8 @@ export interface GanttChartDTO {
   /** Zero-slack tasks on the critical path (CPM over durations+FS deps). Optional
    *  & additive: absent/[] means "not computed" — UI colors these bars distinctly. */
   criticalTaskIds?: TaskId[];
+  /** Key schedule dates (節目) drawn as diamond markers. Optional & additive. */
+  milestones?: GanttMilestone[];
 }
 
 export interface GanttViewState {

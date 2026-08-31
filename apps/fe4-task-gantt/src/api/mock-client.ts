@@ -40,6 +40,8 @@ export interface MockSeed {
   rowDates?: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }>;
   /** critical-path task ids the gantt DTO reports (bar colouring). */
   criticalTaskIds?: common.TaskId[];
+  /** milestone diamonds the gantt DTO reports (key dates / 節目). */
+  milestones?: gantt.GanttMilestone[];
   /** WBS hierarchy overlay: taskId -> {parent, depth, wbs}. The task model has no
    *  parent column (server keeps it in gantt-service), so the mock carries it here
    *  and projects it onto each GanttRow. `hasChildren` is derived, not stored. */
@@ -58,6 +60,7 @@ export class MockApiClient implements ApiClient {
   private view: gantt.GanttViewState | null = null;
   private rowDates: Record<common.TaskId, { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null }> = {};
   private criticalTaskIds: common.TaskId[] = [];
+  private milestones: gantt.GanttMilestone[] = [];
   private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
   private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
@@ -81,6 +84,7 @@ export class MockApiClient implements ApiClient {
     this.view = seed.view ?? null;
     this.rowDates = seed.rowDates ?? {};
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
+    this.milestones = seed.milestones ?? [];
     this.hierarchy = seed.hierarchy ?? {};
     this.currentUserId = seed.currentUserId ?? "usr_me";
   }
@@ -466,6 +470,7 @@ export class MockApiClient implements ApiClient {
       rows: this.ganttRows(eventId),
       dependencies: this.ganttDeps(eventId),
       criticalTaskIds: this.criticalTaskIds.filter((id) => rowIds.has(id)),
+      milestones: this.milestones.filter((m) => !m.taskId || rowIds.has(m.taskId)),
     };
   }
 

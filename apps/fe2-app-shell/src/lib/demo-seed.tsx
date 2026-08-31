@@ -180,18 +180,29 @@ const TASKS: task.Task[] = [
 const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
+    // Critical path = the longest zero-slack chain that decides the finish date:
+    // 登壇者スケジュール確定 → 運営ツール名簿連携 → 当日タイムテーブル作成 → (開催).
+    // Those bars are outlined red + linked by red arrows; 会場レイアウト図 / スポンサー
+    // 請求書 are off the path (slack) so they stay their plain status colour.
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-01T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
       // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
       // contiguous; used to prove the team rail stays straight across an indented child.
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-26T00:00:00Z", endsAt: "2026-08-01T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
       { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
       { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-03T00:00:00Z", endsAt: "2026-08-05T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
     ],
     dependencies: [
-      { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
+      { id: "tsk_1->tsk_2", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
+      { id: "tsk_1->tsk_5", fromTaskId: "tsk_1", toTaskId: "tsk_5", type: "FS", lagDays: 0 },
+      { id: "tsk_5->tsk_6", fromTaskId: "tsk_5", toTaskId: "tsk_6", type: "FS", lagDays: 0 },
+    ],
+    criticalTaskIds: ["tsk_1", "tsk_5", "tsk_6"],
+    milestones: [
+      { id: "ms_speakers", date: "2026-08-01T00:00:00Z", label: "登壇者確定", taskId: "tsk_1" },
+      { id: "ms_conf", date: "2026-08-05T00:00:00Z", label: "カンファレンス開催", taskId: null },
     ],
   },
   evt_3: {
@@ -199,11 +210,17 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
     rows: [
       { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
       { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
-      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-20T00:00:00Z", endsAt: "2026-09-15T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
       { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
     ],
+    // 会場確定 → 募集LP → 当日運営 が最長経路（協賛調整は並行・余裕あり）。
     dependencies: [
-      { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },
+      { id: "hk_1->hk_3", fromTaskId: "hk_1", toTaskId: "hk_3", type: "FS", lagDays: 0 },
+      { id: "hk_3->hk_4", fromTaskId: "hk_3", toTaskId: "hk_4", type: "FS", lagDays: 0 },
+    ],
+    criticalTaskIds: ["hk_1", "hk_3", "hk_4"],
+    milestones: [
+      { id: "ms_hackit", date: "2026-09-20T00:00:00Z", label: "Hackit 開催", taskId: "hk_4" },
     ],
   },
 };

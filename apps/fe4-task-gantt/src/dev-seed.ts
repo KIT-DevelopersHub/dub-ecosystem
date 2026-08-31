@@ -230,6 +230,14 @@ const DEP_PAIRS: Array<[string, string]> = [
 ];
 const CRITICAL_WBS = ["1.1", "3.1", "4.4", "5.2", "6.1", "7.3", "7.5"];
 
+// Key schedule milestones (節目) — diamond markers on the timeline. Free-standing
+// dates pinned to phase completions so the "重要な日" reads at a glance.
+const MILESTONES: gantt.GanttMilestone[] = [
+  { id: "ms_founded", date: "2026-08-10T00:00:00.000Z", label: "法人設立完了", taskId: null },
+  { id: "ms_phase1", date: "2026-10-20T00:00:00.000Z", label: "Phase1 立ち上げ", taskId: null },
+  { id: "ms_launch", date: "2027-07-15T00:00:00.000Z", label: "本番リリース", taskId: null },
+];
+
 const TODAY = Date.parse(iso("2026-08-13"));
 
 function defaultStatus(phase: Phase, end: number): task.TaskStatus {
@@ -422,6 +430,7 @@ export function createDevClient(opts: { padTo?: number; deepNest?: boolean } = {
     rowDates,
     hierarchy,
     criticalTaskIds: CRITICAL_WBS.map(secId),
+    milestones: MILESTONES,
   });
 }
 
