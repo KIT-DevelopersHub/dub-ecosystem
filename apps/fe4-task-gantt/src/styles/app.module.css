@@ -196,6 +196,22 @@
 }
 .filterClear:hover { background: var(--dub-color-surface-sunken); }
 
+/* Reset all persisted view dimensions (zoom/filter/team/archive). Ghost button,
+   pushed to the far right of the toolbar so it reads as a low-emphasis escape hatch. */
+.viewReset {
+  margin-left: auto;
+  padding: 5px var(--dub-space-3);
+  border: 1px solid var(--dub-color-border, #d0d5dd);
+  background: transparent;
+  color: var(--dub-color-text-muted, #667085);
+  cursor: pointer;
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  font-weight: var(--dub-font-weight-medium, 600);
+  border-radius: var(--dub-radius-sm, 6px);
+}
+.viewReset:hover:not(:disabled) { background: var(--dub-color-surface-sunken); color: var(--dub-color-text, #101828); }
+.viewReset:disabled { opacity: 0.5; cursor: default; }
+
 /* ---- legacy list/board (retained components) ---- */
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td {

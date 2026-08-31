@@ -1,0 +1,76 @@
+name: Visual Regression
+
+# @dub/ui Storybook visual-regression (Playwright toHaveScreenshot pixel diff).
+# $0 / self-hosted: baselines are committed to the repo, diffs surface as CI
+# artifacts. No SaaS (Chromatic/Percy). Independent of the main `ci.yml` job.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/fe1-design-system/**"
+      - "packages/tokens/**"
+      - ".github/workflows/visual-regression.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/fe1-design-system/**"
+      - "packages/tokens/**"
+      - ".github/workflows/visual-regression.yml"
+  # Manual run — also the hook the `visual-baselines.yml` seeding flow leans on.
+  workflow_dispatch:
+
+concurrency:
+  group: visual-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+
+jobs:
+  visual:
+    name: storybook · toHaveScreenshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Pin the SAME image tag as the installed @playwright/test version (1.62.1) so
+    # the CI OS + fonts exactly match the committed *-linux baselines. Bump this
+    # tag and re-seed baselines together whenever @playwright/test is upgraded.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-jammy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static Storybook
+        run: pnpm --filter @dub/ui build-storybook
+
+      - name: Run visual regression
+        # Browsers are preinstalled in the Playwright image; no `playwright install`.
+        run: pnpm --filter @dub/ui visual
+
+      - name: Upload diff report (on failure)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff-report
+          # HTML report embeds expected/actual/diff PNGs for every failing story.
+          path: |
+            apps/fe1-design-system/visual/.report
+            apps/fe1-design-system/visual/.output
+          retention-days: 14
+          if-no-files-found: ignore
