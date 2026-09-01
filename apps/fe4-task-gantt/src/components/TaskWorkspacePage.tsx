@@ -22,7 +22,7 @@ import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRowsMulti, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
-import { PRIORITY_LABEL } from "../domain/task-form";
+import { PRIORITY_LABEL, DATE_LABEL } from "../domain/task-form";
 import { useGanttSort } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
 import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
@@ -61,9 +61,9 @@ const NEUTRAL_GROUP_COLOR = "#6f7a90"; // gray.500
 /** Human labels for validation `field` keys shown in the ErrorDialog breakdown. */
 const FIELD_LABEL: Record<string, string> = {
   title: "タイトル",
-  dueAt: "期日",
-  startsAt: "開始日",
-  endsAt: "終了日",
+  dueAt: DATE_LABEL.end,
+  startsAt: DATE_LABEL.start,
+  endsAt: DATE_LABEL.end,
   status: "ステータス",
   priority: "優先度",
   assigneeId: "担当",
@@ -1070,7 +1070,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       <header className={styles.pageHeader}>
         <div className={styles.pageHeaderText}>
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
-          <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
+          <p className={styles.pageSubtitle}>終了日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
         {caps.canWrite && (
           <div className={styles.headerActions}>

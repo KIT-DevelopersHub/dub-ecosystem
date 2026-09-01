@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, Drawer, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
 import { allowedTransitions } from "../domain/status-transitions";
-import { PRIORITY_LABEL, STATUS_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
+import { PRIORITY_LABEL, STATUS_LABEL, DATE_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
@@ -236,17 +236,17 @@ export function TaskDetailPanel({
           />
         </div>
 
-        {/* 開始日 / 期日: a task with both gets an exact gantt bar (arrow-linkable). */}
+        {/* 開始日 / 終了日: a task with both gets an exact gantt bar (arrow-linkable). */}
         <div className={styles.formRow}>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-start">
-              開始日
+              {DATE_LABEL.start}
             </label>
             <DateField id="fe4-detail-start" value={start} disabled={!canWrite} onChange={setStart} testId="fe4-detail-start" />
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-due">
-              期日
+              {DATE_LABEL.end}
             </label>
             <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
           </div>
