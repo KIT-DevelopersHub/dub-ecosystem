@@ -114,6 +114,10 @@ describe("UserListPage", () => {
     expect(within(bar).getByTestId("fe7-users-bulk-disable")).toBeInTheDocument();
     expect(within(bar).getByTestId("fe7-users-bulk-role-apply")).toBeInTheDocument();
 
+    // No layout shift: the bar floats out of document flow (fixed overlay) rather than
+    // being inserted above the table, so selecting a row never pushes the rows down.
+    expect(getComputedStyle(bar).position).toBe("fixed");
+
     // Clearing hides the bar again.
     await user.click(within(bar).getByTestId("fe7-users-bulk-clear"));
     await waitFor(() => expect(screen.queryByTestId("fe7-users-bulk")).not.toBeInTheDocument());

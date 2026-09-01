@@ -1,25 +1,13 @@
-// ① 一括選択アクションバー. Appears above the roster table once one or more rows are
-// checked, and applies an action to the whole selection (利用停止 / ロール付与). Sticky at
-// the table top so the actions stay reachable while scrolling a long selection.
+// ① 一括選択アクションバー. Appears once one or more rows are checked, and applies an
+// action to the whole selection (利用停止 / ロール付与). Renders as a fixed bottom-center
+// floating toolbar (see BulkActionBar.module.css) so it never reflows the table — the
+// row under the cursor stays put when selection toggles.
 import { useState } from "react";
 import { Button, Select, ConfirmDialog, type SelectOption } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import { useBulkSetStatus, useBulkAssignRole } from "../hooks/useBulkUserActions";
+import styles from "./BulkActionBar.module.css";
 
-const barStyle: React.CSSProperties = {
-  position: "sticky",
-  top: 0,
-  zIndex: 2,
-  display: "flex",
-  alignItems: "center",
-  gap: 16,
-  flexWrap: "wrap",
-  padding: "10px 16px",
-  marginBottom: 12,
-  borderRadius: 8,
-  background: "var(--dub-color-accent-subtle, #ddf4ff)",
-  border: "1px solid var(--dub-color-accent-muted, #54aeff)",
-};
 const countStyle: React.CSSProperties = { fontWeight: 600, whiteSpace: "nowrap" };
 const groupStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" };
 const spacerStyle: React.CSSProperties = { flex: 1, minWidth: 8 };
@@ -61,7 +49,7 @@ export function BulkActionBar({ selectedIds, roles, canSetStatus, canAssignRole,
   }
 
   return (
-    <div style={barStyle} data-testid={testId} role="region" aria-label="一括操作">
+    <div className={styles.bar} data-testid={testId} role="region" aria-label="一括操作">
       <span style={countStyle} data-testid={testId ? `${testId}-count` : undefined}>
         {count}件を選択中
       </span>

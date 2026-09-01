@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe7-bulkbar-noshift",
+  "worker": "dub-demo-fe7-bulkbar-noshift",
+  "url": "https://dub-demo-fe7-bulkbar-noshift.developershub-site.workers.dev",
+  "deployedSha": "ee11db0",
+  "branch": "fe7-roster-bulkbar-noshift",
+  "actor": "Claude (kota)",
+  "markers": ["fe7-users-bulk"],
+  "live": true,
+  "verifiedAt": "2026-09-01T15:57:37Z",
+  "updatedAt": "2026-09-01T15:57:37Z",
+  "note": "fe7 roster bulk bar: no layout shift (fixed floating toolbar)"
+}
