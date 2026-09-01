@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Select } from "@dub/ui";
-import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
+import { PRIORITY_LABEL, STATUS_LABEL, DATE_LABEL, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
@@ -200,13 +200,13 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         <div className={styles.formRow}>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-create-start">
-              開始日
+              {DATE_LABEL.start}
             </label>
             <DateField id="fe4-create-start" value={start} onChange={setStart} testId="fe4-create-start" />
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-create-due">
-              期日
+              {DATE_LABEL.end}
             </label>
             <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
           </div>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
-import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
+import { PRIORITY_LABEL, DATE_LABEL, isoFromDateInput } from "../domain/task-form";
 import { DateField } from "./DateField";
 import { AttachmentField, type AttachmentChip } from "./AttachmentField";
 import styles from "../styles/app.module.css";
@@ -31,6 +31,9 @@ export interface MyTaskDraft {
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
+  /** Planned start (開始日). null = no explicit start. Mirrors the gantt create form. */
+  startAt: common.ISODateTime | null;
+  /** 終了日 (canonical field is `dueAt`; 期日=終了日として扱う). */
   dueAt: common.ISODateTime | null;
   attachments: DraftAttachments;
 }
@@ -80,6 +83,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
+  const [start, setStart] = useState<string | null>(null);
   const [due, setDue] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
@@ -93,6 +97,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
     setAssigneeId(null);
     setPriority("medium");
     setTeamId(null);
+    setStart(null);
     setDue(null);
     setDescription("");
     setFiles([]);
@@ -151,6 +156,7 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         priority,
         assigneeId,
         teamId,
+        startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
         attachments: { files, urls },
       });
@@ -239,11 +245,21 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-due">
-            期限
-          </label>
-          <DateField id="fe4-mytask-due" value={due} onChange={setDue} testId="fe4-mytask-create-due" />
+        {/* 開始日 / 終了日: same date-field holding as the gantt タスク作成フォーム
+            (統一・二重定義禁止で DATE_LABEL を共有). */}
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-mytask-start">
+              {DATE_LABEL.start}
+            </label>
+            <DateField id="fe4-mytask-start" value={start} onChange={setStart} testId="fe4-mytask-create-start" />
+          </div>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-mytask-due">
+              {DATE_LABEL.end}
+            </label>
+            <DateField id="fe4-mytask-due" value={due} onChange={setDue} testId="fe4-mytask-create-due" />
+          </div>
         </div>
 
         {teams.length > 0 && (

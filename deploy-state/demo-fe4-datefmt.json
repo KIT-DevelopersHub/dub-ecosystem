@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe4-datefmt",
+  "worker": "dub-demo-fe4-datefmt",
+  "url": "https://dub-demo-fe4-datefmt.developershub-site.workers.dev",
+  "deployedSha": "63654cb",
+  "branch": "HEAD",
+  "actor": "Claude (kota)",
+  "markers": ["fe4-mytask-create-start"],
+  "live": true,
+  "verifiedAt": "2026-09-01T16:16:27Z",
+  "updatedAt": "2026-09-01T16:16:27Z",
+  "note": "終了日統一 + タスク発行/ガント新規フォームの日付フィールド統一(開始日+終了日)"
+}
