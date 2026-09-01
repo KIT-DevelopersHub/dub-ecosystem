@@ -30,5 +30,22 @@ flutter build macos           # release build -> build/macos/Build/Products/…/
 flutter run -d macos --dart-define=WEB_BASE_URL=https://dub-fe2-app-shell-demo.developershub-site.workers.dev
 ```
 
+### Android (experimental — same WebView shell on a phone)
+
+The same shell also runs on Android; the SPA has a `width=device-width` viewport and
+responsive breakpoints, so it reflows to a mobile layout (login renders cleanly). It is
+usable but not mobile-first: data-dense views (Gantt, roster tables, mail/chat) are
+cramped and scroll horizontally, so this is for internal testing/sharing, not an end-user
+mobile product. Requires JDK 17 (Flutter 3.29's Gradle plugin rejects newer JDKs).
+
+```bash
+flutter build apk --release                  # universal APK (all devices)
+flutter build apk --release --split-per-abi  # smaller per-ABI APKs
+# APK -> build/app/outputs/flutter-apk/app-release.apk
+```
+
+APKs are **debug-signed** (no release keystore): Android will warn on install and they
+must not go to a store. To install, enable "unknown sources" and open the APK.
+
 macOS requires deployment target ≥ 10.15 (already configured). `apps/de1-desktop` has no
 `package.json`, so it is invisible to the pnpm/turbo web build.
