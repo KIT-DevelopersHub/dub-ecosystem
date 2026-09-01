@@ -85,6 +85,7 @@ export const GANTT_WIRE = {
   getGanttDependencies: { method: "GET", path: "/gantt/dependencies", query: ["eventId"] },
   getGanttView: { method: "GET", path: "/gantt/views", query: ["eventId"] },
   putGanttView: { method: "PUT", path: "/gantt/views", query: ["eventId"] },
+  getGanttWsTicket: { method: "GET", path: "/gantt/ws-ticket", query: ["eventId"] },
 } as const;
 
 // Compile-time tie between the runtime descriptor and the typed query interface: every
@@ -94,3 +95,40 @@ type _GanttWireKeysAreTyped =
   (typeof GANTT_WIRE)[keyof typeof GANTT_WIRE]["query"][number] extends keyof GetGanttQuery ? true : never;
 const _ganttWireKeyGuard: _GanttWireKeysAreTyped = true;
 void _ganttWireKeyGuard;
+
+// ── Realtime (Durable Object + WebSocket) ────────────────────────────────────
+// gantt-service fans these out to every socket in an event's GanttRoom DO after a
+// write COMMITS (RT never leads the source of truth). This is BOTH the server-internal
+// fanout contract AND the client WS wire contract (frozen — mirror any change on both
+// sides). Delta-only by design (コスト最小化 / 判断66): a bar move ships just the moved
+// window (`row.moved`, applied straight to the client cache, no refetch); a structural
+// change (create/delete/status/assignee/dependency/archive) ships a tiny
+// `chart.invalidated` hint so clients DEBOUNCE-refetch the fresh chart once — the whole
+// chart is never pushed unsolicited. Every event is convergent + idempotent, so an actor
+// re-receiving its own echo re-applies the same state (no origin-filtering needed).
+export type GanttRealtimeEvent =
+  | {
+      kind: "row.moved";
+      eventId: EventId;
+      taskId: TaskId;
+      startsAt: ISODateTime | null;
+      endsAt: ISODateTime | null;
+      at: ISODateTime;
+    }
+  | {
+      kind: "chart.invalidated";
+      eventId: EventId;
+      /** The domain-event name that triggered the invalidation (e.g. "task.created").
+       *  Informational only; clients treat every invalidation the same (refetch fresh). */
+      reason: string;
+      at: ISODateTime;
+    };
+
+/** GET /gantt/ws-ticket?eventId= response. The ticket is a short-lived HMAC token the
+ *  GanttRoom DO verifies before accepting the WS; `doUrl` is the absolute DO-direct URL
+ *  (gateway-bypassing) the browser opens with `?ticket=`. */
+export interface GanttWsTicketResponse {
+  ticket: string;
+  doUrl: string;
+  expiresAt: ISODateTime;
+}

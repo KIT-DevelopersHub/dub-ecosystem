@@ -3,6 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import type { AuthClient, AuthnContext } from "@dub/auth-client";
 import type { task, gantt, common } from "@dub/types";
 import type { UpstreamPort, ViewRepo, DtoCache } from "../src/ports";
+import type { RealtimePublisher } from "../src/realtime";
 
 export function mkTask(over: Partial<task.Task> & { id: string }): task.Task {
   return {
@@ -97,6 +98,27 @@ export function fakeViewRepo(): ViewRepo {
     },
     async deleteByEvent(eventId) {
       for (const k of [...store.keys()]) if (k.endsWith(`|${eventId}`)) store.delete(k);
+    },
+  };
+}
+
+export interface FakeRealtime extends RealtimePublisher {
+  moved: { eventId: string; taskId: string; startsAt: string | null; endsAt: string | null }[];
+  invalidated: { eventId: string; reason: string }[];
+}
+
+/** Records realtime fanout calls so route tests can assert a delta was broadcast. */
+export function fakeRealtime(): FakeRealtime {
+  const moved: FakeRealtime["moved"] = [];
+  const invalidated: FakeRealtime["invalidated"] = [];
+  return {
+    moved,
+    invalidated,
+    async publishRowMoved(eventId, move) {
+      moved.push({ eventId, taskId: move.taskId, startsAt: move.startsAt, endsAt: move.endsAt });
+    },
+    async publishInvalidated(eventId, reason) {
+      invalidated.push({ eventId, reason });
     },
   };
 }
