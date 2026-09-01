@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-critical-milestones",
+  "worker": "dub-demo-gantt-critical-milestones",
+  "url": "https://dub-demo-gantt-critical-milestones.developershub-site.workers.dev",
+  "deployedSha": "e99fa0a",
+  "branch": "feat/fe4-gantt-critical-milestones-visible",
+  "actor": "Claude (kota)",
+  "markers": ["fe4-gantt-guide-critical","fe4-gantt-guide-milestone"],
+  "live": true,
+  "verifiedAt": "2026-08-31T05:53:55Z",
+  "updatedAt": "2026-08-31T05:53:55Z",
+  "note": "fe4 gantt: critical path outline + milestones visible (Bグループ再改善)"
+}

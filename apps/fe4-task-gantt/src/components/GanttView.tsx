@@ -35,6 +35,7 @@ import {
   topSegments,
   weekendBands,
   withGranularity,
+  xOf,
 } from "../domain/timeline-axis";
 import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import { visibleTreeRows } from "../domain/gantt-layout";
@@ -512,6 +513,26 @@ export function GanttView({
   const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
+  // Critical path (CPM zero-slack chain from the read model). We only OUTLINE these bars
+  // + paint their linking arrows red — the status fill is untouched so a bar stays legible
+  // as todo/in-progress/done AND reads as "on the path that decides the finish date".
+  const criticalSet = useMemo(() => new Set(dto.criticalTaskIds ?? []), [dto.criticalTaskIds]);
+  const hasCritical = criticalSet.size > 0;
+
+  // Milestones (節目) → diamond markers on the timeline. Placed by date via the axis, so
+  // they track zoom/scroll like the bars. A milestone pinned to a task rides that row's
+  // vertical centre; a free date sits near the top lane.
+  const milestoneMarks = useMemo(() => {
+    return (dto.milestones ?? [])
+      .map((m) => {
+        const ms = Date.parse(m.date);
+        if (Number.isNaN(ms)) return null;
+        const barY = m.taskId ? barById.get(m.taskId)?.y : undefined;
+        return { id: m.id, label: m.label, x: xOf(ms, win), y: barY ?? null };
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null);
+  }, [dto.milestones, win, barById]);
+
   // Every row (visible or hidden) by id — used to walk the WBS up to a visible anchor.
   const rowByIdAll = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r] as const)), [dto.rows]);
   // Resolve a dependency endpoint to the nearest row that is actually drawn: if the
@@ -575,13 +596,16 @@ export function GanttView({
           dropEdgeY: fromAbove ? toBarTop : toBarBottom,
           aggregated,
           mid: aggregated,
+          // Both real endpoints on the critical path → this arrow is a critical link
+          // (painted red + solid so the chain that decides the finish date pops).
+          critical: criticalSet.has(d.fromTaskId) && criticalSet.has(d.toTaskId),
           tip: aggregated
             ? `依存（集約）: ${titleById.get(fromId) ?? fromId} → ${titleById.get(toId) ?? toId}（折りたたみ中の子タスク・親バー上辺/下辺を指しています）`
             : `依存: ${titleById.get(d.fromTaskId) ?? d.fromTaskId} → ${titleById.get(d.toTaskId) ?? d.toTaskId}`,
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
-  }, [dto.dependencies, barById, titleById, visibleAnchor]);
+  }, [dto.dependencies, barById, titleById, visibleAnchor, criticalSet]);
 
   // 内包バー (experimental): an open parent's bar GROWS vertically to cover its
   // subtree, so the parent visually CONTAINS its children instead of sitting in a
@@ -753,12 +777,13 @@ export function GanttView({
     const cls = status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
     const selected = selectedIds.has(taskId) ? styles.barSelected : "";
+    const critical = criticalSet.has(taskId) ? styles.barCritical : "";
     // Parent (work-package) rows keep the rollup behaviour (their span still auto-
     // encloses their children) but render as an ordinary, legible task bar — the
     // hollow "bracket summary" look was reverted per feedback #97 (見づらい). The
     // parent/child vs dependency distinction is carried by indent + tree lines +
     // the dashed dependency arrows + the legend, not by a special bar shape.
-    return `${styles.bar} ${cls} ${dragging} ${selected}`;
+    return `${styles.bar} ${cls} ${dragging} ${selected} ${critical}`;
   };
 
   // ---- left-pane resize ----
@@ -1040,6 +1065,18 @@ export function GanttView({
           </svg>
           依存（前工程 → 後工程）
         </span>
+        {hasCritical && (
+          <span className={styles.tlGuideItem} data-testid="fe4-gantt-guide-critical">
+            <span className={`${styles.tlLegendSwatch} ${styles.tlLegendSwatchCritical}`} aria-hidden />
+            クリティカルパス（遅れると全体が遅れる最長経路）
+          </span>
+        )}
+        {milestoneMarks.length > 0 && (
+          <span className={styles.tlGuideItem} data-testid="fe4-gantt-guide-milestone">
+            <span className={styles.tlLegendDiamond} aria-hidden />
+            マイルストーン（重要な節目・締切）
+          </span>
+        )}
       </div>
 
       {truncated && (
@@ -1262,6 +1299,9 @@ export function GanttView({
                       <marker id="fe4-arrow" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
                         <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrow} />
                       </marker>
+                      <marker id="fe4-arrow-critical" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+                        <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrowCritical} />
+                      </marker>
                     </defs>
                     {segs.map((s) => {
                       // Vertical-first routing (縦→横): drop DOWN/UP out of the predecessor
@@ -1274,16 +1314,21 @@ export function GanttView({
                       const d = s.dropOntoBar
                         ? `M ${s.x1} ${s.y1} V ${(s.y1 + s.dropEdgeY) / 2} H ${s.x2} V ${s.dropEdgeY}`
                         : `M ${s.x1} ${s.y1} V ${s.y2} H ${s.x2}`;
-                      const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
+                      const cls = [
+                        styles.tlDep,
+                        s.aggregated ? styles.tlDepAgg : "",
+                        s.critical ? styles.tlDepCritical : "",
+                      ].filter(Boolean).join(" ");
                       return (
                         <path
                           key={s.id}
                           d={d}
                           fill="none"
                           className={cls}
-                          markerEnd="url(#fe4-arrow)"
+                          markerEnd={s.critical ? "url(#fe4-arrow-critical)" : "url(#fe4-arrow)"}
                           data-testid={`fe4-gantt-dep-${s.id}`}
                           data-aggregated={s.aggregated ? "1" : undefined}
+                          data-critical={s.critical ? "true" : undefined}
                           data-mid-anchor={s.mid ? "true" : undefined}
                         >
                           <title>{s.tip}</title>
@@ -1295,6 +1340,21 @@ export function GanttView({
 
                 {/* today line */}
                 <div className={styles.tlToday} style={{ left: tX, height: rowsH }} data-testid="fe4-gantt-today" aria-hidden />
+
+                {/* milestones (節目): a thin vertical guide the full height + a diamond and
+                    label in the top lane, so key dates read at a glance across all rows. */}
+                {milestoneMarks.map((m) => (
+                  <div
+                    key={m.id}
+                    className={styles.tlMilestone}
+                    style={{ left: m.x, height: rowsH }}
+                    data-testid={`fe4-gantt-milestone-${m.id}`}
+                    title={`マイルストーン: ${m.label}`}
+                  >
+                    <span className={styles.tlMilestoneDiamond} aria-hidden />
+                    <span className={styles.tlMilestoneLabel}>{m.label}</span>
+                  </div>
+                ))}
 
                 {/* bars */}
                 {bars.map((b) => {
