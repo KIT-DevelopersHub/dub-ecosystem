@@ -713,11 +713,44 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
 ];
 const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
 
+// Synthetic bulk roster so the 名簿 demo shows a長い一覧 (数百行) — this is what the
+// 仮想スクロール (row windowing) is for: only on-screen rows mount, so the list stays
+// smooth even at this size. Appended AFTER the 4 named users so the interactive flows
+// (usr_dave role assign 等) keep working unchanged.
+const BULK_ROSTER_COUNT = 600;
+const BULK_SURNAMES = ["佐藤", "鈴木", "高橋", "田中", "伊藤", "渡辺", "山本", "中村", "小林", "加藤", "吉田", "山田", "松本", "井上", "木村", "林", "清水", "山口", "森", "池田"];
+const BULK_GIVEN = ["蓮", "陽翔", "湊", "樹", "大翔", "陽菜", "結衣", "咲良", "凛", "芽依", "悠真", "颯太", "美咲", "葵", "莉子", "翔太", "健太", "彩花", "直樹", "香織"];
+const BULK_STATUSES: identity.IdentityUser["status"][] = ["active", "active", "active", "active", "invited", "disabled"];
+const BULK_ROLE_IDS = ["role_member", "role_member", "role_maintainer", "role_admin"];
+
+function buildBulkRoster(): identity.IdentityUser[] {
+  const out: identity.IdentityUser[] = [];
+  for (let i = 0; i < BULK_ROSTER_COUNT; i++) {
+    const surname = BULK_SURNAMES[i % BULK_SURNAMES.length]!;
+    const given = BULK_GIVEN[(i * 7) % BULK_GIVEN.length]!;
+    const n = String(i + 1).padStart(3, "0");
+    out.push({
+      id: `usr_bulk_${n}`,
+      orgId: ORG,
+      displayName: `${surname} ${given}`,
+      email: `member${n}@developershub.jp`,
+      githubLogin: i % 3 === 0 ? `member${n}` : null,
+      avatarUrl: null,
+      status: BULK_STATUSES[i % BULK_STATUSES.length]!,
+      roleIds: [BULK_ROLE_IDS[i % BULK_ROLE_IDS.length]!],
+      createdAt: isoNow(),
+      updatedAt: isoNow(),
+    });
+  }
+  return out;
+}
+
 const SEED_USERS: identity.IdentityUser[] = [
   { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_carol", orgId: ORG, displayName: "鈴木 一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_dave", orgId: ORG, displayName: "田中 次郎", email: "jiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  ...buildBulkRoster(),
 ];
 
 const SEED_ROLES: identity.Role[] = [
