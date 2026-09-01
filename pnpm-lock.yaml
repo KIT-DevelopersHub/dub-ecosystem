@@ -260,6 +260,9 @@ importers:
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@dub/gantt-calc':
+        specifier: workspace:*
+        version: link:../../packages/gantt-calc
       '@dub/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens

@@ -352,6 +352,17 @@
 }
 .tlTodayBtn:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); border-color: var(--dub-color-border-strong); }
 
+/* "クリティカルパスを表示" toggle in the toolbar. Wraps the shared @dub/ui Checkbox
+   so its label reads at the toolbar's compact size and keeps clear of the chips. */
+.tlCriticalToggle {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--dub-space-1, 4px);
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  color: var(--dub-color-text-secondary);
+  white-space: nowrap;
+}
+
 /* Granularity chips (月/週/日) now use the shared @dub/ui SegmentedControl —
    the hand-rolled .tlSeg/.tlSegBtn strip was removed in the unification pass. */
 
@@ -862,6 +873,10 @@
    stands for one-or-more folded-away dependencies. */
 .tlDepAgg { stroke-dasharray: 2 3; }
 .tlDepArrow { fill: var(--dub-color-brand-600, var(--dub-color-brand-500)); }
+/* critical-path dependency (both endpoints zero-slack): a solid red line so the
+   critical chain reads as one continuous run through its tasks. Toggle-gated. */
+.tlDepCritical { stroke: var(--dub-color-danger-600, var(--dub-color-danger-500)); stroke-dasharray: none; stroke-width: 2.75; }
+.tlDepArrowCritical { fill: var(--dub-color-danger-600, var(--dub-color-danger-500)); }
 
 .tlToday {
   position: absolute;
@@ -904,6 +919,18 @@
 .barCancelled .barLabel, .barCancelled .barLabelOut { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 
 .barDragging { cursor: grabbing; z-index: 6; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
+
+/* critical-path bar (zero-slack task): a red ring around the bar so the critical
+   tasks stand out over any status fill without repainting them. Opt-in overlay,
+   applied only while the "クリティカルパスを表示" toggle is on. */
+.barCritical {
+  z-index: 4;
+  outline: 2px solid var(--dub-color-danger-500);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dub-color-danger-500) 20%, transparent);
+}
+/* keep the marquee-selection ring dominant when a bar is both selected and critical */
+.barSelected.barCritical { outline-color: var(--dub-color-brand-500); }
 
 /* marquee multi-select highlight: a brand ring + faint wash so a selected bar reads
    as "picked" over any status fill, without hiding its own colour. */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ConfirmDialog, SegmentedControl, SortableList } from "@dub/ui";
+import { Checkbox, ConfirmDialog, SegmentedControl, SortableList } from "@dub/ui";
 import type { SegmentedOption, SortableItemContext, SortableReorderEvent } from "@dub/ui";
 import { barsInRect, normalizeRect, rectIsDrag, unionIds, type Rect } from "../domain/marquee";
 import type { GanttSortActions, GanttSortState } from "../domain/gantt-sort-pref";
@@ -38,6 +38,8 @@ import {
 } from "../domain/timeline-axis";
 import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import { visibleTreeRows } from "../domain/gantt-layout";
+import { deriveCriticalTaskIds } from "../domain/critical-path";
+import { loadShowCriticalPath, saveShowCriticalPath } from "../domain/gantt-view-pref";
 import styles from "../styles/app.module.css";
 
 const HEADER_TOP = 28;
@@ -47,6 +49,8 @@ const CLICK_THRESHOLD_PX = 4;
 const DEFAULT_LEFT_W = 264;
 const MIN_LEFT_W = 176;
 const MAX_LEFT_W = 460;
+/** Stable empty set reused when the critical-path overlay is off (no re-render churn). */
+const EMPTY_CRITICAL: ReadonlySet<common.TaskId> = new Set();
 
 export interface GanttViewProps {
   dto: gantt.GanttChartDTO;
@@ -279,6 +283,20 @@ export function GanttView({
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
   const [collapsed, setCollapsed] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // クリティカルパス表示トグル: OFF by default, opt-in overlay. Persisted per-event
+  // in the same localStorage view-pref基盤 so a reload restores the choice. The path
+  // itself is recomputed LIVE from the displayed rows/deps (below), so it follows
+  // every drag/resize/依存編集 instead of the read model's fetch-time snapshot.
+  const [showCritical, setShowCritical] = useState<boolean>(() => loadShowCriticalPath(dto.eventId));
+  const toggleCritical = useCallback(
+    (next: boolean) => {
+      setShowCritical(next);
+      saveShowCriticalPath(dto.eventId, next);
+    },
+    [dto.eventId],
+  );
+  // Re-seed the toggle when the active event switches (same mounted view, new eventId).
+  useEffect(() => setShowCritical(loadShowCriticalPath(dto.eventId)), [dto.eventId]);
   // 拡大（全画面）閲覧モード: みんなで投影して「見るだけ」の大画面表示。ON の間は
   // 編集（バーのドラッグ/リサイズ・詳細を開く・新規作成・並べ替え）を全て無効化し、
   // ズーム（日/週/月）と横スクロールだけを許す。Fullscreen API を使い、非対応/失敗時も
@@ -512,6 +530,16 @@ export function GanttView({
   const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
+  // Live critical path: recomputed from the CURRENT rows + dependencies (which carry
+  // every optimistic edit) via the shared CPM engine, so the red path auto-follows a
+  // period change or a dependency edit. Computed over the FULL graph (dto.rows/deps,
+  // not just the visible rows) so a critical task folded inside a collapsed parent
+  // still counts. Skipped entirely when the toggle is off (no cost when hidden).
+  const criticalIds = useMemo<ReadonlySet<common.TaskId>>(
+    () => (showCritical ? deriveCriticalTaskIds(dto.rows, dto.dependencies) : EMPTY_CRITICAL),
+    [showCritical, dto.rows, dto.dependencies],
+  );
+
   // Every row (visible or hidden) by id — used to walk the WBS up to a visible anchor.
   const rowByIdAll = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r] as const)), [dto.rows]);
   // Resolve a dependency endpoint to the nearest row that is actually drawn: if the
@@ -563,6 +591,10 @@ export function GanttView({
         const fromAbove = fromCenterY <= to.y + ROW_HEIGHT / 2;
         return {
           id: d.id,
+          // real endpoints (before folding up to a visible ancestor) — used to test
+          // whether BOTH ends of this dependency are on the live critical path.
+          fromReal: d.fromTaskId,
+          toReal: d.toTaskId,
           // predecessor: right edge normally; parent-bar middle when folded up.
           x1: fromAgg ? from.x + from.width / 2 : from.x + from.width,
           y1: fromCenterY,
@@ -753,12 +785,13 @@ export function GanttView({
     const cls = status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
     const selected = selectedIds.has(taskId) ? styles.barSelected : "";
+    const critical = showCritical && criticalIds.has(taskId) ? styles.barCritical : "";
     // Parent (work-package) rows keep the rollup behaviour (their span still auto-
     // encloses their children) but render as an ordinary, legible task bar — the
     // hollow "bracket summary" look was reverted per feedback #97 (見づらい). The
     // parent/child vs dependency distinction is carried by indent + tree lines +
     // the dashed dependency arrows + the legend, not by a special bar shape.
-    return `${styles.bar} ${cls} ${dragging} ${selected}`;
+    return `${styles.bar} ${cls} ${dragging} ${selected} ${critical}`;
   };
 
   // ---- left-pane resize ----
@@ -963,6 +996,15 @@ export function GanttView({
               <GanttSortControl state={sortState} actions={sortActions} />
             </div>
           )}
+          <span className={styles.tlCriticalToggle}>
+            <Checkbox
+              id="fe4-gantt-critical-toggle"
+              checked={showCritical}
+              onChange={toggleCritical}
+              label="クリティカルパスを表示"
+              testId="fe4-gantt-critical-toggle"
+            />
+          </span>
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
             今日
           </button>
@@ -1262,8 +1304,15 @@ export function GanttView({
                       <marker id="fe4-arrow" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
                         <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrow} />
                       </marker>
+                      <marker id="fe4-arrow-critical" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+                        <path d="M0,0 L7,4.5 L0,9 Z" className={styles.tlDepArrowCritical} />
+                      </marker>
                     </defs>
                     {segs.map((s) => {
+                      // A dependency is on the critical path when BOTH endpoints are
+                      // zero-slack tasks; only then is it drawn red (toggle-gated).
+                      const depCritical =
+                        showCritical && criticalIds.has(s.fromReal) && criticalIds.has(s.toReal);
                       // Vertical-first routing (縦→横): drop DOWN/UP out of the predecessor
                       // end first, then run horizontally into the successor — the elbow's
                       // corner sits near the predecessor, not the successor.
@@ -1274,16 +1323,23 @@ export function GanttView({
                       const d = s.dropOntoBar
                         ? `M ${s.x1} ${s.y1} V ${(s.y1 + s.dropEdgeY) / 2} H ${s.x2} V ${s.dropEdgeY}`
                         : `M ${s.x1} ${s.y1} V ${s.y2} H ${s.x2}`;
-                      const cls = s.aggregated ? `${styles.tlDep} ${styles.tlDepAgg}` : styles.tlDep;
+                      const cls = [
+                        styles.tlDep,
+                        s.aggregated ? styles.tlDepAgg : "",
+                        depCritical ? styles.tlDepCritical : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
                       return (
                         <path
                           key={s.id}
                           d={d}
                           fill="none"
                           className={cls}
-                          markerEnd="url(#fe4-arrow)"
+                          markerEnd={depCritical ? "url(#fe4-arrow-critical)" : "url(#fe4-arrow)"}
                           data-testid={`fe4-gantt-dep-${s.id}`}
                           data-aggregated={s.aggregated ? "1" : undefined}
+                          data-critical={depCritical ? "1" : undefined}
                           data-mid-anchor={s.mid ? "true" : undefined}
                         >
                           <title>{s.tip}</title>
@@ -1308,6 +1364,7 @@ export function GanttView({
                       style={{ left: g.left, top: b.y + (ROW_HEIGHT - BAR_HEIGHT) / 2, width: g.width, height: BAR_HEIGHT }}
                       title={titleById.get(b.taskId) ?? ""}
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
+                      data-critical={showCritical && criticalIds.has(b.taskId) ? "1" : undefined}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
                       {...(selectedIds.has(b.taskId) ? { "data-fe4-keep-selection": "true" } : {})}
                     >

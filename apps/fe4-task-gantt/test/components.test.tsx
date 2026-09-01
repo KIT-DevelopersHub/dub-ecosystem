@@ -6,6 +6,7 @@ import { ViewSwitcher } from "../src/components/ViewSwitcher";
 import { TaskListView } from "../src/components/TaskListView";
 import { TaskBoardView } from "../src/components/TaskBoardView";
 import { createUserCache } from "../src/domain/user-cache";
+import { loadShowCriticalPath, saveShowCriticalPath } from "../src/domain/gantt-view-pref";
 import { ROW_HEIGHT } from "../src/domain/timeline-axis";
 import type { GanttSortActions, GanttSortState } from "../src/domain/gantt-sort-pref";
 
@@ -50,6 +51,32 @@ describe("GanttView render (design test 4/7)", () => {
   it("shows truncated banner when flagged (8-8)", () => {
     render(<GanttView dto={dto} zoom="week" truncated />);
     expect(screen.getByTestId("fe4-gantt-truncated")).toBeInTheDocument();
+  });
+
+  it("critical-path toggle: OFF by default (no red overlay), ON marks the zero-slack chain", () => {
+    globalThis.localStorage?.clear();
+    render(<GanttView dto={dto} zoom="day" />);
+    const toggle = screen.getByTestId("fe4-gantt-critical-toggle") as HTMLInputElement;
+    // default OFF — no critical marking anywhere
+    expect(toggle.checked).toBe(false);
+    expect(screen.getByTestId("fe4-gantt-bar-a").getAttribute("data-critical")).toBeNull();
+    expect(screen.getByTestId("fe4-gantt-dep-a->b").getAttribute("data-critical")).toBeNull();
+    // turn it on — a and b form a tight FS chain, so both bars + the edge go critical
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    expect(screen.getByTestId("fe4-gantt-bar-a").getAttribute("data-critical")).toBe("1");
+    expect(screen.getByTestId("fe4-gantt-bar-b").getAttribute("data-critical")).toBe("1");
+    expect(screen.getByTestId("fe4-gantt-dep-a->b").getAttribute("data-critical")).toBe("1");
+    // and it persisted to the per-event view-pref
+    expect(loadShowCriticalPath("evt_1" as gantt.GanttChartDTO["eventId"])).toBe(true);
+  });
+
+  it("restores the critical-path toggle from persisted view-pref (default OFF honoured)", () => {
+    globalThis.localStorage?.clear();
+    saveShowCriticalPath("evt_1" as gantt.GanttChartDTO["eventId"], true);
+    render(<GanttView dto={dto} zoom="day" />);
+    expect((screen.getByTestId("fe4-gantt-critical-toggle") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId("fe4-gantt-bar-a").getAttribute("data-critical")).toBe("1");
   });
 
   it("always renders the parent-child vs dependency guide legend (feedback #3)", () => {

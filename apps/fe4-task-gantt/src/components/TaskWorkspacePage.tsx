@@ -117,7 +117,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // Write-through: persist the view dimensions whenever any of them change, so every
   // setFilter / setZoom call site is covered without wrapping each one.
   useEffect(() => {
-    saveViewPref(eventId, prefFromView(zoom, filter));
+    // Merge over the stored pref so the independently-written showCriticalPath
+    // toggle (saved by the gantt view) survives a zoom/filter change.
+    saveViewPref(eventId, { ...loadViewPref(eventId), ...prefFromView(zoom, filter) });
   }, [eventId, zoom, filter.status, filter.teamId, filter.includeArchived]);
   // Reset all persisted view dimensions to their defaults.
   const resetView = () => {

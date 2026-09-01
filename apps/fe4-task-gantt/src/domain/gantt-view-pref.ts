@@ -26,11 +26,15 @@ export interface GanttViewPref {
   status: task.TaskStatus[];
   teamId?: common.TeamId;
   includeArchived: boolean;
+  /** "クリティカルパスを表示" toggle. Off by default — the red path is an opt-in
+   *  overlay, never shown unless the user turns it on (per-event, per-browser). */
+  showCriticalPath: boolean;
 }
 
-/** The defaults: week zoom, no status narrowing, all teams, archives hidden. */
+/** The defaults: week zoom, no status narrowing, all teams, archives hidden,
+ *  critical path off. */
 export function defaultViewPref(): GanttViewPref {
-  return { zoom: DEFAULT_ZOOM, status: [], includeArchived: false };
+  return { zoom: DEFAULT_ZOOM, status: [], includeArchived: false, showCriticalPath: false };
 }
 
 function isZoom(v: unknown): v is gantt.GanttZoom {
@@ -54,6 +58,7 @@ function coerce(raw: unknown): GanttViewPref {
     status?: unknown;
     teamId?: unknown;
     includeArchived?: unknown;
+    showCriticalPath?: unknown;
   };
   const status = Array.isArray(obj.status)
     ? obj.status.filter(isStatus).filter((s, i, all) => all.indexOf(s) === i)
@@ -67,7 +72,19 @@ function coerce(raw: unknown): GanttViewPref {
     status,
     ...(teamId !== undefined ? { teamId } : {}),
     includeArchived: obj.includeArchived === true,
+    showCriticalPath: obj.showCriticalPath === true,
   };
+}
+
+/** Read just the "クリティカルパスを表示" toggle (default false). */
+export function loadShowCriticalPath(eventId: common.EventId): boolean {
+  return loadViewPref(eventId).showCriticalPath;
+}
+
+/** Persist just the "クリティカルパスを表示" toggle, preserving every other saved
+ *  view dimension (read-modify-write so it never clobbers zoom/filter/team). */
+export function saveShowCriticalPath(eventId: common.EventId, showCriticalPath: boolean): void {
+  saveViewPref(eventId, { ...loadViewPref(eventId), showCriticalPath });
 }
 
 /** Read the saved preference (defaults when nothing/garbage is stored); tolerant of
@@ -116,11 +133,14 @@ export function filterFromPref(
   };
 }
 
-/** Project the live zoom + filter back into a persistable preference. */
+/** Project the live zoom + filter back into the persistable view dimensions it
+ *  OWNS. `showCriticalPath` is deliberately excluded — it is written independently
+ *  by the gantt view (saveShowCriticalPath), so the write-through merges this over
+ *  the stored pref rather than replacing it (avoids clobbering the toggle). */
 export function prefFromView(
   zoom: gantt.GanttZoom,
   filter: TaskFilterState,
-): GanttViewPref {
+): Omit<GanttViewPref, "showCriticalPath"> {
   return {
     zoom,
     status: [...filter.status],
