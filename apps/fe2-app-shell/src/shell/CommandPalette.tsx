@@ -17,6 +17,7 @@ import { createPortal } from "react-dom";
 import { Icon } from "@dub/ui";
 import type { IconName } from "@dub/ui";
 import { isImeComposing } from "@dub/ui";
+import { COMMAND_PALETTE_SHORTCUT, matchChord } from "./shortcuts/registry.ts";
 
 export interface PaletteCommand {
   /** Stable id (used for recents + option DOM ids). */
@@ -57,9 +58,13 @@ function pushRecent(id: string): string[] {
   return next;
 }
 
-/** True when the keydown is the Cmd/Ctrl+K palette toggle (never during IME composition). */
+/**
+ * True when the keydown is the palette toggle. The chord comes from the shortcut registry
+ * (the single source of truth), so the palette binds exactly what the help list shows —
+ * there is no second definition to drift ([[dub-api-contract-sot]]).
+ */
 function isPaletteToggle(e: KeyboardEvent): boolean {
-  return (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k" && !isImeComposing(e);
+  return matchChord(e, COMMAND_PALETTE_SHORTCUT.chord) && !isImeComposing(e);
 }
 
 function matches(cmd: PaletteCommand, q: string): boolean {
