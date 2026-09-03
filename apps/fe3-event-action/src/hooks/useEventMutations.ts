@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { common, event } from "@dub/types";
 import { useEventApi } from "../context/ApiContext";
 import { useToast } from "@dub/ui";
+import { useUndoableAction } from "@dub/app-ui";
 import { createOptimisticMutation } from "./useOptimisticMutation";
 import { eventKeys } from "../lib/queryKeys";
 import { normalizeError } from "../lib/errorMap";
@@ -82,6 +83,42 @@ export function useArchiveEvent(eventId: common.EventId) {
     },
     onError: (err) => toast.show({ kind: "error", title: normalizeError(err).message }),
   });
+}
+
+// ---- Action: archive with UNDO (delayed-commit; optimistic on the actions list) ----
+// The board stays mounted through the grace window, so the "元に戻す" toast + deferred
+// DELETE work here (unlike event-archive, which navigates away). Removes the row
+// instantly, defers api.archiveAction, and re-inserts it if the user undoes or the
+// commit fails ([[optimistic-ui-principle]], FRONTEND_GUIDE §5.3 + ⑤ 取り消し).
+export function useUndoableArchiveAction(eventId: common.EventId) {
+  const api = useEventApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const undoable = useUndoableAction();
+  const key = eventKeys.actions(eventId);
+  return (action: event.DubAction) => {
+    const previous = qc.getQueryData<ListActionsResponse>(key);
+    undoable.run({
+      message: "アクションを削除しました",
+      apply: () => {
+        qc.setQueryData<ListActionsResponse>(key, (prev) =>
+          prev ? { ...prev, items: prev.items.filter((a) => a.id !== action.id) } : prev,
+        );
+      },
+      restore: () => {
+        if (previous !== undefined) qc.setQueryData<ListActionsResponse>(key, previous);
+      },
+      commit: async () => {
+        await api.archiveAction(action.id);
+        void qc.invalidateQueries({ queryKey: key });
+        void qc.invalidateQueries({ queryKey: eventKeys.detail(eventId) });
+      },
+      onCommitError: (err) => {
+        if (previous !== undefined) qc.setQueryData<ListActionsResponse>(key, previous);
+        toast.show({ kind: "error", title: normalizeError(err).message });
+      },
+    });
+  };
 }
 
 // ---- Action: create (non-optimistic) ----

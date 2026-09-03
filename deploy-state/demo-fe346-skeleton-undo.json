@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe346-skeleton-undo",
+  "worker": "dub-demo-fe346-skeleton-undo",
+  "url": "https://dub-demo-fe346-skeleton-undo.developershub-site.workers.dev",
+  "deployedSha": "63654cb",
+  "branch": "HEAD",
+  "actor": "Claude (stg-unwedge)",
+  "markers": ["fe4-gantt-loading","数秒間は「元に戻す」で取り消せます"],
+  "live": true,
+  "verifiedAt": "2026-09-03T15:40:36Z",
+  "updatedAt": "2026-09-03T15:40:36Z",
+  "note": "③ skeleton (fe3/fe4/fe6) + ⑤ undo toast (fe4 task delete, fe3 action delete)"
+}

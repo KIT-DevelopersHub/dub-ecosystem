@@ -1,6 +1,7 @@
 // Workspace search results dropdown, anchored under the channel header. Shows
 // matching messages grouped nowhere fancy — a flat, newest-first list with the
 // channel name, author, and a snippet. Clicking a hit navigates to that channel.
+import { SkeletonList } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { SearchHit } from "../api/contract";
 import styles from "../styles/chat.module.css";
@@ -38,7 +39,9 @@ export function SearchResults({ query, loading, results, resolveUser, onSelect, 
         </button>
       </div>
       {loading ? (
-        <div className={styles.searchEmpty}>検索中…</div>
+        <div className={styles.searchList} data-testid="fe6-search-loading">
+          <SkeletonList rows={4} />
+        </div>
       ) : results.length === 0 ? (
         <div className={styles.searchEmpty} data-testid="fe6-search-empty">
           一致するメッセージはありません

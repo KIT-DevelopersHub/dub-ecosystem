@@ -3,7 +3,7 @@
 // feature.tsx drive channel selection via TanStack Router params; standalone we
 // keep selection in local state and persist the last channel (design §3).
 import { useCallback, useEffect, useState } from "react";
-import { ToastProvider } from "@dub/ui";
+import { SkeletonList, ToastProvider } from "@dub/ui";
 import type { common } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
@@ -20,6 +20,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const unread = useChatStore((s) => s.unread);
   const setUnread = useChatStore((s) => s.setUnread);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(true);
   const [active, setActive] = useState<common.ChannelId | null>(initialChannelId ?? null);
   const [threadOpen, setThreadOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -40,7 +41,12 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const list = await reloadChannels();
+      let list: Channel[] = [];
+      try {
+        list = await reloadChannels();
+      } finally {
+        if (!cancelled) setChannelsLoading(false);
+      }
       if (cancelled) return;
       setActive((cur) => {
         if (cur) return cur;
@@ -94,6 +100,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
         unread={unread}
         activeChannelId={active}
         canCreate={can("chat:create")}
+        loading={channelsLoading}
         onSelect={onSelect}
         onCreate={() => setCreateOpen(true)}
       />
@@ -106,6 +113,11 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
           onSelectChannel={onSelect}
           onChannelsChanged={() => void reloadChannels()}
         />
+      ) : channelsLoading ? (
+        // Initial channel fetch: skeleton the main pane too, not just the sidebar.
+        <section className={styles.main} data-testid="fe6-main-loading">
+          <SkeletonList rows={6} avatar />
+        </section>
       ) : (
         <section className={styles.main}>
           <div className={styles.emptyState}>チャネルを選択してください</div>

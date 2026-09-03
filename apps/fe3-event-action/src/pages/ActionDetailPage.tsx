@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Button, Icon } from "@dub/ui";
+import { Button, Icon, SkeletonLoader } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { useActionRegistry } from "../context/ApiContext";
@@ -23,7 +23,14 @@ function ActionDetailInner({ eventId, actionId }: { eventId: string; actionId: s
     [action, update],
   );
 
-  if (isLoading) return <div className={styles.emptyState}>読み込み中…</div>;
+  // Loading MUST show a skeleton, never a bare blank/text, so the user can tell
+  // "loading" from "empty" (FRONTEND_GUIDE §5.1).
+  if (isLoading)
+    return (
+      <div className={styles.page} data-testid="fe3-action-detail-loading">
+        <SkeletonLoader lines={6} />
+      </div>
+    );
   if (isError || !action) {
     return (
       <div className={styles.notFound} data-testid="fe3-action-notfound">
@@ -71,7 +78,11 @@ export function ActionDetailPage() {
   return (
     <EventContextProvider
       eventId={eventId}
-      fallback={<div className={styles.emptyState}>読み込み中…</div>}
+      fallback={
+        <div className={styles.page} data-testid="fe3-action-detail-loading">
+          <SkeletonLoader lines={6} />
+        </div>
+      }
       notFound={
         <div className={styles.notFound} data-testid="fe3-action-notfound">
           イベントが見つかりません。

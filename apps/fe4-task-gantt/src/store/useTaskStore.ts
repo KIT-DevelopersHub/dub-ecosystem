@@ -62,6 +62,16 @@ export interface TaskStoreState {
   create: (client: ApiClient, body: task.CreateTaskRequest, provisional?: task.Task) => Promise<task.Task | null>;
   // delete — optimistic (removed instantly, restored on failure).
   removeTask: (client: ApiClient, id: common.TaskId) => Promise<boolean>;
+  // deferred-commit delete (undoable): drop the row locally now (returns the snapshot),
+  // re-attach on undo, and commit the DELETE separately once the grace window elapses.
+  /** Remove a task from the cache WITHOUT calling the API; returns the removed row
+   *  (or null) so an undo can put it straight back. */
+  detachTask: (id: common.TaskId) => task.Task | null;
+  /** Re-insert a previously detached task (undo of detachTask). No-op for null. */
+  attachTask: (t: task.Task | null) => void;
+  /** Commit the server-side DELETE for a task already detached locally. Routes the
+   *  error (does NOT re-insert — the caller's onCommitError restores). */
+  commitDelete: (client: ApiClient, id: common.TaskId) => Promise<boolean>;
   /** Surface an error raised OUTSIDE the store (e.g. a relation save / dependency
    *  replace that bypasses the store) so it is never lost. */
   reportError: (e: unknown) => void;
@@ -193,6 +203,27 @@ export const useTaskStore = create<TaskStoreState>((set, get) => ({
         tasks: snapshot ? upsert(s.tasks, snapshot) : s.tasks,
         ...errState(e),
       }));
+      return false;
+    }
+  },
+
+  detachTask(id) {
+    const snapshot = get().tasks[id] ?? null;
+    if (snapshot) set((s) => ({ tasks: remove(s.tasks, id) }));
+    return snapshot;
+  },
+
+  attachTask(t) {
+    if (t) set((s) => ({ tasks: upsert(s.tasks, t) }));
+  },
+
+  async commitDelete(client, id) {
+    try {
+      await api.deleteTask(client, id);
+      set({ lastError: null, lastErrorDetail: null });
+      return true;
+    } catch (e) {
+      set(errState(e));
       return false;
     }
   },

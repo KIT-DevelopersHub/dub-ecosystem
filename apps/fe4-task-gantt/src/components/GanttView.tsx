@@ -1385,7 +1385,7 @@ export function GanttView({
       <ConfirmDialog
         open={bulkDeleteOpen}
         title="タスクを削除"
-        message={`${selectedIds.size}件のタスクを削除しますか？取り消せません。`}
+        message={`${selectedIds.size}件のタスクを削除しますか？削除後、数秒間は「元に戻す」で取り消せます。`}
         confirmLabel="削除"
         cancelLabel="キャンセル"
         danger

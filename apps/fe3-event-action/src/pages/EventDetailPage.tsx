@@ -1,4 +1,4 @@
-import { Button, Icon } from "@dub/ui";
+import { Button, Icon, SkeletonLoader } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { PhaseBadge } from "../components/PhaseBadge";
@@ -71,7 +71,11 @@ export function EventDetailPage() {
   return (
     <EventContextProvider
       eventId={eventId}
-      fallback={<div className={styles.emptyState}>読み込み中…</div>}
+      fallback={
+        <div className={styles.page} data-testid="fe3-event-detail-loading">
+          <SkeletonLoader lines={6} />
+        </div>
+      }
       notFound={
         <div className={styles.notFound} data-testid="fe3-detail-notfound">
           イベントが見つかりません。

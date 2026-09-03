@@ -42,6 +42,7 @@ export type {
   DrawerProps,
   ToastKind,
   ToastOptions,
+  ToastAction,
   ThemeName,
   ThemeProviderProps,
   AppShellProps,

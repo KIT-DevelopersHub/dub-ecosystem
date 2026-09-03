@@ -102,6 +102,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <p className={cx(styles.title)}>{t.title}</p>
               {t.description && <p className={cx(styles.description)}>{t.description}</p>}
             </div>
+            {t.action && (
+              <button
+                type="button"
+                className={cx(styles.action)}
+                data-testid={`toast-action-${t.kind}`}
+                onClick={() => {
+                  t.action?.onClick();
+                  dismiss(t.id);
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
               type="button"
               className={cx(styles.close)}

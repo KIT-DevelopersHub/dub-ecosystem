@@ -15,11 +15,12 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { common, event } from "@dub/types";
-import { Icon, Button, SkeletonList } from "@dub/ui";
+import { Icon, IconButton, Button, SkeletonList } from "@dub/ui";
 import { ActionCard } from "./ActionCard";
 import { ActionCreateModal } from "./ActionCreateModal";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { useActionsQuery } from "../hooks/useEventQueries";
-import { useUpdateAction } from "../hooks/useEventMutations";
+import { useUpdateAction, useUndoableArchiveAction } from "../hooks/useEventMutations";
 import { computeReorder } from "../lib/sortOrder";
 import styles from "./components.module.css";
 
@@ -27,10 +28,12 @@ function SortableActionRow({
   action,
   canWrite,
   onOpen,
+  onDelete,
 }: {
   action: event.DubAction;
   canWrite: boolean;
   onOpen?: (id: string) => void;
+  onDelete?: (action: event.DubAction) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: action.id,
@@ -52,6 +55,14 @@ function SortableActionRow({
         <div style={{ flex: 1 }}>
           <ActionCard action={action} onOpen={onOpen} />
         </div>
+        {onDelete ? (
+          <IconButton
+            name="trash"
+            aria-label="アクションを削除"
+            onClick={() => onDelete(action)}
+            testId={`fe3-actionboard-delete-${action.id}`}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -69,7 +80,9 @@ export function ActionBoard({
   const [kindFilter, setKindFilter] = useState<string>("");
   const query = useActionsQuery(eventId, kindFilter ? { kind: kindFilter } : undefined);
   const update = useUpdateAction(eventId);
+  const archiveAction = useUndoableArchiveAction(eventId);
   const [createOpen, setCreateOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<event.DubAction | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const items = query.data?.items ?? [];
@@ -134,7 +147,13 @@ export function ActionBoard({
           <SortableContext items={items.map((a) => a.id)} strategy={verticalListSortingStrategy}>
             <div className={styles.board}>
               {items.map((a) => (
-                <SortableActionRow key={a.id} action={a} canWrite={canWrite} onOpen={onOpenAction} />
+                <SortableActionRow
+                  key={a.id}
+                  action={a}
+                  canWrite={canWrite}
+                  onOpen={onOpenAction}
+                  onDelete={canWrite ? setPendingDelete : undefined}
+                />
               ))}
             </div>
           </SortableContext>
@@ -146,6 +165,19 @@ export function ActionBoard({
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         knownKinds={kinds}
+      />
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="アクションを削除しますか？"
+        message="削除後、数秒間は「元に戻す」で取り消せます。"
+        confirmLabel="削除する"
+        onConfirm={() => {
+          if (pendingDelete) archiveAction(pendingDelete);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+        testId="fe3-actionboard-delete-confirm"
       />
     </div>
   );

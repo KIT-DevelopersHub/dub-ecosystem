@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "@dub/ui";
+import { Button, SkeletonLoader } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { EventEditForm } from "../components/EventEditForm";
@@ -58,7 +58,11 @@ export function EventSettingsPage() {
   return (
     <EventContextProvider
       eventId={eventId}
-      fallback={<div className={styles.emptyState}>読み込み中…</div>}
+      fallback={
+        <div className={styles.page} data-testid="fe3-event-settings-loading">
+          <SkeletonLoader lines={6} />
+        </div>
+      }
       notFound={
         <div className={styles.notFound} data-testid="fe3-settings-notfound">
           イベントが見つかりません。

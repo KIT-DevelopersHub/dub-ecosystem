@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
-import { Button, ErrorDialog, useToast } from "@dub/ui";
+import { Button, ErrorDialog, SkeletonTable, useToast } from "@dub/ui";
 import type { ErrorDialogDetail } from "@dub/ui";
-import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
+import { useUndoRedo, useUndoRedoHotkeys, useUndoableAction } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
 import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
@@ -154,6 +154,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
   // hotkey is off for read-only users and never steals a focused field's own undo.
   const history = useUndoRedo();
+  // Delayed-commit undo for destructive ops (⑤ 取り消し). Delete removes the row
+  // immediately, shows a "元に戻す" toast for a grace window, and DEFERS the server
+  // DELETE until it elapses — so undo during the window is free (no server round-trip).
+  const undoable = useUndoableAction();
   // Coalesce the "nothing to undo/redo" notice so a held-down ⌘Z on an empty stack
   // (which returns synchronously — no API round-trip to rate-limit it) can't spam the
   // toast. A successful undo/redo awaits its API inverse, so those are naturally paced.
@@ -898,18 +902,31 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       });
       return;
     }
-    // Optimistic: close the panel + drop the bar instantly; the store removes the
-    // row immediately and restores it on failure (with the reason surfaced).
+    // Optimistic + undoable: close the panel + drop the bar/row instantly, show an
+    // "元に戻す" toast, and defer the DELETE until the grace window elapses. Undo
+    // re-attaches the row; on commit failure the store surfaces the reason and we
+    // restore the bar.
+    const snapshot = store.detachTask(id);
     setSelected(null);
     gantt.removeRowOptimistic(id);
-    void store.removeTask(client, id).then(async (ok) => {
-      if (ok) {
-        feedback.success("タスクを削除しました");
-        await store.loadAll(client, query);
-        await gantt.refetchFresh();
-      } else {
-        void gantt.refetchFresh(); // delete failed — restore the bar (reason surfaced by the store)
-      }
+    undoable.run({
+      message: "タスクを削除しました",
+      apply: () => {}, // already applied above (panel close + optimistic removal)
+      restore: () => {
+        store.attachTask(snapshot);
+        void gantt.refetchFresh();
+      },
+      commit: async () => {
+        const ok = await store.commitDelete(client, id);
+        if (ok) {
+          await store.loadAll(client, query);
+          await gantt.refetchFresh();
+        } else {
+          // delete failed — restore the row + bar (reason surfaced by the store)
+          store.attachTask(snapshot);
+          void gantt.refetchFresh();
+        }
+      },
     });
   };
 
@@ -971,21 +988,33 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // ---- marquee bulk operations (範囲選択 → 一括操作) ----
 
   // Bulk delete a marquee selection (after the confirm dialog in GanttView). Mirrors
-  // onDeleteDetail per task: optimistic bar removal + store delete, then reconcile.
-  // Irreversible (no undo push) — the confirm dialog is the guard, same as #364.
+  // onDeleteDetail: optimistic bar/row removal + an "元に戻す" toast that defers the
+  // DELETEs until the grace window elapses; undo re-attaches the whole selection.
   const onBulkDelete = (ids: readonly common.TaskId[]) => {
     if (ids.length === 0) return;
     if (selected && ids.includes(selected)) setSelected(null);
+    const snapshots = ids.map((id) => store.detachTask(id));
     for (const id of ids) gantt.removeRowOptimistic(id);
-    void Promise.all(ids.map((id) => store.removeTask(client, id))).then(async (results) => {
-      const okCount = results.filter(Boolean).length;
-      if (okCount > 0) feedback.success(`${okCount}件のタスクを削除しました`);
-      try {
-        await store.loadAll(client, query);
-        await gantt.refetchFresh();
-      } catch {
-        void gantt.refetchFresh(); // some delete failed (reason surfaced) — restore true bars
-      }
+    undoable.run({
+      message: `${ids.length}件のタスクを削除しました`,
+      apply: () => {}, // already applied above (optimistic removal)
+      restore: () => {
+        for (const t of snapshots) store.attachTask(t);
+        void gantt.refetchFresh();
+      },
+      commit: async () => {
+        const results = await Promise.all(ids.map((id) => store.commitDelete(client, id)));
+        try {
+          await store.loadAll(client, query);
+          await gantt.refetchFresh();
+        } catch {
+          void gantt.refetchFresh();
+        }
+        // Restore any rows whose DELETE failed (reason surfaced by the store).
+        results.forEach((ok, i) => {
+          if (!ok) store.attachTask(snapshots[i] ?? null);
+        });
+      },
     });
   };
 
@@ -1189,6 +1218,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       {store.lastError && !showErrorDialog && (
         <div className={styles.banner} data-testid="fe4-error-banner">
           {store.lastError.message}
+        </div>
+      )}
+
+      {!filteredDto && gantt.isLoading && (
+        // Initial gantt fetch MUST show a skeleton, never a blank canvas, so the
+        // user can tell "loading" from "no tasks" (FRONTEND_GUIDE §5.1).
+        <div className={styles.ganttSkeleton} data-testid="fe4-gantt-loading">
+          <SkeletonTable rows={8} columns={4} />
         </div>
       )}
 

@@ -413,11 +413,19 @@ export interface MenuProps extends TestableProps {
 // Toast contract is authoritative here (凍結案 1-4-3). FE2 re-exports useToast;
 // FE3〜FE7 use these 4 kinds.
 export type ToastKind = "success" | "error" | "info" | "warning";
+/** Optional single action rendered inline in the toast (e.g. an undo affordance).
+ *  Clicking it runs `onClick` and dismisses the toast. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 export interface ToastOptions {
   kind: ToastKind;
   title: string;
   description?: string;
   durationMs?: number; // default 5000; error sticks until closed
+  /** Inline action button (e.g. { label: "元に戻す", onClick } for undoable ops). */
+  action?: ToastAction;
 }
 
 export type ThemeName = "light" | "dark";

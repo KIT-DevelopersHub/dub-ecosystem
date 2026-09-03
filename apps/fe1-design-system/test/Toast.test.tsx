@@ -41,6 +41,24 @@ describe("ToastProvider", () => {
     expect(screen.getByText("注意")).toBeInTheDocument();
   });
 
+  it("renders an inline action button that runs onClick and dismisses the toast", async () => {
+    const onClick = vi.fn();
+    renderWith({ kind: "info", title: "削除しました", action: { label: "元に戻す", onClick } });
+    await userEvent.click(screen.getByText("show"));
+    const action = screen.getByTestId("toast-action-info");
+    expect(action).toHaveTextContent("元に戻す");
+    await userEvent.click(action);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    // clicking the action begins dismissal (two-phase)
+    await waitForElementToBeRemoved(() => screen.queryByTestId("toast-info"));
+  });
+
+  it("omits the action button when no action is given", async () => {
+    renderWith({ kind: "info", title: "no action" });
+    await userEvent.click(screen.getByText("show"));
+    expect(screen.queryByTestId("toast-action-info")).not.toBeInTheDocument();
+  });
+
   it("error toast has role=alert and can be dismissed", async () => {
     renderWith({ kind: "error", title: "失敗" });
     await userEvent.click(screen.getByText("show"));

@@ -84,6 +84,21 @@
   font-size: var(--dub-font-size-xs);
   color: var(--dub-color-text-secondary);
 }
+.action {
+  flex-shrink: 0;
+  align-self: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--dub-color-text-link);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border-radius: var(--dub-radius-sm);
+}
+.action:hover {
+  background: var(--dub-color-surface-sunken);
+}
 .close {
   border: 0;
   background: transparent;

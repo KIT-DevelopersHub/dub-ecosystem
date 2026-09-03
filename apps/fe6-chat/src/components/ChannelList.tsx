@@ -3,6 +3,7 @@
 // badge. "New channel" (+) is gated by can("chat:create") upstream via canCreate.
 // Slack-style information design — built from @dub/ui + own glyphs, no Slack assets.
 import { useState } from "react";
+import { SkeletonList } from "@dub/ui";
 import type { common } from "@dub/types";
 import type { Channel, ChannelType } from "../api/contract";
 import { groupChannels } from "../lib/channel-group";
@@ -15,6 +16,7 @@ export interface ChannelListProps {
   unread: UnreadMap;
   activeChannelId: common.ChannelId | null;
   canCreate: boolean;
+  loading?: boolean;
   workspaceName?: string;
   onSelect: (channelId: common.ChannelId) => void;
   onCreate?: () => void;
@@ -29,6 +31,7 @@ export function ChannelList({
   unread,
   activeChannelId,
   canCreate,
+  loading = false,
   workspaceName = "DevHub",
   onSelect,
   onCreate,
@@ -56,7 +59,13 @@ export function ChannelList({
       </div>
 
       <div className={styles.sidebarScroll}>
-        {groups.map((g) => {
+        {loading && channels.length === 0 ? (
+          // Initial fetch: skeleton the channel list, never a bare blank (§5.1).
+          <div className={styles.section} data-testid="fe6-channel-list-loading">
+            <SkeletonList rows={6} />
+          </div>
+        ) : (
+          groups.map((g) => {
           const isCollapsed = !!collapsed[g.type];
           const isDm = g.type === "dm";
           return (
@@ -123,7 +132,8 @@ export function ChannelList({
                 })}
             </section>
           );
-        })}
+          })
+        )}
       </div>
     </nav>
   );

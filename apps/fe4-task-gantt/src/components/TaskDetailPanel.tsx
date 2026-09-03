@@ -422,7 +422,7 @@ export function TaskDetailPanel({
       <ConfirmDialog
         open={confirming}
         title="タスクを削除しますか？"
-        message="このタスクを削除します。この操作は取り消せません。"
+        message="このタスクを削除します。削除後、数秒間は「元に戻す」で取り消せます。"
         confirmLabel="削除する"
         cancelLabel="やめる"
         danger

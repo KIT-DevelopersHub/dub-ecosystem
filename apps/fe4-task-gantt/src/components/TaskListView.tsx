@@ -1,3 +1,4 @@
+import { SkeletonTable } from "@dub/ui";
 import type { task, common } from "@dub/types";
 import type { UserCache } from "../domain/user-cache";
 import { displayName } from "../domain/user-cache";
@@ -17,6 +18,14 @@ export interface TaskListViewProps {
 
 /** Table list + cursor "さらに読み込む" (no auto infinite-scroll — FE1 LoadMore). */
 export function TaskListView({ tasks, users, hasMore, onLoadMore, onOpen, loading, numberById }: TaskListViewProps) {
+  // Initial fetch (loading + nothing yet): skeleton the table, never a bare blank (§5.1).
+  if (loading && tasks.length === 0) {
+    return (
+      <div data-testid="fe4-list-loading">
+        <SkeletonTable rows={6} columns={4} />
+      </div>
+    );
+  }
   return (
     <div data-testid="fe4-list-view">
       <table className={styles.table}>

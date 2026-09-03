@@ -33,3 +33,9 @@ export {
   type UseUndoRedoOptions,
   type UndoRedoHotkeysOptions,
 } from "./hooks/useUndoRedo";
+
+export {
+  useUndoableAction,
+  type UndoableAction,
+  type UndoableActionInput,
+} from "./hooks/useUndoableAction";

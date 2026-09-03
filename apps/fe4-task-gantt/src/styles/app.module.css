@@ -1027,6 +1027,12 @@
   font-size: var(--dub-font-size-sm, 0.85rem);
 }
 
+/* Initial gantt/board load skeleton — fills the main canvas so the user sees
+   "loading", never a blank, before the first fetch resolves (FRONTEND_GUIDE §5.1). */
+.ganttSkeleton {
+  padding: var(--dub-space-4) var(--dub-space-3);
+}
+
 /* ---- detail panel ---- */
 .panelScrim {
   position: fixed;

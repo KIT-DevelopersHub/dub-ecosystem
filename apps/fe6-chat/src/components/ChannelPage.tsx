@@ -5,7 +5,7 @@
 // channel-settings modal. The main section and the ThreadPane are returned as
 // sibling fragment children so both land as columns of the ChatApp grid.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConfirmDialog, Modal, useToast } from "@dub/ui";
+import { ConfirmDialog, Modal, SkeletonList, useToast } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
@@ -281,6 +281,13 @@ export function ChannelPage({
         )}
         <ConnectionBanner status={view.state.rtStatus} />
         {archived && <ConnectionBanner status={view.state.rtStatus} archived />}
+        {view.loading && view.state.messages.length === 0 ? (
+          // Initial fetch MUST show a skeleton, never a bare blank, so the user can
+          // tell "loading" from "empty channel" (FRONTEND_GUIDE §5.1).
+          <div className={styles.timeline} data-testid="fe6-timeline-loading">
+            <SkeletonList rows={6} avatar />
+          </div>
+        ) : (
         <MessageTimeline
           messages={view.state.messages}
           pending={view.state.pending}
@@ -300,6 +307,7 @@ export function ChannelPage({
           onResend={(id) => void view.resend(id)}
           onDiscard={(id) => view.discard(id)}
         />
+        )}
         <MessageComposer
           channelId={channelId}
           disabled={archived}

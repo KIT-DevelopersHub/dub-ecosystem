@@ -2,6 +2,7 @@
 // requiredPermissions: ["chat:moderate"] in feature.tsx).
 /// <reference lib="dom" />
 import { useEffect, useState } from "react";
+import { SkeletonLoader } from "@dub/ui";
 import type { common } from "@dub/types";
 import { useChatRuntime } from "../context";
 import type { Channel } from "../api/contract";
@@ -25,7 +26,12 @@ export function ChannelSettingsRoute() {
     };
   }, [api, channelId]);
 
-  if (!channel || !channelId) return <div>読み込み中…</div>;
+  if (!channel || !channelId)
+    return (
+      <div data-testid="fe6-channel-settings-loading" style={{ padding: "var(--dub-space-4)" }}>
+        <SkeletonLoader lines={5} />
+      </div>
+    );
 
   return (
     <ChannelSettingsForm

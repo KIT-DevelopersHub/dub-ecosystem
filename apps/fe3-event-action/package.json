@@ -15,6 +15,7 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
+    "@dub/app-ui": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/tokens": "workspace:*",
     "@dub/types": "workspace:*",
