@@ -14,6 +14,12 @@ import { buildGanttChartDTO } from "./dto";
 import { validatePutBody } from "./views";
 import { dispatchEvent } from "./queue";
 import { defaultDeps } from "./deps";
+import { signWsTicket, ticketExpiryMs, buildDoUrl } from "./wsticket";
+
+// Dev-only fallback secret; production sets WS_TICKET_SECRET via `wrangler secret put`.
+const DEV_WS_SECRET = "dev-insecure-ws-ticket-secret";
+// Default DO-direct base (gateway-bypassing). ":id" -> eventId. Overridden per env.
+const DEFAULT_DO_URL_BASE = "wss://dub-gantt-service.developershub-site.workers.dev/ws/:id";
 
 type Vars = { dubCtx: RequestContext; authn: AuthnContext };
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
@@ -88,6 +94,15 @@ export function createApp(deps: AppDeps = defaultDeps): App {
       throw errors.validationFailed([{ field: "body", reason: "invalid_envelope" }]);
     }
     await dispatchEvent(c.env, body as DubEventEnvelope, deps);
+    // Realtime hint: a structural change (create/delete/status/assignee/dependency/archive)
+    // landed, so the DERIVED chart may have shifted (CPM re-schedule). Tell every viewer of
+    // this event's gantt to refetch fresh once (they debounce). Delta-only: we ship just the
+    // trigger name, never the chart. eventId is optional on task.* (an unlinked task belongs
+    // to no event-scoped gantt) → nothing to fan out. Best-effort (publisher swallows).
+    const invalidatedEventId = (body.payload as { eventId?: common.EventId } | undefined)?.eventId;
+    if (invalidatedEventId) {
+      await deps.realtime(c.env).publishInvalidated(invalidatedEventId, body.name);
+    }
     return c.json({ ok: true }, 202);
   });
 
@@ -154,6 +169,27 @@ export function createApp(deps: AppDeps = defaultDeps): App {
     return c.json(state satisfies gantt.GanttViewState);
   });
 
+  // ---- GET /gantt/ws-ticket (realtime connect; DO-direct) ----
+  // Subscribe follows read access: the guard above already enforced event:read for this
+  // eventId, so an authenticated viewer of the chart is authorized to subscribe. The
+  // GanttRoom DO still independently verifies the HMAC ticket + Origin at connect time,
+  // so this issuance is the read gate and the DO is the connect gate. The ticket is
+  // short-lived (60s) — just long enough to open the WS after this GET.
+  app.get("/gantt/ws-ticket", async (c) => {
+    const eventId = requireEventId(c);
+    const userId = c.get("authn").userId;
+    const secret = c.env.WS_TICKET_SECRET ?? DEV_WS_SECRET;
+    const base = c.env.GANTT_RT_DO_URL_BASE ?? DEFAULT_DO_URL_BASE;
+    const expEpochMs = ticketExpiryMs(Date.now());
+    const ticket = await signWsTicket(secret, { eventId, userId, expEpochMs });
+    const res: gantt.GanttWsTicketResponse = {
+      ticket,
+      doUrl: buildDoUrl(base, eventId),
+      expiresAt: new Date(expEpochMs).toISOString(),
+    };
+    return c.json(res satisfies gantt.GanttWsTicketResponse);
+  });
+
   // ---- PATCH /gantt/rows/:taskId (persist a bar's window: startsAt/endsAt) ----
   // The write path a timeline drag/resize OR a start/due edit uses. gantt maps the
   // window onto the underlying task (startsAt→startAt, endsAt→dueAt) via task-service
@@ -165,7 +201,17 @@ export function createApp(deps: AppDeps = defaultDeps): App {
     const body = validatePatchRowBody(await c.req.json().catch(() => ({})));
     const upstream = deps.upstream(c.env);
     const updated = await upstream.updateTaskDates(ctx, taskId, body);
-    if (updated.eventId) await deps.cache(c.env).purge(updated.eventId);
+    if (updated.eventId) {
+      await deps.cache(c.env).purge(updated.eventId);
+      // Realtime delta: fan the moved window out to every other viewer of this event's
+      // gantt so their bar jumps the same tick (no whole-chart re-send). Best-effort —
+      // the publisher swallows DO failures so the 2xx write is never lost.
+      await deps.realtime(c.env).publishRowMoved(updated.eventId, {
+        taskId: updated.id,
+        startsAt: body.startsAt,
+        endsAt: body.endsAt,
+      });
+    }
     const row: gantt.GanttRow = {
       taskId: updated.id,
       title: updated.title,
