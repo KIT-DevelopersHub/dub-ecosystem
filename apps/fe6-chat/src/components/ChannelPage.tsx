@@ -84,7 +84,9 @@ export function ChannelPage({
 
   // resolve author display names in batch as new authors/members appear
   useEffect(() => {
-    const ids = new Set<common.UserId>([...view.state.messages.map((m) => m.authorId), ...members.map((m) => m.userId)]);
+    // Drop null authorIds (system posts have no author to resolve).
+    const authorIds = view.state.messages.map((m) => m.authorId).filter((id): id is common.UserId => id !== null);
+    const ids = new Set<common.UserId>([...authorIds, ...members.map((m) => m.userId)]);
     const missing = [...ids].filter((id) => !(id in users));
     if (missing.length === 0) return;
     let cancelled = false;

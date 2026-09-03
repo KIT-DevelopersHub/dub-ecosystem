@@ -134,7 +134,10 @@ export interface ChatChannel {
 export interface ChatMessage {
   id: MessageId;
   channelId: ChannelId;
-  authorId: UserId;
+  // null = system post (chat-service `kind: "system"`, e.g. channel-created notices /
+  // notification→chat delivery). Matches chat-service's wire (authorId: UserId | null);
+  // the RT message.created event stays non-null since system posts do not emit it.
+  authorId: UserId | null;
   body: string;
   createdAt: ISODateTime;
 }

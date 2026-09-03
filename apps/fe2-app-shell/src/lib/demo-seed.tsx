@@ -1060,6 +1060,26 @@ function createChatStore() {
   });
   const byId = new Map(all.map((c) => [c.id, c]));
 
+  // Seeded timeline for #general — includes a SYSTEM post (authorId: null, chat-service
+  // `kind: "system"`). System posts have no author; the client must render them as
+  // "システム" and never feed null into the Avatar (initials(null).trim() would crash
+  // the whole chat screen). This seed is the demo regression guard for that fix.
+  const msg = (over: Partial<Record<string, unknown>> & { id: string; authorId: string | null; body: string; createdAt: string }) => ({
+    channelId: "chn_general",
+    threadRootId: null,
+    replyCount: 0,
+    reactions: [],
+    attachments: [],
+    editedAt: null,
+    deletedAt: null,
+    version: 1,
+    ...over,
+  });
+  const generalMessages = [
+    msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
+    msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+  ];
+
   function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
@@ -1083,7 +1103,19 @@ function createChatStore() {
       if (m && method === "POST") return json(null, 204);
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
-      return json(page([])); // empty timeline (Paginated envelope)
+      const channelId = url.searchParams.get("channelId");
+      // #general opens to a seeded timeline (incl. a system post); others stay empty.
+      return json(page(channelId === "chn_general" ? generalMessages : []));
+    }
+    {
+      // Members / pins: demo returns a small roster and no pins (bare arrays per the
+      // fe6 contract) so opening a channel does not 404 those companion fetches.
+      const mem = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
+      if (mem && method === "GET") {
+        return json([{ channelId: decodeURIComponent(mem[1]!), userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
+      }
+      const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
+      if (pin && method === "GET") return json([]);
     }
     return null;
   }
