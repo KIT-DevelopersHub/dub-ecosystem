@@ -247,6 +247,43 @@ svg {
   }
 }
 
+/* カラー設定 (表示設定) dialog. Sectioned so future display options sit beside テーマ with
+   generous breathing room ([[ui-spacing-principle]]). */
+.fe2-color-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+}
+.fe2-color-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.fe2-color-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.fe2-color-section-title {
+  font-size: var(--dub-font-size-md);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.fe2-color-section-help {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+  line-height: 1.5;
+}
+.fe2-color-current {
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+.fe2-color-current strong {
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-medium);
+}
+
 /* Content max width so wide screens keep comfortable line lengths. */
 .fe2-page {
   max-width: 1080px;

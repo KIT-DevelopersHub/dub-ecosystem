@@ -88,7 +88,9 @@ export type IconName =
   // theme switch (fe2 設定メニューのテーマ切替 — system/light/dark). Additive, closed-union preserved.
   | "sun"
   | "moon"
-  | "monitor";
+  | "monitor"
+  // カラー設定 (fe2 設定メニュー → カラー設定ダイアログのエントリ). Additive, closed-union preserved.
+  | "palette";
 
 export interface IconProps extends TestableProps {
   name: IconName;
