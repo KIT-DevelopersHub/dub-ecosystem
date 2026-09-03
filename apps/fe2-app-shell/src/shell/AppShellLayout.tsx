@@ -15,6 +15,7 @@ import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
+import { ThemeToggle } from "./ThemeToggle.tsx";
 import {
   isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
@@ -202,6 +203,10 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
+          {/* Theme switch — surfaces UiStore.setTheme (was persisted but had no UI).
+              Sits in the uniform icon row (9-dot / テーマ / ⚙); recolours every app
+              via the shared @dub/tokens variables that AppRoot's ThemeProvider drives. */}
+          <ThemeToggle />
           {settingsItems.length > 0 ? (
             // Settings (⚙) dropdown — the account self-service container. アカウント設定
             // (display name / avatar / password change) and ログアウト live INSIDE it, so

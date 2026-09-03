@@ -84,7 +84,11 @@ export type IconName =
   | "send"
   | "reply"
   | "pin"
-  | "hash";
+  | "hash"
+  // theme switch (fe2 header ThemeToggle — system/light/dark). Additive, closed-union preserved.
+  | "sun"
+  | "moon"
+  | "monitor";
 
 export interface IconProps extends TestableProps {
   name: IconName;

@@ -21,6 +21,7 @@ import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
+import { MyDayWidget } from "./MyDayWidget.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
@@ -176,6 +177,13 @@ export function HomeScreen({
   // field undefined → we show "—"/an in-frame error rather than a misleading 0.
   const segments = taskSegmentsFromCounts(data?.taskSummary?.byStatus ?? {});
   const hasTasks = data?.taskSummary !== undefined && !taskError;
+  // 対応中 = todo + in_progress + blocked (the viewer's own open tasks); undefined
+  // when task-service degraded so マイデイ shows a hint, not a misleading 0.
+  const byStatus = data?.taskSummary?.byStatus;
+  const openTasks =
+    !taskError && byStatus !== undefined
+      ? (byStatus.todo ?? 0) + (byStatus.in_progress ?? 0) + (byStatus.blocked ?? 0)
+      : undefined;
   const freeTier = usageError ? [] : freeTierFromMetrics(data?.usageSummary?.metrics ?? []);
   const worst = worstFreeTier(freeTier);
   const orgMembers = membersError ? undefined : data?.orgStats?.members;
@@ -385,6 +393,14 @@ export function HomeScreen({
 
         {/* ── right: live BFF panels (unchanged testIds/behavior) ───────────────── */}
         <aside className="fe2-home-side">
+          {/* マイデイ — personal starting point (対応中タスク / 未読メンション / クイック
+              アクション). First in the rail so the viewer's own day leads the page. */}
+          <MyDayWidget
+            openTasks={openTasks}
+            isPending={isPending}
+            taskError={Boolean(taskError)}
+            {...(onNavigate ? { onNavigate } : {})}
+          />
           <Card
             testId="fe2-home-events"
             header={

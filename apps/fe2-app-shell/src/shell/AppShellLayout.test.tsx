@@ -100,6 +100,11 @@ describe("AppShellLayout", () => {
     expect(out.endsWith("@developershub.jp")).toBe(true);
   });
 
+  it("mounts the theme toggle in the header icon row", async () => {
+    renderShell();
+    expect(await screen.findByTestId("fe2-theme-toggle-trigger")).toBeInTheDocument();
+  });
+
   it("renders header widget slot and routed content; tools live behind the launcher", async () => {
     renderShell();
     expect(screen.getByTestId("header-widget")).toBeInTheDocument();

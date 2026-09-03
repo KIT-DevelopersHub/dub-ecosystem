@@ -61,6 +61,10 @@ import {
   Reply,
   Pin,
   Hash,
+  // theme switch (fe2 header ThemeToggle — system/light/dark)
+  Sun,
+  Moon,
+  Monitor,
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "./types";
@@ -130,6 +134,10 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   reply: Reply,
   pin: Pin,
   hash: Hash,
+  // theme switch (fe2 header ThemeToggle)
+  sun: Sun,
+  moon: Moon,
+  monitor: Monitor,
 };
 
 // Direct re-export of Lucide for advanced callers (still tree-shakable).
