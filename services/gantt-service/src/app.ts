@@ -186,6 +186,9 @@ export function createApp(deps: AppDeps = defaultDeps): App {
       ticket,
       doUrl: buildDoUrl(base, eventId),
       expiresAt: new Date(expEpochMs).toISOString(),
+      // Echo the caller's identity so the client can mark/exclude "you" in the presence
+      // bar without a second /me round-trip.
+      self: { userId },
     };
     return c.json(res satisfies gantt.GanttWsTicketResponse);
   });

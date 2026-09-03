@@ -1,14 +1,15 @@
 // Realtime gantt sync (Durable Object + WebSocket). Opens a DO-direct WS to the event's
-// GanttRoom (gateway-bypassing) using a short-lived ws-ticket, and applies inbound deltas
-// to the react-query cache so every viewer's timeline updates live:
-//   - row.moved         → apply the moved window straight to the cache (no refetch)
-//   - chart.invalidated → debounce-refetch the fresh chart ONCE (a structural change may
-//                         have shifted the CPM-derived bars, so a delta can't express it)
+// GanttRoom (gateway-bypassing) using a short-lived ws-ticket, and:
+//   - applies inbound deltas to the react-query cache so every viewer's timeline updates
+//     live (row.moved → apply the moved window; chart.invalidated → debounce-refetch once)
+//   - tracks PRESENCE (who else is viewing this gantt) and exposes it so the workspace can
+//     render Google-Docs-style avatars at the top; the roster updates live as peers join /
+//     leave (a `presence` snapshot frame the DO fans out on every join/leave).
 // This mirrors chat-service's FE6 client. The socket is best-effort: if the ticket/WS
 // fails the chart still works from its normal GET + optimistic writes — RT is a delivery
 // optimisation, never the source of truth. Idle sockets cost $0 (DO Hibernation); we send
 // a keepalive ping so a dropped link is detected and reconnected with backoff.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { gantt, common } from "@dub/types";
 import { useApiClient } from "./client-context";
 import { getGanttWsTicket } from "./endpoints";
@@ -26,6 +27,19 @@ export interface GanttRealtimeActions {
   invalidate: () => void;
 }
 
+export type RealtimeStatus = "connecting" | "open" | "reconnecting" | "closed";
+
+/** What the hook returns to the workspace so it can render the presence bar. */
+export interface GanttRealtimePresence {
+  /** Everyone currently viewing this gantt, deduped per user (includes the local user;
+   *  the presence bar filters "you" out with `selfUserId`). */
+  presence: gantt.GanttPresenceUser[];
+  /** The local user's id (from the ws-ticket), or null before the first ticket. */
+  selfUserId: common.UserId | null;
+  /** Socket lifecycle, for the connection indicator. */
+  status: RealtimeStatus;
+}
+
 /** Pure application of one realtime event onto the cache actions. Exported so the
  *  delta→cache mapping is unit-testable without a live WebSocket. */
 export function applyGanttRealtimeEvent(ev: gantt.GanttRealtimeEvent, actions: GanttRealtimeActions): void {
@@ -36,6 +50,9 @@ export function applyGanttRealtimeEvent(ev: gantt.GanttRealtimeEvent, actions: G
     case "chart.invalidated":
       actions.invalidate();
       return;
+    case "presence":
+      // presence is UI state, not a cache mutation — handled in the hook, not here.
+      return;
   }
 }
 
@@ -45,15 +62,20 @@ const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
 /**
- * Subscribe the current gantt view to realtime deltas for `eventId`. Manages the whole
- * socket lifecycle (ticket fetch → connect → apply → keepalive → backoff reconnect →
- * teardown). No-op when WebSocket is unavailable (SSR/tests) or eventId is empty.
+ * Subscribe the current gantt view to realtime deltas + presence for `eventId`. Manages
+ * the whole socket lifecycle (ticket fetch → connect → apply → keepalive → backoff
+ * reconnect → teardown) and returns the live presence roster. No-op (empty roster) when
+ * WebSocket is unavailable (SSR/tests) or eventId is empty.
  */
-export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtimeActions): void {
+export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtimeActions): GanttRealtimePresence {
   const client = useApiClient();
   // Keep the latest actions in a ref so the socket effect doesn't reconnect on each render.
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+
+  const [presence, setPresence] = useState<gantt.GanttPresenceUser[]>([]);
+  const [selfUserId, setSelfUserId] = useState<common.UserId | null>(null);
+  const [status, setStatus] = useState<RealtimeStatus>("closed");
 
   useEffect(() => {
     if (!eventId || typeof WebSocket === "undefined") return;
@@ -82,6 +104,8 @@ export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtime
 
     const scheduleReconnect = () => {
       if (disposed || reconnectTimer) return;
+      setStatus("reconnecting");
+      setPresence([]); // roster is unknown while disconnected
       const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
       attempt++;
       reconnectTimer = setTimeout(() => {
@@ -92,6 +116,7 @@ export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtime
 
     const connect = async () => {
       if (disposed) return;
+      if (attempt === 0) setStatus("connecting");
       let ticket: gantt.GanttWsTicketResponse;
       try {
         ticket = await getGanttWsTicket(client, eventId);
@@ -100,10 +125,14 @@ export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtime
         return;
       }
       if (disposed) return;
+      if (ticket.self?.userId) setSelfUserId(ticket.self.userId);
       // Empty doUrl ⇒ realtime intentionally unavailable (mock/demo, or a backend without
       // the GanttRoom DO bound). Do not connect and do not reconnect — the chart works
       // fine over plain GET + optimistic writes.
-      if (!ticket.doUrl) return;
+      if (!ticket.doUrl) {
+        setStatus("closed");
+        return;
+      }
 
       const url = `${ticket.doUrl}${ticket.doUrl.includes("?") ? "&" : "?"}ticket=${encodeURIComponent(ticket.ticket)}`;
       let ws: WebSocket;
@@ -117,6 +146,14 @@ export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtime
 
       ws.onopen = () => {
         attempt = 0; // reset backoff on a clean connect
+        setStatus("open");
+        // Ask for the current presence snapshot immediately (belt-and-suspenders: the DO
+        // also fans out on our join, but `hello` covers any race).
+        try {
+          ws.send("hello");
+        } catch {
+          /* closing socket; the close handler reconnects */
+        }
         clearPing();
         pingTimer = setInterval(() => {
           try {
@@ -137,7 +174,8 @@ export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtime
         }
         // Ignore anything for another event (defensive; a DO only fans out its own).
         if (ev.eventId !== eventId) return;
-        if (ev.kind === "chart.invalidated") scheduleInvalidate();
+        if (ev.kind === "presence") setPresence(ev.users);
+        else if (ev.kind === "chart.invalidated") scheduleInvalidate();
         else applyGanttRealtimeEvent(ev, actionsRef.current);
       };
 
@@ -172,6 +210,10 @@ export function useGanttRealtime(eventId: common.EventId, actions: GanttRealtime
           /* already closing */
         }
       }
+      setStatus("closed");
+      setPresence([]);
     };
   }, [client, eventId]);
+
+  return { presence, selfUserId, status };
 }

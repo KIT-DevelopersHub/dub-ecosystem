@@ -106,7 +106,30 @@ void _ganttWireKeyGuard;
 // `chart.invalidated` hint so clients DEBOUNCE-refetch the fresh chart once — the whole
 // chart is never pushed unsolicited. Every event is convergent + idempotent, so an actor
 // re-receiving its own echo re-applies the same state (no origin-filtering needed).
+//
+// The DO also fans out a `presence` frame (who is currently viewing this event's gantt —
+// Google-Docs-style avatars) whenever the roster changes (a socket joins or leaves). It
+// carries no business data; it is pure "who is here", deduped per user across that user's
+// tabs. Cost stays $0: the DO holds no durable rows and idle sockets hibernate.
+
+/** One user currently connected to an event's GanttRoom, deduped by userId across that
+ *  user's tabs (two tabs ⇒ one entry). `displayName` is best-effort: the DO relays only
+ *  what it knows (currently none — identity is a bare userId), so clients resolve the
+ *  human label from their own roster and fall back to the id. Additive by design. */
+export interface GanttPresenceUser {
+  userId: UserId;
+  displayName?: string;
+}
+
 export type GanttRealtimeEvent =
+  | {
+      kind: "presence";
+      eventId: EventId;
+      /** The full, deduped roster of users viewing this gantt right now (a snapshot,
+       *  not a delta — the client replaces its list wholesale). */
+      users: GanttPresenceUser[];
+      at: ISODateTime;
+    }
   | {
       kind: "row.moved";
       eventId: EventId;
@@ -131,4 +154,13 @@ export interface GanttWsTicketResponse {
   ticket: string;
   doUrl: string;
   expiresAt: ISODateTime;
+  /** The caller's own identity, so the client can mark/exclude "you" in the presence
+   *  bar without a second /me round-trip. Additive/optional — older clients ignore it. */
+  self?: { userId: UserId };
 }
+
+/** Client → server WS frames. The DO trusts ONLY the socket's ticket-derived identity,
+ *  never a userId a frame might carry, so a frame cannot spoof another user. */
+export type GanttClientMessage =
+  | "ping" // keepalive (also refreshes liveness)
+  | "hello"; // request the current presence snapshot right after connect

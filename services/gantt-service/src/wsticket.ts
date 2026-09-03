@@ -12,6 +12,10 @@ export interface WsTicketClaims {
   eventId: common.EventId;
   userId: common.UserId;
   expEpochMs: number;
+  /** Optional signed display label. The prod issuer omits it (identity is a bare userId
+   *  there; the client resolves names from its roster); the dev/demo issuer sets it so the
+   *  self-contained demo can show human names without a roster. Non-spoofable (signed). */
+  displayName?: string;
 }
 
 function b64urlEncode(bytes: Uint8Array): string {
