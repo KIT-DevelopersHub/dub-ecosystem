@@ -53,6 +53,16 @@ describe("applyGanttRealtimeEvent", () => {
     expect(a.moves).toEqual([]);
   });
 
+  it("presence → no cache mutation (roster is UI state, handled in the hook)", () => {
+    const a = actions();
+    applyGanttRealtimeEvent(
+      { kind: "presence", eventId: "event_1", users: [{ userId: "user_a" }], at: "x" },
+      a,
+    );
+    expect(a.moves).toEqual([]);
+    expect(a.invalidations).toBe(0);
+  });
+
   it("dispatches purely on kind (a spy proves each branch fires exactly once)", () => {
     const applyMove = vi.fn();
     const invalidate = vi.fn();

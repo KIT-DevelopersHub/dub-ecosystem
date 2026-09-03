@@ -30,26 +30,60 @@ async function connect(
   });
 }
 
-/** Resolve with the next message, or reject after `ms` (used to assert delivery). */
+/** True for a `presence` snapshot frame (auto-pushed on any join/leave). Tests that
+ *  assert a specific delta/pong skip these so the new presence traffic is transparent. */
+function isPresenceFrame(data: unknown): boolean {
+  return typeof data === "string" && data.includes('"kind":"presence"');
+}
+
+/** Resolve with the next NON-presence message, or reject after `ms`. Presence snapshots
+ *  are transparent to these delivery assertions (see isPresenceFrame). */
 function nextMessage(ws: WebSocket, ms = 1000): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timeout waiting for message")), ms);
-    ws.addEventListener(
-      "message",
-      (e: MessageEvent) => {
-        clearTimeout(timer);
-        resolve(e.data as string);
-      },
-      { once: true },
-    );
+    const onMsg = (e: MessageEvent) => {
+      if (isPresenceFrame(e.data)) return; // skip; keep listening
+      clearTimeout(timer);
+      ws.removeEventListener("message", onMsg as EventListener);
+      resolve(e.data as string);
+    };
+    ws.addEventListener("message", onMsg as EventListener);
   });
 }
 
-/** Assert NO message arrives within `ms`. */
+/** Wait for a `presence` frame whose roster has exactly `want` users; resolve its list. */
+function nextPresence(ws: WebSocket, want: number, ms = 1500): Promise<gantt.GanttPresenceUser[]> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout waiting for presence(${want})`)), ms);
+    const onMsg = (e: MessageEvent) => {
+      if (typeof e.data !== "string") return;
+      let ev: gantt.GanttRealtimeEvent;
+      try {
+        ev = JSON.parse(e.data) as gantt.GanttRealtimeEvent;
+      } catch {
+        return;
+      }
+      if (ev.kind !== "presence" || ev.users.length !== want) return;
+      clearTimeout(timer);
+      ws.removeEventListener("message", onMsg as EventListener);
+      resolve(ev.users);
+    };
+    ws.addEventListener("message", onMsg as EventListener);
+  });
+}
+
+/** Assert NO non-presence message arrives within `ms` (presence frames are ignored). */
 function expectSilence(ws: WebSocket, ms = 250): Promise<void> {
   return new Promise((resolve, reject) => {
-    ws.addEventListener("message", () => reject(new Error("unexpected message")), { once: true });
-    setTimeout(resolve, ms);
+    const onMsg = (e: MessageEvent) => {
+      if (isPresenceFrame(e.data)) return;
+      reject(new Error("unexpected message"));
+    };
+    ws.addEventListener("message", onMsg as EventListener);
+    setTimeout(() => {
+      ws.removeEventListener("message", onMsg as EventListener);
+      resolve();
+    }, ms);
   });
 }
 
@@ -259,5 +293,76 @@ describe("DoRealtimePublisher — real RT wiring (read model -> DO)", () => {
 
     expect(JSON.parse(await got)).toMatchObject({ kind: "chart.invalidated", eventId: ev, reason: "task.created" });
     s.webSocket!.close();
+  });
+});
+
+describe("GanttRoom DO — presence (who is viewing this gantt, live)", () => {
+  it("pushes a presence snapshot to a viewer when they join", async () => {
+    const ev = "event_presence_join";
+    const a = await connect(ev, await ticketFor(ev, "user_a"));
+    a.webSocket!.accept();
+    const users = await nextPresence(a.webSocket!, 1);
+    expect(users.map((u) => u.userId)).toEqual(["user_a"]);
+    a.webSocket!.close();
+  });
+
+  it("fans the updated roster out to existing peers when another viewer joins", async () => {
+    const ev = "event_presence_second";
+    const a = await connect(ev, await ticketFor(ev, "user_a"));
+    a.webSocket!.accept();
+    await nextPresence(a.webSocket!, 1); // a alone
+
+    const seenTwo = nextPresence(a.webSocket!, 2); // a should learn about b
+    const b = await connect(ev, await ticketFor(ev, "user_b"));
+    b.webSocket!.accept();
+
+    const users = await seenTwo;
+    expect(users.map((u) => u.userId).sort()).toEqual(["user_a", "user_b"]);
+    a.webSocket!.close();
+    b.webSocket!.close();
+  });
+
+  it("dedupes one user's multiple tabs into a single avatar", async () => {
+    const ev = "event_presence_dedupe";
+    const t1 = await connect(ev, await ticketFor(ev, "user_dup"));
+    t1.webSocket!.accept();
+    await nextPresence(t1.webSocket!, 1);
+
+    // Second tab, SAME user → roster must still show exactly one user.
+    const stillOne = nextPresence(t1.webSocket!, 1);
+    const t2 = await connect(ev, await ticketFor(ev, "user_dup"));
+    t2.webSocket!.accept();
+    const users = await stillOne;
+    expect(users.map((u) => u.userId)).toEqual(["user_dup"]);
+    t1.webSocket!.close();
+    t2.webSocket!.close();
+  });
+
+  it("removes a viewer from the roster when their socket closes", async () => {
+    const ev = "event_presence_leave";
+    const a = await connect(ev, await ticketFor(ev, "user_a"));
+    const b = await connect(ev, await ticketFor(ev, "user_b"));
+    a.webSocket!.accept();
+    b.webSocket!.accept();
+    await nextPresence(a.webSocket!, 2); // both present
+
+    const backToOne = nextPresence(a.webSocket!, 1); // a should see b leave
+    b.webSocket!.close();
+    const users = await backToOne;
+    expect(users.map((u) => u.userId)).toEqual(["user_a"]);
+    a.webSocket!.close();
+  });
+
+  it("answers `hello` with the current snapshot (unicast)", async () => {
+    const ev = "event_presence_hello";
+    const a = await connect(ev, await ticketFor(ev, "user_a"));
+    a.webSocket!.accept();
+    await nextPresence(a.webSocket!, 1); // drain the join broadcast
+
+    const replied = nextPresence(a.webSocket!, 1);
+    a.webSocket!.send("hello");
+    const users = await replied;
+    expect(users.map((u) => u.userId)).toEqual(["user_a"]);
+    a.webSocket!.close();
   });
 });
