@@ -746,6 +746,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       {
         eventId,
         title: draft.title,
+        ...(draft.description ? { description: draft.description } : {}),
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(teamId ? { teamId } : {}),

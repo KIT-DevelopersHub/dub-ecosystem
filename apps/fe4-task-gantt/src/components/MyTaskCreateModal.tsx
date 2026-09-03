@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
-import { PRIORITY_LABEL, DATE_LABEL, isoFromDateInput } from "../domain/task-form";
-import { DateField } from "./DateField";
+import { Modal, Button, Select } from "@dub/ui";
+import { isoFromDateInput } from "../domain/task-form";
+import { type ScopeTask } from "../domain/task-hierarchy";
 import { AttachmentField, type AttachmentChip } from "./AttachmentField";
+import { TaskFormFields } from "./TaskFormFields";
 import styles from "../styles/app.module.css";
 
 /** A file the requester attached in the modal — read into a self-contained data:
@@ -28,6 +29,7 @@ export interface MyTaskDraft {
   eventId: common.EventId | null;
   title: string;
   description: string | null;
+  status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
   teamId: common.TeamId | null;
@@ -35,6 +37,10 @@ export interface MyTaskDraft {
   startAt: common.ISODateTime | null;
   /** 終了日 (canonical field is `dueAt`; 期日=終了日として扱う). */
   dueAt: common.ISODateTime | null;
+  /** WBS parent (親タスク). null = top-level. */
+  parentTaskId: common.TaskId | null;
+  /** 先行タスク (依存・同じチーム内). */
+  dependsOnIds: common.TaskId[];
   attachments: DraftAttachments;
 }
 
@@ -61,30 +67,39 @@ export interface MyTaskCreateModalProps {
   events: readonly EventOption[];
   people: readonly identity.UserSummary[];
   teams: readonly team.Team[];
+  /** existing tasks offered as WBS parents (親タスク). */
+  parentOptions: readonly { id: common.TaskId; title: string }[];
+  /** existing tasks with their team — powers the team-scoped 先行タスク picker. */
+  scopeTasks: readonly ScopeTask[];
   onCreate: (draft: MyTaskDraft) => Promise<void>;
   /** preselect the requester's own name in the header hint. */
   requesterName?: string;
 }
 
+// A newly-issued task starts in "todo"; only todo-reachable states are offered (同 ガント作成).
+const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
 /**
- * "タスクを発行" — anyone can add and issue a task (design ask (a)). The modal
- * captures 誰に(担当者)・内容・期限. Linking the task to an 対象イベント is now
- * OPTIONAL (判断44): leave it as「紐付けない」to issue a standalone task. The
- * requester (from) is the current user, stamped server-side as created_by — so no
- * field is needed for it.
+ * "タスクを発行" — anyone can add and issue a task (design ask (a)). Uses the SAME
+ * canonical field set/layout as the gantt タスク作成フォーム (共通コンポーネント
+ * TaskFormFields), with two form-specific extras: an optional 対象イベント link
+ * (判断44) above the shared fields, and 添付 (attachments) just before 詳細. The
+ * requester (from) is the current user, stamped server-side as created_by.
  */
 const NO_EVENT = ""; // sentinel for the "未紐付け" Select option
 
-export function MyTaskCreateModal({ open, onClose, events, people, teams, onCreate, requesterName }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, events, people, teams, parentOptions, scopeTasks, onCreate, requesterName }: MyTaskCreateModalProps) {
   const [eventId, setEventId] = useState<common.EventId | "">(NO_EVENT);
   const [title, setTitle] = useState("");
+  const [status, setStatus] = useState<task.TaskStatus>("todo");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
   const [teamId, setTeamId] = useState<common.TeamId | null>(null);
   const [start, setStart] = useState<string | null>(null);
   const [due, setDue] = useState<string | null>(null);
+  const [parentId, setParentId] = useState<common.TaskId | null>(null);
+  const [deps, setDeps] = useState<common.TaskId[]>([]);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<DraftFileAttachment[]>([]);
   const [urls, setUrls] = useState<DraftUrlAttachment[]>([]);
@@ -94,11 +109,14 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const reset = () => {
     setEventId(NO_EVENT);
     setTitle("");
+    setStatus("todo");
     setAssigneeId(null);
     setPriority("medium");
     setTeamId(null);
     setStart(null);
     setDue(null);
+    setParentId(null);
+    setDeps([]);
     setDescription("");
     setFiles([]);
     setUrls([]);
@@ -153,11 +171,14 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
         eventId: eventId === NO_EVENT ? null : (eventId as common.EventId),
         title: title.trim(),
         description: description.trim() ? description.trim() : null,
+        status,
         priority,
         assigneeId,
         teamId,
         startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
+        parentTaskId: parentId,
+        dependsOnIds: deps,
         attachments: { files, urls },
       });
       reset();
@@ -189,124 +210,69 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           依頼主: <strong>{requesterName}</strong>
         </p>
       )}
-      <div className={styles.formGrid}>
-        <div className={styles.formFieldFull}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-title">
-            タイトル<span className={styles.req}>*</span>
-          </label>
-          <TextField
-            id="fe4-mytask-title"
-            value={title}
-            onChange={setTitle}
-            placeholder="例: 登壇者へ最終案内メールを送る"
-            testId="fe4-mytask-create-title"
-          />
-        </div>
-
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-event">
-            対象イベント（任意）
-          </label>
-          <Select
-            id="fe4-mytask-event"
-            value={eventId}
-            onChange={(v) => setEventId(v as common.EventId | "")}
-            options={[
-              { value: NO_EVENT, label: "紐付けない" },
-              ...events.map((e) => ({ value: e.id, label: e.name })),
-            ]}
-            testId="fe4-mytask-create-event"
-          />
-        </div>
-
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-assignee">
-            依頼先（担当者）
-          </label>
-          <Select
-            id="fe4-mytask-assignee"
-            value={assigneeId ?? ""}
-            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...people.map((u) => ({ value: u.id, label: u.displayName }))]}
-            testId="fe4-mytask-create-assignee"
-          />
-        </div>
-
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-priority">
-            優先度
-          </label>
-          <Select
-            id="fe4-mytask-priority"
-            value={priority}
-            onChange={(v) => setPriority(v as task.TaskPriority)}
-            options={PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABEL[p] }))}
-            testId="fe4-mytask-create-priority"
-          />
-        </div>
-
-        {/* 開始日 / 終了日: same date-field holding as the gantt タスク作成フォーム
-            (統一・二重定義禁止で DATE_LABEL を共有). */}
-        <div className={styles.formRow}>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-mytask-start">
-              {DATE_LABEL.start}
-            </label>
-            <DateField id="fe4-mytask-start" value={start} onChange={setStart} testId="fe4-mytask-create-start" />
-          </div>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-mytask-due">
-              {DATE_LABEL.end}
-            </label>
-            <DateField id="fe4-mytask-due" value={due} onChange={setDue} testId="fe4-mytask-create-due" />
-          </div>
-        </div>
-
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-mytask-team">
-              チーム
+      <TaskFormFields
+        idPrefix="fe4-mytask-create"
+        title={title}
+        onTitleChange={setTitle}
+        titlePlaceholder="例: 登壇者へ最終案内メールを送る"
+        statuses={CREATE_STATUSES}
+        status={status}
+        onStatusChange={setStatus}
+        priorities={PRIORITIES}
+        priority={priority}
+        onPriorityChange={setPriority}
+        users={people}
+        assigneeId={assigneeId}
+        onAssigneeChange={setAssigneeId}
+        assigneeLabel="依頼先（担当者）"
+        teams={teams}
+        teamId={teamId}
+        onTeamIdChange={setTeamId}
+        start={start}
+        onStartChange={setStart}
+        due={due}
+        onDueChange={setDue}
+        scopeTasks={scopeTasks}
+        parentOptions={parentOptions}
+        parentId={parentId}
+        onParentIdChange={setParentId}
+        deps={deps}
+        onDepsChange={setDeps}
+        description={description}
+        onDescriptionChange={setDescription}
+        descriptionPlaceholder="依頼の詳細や補足を書けます"
+        leadingSlot={
+          <div className={styles.formFieldFull}>
+            <label className={styles.formLabel} htmlFor="fe4-mytask-create-event">
+              対象イベント（任意）
             </label>
             <Select
-              id="fe4-mytask-team"
-              value={teamId ?? ""}
-              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
-              options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-              testId="fe4-mytask-create-team"
+              id="fe4-mytask-create-event"
+              value={eventId}
+              onChange={(v) => setEventId(v as common.EventId | "")}
+              options={[
+                { value: NO_EVENT, label: "紐付けない" },
+                ...events.map((e) => ({ value: e.id, label: e.name })),
+              ]}
+              testId="fe4-mytask-create-event"
             />
           </div>
-        )}
-
-        {/* 添付（ファイル・URL）: shared compact 📎/🔗 control — same look as the gantt
-            タスク詳細 (③=②で統一・共通コンポーネント化). */}
-        <div className={styles.formFieldFull}>
-          <AttachmentField
-            chips={attachChips}
-            canWrite
-            busy={saving}
-            error={attachError}
-            onPickFiles={(list) => void onPickFiles(list)}
-            onAddUrl={addUrl}
-            onRemove={removeChip}
-            testIdPrefix="fe4-mytask-attach"
-          />
-        </div>
-
-        {/* 詳細（任意・旧「内容」）: long-form note last, mirroring the タスク詳細 order. */}
-        <div className={styles.formFieldFull}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-desc">
-            詳細（任意）
-          </label>
-          <Textarea
-            id="fe4-mytask-desc"
-            value={description}
-            onChange={setDescription}
-            rows={3}
-            placeholder="依頼の詳細や補足を書けます"
-            testId="fe4-mytask-create-desc"
-          />
-        </div>
-      </div>
+        }
+        beforeDescriptionSlot={
+          <div className={styles.formFieldFull}>
+            <AttachmentField
+              chips={attachChips}
+              canWrite
+              busy={saving}
+              error={attachError}
+              onPickFiles={(list) => void onPickFiles(list)}
+              onAddUrl={addUrl}
+              onRemove={removeChip}
+              testIdPrefix="fe4-mytask-attach"
+            />
+          </div>
+        }
+      />
     </Modal>
   );
 }
