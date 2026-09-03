@@ -1992,6 +1992,34 @@ function createMembersStore() {
   return { handle };
 }
 
+// ── demo-only artificial latency (skeleton showcase) ───────────────────────────
+// fe346-visible-slowmo: this whole module is the DEMO transport (VITE_DEMO build only),
+// so nothing here ships to production. Real reads instantly resolve from in-memory seed,
+// which makes every skeleton flash for a single frame — invisible to a reviewer. We add a
+// deliberate delay to GET reads so each list / board / gantt / chat skeleton is actually
+// on screen long enough to see. Mutations (POST/PATCH/DELETE) are NOT delayed, so the undo
+// toast + optimistic delete stay crisp.
+//
+// Control it live from the demo URL (no rebuild needed):
+//   (no query) → 900ms  · a mild default so first loads always show the skeleton
+//   ?slow=1    → 1500ms · pronounced; best for filming / clearly seeing skeletons
+//   ?slow=2500 → custom milliseconds
+//   ?slow=0    → disabled (instant, original behaviour)
+function demoReadDelayMs(): number {
+  try {
+    // Never slow down the unit tests — this delay is purely a real-browser demo aid.
+    if (import.meta.env?.MODE === "test") return 0;
+    const raw = new URLSearchParams(window.location.search).get("slow");
+    if (raw === null) return 900;
+    if (raw === "" || raw === "1" || raw.toLowerCase() === "true") return 1500;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 900;
+  } catch {
+    return 900;
+  }
+}
+const demoSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -2038,10 +2066,21 @@ export function createDemoFetch(): typeof fetch {
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore();
 
+  // Runtime marker (survives minification) proving THIS slow-mo demo build is the one served.
+  if (typeof console !== "undefined" && import.meta.env?.MODE !== "test") {
+    console.info("[demo] fe346-visible skeleton/undo slow-mo transport active (add ?slow=1 to slow reads more, ?slow=0 to disable)");
+  }
+
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href);
     const method = (init?.method ?? "GET").toUpperCase();
+    // Skeleton showcase: slow down data reads (not auth/boot handshake, not mutations) so
+    // list/board/gantt/chat skeletons are visible. Demo-only; see demoReadDelayMs above.
+    if (method === "GET" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/bff/"))) {
+      const ms = demoReadDelayMs();
+      if (ms > 0) await demoSleep(ms);
+    }
     // Parse the JSON body once for the roster store's mutation handlers.
     let parsedBody: unknown;
     if (typeof init?.body === "string" && init.body.length > 0) {

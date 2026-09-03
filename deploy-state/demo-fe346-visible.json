@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe346-visible",
+  "worker": "dub-demo-fe346-visible",
+  "url": "https://dub-demo-fe346-visible.developershub-site.workers.dev",
+  "deployedSha": "ead7db4",
+  "branch": "feat/fe346-skeleton-undo",
+  "actor": "Claude (stg-unwedge)",
+  "markers": ["fe346-visible skeleton/undo slow-mo transport active","fe4-gantt-loading"],
+  "live": true,
+  "verifiedAt": "2026-09-03T16:10:55Z",
+  "updatedAt": "2026-09-03T16:10:55Z",
+  "note": "skeleton(fe3/fe4/fe6)+fe4 undo, demo-only read delay (?slow=1/0)"
+}
