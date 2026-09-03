@@ -61,6 +61,7 @@ import {
   Reply,
   Pin,
   Hash,
+  Keyboard,
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "./types";
@@ -130,6 +131,7 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   reply: Reply,
   pin: Pin,
   hash: Hash,
+  keyboard: Keyboard,
 };
 
 // Direct re-export of Lucide for advanced callers (still tree-shakable).

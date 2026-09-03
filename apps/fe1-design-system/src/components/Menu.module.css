@@ -111,6 +111,10 @@
 .itemLabel {
   flex: 1;
   line-height: var(--dub-font-line-height-tight);
+  /* Keep dropdown item labels on one line. A long/CJK label (e.g.
+     "キーボードショートカット") otherwise wrapped to two rows and doubled the
+     item height. The panel grows to fit (min-width 220px .. max-width viewport). */
+  white-space: nowrap;
 }
 
 /* Text-labelled trigger (dub-menu-trigger-label). The label sits between the

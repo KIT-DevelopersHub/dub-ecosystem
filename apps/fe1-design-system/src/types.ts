@@ -84,7 +84,8 @@ export type IconName =
   | "send"
   | "reply"
   | "pin"
-  | "hash";
+  | "hash"
+  | "keyboard";
 
 export interface IconProps extends TestableProps {
   name: IconName;
