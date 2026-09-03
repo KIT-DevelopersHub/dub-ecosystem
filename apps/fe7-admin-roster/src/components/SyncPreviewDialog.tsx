@@ -7,12 +7,12 @@ import type { EmailRoutingSyncPreview, EmailRoutingDiffRow } from "../contracts/
 function Section({ title, tone, rows, testId }: { title: string; tone: "success" | "warning" | "danger" | "neutral"; rows: EmailRoutingDiffRow[]; testId: string }) {
   if (rows.length === 0) return null;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }} data-testid={testId}>
-      <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-1)" }} data-testid={testId}>
+      <span style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-2)", fontSize: 13, fontWeight: 600 }}>
         <Badge tone={tone}>{rows.length}</Badge>
         {title}
       </span>
-      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--dub-color-fg-muted, #57606a)" }}>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--dub-color-text-muted)" }}>
         {rows.map((r) => (
           <li key={r.email}>{r.email}</li>
         ))}
@@ -45,7 +45,7 @@ export function SyncPreviewDialog({
       title="Email Routing 同期プレビュー"
       testId="fe7-sync-preview"
       footer={
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--dub-space-2)" }}>
           <Button variant="secondary" onClick={onCancel} disabled={applying}>キャンセル</Button>
           <Button variant="primary" onClick={onApply} loading={applying} disabled={nothingToDo} testId="fe7-sync-apply">
             適用する
@@ -56,8 +56,8 @@ export function SyncPreviewDialog({
       {!p ? (
         <p>プレビューを取得しています…</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--dub-color-fg-muted, #57606a)" }} data-testid="fe7-sync-preview-summary">
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" }}>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--dub-color-text-muted)" }} data-testid="fe7-sync-preview-summary">
             追加 {p.projected.added}・更新 {p.projected.updated}・停止 {p.projected.deactivated}（対象 {p.projected.total} 件）。適用するまで名簿は変更されません。
           </p>
           {nothingToDo ? <p style={{ margin: 0, fontSize: 13 }}>変更はありません。名簿は Email Routing と一致しています。</p> : null}

@@ -13,6 +13,8 @@ import {
   LoadMore,
   FormField,
   Spinner,
+  SkeletonTable,
+  SkeletonList,
   type ColumnDef,
   type SelectOption,
   type SortState,
@@ -50,20 +52,20 @@ const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
   { value: "rejected", label: "却下" },
 ];
 
-const toolbarStyle: React.CSSProperties = { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" };
-const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center" };
-const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
+const toolbarStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-3)", alignItems: "flex-end", flexWrap: "wrap" };
+const actionsStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-2)", alignItems: "center" };
+const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-1)" };
 const noticeTitleStyle: React.CSSProperties = { fontWeight: 600 };
-const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
-const summaryStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: "12px 0 8px", fontWeight: 500 };
+const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13, margin: 0 };
+const summaryStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13, margin: "12px 0 8px", fontWeight: 500 };
 
 // Master (table) + detail (right pane) — the roster and the selected user's management
 // surface sit side by side on ONE screen. Wraps under the table on narrow viewports.
-const splitStyle: React.CSSProperties = { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap", marginTop: 16 };
+const splitStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-6)", alignItems: "flex-start", flexWrap: "wrap", marginTop: "var(--dub-space-4)" };
 const tableColStyle: React.CSSProperties = { flex: "1 1 460px", minWidth: 0 };
 const paneColStyle: React.CSSProperties = { flex: "1 1 340px", minWidth: 300, position: "sticky", top: 16 };
-const paneHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 };
-const paneTitleStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 16, minWidth: 0 };
+const paneHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--dub-space-2)", marginBottom: "var(--dub-space-3)" };
+const paneTitleStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: "var(--dub-space-2)", fontWeight: 600, fontSize: "var(--dub-font-size-md)", minWidth: 0 };
 
 function nameButtonStyle(selected: boolean): React.CSSProperties {
   return {
@@ -73,7 +75,7 @@ function nameButtonStyle(selected: boolean): React.CSSProperties {
     font: "inherit",
     cursor: "pointer",
     textAlign: "left",
-    color: "var(--dub-color-accent-fg, #0969da)",
+    color: "var(--dub-color-text-link)",
     fontWeight: selected ? 700 : 500,
     textDecoration: selected ? "underline" : "none",
   };
@@ -210,7 +212,7 @@ export function UserListPage() {
             紐付け
           </Button>
         ) : (
-          <span style={{ color: "var(--dub-color-fg-muted, #57606a)" }}>未設定</span>
+          <span style={{ color: "var(--dub-color-text-muted)" }}>未設定</span>
         );
       },
     },
@@ -298,6 +300,19 @@ export function UserListPage() {
 
       {query.isError ? (
         <ErrorState error={displayError(query.error)} onRetry={() => query.refetch()} testId="fe7-users-error" />
+      ) : query.isLoading ? (
+        // FE1 §5 loading principle: 読み込み中は必ずスケルトンを出し、空(0件)と区別できるように。
+        // マスター(表)+ディテール(右ペイン)の2カラムを、実レイアウトと同じ骨組みで見せる。
+        <div style={splitStyle} data-testid="fe7-users-loading">
+          <div style={tableColStyle}>
+            <SkeletonTable rows={6} columns={columns.length} testId="fe7-users-skeleton" />
+          </div>
+          <div style={paneColStyle}>
+            <Card>
+              <SkeletonList rows={4} testId="fe7-user-pane-skeleton" />
+            </Card>
+          </div>
+        </div>
       ) : query.data && items.length === 0 ? (
         <EmptyState title="該当するユーザーがいません" testId="fe7-users-empty" />
       ) : (

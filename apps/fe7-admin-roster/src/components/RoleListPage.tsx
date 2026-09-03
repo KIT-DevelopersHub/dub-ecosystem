@@ -22,15 +22,15 @@ import styles from "./RoleListPage.module.css";
 // a role" rather than an inert header. The pill slide + panel enter animation are
 // owned by the core component (see SegmentedControl) and RoleListPage.module.css.
 const nameStyle: React.CSSProperties = { fontWeight: 600 };
-const metaStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #57606a)", fontSize: 13 };
-const skeletonStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 8 };
+const metaStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13 };
+const skeletonStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2)" };
 const panelStyle: React.CSSProperties = {
-  marginTop: 16,
-  border: "1px solid var(--dub-color-border-default, #d0d7de)",
-  borderRadius: 8,
-  padding: 16,
+  marginTop: "var(--dub-space-4)",
+  border: "1px solid var(--dub-color-border-default)",
+  borderRadius: "var(--dub-radius-md)",
+  padding: "var(--dub-space-4)",
 };
-const panelHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, marginBottom: 12 };
+const panelHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: "var(--dub-space-3)", marginBottom: "var(--dub-space-3)" };
 
 export function RoleListPage({ onNew }: { onNew?: () => void }) {
   const roles = useRoles();
@@ -137,7 +137,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
       )}
       {/* Workspace-wide chat setting — not per-role, so it lives below the role strip.
           Today all tiers default to 完全に消す(hard); this is the 器 for a future split. */}
-      <div style={{ marginTop: 24 }}>
+      <div style={{ marginTop: "var(--dub-space-6)" }}>
         <ChatDeletionPolicySection />
       </div>
 
