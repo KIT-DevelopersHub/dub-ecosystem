@@ -727,8 +727,44 @@ const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:re
 // IdentityUser, read by FE7's RosterUser projection and its 種別 column / sort.
 type DemoRosterUser = identity.IdentityUser & { source?: "manual" | "email-routing" };
 
-// A fuller roster (12 rows) so the admin table's 一括選択・列ソート・件数サマリ・URLフィルタ
-// (判断29 ①⑤⑧) are all visibly meaningful in the demo — varied 状態 / 種別 / ロール.
+// Synthetic bulk roster so the 名簿 demo shows a長い一覧 (数百行) — this is what the
+// 仮想スクロール (row windowing) is for: only on-screen rows mount, so the list stays
+// smooth even at this size. Appended AFTER the named users so the interactive flows
+// (usr_dave role assign 等) keep working unchanged. Each row also carries `source` so
+// the 種別 column / sort / URLフィルタ stay meaningful across all 600 rows.
+const BULK_ROSTER_COUNT = 600;
+const BULK_SURNAMES = ["佐藤", "鈴木", "高橋", "田中", "伊藤", "渡辺", "山本", "中村", "小林", "加藤", "吉田", "山田", "松本", "井上", "木村", "林", "清水", "山口", "森", "池田"];
+const BULK_GIVEN = ["蓮", "陽翔", "湊", "樹", "大翔", "陽菜", "結衣", "咲良", "凛", "芽依", "悠真", "颯太", "美咲", "葵", "莉子", "翔太", "健太", "彩花", "直樹", "香織"];
+const BULK_STATUSES: identity.IdentityUser["status"][] = ["active", "active", "active", "active", "invited", "disabled"];
+const BULK_ROLE_IDS = ["role_member", "role_member", "role_maintainer", "role_admin"];
+const BULK_SOURCES: DemoRosterUser["source"][] = ["email-routing", "manual"];
+
+function buildBulkRoster(): DemoRosterUser[] {
+  const out: DemoRosterUser[] = [];
+  for (let i = 0; i < BULK_ROSTER_COUNT; i++) {
+    const surname = BULK_SURNAMES[i % BULK_SURNAMES.length]!;
+    const given = BULK_GIVEN[(i * 7) % BULK_GIVEN.length]!;
+    const n = String(i + 1).padStart(3, "0");
+    out.push({
+      id: `usr_bulk_${n}`,
+      orgId: ORG,
+      displayName: `${surname} ${given}`,
+      email: `member${n}@developershub.jp`,
+      githubLogin: i % 3 === 0 ? `member${n}` : null,
+      avatarUrl: null,
+      status: BULK_STATUSES[i % BULK_STATUSES.length]!,
+      source: BULK_SOURCES[i % BULK_SOURCES.length]!,
+      roleIds: [BULK_ROLE_IDS[i % BULK_ROLE_IDS.length]!],
+      createdAt: isoNow(),
+      updatedAt: isoNow(),
+    });
+  }
+  return out;
+}
+
+// A fuller named roster (12 rows) so the admin table's 一括選択・列ソート・件数サマリ・URLフィルタ
+// (判断29 ①⑤⑧) are all visibly meaningful in the demo — varied 状態 / 種別 / ロール —
+// then the 600-row bulk roster (判断P10) exercises the 仮想スクロール.
 const SEED_USERS: DemoRosterUser[] = [
   { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
@@ -742,6 +778,7 @@ const SEED_USERS: DemoRosterUser[] = [
   { id: "usr_lily", orgId: ORG, displayName: "小林 里", email: "ri@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  ...buildBulkRoster(),
 ];
 
 const SEED_ROLES: identity.Role[] = [
