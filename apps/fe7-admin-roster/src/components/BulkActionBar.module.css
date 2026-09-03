@@ -1,0 +1,43 @@
+/*
+ * The bulk-action toolbar floats over the viewport (fixed, bottom-center) instead
+ * of taking a slot in the document flow. Rendering it inline above the table shifted
+ * every row down the moment a checkbox was ticked, so the row under the cursor slid
+ * away. As a fixed overlay it never reflows the table: the row you selected stays
+ * exactly where your cursor is. Sits below modals (--dub-zIndex-modal) so the
+ * ConfirmDialog still layers on top.
+ */
+.bar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: var(--dub-zIndex-sticky, 1100);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--dub-color-accent-subtle, #ddf4ff);
+  border: 1px solid var(--dub-color-accent-muted, #54aeff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.12);
+  animation: fe7-bulkbar-in 160ms ease-out;
+}
+
+@keyframes fe7-bulkbar-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    animation: none;
+  }
+}
