@@ -100,9 +100,19 @@ describe("AppShellLayout", () => {
     expect(out.endsWith("@developershub.jp")).toBe(true);
   });
 
-  it("mounts the theme toggle in the header icon row", async () => {
-    renderShell();
-    expect(await screen.findByTestId("fe2-theme-toggle-trigger")).toBeInTheDocument();
+  it("moves theme switching INTO the 設定 menu (no standalone header toggle)", async () => {
+    renderShell(vi.fn());
+    // The old standalone header theme control is gone.
+    expect(screen.queryByTestId("fe2-theme-toggle-trigger")).not.toBeInTheDocument();
+    // Theme options live inside the 設定 (⚙) menu and are hidden until it opens.
+    expect(screen.queryByTestId("fe2-theme-option-dark")).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
+    expect(screen.getByTestId("fe2-theme-option-system")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-theme-option-light")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-theme-option-dark")).toBeInTheDocument();
+    // Selecting one drives UiStore.setTheme (全アプリ波及 + localStorage永続の入口).
+    await userEvent.click(screen.getByTestId("fe2-theme-option-dark"));
+    expect(useUiStore.getState().theme).toBe("dark");
   });
 
   it("renders header widget slot and routed content; tools live behind the launcher", async () => {
@@ -168,13 +178,20 @@ describe("AppShellLayout", () => {
       </QueryClientProvider>,
     );
     await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
-    // Both items present; logout is danger-toned and ordered AFTER account settings.
+    // Order: アカウント設定, then the theme group (system/light/dark), then logout last.
+    // Logout is danger-toned and ordered AFTER account settings + theme.
     const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
-    expect(items).toEqual(["fe2-account-settings-open", "fe2-logout"]);
+    expect(items).toEqual([
+      "fe2-account-settings-open",
+      "fe2-theme-option-system",
+      "fe2-theme-option-light",
+      "fe2-theme-option-dark",
+      "fe2-logout",
+    ]);
     const logout = screen.getByTestId("fe2-logout");
     expect(logout).toHaveAttribute("data-tone", "danger");
-    // A separator divides the safe settings from the 離脱 action.
-    expect(screen.getByRole("separator")).toBeInTheDocument();
+    // Two separators: one above the theme group, one above the 離脱 (logout) action.
+    expect(screen.getAllByRole("separator")).toHaveLength(2);
     await userEvent.click(logout);
     expect(onLogout).toHaveBeenCalledTimes(1);
   });

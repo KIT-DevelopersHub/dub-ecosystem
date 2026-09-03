@@ -15,7 +15,8 @@ import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
-import { ThemeToggle } from "./ThemeToggle.tsx";
+import { buildThemeMenuItems } from "./themeMenu.tsx";
+import { useUiStore } from "../store/uiStore.tsx";
 import {
   isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
@@ -123,17 +124,26 @@ export function AppShellLayout({
   const auth = useAuth();
   const { can } = usePermissions();
   const [acctOpen, setAcctOpen] = useState(false);
+  // Theme source of truth (persisted to localStorage; AppRoot's ThemeBridge resolves
+  // "system" and drives @dub/ui ThemeProvider). Surfaced as rows in the ⚙ menu below.
+  const theme = useUiStore((s) => s.theme);
+  const setTheme = useUiStore((s) => s.setTheme);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
   const authed = auth.status === "authenticated";
 
   // The ⚙ menu's contents. アカウント設定 (display name / avatar / password) needs the
-  // api-client; ログアウト only needs the onLogout handler, so logout stays available to
-  // any signed-in viewer even if no api is wired. Logout sits last, under a divider,
-  // danger-toned — a 離脱/destructive action set apart from the safe settings above it.
-  // パスワード変更 is no longer a separate item: it lives INSIDE アカウント設定, unifying
-  // all self-service account actions under one entry.
+  // api-client; テーマ切替 (system/light/dark) is always available — it needs neither api
+  // nor auth — so it sits in its own divider group below account settings; ログアウト only
+  // needs the onLogout handler, so logout stays available to any signed-in viewer even if
+  // no api is wired. Logout sits last, under a divider, danger-toned — a 離脱/destructive
+  // action set apart from the safe settings above it. パスワード変更 is no longer a separate
+  // item: it lives INSIDE アカウント設定, unifying all self-service account actions.
+  //
+  // テーマ切替 moved here from a standalone header icon (user direction: not important
+  // enough for a permanent header slot). setTheme/localStorage永続/全アプリ波及/system時
+  // OS追従 are all unchanged — only the entry point moved into this menu.
   const settingsItems: MenuItem[] = [];
   if (showAccount) {
     settingsItems.push({
@@ -144,6 +154,9 @@ export function AppShellLayout({
       testId: "fe2-account-settings-open",
     });
   }
+  // Theme group — divided from preceding items only when something precedes it, so the
+  // group never opens the menu with a stray top separator.
+  settingsItems.push(...buildThemeMenuItems(theme, setTheme, settingsItems.length > 0));
   if (authed && onLogout) {
     settingsItems.push({
       id: "logout",
@@ -203,16 +216,12 @@ export function AppShellLayout({
           {headerWidgets.map((Widget, i) => (
             <Widget key={i} />
           ))}
-          {/* Theme switch — surfaces UiStore.setTheme (was persisted but had no UI).
-              Sits in the uniform icon row (9-dot / テーマ / ⚙); recolours every app
-              via the shared @dub/tokens variables that AppRoot's ThemeProvider drives. */}
-          <ThemeToggle />
           {settingsItems.length > 0 ? (
-            // Settings (⚙) dropdown — the account self-service container. アカウント設定
-            // (display name / avatar / password change) and ログアウト live INSIDE it, so
-            // the header is just 9-dot / bell / ⚙ (uniform icon row, no bare
-            // buttons). パスワード変更 is now nested within アカウント設定 (unified), and the
-            // logout flow's behaviour/API/authz are unchanged.
+            // Settings (⚙) dropdown — the self-service container. アカウント設定 (display
+            // name / avatar / password change), テーマ切替 (system/light/dark) and ログアウト
+            // all live INSIDE it, so the header is just 9-dot / bell / ⚙ (uniform icon
+            // row, no bare buttons). パスワード変更 is nested within アカウント設定 (unified),
+            // and the logout flow's behaviour/API/authz are unchanged.
             <Menu
               testId="fe2-settings-menu"
               label="設定"

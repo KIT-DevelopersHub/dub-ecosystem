@@ -61,7 +61,7 @@ import {
   Reply,
   Pin,
   Hash,
-  // theme switch (fe2 header ThemeToggle — system/light/dark)
+  // theme switch (fe2 設定メニューのテーマ切替 — system/light/dark)
   Sun,
   Moon,
   Monitor,
@@ -134,7 +134,7 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   reply: Reply,
   pin: Pin,
   hash: Hash,
-  // theme switch (fe2 header ThemeToggle)
+  // theme switch (fe2 設定メニューのテーマ切替)
   sun: Sun,
   moon: Moon,
   monitor: Monitor,

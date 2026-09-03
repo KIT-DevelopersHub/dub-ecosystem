@@ -85,7 +85,7 @@ export type IconName =
   | "reply"
   | "pin"
   | "hash"
-  // theme switch (fe2 header ThemeToggle — system/light/dark). Additive, closed-union preserved.
+  // theme switch (fe2 設定メニューのテーマ切替 — system/light/dark). Additive, closed-union preserved.
   | "sun"
   | "moon"
   | "monitor";
