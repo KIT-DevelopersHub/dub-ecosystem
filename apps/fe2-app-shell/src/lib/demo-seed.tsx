@@ -1081,7 +1081,9 @@ function createChatStore() {
   interface WireMsg {
     id: string;
     channelId: string;
-    authorId: string;
+    // null = system post (chat-service `kind: "system"`). Renderers must treat null as
+    // "システム"; modeling it non-null crashed the whole chat screen (initials(null)).
+    authorId: string | null;
     body: string;
     threadRootId: string | null;
     replyCount: number;
@@ -1096,7 +1098,7 @@ function createChatStore() {
   const mk = (
     id: string,
     channelId: string,
-    authorId: string,
+    authorId: string | null,
     body: string,
     createdAt: string,
     reactions: { emoji: string; userIds: string[] }[] = [],
@@ -1106,7 +1108,10 @@ function createChatStore() {
   });
 
   const SEED_MESSAGES: WireMsg[] = [
-    // #general — the channel the demo opens on (rich; includes ME messages so 既読 shows)
+    // #general — the channel the demo opens on (rich; includes ME messages so 既読 shows).
+    // Leads with a SYSTEM post (authorId: null) — the demo regression guard for the crash
+    // fix: a null author must render as "システム", never feed null into the Avatar.
+    mk("msg_gen000", "chn_general", null, "Channel #general created.", mt(20, 9, 0)),
     mk("msg_gen010", "chn_general", A.bob, "おはようございます！今日もよろしくお願いします 🙌", mt(20, 9, 2), [{ emoji: "👋", userIds: [A.me, A.carol, A.dave] }]),
     mk("msg_gen020", "chn_general", A.me, "おはようございます。10:00 からスタンドアップです 📣", mt(20, 9, 4)),
     mk("msg_gen030", "chn_general", A.carol, "承知しました！資料まとめておきます", mt(20, 9, 8), [{ emoji: "🙏", userIds: [A.me] }]),

@@ -51,7 +51,10 @@ export function ThreadPane({
 
   // resolve reply authors the parent timeline may not have seen yet
   useEffect(() => {
-    const ids = Array.from(new Set([root.authorId, ...replies.map((m) => m.authorId)]));
+    // Drop null authorIds (system posts have no author to resolve).
+    const ids = Array.from(new Set([root.authorId, ...replies.map((m) => m.authorId)])).filter(
+      (id): id is common.UserId => id !== null,
+    );
     const missing = ids.filter((id) => !resolveUser?.(id) && !(id in localUsers));
     if (missing.length === 0) return;
     let cancelled = false;

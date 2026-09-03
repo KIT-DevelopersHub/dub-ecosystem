@@ -34,7 +34,11 @@ export interface MessageItemProps {
   onTogglePin?: (message: Message) => void;
 }
 
-function nameOf(id: common.UserId, resolve?: MessageItemProps["resolveUser"]): string {
+// System posts (chat-service `kind: "system"`) carry `authorId: null`. Never return
+// null here — a null name reaches @dub/ui <Avatar> whose initials() does name.trim()
+// and throws, taking the whole chat screen down via the error boundary.
+function nameOf(id: common.UserId | null, resolve?: MessageItemProps["resolveUser"]): string {
+  if (id === null) return "システム";
   return resolve?.(id)?.displayName ?? id;
 }
 
@@ -71,7 +75,7 @@ export function MessageItem({
   const canEdit = isAuthor && !isDeleted; // authors only — even moderators can't edit others'
   const canDelete = (isAuthor || canModerate) && !isDeleted;
   const authorName = nameOf(message.authorId, resolveUser);
-  const authorAvatar = resolveUser?.(message.authorId)?.avatarUrl ?? undefined;
+  const authorAvatar = message.authorId ? (resolveUser?.(message.authorId)?.avatarUrl ?? undefined) : undefined;
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
