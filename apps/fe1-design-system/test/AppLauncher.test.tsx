@@ -81,27 +81,81 @@ describe("AppLauncher (waffle app switcher 凍結案 1-4-3)", () => {
     expect(screen.getByText(/一致するアプリはありません/)).toBeInTheDocument();
   });
 
-  it("moves the active tile with ArrowDown and launches it with Enter", async () => {
-    const onSelect = vi.fn();
-    render(<AppLauncher items={MANY} onSelect={onSelect} testId="launcher" />);
-    await userEvent.click(screen.getByTestId("launcher-trigger"));
-    const search = screen.getByTestId("launcher-search");
+  // A full 3×2 grid (matches the CSS `repeat(3, …)`; jsdom uses the 3-column fallback).
+  //   row0:  a(0)  b(1)  c(2)
+  //   row1:  d(3)  e(4)  f(5)
+  const GRID: AppLauncherItem[] = [
+    { id: "/a", label: "AA", icon: "inbox", href: "/a" },
+    { id: "/b", label: "BB", icon: "inbox", href: "/b" },
+    { id: "/c", label: "CC", icon: "inbox", href: "/c" },
+    { id: "/d", label: "DD", icon: "inbox", href: "/d" },
+    { id: "/e", label: "EE", icon: "inbox", href: "/e" },
+    { id: "/f", label: "FF", icon: "inbox", href: "/f" },
+  ];
 
-    // First ArrowDown selects the first enabled tile (メール), second moves to チャット.
-    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
-    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/chat" }));
-    expect(search).toBeDefined();
+  it("first arrow press anchors on the first enabled tile", async () => {
+    const onSelect = vi.fn();
+    render(<AppLauncher items={GRID} onSelect={onSelect} testId="launcher" />);
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    await userEvent.keyboard("{ArrowDown}{Enter}"); // first press → a, not a row-step
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/a" }));
   });
 
-  it("skips disabled tiles during keyboard navigation and never selects them", async () => {
+  it("ArrowRight / ArrowLeft step to the horizontal neighbour", async () => {
     const onSelect = vi.fn();
-    render(<AppLauncher items={MANY} onSelect={onSelect} testId="launcher" />);
+    render(<AppLauncher items={GRID} onSelect={onSelect} testId="launcher" />);
     await userEvent.click(screen.getByTestId("launcher-trigger"));
+    // anchor a → right → b → right → c → left → b
+    await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}{ArrowLeft}{Enter}");
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/b" }));
+  });
 
-    // 3 enabled tiles then a disabled one; four ArrowDowns wrap back to メール, never 準備中.
-    await userEvent.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
-    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/mail" }));
-    expect(onSelect).not.toHaveBeenCalledWith(expect.objectContaining({ id: "/soon" }));
+  it("ArrowDown / ArrowUp move a full row within the same column", async () => {
+    const onSelect = vi.fn();
+    render(<AppLauncher items={GRID} onSelect={onSelect} testId="launcher" />);
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    // anchor a → right → b(col1) → down → e(col1, row1) → up → b
+    await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowDown}{ArrowUp}{Enter}");
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/b" }));
+  });
+
+  it("ArrowDown from the top row lands on the tile directly below (not the right neighbour)", async () => {
+    const onSelect = vi.fn();
+    render(<AppLauncher items={GRID} onSelect={onSelect} testId="launcher" />);
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    // anchor a(col0,row0) → down → d(col0,row1), NOT b (the old 1-D "next" bug)
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/d" }));
+  });
+
+  it("ArrowUp from the top row wraps to the bottom of the same column", async () => {
+    const onSelect = vi.fn();
+    render(<AppLauncher items={GRID} onSelect={onSelect} testId="launcher" />);
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    // anchor a(col0,row0) → up wraps → d(col0, bottom row)
+    await userEvent.keyboard("{ArrowDown}{ArrowUp}{Enter}");
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/d" }));
+  });
+
+  it("skips disabled tiles when moving down a column and never selects them", async () => {
+    // col0 = a(0) enabled, d(3) DISABLED, g(6) enabled → ArrowDown from a jumps to g.
+    const DIS: AppLauncherItem[] = [
+      { id: "/a", label: "AA", icon: "inbox", href: "/a" },
+      { id: "/b", label: "BB", icon: "inbox", href: "/b" },
+      { id: "/c", label: "CC", icon: "inbox", href: "/c" },
+      { id: "/d", label: "DD", icon: "settings", disabled: true, disabledReason: "準備中" },
+      { id: "/e", label: "EE", icon: "inbox", href: "/e" },
+      { id: "/f", label: "FF", icon: "inbox", href: "/f" },
+      { id: "/g", label: "GG", icon: "inbox", href: "/g" },
+      { id: "/h", label: "HH", icon: "inbox", href: "/h" },
+      { id: "/i", label: "II", icon: "inbox", href: "/i" },
+    ];
+    const onSelect = vi.fn();
+    render(<AppLauncher items={DIS} onSelect={onSelect} testId="launcher" />);
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}"); // a → (skip d) → g
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "/g" }));
+    expect(onSelect).not.toHaveBeenCalledWith(expect.objectContaining({ id: "/d" }));
   });
 
   it("does not launch on the IME confirm Enter (isComposing)", async () => {

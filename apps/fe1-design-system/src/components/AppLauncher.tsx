@@ -10,8 +10,17 @@
 // Filter/keyboard (判断18②): opening the popover shows a filter box that gets focus
 // immediately. Typing narrows the grid by case-insensitive substring on the label —
 // this is a *display* filter only. Apps are never removed or hidden from the catalog
-// ([[dub-never-hide-or-reduce-apps]]); clearing the box restores every tile. ↑/↓ move
-// the active tile, Enter opens it, Esc closes. The active option is tracked via
+// ([[dub-never-hide-or-reduce-apps]]); clearing the box restores every tile.
+//
+// Arrow keys move the active tile in 2-D over the *visible* (filtered) grid — the tiles
+// are laid out as a CSS grid of N columns, so 1-D next/prev felt wrong (pressing ↓ just
+// stepped to the "next" tile, which is the one to the RIGHT). ←/→ step to the left/right
+// neighbour (row-sending + wrapping so every tile is reachable); ↑/↓ move one full row
+// up/down within the same column (wrapping top⇄bottom, skipping release-gated tiles and
+// the empty cells of a ragged last row). The column count is read from the live grid's
+// computed `grid-template-columns` so the math always matches what the user sees (with a
+// 3-column fallback for non-layout environments like jsdom, matching the CSS default).
+// Enter opens the active tile, Esc closes. The active option is tracked via
 // aria-activedescendant so focus can stay in the box while the user keeps typing.
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
@@ -47,6 +56,7 @@ export function AppLauncher({
   const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const panelId = `${baseId}-panel`;
   const listId = `${baseId}-list`;
@@ -106,7 +116,25 @@ export function AppLauncher({
     onSelect?.(item);
   };
 
-  // Step from `from` in `dir` (+1/-1), wrapping, landing on the next enabled tile.
+  // Live column count of the rendered grid. Read from the computed
+  // `grid-template-columns` (resolved to concrete tracks, e.g. "84px 84px 84px" → 3) so
+  // the ↑/↓ row-step always matches what the user sees, even if the CSS becomes
+  // responsive later. Falls back to 3 (the CSS default `repeat(3, …)`) when the layout
+  // engine can't resolve tracks — e.g. jsdom in tests, or before first paint.
+  const getColumns = (): number => {
+    const el = gridRef.current;
+    if (el && typeof getComputedStyle === "function") {
+      const tracks = getComputedStyle(el).gridTemplateColumns;
+      if (tracks && tracks !== "none") {
+        const count = tracks.trim().split(/\s+/).filter(Boolean).length;
+        if (count > 0) return count;
+      }
+    }
+    return 3;
+  };
+
+  // Step from `from` by a linear offset (+1/-1), wrapping over the whole visible list and
+  // landing on the next enabled tile. Backs ←/→ (right/left neighbour, row-sending).
   const nextEnabled = (from: number, dir: 1 | -1): number => {
     const n = visible.length;
     if (n === 0) return -1;
@@ -117,15 +145,41 @@ export function AppLauncher({
     return -1; // every visible tile is disabled
   };
 
+  // Move one row up/down (drow -1/+1) within the SAME column, wrapping top⇄bottom and
+  // skipping both release-gated tiles and the empty cells of a ragged last row. Backs ↑/↓.
+  const rowStep = (from: number, drow: 1 | -1): number => {
+    const n = visible.length;
+    if (n === 0) return -1;
+    const cols = Math.max(1, getColumns());
+    const rows = Math.ceil(n / cols);
+    const start = from < 0 ? 0 : from;
+    const col = start % cols;
+    const baseRow = Math.floor(start / cols);
+    for (let step = 1; step <= rows; step += 1) {
+      const row = (((baseRow + drow * step) % rows) + rows) % rows;
+      const cand = row * cols + col;
+      if (cand < n && !visible[cand]?.disabled) return cand;
+    }
+    return from; // no other enabled tile in this column — stay put
+  };
+
   const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
     // 変換確定 Enter (IME) must never launch a tile (FRONTEND_GUIDE §IME).
     if (isImeComposing(e)) return;
-    if (e.key === "ArrowDown") {
+    // First arrow press (nothing active yet) lands on the first enabled tile so the user
+    // has an anchor; subsequent presses move directionally from there.
+    if (e.key === "ArrowRight") {
       e.preventDefault();
-      setActiveIndex((prev) => nextEnabled(prev < 0 ? -1 : prev, 1));
+      setActiveIndex((prev) => (prev < 0 ? nextEnabled(-1, 1) : nextEnabled(prev, 1)));
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev < 0 ? nextEnabled(-1, 1) : nextEnabled(prev, -1)));
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev < 0 ? nextEnabled(-1, 1) : rowStep(prev, 1)));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActiveIndex((prev) => nextEnabled(prev < 0 ? 0 : prev, -1));
+      setActiveIndex((prev) => (prev < 0 ? nextEnabled(-1, 1) : rowStep(prev, -1)));
     } else if (e.key === "Enter") {
       const idx = activeIndex >= 0 ? activeIndex : nextEnabled(-1, 1);
       const item = idx >= 0 ? visible[idx] : undefined;
@@ -179,7 +233,16 @@ export function AppLauncher({
               「{query.trim()}」に一致するアプリはありません
             </div>
           ) : (
-            <div className={cx(styles.grid)} role="listbox" id={listId} aria-label={title}>
+            <div
+              ref={gridRef}
+              className={cx(styles.grid)}
+              role="listbox"
+              id={listId}
+              aria-label={title}
+              // Liveness marker + self-doc: arrow keys navigate this listbox in 2-D over
+              // the visible grid (↑/↓ by row, ←/→ by neighbour). See onSearchKeyDown.
+              data-nav="fe1-launcher-grid-2d"
+            >
               {visible.map((item, index): ReactNode => {
                 const active = index === activeIndex;
                 return (
