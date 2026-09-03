@@ -21,11 +21,6 @@ export interface Env {
   GANTT_RT_DO_URL_BASE?: string;
   // Origin allow-list enforced by the GanttRoom DO (comma-separated).
   GANTT_RT_ALLOWED_ORIGINS?: string;
-  // DEV/DEMO ONLY. When "1", the worker serves a self-contained 2-tab presence demo at
-  // `/` and an UNAUTHENTICATED ws-ticket issuer at `/demo/ws-ticket` (so the demo needs no
-  // gateway/auth/DB stack). MUST stay unset in prod/staging — it would let anyone mint a
-  // ticket. The disposable demo Worker sets it via wrangler.demo.toml [vars].
-  GANTT_RT_DEV_TICKET?: string;
 }
 
 export const SERVICE_NAME = "gantt-service";

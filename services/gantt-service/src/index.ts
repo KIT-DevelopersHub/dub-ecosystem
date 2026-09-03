@@ -14,16 +14,9 @@
 // for /ws would let anyone spoof x-dub-user-id. /health stays public for uptime probes.
 import type { ExportedHandler, MessageBatch, Request as CfRequest } from "@cloudflare/workers-types";
 import type { DubEventEnvelope } from "@dub/events";
-import type { gantt } from "@dub/types";
 import type { Env } from "./env";
 import { createApp } from "./app";
 import { buildQueueConsumer } from "./queue";
-import { DEMO_PAGE_HTML } from "./demo-page";
-import { signWsTicket, ticketExpiryMs, buildDoUrl } from "./wsticket";
-
-// Dev-only fallback secret (matches app.ts). The demo Worker sets WS_TICKET_SECRET as a var.
-const DEV_WS_SECRET = "dev-insecure-ws-ticket-secret";
-const DEFAULT_DO_URL_BASE = "wss://dub-gantt-service.developershub-site.workers.dev/ws/:id";
 
 const app = createApp();
 
@@ -38,59 +31,12 @@ function routeWebSocket(request: Request, env: Env, url: URL): Response {
   return stub.fetch(request as unknown as CfRequest) as unknown as Response;
 }
 
-/** DEV/DEMO-ONLY: the self-contained 2-tab presence demo page. */
-function demoPageResponse(): Response {
-  return new Response(DEMO_PAGE_HTML, {
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-  });
-}
-
-/** DEV/DEMO-ONLY: mint a ws-ticket WITHOUT auth (gated by GANTT_RT_DEV_TICKET) so the
- *  self-contained demo can connect to the real DO with no gateway/auth/DB stack. The
- *  demo-supplied displayName is signed into the ticket so the DO can relay real names. */
-async function demoWsTicket(env: Env, url: URL): Promise<Response> {
-  const eventId = url.searchParams.get("eventId");
-  const userId = url.searchParams.get("userId");
-  const displayName = url.searchParams.get("displayName") ?? undefined;
-  if (!eventId || !userId) {
-    return new Response(JSON.stringify({ error: { code: "GANTT_DEMO_TICKET_MISSING_PARAMS" } }), {
-      status: 400,
-      headers: { "content-type": "application/json" },
-    });
-  }
-  const secret = env.WS_TICKET_SECRET ?? DEV_WS_SECRET;
-  const base = env.GANTT_RT_DO_URL_BASE ?? DEFAULT_DO_URL_BASE;
-  const expEpochMs = ticketExpiryMs(Date.now());
-  const ticket = await signWsTicket(secret, {
-    eventId,
-    userId,
-    expEpochMs,
-    ...(displayName ? { displayName } : {}),
-  });
-  const res: gantt.GanttWsTicketResponse = {
-    ticket,
-    doUrl: buildDoUrl(base, eventId),
-    expiresAt: new Date(expEpochMs).toISOString(),
-    self: { userId },
-  };
-  return new Response(JSON.stringify(res), {
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
-  });
-}
-
 const handler: ExportedHandler<Env> = {
   fetch(request, env, ctx) {
     const url = new URL(request.url);
     // Realtime WS upgrade → straight to the DO (public subdomain path).
     if (url.pathname.startsWith("/ws/") && request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
       return routeWebSocket(request as unknown as Request, env, url) as never;
-    }
-    // DEV/DEMO-ONLY surfaces (never enabled in prod/staging): the presence demo page and
-    // its unauthenticated ws-ticket issuer. Gated by GANTT_RT_DEV_TICKET so the header-
-    // trusting API guard below is never relaxed in real environments.
-    if (env.GANTT_RT_DEV_TICKET === "1") {
-      if (url.pathname === "/" || url.pathname === "/demo") return demoPageResponse() as never;
-      if (url.pathname === "/demo/ws-ticket") return demoWsTicket(env, url) as never;
     }
     // Header-trusting HTTP API is gated to service-binding callers (host "svc") only.
     // /health stays public; /ws already handled above. A public workers.dev request to
