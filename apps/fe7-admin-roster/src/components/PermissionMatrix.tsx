@@ -10,15 +10,15 @@ import { AppAccessSection } from "./AppAccessSection";
 // even non-obvious keys explain what turning them on grants. Enabled rows get a
 // success tint so on/off is legible at a glance, not only from the toggle.
 const cardStyle: React.CSSProperties = {
-  border: "1px solid var(--dub-color-border-default, #dde1e9)",
-  borderRadius: 8,
-  padding: 12,
-  marginBottom: 12,
-  background: "var(--dub-color-surface-base, #ffffff)",
+  border: "1px solid var(--dub-color-border-default)",
+  borderRadius: "var(--dub-radius-md)",
+  padding: "var(--dub-space-3)",
+  marginBottom: "var(--dub-space-3)",
+  background: "var(--dub-color-surface-base)",
 };
-const legendRowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", width: "100%" };
+const legendRowStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-2)", alignItems: "center", width: "100%" };
 const groupTitleStyle: React.CSSProperties = { fontWeight: 700, fontSize: 15 };
-const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 13 };
+const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted)", fontSize: 13 };
 // Two-column grid for the permission rows: halves the vertical scroll length vs the
 // old single full-width column. The min track width (460px) is wide enough that only
 // two columns fit a normal admin panel, so it stays a true 2-column layout instead of
@@ -27,7 +27,7 @@ const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-
 const gridStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
-  gap: 4,
+  gap: "var(--dub-space-1)",
 };
 const rowBaseStyle: React.CSSProperties = {
   display: "flex",
@@ -36,19 +36,19 @@ const rowBaseStyle: React.CSSProperties = {
   padding: "8px 8px",
   borderRadius: 6,
 };
-const rowOnStyle: React.CSSProperties = { background: "var(--dub-color-success-50, #ecfdf3)" };
+const rowOnStyle: React.CSSProperties = { background: "var(--dub-color-surface-sunken)" };
 const switchWrapStyle: React.CSSProperties = { flex: 1, minWidth: 0 };
 const labelBlockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2, minWidth: 0 };
 const labelLineStyle: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" };
-const nameStyle: React.CSSProperties = { fontWeight: 600, fontSize: 14 };
-const dangerousNameStyle: React.CSSProperties = { ...nameStyle, color: "var(--dub-color-danger-600, #d92d20)" };
-const descStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12.5, lineHeight: 1.45 };
+const nameStyle: React.CSSProperties = { fontWeight: 600, fontSize: "var(--dub-font-size-sm)" };
+const dangerousNameStyle: React.CSSProperties = { ...nameStyle, color: "var(--dub-color-danger-600)" };
+const descStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 12.5, lineHeight: 1.45 };
 const keyHintStyle: React.CSSProperties = {
-  color: "var(--dub-color-text-muted, #6f7a90)",
+  color: "var(--dub-color-text-muted)",
   fontSize: 11,
   fontFamily: "var(--dub-font-family-mono, monospace)",
 };
-const lockHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 11, fontWeight: 600 };
+const lockHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 11, fontWeight: 600 };
 const badgeWrapStyle: React.CSSProperties = { flex: "none", paddingTop: 1 };
 
 export function PermissionMatrix({

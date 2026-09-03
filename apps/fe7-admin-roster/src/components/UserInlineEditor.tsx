@@ -18,16 +18,16 @@ import { useToast } from "../hooks/useToast";
 import { errorMessage } from "../lib/errorDisplay";
 import type { OffboardOutcome } from "../lib/offboard";
 
-const sectionStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 12 };
-const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
-const metaStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
+const sectionStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" };
+const actionsStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-2)", flexWrap: "wrap" };
+const metaStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13, margin: 0 };
 const rolesHeaderStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  gap: 8,
+  gap: "var(--dub-space-2)",
 };
-const rolesTitleStyle: React.CSSProperties = { fontWeight: 600, fontSize: 14 };
+const rolesTitleStyle: React.CSSProperties = { fontWeight: 600, fontSize: "var(--dub-font-size-sm)" };
 
 export function UserInlineEditor({
   user,
@@ -138,9 +138,9 @@ export function UserInlineEditor({
       {outcome ? (
         <div
           style={{
-            border: "1px solid var(--dub-color-border-default, #d0d7de)",
-            borderRadius: 8,
-            padding: 12,
+            border: "1px solid var(--dub-color-border-default)",
+            borderRadius: "var(--dub-radius-md)",
+            padding: "var(--dub-space-3)",
             display: "flex",
             flexDirection: "column",
             gap: 6,
@@ -151,9 +151,9 @@ export function UserInlineEditor({
             オフボード結果{outcome.ok ? "" : "（一部失敗）"}
           </strong>
           {outcome.steps.map((st) => (
-            <div key={st.step} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }} data-testid={`fe7-offboard-step-${st.step}`}>
+            <div key={st.step} style={{ display: "flex", justifyContent: "space-between", gap: "var(--dub-space-2)", fontSize: 13 }} data-testid={`fe7-offboard-step-${st.step}`}>
               <span>{STEP_LABEL[st.step] ?? st.step}</span>
-              <span style={{ color: st.status === "failed" ? "var(--dub-color-fg-danger, #cf222e)" : "var(--dub-color-fg-muted, #57606a)" }}>
+              <span style={{ color: st.status === "failed" ? "var(--dub-color-danger-600)" : "var(--dub-color-text-muted)" }}>
                 {STATUS_MARK[st.status] ?? st.status}・{st.detail}
               </span>
             </div>

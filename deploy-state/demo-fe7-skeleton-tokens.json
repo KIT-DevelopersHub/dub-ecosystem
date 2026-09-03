@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe7-skeleton-tokens",
+  "worker": "dub-demo-fe7-skeleton-tokens",
+  "url": "https://dub-demo-fe7-skeleton-tokens.developershub-site.workers.dev",
+  "deployedSha": "63654cb",
+  "branch": "HEAD",
+  "actor": "Claude (kota)",
+  "markers": ["fe7-users-skeleton","fe7-user-detail-skeleton"],
+  "live": true,
+  "verifiedAt": "2026-09-03T15:26:32Z",
+  "updatedAt": "2026-09-03T15:26:32Z",
+  "note": "fe7 skeleton UI + @dub/tokens migration (dark-safe)"
+}
