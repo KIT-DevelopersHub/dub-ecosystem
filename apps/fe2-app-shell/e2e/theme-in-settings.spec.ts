@@ -30,9 +30,12 @@ test("theme lives in 設定 → カラー設定 dialog; dark applies app-wide an
   // Pick ダーク → the theme root flips to data-theme="dark" (recolours every app) — live.
   await page.getByTestId("fe2-theme-option-dark").click();
   await expect(page.locator(root)).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByTestId("fe2-theme-option-dark")).toHaveAttribute("aria-selected", "true");
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("dub.ui.theme")))
     .toBe("dark");
+  // Let the segmented pill finish gliding to the new row before the deliverable shot.
+  await page.waitForTimeout(400);
   await page.screenshot({ path: "e2e/.output/color-dialog-dark.png" });
 
   // Close the dialog; the dark theme stays applied.
