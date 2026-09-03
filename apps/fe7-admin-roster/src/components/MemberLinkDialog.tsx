@@ -95,8 +95,8 @@ export function MemberLinkDialog({
         </DialogActions>
       }
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <p style={{ color: "var(--dub-color-fg-muted, #57606a)", margin: 0, fontSize: 13 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" }}>
+        <p style={{ color: "var(--dub-color-text-muted)", margin: 0, fontSize: 13 }}>
           このメールアドレスに対応する運営メンバーを選んで「紐付ける」を押してください（自動では紐付けません）。既に別のアカウントに紐付いているメンバーは選べません。
         </p>
         <TextField id="fe7-member-link-search" value={search} onChange={setSearch} placeholder="氏名・担当で絞り込み" testId="fe7-member-link-search" />
@@ -106,11 +106,11 @@ export function MemberLinkDialog({
         ) : overview.isError ? (
           <ErrorState error={displayError(overview.error)} onRetry={() => overview.refetch()} testId="fe7-member-link-error" />
         ) : ranked.length === 0 ? (
-          <p style={{ color: "var(--dub-color-fg-muted, #57606a)", margin: 0 }} data-testid="fe7-member-link-empty">
+          <p style={{ color: "var(--dub-color-text-muted)", margin: 0 }} data-testid="fe7-member-link-empty">
             該当する運営メンバーがいません。
           </p>
         ) : (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4, maxHeight: 320, overflowY: "auto" }} data-testid="fe7-member-link-candidates">
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--dub-space-1)", maxHeight: 320, overflowY: "auto" }} data-testid="fe7-member-link-candidates">
             {ranked.map(({ member: m, taken, candidate }) => (
               <li key={m.id}>
                 <button
@@ -124,11 +124,11 @@ export function MemberLinkDialog({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    gap: 8,
+                    gap: "var(--dub-space-2)",
                     padding: "8px 10px",
-                    border: `1px solid ${selectedId === m.id ? "var(--dub-color-accent-fg, #0969da)" : "var(--dub-color-border, #d0d7de)"}`,
+                    border: `1px solid ${selectedId === m.id ? "var(--dub-color-text-link)" : "var(--dub-color-border-default)"}`,
                     borderRadius: 6,
-                    background: selectedId === m.id ? "var(--dub-color-accent-subtle, #ddf4ff)" : "transparent",
+                    background: selectedId === m.id ? "var(--dub-color-surface-sunken)" : "transparent",
                     cursor: taken ? "not-allowed" : "pointer",
                     opacity: taken ? 0.55 : 1,
                     textAlign: "left",
@@ -137,11 +137,11 @@ export function MemberLinkDialog({
                 >
                   <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                     <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
-                    <span style={{ fontSize: 12, color: "var(--dub-color-fg-muted, #57606a)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {m.roleTitle ?? "担当未設定"}
                     </span>
                   </span>
-                  <span style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
+                  <span style={{ display: "inline-flex", gap: "var(--dub-space-1)", flexShrink: 0 }}>
                     {candidate && !taken ? <Tag tone="success">候補</Tag> : null}
                     {taken ? <Tag tone="neutral">紐付け済み</Tag> : null}
                   </span>

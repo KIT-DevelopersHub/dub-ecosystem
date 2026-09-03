@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { identity } from "@dub/types";
-import { PageHeader, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
+import { PageHeader, Card, TextField, Button, ConfirmDialog, FormField, SkeletonList } from "@dub/ui";
 import { PermissionMatrix } from "./PermissionMatrix";
 import { useRoles, usePermissionCatalog, useCreateRole, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
@@ -67,7 +67,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
         {catalog.data ? (
           <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} lockedKeys={lockedKeys} />
         ) : (
-          <p>権限カタログを読み込み中…</p>
+          <SkeletonList rows={5} testId="fe7-role-catalog-skeleton" />
         )}
         {!readOnly ? (
           <Button variant="primary" onClick={() => setConfirmSave(true)} disabled={!name.trim()} testId="fe7-role-save">保存</Button>

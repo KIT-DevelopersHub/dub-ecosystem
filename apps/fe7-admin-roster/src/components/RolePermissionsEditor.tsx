@@ -6,7 +6,7 @@
 // this component only edits an already-loaded role.
 import { useState } from "react";
 import type { identity } from "@dub/types";
-import { TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
+import { TextField, Button, ConfirmDialog, FormField, SkeletonList } from "@dub/ui";
 import { PermissionMatrix } from "./PermissionMatrix";
 import { usePermissionCatalog, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
@@ -14,8 +14,8 @@ import { useToast } from "../hooks/useToast";
 import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
 import { errorMessage } from "../lib/errorDisplay";
 
-const noteStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, marginTop: 8 };
-const actionsStyle: React.CSSProperties = { marginTop: 12 };
+const noteStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13, marginTop: "var(--dub-space-2)" };
+const actionsStyle: React.CSSProperties = { marginTop: "var(--dub-space-3)" };
 
 export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   const catalog = usePermissionCatalog();
@@ -65,7 +65,7 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
       {catalog.data ? (
         <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
       ) : (
-        <p>権限カタログを読み込み中…</p>
+        <SkeletonList rows={5} testId={`${ns}-catalog-skeleton`} />
       )}
       {readOnly ? (
         <p style={noteStyle}>編集権限がありません。</p>

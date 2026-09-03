@@ -2,7 +2,7 @@
 // the roster right-pane (UserListPage) — design "1画面で完結". This standalone page is
 // kept only so an existing `/admin/users/:id` deep link still resolves; it reuses the
 // same UserInlineEditor so behaviour is identical to the inline pane.
-import { PageHeader, ErrorState, EmptyState } from "@dub/ui";
+import { PageHeader, ErrorState, EmptyState, SkeletonList } from "@dub/ui";
 import { UserStatusBadge } from "./UserStatusBadge";
 import { UserInlineEditor } from "./UserInlineEditor";
 import { useUser } from "../hooks/useRosterApi";
@@ -24,7 +24,8 @@ export function UserDetailPage({
     if (p.kind === "empty") return <EmptyState title={p.message} testId="fe7-user-notfound" />;
     return <ErrorState error={displayError(user.error)} onRetry={() => user.refetch()} testId="fe7-user-error" />;
   }
-  if (!user.data) return <p>読み込み中…</p>;
+  // FE1 §5 loading principle: bare text ではなくスケルトンで「読み込み中」を示す。
+  if (!user.data) return <SkeletonList rows={5} testId="fe7-user-detail-skeleton" />;
 
   return (
     <div>

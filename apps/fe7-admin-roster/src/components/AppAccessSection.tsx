@@ -18,53 +18,53 @@ import {
 // a shared domain key — now has its OWN row, so an admin can grant/revoke each app to a
 // role individually. Purely presentational; all set logic lives in lib/appAccessMatrix.
 const cardStyle: React.CSSProperties = {
-  border: "1px solid var(--dub-color-border-default, #dde1e9)",
-  borderRadius: 8,
-  padding: 12,
-  marginBottom: 12,
-  background: "var(--dub-color-surface-base, #ffffff)",
+  border: "1px solid var(--dub-color-border-default)",
+  borderRadius: "var(--dub-radius-md)",
+  padding: "var(--dub-space-3)",
+  marginBottom: "var(--dub-space-3)",
+  background: "var(--dub-color-surface-base)",
 };
-const legendRowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", width: "100%" };
+const legendRowStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-2)", alignItems: "center", width: "100%" };
 const groupTitleStyle: React.CSSProperties = { fontWeight: 700, fontSize: 15 };
-const groupHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12.5, marginTop: 2, lineHeight: 1.45 };
-const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 13 };
+const groupHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 12.5, marginTop: 2, lineHeight: 1.45 };
+const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted)", fontSize: 13 };
 
 const rowBaseStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 8,
+  gap: "var(--dub-space-2)",
   padding: "10px 10px",
   borderRadius: 6,
   border: "1px solid transparent",
 };
 const rowOnStyle: React.CSSProperties = {
-  background: "var(--dub-color-success-50, #ecfdf3)",
-  border: "1px solid var(--dub-color-success-200, #abefc6)",
+  background: "var(--dub-color-surface-sunken)",
+  border: "1px solid var(--dub-color-success-200)",
 };
 const rowHeadStyle: React.CSSProperties = { display: "flex", gap: 10, alignItems: "center" };
 const switchWrapStyle: React.CSSProperties = { flex: 1, minWidth: 0 };
-const nameStyle: React.CSSProperties = { fontWeight: 600, fontSize: 14 };
+const nameStyle: React.CSSProperties = { fontWeight: 600, fontSize: "var(--dub-font-size-sm)" };
 const keyHintStyle: React.CSSProperties = {
-  color: "var(--dub-color-text-muted, #6f7a90)",
+  color: "var(--dub-color-text-muted)",
   fontSize: 11,
   fontFamily: "var(--dub-font-family-mono, monospace)",
 };
-const openHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 11 };
+const openHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 11 };
 const badgeWrapStyle: React.CSSProperties = { flex: "none" };
 // Nested (indented) level selector — visually reads as a child of the enable toggle.
 const nestStyle: React.CSSProperties = {
   marginLeft: 46,
-  paddingLeft: 12,
-  borderLeft: "2px solid var(--dub-color-border-default, #dde1e9)",
+  paddingLeft: "var(--dub-space-3)",
+  borderLeft: "2px solid var(--dub-color-border-default)",
   display: "flex",
   flexDirection: "column",
-  gap: 4,
+  gap: "var(--dub-space-1)",
 };
-const nestLabelStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12 };
+const nestLabelStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)" };
 const gridStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
-  gap: 4,
+  gap: "var(--dub-space-1)",
 };
 
 const LEVEL_OPTIONS: { value: AppAccessLevel; label: string }[] = [

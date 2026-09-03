@@ -15,11 +15,11 @@ import type { RosterUser } from "../contracts/pending";
 
 const cellStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" };
 const chipsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 };
-const emptyStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13 };
-const panelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 8, minWidth: 200 };
+const emptyStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13 };
+const panelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2)", minWidth: 200 };
 const panelTitleStyle: React.CSSProperties = { fontWeight: 600, fontSize: 13, marginBottom: 2 };
-const panelHintStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 12, margin: 0 };
-const rowStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 };
+const panelHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)", margin: 0 };
+const rowStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--dub-space-2)" };
 
 /** System roles get a distinct tone so admin/organizer read at a glance. */
 function roleTone(name: string): BadgeTone {

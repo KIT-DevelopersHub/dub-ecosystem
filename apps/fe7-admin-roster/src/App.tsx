@@ -57,7 +57,7 @@ function Sidebar({ navigate }: { navigate: (p: string) => void }) {
   // the matching route's requiredPermissions.
   const permsOf = (path: string) => routes.find((r) => r.path === path)?.requiredPermissions ?? [];
   return (
-    <nav style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180 }}>
+    <nav style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-2)", minWidth: 180 }}>
       {nav
         .filter((n) => canAll(permsOf(n.path)))
         .sort((a, b) => a.order - b.order)
@@ -103,7 +103,7 @@ export function App() {
           <div style={{ padding: "24px 24px 0", fontFamily: "var(--dub-font-family-sans)" }} data-testid="fe7-shell-top">
             <MailRateLimitBanner />
           </div>
-          <div style={{ display: "flex", gap: 24, padding: 24, fontFamily: "var(--dub-font-family-sans)" }}>
+          <div style={{ display: "flex", gap: "var(--dub-space-6)", padding: "var(--dub-space-6)", fontFamily: "var(--dub-font-family-sans)" }}>
             <Sidebar navigate={setPath} />
             <main style={{ flex: 1 }} data-testid="fe7-main">
               {Body && match ? (
