@@ -108,9 +108,19 @@
   flex-shrink: 0;
   color: var(--dub-color-text-secondary);
 }
+/* Item label. flex:1 lets it fill the row, but without a nowrap guard a long CJK
+   label (e.g. "キーボードショートカット") wrapped mid-word and orphaned a single
+   trailing character ("ト") on a second line. Keep every item to one line — the
+   panel is width:auto (min 220px, max viewport) so it widens to fit the widest
+   label — and ellipsize only in the extreme case it still can't fit. Mirrors the
+   .triggerLabel guard above. */
 .itemLabel {
   flex: 1;
+  min-width: 0;
   line-height: var(--dub-font-line-height-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Text-labelled trigger (dub-menu-trigger-label). The label sits between the
