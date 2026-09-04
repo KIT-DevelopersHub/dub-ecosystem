@@ -21,6 +21,10 @@ import {
   type TimelineBar,
   ROW_HEIGHT,
   BAR_HEIGHT,
+  HEADER_TOP,
+  HEADER_BOTTOM,
+  HEADER_H,
+  DEFAULT_LEFT_W,
   bottomTicks,
   canvasWidth,
   dayAtX,
@@ -40,11 +44,7 @@ import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import { visibleTreeRows } from "../domain/gantt-layout";
 import styles from "../styles/app.module.css";
 
-const HEADER_TOP = 28;
-const HEADER_BOTTOM = 26;
-const HEADER_H = HEADER_TOP + HEADER_BOTTOM;
 const CLICK_THRESHOLD_PX = 4;
-const DEFAULT_LEFT_W = 264;
 const MIN_LEFT_W = 176;
 const MAX_LEFT_W = 460;
 

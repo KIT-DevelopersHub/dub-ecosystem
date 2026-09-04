@@ -11,6 +11,15 @@ import type { gantt } from "@dub/types";
 export const MS_PER_DAY = 86_400_000;
 export const ROW_HEIGHT = 44;
 export const BAR_HEIGHT = 26;
+// Two-tier axis header geometry (top = month band, bottom = day/week ticks) and the
+// default width of the sticky left task-name column. Centralised here so BOTH the live
+// GanttView and its loading GanttSkeleton read the exact same numbers — the skeleton's
+// header height, row pitch and left column therefore line up pixel-for-pixel with the
+// real chart and cannot drift apart when one is edited.
+export const HEADER_TOP = 28;
+export const HEADER_BOTTOM = 26;
+export const HEADER_H = HEADER_TOP + HEADER_BOTTOM;
+export const DEFAULT_LEFT_W = 264;
 
 export type Granularity = gantt.GanttZoom; // "day" | "week" | "month"
 

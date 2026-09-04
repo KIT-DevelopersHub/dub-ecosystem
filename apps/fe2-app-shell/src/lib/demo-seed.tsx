@@ -2047,6 +2047,35 @@ function createMembersStore() {
   return { handle };
 }
 
+/** How long (ms) to hold the gantt READ endpoints so a reviewer can actually SEE the
+ *  ガント loading skeleton — the seeded data otherwise resolves in ~0ms and the skeleton
+ *  flashes by ("読み込みが早すぎてスケルトンが見えない"). DEMO-ONLY: this is read only by
+ *  the VITE_DEMO transport (createDemoFetch), so production / live builds are unaffected.
+ *
+ *  URL controls (append to the demo URL):
+ *    ?skeleton=1  → hold the gantt reads effectively forever so the skeleton stays on
+ *                   screen for as long as you want to inspect it.
+ *    ?slow        → hold them ~4s (skeleton shows, then real data loads).
+ *    ?slow=<ms>   → hold them <ms> (capped at 10 min).
+ *  Absent → 0 (normal instant demo). Pure + exported for unit testing. */
+export function ganttSkeletonDelayMs(search: string): number {
+  const HOLD_FOREVER = 600_000; // 10 min — long enough to inspect; still bounded
+  const params = new URLSearchParams(search || "");
+  if (params.has("skeleton")) {
+    const v = (params.get("skeleton") ?? "").toLowerCase();
+    if (v === "" || v === "1" || v === "true" || v === "gantt" || v === "on") return HOLD_FOREVER;
+    return 0; // ?skeleton=0 / ?skeleton=off → disabled
+  }
+  if (params.has("slow")) {
+    const raw = params.get("slow") ?? "";
+    if (raw === "") return 4000; // bare ?slow → a comfortable 4s
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return 4000;
+    return Math.min(n, HOLD_FOREVER);
+  }
+  return 0;
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -2093,10 +2122,22 @@ export function createDemoFetch(): typeof fetch {
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore();
 
+  // Demo-only skeleton preview: hold the gantt READ endpoints per the ?slow / ?skeleton
+  // URL controls so the ガント loading skeleton is actually visible. Read once at transport
+  // creation (a reload with a changed param re-reads it). 0 = off = instant (default).
+  const ganttHoldMs = ganttSkeletonDelayMs(
+    typeof location !== "undefined" ? location.search : "",
+  );
+
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href);
     const method = (init?.method ?? "GET").toUpperCase();
+    // Artificially delay the gantt chart read so the skeleton stays on screen (demo only).
+    // Gated to the gantt GET so other demo screens (dashboard/mail/…) stay instant.
+    if (ganttHoldMs > 0 && method === "GET" && url.pathname === "/api/v1/gantt") {
+      await new Promise((resolve) => setTimeout(resolve, ganttHoldMs));
+    }
     // Parse the JSON body once for the roster store's mutation handlers.
     let parsedBody: unknown;
     if (typeof init?.body === "string" && init.body.length > 0) {
