@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ColumnDef, DataTableProps, SortState } from "../types";
+import { useVirtualRows } from "./useVirtualRows";
 import styles from "./DataTable.module.css";
 import { cx } from "../utils/cx";
 import { Icon } from "./Icon";
@@ -178,10 +179,68 @@ export function DataTable<Row>({
   onRowClick,
   selection,
   columnHiding,
+  virtualize,
   testId,
 }: DataTableProps<Row>) {
   const { isVisible, toggle, showAll, reset } = useColumnVisibility(columns, columnHiding?.storageKey);
   const visibleColumns = columnHiding ? columns.filter(isVisible) : columns;
+
+  // ── Row windowing (opt-in via `virtualize`) ──────────────────────────────
+  // Only kicks in past `threshold` rows; below it the table renders exactly as
+  // before (no scroll container). The hook self-disables where the viewport can't
+  // be measured (SSR/tests) → every row renders, so nothing becomes untestable.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const getScrollElement = useCallback(() => scrollRef.current, []);
+  const vThreshold = virtualize?.threshold ?? 100;
+  const estimateRowHeight = virtualize?.estimateRowHeight ?? 48;
+  const maxHeight = virtualize?.maxHeight ?? 560;
+  // Window once the row count REACHES the threshold (>=), not strictly exceeds it.
+  // The roster's first page is exactly DEFAULT_LIMIT rows, so a strict `>` at
+  // threshold:50 could never engage on a 50-row page (50 > 50 is false); `>=` makes
+  // a full 50-row page window as intended.
+  const wantVirtual = !!virtualize && !loading && rows.length >= vThreshold;
+  const virtual = useVirtualRows({
+    count: rows.length,
+    estimateRowHeight,
+    overscan: virtualize?.overscan ?? 8,
+    getScrollElement,
+    enabled: wantVirtual,
+    initialViewport: maxHeight,
+  });
+  const windowed = wantVirtual && virtual.active;
+  const colSpan = visibleColumns.length + (selection ? 1 : 0);
+
+  const renderRow = (row: Row, index: number) => {
+    const key = rowKey(row);
+    return (
+      <tr
+        key={key}
+        ref={windowed ? (el) => virtual.measureElement(index, el) : undefined}
+        className={cx(styles.tr, onRowClick && styles.clickable)}
+        onClick={onRowClick ? () => onRowClick(row) : undefined}
+      >
+        {selection && (
+          <td className={cx(styles.checkCell)} onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              aria-label="行を選択"
+              checked={selection.selectedKeys.includes(key)}
+              onChange={() => toggleOne(key)}
+            />
+          </td>
+        )}
+        {visibleColumns.map((col) => (
+          <td
+            key={col.key}
+            className={cx(styles.td, col.noWrap && styles.noWrap)}
+            style={{ minWidth: col.minWidth, textAlign: col.align ?? "left" }}
+          >
+            {col.cell(row)}
+          </td>
+        ))}
+      </tr>
+    );
+  };
 
   const picker = columnHiding ? (
     <ColumnPicker
@@ -224,9 +283,14 @@ export function DataTable<Row>({
   return (
     <>
       {picker}
-      <div className={cx(styles.wrap)} data-testid={testId}>
+      <div
+        ref={scrollRef}
+        className={cx(styles.wrap, wantVirtual && styles.scroll)}
+        style={wantVirtual ? { maxHeight } : undefined}
+        data-testid={testId}
+      >
         <table className={cx(styles.table)}>
-          <thead>
+          <thead className={cx(wantVirtual && styles.stickyHead)}>
             <tr>
               {selection && (
                 <th className={cx(styles.checkCell)}>
@@ -270,41 +334,28 @@ export function DataTable<Row>({
           <tbody>
             {loading ? (
               <tr>
-                <td className={cx(styles.loadingCell)} colSpan={visibleColumns.length + (selection ? 1 : 0)}>
+                <td className={cx(styles.loadingCell)} colSpan={colSpan}>
                   <Spinner />
                 </td>
               </tr>
-            ) : (
-              rows.map((row) => {
-                const key = rowKey(row);
-                return (
-                  <tr
-                    key={key}
-                    className={cx(styles.tr, onRowClick && styles.clickable)}
-                    onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  >
-                    {selection && (
-                      <td className={cx(styles.checkCell)} onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          aria-label="行を選択"
-                          checked={selection.selectedKeys.includes(key)}
-                          onChange={() => toggleOne(key)}
-                        />
-                      </td>
-                    )}
-                    {visibleColumns.map((col) => (
-                      <td
-                        key={col.key}
-                        className={cx(styles.td, col.noWrap && styles.noWrap)}
-                        style={{ minWidth: col.minWidth, textAlign: col.align ?? "left" }}
-                      >
-                        {col.cell(row)}
-                      </td>
-                    ))}
+            ) : windowed ? (
+              <>
+                {virtual.paddingTop > 0 && (
+                  <tr aria-hidden="true" style={{ height: virtual.paddingTop }}>
+                    <td colSpan={colSpan} style={{ padding: 0, border: 0 }} />
                   </tr>
-                );
-              })
+                )}
+                {rows
+                  .slice(virtual.startIndex, virtual.endIndex + 1)
+                  .map((row, i) => renderRow(row, virtual.startIndex + i))}
+                {virtual.paddingBottom > 0 && (
+                  <tr aria-hidden="true" style={{ height: virtual.paddingBottom }}>
+                    <td colSpan={colSpan} style={{ padding: 0, border: 0 }} />
+                  </tr>
+                )}
+              </>
+            ) : (
+              rows.map((row, index) => renderRow(row, index))
             )}
           </tbody>
         </table>

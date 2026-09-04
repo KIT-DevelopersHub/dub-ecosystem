@@ -17,10 +17,18 @@ export interface UserListFilters {
   limit?: number;
 }
 
+// Request a full page (identity-roster clamps to MAX_LIMIT=200) rather than leaving the
+// backend DEFAULT_LIMIT=50. Two reasons: (1) so a 50人規模の org loads its whole roster in
+// one page and the DataTable's 仮想スクロール (>= threshold 50) actually engages — with the
+// default 50-row page it would sit exactly at the boundary; (2) fewer LoadMore round-trips.
+// Windowing keeps the DOM bounded regardless of how many rows are loaded.
+const ROSTER_PAGE_LIMIT = 200;
+
 export const DEFAULT_USER_FILTERS: UserListFilters = {
   search: "",
   status: "all",
   roleKey: null,
+  limit: ROSTER_PAGE_LIMIT,
 };
 
 export type ListUsersParams = Record<string, string | number>;
