@@ -100,6 +100,26 @@ describe("AppShellLayout", () => {
     expect(out.endsWith("@developershub.jp")).toBe(true);
   });
 
+  it("surfaces theme via a single カラー設定 menu item that opens a dialog (not bare rows)", async () => {
+    renderShell(vi.fn());
+    // No standalone header theme control, and the three theme rows no longer sit directly
+    // in the ⚙ menu — they moved behind one カラー設定 entry → dialog.
+    expect(screen.queryByTestId("fe2-theme-toggle-trigger")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-theme-option-dark")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-color-settings-open")).not.toBeInTheDocument();
+    // Open 設定 → カラー設定 is present (a single row), the raw theme options are not.
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
+    const colorItem = screen.getByTestId("fe2-color-settings-open");
+    expect(colorItem).toHaveTextContent("カラー設定");
+    expect(screen.queryByTestId("fe2-theme-option-dark")).not.toBeInTheDocument();
+    // Clicking it opens the カラー設定 dialog with the theme segmented control inside.
+    await userEvent.click(colorItem);
+    expect(await screen.findByTestId("fe2-color-settings")).toBeInTheDocument();
+    // Selecting a theme in the dialog drives UiStore.setTheme (全アプリ波及 + localStorage永続の入口).
+    await userEvent.click(screen.getByTestId("fe2-theme-option-dark"));
+    expect(useUiStore.getState().theme).toBe("dark");
+  });
+
   it("renders header widget slot and routed content; tools live behind the launcher", async () => {
     renderShell();
     expect(screen.getByTestId("header-widget")).toBeInTheDocument();
@@ -163,13 +183,18 @@ describe("AppShellLayout", () => {
       </QueryClientProvider>,
     );
     await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
-    // Both items present; logout is danger-toned and ordered AFTER account settings.
+    // Order: アカウント設定, カラー設定 (opens the dialog), then logout last.
+    // Logout is danger-toned and ordered AFTER account + color settings.
     const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
-    expect(items).toEqual(["fe2-account-settings-open", "fe2-logout"]);
+    expect(items).toEqual([
+      "fe2-account-settings-open",
+      "fe2-color-settings-open",
+      "fe2-logout",
+    ]);
     const logout = screen.getByTestId("fe2-logout");
     expect(logout).toHaveAttribute("data-tone", "danger");
-    // A separator divides the safe settings from the 離脱 action.
-    expect(screen.getByRole("separator")).toBeInTheDocument();
+    // One separator: above the 離脱 (logout) action, set apart from the safe settings above.
+    expect(screen.getAllByRole("separator")).toHaveLength(1);
     await userEvent.click(logout);
     expect(onLogout).toHaveBeenCalledTimes(1);
   });

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe2-color-dialog",
+  "worker": "dub-demo-fe2-color-dialog",
+  "url": "https://dub-demo-fe2-color-dialog.developershub-site.workers.dev",
+  "deployedSha": "db238fb",
+  "branch": "feat/fe2-darkmode-myday",
+  "actor": "Claude (stg-unwedge)",
+  "markers": ["fe2-color-settings-open","fe2-color-theme-segmented"],
+  "live": true,
+  "verifiedAt": "2026-09-03T16:20:06Z",
+  "updatedAt": "2026-09-03T16:20:06Z",
+  "note": "設定→カラー設定ダイアログ(テーマsystem/light/dark)"
+}
