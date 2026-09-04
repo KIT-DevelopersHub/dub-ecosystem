@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   PageHeader,
   DataTable,
@@ -15,7 +15,9 @@ import {
   Spinner,
   type ColumnDef,
   type SelectOption,
+  type SortState,
 } from "@dub/ui";
+import { BulkActionBar } from "./BulkActionBar";
 import { UserStatusBadge } from "./UserStatusBadge";
 import { UserInlineEditor } from "./UserInlineEditor";
 import { InlineRoleEditor } from "./InlineRoleEditor";
@@ -36,6 +38,8 @@ import { usePermissions } from "../hooks/usePermissions";
 import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
 import { displayError } from "../lib/errorDisplay";
+import { sortUsers } from "../lib/sortUsers";
+import { readRosterViewFromUrl, writeRosterViewToUrl } from "../lib/urlFilters";
 import type { RosterUser } from "../contracts/pending";
 
 const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
@@ -51,6 +55,7 @@ const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems:
 const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
 const noticeTitleStyle: React.CSSProperties = { fontWeight: 600 };
 const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
+const summaryStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: "12px 0 8px", fontWeight: 500 };
 
 // Master (table) + detail (right pane) — the roster and the selected user's management
 // surface sit side by side on ONE screen. Wraps under the table on narrow viewports.
@@ -84,8 +89,12 @@ function SourceBadge({ source, testId }: { source: RosterUser["source"]; testId?
 }
 
 export function UserListPage() {
-  const [filters, setFilters] = useState<UserListFilters>(DEFAULT_USER_FILTERS);
+  // ⑧ Seed filters + sort from the URL so a shared/bookmarked view restores on load.
+  const initialView = useMemo(() => readRosterViewFromUrl(), []);
+  const [filters, setFilters] = useState<UserListFilters>({ ...DEFAULT_USER_FILTERS, ...initialView.filters });
+  const [sort, setSort] = useState<SortState | undefined>(initialView.sort);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -93,6 +102,13 @@ export function UserListPage() {
   const { can } = usePermissions();
   const { me } = useRosterContext();
   const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
+  // ⑤ Unfiltered total for the「X件中Y件」summary (cheap: cached, one page in demo).
+  const totalQuery = useUsers(DEFAULT_USER_FILTERS);
+
+  // ⑧ Mirror the active filter + sort into the URL query (replace, not push).
+  useEffect(() => {
+    writeRosterViewToUrl({ filters: { search: filters.search, status: filters.status }, sort });
+  }, [filters.search, filters.status, sort]);
   const rolesQuery = useRoles();
   const sync = useSyncEmailRouting();
   const preview = usePreviewEmailRouting();
@@ -129,6 +145,17 @@ export function UserListPage() {
   }
 
   const items = query.data?.items ?? [];
+  // ⑤ Client-side sort of the loaded rows (demo returns the full set in one page).
+  const sortedItems = useMemo(() => sortUsers(items, sort), [items, sort]);
+  // ⑤ Count summary: total (unfiltered) vs. currently shown (filtered) rows.
+  const shownCount = items.length;
+  const totalCount = totalQuery.data?.items.length ?? shownCount;
+  const isNarrowed = filters.search.trim() !== "" || filters.status !== "all";
+  const countSummary = isNarrowed ? `${totalCount}件中 ${shownCount}件を表示` : `全 ${totalCount}件`;
+  // Selection acts on the currently-loaded rows; drop keys that left the filter.
+  const visibleIds = new Set(items.map((u) => u.id));
+  const effectiveSelected = selectedIds.filter((id) => visibleIds.has(id));
+  const canBulk = can("identity:admin");
   // Resolve the selection against the freshest list so the pane reflects saved edits
   // and closes itself if the selected user drops out of the current filter.
   const selectedUser = items.find((u) => u.id === selectedId) ?? null;
@@ -137,6 +164,7 @@ export function UserListPage() {
     {
       key: "name",
       header: "名前",
+      sortable: true,
       cell: (u) => (
         <span data-testid={`fe7-users-row-${u.id}`}>
           <button
@@ -151,8 +179,8 @@ export function UserListPage() {
         </span>
       ),
     },
-    { key: "email", header: "メール", cell: (u) => u.email },
-    { key: "source", header: "種別", cell: (u) => <SourceBadge source={u.source} testId={`fe7-users-source-${u.id}`} /> },
+    { key: "email", header: "メール", sortable: true, cell: (u) => u.email },
+    { key: "source", header: "種別", sortable: true, cell: (u) => <SourceBadge source={u.source} testId={`fe7-users-source-${u.id}`} /> },
     {
       key: "member",
       header: "運営メンバー",
@@ -191,7 +219,7 @@ export function UserListPage() {
       header: "ロール",
       cell: (u) => <InlineRoleEditor user={u} roles={roles} currentUserId={currentUserId} canAdmin={canManageRoles} />,
     },
-    { key: "status", header: "状態", cell: (u) => <UserStatusBadge status={u.status} /> },
+    { key: "status", header: "状態", sortable: true, cell: (u) => <UserStatusBadge status={u.status} /> },
   ];
 
   return (
@@ -247,6 +275,7 @@ export function UserListPage() {
             value={filters.search}
             onChange={(v) => {
               setCursor(undefined);
+              setSelectedIds([]);
               setFilters((f) => ({ ...f, search: v }));
             }}
             testId="fe7-users-search"
@@ -259,6 +288,7 @@ export function UserListPage() {
             options={STATUS_OPTIONS}
             onChange={(v) => {
               setCursor(undefined);
+              setSelectedIds([]);
               setFilters((f) => ({ ...f, status: v }));
             }}
             testId="fe7-users-status-filter"
@@ -273,10 +303,27 @@ export function UserListPage() {
       ) : (
         <div style={splitStyle}>
           <div style={tableColStyle}>
+            <p style={summaryStyle} data-testid="fe7-users-count">
+              {countSummary}
+              {effectiveSelected.length > 0 ? `・${effectiveSelected.length}件を選択中` : ""}
+            </p>
+            {canBulk && effectiveSelected.length > 0 ? (
+              <BulkActionBar
+                selectedIds={effectiveSelected}
+                roles={roles}
+                canSetStatus={canBulk}
+                canAssignRole={canManageRoles}
+                onClear={() => setSelectedIds([])}
+                testId="fe7-users-bulk"
+              />
+            ) : null}
             <DataTable
               columns={columns}
-              rows={items}
+              rows={sortedItems}
               rowKey={(u) => u.id}
+              sort={sort}
+              onSortChange={setSort}
+              selection={canBulk ? { selectedKeys: selectedIds, onChange: setSelectedIds } : undefined}
               onRowClick={(u) => setSelectedId(u.id)}
               testId="fe7-users-table"
             />

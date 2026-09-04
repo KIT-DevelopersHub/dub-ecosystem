@@ -49,6 +49,16 @@ describe("MessageItem authorization UI", () => {
     expect(screen.queryByTestId("fe6-timeline-delete")).toBeNull();
   });
 
+  it("renders a system post (authorId null) as システム without crashing", () => {
+    // chat-service `kind: "system"` posts carry authorId: null. A null author once
+    // reached <Avatar name={null}> → initials(null).trim() → crashed the whole screen.
+    render(<MessageItem message={msg({ authorId: null, body: "Channel #general created." })} currentUserId={ME} canModerate={false} />);
+    expect(screen.getByText("システム")).toBeInTheDocument();
+    expect(screen.getByTestId("fe6-timeline-body")).toHaveTextContent("Channel #general created.");
+    // a system post is not authored by the viewer → no edit/delete affordances
+    expect(screen.queryByTestId("fe6-timeline-edit")).toBeNull();
+  });
+
   it("renders a mention with the resolved display name", () => {
     render(
       <MessageItem

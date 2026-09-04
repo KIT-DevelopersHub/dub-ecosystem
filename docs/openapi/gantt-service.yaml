@@ -139,6 +139,40 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /gantt/ws-ticket:
+    get:
+      operationId: getGanttWsTicket
+      summary: Issue a short-lived ws-ticket to open the realtime WS (DO-direct)
+      tags:
+        - gantt
+      description: |-
+        Realtime gantt sync (Durable Object + WebSocket). Returns a short-lived (60s) HMAC
+        ws-ticket plus the absolute DO-direct `doUrl` (gateway-bypassing) the browser opens
+        with `?ticket=`. Subscribe follows read access: event:read is enforced here, and the
+        GanttRoom DO independently re-verifies the ticket + Origin at connect time. The DO
+        fans out delta events (row.moved / chart.invalidated) to every connected viewer.
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ws-ticket + DO-direct URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GanttWsTicketResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /gantt/rows/{taskId}:
     patch:
       operationId: patchGanttRow
@@ -180,6 +214,24 @@ paths:
           $ref: '#/components/responses/Conflict'
 components:
   schemas:
+    GanttWsTicketResponse:
+      type: object
+      description: |-
+        GET /gantt/ws-ticket response. `ticket` is a short-lived HMAC token the GanttRoom DO
+        verifies before accepting the WS; `doUrl` is the absolute DO-direct URL (gateway
+        bypassed) opened with `?ticket=`.
+      required:
+        - ticket
+        - doUrl
+        - expiresAt
+      properties:
+        ticket:
+          type: string
+        doUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
     Error:
       type: object
       description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.
