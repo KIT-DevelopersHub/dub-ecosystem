@@ -194,7 +194,11 @@ export function DataTable<Row>({
   const vThreshold = virtualize?.threshold ?? 100;
   const estimateRowHeight = virtualize?.estimateRowHeight ?? 48;
   const maxHeight = virtualize?.maxHeight ?? 560;
-  const wantVirtual = !!virtualize && !loading && rows.length > vThreshold;
+  // Window once the row count REACHES the threshold (>=), not strictly exceeds it.
+  // The roster's first page is exactly DEFAULT_LIMIT rows, so a strict `>` at
+  // threshold:50 could never engage on a 50-row page (50 > 50 is false); `>=` makes
+  // a full 50-row page window as intended.
+  const wantVirtual = !!virtualize && !loading && rows.length >= vThreshold;
   const virtual = useVirtualRows({
     count: rows.length,
     estimateRowHeight,

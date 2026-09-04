@@ -199,6 +199,38 @@ describe("DataTable", () => {
       const wrap = screen.getByTestId("vt");
       expect(wrap.style.maxHeight).toBe("");
     });
+
+    // Off-by-one guard: the roster's first page is exactly DEFAULT_LIMIT (50) rows, so
+    // windowing MUST engage AT the threshold, not only strictly past it. A `>` at
+    // threshold:50 left a full 50-row page un-windowed forever (50 > 50 is false).
+    it("engages the scroll viewport AT exactly the threshold row count (>= boundary)", () => {
+      const fifty: Row[] = Array.from({ length: 50 }, (_, i) => ({ id: String(i), name: `User ${i}` }));
+      render(
+        <DataTable
+          columns={columns}
+          rows={fifty}
+          rowKey={(r) => r.id}
+          testId="vt"
+          virtualize={{ threshold: 50, estimateRowHeight: 40, maxHeight: 400 }}
+        />,
+      );
+      // exactly 50 rows → viewport wrapper appears (was broken under the strict `>`).
+      expect(screen.getByTestId("vt")).toHaveStyle({ maxHeight: "400px" });
+    });
+
+    it("does NOT engage one row below the threshold (49 rows, threshold 50)", () => {
+      const fortyNine: Row[] = Array.from({ length: 49 }, (_, i) => ({ id: String(i), name: `User ${i}` }));
+      render(
+        <DataTable
+          columns={columns}
+          rows={fortyNine}
+          rowKey={(r) => r.id}
+          testId="vt"
+          virtualize={{ threshold: 50, estimateRowHeight: 40, maxHeight: 400 }}
+        />,
+      );
+      expect(screen.getByTestId("vt").style.maxHeight).toBe("");
+    });
   });
 
   it("applies minWidth + noWrap to header and body cells (wide-table horizontal scroll)", () => {

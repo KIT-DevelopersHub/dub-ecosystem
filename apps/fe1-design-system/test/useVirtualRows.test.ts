@@ -27,6 +27,18 @@ describe("useVirtualRows", () => {
     expect(result.current.paddingBottom).toBeGreaterThan(40_000);
   });
 
+  it("bounds the mounted window well below the full count at a 50-row roster (DOM stays有界)", () => {
+    const el = makeScrollEl(400); // viewport shows ~8 rows at 50px
+    const { result } = renderHook(() =>
+      useVirtualRows({ count: 50, estimateRowHeight: 50, overscan: 8, getScrollElement: () => el }),
+    );
+    expect(result.current.active).toBe(true);
+    // 8 visible + 8 overscan → far fewer than all 50 rows mount → DOM count is bounded.
+    const mounted = result.current.endIndex - result.current.startIndex + 1;
+    expect(mounted).toBeLessThan(25);
+    expect(result.current.paddingBottom).toBeGreaterThan(0); // spacer stands in for un-mounted rows
+  });
+
   it("shifts the window and grows paddingTop after a scroll", () => {
     const el = makeScrollEl(500);
     const { result } = renderHook(() =>

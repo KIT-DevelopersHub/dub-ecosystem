@@ -304,11 +304,11 @@ export interface DataTableProps<Row> extends TestableProps {
    * scrolls inside a fixed-height viewport and only the rows in view (+ overscan)
    * are mounted, so 数百〜数千行でも初期描画とスクロールが滑らか。行の高さは実測する
    * ので可変高さ行にも対応。ソート/選択/フィルタ/行クリック/表示列は不変(additive)。
-   * `threshold` 以下の行数では従来どおり全行を描画し、コンテナも挟まない。測定不能な
+   * `threshold` 未満の行数では従来どおり全行を描画し、コンテナも挟まない。測定不能な
    * 環境(SSR/テスト)では自動的に全行描画へフォールバックする。
    */
   virtualize?: {
-    /** 行数がこれ以下なら仮想化しない (default 100)。 */
+    /** 行数がこれ以上になったら仮想化する (>= 判定・default 100)。 */
     threshold?: number;
     /** 目安の行高さ px。初期ウィンドウとスクロールバー長の見積りに使う (default 48)。 */
     estimateRowHeight?: number;
