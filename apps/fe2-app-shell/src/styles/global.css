@@ -1264,3 +1264,187 @@ svg {
   margin-top: var(--dub-space-4);
   justify-content: center;
 }
+
+/* ---- command palette (Cmd/Ctrl+K, P06) ----------------------------------- */
+/* A centered-top overlay launcher. Sits at the modal layer so it covers the shell
+ * and the feedback FAB. Tokenized throughout so light/dark flow automatically. */
+.fe2-cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--dub-z-index-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(var(--dub-space-8), 12vh) var(--dub-space-4) var(--dub-space-4);
+  background: rgba(16, 24, 40, 0.44);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: fe2-cmdk-fade var(--dub-motion-fast) var(--dub-motion-easing);
+}
+@keyframes fe2-cmdk-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fe2-cmdk-dialog {
+  width: 100%;
+  max-width: 560px;
+  max-height: min(64vh, 560px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  box-shadow: var(--dub-shadow-overlay);
+  animation: fe2-cmdk-rise var(--dub-motion-normal) var(--dub-motion-easing);
+}
+@keyframes fe2-cmdk-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fe2-cmdk-search {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-4) var(--dub-space-5);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.fe2-cmdk-search-icon {
+  display: inline-flex;
+  color: var(--dub-color-text-muted);
+}
+.fe2-cmdk-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-lg);
+  line-height: var(--dub-font-line-height-normal);
+}
+.fe2-cmdk-input::placeholder {
+  color: var(--dub-color-text-muted);
+}
+.fe2-cmdk-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--dub-space-2) 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.fe2-cmdk-section + .fe2-cmdk-section {
+  margin-top: var(--dub-space-2);
+}
+.fe2-cmdk-section-title {
+  padding: var(--dub-space-2) var(--dub-space-5) var(--dub-space-1);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+  letter-spacing: 0.02em;
+}
+.fe2-cmdk-section-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fe2-cmdk-item {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  margin: 0 var(--dub-space-2);
+  padding: var(--dub-space-3) var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+  color: var(--dub-color-text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+.fe2-cmdk-item.is-active {
+  background: var(--dub-color-brand-100);
+}
+.fe2-cmdk-item.is-disabled {
+  color: var(--dub-color-text-muted);
+  cursor: not-allowed;
+}
+.fe2-cmdk-item.is-disabled.is-active {
+  background: var(--dub-color-surface-sunken);
+}
+.fe2-cmdk-item-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--dub-color-text-secondary);
+}
+.fe2-cmdk-item.is-disabled .fe2-cmdk-item-icon {
+  color: var(--dub-color-text-muted);
+}
+.fe2-cmdk-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--dub-font-size-md);
+}
+.fe2-cmdk-item-reason {
+  flex: 0 0 auto;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+.fe2-cmdk-empty {
+  padding: var(--dub-space-8) var(--dub-space-5);
+  text-align: center;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+.fe2-cmdk-footer {
+  display: flex;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-3) var(--dub-space-5);
+  border-top: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+.fe2-cmdk-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+}
+.fe2-cmdk-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  padding: 1px var(--dub-space-1);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-xs);
+  line-height: 1.4;
+}
+@media (max-width: 640px) {
+  .fe2-cmdk-overlay {
+    padding-top: var(--dub-space-6);
+  }
+  .fe2-cmdk-footer {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe2-cmdk-overlay,
+  .fe2-cmdk-dialog {
+    animation: none;
+  }
+}
