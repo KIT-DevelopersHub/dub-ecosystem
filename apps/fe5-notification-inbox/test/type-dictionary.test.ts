@@ -57,6 +57,13 @@ describe("resolveCategory (server type -> tab category)", () => {
     expect(resolveCategory("release.notes")).toBe("app_update");
   });
 
+  it("maps feedback/feedback.* to フィードバック", () => {
+    expect(resolveCategory("feedback")).toBe("feedback");
+    expect(resolveCategory("feedback.submitted")).toBe("feedback");
+    // guard against a non-namespaced near-match ("feedbackish" is not feedback)
+    expect(resolveCategory("feedbackish")).toBe("other");
+  });
+
   it("does not misclassify a non-namespaced near-match", () => {
     // "released.foo" must NOT be treated as release.*
     expect(resolveCategory("released.foo")).toBe("other");

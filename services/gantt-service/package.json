@@ -24,6 +24,7 @@
     "hono": "^4"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.71",
     "@cloudflare/workers-types": "^4"
   }
 }
