@@ -5,7 +5,7 @@
 // still fall through to a NOT_FOUND envelope (in-frame fallback, never blank).
 import { describe, expect, it } from "vitest";
 import { createApiClient, ApiError } from "./api-client.tsx";
-import { createDemoFetch, isDemoEnabled } from "./demo-seed.tsx";
+import { createDemoFetch, isDemoEnabled, ganttSkeletonDelayMs } from "./demo-seed.tsx";
 
 function api() {
   return createApiClient({ baseUrl: "https://demo.local", fetchImpl: createDemoFetch() });
@@ -62,6 +62,37 @@ describe("isDemoEnabled", () => {
     expect(isDemoEnabled({ VITE_DEMO: "false" })).toBe(false);
     expect(isDemoEnabled({})).toBe(false);
     expect(isDemoEnabled(undefined)).toBe(false);
+  });
+});
+
+describe("ganttSkeletonDelayMs (demo-only skeleton preview)", () => {
+  it("is 0 (instant) when no control param is present", () => {
+    expect(ganttSkeletonDelayMs("")).toBe(0);
+    expect(ganttSkeletonDelayMs("?foo=bar")).toBe(0);
+    expect(ganttSkeletonDelayMs("?tasks=50")).toBe(0);
+  });
+
+  it("holds effectively forever for ?skeleton (freeze to inspect)", () => {
+    expect(ganttSkeletonDelayMs("?skeleton")).toBe(600_000);
+    expect(ganttSkeletonDelayMs("?skeleton=1")).toBe(600_000);
+    expect(ganttSkeletonDelayMs("?skeleton=gantt")).toBe(600_000);
+    expect(ganttSkeletonDelayMs("?skeleton=on")).toBe(600_000);
+  });
+
+  it("?skeleton=0 / off disables the hold", () => {
+    expect(ganttSkeletonDelayMs("?skeleton=0")).toBe(0);
+    expect(ganttSkeletonDelayMs("?skeleton=off")).toBe(0);
+  });
+
+  it("?slow uses a 4s default and honours an explicit ms value", () => {
+    expect(ganttSkeletonDelayMs("?slow")).toBe(4000);
+    expect(ganttSkeletonDelayMs("?slow=2000")).toBe(2000);
+    expect(ganttSkeletonDelayMs("?slow=abc")).toBe(4000); // non-numeric → default
+    expect(ganttSkeletonDelayMs("?slow=-5")).toBe(4000); // non-positive → default
+  });
+
+  it("caps ?slow at 10 minutes", () => {
+    expect(ganttSkeletonDelayMs("?slow=99999999")).toBe(600_000);
   });
 });
 

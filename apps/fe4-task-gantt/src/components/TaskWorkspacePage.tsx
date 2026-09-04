@@ -38,6 +38,7 @@ import { useWriteFeedback } from "../domain/write-feedback";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
+import { GanttSkeleton } from "./GanttSkeleton";
 import { TaskDetailPanel, type RelationEdit } from "./TaskDetailPanel";
 import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
 import styles from "../styles/app.module.css";
@@ -1208,6 +1209,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           {store.lastError.message}
         </div>
       )}
+
+      {/* Loading: draw the layout-matched skeleton in the SAME slot GanttView occupies
+          so the chart swaps in with no reflow (症状: スケルトンがずれる). Shown until the
+          gantt DTO first arrives; an error surfaces via the banner/dialog above, so we
+          don't hold the skeleton on a failed load. */}
+      {!gantt.data && !gantt.isError && <GanttSkeleton />}
 
       {filteredDto && (
         <GanttView
