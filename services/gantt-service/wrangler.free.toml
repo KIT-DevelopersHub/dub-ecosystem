@@ -16,10 +16,36 @@ name = "dub-gantt-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
-workers_dev = false
+# Realtime is DO-direct (gateway-bypassing): browsers open wss://<subdomain>/ws/:eventId
+# straight to the GanttRoom DO, so the workers.dev subdomain MUST be reachable from the
+# public internet. The header-trusting HTTP API is still gated to host "svc" (service
+# binding) in src/index.ts, so exposing the subdomain does not widen the HTTP attack
+# surface — only /ws (ticket+Origin verified in the DO) and /health answer publicly.
+workers_dev = true
 
 [observability]
 enabled = true
+
+# ── Realtime (DO + WS) ────────────────────────────────────────────────────────
+# GanttRoom DO: one instance per event; WS fanout / presence / ws-ticket verify. SQLite-
+# backed DOs run on the free plan and GanttRoom holds no durable rows → cost stays $0.
+[[durable_objects.bindings]]
+name = "GANTT_ROOM"
+class_name = "GanttRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GanttRoom"]
+
+[vars]
+# DO-direct ws-ticket base (":id" -> eventId) — this worker's own public subdomain.
+GANTT_RT_DO_URL_BASE = "wss://dub-gantt-service.developershub-site.workers.dev/ws/:id"
+# Origin allow-list enforced by the GanttRoom DO (SPA shell + prod app origin).
+GANTT_RT_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
+
+# NOTE: WS_TICKET_SECRET is a Worker Secret. Set once with:
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler secret put WS_TICKET_SECRET --config services/gantt-service/wrangler.free.toml
 
 # Shared dub-core D1: gantt owns the gantt_* namespace (per-user view state) only.
 [[d1_databases]]

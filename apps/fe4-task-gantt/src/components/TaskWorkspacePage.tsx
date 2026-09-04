@@ -7,6 +7,7 @@ import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
 import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
+import { useGanttRealtime } from "../api/useGanttRealtime";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
 import { useRoster } from "../api/useRoster";
@@ -127,6 +128,15 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   };
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
+  // Realtime sync: apply peers' bar moves straight to the cache, and refetch fresh when a
+  // structural change (create/delete/status/assignee/dependency) shifts the derived chart.
+  // Best-effort — the chart works without it (RT is a delivery optimisation, not the SoT).
+  useGanttRealtime(eventId, {
+    applyMove: gantt.setRowScheduleOptimistic,
+    invalidate: () => {
+      void gantt.refetchFresh();
+    },
+  });
   // Per-user view state — carries the personal manual row order (drag reorder).
   const view = useGanttView(eventId);
   const orderedTaskIds = useMemo(() => view.data?.orderedTaskIds ?? [], [view.data]);

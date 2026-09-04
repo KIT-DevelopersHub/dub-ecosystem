@@ -138,6 +138,20 @@ export function patchGanttRow(
   });
 }
 
+/** Issue a short-lived ws-ticket + DO-direct URL to open the realtime WS for this
+ *  event's gantt. Subscribe follows read access (server enforces event:read). */
+export function getGanttWsTicket(
+  client: ApiClient,
+  eventId: common.EventId,
+): Promise<gantt.GanttWsTicketResponse> {
+  const query: gantt.GetGanttQuery = { eventId };
+  return client.request<gantt.GanttWsTicketResponse>({
+    method: "GET",
+    path: `${P}/gantt/ws-ticket`,
+    query: { ...query },
+  });
+}
+
 export function getGanttDependencies(
   client: ApiClient,
   eventId: common.EventId,
