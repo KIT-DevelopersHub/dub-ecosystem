@@ -16,31 +16,31 @@ import { useSetUserPassword, useViewUserPassword } from "../hooks/useRosterApi";
 import { useToast } from "../hooks/useToast";
 import { errorMessage } from "../lib/errorDisplay";
 
-const sectionStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 12 };
-const titleStyle: React.CSSProperties = { fontWeight: 600, fontSize: 14 };
-const helpStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
-const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" };
+const sectionStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" };
+const titleStyle: React.CSSProperties = { fontWeight: 600, fontSize: "var(--dub-font-size-sm)" };
+const helpStyle: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13, margin: 0 };
+const actionsStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-2)", flexWrap: "wrap", alignItems: "flex-end" };
 const secretBoxStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 8,
-  padding: 12,
-  borderRadius: 8,
-  border: "1px solid var(--dub-color-border-warning, #d4a72c)",
-  background: "var(--dub-color-bg-warning-subtle, #fff8e1)",
+  gap: "var(--dub-space-2)",
+  padding: "var(--dub-space-3)",
+  borderRadius: "var(--dub-radius-md)",
+  border: "1px solid var(--dub-color-warning-300)",
+  background: "var(--dub-color-warning-50)",
 };
-const secretRowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" };
+const secretRowStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-2)", alignItems: "center", flexWrap: "wrap" };
 const secretValueStyle: React.CSSProperties = {
-  fontFamily: "var(--dub-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
-  fontSize: 14,
+  fontFamily: "var(--dub-font-family-mono)",
+  fontSize: "var(--dub-font-size-sm)",
   padding: "4px 8px",
   borderRadius: 6,
-  background: "var(--dub-color-bg-default, #ffffff)",
-  border: "1px solid var(--dub-color-border-default, #d0d7de)",
+  background: "var(--dub-color-surface-base)",
+  border: "1px solid var(--dub-color-border-default)",
   userSelect: "all",
   wordBreak: "break-all",
 };
-const warnLabelStyle: React.CSSProperties = { color: "var(--dub-color-fg-warning, #9a6700)", fontSize: 12, fontWeight: 600 };
+const warnLabelStyle: React.CSSProperties = { color: "var(--dub-color-warning-700)", fontSize: "var(--dub-font-size-xs)", fontWeight: 600 };
 
 async function copy(text: string): Promise<boolean> {
   try {

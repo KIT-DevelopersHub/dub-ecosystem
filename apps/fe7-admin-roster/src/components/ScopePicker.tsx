@@ -2,7 +2,7 @@ import { Select, FormField, type SelectOption } from "@dub/ui";
 import { usePermissions } from "../hooks/usePermissions";
 import { eventScopeAvailable, type ScopeSelection } from "../lib/scope";
 
-const checkboxRow: React.CSSProperties = { display: "flex", gap: 16, alignItems: "center", margin: "8px 0" };
+const checkboxRow: React.CSSProperties = { display: "flex", gap: "var(--dub-space-4)", alignItems: "center", margin: "8px 0" };
 
 // P0: org-wide or event scope. Event candidates require event:read; without it the
 // picker degrades to org-wide only (design §6 FORBIDDEN degrade).

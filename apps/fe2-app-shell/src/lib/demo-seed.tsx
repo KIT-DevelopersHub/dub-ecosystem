@@ -253,8 +253,18 @@ function ganttViewFor(eventId: string): gantt.GanttViewState {
 
 // ── notifications ─────────────────────────────────────────────────────────────
 const NOTIFICATIONS: notification.InboxItem[] = [
+  // Feedback notification — carries the submitter as a first-class actor so the inbox
+  // shows "差出人: 山田 花子" (resolved display name) instead of an opaque user id, and
+  // the click-through dialog surfaces the full body / sender / time.
+  { id: "ntf_fb1", type: "feedback", title: "新しいフィードバック: 検索が遅い", body: "カテゴリ: idea\n発生ページ: イベント一覧\n\n検索ページの読み込みが重く、キーワードを入れてから結果が出るまで数秒かかることがあります。特に参加者数が多いイベントで顕著です。結果の遅延読み込みや一覧の軽量化をご検討いただけると助かります。よろしくお願いします。", readAt: null, createdAt: "2026-08-02T04:00:00Z", resourceType: "feedback", resourceId: "nfb_1", audience: "admin", actorId: "usr_alice", actorName: "山田 花子" },
+  // A deliberately long announcement so the detail dialog's internal scroll (full-text
+  // view) is demonstrable on a non-feedback row.
+  { id: "ntf_long1", type: "system.announcement", title: "定期メンテナンスと今後の機能追加のお知らせ", body: "いつもDevHubをご利用いただきありがとうございます。\n\n【メンテナンス】\n8月10日(月) 深夜1:00〜3:00 に定期メンテナンスを実施します。この時間帯は一時的にログインや通知の受信ができなくなる場合があります。作業中のデータは事前に保存してください。\n\n【今後の機能追加】\n・通知の全文表示ダイアログ(このお知らせのように長文も折りたたまずに読めます)\n・フィードバック通知への送信者名の表示\n・ガントチャートの依存関係編集の改善\n・メール添付ファイルのプレビュー\n\nご不明な点があれば運営までお問い合わせください。今後ともよろしくお願いいたします。", readAt: "2026-08-02T03:30:00Z", createdAt: "2026-08-02T03:30:00Z", resourceType: null, resourceId: null },
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
   { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
+  // 参加届 (participation) — a public participation-form submission notified to admins, so the
+  // 参加届 tab shows content in the demo alongside フィードバック / アプリアップデート.
+  { id: "ntf_part1", type: "member.participation.submitted", title: "新しい参加届: 田中 太郎", body: "「北陸ITカンファレンス 2026」への参加届が届きました。\n所属: 金沢工業大学\n役割: 一般参加", readAt: null, createdAt: "2026-08-02T00:30:00Z", resourceType: "participation", resourceId: "part_1", audience: "admin", actorId: "usr_tanaka", actorName: "田中 太郎" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
 ];
 
@@ -717,8 +727,44 @@ const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:re
 // IdentityUser, read by FE7's RosterUser projection and its 種別 column / sort.
 type DemoRosterUser = identity.IdentityUser & { source?: "manual" | "email-routing" };
 
-// A fuller roster (12 rows) so the admin table's 一括選択・列ソート・件数サマリ・URLフィルタ
-// (判断29 ①⑤⑧) are all visibly meaningful in the demo — varied 状態 / 種別 / ロール.
+// Synthetic bulk roster so the 名簿 demo shows a長い一覧 (数百行) — this is what the
+// 仮想スクロール (row windowing) is for: only on-screen rows mount, so the list stays
+// smooth even at this size. Appended AFTER the named users so the interactive flows
+// (usr_dave role assign 等) keep working unchanged. Each row also carries `source` so
+// the 種別 column / sort / URLフィルタ stay meaningful across all 600 rows.
+const BULK_ROSTER_COUNT = 600;
+const BULK_SURNAMES = ["佐藤", "鈴木", "高橋", "田中", "伊藤", "渡辺", "山本", "中村", "小林", "加藤", "吉田", "山田", "松本", "井上", "木村", "林", "清水", "山口", "森", "池田"];
+const BULK_GIVEN = ["蓮", "陽翔", "湊", "樹", "大翔", "陽菜", "結衣", "咲良", "凛", "芽依", "悠真", "颯太", "美咲", "葵", "莉子", "翔太", "健太", "彩花", "直樹", "香織"];
+const BULK_STATUSES: identity.IdentityUser["status"][] = ["active", "active", "active", "active", "invited", "disabled"];
+const BULK_ROLE_IDS = ["role_member", "role_member", "role_maintainer", "role_admin"];
+const BULK_SOURCES: DemoRosterUser["source"][] = ["email-routing", "manual"];
+
+function buildBulkRoster(): DemoRosterUser[] {
+  const out: DemoRosterUser[] = [];
+  for (let i = 0; i < BULK_ROSTER_COUNT; i++) {
+    const surname = BULK_SURNAMES[i % BULK_SURNAMES.length]!;
+    const given = BULK_GIVEN[(i * 7) % BULK_GIVEN.length]!;
+    const n = String(i + 1).padStart(3, "0");
+    out.push({
+      id: `usr_bulk_${n}`,
+      orgId: ORG,
+      displayName: `${surname} ${given}`,
+      email: `member${n}@developershub.jp`,
+      githubLogin: i % 3 === 0 ? `member${n}` : null,
+      avatarUrl: null,
+      status: BULK_STATUSES[i % BULK_STATUSES.length]!,
+      source: BULK_SOURCES[i % BULK_SOURCES.length]!,
+      roleIds: [BULK_ROLE_IDS[i % BULK_ROLE_IDS.length]!],
+      createdAt: isoNow(),
+      updatedAt: isoNow(),
+    });
+  }
+  return out;
+}
+
+// A fuller named roster (12 rows) so the admin table's 一括選択・列ソート・件数サマリ・URLフィルタ
+// (判断29 ①⑤⑧) are all visibly meaningful in the demo — varied 状態 / 種別 / ロール —
+// then the 600-row bulk roster (判断P10) exercises the 仮想スクロール.
 const SEED_USERS: DemoRosterUser[] = [
   { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
@@ -732,6 +778,7 @@ const SEED_USERS: DemoRosterUser[] = [
   { id: "usr_lily", orgId: ORG, displayName: "小林 里", email: "ri@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  ...buildBulkRoster(),
 ];
 
 const SEED_ROLES: identity.Role[] = [
@@ -1002,8 +1049,10 @@ function createRosterStore() {
 // the sidebar renders 全体 / チーム別 / 役割別 channels out of the box. Channel names
 // stay romaji for consistency (#7); Japanese topics describe each one. Team channels
 // mirror member-service's real 運営チーム (統括/開発/当日進行/スポンサー/会場/集客広報)
-// — no invented teams. Messages/WS are not seeded (no WS in demo): channels open to a
-// clean empty timeline; the sidebar list is the enriched surface.
+// — no invented teams. A message backlog IS seeded (below) so timelines are populated
+// and typing / 既読 have content to attach to; there is still no chat WS in demo, so
+// FE6 drives those display-only cues from its demo simulator (ChatProviders.demoLiveness).
+// Posting / edit / delete / reactions mutate the in-session store end-to-end.
 interface DemoChatChannel {
   id: string;
   type: "topic" | "event" | "dm";
@@ -1060,27 +1109,98 @@ function createChatStore() {
   });
   const byId = new Map(all.map((c) => [c.id, c]));
 
-  // Seeded timeline for #general — includes a SYSTEM post (authorId: null, chat-service
-  // `kind: "system"`). System posts have no author; the client must render them as
-  // "システム" and never feed null into the Avatar (initials(null).trim() would crash
-  // the whole chat screen). This seed is the demo regression guard for that fix.
-  const msg = (over: Partial<Record<string, unknown>> & { id: string; authorId: string | null; body: string; createdAt: string }) => ({
-    channelId: "chn_general",
-    threadRootId: null,
-    replyCount: 0,
-    reactions: [],
-    attachments: [],
-    editedAt: null,
-    deletedAt: null,
-    version: 1,
-    ...over,
+  // ── message history ─────────────────────────────────────────────────────────
+  // A believable Slack-style backlog so the timeline is populated (and typing /
+  // 既読 have something to attach to). Authors are the seeded roster users so
+  // identity /users?ids= resolves their display names. Ids are ULID-ordered
+  // ("msg_<chan><seq>"), and posted messages mint "msg_zz…" ids that sort after.
+  const A = { me: ME_ID, bob: "usr_bob", carol: "usr_carol", dave: "usr_dave" };
+  interface WireMsg {
+    id: string;
+    channelId: string;
+    // null = system post (chat-service `kind: "system"`). Renderers must treat null as
+    // "システム"; modeling it non-null crashed the whole chat screen (initials(null)).
+    authorId: string | null;
+    body: string;
+    threadRootId: string | null;
+    replyCount: number;
+    reactions: { emoji: string; userIds: string[] }[];
+    attachments: [];
+    editedAt: string | null;
+    deletedAt: string | null;
+    version: number;
+    createdAt: string;
+  }
+  const mt = (day: number, h: number, mn: number): string => new Date(Date.UTC(2026, 7, day, h, mn, 0)).toISOString();
+  const mk = (
+    id: string,
+    channelId: string,
+    authorId: string | null,
+    body: string,
+    createdAt: string,
+    reactions: { emoji: string; userIds: string[] }[] = [],
+  ): WireMsg => ({
+    id, channelId, authorId, body, threadRootId: null, replyCount: 0,
+    reactions, attachments: [], editedAt: null, deletedAt: null, version: 1, createdAt,
   });
-  const generalMessages = [
-    msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
-    msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+
+  const SEED_MESSAGES: WireMsg[] = [
+    // #general — the channel the demo opens on (rich; includes ME messages so 既読 shows).
+    // Leads with a SYSTEM post (authorId: null) — the demo regression guard for the crash
+    // fix: a null author must render as "システム", never feed null into the Avatar.
+    mk("msg_gen000", "chn_general", null, "Channel #general created.", mt(20, 9, 0)),
+    mk("msg_gen010", "chn_general", A.bob, "おはようございます！今日もよろしくお願いします 🙌", mt(20, 9, 2), [{ emoji: "👋", userIds: [A.me, A.carol, A.dave] }]),
+    mk("msg_gen020", "chn_general", A.me, "おはようございます。10:00 からスタンドアップです 📣", mt(20, 9, 4)),
+    mk("msg_gen030", "chn_general", A.carol, "承知しました！資料まとめておきます", mt(20, 9, 8), [{ emoji: "🙏", userIds: [A.me] }]),
+    mk("msg_gen040", "chn_general", A.me, "`deploy` を本番へ流しました ✅ 反映確認お願いします", mt(20, 9, 15), [{ emoji: "🚀", userIds: [A.bob, A.carol, A.dave] }]),
+    mk("msg_gen050", "chn_general", A.dave, "確認しました、問題なさそうです 👀", mt(20, 9, 22)),
+    mk("msg_gen060", "chn_general", A.bob, "ありがとうございます！助かりました 🎉", mt(20, 9, 30)),
+
+    // #dev
+    mk("msg_dev010", "chn_dev", A.dave, "APIのレート制限、こんな感じで入れました", mt(20, 11, 2)),
+    mk("msg_dev020", "chn_dev", A.dave, "```ts\nconst limiter = rateLimit({\n  windowMs: 60_000,\n  max: 100,\n});\napp.use(limiter);\n```", mt(20, 11, 3), [{ emoji: "👍", userIds: [A.me, A.carol] }, { emoji: "🔥", userIds: [A.bob] }]),
+    mk("msg_dev030", "chn_dev", A.me, "いいですね！`max` は環境変数にしておきましょう", mt(20, 11, 8)),
+    mk("msg_dev040", "chn_dev", A.carol, "レビュー投げました 🙏", mt(20, 11, 40), [{ emoji: "✅", userIds: [A.dave] }]),
+
+    // #design
+    mk("msg_des010", "chn_design", A.carol, "新しいロゴ案、3パターン用意しました。意見ください！", mt(20, 10, 30), [{ emoji: "🎨", userIds: [A.me, A.bob, A.dave] }]),
+    mk("msg_des020", "chn_design", A.bob, "B案がいいと思います！余白の取り方が好き", mt(20, 10, 35)),
+    mk("msg_des030", "chn_design", A.me, "自分もB案に一票。ダークモードでも映えそう", mt(20, 10, 41), [{ emoji: "❤️", userIds: [A.carol] }]),
+
+    // #random
+    mk("msg_rnd010", "chn_random", A.dave, "近くにいい感じのカフェ見つけた ☕️ 今度みんなで行きましょう", mt(20, 12, 15), [{ emoji: "😋", userIds: [A.me, A.bob, A.carol] }]),
+    mk("msg_rnd020", "chn_random", A.me, "いいですね！金曜どうですか？", mt(20, 12, 20)),
+
+    // event: 北陸ITカンファレンス
+    mk("msg_evt010", "chn_evt_conf", A.bob, "登壇者の確定リスト共有します。スプレッドシートは後ほど 📄", mt(20, 13, 0), [{ emoji: "🎉", userIds: [A.me, A.carol, A.dave] }]),
+    mk("msg_evt020", "chn_evt_conf", A.me, "助かります！会場レイアウトも詰めましょう", mt(20, 13, 5)),
+
+    // team-dev
+    mk("msg_tdv010", "chn_team_dev", A.dave, "今週のリリース、金曜の午前で確定でしょうか？", mt(20, 15, 0)),
+    mk("msg_tdv020", "chn_team_dev", A.me, "はい、金曜 10:00 で。前日にステージング最終確認します", mt(20, 15, 6), [{ emoji: "👍", userIds: [A.dave, A.carol] }]),
   ];
 
-  function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
+  // Mutable in-session store (fresh per createDemoFetch → tests isolated, reload resets).
+  const messagesByChannel = new Map<string, WireMsg[]>();
+  for (const c of all) messagesByChannel.set(c.id, []);
+  for (const m of SEED_MESSAGES) {
+    const arr = messagesByChannel.get(m.channelId);
+    if (arr) arr.push(m);
+  }
+  let postSeq = 0;
+  const memberIds = [A.me, A.bob, A.carol, A.dave];
+  const membersOf = (channelId: string) =>
+    memberIds.map((userId) => ({ channelId, userId, role: userId === A.me ? "admin" : "member", joinedAt: CH_TS }));
+
+  function findMsg(id: string): WireMsg | undefined {
+    for (const arr of messagesByChannel.values()) {
+      const found = arr.find((m) => m.id === id);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");
@@ -1090,12 +1210,23 @@ function createChatStore() {
     if (method === "GET" && pathname === "/api/v1/chat/unread") {
       return json([]); // no unread badges in demo
     }
+    if (method === "GET" && pathname === "/api/v1/chat/settings/deletion-policy") {
+      return json({ policy: { member: "hard", moderator: "hard" }, version: 0 });
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
+      if (m && method === "GET") return json(membersOf(decodeURIComponent(m[1]!)));
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
+      if (m && method === "GET") return json([]); // no pre-pinned items in demo
+    }
     {
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const c = byId.get(decodeURIComponent(m[1]!));
         if (!c) return notFound(`GET ${pathname}`);
-        return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "member", joinedAt: CH_TS } });
+        return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "admin", joinedAt: CH_TS } });
       }
     }
     {
@@ -1103,19 +1234,59 @@ function createChatStore() {
       if (m && method === "POST") return json(null, 204);
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
-      const channelId = url.searchParams.get("channelId");
-      // #general opens to a seeded timeline (incl. a system post); others stay empty.
-      return json(page(channelId === "chn_general" ? generalMessages : []));
+      const channelId = url.searchParams.get("channelId") ?? "";
+      const items = (messagesByChannel.get(channelId) ?? []).filter((m) => !m.threadRootId);
+      return json(page(items)); // ULID-ascending, Paginated envelope
+    }
+    if (method === "POST" && pathname === "/api/v1/chat/messages") {
+      const b = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string };
+      const channelId = b.channelId ?? "";
+      const arr = messagesByChannel.get(channelId);
+      if (!arr) return notFound(`POST ${pathname}`);
+      const created = mk(`msg_zz${Date.now()}${postSeq++}`, channelId, ME_ID, b.body ?? "", new Date().toISOString());
+      if (b.threadRootId) created.threadRootId = b.threadRootId;
+      arr.push(created);
+      return json(created, 201);
     }
     {
-      // Members / pins: demo returns a small roster and no pins (bare arrays per the
-      // fe6 contract) so opening a channel does not 404 those companion fetches.
-      const mem = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
-      if (mem && method === "GET") {
-        return json([{ channelId: decodeURIComponent(mem[1]!), userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
+      const m = /^\/api\/v1\/chat\/messages\/([^/]+)\/reactions$/.exec(pathname);
+      if (m && method === "POST") {
+        const msg = findMsg(decodeURIComponent(m[1]!));
+        if (!msg) return notFound(`POST ${pathname}`);
+        const emoji = ((body ?? {}) as { emoji?: string }).emoji ?? "👍";
+        const existing = msg.reactions.find((r) => r.emoji === emoji);
+        if (existing) {
+          existing.userIds = existing.userIds.includes(ME_ID)
+            ? existing.userIds.filter((u) => u !== ME_ID)
+            : [...existing.userIds, ME_ID];
+          if (existing.userIds.length === 0) msg.reactions = msg.reactions.filter((r) => r.emoji !== emoji);
+        } else {
+          msg.reactions.push({ emoji, userIds: [ME_ID] });
+        }
+        return json({ messageId: msg.id, reactions: msg.reactions });
       }
-      const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
-      if (pin && method === "GET") return json([]);
+    }
+    {
+      const m = /^\/api\/v1\/chat\/messages\/([^/]+)$/.exec(pathname);
+      if (m && method === "PATCH") {
+        const msg = findMsg(decodeURIComponent(m[1]!));
+        if (!msg) return notFound(`PATCH ${pathname}`);
+        msg.body = ((body ?? {}) as { body?: string }).body ?? msg.body;
+        msg.editedAt = new Date().toISOString();
+        msg.version += 1;
+        return json(msg);
+      }
+      if (m && method === "DELETE") {
+        const id = decodeURIComponent(m[1]!);
+        for (const arr of messagesByChannel.values()) {
+          const idx = arr.findIndex((x) => x.id === id);
+          if (idx >= 0) {
+            arr.splice(idx, 1); // hard delete (demo default policy)
+            return json({ mode: "hard", message: null });
+          }
+        }
+        return notFound(`DELETE ${pathname}`);
+      }
     }
     return null;
   }

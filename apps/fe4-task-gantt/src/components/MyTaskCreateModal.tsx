@@ -213,17 +213,35 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           />
         </div>
 
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-mytask-assignee">
-            依頼先（担当者）
-          </label>
-          <Select
-            id="fe4-mytask-assignee"
-            value={assigneeId ?? ""}
-            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...people.map((u) => ({ value: u.id, label: u.displayName }))]}
-            testId="fe4-mytask-create-assignee"
-          />
+        {/* 依頼先（担当）と チーム は横並び（feedback ㉚）。formRow は全幅を占めるので
+            2カラムで整然と並ぶ。 */}
+        <div className={styles.formRow}>
+          <div className={styles.formField}>
+            <label className={styles.formLabel} htmlFor="fe4-mytask-assignee">
+              依頼先（担当者）
+            </label>
+            <Select
+              id="fe4-mytask-assignee"
+              value={assigneeId ?? ""}
+              onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
+              options={[{ value: "", label: "未割当" }, ...people.map((u) => ({ value: u.id, label: u.displayName }))]}
+              testId="fe4-mytask-create-assignee"
+            />
+          </div>
+          {teams.length > 0 && (
+            <div className={styles.formField}>
+              <label className={styles.formLabel} htmlFor="fe4-mytask-team">
+                チーム
+              </label>
+              <Select
+                id="fe4-mytask-team"
+                value={teamId ?? ""}
+                onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
+                options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
+                testId="fe4-mytask-create-team"
+              />
+            </div>
+          )}
         </div>
 
         <div className={styles.formField}>
@@ -245,21 +263,6 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
           </label>
           <DateField id="fe4-mytask-due" value={due} onChange={setDue} testId="fe4-mytask-create-due" />
         </div>
-
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-mytask-team">
-              チーム
-            </label>
-            <Select
-              id="fe4-mytask-team"
-              value={teamId ?? ""}
-              onChange={(v) => setTeamId(v ? (v as common.TeamId) : null)}
-              options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-              testId="fe4-mytask-create-team"
-            />
-          </div>
-        )}
 
         {/* 添付（ファイル・URL）: shared compact 📎/🔗 control — same look as the gantt
             タスク詳細 (③=②で統一・共通コンポーネント化). */}

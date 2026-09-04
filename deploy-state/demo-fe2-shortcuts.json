@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe2-shortcuts",
+  "worker": "dub-demo-fe2-shortcuts",
+  "url": "https://dub-demo-fe2-shortcuts.developershub-site.workers.dev",
+  "deployedSha": "6497138",
+  "branch": "feat/keyboard-shortcuts-view",
+  "actor": "Claude (kota)",
+  "markers": ["fe2-shortcuts-open","キーボードショートカット"],
+  "live": true,
+  "verifiedAt": "2026-09-02T11:30:32Z",
+  "updatedAt": "2026-09-02T11:30:32Z",
+  "note": "P07 keyboard shortcuts help dialog (registry-driven)"
+}

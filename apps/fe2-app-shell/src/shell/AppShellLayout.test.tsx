@@ -183,12 +183,13 @@ describe("AppShellLayout", () => {
       </QueryClientProvider>,
     );
     await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
-    // Order: アカウント設定, カラー設定 (opens the dialog), then logout last.
-    // Logout is danger-toned and ordered AFTER account + color settings.
+    // Order: アカウント設定, カラー設定 (opens the dialog), キーボードショートカット, then logout last.
+    // Logout is danger-toned and ordered AFTER account + color settings + shortcuts.
     const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
     expect(items).toEqual([
       "fe2-account-settings-open",
       "fe2-color-settings-open",
+      "fe2-shortcuts-open",
       "fe2-logout",
     ]);
     const logout = screen.getByTestId("fe2-logout");
@@ -197,6 +198,15 @@ describe("AppShellLayout", () => {
     expect(screen.getAllByRole("separator")).toHaveLength(1);
     await userEvent.click(logout);
     expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the キーボードショートカット list from the 設定 menu, listing registry entries", async () => {
+    renderShell(vi.fn());
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
+    await userEvent.click(screen.getByTestId("fe2-shortcuts-open"));
+    // The dialog lists the palette shortcut (Cmd/Ctrl+K) from the shared registry.
+    expect(await screen.findByTestId("fe2-shortcuts")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-shortcuts-row-command-palette")).toBeInTheDocument();
   });
 
   it("renders injected nav badge from badgeSource inside the launcher", async () => {

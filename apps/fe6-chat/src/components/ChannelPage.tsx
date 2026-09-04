@@ -21,6 +21,8 @@ import { MessageComposer } from "./MessageComposer";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { SearchResults } from "./SearchResults";
 import { ThreadPane } from "./ThreadPane";
+import { TypingIndicator } from "./TypingIndicator";
+import { useChatDemoLiveness } from "../hooks/useChatLive";
 import styles from "../styles/chat.module.css";
 
 export function ChannelPage({
@@ -34,7 +36,7 @@ export function ChannelPage({
   onSelectChannel?: (channelId: common.ChannelId) => void;
   onChannelsChanged?: () => void;
 }) {
-  const { api, can, currentUserId } = useChatRuntime();
+  const { api, can, currentUserId, demoLiveness } = useChatRuntime();
   const view = useChannelView(channelId);
   const { show } = useToast();
   const markRead = useChatStore((s) => s.markRead);
@@ -144,6 +146,17 @@ export function ChannelPage({
   useEffect(() => {
     if (newestId) tracker.current?.observeBottom(newestId);
   }, [newestId]);
+
+  // Typing + read receipts: in demo/standalone (no chat WS) the simulator drives the
+  // display-only stores from the loaded members + timeline; a live RT backend feeds
+  // them instead (demoLiveness=false → no-op).
+  useChatDemoLiveness({
+    enabled: demoLiveness ?? false,
+    channelId,
+    currentUserId,
+    members,
+    messages: view.state.messages,
+  });
 
   const resolveUser = useCallback((id: common.UserId) => users[id], [users]);
   const resolveMentionCandidates = useCallback(
@@ -281,9 +294,14 @@ export function ChannelPage({
             }}
           />
         )}
-        <ConnectionBanner status={view.state.rtStatus} />
+        {/* In demo/standalone the chat WS is intentionally absent and the simulator
+            drives typing / 既読 — a "接続が切断" banner would contradict that, so it is
+            suppressed there. Live deployments still surface real connection state. */}
+        {!demoLiveness && <ConnectionBanner status={view.state.rtStatus} />}
         {archived && <ConnectionBanner status={view.state.rtStatus} archived />}
         <MessageTimeline
+          channelId={channelId}
+          channelType={channel?.type ?? "topic"}
           messages={view.state.messages}
           pending={view.state.pending}
           currentUserId={currentUserId}
@@ -302,6 +320,7 @@ export function ChannelPage({
           onResend={(id) => void view.resend(id)}
           onDiscard={(id) => view.discard(id)}
         />
+        <TypingIndicator channelId={channelId} currentUserId={currentUserId} resolveUser={resolveUser} />
         <MessageComposer
           channelId={channelId}
           disabled={archived}

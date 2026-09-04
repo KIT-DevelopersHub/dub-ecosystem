@@ -19,12 +19,12 @@ function modeOptions(tier: "member" | "moderator", disabled: boolean): Segmented
   ];
 }
 
-const sectionTitle: React.CSSProperties = { fontWeight: 600, fontSize: 16, marginBottom: 4 };
-const sectionDesc: React.CSSProperties = { color: "var(--dub-color-text-muted, #57606a)", fontSize: 13, marginBottom: 16 };
-const tierLabel: React.CSSProperties = { fontWeight: 600, fontSize: 14, marginBottom: 2 };
-const tierHint: React.CSSProperties = { color: "var(--dub-color-text-muted, #57606a)", fontSize: 12, marginBottom: 8 };
-const tierBlock: React.CSSProperties = { marginBottom: 20 };
-const footer: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, marginTop: 8 };
+const sectionTitle: React.CSSProperties = { fontWeight: 600, fontSize: "var(--dub-font-size-md)", marginBottom: "var(--dub-space-1)" };
+const sectionDesc: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: 13, marginBottom: "var(--dub-space-4)" };
+const tierLabel: React.CSSProperties = { fontWeight: 600, fontSize: "var(--dub-font-size-sm)", marginBottom: 2 };
+const tierHint: React.CSSProperties = { color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)", marginBottom: "var(--dub-space-2)" };
+const tierBlock: React.CSSProperties = { marginBottom: "var(--dub-space-5)" };
+const footer: React.CSSProperties = { display: "flex", alignItems: "center", gap: "var(--dub-space-3)", marginTop: "var(--dub-space-2)" };
 
 export function ChatDeletionPolicySection() {
   const query = useChatDeletionPolicy();

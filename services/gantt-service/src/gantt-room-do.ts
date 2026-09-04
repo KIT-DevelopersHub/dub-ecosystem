@@ -15,6 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { gantt } from "@dub/types";
 import { verifyWsTicket } from "./wsticket";
+import { buildPresenceSnapshot, type SocketMeta } from "./presence";
 
 export interface GanttRoomEnv {
   // gantt self-owned HMAC secret (Worker Secret in prod; same value the issuer signs with).
@@ -27,12 +28,6 @@ export interface GanttRoomEnv {
 // Dev-only fallback; MUST match the issuer's fallback in src/index.ts / app.ts.
 const DEV_WS_SECRET = "dev-insecure-ws-ticket-secret";
 const DEFAULT_ALLOWED_ORIGINS = "https://app.developershub.jp";
-
-// Per-socket metadata survives hibernation via serializeAttachment.
-interface SocketMeta {
-  userId: string;
-  eventId: string;
-}
 
 function errorResponse(status: number, code: string): Response {
   return new Response(JSON.stringify({ error: { code } }), {
@@ -76,7 +71,16 @@ export class GanttRoom extends DurableObject<GanttRoomEnv> {
     // Hibernation API: the runtime keeps the socket without holding this DO in memory;
     // webSocketMessage/Close re-hydrate it on demand ($0 while idle).
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ userId: claims.userId, eventId } satisfies SocketMeta);
+    server.serializeAttachment({
+      userId: claims.userId,
+      eventId,
+      ...(claims.displayName ? { displayName: claims.displayName } : {}),
+      connectedAt: Date.now(),
+    } satisfies SocketMeta);
+
+    // A viewer joined → the roster changed. Fan the fresh presence snapshot out to
+    // everyone (the newcomer included, so it renders "who is here" immediately).
+    this.broadcastPresence(eventId);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -105,25 +109,78 @@ export class GanttRoom extends DurableObject<GanttRoomEnv> {
     return this.ctx.getWebSockets().length;
   }
 
-  // Clients are read-only over WS (all writes go through the HTTP master). We only answer
-  // a lightweight liveness ping so the client can detect a stale link and reconnect.
+  // Clients are read-only over WS (all writes go through the HTTP master). We answer a
+  // lightweight liveness ping so the client can detect a stale link and reconnect, and a
+  // `hello` with the current presence snapshot (unicast) so a just-connected tab paints
+  // "who is here" without waiting for the next roster change.
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (message === "ping") ws.send("pong");
+    if (message === "ping") {
+      ws.send("pong");
+      return;
+    }
+    if (message === "hello") {
+      const meta = ws.deserializeAttachment() as SocketMeta | null;
+      if (meta) ws.send(this.presenceFrame(meta.eventId));
+    }
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    // Read the leaving socket's event BEFORE closing so we can refresh the roster.
+    const meta = ws.deserializeAttachment() as SocketMeta | null;
     try {
       ws.close(code, reason);
     } catch {
       // already closing
     }
+    // A viewer left → recompute presence for the room, excluding this now-closed socket,
+    // so its avatar disappears for the remaining peers immediately.
+    if (meta) this.broadcastPresence(meta.eventId, ws);
   }
 
   override async webSocketError(ws: WebSocket): Promise<void> {
+    const meta = ws.deserializeAttachment() as SocketMeta | null;
     try {
       ws.close(1011, "internal error");
     } catch {
       // already closing
+    }
+    if (meta) this.broadcastPresence(meta.eventId, ws);
+  }
+
+  /** Build the current presence snapshot for `eventId`, optionally excluding one socket
+   *  (the one that is leaving — it may still appear in getWebSockets() mid-close). */
+  private snapshotUsers(eventId: string, exclude?: WebSocket): gantt.GanttPresenceUser[] {
+    const metas: SocketMeta[] = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === exclude) continue;
+      const meta = ws.deserializeAttachment() as SocketMeta | null;
+      if (meta && meta.eventId === eventId) metas.push(meta);
+    }
+    return buildPresenceSnapshot(metas);
+  }
+
+  /** Serialized `presence` frame for `eventId` (the snapshot, sent whole — not a delta). */
+  private presenceFrame(eventId: string, exclude?: WebSocket): string {
+    const event: gantt.GanttRealtimeEvent = {
+      kind: "presence",
+      eventId,
+      users: this.snapshotUsers(eventId, exclude),
+      at: new Date().toISOString(),
+    };
+    return JSON.stringify(event);
+  }
+
+  /** Fan the current presence snapshot out to every socket in the room (best-effort;
+   *  a dead peer never blocks the rest). `exclude` skips a leaving socket. */
+  private broadcastPresence(eventId: string, exclude?: WebSocket): void {
+    const data = this.presenceFrame(eventId, exclude);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === exclude) continue;
+      try {
+        ws.send(data);
+      } catch {
+        // socket already gone; ignore
+      }
     }
   }
 

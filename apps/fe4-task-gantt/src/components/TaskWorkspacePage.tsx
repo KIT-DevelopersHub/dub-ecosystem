@@ -35,6 +35,7 @@ import {
   saveViewPref,
 } from "../domain/gantt-view-pref";
 import { useWriteFeedback } from "../domain/write-feedback";
+import { PresenceBar } from "./PresenceBar";
 import { TaskFilterBar } from "./TaskFilterBar";
 import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
@@ -131,7 +132,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // Realtime sync: apply peers' bar moves straight to the cache, and refetch fresh when a
   // structural change (create/delete/status/assignee/dependency) shifts the derived chart.
   // Best-effort — the chart works without it (RT is a delivery optimisation, not the SoT).
-  useGanttRealtime(eventId, {
+  const realtime = useGanttRealtime(eventId, {
     applyMove: gantt.setRowScheduleOptimistic,
     invalidate: () => {
       void gantt.refetchFresh();
@@ -159,6 +160,16 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // "未割当" (bug 1b). Best-effort: an organizer lacking identity:read falls back
   // to the resolved-from-tasks list.
   const roster = useRoster().data ?? [];
+
+  // Display-name lookup for the presence avatars: the presence frame carries only user
+  // ids (identity is a bare id server-side), so we resolve human labels from the org
+  // roster ∪ the user cache (resolved from task assignments). Falls back to the id.
+  const displayNameById = useMemo(() => {
+    const m = new Map<common.UserId, string>();
+    for (const u of roster) m.set(u.id, u.displayName);
+    for (const [id, summary] of users) if (summary?.displayName) m.set(id, summary.displayName);
+    return m;
+  }, [roster, users]);
 
   // Undo/redo (判断57). A reusable command stack (@dub/app-ui) — every state-
   // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
@@ -1089,6 +1100,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
           <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
+        {/* Live presence: who is viewing this gantt right now — 自分含む全員. Visible to
+            every viewer, not only editors. Self is pinned first and badged「（あなた）」. */}
+        <PresenceBar
+          presence={realtime.presence}
+          status={realtime.status}
+          selfUserId={realtime.selfUserId}
+          displayNameById={displayNameById}
+        />
         {caps.canWrite && (
           <div className={styles.headerActions}>
             {/* Organizer edit affordance. Placeholder gating today: canWrite comes

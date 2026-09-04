@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe5-feedback-tab",
+  "worker": "dub-demo-fe5-feedback-tab",
+  "url": "https://dub-demo-fe5-feedback-tab.developershub-site.workers.dev",
+  "deployedSha": "c423486",
+  "branch": "feat/fe5-notification-type-tabs",
+  "actor": "Claude (kota)",
+  "markers": ["フィードバック","新しい参加届: 田中 太郎"],
+  "live": true,
+  "verifiedAt": "2026-08-31T06:03:05Z",
+  "updatedAt": "2026-08-31T06:03:05Z",
+  "note": "fe5 通知インボックス: フィードバック種別タブ追加(+参加届/アプリアップデート)。送信者名/全文ダイアログ(判断42)維持。"
+}

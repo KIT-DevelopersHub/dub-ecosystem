@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe4-date-fields-fix",
+  "worker": "dub-demo-fe4-date-fields-fix",
+  "url": "https://dub-demo-fe4-date-fields-fix.developershub-site.workers.dev",
+  "deployedSha": "da030be",
+  "branch": "fix/fe4-date-fields-layout",
+  "actor": "Claude (kota)",
+  "markers": ["fe4-create-start","fe4-create-due"],
+  "live": true,
+  "verifiedAt": "2026-08-31T05:51:16Z",
+  "updatedAt": "2026-08-31T05:51:16Z",
+  "note": "開始日/期日UI崩れ修正+担当/チーム横並び"
+}

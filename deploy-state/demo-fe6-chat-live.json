@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe6-chat-live",
+  "worker": "dub-demo-fe6-chat-live",
+  "url": "https://dub-demo-fe6-chat-live.developershub-site.workers.dev",
+  "deployedSha": "2a1e6a2",
+  "branch": "HEAD",
+  "actor": "Claude (kota)",
+  "markers": ["fe6-typing-indicator","fe6-read-receipt","fe6-rail-self"],
+  "live": true,
+  "verifiedAt": "2026-08-29T05:03:32Z",
+  "updatedAt": "2026-08-29T05:03:32Z",
+  "note": "fe6-chat: typing indicator + read receipts (既読) + honest workspace rail (self/presence)"
+}

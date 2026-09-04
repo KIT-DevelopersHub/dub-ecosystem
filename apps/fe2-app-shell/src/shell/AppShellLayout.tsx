@@ -16,6 +16,8 @@ import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
+import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
+import { ShortcutsDialog } from "./ShortcutsDialog.tsx";
 import {
   isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
@@ -80,6 +82,22 @@ export interface AppShellLayoutProps {
 //      the launcher never shows an app that would 403.
 // Sort order: usable apps first, greyed apps last; the existing order-based sequence is
 // preserved within each group (a stable partition), and nothing is removed.
+// The access gate for a nav entry, shared by the launcher and the command palette so
+// a greyed app looks/behaves identically in both surfaces (and matches router.tsx).
+function navGate(entry: NavEntry, can: Can): { disabled: boolean; reason?: string } {
+  const releaseGated = isReleaseGatedFor(entry.appId, can);
+  const lacksPermission =
+    entry.requiredPermissions !== undefined &&
+    entry.requiredPermissions.length > 0 &&
+    !entry.requiredPermissions.every((p) => can(p));
+  if (releaseGated || lacksPermission) {
+    // Release gate wins the reason, matching router.tsx where RequirePublished wraps
+    // the permission gate (an unpublished app denies first, regardless of perms).
+    return { disabled: true, reason: releaseGated ? UNPUBLISHED_TILE_REASON : UNAUTHORIZED_TILE_REASON };
+  }
+  return { disabled: false };
+}
+
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
   const items = [...navEntries]
     .sort((a, b) => a.order - b.order)
@@ -92,22 +110,91 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
-      const releaseGated = isReleaseGatedFor(entry.appId, can);
-      const lacksPermission =
-        entry.requiredPermissions !== undefined &&
-        entry.requiredPermissions.length > 0 &&
-        !entry.requiredPermissions.every((p) => can(p));
-      if (releaseGated || lacksPermission) {
+      const gate = navGate(entry, can);
+      if (gate.disabled) {
         item.disabled = true;
-        // Release gate wins the tooltip, matching router.tsx where RequirePublished
-        // wraps the permission gate (an unpublished app denies first, regardless of perms).
-        item.disabledReason = releaseGated ? UNPUBLISHED_TILE_REASON : UNAUTHORIZED_TILE_REASON;
+        item.disabledReason = gate.reason;
       }
       return item;
     });
   // Usable first, greyed last. filter() is a stable partition, so each group keeps its
   // order-sorted sequence; no tile is dropped (消さない — greyed apps only move down).
   return [...items.filter((i) => !i.disabled), ...items.filter((i) => i.disabled)];
+}
+
+// Derive extra ASCII search terms from an entry so a Japanese label ("メール") is still
+// found by typing its route/app id ("mail"). The palette matches label + these.
+function navKeywords(entry: NavEntry): string[] {
+  const fromPath = entry.path.split("/").filter(Boolean);
+  return entry.appId ? [entry.appId, ...fromPath] : fromPath;
+}
+
+// Build the palette command list: every app (gated identically to the launcher, greyed
+// apps kept — 消さない) plus the global self-service actions. Apps sort usable-first to
+// match the launcher; actions follow in their own section.
+export function buildPaletteCommands(
+  navEntries: NavEntry[],
+  can: Can,
+  actions: {
+    onNavigate?: (path: string) => void;
+    onOpenAccount?: () => void;
+    onLogout?: () => void;
+  },
+): PaletteCommand[] {
+  const apps = [...navEntries]
+    .sort((a, b) => a.order - b.order)
+    .map((entry): PaletteCommand => {
+      const gate = navGate(entry, can);
+      const cmd: PaletteCommand = {
+        id: `app:${entry.path}`,
+        label: entry.label,
+        group: "アプリ",
+        icon: entry.icon,
+        keywords: navKeywords(entry),
+        run: () => actions.onNavigate?.(entry.path),
+      };
+      if (gate.disabled) {
+        cmd.disabled = true;
+        cmd.disabledReason = gate.reason;
+      }
+      return cmd;
+    });
+  const usable = apps.filter((c) => !c.disabled);
+  const greyed = apps.filter((c) => c.disabled);
+
+  const actionCmds: PaletteCommand[] = [];
+  if (actions.onNavigate) {
+    actionCmds.push({
+      id: "action:home",
+      label: "ホームへ移動",
+      group: "アクション",
+      icon: "home",
+      keywords: ["home", "dashboard", "ホーム", "ダッシュボード"],
+      run: () => actions.onNavigate?.("/"),
+    });
+  }
+  if (actions.onOpenAccount) {
+    actionCmds.push({
+      id: "action:account",
+      label: "アカウント設定",
+      group: "アクション",
+      icon: "user",
+      keywords: ["account", "settings", "profile", "password", "設定", "プロフィール", "パスワード"],
+      run: () => actions.onOpenAccount?.(),
+    });
+  }
+  if (actions.onLogout) {
+    actionCmds.push({
+      id: "action:logout",
+      label: "ログアウト",
+      group: "アクション",
+      icon: "log-out",
+      keywords: ["logout", "signout", "ログアウト"],
+      run: () => actions.onLogout?.(),
+    });
+  }
+
+  return [...usable, ...greyed, ...actionCmds];
 }
 
 export function AppShellLayout({
@@ -125,6 +212,7 @@ export function AppShellLayout({
   const [acctOpen, setAcctOpen] = useState(false);
   // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
   const [colorOpen, setColorOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
@@ -157,6 +245,17 @@ export function AppShellLayout({
     onSelect: () => setColorOpen(true),
     testId: "fe2-color-settings-open",
   });
+  // キーボードショートカット一覧 — available to any signed-in viewer (shortcuts are global
+  // and need no api). Opens the ShortcutsDialog, which also lists itself via the "?" hotkey.
+  if (authed) {
+    settingsItems.push({
+      id: "keyboard-shortcuts",
+      label: "キーボードショートカット",
+      icon: "keyboard",
+      onSelect: () => setShortcutsOpen(true),
+      testId: "fe2-shortcuts-open",
+    });
+  }
   if (authed && onLogout) {
     settingsItems.push({
       id: "logout",
@@ -237,10 +336,21 @@ export function AppShellLayout({
     />
   );
 
+  // Cmd/Ctrl+K palette: apps mirror the launcher (same gating), actions mirror the ⚙
+  // menu. Mounted only for authenticated viewers so the hotkey/commands match what a
+  // signed-in user can actually do; the palette itself owns the open/close + shortcut.
+  const paletteCommands = buildPaletteCommands(navEntries, can, {
+    ...(onNavigate ? { onNavigate } : {}),
+    ...(showAccount ? { onOpenAccount: () => setAcctOpen(true) } : {}),
+    ...(authed && onLogout ? { onLogout } : {}),
+  });
+
   // No `sidebar` prop -> @dub/ui AppShell renders no left rail; main spans full width.
   return (
     <AppShell header={header} testId="fe2-shell">
       {children}
+      {authed ? <CommandPalette commands={paletteCommands} /> : null}
+      {authed ? <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} /> : null}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
       <ColorSettingsDialog open={colorOpen} onClose={() => setColorOpen(false)} />
