@@ -1448,3 +1448,87 @@ svg {
     animation: none;
   }
 }
+
+/* ── キーボードショートカット一覧 (ShortcutsDialog) ─────────────────────────────
+   Renders inside the @dub/ui Modal, so these style only the content: a per-category
+   list of "action ⟶ key chord" rows with generous spacing ([[ui-spacing-principle]]). */
+.fe2-shortcuts-intro {
+  margin: 0 0 var(--dub-space-5);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-line-height-normal);
+}
+.fe2-shortcuts-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+}
+.fe2-shortcuts-group-title {
+  margin: 0 0 var(--dub-space-3);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.fe2-shortcuts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.fe2-shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-3) var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+}
+.fe2-shortcuts-row:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.fe2-shortcuts-row-label {
+  min-width: 0;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-md);
+}
+.fe2-shortcuts-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  flex: 0 0 auto;
+}
+.fe2-shortcuts-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75em;
+  height: 1.75em;
+  padding: 0 var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default);
+  border-bottom-width: 2px;
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  line-height: 1;
+}
+.fe2-shortcuts-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  margin: var(--dub-space-6) 0 0;
+  padding-top: var(--dub-space-4);
+  border-top: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+.fe2-shortcuts-hint .fe2-shortcuts-kbd {
+  min-width: 1.5em;
+  height: 1.5em;
+}

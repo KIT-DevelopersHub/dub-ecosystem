@@ -67,6 +67,7 @@ import {
   Monitor,
   // カラー設定 (fe2 設定メニュー → カラー設定ダイアログ)
   Palette,
+  Keyboard,
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "./types";
@@ -142,6 +143,7 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   monitor: Monitor,
   // カラー設定エントリ (fe2 設定メニュー)
   palette: Palette,
+  keyboard: Keyboard,
 };
 
 // Direct re-export of Lucide for advanced callers (still tree-shakable).

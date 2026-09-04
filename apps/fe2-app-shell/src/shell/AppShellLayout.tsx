@@ -17,6 +17,7 @@ import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
+import { ShortcutsDialog } from "./ShortcutsDialog.tsx";
 import {
   isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
@@ -211,6 +212,7 @@ export function AppShellLayout({
   const [acctOpen, setAcctOpen] = useState(false);
   // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
   const [colorOpen, setColorOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
@@ -243,6 +245,17 @@ export function AppShellLayout({
     onSelect: () => setColorOpen(true),
     testId: "fe2-color-settings-open",
   });
+  // キーボードショートカット一覧 — available to any signed-in viewer (shortcuts are global
+  // and need no api). Opens the ShortcutsDialog, which also lists itself via the "?" hotkey.
+  if (authed) {
+    settingsItems.push({
+      id: "keyboard-shortcuts",
+      label: "キーボードショートカット",
+      icon: "keyboard",
+      onSelect: () => setShortcutsOpen(true),
+      testId: "fe2-shortcuts-open",
+    });
+  }
   if (authed && onLogout) {
     settingsItems.push({
       id: "logout",
@@ -337,6 +350,7 @@ export function AppShellLayout({
     <AppShell header={header} testId="fe2-shell">
       {children}
       {authed ? <CommandPalette commands={paletteCommands} /> : null}
+      {authed ? <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} /> : null}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
       <ColorSettingsDialog open={colorOpen} onClose={() => setColorOpen(false)} />

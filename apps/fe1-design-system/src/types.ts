@@ -90,7 +90,8 @@ export type IconName =
   | "moon"
   | "monitor"
   // カラー設定 (fe2 設定メニュー → カラー設定ダイアログのエントリ). Additive, closed-union preserved.
-  | "palette";
+  | "palette"
+  | "keyboard";
 
 export interface IconProps extends TestableProps {
   name: IconName;
