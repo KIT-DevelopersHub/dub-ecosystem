@@ -9,12 +9,17 @@ const names = new Map<common.UserId, string>([
   ["user_b", "山田 太郎"],
 ]);
 
-function bar(presence: gantt.GanttPresenceUser[], status: "open" | "connecting" = "open", max?: number) {
+function bar(
+  presence: gantt.GanttPresenceUser[],
+  status: "open" | "connecting" = "open",
+  max?: number,
+  selfUserId: common.UserId | null = "user_self" as common.UserId,
+) {
   return render(
     <PresenceBar
       presence={presence}
       status={status}
-      selfUserId={"user_self" as common.UserId}
+      selfUserId={selfUserId}
       displayNameById={names}
       max={max}
     />,
@@ -22,25 +27,31 @@ function bar(presence: gantt.GanttPresenceUser[], status: "open" | "connecting" 
 }
 
 describe("PresenceBar", () => {
-  it("shows OTHER viewers as avatars and excludes the local user (自分以外)", () => {
+  it("shows ALL viewers as avatars, INCLUDING the local user (自分含む全員)", () => {
     bar([{ userId: "user_self" }, { userId: "user_a" }, { userId: "user_b" }]);
     expect(screen.getByTestId("fe4-presence-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("fe4-presence-avatar-user_self")).toBeInTheDocument();
     expect(screen.getByTestId("fe4-presence-avatar-user_a")).toBeInTheDocument();
     expect(screen.getByTestId("fe4-presence-avatar-user_b")).toBeInTheDocument();
-    // self is filtered out
-    expect(screen.queryByTestId("fe4-presence-avatar-user_self")).toBeNull();
-    expect(screen.getByText("他 2 人が閲覧中")).toBeInTheDocument();
+    // self is badged "（あなた）"
+    expect(screen.getByTestId("fe4-presence-avatar-user_self")).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("（あなた）"),
+    );
+    expect(screen.getByText("3 人が閲覧中")).toBeInTheDocument();
   });
 
-  it("dedupes a user that appears twice", () => {
-    bar([{ userId: "user_a" }, { userId: "user_a" }]);
+  it("injects self so a single tab still sees itself (1タブでも自分が出る)", () => {
+    // The frame carries no one (or hasn't arrived) yet — self is still shown when connected.
+    bar([]);
+    expect(screen.getByTestId("fe4-presence-avatar-user_self")).toBeInTheDocument();
+    expect(screen.getByText("1 人が閲覧中")).toBeInTheDocument();
+  });
+
+  it("dedupes a user that appears twice (multi-tab ⇒ one avatar)", () => {
+    bar([{ userId: "user_a" }, { userId: "user_a" }], "open", undefined, null);
     expect(screen.getAllByTestId("fe4-presence-avatar-user_a")).toHaveLength(1);
-    expect(screen.getByText("他 1 人が閲覧中")).toBeInTheDocument();
-  });
-
-  it("renders nothing when only the local user is present and connected", () => {
-    const { container } = bar([{ userId: "user_self" }]);
-    expect(container.firstChild).toBeNull();
+    expect(screen.getByText("1 人が閲覧中")).toBeInTheDocument();
   });
 
   it("collapses overflow into a +N chip", () => {
@@ -53,12 +64,13 @@ describe("PresenceBar", () => {
       ],
       "open",
       2,
+      null, // no self injection so the count is purely the four peers
     );
     expect(screen.getByText("+2")).toBeInTheDocument();
   });
 
   it("uses the roster label's initials for the avatar", () => {
-    bar([{ userId: "user_b" }]); // 山田 太郎 → 山
+    bar([{ userId: "user_b" }], "open", undefined, null); // 山田 太郎 → 山
     expect(screen.getByTestId("fe4-presence-avatar-user_b")).toHaveTextContent("山");
   });
 });

@@ -31,8 +31,9 @@ export type RealtimeStatus = "connecting" | "open" | "reconnecting" | "closed";
 
 /** What the hook returns to the workspace so it can render the presence bar. */
 export interface GanttRealtimePresence {
-  /** Everyone currently viewing this gantt, deduped per user (includes the local user;
-   *  the presence bar filters "you" out with `selfUserId`). */
+  /** Everyone currently viewing this gantt, deduped per user — INCLUDING the local user
+   *  (the DO fans self out in its snapshot). The presence bar renders self too, badged
+   *  "（あなた）" via `selfUserId`. */
   presence: gantt.GanttPresenceUser[];
   /** The local user's id (from the ws-ticket), or null before the first ticket. */
   selfUserId: common.UserId | null;
