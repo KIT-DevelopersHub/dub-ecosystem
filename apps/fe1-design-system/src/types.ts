@@ -462,6 +462,10 @@ export interface AppLauncherProps extends TestableProps {
   onSelect?: (item: AppLauncherItem) => void; // click/Enter on a tile
   label?: string; // aria-label for the waffle trigger (default: "アプリ")
   title?: string; // heading shown atop the popover grid
+  // Placeholder + aria-label for the filter box shown when the popover opens. The
+  // box narrows the *displayed* tiles by substring; it never removes apps from the
+  // catalog (消さない). Default: "アプリを検索".
+  searchPlaceholder?: string;
 }
 
 export interface SidebarItem {

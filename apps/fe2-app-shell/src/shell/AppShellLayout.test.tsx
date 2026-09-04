@@ -411,7 +411,8 @@ describe("AppShellLayout", () => {
       </QueryClientProvider>,
     );
     await userEvent.click(await screen.findByTestId("fe2-app-launcher-trigger"));
-    const tiles = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
+    // AppLauncher tiles are listbox options (search/keyboard-nav a11y model).
+    const tiles = screen.getAllByRole("option").map((el) => el.getAttribute("data-testid"));
     // メール (usable) first; then the two greyed apps in their original order (events<admin).
     expect(tiles).toEqual([
       "fe2-app-launcher-item-mail",

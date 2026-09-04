@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe1-launcher-search",
+  "worker": "dub-demo-fe1-launcher-search",
+  "url": "https://dub-demo-fe1-launcher-search.developershub-site.workers.dev",
+  "deployedSha": "63654cb",
+  "branch": "HEAD",
+  "actor": "Claude (kota)",
+  "markers": ["アプリを検索","に一致するアプリはありません"],
+  "live": true,
+  "verifiedAt": "2026-09-03T15:19:58Z",
+  "updatedAt": "2026-09-03T15:19:58Z",
+  "note": "AppLauncher filter+keyboard (判断18②)"
+}
