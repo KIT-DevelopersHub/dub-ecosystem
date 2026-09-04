@@ -3,7 +3,7 @@
 // back-nav safe (FE5 §3, test 3). No React here.
 //
 // Two orthogonal axes:
-//  - `category` drives the user-facing tabs (All / アプリアップデート / メール / 参加届) and is
+//  - `category` drives the user-facing tabs (All / 参加届 / アプリアップデート / フィードバック / メール) and is
 //    applied CLIENT-SIDE (the inbox list endpoint does not filter by type — see repo.listInbox).
 //  - `type` is a legacy server-side type-prefix filter kept for the admin/deep-link paths and
 //    for type-scoped mark-all-read; the tabs no longer set it (defaults to "").
@@ -18,7 +18,7 @@ export interface InboxFilter {
 
 export const EMPTY_FILTER: InboxFilter = { unreadOnly: false, category: "all", type: "" };
 
-const CATEGORY_VALUES: CategoryFilter[] = ["all", "app_update", "mail", "participation", "other"];
+const CATEGORY_VALUES: CategoryFilter[] = ["all", "app_update", "mail", "participation", "feedback", "other"];
 
 function parseCategory(raw: string | null): CategoryFilter {
   return raw !== null && (CATEGORY_VALUES as string[]).includes(raw) ? (raw as CategoryFilter) : "all";

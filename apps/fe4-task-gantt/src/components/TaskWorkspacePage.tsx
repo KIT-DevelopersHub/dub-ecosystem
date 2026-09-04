@@ -7,6 +7,7 @@ import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
 import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
+import { useGanttRealtime } from "../api/useGanttRealtime";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
 import { useRoster } from "../api/useRoster";
@@ -127,6 +128,15 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   };
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
+  // Realtime sync: apply peers' bar moves straight to the cache, and refetch fresh when a
+  // structural change (create/delete/status/assignee/dependency) shifts the derived chart.
+  // Best-effort — the chart works without it (RT is a delivery optimisation, not the SoT).
+  useGanttRealtime(eventId, {
+    applyMove: gantt.setRowScheduleOptimistic,
+    invalidate: () => {
+      void gantt.refetchFresh();
+    },
+  });
   // Per-user view state — carries the personal manual row order (drag reorder).
   const view = useGanttView(eventId);
   const orderedTaskIds = useMemo(() => view.data?.orderedTaskIds ?? [], [view.data]);
@@ -795,8 +805,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return true;
   };
 
-  const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
-    if (!selectedTask) return;
+  // Returns a promise that resolves true on success / false on failure so the detail
+  // panel's auto-save indicator can show 保存中…→保存しました/保存に失敗しました.
+  const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit): Promise<boolean> => {
+    if (!selectedTask) return Promise.resolve(false);
     const needsRelations = relations.parentChanged || relations.depsChanged;
     // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
     // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
@@ -833,7 +845,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           fieldOnlyPatch.dueAt !== undefined ? fieldOnlyPatch.dueAt : barBefore?.endsAt ?? null;
         gantt.setRowScheduleOptimistic(id, nextStarts, nextEnds);
       }
-      void store
+      const savePromise = store
         .patchOptimistic(client, id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
         .then((ok) => {
           if (ok) {
@@ -843,6 +855,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
             // Save failed (reason surfaced by the store) — restore the true bar position.
             void gantt.refetchFresh();
           }
+          return ok !== null; // Task on success, null on failure → boolean for the indicator
         });
       if (Object.keys(afterFields).length > 0) {
         history.push({
@@ -855,7 +868,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           },
         });
       }
-      return;
+      return savePromise;
     }
     // Relation edit (親子 / 依存). Snapshot the BEFORE state so Ctrl-Z can restore
     // the previous parent/predecessors, apply the AFTER state, then record it.
@@ -869,9 +882,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // stale panel version — the reparent→依存 failure class. The optimistic parent + 依存
     // reflection (and its rollback) now lives INSIDE applyRelationsRaw, so save + undo +
     // redo all reflect instantly. On success we confirm with a success toast.
-    void applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined).then((ok) => {
-      if (ok) feedback.success();
-    });
+    const relPromise = applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined).then(
+      (ok) => {
+        if (ok) feedback.success();
+        return ok;
+      },
+    );
     history.push({
       label: relations.depsChanged ? "先行タスク（依存）の変更" : "親タスク（親子）の変更",
       undo: async () => {
@@ -881,6 +897,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         await applyRelationsRaw(id, nextParent, nextDeps);
       },
     });
+    return relPromise;
   };
 
   const onDeleteDetail = () => {

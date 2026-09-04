@@ -32,6 +32,14 @@ describe("Display", () => {
     expect(screen.getByText("AL")).toBeInTheDocument();
   });
 
+  it("Avatar renders a fallback (no throw) for a null/undefined name", () => {
+    // A shared leaf primitive must never crash the host app on bad input — a null name
+    // once threw initials(null).trim() and took the whole chat screen down.
+    render(<Avatar name={null as unknown as string} testId="a-null" />);
+    expect(screen.getByTestId("a-null")).toBeInTheDocument();
+    expect(screen.getByText("?")).toBeInTheDocument();
+  });
+
   it("Tag calls onRemove", async () => {
     const onRemove = vi.fn();
     render(
