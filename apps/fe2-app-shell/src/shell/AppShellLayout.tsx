@@ -15,6 +15,7 @@ import type { ApiClient } from "../lib/api-client.tsx";
 import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
+import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
 import {
   isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
@@ -122,17 +123,23 @@ export function AppShellLayout({
   const auth = useAuth();
   const { can } = usePermissions();
   const [acctOpen, setAcctOpen] = useState(false);
+  // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
+  const [colorOpen, setColorOpen] = useState(false);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
   const authed = auth.status === "authenticated";
 
-  // The ⚙ menu's contents. アカウント設定 (display name / avatar / password) needs the
-  // api-client; ログアウト only needs the onLogout handler, so logout stays available to
-  // any signed-in viewer even if no api is wired. Logout sits last, under a divider,
-  // danger-toned — a 離脱/destructive action set apart from the safe settings above it.
-  // パスワード変更 is no longer a separate item: it lives INSIDE アカウント設定, unifying
-  // all self-service account actions under one entry.
+  // The ⚙ menu's contents — a short list of self-service行き先, each a single row that
+  // either opens a dialog or fires an action:
+  //   • アカウント設定 (needs the api-client) — display name / avatar / password / 参加情報.
+  //   • カラー設定 (表示設定) — always available; opens the ColorSettingsDialog where テーマ
+  //     (system/light/dark) is chosen. The three theme rows used to sit directly in this
+  //     menu, which read oddly; folding them behind one カラー設定 row keeps the menu a tidy
+  //     list of destinations and leaves room to grow (density/accent) inside the dialog.
+  //     setTheme/localStorage永続/全アプリ波及/system時OS追従 are all unchanged.
+  //   • ログアウト — needs only onLogout, so it stays for any signed-in viewer even with no
+  //     api wired. Last, under a divider, danger-toned — a 離脱/destructive action set apart.
   const settingsItems: MenuItem[] = [];
   if (showAccount) {
     settingsItems.push({
@@ -143,6 +150,13 @@ export function AppShellLayout({
       testId: "fe2-account-settings-open",
     });
   }
+  settingsItems.push({
+    id: "color-settings",
+    label: "カラー設定",
+    icon: "palette",
+    onSelect: () => setColorOpen(true),
+    testId: "fe2-color-settings-open",
+  });
   if (authed && onLogout) {
     settingsItems.push({
       id: "logout",
@@ -203,11 +217,11 @@ export function AppShellLayout({
             <Widget key={i} />
           ))}
           {settingsItems.length > 0 ? (
-            // Settings (⚙) dropdown — the account self-service container. アカウント設定
-            // (display name / avatar / password change) and ログアウト live INSIDE it, so
-            // the header is just 9-dot / bell / ⚙ (uniform icon row, no bare
-            // buttons). パスワード変更 is now nested within アカウント設定 (unified), and the
-            // logout flow's behaviour/API/authz are unchanged.
+            // Settings (⚙) dropdown — the self-service container. アカウント設定 (display
+            // name / avatar / password change), テーマ切替 (system/light/dark) and ログアウト
+            // all live INSIDE it, so the header is just 9-dot / bell / ⚙ (uniform icon
+            // row, no bare buttons). パスワード変更 is nested within アカウント設定 (unified),
+            // and the logout flow's behaviour/API/authz are unchanged.
             <Menu
               testId="fe2-settings-menu"
               label="設定"
@@ -229,6 +243,7 @@ export function AppShellLayout({
       {children}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
+      <ColorSettingsDialog open={colorOpen} onClose={() => setColorOpen(false)} />
     </AppShell>
   );
 }
