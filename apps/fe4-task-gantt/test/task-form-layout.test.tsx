@@ -89,7 +89,6 @@ describe("タスク作成フォームの確定レイアウト（両フォーム�
       <MyTaskCreateModal
         open
         onClose={() => {}}
-        events={[]}
         people={USERS}
         teams={TEAMS}
         parentOptions={PARENT_OPTS}

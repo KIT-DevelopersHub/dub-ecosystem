@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, updateTask, replaceDependencies, resolveUsers, createTaskAttachment } from "../api/endpoints";
+import { listTasks, createTask, updateTask, replaceDependencies, resolveUsers } from "../api/endpoints";
 import type { ScopeTask } from "../domain/task-hierarchy";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
@@ -16,7 +16,7 @@ import {
 } from "../domain/my-tasks";
 import { MyTasksFilterBar } from "./MyTasksFilterBar";
 import { MyTaskList } from "./MyTaskList";
-import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
+import { MyTaskCreateModal, type MyTaskDraft } from "./MyTaskCreateModal";
 import { TaskDetailDialog } from "./TaskDetailDialog";
 import styles from "../styles/app.module.css";
 
@@ -33,7 +33,6 @@ export interface MyTasksPageProps {
   /** roster for the filter selects + create modal 依頼先. */
   people: readonly identity.UserSummary[];
   teams: readonly team.Team[];
-  events: readonly EventOption[];
 }
 
 /**
@@ -42,7 +41,7 @@ export interface MyTasksPageProps {
  * 「すべて」, unified into one list that shows 依頼→担当 (from→to). Create is
  * optimistic (the new task appears instantly, rolls back on error).
  */
-export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPageProps) {
+export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) {
   const client = useApiClient();
   const toast = useToast();
 
@@ -58,21 +57,12 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
 
   const teamNames = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
 
-  // Fallbacks so the hub works in the shell too, where the caller may not have a
-  // roster / event list to hand: people fall back to whoever appears in the tasks,
-  // events fall back to the distinct events those tasks belong to (id as label).
+  // Fallback so the hub works in the shell too, where the caller may not have a roster
+  // to hand: people fall back to whoever appears in the tasks.
   const effectivePeople = useMemo<readonly identity.UserSummary[]>(
     () => (people.length > 0 ? people : [...users.values()]),
     [people, users],
   );
-  const effectiveEvents = useMemo<readonly EventOption[]>(() => {
-    if (events.length > 0) return events;
-    const seen = new Map<common.EventId, EventOption>();
-    for (const t of tasks) {
-      if (t.eventId && !seen.has(t.eventId)) seen.set(t.eventId, { id: t.eventId, name: t.eventId });
-    }
-    return [...seen.values()];
-  }, [events, tasks]);
   const currentUserName = useMemo(
     () => users.get(currentUserId)?.displayName ?? people.find((p) => p.id === currentUserId)?.displayName ?? "自分",
     [users, people, currentUserId],
@@ -201,31 +191,6 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
           });
         }
       }
-      // Persist attachments after the task exists (they need its real id). Best-effort:
-      // a failed attachment must not undo an already-created task.
-      const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
-      if (attachCount > 0) {
-        try {
-          for (const f of draft.attachments.files) {
-            await createTaskAttachment(client, created.id, {
-              kind: "file",
-              name: f.name,
-              url: f.url,
-              mimeType: f.mimeType,
-              sizeBytes: f.sizeBytes,
-            });
-          }
-          for (const u of draft.attachments.urls) {
-            await createTaskAttachment(client, created.id, { kind: "url", name: u.name, url: u.url });
-          }
-        } catch {
-          toast.show({
-            kind: "error",
-            title: "一部の添付を保存できませんでした",
-            description: "タスクは作成済みです。詳細から再度添付できます。",
-          });
-        }
-      }
       // reconcile the temp row with the server task (or drop it if out of lens).
       setTasks((prev) => {
         const withoutTemp = prev.filter((t) => t.id !== tempId);
@@ -296,7 +261,6 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       <MyTaskCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        events={effectiveEvents}
         people={effectivePeople}
         teams={teams}
         parentOptions={parentOptions}

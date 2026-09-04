@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { TextField, Textarea, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, DATE_LABEL } from "../domain/task-form";
@@ -27,6 +26,10 @@ import styles from "../styles/app.module.css";
  * The 親タスク→チーム interlock (親子は同一チーム) is owned here so both forms behave
  * identically: choosing a 親タスク fixes+locks the team to the parent's team and prunes
  * cross-team predecessors; the server also enforces it (二重の担保).
+ *
+ * This component takes NO per-form escape hatches (no extra slots, no relabeling): the
+ * field set/order is the single canonical spec and both create modals render it with the
+ * SAME props, so タスク作成 と タスク発行 は寸分違わず同一になる (フォーム固有の追加項目は作らない).
  */
 export interface TaskFormFieldsProps {
   idPrefix: string;
@@ -46,8 +49,6 @@ export interface TaskFormFieldsProps {
   users: readonly identity.UserSummary[];
   assigneeId: common.UserId | null;
   onAssigneeChange: (v: common.UserId | null) => void;
-  /** label for the 担当 field (タスク発行 uses 「依頼先（担当者）」). Defaults to 「担当」. */
-  assigneeLabel?: string;
 
   teams: readonly team.Team[];
   teamId: common.TeamId | null;
@@ -71,11 +72,6 @@ export interface TaskFormFieldsProps {
   description: string;
   onDescriptionChange: (v: string) => void;
   descriptionPlaceholder?: string;
-
-  /** optional form-specific field inserted right after タイトル (e.g. 対象イベント). */
-  leadingSlot?: ReactNode;
-  /** optional form-specific field inserted right before 詳細 (e.g. 添付). */
-  beforeDescriptionSlot?: ReactNode;
 }
 
 export function TaskFormFields(props: TaskFormFieldsProps) {
@@ -93,7 +89,6 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
     users,
     assigneeId,
     onAssigneeChange,
-    assigneeLabel = "担当",
     teams,
     teamId,
     onTeamIdChange,
@@ -110,8 +105,6 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
     description,
     onDescriptionChange,
     descriptionPlaceholder,
-    leadingSlot,
-    beforeDescriptionSlot,
   } = props;
 
   const depOptions = dependencyScopeOptions(scopeTasks, teamId);
@@ -132,7 +125,7 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
   };
 
   return (
-    <div className={styles.formGrid} data-form-spec="fe4-taskform-spec-v1">
+    <div className={styles.formGrid} data-form-spec="fe4-taskform-identical-v2">
       <div className={styles.formFieldFull}>
         <label className={styles.formLabel} htmlFor={`${idPrefix}-title`}>
           タイトル<span className={styles.req}>*</span>
@@ -145,8 +138,6 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
           testId={`${idPrefix}-title`}
         />
       </div>
-
-      {leadingSlot}
 
       {/* ステータス / 優先度 (2カラム・同一行) */}
       <div className={styles.formRow}>
@@ -180,7 +171,7 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
       <div className={styles.formRow}>
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor={`${idPrefix}-assignee`}>
-            {assigneeLabel}
+            担当
           </label>
           <Select
             id={`${idPrefix}-assignee`}
@@ -247,8 +238,6 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
         <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク）</span>
         <PredecessorPicker options={depOptions} value={deps} onChange={onDepsChange} testId={`${idPrefix}-deps`} />
       </div>
-
-      {beforeDescriptionSlot}
 
       {/* 詳細 (全幅) */}
       <div className={styles.formFieldFull}>

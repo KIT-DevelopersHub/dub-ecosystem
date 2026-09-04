@@ -10,10 +10,9 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTeams, listEvents, toDomainTeams } from "../api/endpoints";
+import { listTeams, toDomainTeams } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
-import type { EventOption } from "../components/MyTaskCreateModal";
 import styles from "../styles/app.module.css";
 
 export interface TaskRouteContextValue {
@@ -78,7 +77,6 @@ export function MeTasksRoute() {
   const client = useApiClient();
   const { currentUserId } = useTaskRoute();
   const [teams, setTeams] = useState<readonly team.Team[]>([]);
-  const [events, setEvents] = useState<readonly EventOption[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -89,16 +87,6 @@ export function MeTasksRoute() {
       .catch(() => {
         /* teams are optional; the hub degrades gracefully without them */
       });
-    // Supply the real event list so 「タスクを発行」 is enabled and can target a
-    // live event. Without this the button stayed disabled for admins who had no
-    // existing tasks to derive an event from (issue: 発行ボタンが押せない).
-    void listEvents(client)
-      .then((res) => {
-        if (live) setEvents(res.items.map((e) => ({ id: e.id, name: e.title })));
-      })
-      .catch(() => {
-        /* events are optional; the hub falls back to task-derived events */
-      });
     return () => {
       live = false;
     };
@@ -108,7 +96,7 @@ export function MeTasksRoute() {
 
   return (
     <ToastProvider>
-      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} events={events} />
+      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} />
     </ToastProvider>
   );
 }
