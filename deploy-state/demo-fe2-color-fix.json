@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe2-color-fix",
+  "worker": "dub-demo-fe2-color-fix",
+  "url": "https://dub-demo-fe2-color-fix.developershub-site.workers.dev",
+  "deployedSha": "1afdb1e",
+  "branch": "feat/fe2-darkmode-myday",
+  "actor": "Kota",
+  "markers": ["fe2-theme-list"],
+  "live": true,
+  "verifiedAt": "2026-09-04T04:42:14Z",
+  "updatedAt": "2026-09-04T04:42:14Z",
+  "note": "カラー設定テーマ選択を縦リスト化(折り返し解消)"
+}

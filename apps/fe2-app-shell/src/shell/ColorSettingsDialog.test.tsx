@@ -16,7 +16,7 @@ describe("ColorSettingsDialog", () => {
     expect(screen.queryByTestId("fe2-color-theme-segmented")).not.toBeInTheDocument();
   });
 
-  it("renders the theme segmented control with system/light/dark options when open", () => {
+  it("renders the theme radiogroup with system/light/dark options when open", () => {
     render(<ColorSettingsDialog open onClose={() => {}} />);
     expect(screen.getByTestId("fe2-color-settings")).toBeInTheDocument();
     expect(screen.getByTestId("fe2-theme-option-system")).toBeInTheDocument();
@@ -27,8 +27,8 @@ describe("ColorSettingsDialog", () => {
   it("marks the current theme as selected and shows it in the current-setting line", () => {
     useUiStore.setState({ theme: "light" });
     render(<ColorSettingsDialog open onClose={() => {}} />);
-    expect(screen.getByTestId("fe2-theme-option-light")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("fe2-theme-option-dark")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByTestId("fe2-theme-option-light")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("fe2-theme-option-dark")).toHaveAttribute("aria-checked", "false");
     expect(screen.getByTestId("fe2-color-theme-current")).toHaveTextContent("ライト");
   });
 
