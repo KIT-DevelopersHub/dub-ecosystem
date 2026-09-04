@@ -133,6 +133,16 @@ gen_one() {
       /^GANTT_RT_ALLOWED_ORIGINS = "/ {
         print "GANTT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
       }
+      # --- chat realtime vars: same as gantt above. The DO-direct WS base + Origin
+      #     allow-list must point at the STAGING chat worker + staging fe2 origin, else
+      #     staging fe2 opens the WS against the PROD chat worker and its staging-signed
+      #     ticket is rejected (401) — chat realtime silently dead on staging. ---
+      /^CHAT_RT_DO_URL_BASE = "/ {
+        sub(/dub-chat-service\./, "dub-chat-service-staging."); print; next
+      }
+      /^CHAT_RT_ALLOWED_ORIGINS = "/ {
+        print "CHAT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
+      }
       # --- default: swap resource ids + extend gateway CORS, then print ---
       {
         gsub(DUBCORE_ID, DUBCORE_STG)
