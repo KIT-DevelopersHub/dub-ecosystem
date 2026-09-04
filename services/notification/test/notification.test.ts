@@ -306,6 +306,24 @@ describe("lane-A mapping", () => {
     expect((EVENT_MAPPINGS as Record<string, unknown>)["task.deleted"]).toBeUndefined();
   });
 
+  it("chat.message.created with mentions -> in_app notification to the mentioned users", () => {
+    const rule = EVENT_MAPPINGS["chat.message.created"]!;
+    const env = envelope("chat.message.created", { channelId: "chan_1", messageId: "msg_1", authorId: "u_author", mentions: ["u_a", "u_b"] });
+    const input = mappingToIngest(rule, env);
+    expect(input.type).toBe("chat.mention");
+    expect(input.recipients).toEqual({ userIds: ["u_a", "u_b"] });
+    expect(input.channels).toEqual(["in_app"]);
+    expect(input.resourceType).toBe("channel");
+    expect(input.resourceId).toBe("chan_1");
+  });
+
+  it("chat.message.created with no mentions -> empty recipients (a legitimate no-op, no bell)", () => {
+    const rule = EVENT_MAPPINGS["chat.message.created"]!;
+    const env = envelope("chat.message.created", { channelId: "chan_1", messageId: "msg_2", authorId: "u_author" });
+    const input = mappingToIngest(rule, env);
+    expect(input.recipients).toEqual({});
+  });
+
   it("public.inquiry.received propagates name/email/message into content body", () => {
     const rule = EVENT_MAPPINGS["public.inquiry.received"]!;
     const env = envelope("public.inquiry.received", { kind: "sponsor", name: "Bob", email: "bob@example.com", message: "We would like to sponsor." });

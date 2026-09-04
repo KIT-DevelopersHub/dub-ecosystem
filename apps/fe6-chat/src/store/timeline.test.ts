@@ -122,6 +122,26 @@ describe("applyRealtimeEvent", () => {
     const out = applyRealtimeEvent(state, { kind: "member.added", channelId: CH, userId: OTHER, at: "2026-08-09T01:00:00Z" }, ME);
     expect(out).toBe(state);
   });
+
+  it("converges reactions on reaction.updated (wire map -> Reaction[])", () => {
+    const state = { ...emptyChannelView(CH), messages: [msg("msg_a", { reactions: [] })] };
+    const out = applyRealtimeEvent(
+      state,
+      { kind: "reaction.updated", channelId: CH, messageId: "msg_a", emoji: "🎉", userId: OTHER, op: "added", reactions: { "🎉": [OTHER, ME] }, at: "2026-08-09T04:00:00Z" },
+      ME,
+    );
+    expect(out.messages[0]!.reactions).toEqual([{ emoji: "🎉", userIds: [OTHER, ME] }]);
+  });
+
+  it("reaction.updated for an unloaded message is a no-op", () => {
+    const state = { ...emptyChannelView(CH), messages: [msg("msg_a", { reactions: [] })] };
+    const out = applyRealtimeEvent(
+      state,
+      { kind: "reaction.updated", channelId: CH, messageId: "msg_missing", emoji: "👍", userId: OTHER, op: "added", reactions: { "👍": [OTHER] }, at: "2026-08-09T04:00:00Z" },
+      ME,
+    );
+    expect(out.messages[0]!.reactions).toEqual([]);
+  });
 });
 
 describe("pending lifecycle", () => {

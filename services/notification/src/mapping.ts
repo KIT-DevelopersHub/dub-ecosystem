@@ -8,6 +8,7 @@ import type {
   ActionCreatedPayload,
   ActionStatusChangedPayload,
   ActionUpdatedPayload,
+  ChatMessageCreatedPayload,
   DeployDeploymentStatusChangedPayload,
   DeployDnsRecordChangedPayload,
   EventArchivedPayload,
@@ -146,6 +147,29 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     priority: "normal",
     buildRecipients: (p) => byEvent((p as ActionArchivedPayload).eventId),
     buildContent: (p) => ({ title: "Action archived", resourceType: "action", resourceId: (p as ActionArchivedPayload).actionId }),
+  },
+
+  // ---- chat ----
+  // A chat @mention becomes an in-app notification for each mentioned user (Slack
+  // parity: you get notified when someone @-mentions you, even while you're elsewhere).
+  // `mentions` rides the event (chat-service parses the body at post time, author
+  // already excluded) so notification never reads chat D1. No mentions -> empty
+  // recipients -> a legitimate no-op (design test #3): a plain channel message does NOT
+  // ring the bell (the in-app unread badge covers that), only mentions do. in_app only
+  // (no email/push storm for every mention).
+  "chat.message.created": {
+    type: "chat.mention",
+    channels: ["in_app"],
+    priority: "normal",
+    buildRecipients: (p) => {
+      const ids = (p as ChatMessageCreatedPayload).mentions;
+      return ids && ids.length > 0 ? { userIds: [...ids] } : {};
+    },
+    buildContent: (p) => ({
+      title: "メンションされました",
+      resourceType: "channel",
+      resourceId: (p as ChatMessageCreatedPayload).channelId,
+    }),
   },
 
   // ---- public inquiry (gateway) — save + notify staff ----

@@ -29,7 +29,24 @@ export type ChatRealtimeEvent =
       mode?: MessageDeletionMode;
     }
   | { kind: "member.added"; channelId: ChannelId; userId: UserId; at: ISODateTime }
-  | { kind: "member.removed"; channelId: ChannelId; userId: UserId; at: ISODateTime };
+  | { kind: "member.removed"; channelId: ChannelId; userId: UserId; at: ISODateTime }
+  | {
+      // A reaction was toggled on a message. Additive variant (RT裁定#4 stayed at 4
+      // kinds through P0): carries the message's FULL post-toggle reaction set so every
+      // client converges to the same state with a single apply — no per-delta merge, and
+      // idempotent if a frame is replayed. `op`/`userId`/`emoji` describe the specific
+      // toggle for optional affordances (e.g. "X reacted"). Older clients that don't know
+      // this kind ignore it (the WS client's kind allow-list drops unknown frames), so
+      // reactions simply stay non-realtime for them — never a break.
+      kind: "reaction.updated";
+      channelId: ChannelId;
+      messageId: MessageId;
+      emoji: string;
+      userId: UserId;
+      op: "added" | "removed";
+      reactions: Record<string, UserId[]>;
+      at: ISODateTime;
+    };
 
 // ---- message deletion policy (RBAC-configurable delete behaviour) ------------
 // A deleted message is either HARD-removed (physically gone — vanishes from the

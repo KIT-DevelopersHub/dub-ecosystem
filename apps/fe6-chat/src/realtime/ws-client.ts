@@ -22,7 +22,11 @@ function isRealtimeEvent(v: unknown): v is ChatRealtimeEvent {
   if (v === null || typeof v !== "object") return false;
   const k = (v as { kind?: unknown }).kind;
   return (
-    k === "message.created" || k === "message.deleted" || k === "member.added" || k === "member.removed"
+    k === "message.created" ||
+    k === "message.deleted" ||
+    k === "member.added" ||
+    k === "member.removed" ||
+    k === "reaction.updated"
   );
 }
 
