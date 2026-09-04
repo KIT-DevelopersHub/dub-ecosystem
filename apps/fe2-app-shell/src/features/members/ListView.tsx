@@ -46,6 +46,7 @@ export function ListView({
   members,
   teamsById,
   accountLabels,
+  loading = false,
   onEdit,
   onDelete,
   onLink,
@@ -55,6 +56,8 @@ export function ListView({
   teamsById: Map<string, MemberTeam>;
   /** identity userId -> display label (email/name) for the linked-account column. */
   accountLabels: Map<string, string>;
+  /** while true, the table renders skeleton rows under the real toolbar + header (no layout shift). */
+  loading?: boolean;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
   onLink: (m: OrgMember) => void;
@@ -133,6 +136,7 @@ export function ListView({
       columns={columns}
       rows={members}
       rowKey={(m) => m.id}
+      loading={loading}
       testId="members-table"
       columnHiding={{ storageKey: "dub.members.roster.columns.v1" }}
       emptyState={<EmptyState title="メンバーがいません" description="「メンバーを追加」から登録してください" icon="users" />}
