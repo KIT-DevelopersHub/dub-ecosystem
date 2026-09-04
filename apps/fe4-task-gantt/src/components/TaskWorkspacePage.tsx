@@ -1100,8 +1100,8 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
           <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
-        {/* Live presence: who else is viewing this gantt right now (自分以外). Visible to
-            every viewer, not only editors. Renders nothing when no one else is here. */}
+        {/* Live presence: who is viewing this gantt right now — 自分含む全員. Visible to
+            every viewer, not only editors. Self is pinned first and badged「（あなた）」. */}
         <PresenceBar
           presence={realtime.presence}
           status={realtime.status}

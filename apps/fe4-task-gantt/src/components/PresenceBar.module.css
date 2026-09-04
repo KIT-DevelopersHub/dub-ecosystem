@@ -61,6 +61,14 @@
 .avatar:first-child {
   margin-left: 0;
 }
+/* "You" gets an accent ring so 自分 is unmistakable in the row. Double box-shadow keeps the
+   ring circular (outline would square the corners) and lifts it above neighbour chips. */
+.avatar.self {
+  z-index: 1;
+  box-shadow:
+    0 0 0 2px var(--dub-color-surface-base, #fff),
+    0 0 0 4px var(--dub-color-accent, #6366f1);
+}
 
 .overflow {
   width: 30px;
