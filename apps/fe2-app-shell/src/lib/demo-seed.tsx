@@ -713,11 +713,25 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
 ];
 const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
 
-const SEED_USERS: identity.IdentityUser[] = [
-  { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
-  { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
-  { id: "usr_carol", orgId: ORG, displayName: "鈴木 一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
-  { id: "usr_dave", orgId: ORG, displayName: "田中 次郎", email: "jiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+// The roster carries `source` (Email Routing vs. 手動) — extra field over the frozen
+// IdentityUser, read by FE7's RosterUser projection and its 種別 column / sort.
+type DemoRosterUser = identity.IdentityUser & { source?: "manual" | "email-routing" };
+
+// A fuller roster (12 rows) so the admin table's 一括選択・列ソート・件数サマリ・URLフィルタ
+// (判断29 ①⑤⑧) are all visibly meaningful in the demo — varied 状態 / 種別 / ロール.
+const SEED_USERS: DemoRosterUser[] = [
+  { id: ME_ID, orgId: ORG, displayName: "デモ 管理者", email: "demo@developershub.jp", githubLogin: "demo", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_bob", orgId: ORG, displayName: "佐藤 太郎", email: "taro@developershub.jp", githubLogin: "taro", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_carol", orgId: ORG, displayName: "鈴木 一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_dave", orgId: ORG, displayName: "田中 次郎", email: "jiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_emi", orgId: ORG, displayName: "山田 恵美", email: "emi@developershub.jp", githubLogin: "emi-y", avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_frank", orgId: ORG, displayName: "高橋 文人", email: "fumito@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_grace", orgId: ORG, displayName: "伊藤 佳", email: "kei@developershub.jp", githubLogin: "kei-i", avatarUrl: null, status: "invited", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_hana", orgId: ORG, displayName: "渡辺 花", email: "hana@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_ken", orgId: ORG, displayName: "中村 健", email: "ken@developershub.jp", githubLogin: "ken-n", avatarUrl: null, status: "disabled", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_lily", orgId: ORG, displayName: "小林 里", email: "ri@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
 ];
 
 const SEED_ROLES: identity.Role[] = [
@@ -782,7 +796,7 @@ function problem(code: string, message: string, status: number, details?: unknow
  *  (GET/POST/PATCH/DELETE identity/roles + users + assignments, audit, mail). */
 function createRosterStore() {
   const roles: identity.Role[] = SEED_ROLES.map((r) => ({ ...r, permissions: [...r.permissions] }));
-  const users: identity.IdentityUser[] = SEED_USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+  const users: DemoRosterUser[] = SEED_USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] }));
   const assignments: Record<string, DemoRoleAssignment[]> = {};
   for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
   const audits: auditLog.AuditRecord[] = SEED_AUDITS.map((a) => ({ ...a }));
@@ -808,7 +822,16 @@ function createRosterStore() {
     if (method === "GET") {
       if (pathname === "/api/v1/identity/users") {
         // FE3/FE6 resolve display names via ?ids=; roster lists the full set.
-        return json(page(url.searchParams.has("ids") ? summaries() : users));
+        if (url.searchParams.has("ids")) return json(page(summaries()));
+        // Roster filtering (mirrors identity-roster + the standalone mock): the FE7
+        // 名簿 sends status / q so the count summary「X件中Y件」and URL-saved filters
+        // actually narrow the list in the demo.
+        let list = users;
+        const status = url.searchParams.get("status");
+        if (status) list = list.filter((u) => u.status === status);
+        const q = url.searchParams.get("q");
+        if (q) list = list.filter((u) => u.displayName.includes(q) || u.email.includes(q));
+        return json(page(list));
       }
       {
         const id = seg(/^\/api\/v1\/identity\/users\/([^/]+)\/roles$/);
@@ -1037,6 +1060,26 @@ function createChatStore() {
   });
   const byId = new Map(all.map((c) => [c.id, c]));
 
+  // Seeded timeline for #general — includes a SYSTEM post (authorId: null, chat-service
+  // `kind: "system"`). System posts have no author; the client must render them as
+  // "システム" and never feed null into the Avatar (initials(null).trim() would crash
+  // the whole chat screen). This seed is the demo regression guard for that fix.
+  const msg = (over: Partial<Record<string, unknown>> & { id: string; authorId: string | null; body: string; createdAt: string }) => ({
+    channelId: "chn_general",
+    threadRootId: null,
+    replyCount: 0,
+    reactions: [],
+    attachments: [],
+    editedAt: null,
+    deletedAt: null,
+    version: 1,
+    ...over,
+  });
+  const generalMessages = [
+    msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
+    msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+  ];
+
   function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
@@ -1060,7 +1103,19 @@ function createChatStore() {
       if (m && method === "POST") return json(null, 204);
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
-      return json(page([])); // empty timeline (Paginated envelope)
+      const channelId = url.searchParams.get("channelId");
+      // #general opens to a seeded timeline (incl. a system post); others stay empty.
+      return json(page(channelId === "chn_general" ? generalMessages : []));
+    }
+    {
+      // Members / pins: demo returns a small roster and no pins (bare arrays per the
+      // fe6 contract) so opening a channel does not 404 those companion fetches.
+      const mem = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
+      if (mem && method === "GET") {
+        return json([{ channelId: decodeURIComponent(mem[1]!), userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
+      }
+      const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
+      if (pin && method === "GET") return json([]);
     }
     return null;
   }
