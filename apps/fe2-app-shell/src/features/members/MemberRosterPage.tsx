@@ -11,7 +11,6 @@ import {
   Button,
   TextField,
   ConfirmDialog,
-  SkeletonLoader,
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
@@ -70,7 +69,9 @@ export function MemberRosterPage(): JSX.Element {
     setConfirm(null);
   };
 
-  if (overview.isLoading) return <SkeletonLoader testId="member-roster-loading" />;
+  // Error is a distinct terminal state; the loading state, by contrast, keeps the full
+  // page scaffold mounted (header + toolbar + table chrome) and only swaps the table body
+  // to skeleton rows — so nothing shifts vertically when data resolves (FE1 §5).
   if (overview.isError) {
     const display = ApiError.isApiError(overview.error)
       ? toDisplayableError(overview.error)
@@ -78,13 +79,15 @@ export function MemberRosterPage(): JSX.Element {
     return <ErrorState error={display} onRetry={() => void overview.refetch()} />;
   }
 
+  const loading = overview.isLoading;
+
   return (
     <div data-testid="member-roster-page">
       <PageHeader
         title="運営名簿"
         description="運営メンバー全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
         actions={
-          <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} testId="member-roster-add-member">
+          <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} disabled={loading} testId="member-roster-add-member">
             メンバーを追加
           </Button>
         }
@@ -97,6 +100,7 @@ export function MemberRosterPage(): JSX.Element {
             value={search}
             onChange={setSearch}
             placeholder="氏名・役割・学科・学年で検索"
+            disabled={loading}
             testId="member-roster-search"
           />
         </div>
@@ -106,6 +110,7 @@ export function MemberRosterPage(): JSX.Element {
         members={filteredMembers}
         teamsById={teamsById}
         accountLabels={accountLabels}
+        loading={loading}
         onEdit={openEditMember}
         onDelete={(m) => setConfirm(m)}
         onLink={(m) => setLinkDialog({ open: true, member: m })}
