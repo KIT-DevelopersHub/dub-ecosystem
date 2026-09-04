@@ -58,7 +58,7 @@ describe("failed save surfaces the reason (bug 4b/4c)", () => {
         details: [{ field: "period", reason: "required", message: "期間（時期）が未入力です" }],
       },
     });
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // no save button: the title edit auto-saves after the debounce and the failure surfaces
     const dialog = await screen.findByTestId("fe4-error-dialog");
     expect(dialog).toBeInTheDocument();
     expect(screen.getByTestId("fe4-error-dialog-details")).toHaveTextContent("期間（時期）が未入力です");
