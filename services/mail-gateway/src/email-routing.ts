@@ -24,11 +24,21 @@ import { parseTimeoutMs } from "./resilience";
 
 const CF_API_BASE = "https://api.cloudflare.com/client/v4";
 
+/** Default Email Routing Worker target for an issued receiving address (free-tier prod
+ *  Worker name). Overridable via CF_EMAIL_ROUTING_WORKER_NAME. */
+export const DEFAULT_EMAIL_ROUTING_WORKER = "dub-mail-gateway";
+
+/** Human-readable "forward target" shown for an issued receiving address: every issued
+ *  @zone address routes to the mail Worker (not a per-address forward), so the roster UI
+ *  displays this fixed label rather than asking an admin to choose a destination. */
+export const MAIL_WORKER_DESTINATION_LABEL = "mail-gateway (Worker)";
+
 export interface EmailRoutingConfig {
   token: string;
   accountId?: string; // required for destination-address operations
   zoneId?: string; // required for rule operations
   zoneName: string; // zone apex (anti-spoof check on rule matchers)
+  workerName: string; // Email Routing Worker target for issued receiving addresses
   timeoutMs: number;
   fetchImpl?: typeof fetch; // injectable for tests; defaults to global fetch
 }
@@ -111,6 +121,70 @@ function firstForwardTarget(rule: CfRoutingRule): string | null {
   return null;
 }
 
+function hasWorkerAction(rule: CfRoutingRule): boolean {
+  return (rule.actions ?? []).some((a) => a.type === "worker");
+}
+
+/** The first literal `to` matcher whose address is in `zoneName` (a receiving address). */
+function firstZoneReceiver(rule: CfRoutingRule, zoneName: string): string | null {
+  const suffix = `@${zoneName.trim().toLowerCase()}`;
+  for (const m of rule.matchers ?? []) {
+    if (m.type !== "literal" || m.field !== "to" || typeof m.value !== "string") continue;
+    const address = m.value.trim().toLowerCase();
+    if (address.length > suffix.length && address.endsWith(suffix)) return address;
+  }
+  return null;
+}
+
+/** Management view of ONE issued @zone receiving address (a routing rule the roster admin
+ *  console owns). Distinct from RosterEmailAddress (sync source): this carries the RULE ID
+ *  so the console can enable/disable/delete it, and a display `destination` for the table. */
+export interface IssuedEmailAddress {
+  id: string; // routing rule id (used for PATCH/DELETE)
+  localPart: string; // e.g. "info"
+  address: string; // localPart@zone
+  destination: string; // display: the mail Worker (or a legacy forward target)
+  enabled: boolean; // rule enabled/paused
+  createdAt: string; // CF rules carry no created ts → "" (the UI does not render it)
+}
+
+/** Map one routing rule to an issued-address view, or null when the rule has no literal
+ *  `to` matcher in our zone (catch-all / archive-only / other rules are not issued addresses). */
+export function issuedAddressFromRule(rule: CfRoutingRule, zoneName: string): IssuedEmailAddress | null {
+  const address = firstZoneReceiver(rule, zoneName);
+  if (!address) return null;
+  const destination = hasWorkerAction(rule) ? MAIL_WORKER_DESTINATION_LABEL : (firstForwardTarget(rule) ?? MAIL_WORKER_DESTINATION_LABEL);
+  return {
+    id: rule.id,
+    localPart: address.split("@")[0] ?? address,
+    address,
+    destination,
+    enabled: !!rule.enabled,
+    createdAt: "",
+  };
+}
+
+/** Every issued @zone receiving address, de-duped by address (first rule wins). */
+export function issuedAddressesFromRules(rules: CfRoutingRule[], zoneName: string): IssuedEmailAddress[] {
+  const byAddress = new Map<string, IssuedEmailAddress>();
+  for (const rule of rules ?? []) {
+    const issued = issuedAddressFromRule(rule, zoneName);
+    if (issued && !byAddress.has(issued.address)) byAddress.set(issued.address, issued);
+  }
+  return [...byAddress.values()];
+}
+
+/** Build the CreateRuleInput that issues a receiving address forwarding to the mail
+ *  Worker. Inbound to `address` is handed to the Worker's email() handler (→ Dub inbox). */
+export function issueReceivingRuleInput(address: string, localPart: string, workerName: string): CreateRuleInput {
+  return {
+    name: `dub-issued:${localPart}`,
+    enabled: true,
+    matchers: [{ type: "literal", field: "to", value: address }],
+    actions: [{ type: "worker", value: [workerName] }],
+  };
+}
+
 interface CfEnvelope<T> {
   success: boolean;
   errors: Array<{ code?: number; message?: string }>;
@@ -137,6 +211,7 @@ export function emailRoutingConfigFromEnv(env: Env): EmailRoutingConfig | null {
     accountId: env.CF_EMAIL_ROUTING_ACCOUNT_ID || undefined,
     zoneId: env.CF_EMAIL_ROUTING_ZONE_ID || undefined,
     zoneName: env.CF_EMAIL_ROUTING_ZONE_NAME || "developershub.jp",
+    workerName: env.CF_EMAIL_ROUTING_WORKER_NAME || DEFAULT_EMAIL_ROUTING_WORKER,
     timeoutMs: parseTimeoutMs(env),
     fetchImpl: undefined,
   };

@@ -139,7 +139,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
         items: s.emailAddresses.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })),
       } as unknown as T;
     }
-    if (path.endsWith("/admin/email-routing/addresses")) {
+    if (path.endsWith("/admin/email-routing/issued-addresses")) {
       return paginate([...s.emailAddresses]) as unknown as T;
     }
     if (path.endsWith("/audit/logs")) {
@@ -299,7 +299,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       const result: SyncEmailRoutingResult = { added, updated, deactivated, total: normalized.length };
       return result as unknown as T;
     }
-    if (path.endsWith("/admin/email-routing/addresses")) {
+    if (path.endsWith("/admin/email-routing/issued-addresses")) {
       const req = body as { localPart: string };
       const localPart = req.localPart?.trim().toLowerCase();
       if (!localPart || !/^[a-z0-9._-]+$/.test(localPart)) {
@@ -453,7 +453,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       }
       return;
     }
-    const emailMatch = path.match(/\/admin\/email-routing\/addresses\/([^/]+)$/);
+    const emailMatch = path.match(/\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
     if (emailMatch) {
       s.emailAddresses = s.emailAddresses.filter((a) => a.id !== emailMatch[1]!);
       return;

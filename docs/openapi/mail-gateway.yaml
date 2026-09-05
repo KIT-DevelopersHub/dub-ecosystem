@@ -314,6 +314,144 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /admin/email-routing/issued-addresses:
+    get:
+      operationId: listIssuedEmailAddresses
+      summary: List issued @developershub.jp receiving addresses
+      tags:
+        - mail
+      description: 'Requires mail:admin. Issued receiving addresses are zone-scoped routing rules that forward localPart@developershub.jp to the mail Worker (this service). Distinct from /addresses (account-scoped forward-target destinations). 503 when CF_EMAIL_ROUTING_TOKEN is unset.'
+      responses:
+        '200':
+          description: Issued receiving addresses
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IssuedEmailAddress'
+                  nextCursor:
+                    type: string
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+    post:
+      operationId: issueEmailAddress
+      summary: Issue a receiving address (rule → mail Worker) and send a confirmation mail
+      tags:
+        - mail
+      description: 'Requires mail:admin. Creates a zone routing rule forwarding localPart@developershub.jp to the mail Worker, then sends a confirmation mail to the new address (best-effort; confirmationEmailSent reflects the outcome). Audited (mail.email_routing.address.issue). 409 when the address is already issued.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - localPart
+              properties:
+                localPart:
+                  type: string
+                  description: 'Local part only; the address is derived as ${localPart}@developershub.jp.'
+      responses:
+        '201':
+          description: Issued receiving address
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssuedEmailAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The address is already issued.
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+  /admin/email-routing/issued-addresses/{id}:
+    patch:
+      operationId: updateIssuedEmailAddress
+      summary: Enable or disable an issued receiving address
+      tags:
+        - mail
+      description: 'Requires mail:admin. Toggles the underlying routing rule. Audited (mail.email_routing.address.update).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - enabled
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated issued receiving address
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssuedEmailAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+    delete:
+      operationId: revokeIssuedEmailAddress
+      summary: Revoke an issued receiving address
+      tags:
+        - mail
+      description: 'Requires mail:admin. Deletes the underlying routing rule. Audited (mail.email_routing.address.revoke).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
   /admin/email-routing/addresses:
     get:
       operationId: listEmailRoutingAddresses
@@ -740,6 +878,38 @@ components:
           type: integer
         used:
           type: integer
+    IssuedEmailAddress:
+      type: object
+      description: >-
+        An issued @developershub.jp RECEIVING address: a zone-scoped routing rule that
+        forwards localPart@developershub.jp to the mail Worker. This is what makes an
+        address usable in Dub (vs EmailRoutingAddress, a forward-target destination).
+      required:
+        - id
+        - localPart
+        - address
+        - destination
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Underlying routing rule id (used for PATCH/DELETE).
+        localPart:
+          type: string
+        address:
+          type: string
+          format: email
+        destination:
+          type: string
+          description: Display label for the fixed forward target (the mail Worker).
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          description: ISO timestamp set on issue; empty on list (CF rules carry no created ts).
+        confirmationEmailSent:
+          type: boolean
+          description: Present on the issue (POST) response — whether the confirmation mail was accepted.
     EmailRoutingAddress:
       type: object
       description: A Cloudflare Email Routing destination (forward-target) address.
