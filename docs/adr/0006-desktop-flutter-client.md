@@ -1,9 +1,16 @@
 # ADR-0006: Desktop client — Flutter (macOS + Windows) over the shared gateway
 
-- Status: Proposed
+- Status: Partially superseded by ADR-0007
 - Date: 2026-08-19
 - Deciders: DevHub (Dub) core
-- Related: ADR-0004 (auth session cookie), `apps/de1-desktop`, `docs/openapi/api-gateway.yaml`, `apps/mo1-ios` / `apps/mo2-android` (native mobile precedent)
+- Related: ADR-0004 (auth session cookie), ADR-0007 (desktop is a WebView clone of the web app), `apps/de1-desktop`, `docs/openapi/api-gateway.yaml`, `apps/mo1-ios` / `apps/mo2-android` (native mobile precedent)
+
+> **Note (2026-08-19):** the *framework* decision here (Flutter, macOS + Windows, one
+> codebase, single gateway boundary) still stands. The *implementation* decision — re-build
+> each screen in Flutter with dio + Riverpod and hand-mirrored contract models — is
+> **superseded by ADR-0007**: the desktop app now renders the real Web SPA in a WebView
+> (完コピ / perfect copy) and grows native screens incrementally behind a registry seam.
+> The dio/Riverpod/hand-model machinery described below is no longer used.
 
 ## Context
 

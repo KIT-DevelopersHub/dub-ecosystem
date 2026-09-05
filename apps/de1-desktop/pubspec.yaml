@@ -1,5 +1,5 @@
 name: dub_desktop
-description: "DAV desktop client (Flutter, macOS + Windows) for the DevHub/Dub ecosystem. Talks to the shared api-gateway; feature-parity with the web app is the goal."
+description: "Dub — the DevHub/Dub desktop client (Flutter, macOS + Windows). A thin native shell that renders the real Web SPA (fe2-app-shell) verbatim, so it is a pixel-for-pixel copy of the web app and follows every web deploy."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -35,18 +35,28 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
-  # State management (pure Dart, no native plugins).
+  # The entire desktop UI is the real Web SPA rendered in an embedded WebView
+  # (macOS = WKWebView, Windows = WebView2). This is what makes the desktop app
+  # a literal copy of the web app. No bespoke Flutter screens, no HTTP client —
+  # the web bundle owns all of that.
+  flutter_inappwebview: ^6.1.5
+
+  # State management for the *only* native layer: the biometric launch gate and
+  # the credential-autofill controller (pure Dart, no native plugins).
   flutter_riverpod: ^2.5.1
-  # HTTP client + web-parity cookie session handling (all pure Dart — no
-  # platform channels, so the macOS/Windows builds need no extra pods).
-  dio: ^5.7.0
-  dio_cookie_manager: ^3.1.1
-  cookie_jar: ^4.0.8
+
+  # OS-native biometric launch gate. Federated plugin: macOS uses
+  # local_auth_darwin (Touch ID), Windows uses local_auth_windows (Windows
+  # Hello). `biometricOnly: false` lets the OS fall back to the device
+  # passcode/password when biometrics are unavailable or fail.
+  local_auth: ^2.3.0
+
+  # Secure at-rest storage for the saved Dub credentials (email + password).
+  # macOS = Keychain, Windows = Credential Manager (DPAPI). Never a plain file.
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:
-    sdk: flutter
-  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
