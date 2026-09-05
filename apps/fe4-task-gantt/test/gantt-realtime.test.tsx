@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type { gantt } from "@dub/types";
 import { avatarColor, avatarInitials, presenceLabel } from "../src/realtime/presence";
 import { GanttRtClient } from "../src/realtime/gantt-rt-client";
@@ -41,6 +41,21 @@ describe("PresenceBar", () => {
     const avatars = screen.getAllByRole("listitem");
     expect(avatars[0]).toHaveAttribute("data-testid", "fe4-presence-avatar-u2");
     expect(screen.getByText(/1人が編集中/)).toBeInTheDocument();
+  });
+
+  it("opens a roster popover listing every viewer with the self tag", () => {
+    render(<PresenceBar presence={users} status="open" selfUserId={"u1"} displayNameById={roster} />);
+    // Closed by default: no roster menu yet.
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /このガントを見ているメンバー/ }));
+    const menu = screen.getByRole("menu");
+    expect(menu).toBeInTheDocument();
+    // Both names are listed, and the local user is tagged （あなた）.
+    expect(screen.getByRole("menuitem", { name: /Ann/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Ben/ })).toBeInTheDocument();
+    expect(screen.getByText(/（あなた）/)).toBeInTheDocument();
+    // Editing viewer (Ben) is surfaced as 編集中 in the list.
+    expect(screen.getAllByText("編集中").length).toBeGreaterThan(0);
   });
 
   it("collapses overflow into +N", () => {
