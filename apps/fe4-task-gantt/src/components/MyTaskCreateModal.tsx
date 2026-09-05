@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button, TextField, Textarea, Select } from "@dub/ui";
 import { PRIORITY_LABEL, isoFromDateInput } from "../domain/task-form";
@@ -86,9 +86,24 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
   const [urls, setUrls] = useState<DraftUrlAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Tracks whether the user has manually chosen an 対象イベント in this session so the
+  // auto-default below never overrides a deliberate pick (including 「紐付けない」).
+  const eventTouched = useRef(false);
+
+  // Default the 対象イベント to the user's first event when the modal opens (and when the
+  // event list first arrives), so a task created from マイタスク lands in that event's
+  // ガント by default. The report "マイタスクで追加したタスクがガントに無い時がある" was
+  // caused by the old silent default (紐付けない → eventId=null) making the new task
+  // invisible on every event-scoped gantt. 「紐付けない」stays an explicit opt-out (判断44).
+  useEffect(() => {
+    if (open && !eventTouched.current) {
+      setEventId(events.length > 0 ? events[0]!.id : NO_EVENT);
+    }
+  }, [open, events]);
 
   const reset = () => {
-    setEventId(NO_EVENT);
+    eventTouched.current = false;
+    setEventId(events.length > 0 ? events[0]!.id : NO_EVENT);
     setTitle("");
     setAssigneeId(null);
     setPriority("medium");
@@ -199,18 +214,26 @@ export function MyTaskCreateModal({ open, onClose, events, people, teams, onCrea
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-mytask-event">
-            対象イベント（任意）
+            対象イベント
           </label>
           <Select
             id="fe4-mytask-event"
             value={eventId}
-            onChange={(v) => setEventId(v as common.EventId | "")}
+            onChange={(v) => {
+              eventTouched.current = true;
+              setEventId(v as common.EventId | "");
+            }}
             options={[
-              { value: NO_EVENT, label: "紐付けない" },
               ...events.map((e) => ({ value: e.id, label: e.name })),
+              { value: NO_EVENT, label: "紐付けない（ガントに表示されません）" },
             ]}
             testId="fe4-mytask-create-event"
           />
+          {eventId === NO_EVENT && (
+            <p className={styles.createHint} data-testid="fe4-mytask-create-event-warning">
+              イベントに紐付けないタスクはガントに表示されません。
+            </p>
+          )}
         </div>
 
         <div className={styles.formField}>
