@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { task, common, identity } from "@dub/types";
 import type { gantt as ganttNs } from "@dub/types";
 import { Button, ErrorDialog, useToast } from "@dub/ui";
@@ -18,6 +18,7 @@ import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf } from "../domain/task-hierarchy";
+import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { applyManualOrder, reorderWithinSiblings } from "../domain/row-order";
 import { sortRows, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
@@ -88,6 +89,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // ("先行タスクを作成" from the detail panel).
   const [createPredecessorFor, setCreatePredecessorFor] = useState<common.TaskId | null>(null);
   const [users, setUsers] = useState<UserCache>(() => createUserCache());
+  // When the active event changes (the global header switcher navigates to another
+  // event's gantt → new eventId prop, same mounted route), drop the previous event's
+  // filter (it carries the eventId + status narrowing) and any open selection so the
+  // new event loads clean. Skip the initial mount — filter is already seeded.
+  const prevEventRef = useRef(eventId);
+  useEffect(() => {
+    if (prevEventRef.current === eventId) return;
+    prevEventRef.current = eventId;
+    setFilter(emptyFilter(eventId));
+    setSelected(null);
+  }, [eventId]);
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
   // Per-user view state — carries the personal manual row order (drag reorder).
@@ -114,7 +126,35 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // changing gantt action records its inverse, and Ctrl/⌘-Z reverses it. The
   // hotkey is off for read-only users and never steals a focused field's own undo.
   const history = useUndoRedo();
-  useUndoRedoHotkeys(history, { enabled: caps.canWrite });
+  // Coalesce the "nothing to undo/redo" notice so a held-down ⌘Z on an empty stack
+  // (which returns synchronously — no API round-trip to rate-limit it) can't spam the
+  // toast. A successful undo/redo awaits its API inverse, so those are naturally paced.
+  const lastBoundaryToast = useRef(0);
+  const notifyBoundary = (message: string) => {
+    const now = Date.now();
+    if (now - lastBoundaryToast.current < 1500) return;
+    lastBoundaryToast.current = now;
+    toast.show({ kind: "info", title: message });
+  };
+  // Run undo/redo AND tell the user what happened (判断: 戻した/やり直したのが見えるように).
+  // Reads the label of the command about to be reversed (undoLabel/redoLabel) so the
+  // toast names the operation ("並び替えを元に戻しました"); falls back to a generic line.
+  // Both the hotkeys and the header buttons route through these, so the copy is one place.
+  const runUndo = async (): Promise<boolean> => {
+    const label = history.undoLabel;
+    const ok = await history.undo();
+    if (ok) toast.show({ kind: "info", title: label ? `${label}を元に戻しました` : "元に戻しました" });
+    else notifyBoundary("これ以上戻せません");
+    return ok;
+  };
+  const runRedo = async (): Promise<boolean> => {
+    const label = history.redoLabel;
+    const ok = await history.redo();
+    if (ok) toast.show({ kind: "info", title: label ? `${label}をやり直しました` : "やり直しました" });
+    else notifyBoundary("これ以上やり直せません");
+    return ok;
+  };
+  useUndoRedoHotkeys({ undo: runUndo, redo: runRedo }, { enabled: caps.canWrite });
 
   // Load the WHOLE event: the gantt intersects its rows with this store set (see
   // `filteredDto`), so any task missing from the store silently vanishes from the
@@ -213,6 +253,11 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     }
     return m;
   }, [tasks, users]);
+  // Displayed titles come from the store (task-service = the authority on title), so a
+  // detail-panel rename reflects on every bar/row the SAME tick (optimistic) and is
+  // reconciled by loadAll — never reverting to the gantt read model's denormalized,
+  // possibly-stale copy after refetch. Mirrors statusById / assigneeNameById.
+  const titleById = useMemo(() => new Map(tasks.map((t) => [t.id, t.title] as const)), [tasks]);
 
   // Per-task grouping descriptor for the sort-bracket rail. Only チーム順 / 重要度順 group
   // into visible ranges; 手動・時期 pass undefined so no brackets render. Team-less rows
@@ -276,22 +321,28 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
-  // The selected task's DISPLAYED bar window (derived by the gantt read model). Seeds the
-  // detail 開始日/期日 when the task's own startAt/dueAt columns are null, so the panel value
-  // equals the bar and the axis (値=バー=横軸) even for a derived-start task (real data
-  // seeds only dueAt — start_at is null until first edited).
-  const selectedRow = useMemo(
-    () => (selected ? gantt.data?.rows.find((r) => r.taskId === selected) ?? null : null),
-    [selected, gantt.data],
-  );
+  // The selected task's DISPLAYED bar window. Read it from the ROLLED-UP rows (the same
+  // transform the gantt bars use), NOT the raw read-model rows. This matters for a WBS
+  // PARENT: the read model returns a parent's own startsAt/endsAt as null (its span is a
+  // rollup of its children), so the raw row carries null and the detail panel would fall
+  // back to the parent's STALE own start_at/due_at column — a value that no longer matches
+  // the children (症状#7 親子の値ズレ). Rolling here makes barStartsAt/barEndsAt the parent's
+  // TRUE child-derived span, so 値(詳細)=バー=横軸 holds for parents too, not just leaves.
+  const selectedRow = useMemo(() => {
+    if (!selected || !gantt.data) return null;
+    return rollupRowDates(gantt.data.rows).find((r) => r.taskId === selected) ?? null;
+  }, [selected, gantt.data]);
 
   // Hierarchy/scope model over ALL rows (unfiltered by status) so parents and
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
   const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
+  // Prefer the store's fresh title so the parent / 先行タスク pickers relabel the same
+  // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
+  // which the store list omits).
   const allTaskOptions = useMemo(
-    () => allRows.map((r) => ({ id: r.taskId, title: r.title })),
-    [allRows],
+    () => allRows.map((r) => ({ id: r.taskId, title: titleById.get(r.taskId) ?? r.title })),
+    [allRows, titleById],
   );
   // predecessors currently on the selected task (先行タスク＝依存元 where to===selected).
   const selectedDependsOn = useMemo(() => {
@@ -381,6 +432,67 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         feedback.failure(e, "予定の保存に失敗しました");
         void gantt.refetchFresh();
       });
+  };
+
+  // Optimistically apply, then persist, a SET of explicit child schedules (used by the
+  // parent-bar resize and its undo/redo — each is an idempotent "set" of absolute dates).
+  const applyChildScheduleSet = (
+    set: ReadonlyArray<{ id: common.TaskId; startsAt: common.ISODateTime; endsAt: common.ISODateTime }>,
+  ): Promise<void> => {
+    if (set.length === 0) return Promise.resolve();
+    for (const s of set) gantt.setRowScheduleOptimistic(s.id, s.startsAt, s.endsAt);
+    return Promise.all(set.map((s) => patchGanttRow(client, s.id, { startsAt: s.startsAt, endsAt: s.endsAt })))
+      .then(() => gantt.refetchFresh())
+      .then(() => store.loadAll(client, query))
+      .catch((e) => {
+        feedback.failure(e, "予定の保存に失敗しました");
+        void gantt.refetchFresh();
+      });
+  };
+
+  // Resize a work-package (parent) BAR at one edge. A parent's span is the rollup of its
+  // children (the read model returns the parent's own dates as null), so we cannot persist
+  // the parent's own row — the next GET discards it and the bar snaps back ("親バーを伸ばし
+  // ても反映されない"). Instead we SCALE the dated descendants about the opposite edge so the
+  // rolled span reaches the dragged edge; those child writes persist and roll the parent bar
+  // up to match. Undo restores the children's EXACT prior dates (scaling has no clean day-
+  // aligned inverse), so Ctrl-Z is one step.
+  const onParentResize = (parentId: common.TaskId, edge: "start" | "end", deltaDays: number) => {
+    if (deltaDays === 0) return;
+    const rows = gantt.currentRows();
+    const parent = rollupRowDates(rows).find((r) => r.taskId === parentId);
+    if (!parent?.startsAt || !parent?.endsAt) return;
+    // BFS the subtree to collect every descendant (any depth).
+    const ids: common.TaskId[] = [parentId];
+    for (let i = 0; i < ids.length; i++) for (const r of rows) if (r.parentTaskId === ids[i]) ids.push(r.taskId);
+    const descendants = ids
+      .slice(1)
+      .map((id) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r)
+      .map((r) => ({ taskId: r.taskId, startsAt: r.startsAt ?? null, endsAt: r.endsAt ?? null }));
+    const scaled = scaleChildrenForParentResize(
+      { startsAt: parent.startsAt, endsAt: parent.endsAt },
+      descendants,
+      edge,
+      deltaDays,
+    );
+    if (scaled.length === 0) return;
+    const after = scaled.map((s) => ({
+      id: s.taskId as common.TaskId,
+      startsAt: s.startsAt as common.ISODateTime,
+      endsAt: s.endsAt as common.ISODateTime,
+    }));
+    // Snapshot the children's CURRENT dates so undo restores them exactly.
+    const before = after
+      .map(({ id }) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r && !!r.startsAt && !!r.endsAt)
+      .map((r) => ({ id: r.taskId, startsAt: r.startsAt!, endsAt: r.endsAt! }));
+    void applyChildScheduleSet(after);
+    history.push({
+      label: "まとめ行のリサイズ",
+      undo: () => applyChildScheduleSet(before),
+      redo: () => applyChildScheduleSet(after),
+    });
   };
 
   // Re-issue a task's field patch (optional) + WBS parent and/or predecessors as a
@@ -774,6 +886,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const onDeleteDetail = () => {
     if (!selectedTask) return;
     const id = selectedTask.id;
+    // Guard (defense-in-depth over the panel's own block): never delete a task that
+    // still has live children. Deleting it would orphan the children and the read model
+    // would silently re-parent them under the previous row. Block + explain instead of
+    // optimistically removing then rolling back on the server 409.
+    const hasChildren = scopeTasks.some((s) => s.parentTaskId === id);
+    if (hasChildren) {
+      toast.show({
+        kind: "error",
+        title: "子タスクがあるため削除できません。先に子タスクを削除または移動してください",
+      });
+      return;
+    }
     // Optimistic: close the panel + drop the bar instantly; the store removes the
     // row immediately and restores it on failure (with the reason surfaced).
     setSelected(null);
@@ -855,7 +979,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
               <button
                 type="button"
                 className={styles.undoBtn}
-                onClick={() => void history.undo()}
+                onClick={() => void runUndo()}
                 disabled={!history.canUndo}
                 title={`元に戻す${history.undoLabel ? `: ${history.undoLabel}` : ""}（Ctrl/⌘+Z）`}
                 aria-label="元に戻す"
@@ -866,7 +990,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
               <button
                 type="button"
                 className={styles.undoBtn}
-                onClick={() => void history.redo()}
+                onClick={() => void runRedo()}
                 disabled={!history.canRedo}
                 title={`やり直す${history.redoLabel ? `: ${history.redoLabel}` : ""}（Ctrl/⌘+Shift+Z）`}
                 aria-label="やり直す"
@@ -955,6 +1079,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           truncated={filteredDto.rows.length >= 2000}
           onSchedule={caps.canWrite ? onSchedule : undefined}
           onScheduleShift={caps.canWrite ? onScheduleShift : undefined}
+          onParentResize={caps.canWrite ? onParentResize : undefined}
           onReorder={caps.canWrite ? onReorder : undefined}
           sortMode={sortMode}
           onSortModeChange={setSortMode}
@@ -962,6 +1087,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
           assigneeNameById={assigneeNameById}
+          titleOverrides={titleById}
           teamColorById={teamColorById}
           teamLegend={teamLegend}
           numberById={numberById}
@@ -997,9 +1123,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           dependsOnIds={selectedDependsOn}
           barStartsAt={selectedRow?.startsAt ?? null}
           barEndsAt={selectedRow?.endsAt ?? null}
+          hasChildren={selectedRow?.hasChildren ?? false}
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}
+          onDeleteBlocked={(n) =>
+            toast.show({
+              kind: "warning",
+              title: "削除できません",
+              description: `子タスクが${n}件あるため削除できません。先に子タスクを削除するか、別の親へ移動してください。`,
+            })
+          }
           onCreateChild={onCreateChild}
           onCreatePredecessor={onCreatePredecessor}
           onClose={() => setSelected(null)}

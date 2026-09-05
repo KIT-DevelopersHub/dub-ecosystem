@@ -44,6 +44,8 @@ export function mapError(e: DisplayableError): ErrorUx {
       return { action: "dependency_cycle_inline", message: "依存関係が循環しています" };
     case "TASK_INVALID_STATUS_TRANSITION":
       return { action: "rollback_transition", message: "その状態へは移動できません" };
+    case "TASK_HAS_CHILDREN":
+      return { action: "toast_generic", message: "子タスクがあるため削除できません。先に子タスクを削除または移動してください" };
     case "GANTT_DEPENDENCY_CYCLE":
       return { action: "gantt_cycle_banner", message: "依存関係に循環があります" };
     case CommonErrorCodes.RATE_LIMITED:
@@ -52,8 +54,21 @@ export function mapError(e: DisplayableError): ErrorUx {
     case CommonErrorCodes.UPSTREAM_TIMEOUT:
     case "GANTT_UPSTREAM_UNAVAILABLE":
       return { action: "retry_button", message: "接続できませんでした。再試行してください" };
+    // Browser-side transport failures. The api-client mints these synthetic codes when
+    // the fetch itself rejects (offline / DNS / CORS / a stale post-deploy chunk) — its
+    // raw `.message` is the English "Failed to fetch", which must NEVER reach a toast.
+    // Map them to a human-readable Japanese reason so a bar move/resize that can't save
+    // explains itself (and rolls back) instead of surfacing "Failed to fetch".
+    case "NETWORK_ERROR":
+      return { action: "retry_button", message: "ネットワークに接続できませんでした。通信環境を確認して再試行してください" };
+    case CommonErrorCodes.INTERNAL:
+      return { action: "retry_button", message: "サーバーでエラーが発生しました。時間をおいて再試行してください" };
+    case "CLIENT_CONTRACT_MISMATCH":
+      return { action: "toast_generic", message: "予期しない応答を受け取りました。時間をおいて再試行してください" };
+    // Unknown code: NEVER echo the raw server/transport `.message` (often an English dev
+    // string). Fall back to a friendly Japanese generic so no English leaks to the user.
     default:
-      return { action: "toast_generic", message: e.message || "エラーが発生しました" };
+      return { action: "toast_generic", message: "エラーが発生しました。時間をおいて再試行してください" };
   }
 }
 

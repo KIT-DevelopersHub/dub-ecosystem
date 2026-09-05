@@ -43,7 +43,8 @@ describe("POST /api/v1/public/participation", () => {
 
     const res = await app.fetch(post(validBody), env, execCtx);
     expect(res.status).toBe(200);
-    expect(await jsonOf<gateway.PublicParticipationResponse>(res)).toEqual({ accepted: true, matchKind: "created_new" });
+    // 提出は記録のみ (名簿反映は管理者が確定) なので応答は accepted だけ。
+    expect(await jsonOf<gateway.PublicParticipationResponse>(res)).toEqual({ accepted: true });
 
     // forwarded once, to the internal route, as a genuine s2s call (x-dub-internal +
     // system actor), NOT leaking any inbound auth.
@@ -57,14 +58,16 @@ describe("POST /api/v1/public/participation", () => {
     expect(forwarded.gmail).toBe("taro@gmail.com");
   });
 
-  it("propagates the resolved matchKind without leaking the member identity", async () => {
+  it("does not leak the member identity nor any resolution result", async () => {
     const member = memberBinding("linked_existing");
     const env = makeEnv({ SVC_MEMBER: member.fetcher });
     const app = createApp({ ...NO_RL, turnstile: async () => true });
     const res = await app.fetch(post(validBody), env, execCtx);
     const body = await jsonOf<gateway.PublicParticipationResponse & { member?: unknown }>(res);
-    expect(body.matchKind).toBe("linked_existing");
+    // 反映は管理者が後から確定するため、公開応答に matchKind / member は出さない。
+    expect(body).toEqual({ accepted: true });
     expect(body.member).toBeUndefined();
+    expect(body.matchKind).toBeUndefined();
   });
 
   it("invalid input -> 400 VALIDATION_FAILED before turnstile / any forward", async () => {

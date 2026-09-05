@@ -8,9 +8,9 @@
 //
 // さらに横スクロールを抑えるため DataTable の「表示列」ピッカー(columnHiding)を有効化する。
 // 既定 on = 主要列(氏名/担当・役割/ステータス/所属チーム/連絡先) と 操作列(hideable:false・常時表示)。
-// 情報過多で幅の広い列(ローマ字/学科/学年/アカウント/学校メール/Gmail)は defaultHidden で初期 off に
-// し、初期表示の横スクロールを最小化する。選択は localStorage にユーザー単位で保存され、全部 on に
-// すれば従来どおり全列表示。
+// 情報過多で幅の広い列(ローマ字/学科/学年/学校メール/Gmail)は defaultHidden で初期 off にし、
+// 初期表示の横スクロールを最小化する。developershub.jpメール(紐付いたアカウント)は既定表示 ON。
+// 選択は localStorage にユーザー単位で保存され、全部 on にすれば従来どおり全列表示。
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
@@ -69,10 +69,9 @@ export function ListView({
     { key: "status", header: "ステータス", minWidth: "7rem", noWrap: true, cell: (m) => <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> },
     {
       key: "account",
-      header: "アカウント",
-      minWidth: "12rem",
+      header: "developershub.jpメール",
+      minWidth: "13rem",
       noWrap: true,
-      defaultHidden: true,
       cell: (m) =>
         m.identityUserId ? (
           <span style={{ display: "inline-flex", gap: "var(--dub-space-1)", alignItems: "center", maxWidth: "13rem" }} data-testid={`members-account-${m.id}`}>
@@ -83,7 +82,7 @@ export function ListView({
           </span>
         ) : (
           <Button variant="ghost" size="sm" onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
-            未リンク・紐付け
+            未設定・紐付け
           </Button>
         ),
     },

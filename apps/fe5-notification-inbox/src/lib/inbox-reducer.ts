@@ -49,6 +49,18 @@ export function markReadLocally(
   return [next, state];
 }
 
+// Optimistically mark one item UNREAD again (readAt cleared). Returns [next, rollback].
+export function markUnreadLocally(
+  state: InboxState,
+  id: string,
+): [InboxState, InboxState] {
+  const next: InboxState = {
+    ...state,
+    items: state.items.map((i) => (i.id === id && i.readAt !== null ? { ...i, readAt: null } : i)),
+  };
+  return [next, state];
+}
+
 // Optimistically mark all read (respecting an optional type prefix filter).
 export function markAllReadLocally(
   state: InboxState,

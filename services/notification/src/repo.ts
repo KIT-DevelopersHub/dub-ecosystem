@@ -267,6 +267,26 @@ export async function markRead(db: DbClient, userId: string, inboxId: string): P
   return true;
 }
 
+/**
+ * Mark a single inbox row UNREAD again (read_at -> NULL). Additive inverse of markRead
+ * so a user can restore a notification to unread. Idempotent (already-unread stays
+ * unread). Returns false when the row does not exist or belongs to another user.
+ */
+export async function markUnread(db: DbClient, userId: string, inboxId: string): Promise<boolean> {
+  const row = await db.first<{ id: string }>(
+    `SELECT id FROM notif_inbox WHERE id = ? AND user_id = ?`,
+    inboxId,
+    userId,
+  );
+  if (!row) return false;
+  await db.run(
+    `UPDATE notif_inbox SET read_at = NULL WHERE id = ? AND user_id = ?`,
+    inboxId,
+    userId,
+  );
+  return true;
+}
+
 /** Mark every unread row read (optionally scoped to a type prefix). Returns count. */
 export async function markAllRead(db: DbClient, userId: string, typePrefix?: string): Promise<number> {
   if (typePrefix !== undefined) {

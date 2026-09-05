@@ -126,6 +126,7 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     note: r.note,
     status: r.status,
     matchKind: r.matchKind,
+    reviewState: r.reviewState,
     submittedBy: r.submittedBy,
     submittedAt: r.submittedAt,
     createdAt: r.createdAt,

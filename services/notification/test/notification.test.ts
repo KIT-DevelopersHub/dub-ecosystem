@@ -515,6 +515,27 @@ describe("HTTP app", () => {
     expect(await unreadCount(h.db, "u1")).toBe(0);
   });
 
+  it("PATCH /inbox/:id/unread restores a read row to unread (idempotent; unread-count reflects it)", async () => {
+    const h = makeTestEnv();
+    await req("/notify", internalPost({ type: "system.announcement", recipientIds: ["u1"], title: "a", body: "b", channels: ["in_app"] }), h);
+    const page = (await (await req("/inbox", { headers: { "x-dub-user-id": "u1" } }, h)).json()) as { items: { id: string }[] };
+    const id = page.items[0]!.id;
+
+    await req(`/inbox/${id}/read`, { method: "PATCH", headers: { "x-dub-user-id": "u1" } }, h);
+    expect(await unreadCount(h.db, "u1")).toBe(0);
+
+    const un = await req(`/inbox/${id}/unread`, { method: "PATCH", headers: { "x-dub-user-id": "u1" } }, h);
+    expect(un.status).toBe(200);
+    expect(await unreadCount(h.db, "u1")).toBe(1);
+    // idempotent: re-marking unread keeps it unread
+    await req(`/inbox/${id}/unread`, { method: "PATCH", headers: { "x-dub-user-id": "u1" } }, h);
+    expect(await unreadCount(h.db, "u1")).toBe(1);
+
+    // another user cannot flip someone else's row -> 404
+    const forbidden = await req(`/inbox/${id}/unread`, { method: "PATCH", headers: { "x-dub-user-id": "u2" } }, h);
+    expect(forbidden.status).toBe(404);
+  });
+
   it("#9 reading another user's inbox item -> 404 NOTIF_INBOX_ITEM_NOT_FOUND", async () => {
     const h = makeTestEnv();
     await req("/notify", internalPost({ type: "system.announcement", recipientIds: ["u1"], title: "a", body: "b", channels: ["in_app"] }), h);

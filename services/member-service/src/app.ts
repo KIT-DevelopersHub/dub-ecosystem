@@ -136,6 +136,15 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/members/participation", authz.requirePermission(READ), async (c) => {
     return c.json(await svc.listParticipations(reqCtx(c)));
   });
+  // 突合候補 (招待中/検討中のうち氏名/メール一致) — 管理者が結合先を選ぶために閲覧。
+  app.get("/members/participation/:id/candidates", authz.requirePermission(READ), async (c) => {
+    return c.json(await svc.listParticipationCandidates(reqCtx(c), c.req.param("id")));
+  });
+  // 反映確定 (link/create/skip) — roster を書き換えるので identity:admin。
+  app.post("/members/participation/:id/resolve", authz.requirePermission(WRITE), async (c) => {
+    const body = await readJson<member.ResolveParticipationRequest>(c);
+    return c.json(await svc.resolveParticipation(reqCtx(c), c.req.param("id"), body));
+  });
 
   return app;
 }

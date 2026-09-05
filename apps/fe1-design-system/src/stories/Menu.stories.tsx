@@ -35,7 +35,10 @@ export const IconOnly: Story = {
     menuLabel: "設定",
     icon: "settings",
     iconOnly: true,
-    items: [{ id: "password", label: "パスワード変更", icon: "lock", onSelect: () => {} }],
+    items: [
+      { id: "password", label: "パスワード変更", icon: "lock", onSelect: () => {} },
+      { id: "logout", label: "ログアウト", icon: "log-out", tone: "danger", dividerBefore: true, onSelect: () => {} },
+    ],
   },
   render: (args) => (
     <div style={{ padding: 48, display: "flex", justifyContent: "flex-end" }}>

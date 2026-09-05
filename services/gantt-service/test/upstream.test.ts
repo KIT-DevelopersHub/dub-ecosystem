@@ -118,6 +118,107 @@ describe("createHttpUpstream.listTasks pagination", () => {
   });
 });
 
+// A task-service fake for the date read-modify-write. GET /tasks/:id returns the CURRENT
+// (mutable) version; PATCH /tasks/:id 409s while `conflictsLeft > 0` (modelling another
+// writer that bumped the version between our read and write — the overlapping-resize race),
+// then succeeds. Every PATCH attempt is counted so a test can assert the retry happened.
+function rmwTaskFetcher(opts: { conflicts: number; startVersion?: number }): {
+  fetcher: Fetcher;
+  getCount: () => number;
+  patchCount: () => number;
+} {
+  let version = opts.startVersion ?? 1;
+  let conflictsLeft = opts.conflicts;
+  let gets = 0;
+  let patches = 0;
+  const fetcher = {
+    async fetch(req: Request): Promise<Response> {
+      const url = new URL(req.url);
+      const m = url.pathname.match(/^\/tasks\/([^/]+)$/);
+      if (!m) return new Response("not found", { status: 404 });
+      const id = decodeURIComponent(m[1]!);
+      if (req.method === "GET") {
+        gets++;
+        return new Response(JSON.stringify({ ...mkTask(id), version }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (req.method === "PATCH") {
+        patches++;
+        if (conflictsLeft > 0) {
+          conflictsLeft--;
+          version++; // the "other writer" moved the version on — our next read sees it
+          return new Response(
+            JSON.stringify({
+              error: { code: "TASK_VERSION_CONFLICT", message: "Version conflict (stale version)", retryable: false },
+            }),
+            { status: 409, headers: { "content-type": "application/json" } },
+          );
+        }
+        version++;
+        return new Response(JSON.stringify({ ...mkTask(id), version, dueAt: "2026-09-10T00:00:00.000Z" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  } as unknown as Fetcher;
+  return { fetcher, getCount: () => gets, patchCount: () => patches };
+}
+
+describe("createHttpUpstream.updateTaskDates — version-conflict retry (症状#8 稀リサイズエラー)", () => {
+  it("retries the read-modify-write on a 409 and succeeds (spurious self-conflict absorbed)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { fetcher, getCount, patchCount } = rmwTaskFetcher({ conflicts: 1 });
+    const up = createHttpUpstream(envWith(fetcher));
+    const res = await up.updateTaskDates(ctx, "t1", {
+      startsAt: "2026-09-07T00:00:00.000Z",
+      endsAt: "2026-09-10T00:00:00.000Z",
+    });
+    expect(res.id).toBe("t1");
+    // one conflict => two PATCH attempts, each preceded by a fresh GET (re-read version).
+    expect(patchCount()).toBe(2);
+    expect(getCount()).toBe(2);
+    warn.mockRestore();
+  });
+
+  it("propagates the 409 only after retries are exhausted (a truly persistent conflict)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Always conflicts => 1 initial + RMW_MAX_RETRIES(3) retries = 4 attempts, then throw.
+    const { fetcher, patchCount } = rmwTaskFetcher({ conflicts: 99 });
+    const up = createHttpUpstream(envWith(fetcher));
+    await expect(
+      up.updateTaskDates(ctx, "t1", { startsAt: null, endsAt: "2026-09-10T00:00:00.000Z" }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(patchCount()).toBe(4);
+    warn.mockRestore();
+  });
+
+  it("does NOT retry a non-conflict error (404 propagates immediately, no extra attempts)", async () => {
+    const fetcher = {
+      async fetch(req: Request): Promise<Response> {
+        if (req.method === "GET") {
+          return new Response(JSON.stringify(mkTask("t1")), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        // PATCH 404 (task vanished) — not a version race, so it must surface at once.
+        return new Response(
+          JSON.stringify({ error: { code: "TASK_NOT_FOUND", message: "not found", retryable: false } }),
+          { status: 404, headers: { "content-type": "application/json" } },
+        );
+      },
+    } as unknown as Fetcher;
+    const up = createHttpUpstream(envWith(fetcher));
+    await expect(
+      up.updateTaskDates(ctx, "t1", { startsAt: null, endsAt: "2026-09-10T00:00:00.000Z" }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+});
+
 describe("createHttpUpstream.listDependencies contract", () => {
   const dep = (taskId: string, dependsOnId: string): task.TaskDependency => ({ taskId, dependsOnId });
 
