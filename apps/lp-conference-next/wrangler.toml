@@ -1,0 +1,18 @@
+# lp-conference-next — public conference LP (Next.js SSG rebuild) delivered as a
+# SEPARATE, assets-only Cloudflare Worker (承認済み設計: 公開LPは認証済み管理面とは別Worker).
+# No `main`: Cloudflare serves ./out (the static Next `output: export` build)
+# directly. The LP never calls internal services / admin APIs live.
+#
+# Deploy:
+#   pnpm --filter @dub/lp-conference-next build
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   npx wrangler deploy --config apps/lp-conference-next/wrangler.toml
+name = "lp-conference-next"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./out"
+not_found_handling = "404-page"
+
+[observability]
+enabled = true
