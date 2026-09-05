@@ -43,6 +43,13 @@
     ],
     "missingInCode": []
   },
+  "event-service": {
+    "missingInSpec": [
+      "GET /events/{}/details",
+      "PUT /events/{}/details"
+    ],
+    "missingInCode": []
+  },
   "gantt-service": {
     "missingInSpec": [
       "POST /internal/events-async"
@@ -85,15 +92,19 @@
     ],
     "missingInCode": [
       "DELETE /admin/email-routing/addresses/{}",
+      "DELETE /admin/email-routing/issued-addresses/{}",
       "DELETE /admin/email-routing/rules/{}",
       "GET /admin/email-routing/addresses",
+      "GET /admin/email-routing/issued-addresses",
       "GET /admin/email-routing/rules",
       "GET /mailboxes",
       "GET /messages",
       "GET /messages/{}",
       "GET /threads/{}",
+      "PATCH /admin/email-routing/issued-addresses/{}",
       "PATCH /admin/email-routing/rules/{}",
       "POST /admin/email-routing/addresses",
+      "POST /admin/email-routing/issued-addresses",
       "POST /admin/email-routing/rules",
       "POST /mailboxes/{}",
       "POST /outbox"

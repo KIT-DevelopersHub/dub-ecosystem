@@ -766,6 +766,9 @@ const SEED_AUDITS: auditLog.AuditRecord[] = [
 
 // Email Routing (@developershub.jp) seed — managed addresses / forwarding rules.
 const EMAIL_DOMAIN = "developershub.jp";
+// Fixed forward target for every issued address: the mail Worker (the roster no longer
+// asks the admin to pick a destination — inbound always routes to the mail app).
+const MAIL_WORKER_DESTINATION = "mail-gateway (Worker)";
 interface DemoEmailAddress {
   id: string;
   localPart: string;
@@ -895,12 +898,12 @@ function createRosterStore() {
         return json(user);
       }
       if (pathname === "/api/v1/mail/admin/email-routing/addresses") {
-        const req = body as { localPart?: string; destination?: string };
+        const req = body as { localPart?: string };
         const localPart = req?.localPart?.trim().toLowerCase() ?? "";
         if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
-        if (!EMAIL_RE.test(req?.destination ?? "")) return problem("VALIDATION_FAILED", "転送先のメール形式が不正です", 400, [{ field: "destination", reason: "format" }]);
         if (emails.some((a) => a.localPart === localPart)) return problem("CONFLICT", "同名のアドレスが既に存在します", 409);
-        const addr: DemoEmailAddress = { id: rid("eml"), localPart, address: `${localPart}@${EMAIL_DOMAIN}`, destination: req!.destination!, enabled: true, createdAt: new Date().toISOString() };
+        // Forward target is fixed to the mail Worker — the caller no longer supplies one.
+        const addr: DemoEmailAddress = { id: rid("eml"), localPart, address: `${localPart}@${EMAIL_DOMAIN}`, destination: MAIL_WORKER_DESTINATION, enabled: true, createdAt: new Date().toISOString() };
         emails.push(addr);
         return json(addr);
       }

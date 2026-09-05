@@ -164,23 +164,23 @@ describe("admin email routing (@developershub.jp address management)", () => {
     expect(addrs.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
   });
 
-  it("issue: POST creates an address; bad local part and bad destination 400", async () => {
+  it("issue: POST creates an address with only a local part (destination fixed to the mail Worker); bad local part 400", async () => {
     const a = api();
     const before = (await list(a)).items.length;
-    const created = await a.request<Addr>({ method: "POST", path: BASE, body: { localPart: "events", destination: "team@example.com" } });
+    // No destination supplied — the forward target is fixed to the mail Worker server-side.
+    const created = await a.request<Addr>({ method: "POST", path: BASE, body: { localPart: "events" } });
     expect(created.address).toBe("events@developershub.jp");
     expect(created.enabled).toBe(true);
+    expect(created.destination).toBe("mail-gateway (Worker)");
     expect((await list(a)).items.length).toBe(before + 1);
 
-    for (const bad of [{ localPart: "Bad Space", destination: "team@example.com" }, { localPart: "ok", destination: "not-an-email" }]) {
-      let e: unknown;
-      try {
-        await a.request({ method: "POST", path: BASE, body: bad });
-      } catch (err) {
-        e = err;
-      }
-      expect((e as ApiError).status).toBe(400);
+    let e: unknown;
+    try {
+      await a.request({ method: "POST", path: BASE, body: { localPart: "Bad Space" } });
+    } catch (err) {
+      e = err;
     }
+    expect((e as ApiError).status).toBe(400);
   });
 
   it("enable/disable via PATCH and delete via DELETE persist", async () => {
