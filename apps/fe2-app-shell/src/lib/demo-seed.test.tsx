@@ -33,6 +33,23 @@ describe("createDemoFetch", () => {
     expect(users.items.length).toBeGreaterThan(0);
   });
 
+  it("filters GET /tasks by scope like task-service (ガント vs マイタスク parity)", async () => {
+    const a = api();
+    // event-scoped (what the ガント fetches) — every task of evt_1, regardless of assignee.
+    const evt1 = await a.tasks.get<{ items: { id: string; eventId: string; assigneeId: string | null }[] }>(
+      "?eventId=evt_1",
+    );
+    expect(evt1.items.length).toBeGreaterThan(0);
+    expect(evt1.items.every((t) => t.eventId === "evt_1")).toBe(true);
+    // the event set includes a task assigned to someone else (usr_bob) — so it is NOT
+    // the same as a self-scoped fetch (this is exactly the ガント/マイタスク mismatch).
+    expect(evt1.items.some((t) => t.assigneeId !== "usr_demo")).toBe(true);
+    // self-scoped 担当 (what マイタスク's 担当 lens fetches) — only the demo user's tasks.
+    const mine = await a.tasks.get<{ items: { assigneeId: string | null }[] }>("?assigneeId=usr_demo");
+    expect(mine.items.length).toBeGreaterThan(0);
+    expect(mine.items.every((t) => t.assigneeId === "usr_demo")).toBe(true);
+  });
+
   it("serves detail + benign mutation endpoints (mail read/thread, gantt)", async () => {
     const a = api();
     const thread = await a.request<{ id: string; messages: unknown[] }>({ method: "GET", path: "/api/v1/mail/threads/thr_1" });
