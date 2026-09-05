@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { task } from "@dub/types";
 import {
   lensQueries,
+  allTasksQueries,
   mergeTasks,
   applyMyTasksFilter,
   sortMyTasks,
@@ -41,6 +42,25 @@ describe("lensQueries", () => {
   });
   it("all lens queries both sides (assigned + issued)", () => {
     expect(lensQueries("usr_me", "all")).toHaveLength(2);
+  });
+});
+
+describe("allTasksQueries (すべて = ガント parity)", () => {
+  it("issues one event-scoped query per event plus the two self-scoped ones", () => {
+    const qs = allTasksQueries("usr_me", ["evt_1", "evt_2"]);
+    // same event-scoped call the gantt makes → identical task set as the timeline
+    expect(qs).toContainEqual({ eventId: "evt_1", limit: 200 });
+    expect(qs).toContainEqual({ eventId: "evt_2", limit: 200 });
+    // self-scoped tail keeps the user's personal / event-unlinked tasks (判断44)
+    expect(qs).toContainEqual({ assigneeId: "usr_me", limit: 200 });
+    expect(qs).toContainEqual({ createdById: "usr_me", limit: 200 });
+    expect(qs).toHaveLength(4);
+  });
+  it("with no events falls back to the two self-scoped queries only", () => {
+    expect(allTasksQueries("usr_me", [])).toEqual([
+      { assigneeId: "usr_me", limit: 200 },
+      { createdById: "usr_me", limit: 200 },
+    ]);
   });
 });
 

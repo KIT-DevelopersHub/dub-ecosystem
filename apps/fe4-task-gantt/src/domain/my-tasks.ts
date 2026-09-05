@@ -38,7 +38,14 @@ export function myTasksFilterActiveCount(f: MyTasksFilter): number {
   );
 }
 
-/** Which backend queries a lens needs. Each is self-scoped (eventId omitted). */
+/** Which backend queries a lens needs.
+ *  担当/依頼 stay self-scoped (eventId omitted; the server's /me rule). 「すべて」 is
+ *  parity with the ガント: the gantt is event-scoped and shows EVERY task in the event
+ *  (gantt-service forwards `GET /tasks?eventId=` to task-service), so a self-scoped
+ *  すべて would only ever show the viewer's own tasks and never match the timeline. To
+ *  keep マイタスク and ガント on the SAME task set, すべて fetches each of the user's
+ *  events (same event-scoped call the gantt makes) and unions the result — see
+ *  `allTasksQueries`. */
 export function lensQueries(currentUserId: common.UserId, lens: MyTasksLens): task.ListTasksQuery[] {
   const assigned: task.ListTasksQuery = { assigneeId: currentUserId, limit: 200 };
   const requested: task.ListTasksQuery = { createdById: currentUserId, limit: 200 };
@@ -48,8 +55,27 @@ export function lensQueries(currentUserId: common.UserId, lens: MyTasksLens): ta
     case "requested":
       return [requested];
     case "all":
+      // Fallback only (no events in scope): union of the two self-scoped lenses so
+      // すべて never regresses to empty when the event list failed to load.
       return [assigned, requested];
   }
+}
+
+/** Queries for the 「すべて」 lens — parity with the ガント. One event-scoped query per
+ *  event the user can see (the SAME `GET /tasks?eventId=` gantt-service issues upstream,
+ *  so マイタスク renders the identical task set the timeline does), unioned with the
+ *  user's self-scoped tasks so personal / event-unlinked tasks (判断44) are never
+ *  dropped. Merge + de-dupe with `mergeTasks`. */
+export function allTasksQueries(
+  currentUserId: common.UserId,
+  eventIds: readonly common.EventId[],
+): task.ListTasksQuery[] {
+  const perEvent = eventIds.map((eventId): task.ListTasksQuery => ({ eventId, limit: 200 }));
+  const self: task.ListTasksQuery[] = [
+    { assigneeId: currentUserId, limit: 200 },
+    { createdById: currentUserId, limit: 200 },
+  ];
+  return [...perEvent, ...self];
 }
 
 /** Merge several task pages into one list, de-duplicated by id (last write wins). */

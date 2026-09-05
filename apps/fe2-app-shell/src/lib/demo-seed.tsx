@@ -135,12 +135,12 @@ const TASKS: task.Task[] = [
   },
   {
     version: 1, id: "tsk_3", eventId: "evt_1", title: "スポンサー請求書送付", description: "確定した3社へ請求",
-    status: "done", priority: "urgent", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-07-25T09:00:00Z", origin: "internal",
+    status: "done", priority: "urgent", assigneeId: "usr_bob", teamId: "team_ops", createdBy: ME_ID, dueAt: "2026-07-25T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-02T00:00:00Z", updatedAt: "2026-07-24T00:00:00Z",
   },
   {
     version: 1, id: "tsk_4", eventId: "evt_1", title: "受付システム連携確認", description: null,
-    status: "blocked", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: null, origin: "github",
+    status: "blocked", priority: "medium", assigneeId: null, teamId: "team_hq", createdBy: ME_ID, dueAt: null, origin: "github",
     archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z",
   },
   {
@@ -150,7 +150,7 @@ const TASKS: task.Task[] = [
   },
   {
     version: 1, id: "tsk_6", eventId: "evt_1", title: "当日タイムテーブル作成", description: null,
-    status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
+    status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", createdBy: ME_ID, dueAt: "2026-08-08T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
   },
   // ── evt_3 (学生ハッカソン Hackit 秋) — a 2nd event WITH a gantt so the global
@@ -162,7 +162,7 @@ const TASKS: task.Task[] = [
   },
   {
     version: 1, id: "hk_2", eventId: "evt_3", title: "Hackit: 協賛・賞品調整", description: null,
-    status: "in_progress", priority: "medium", assigneeId: "usr_bob", teamId: "team_ops", startAt: "2026-08-10T00:00:00Z", dueAt: "2026-09-05T00:00:00Z", origin: "internal",
+    status: "in_progress", priority: "medium", assigneeId: "usr_bob", teamId: "team_ops", createdBy: ME_ID, startAt: "2026-08-10T00:00:00Z", dueAt: "2026-09-05T00:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-10T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
   },
   {
@@ -1169,8 +1169,27 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const id = seg(/^\/api\/v1\/events\/([^/]+)$/);
       if (id) return EVENT_DETAIL[id] ? json(EVENT_DETAIL[id]) : notFound(`GET ${pathname}`);
     }
-    // tasks
-    if (pathname === "/api/v1/tasks") return json(page(TASKS));
+    // tasks — mirror task-service GET /tasks filtering so the demo is faithful:
+    // the ガント fetches `?eventId=` (all of an event's tasks) while マイタスク's 担当/
+    // 依頼 lenses fetch `?assigneeId=`/`?createdById=` (self-scoped). Returning every
+    // task regardless of query masked the real scope difference. Apply the same
+    // filters the real service does so both apps show the correct, matching sets.
+    if (pathname === "/api/v1/tasks") {
+      const qEvent = url.searchParams.get("eventId");
+      const qAssignee = url.searchParams.get("assigneeId");
+      const qCreatedBy = url.searchParams.get("createdById");
+      const qStatuses = (url.searchParams.get("status") ?? "").split(",").filter(Boolean);
+      const includeArchived = url.searchParams.get("includeArchived") === "true";
+      const items = TASKS.filter((t) => {
+        if (qEvent && t.eventId !== qEvent) return false;
+        if (qAssignee && t.assigneeId !== qAssignee) return false;
+        if (qCreatedBy && (t.createdBy ?? null) !== qCreatedBy) return false;
+        if (qStatuses.length > 0 && !qStatuses.includes(t.status)) return false;
+        if (!includeArchived && t.archivedAt != null) return false;
+        return true;
+      });
+      return json(page(items));
+    }
     {
       const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
       if (id) {

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mytask-gantt-parity",
+  "worker": "dub-demo-mytask-gantt-parity",
+  "url": "https://dub-demo-mytask-gantt-parity.developershub-site.workers.dev",
+  "deployedSha": "7b613cc",
+  "branch": "fix/mytask-gantt-parity",
+  "actor": "Claude Code",
+  "markers": ["ガントと同じ一覧"],
+  "live": true,
+  "verifiedAt": "2026-09-05T20:17:12Z",
+  "updatedAt": "2026-09-05T20:17:12Z",
+  "note": "MyTasks shows same task set as Gantt (すべて lens = event-scoped parity)"
+}
