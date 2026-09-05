@@ -186,6 +186,9 @@ export function createApp(deps: AppDeps = defaultDeps): App {
       ticket,
       doUrl: buildDoUrl(base, eventId),
       expiresAt: new Date(expEpochMs).toISOString(),
+      // Echo the caller's identity so the presence bar can mark "（あなた）" without a
+      // second /me round-trip. displayName is resolved client-side from the roster.
+      self: { userId },
     };
     return c.json(res satisfies gantt.GanttWsTicketResponse);
   });

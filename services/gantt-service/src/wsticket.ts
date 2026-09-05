@@ -12,6 +12,10 @@ export interface WsTicketClaims {
   eventId: common.EventId;
   userId: common.UserId;
   expEpochMs: number;
+  /** Display label the issuer resolved for this user, signed so the GanttRoom DO can
+   *  trust it for presence avatars (non-spoofable). Additive/optional: an older ticket
+   *  without it stays valid, and the client falls back to its own roster for the name. */
+  displayName?: string;
 }
 
 function b64urlEncode(bytes: Uint8Array): string {
