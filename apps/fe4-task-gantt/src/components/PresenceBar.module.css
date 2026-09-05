@@ -1,10 +1,12 @@
-/* Presence avatars (Google-Docs-style): who is viewing / editing this gantt. Colours are
-   generated per user (presence.ts), so only layout + state affordances live here. Uses
+/* Presence avatars (Google-Docs-style active-viewer cluster): overlapping circular
+   avatars, each ringed in the person's colour (from presence.ts), with a roster popover.
+   Colours are computed per user, so only layout + state affordances live here. Uses
    @dub/tokens CSS custom properties for surfaces/lines so it tracks light/dark. */
 .bar {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .status {
@@ -33,13 +35,35 @@
   background: var(--color-fg-muted, #94a3b8);
 }
 
+/* The whole avatar row is a single button so the roster popover opens on click. */
+.cluster {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 4px 3px 8px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.cluster:hover {
+  background: var(--color-bg-muted, #f1f5f9);
+}
+.cluster:focus-visible {
+  outline: 2px solid var(--color-border-focus, #2970ff);
+  outline-offset: 2px;
+}
+
 .avatars {
   display: inline-flex;
   align-items: center;
-  padding-left: 8px;
 }
 
-.avatar {
+/* Each avatar: a coloured disc + white initials, wrapped by a white gap and a ring in the
+   SAME identity colour (currentColor) — the way Docs rings each active viewer. */
+.avatar,
+.miniAvatar {
   position: relative;
   width: 30px;
   height: 30px;
@@ -47,51 +71,63 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 650;
+  color: #fff; /* fallback; the inline style sets currentColor to the identity colour */
   line-height: 1;
-  margin-left: -8px;
-  border: 2px solid var(--color-bg-surface, #ffffff);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
+  box-shadow:
+    0 0 0 2px var(--color-bg-surface, #ffffff),
+    0 0 0 3px currentColor;
   cursor: default;
   user-select: none;
+}
+.avatar {
+  margin-left: -6px;
+  animation: avatarIn 0.18s ease-out both;
 }
 .avatar:first-child {
   margin-left: 0;
 }
+.initials {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  z-index: 1;
+}
+.miniAvatar {
+  width: 24px;
+  height: 24px;
+  box-shadow: 0 0 0 2px var(--color-bg-surface, #ffffff), 0 0 0 3px currentColor;
+  flex: none;
+}
+.miniAvatar .initials {
+  font-size: 10px;
+}
 
-/* Editing = Google-Docs coloured ring + a subtle pulse + an "編集" badge. */
+/* Editing = a warm accent ring + a subtle pulse + an "編集" badge (Docs shows a caret; we
+   keep our own affordance since the gantt is a schedule, not a text cursor). */
 .editing {
   box-shadow:
     0 0 0 2px var(--color-bg-surface, #fff),
     0 0 0 4px var(--color-warning-solid, #f79009);
-  animation: pulse 1.8s ease-in-out infinite;
+  animation:
+    avatarIn 0.18s ease-out both,
+    pulse 1.8s ease-in-out infinite;
 }
-.badge {
-  position: absolute;
-  bottom: -4px;
-  right: -4px;
-  background: var(--color-warning-solid, #f79009);
-  color: #fff;
-  font-size: 8px;
-  font-weight: 700;
-  padding: 1px 3px;
-  border-radius: 6px;
-  line-height: 1;
-  border: 1px solid var(--color-bg-surface, #fff);
+.miniAvatar.editing {
+  animation: none;
 }
 
-/* Self marker: a small ring inset + a persistent "あなた" caption above the chip. */
-.me::before {
+/* Self chip: a persistent "あなた" caption above the anchor avatar. */
+.me::after {
   content: "あなた";
   position: absolute;
   top: -15px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 9px;
+  font-weight: 600;
   color: var(--color-fg-muted, #64748b);
   white-space: nowrap;
+  pointer-events: none;
 }
 
 .overflow {
@@ -101,14 +137,101 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-left: -8px;
+  margin-left: -6px;
   font-size: 11px;
   font-weight: 650;
   color: var(--color-fg-default, #334155);
   background: var(--color-bg-muted, #e2e8f0);
-  border: 2px solid var(--color-bg-surface, #ffffff);
+  box-shadow: 0 0 0 2px var(--color-bg-surface, #ffffff);
+  animation: avatarIn 0.18s ease-out both;
 }
 
+/* Roster popover: the "who is here" name list Docs shows when you click the cluster. */
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 8px;
+  background: var(--color-bg-surface, #ffffff);
+  border: 1px solid var(--color-border-subtle, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.16);
+  animation: popIn 0.14s ease-out both;
+}
+.popoverTitle {
+  margin: 2px 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-fg-muted, #64748b);
+  letter-spacing: 0.02em;
+}
+.popoverList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.popoverItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px;
+  border-radius: 8px;
+}
+.popoverItem:hover {
+  background: var(--color-bg-muted, #f1f5f9);
+}
+.popoverName {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-fg-default, #1e293b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.youTag {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--color-fg-muted, #64748b);
+}
+.popoverState {
+  flex: none;
+  font-size: 11px;
+  color: var(--color-fg-muted, #64748b);
+}
+.popoverState.stateEditing {
+  color: var(--color-warning-solid, #b54708);
+  font-weight: 600;
+}
+
+@keyframes avatarIn {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 @keyframes pulse {
   0%,
   100% {
@@ -129,5 +252,14 @@
   }
   50% {
     opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar,
+  .overflow,
+  .editing,
+  .popover {
+    animation: none;
   }
 }
