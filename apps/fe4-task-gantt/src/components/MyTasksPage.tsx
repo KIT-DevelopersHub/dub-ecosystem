@@ -9,6 +9,7 @@ import {
   type MyTasksLens,
   emptyMyTasksFilter,
   lensQueries,
+  allTasksQueries,
   mergeTasks,
   applyMyTasksFilter,
   sortMyTasks,
@@ -22,9 +23,9 @@ import styles from "../styles/app.module.css";
 const PAGE_SIZE = 25;
 
 const LENS_TABS: { key: MyTasksLens; label: string; hint: string }[] = [
+  { key: "all", label: "すべて", hint: "すべてのタスク（ガントと同じ一覧）" },
   { key: "assigned", label: "担当", hint: "自分に割り当てられたタスク" },
   { key: "requested", label: "依頼", hint: "自分が発行したタスク" },
-  { key: "all", label: "すべて", hint: "自分に関わる全タスク" },
 ];
 
 export interface MyTasksPageProps {
@@ -45,7 +46,10 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
   const client = useApiClient();
   const toast = useToast();
 
-  const [lens, setLens] = useState<MyTasksLens>("assigned");
+  // Default to すべて so opening マイタスク shows the SAME task set the ガント does
+  // (parity was the whole point — a self-scoped default looked empty for anyone who
+  // wasn't personally assigned the event's tasks). 担当/依頼 narrow from there.
+  const [lens, setLens] = useState<MyTasksLens>("all");
   const [filter, setFilter] = useState<MyTasksFilter>(() => emptyMyTasksFilter());
   const [tasks, setTasks] = useState<task.Task[]>([]);
   const [users, setUsers] = useState<UserCache>(() => createUserCache(people));
@@ -77,12 +81,21 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     [users, people, currentUserId],
   );
 
-  // fetch the lens' task set (one or two self-scoped queries, merged + deduped).
+  // The event ids in scope drive the すべて lens' event-scoped (gantt-parity) fetch.
+  const eventIds = useMemo(() => events.map((e) => e.id), [events]);
+
+  // fetch the lens' task set. 担当/依頼 are self-scoped (one query each); すべて fetches
+  // every in-scope event (the same event-scoped call the ガント makes) plus the user's
+  // self-scoped tasks, so マイタスク shows the identical set the timeline does. All
+  // pages are merged + de-duped by id.
   const load = useCallback(async () => {
     const seq = ++reqSeq.current;
     setLoading(true);
     try {
-      const queries = lensQueries(currentUserId, lens);
+      const queries =
+        lens === "all" && eventIds.length > 0
+          ? allTasksQueries(currentUserId, eventIds)
+          : lensQueries(currentUserId, lens);
       const pages = await Promise.all(queries.map((q) => listTasks(client, q)));
       if (seq !== reqSeq.current) return; // a newer load superseded this one
       const merged = mergeTasks(...pages.map((p) => p.items));
@@ -90,7 +103,7 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [client, currentUserId, lens]);
+  }, [client, currentUserId, lens, eventIds]);
 
   useEffect(() => {
     void load();
