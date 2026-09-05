@@ -30,10 +30,16 @@ Everything visible is the web app; the shell adds a single native capability on 
 2. **Autofill** — once the gate is passed, the WebView loads and a small injected page script
    fills the saved email + password into the web login form (`#fe2-login-email`,
    `#fe2-login-password`) and clicks submit. `lib/ui/web_shell.dart`.
-3. **First run / capture** — with nothing saved the app opens straight to the web login; the
-   user signs in by hand and the shell captures those credentials on submit and stores them in
-   the OS secure store (macOS Keychain / Windows Credential Manager, via `flutter_secure_storage`,
-   `lib/state/credential_store.dart`). From the next launch the gate + autofill apply.
+3. **First run / opt-in capture** — with nothing saved the app opens straight to the web login;
+   the user signs in by hand. The typed credentials are held **only in memory** (never
+   persisted on submit). When that manual login **succeeds** (the login form unmounts) a native
+   dialog asks *「Touch ID でログインを自動化しますか？」* — and only if the user taps **有効にする**
+   are the credentials written to the OS secure store (macOS Keychain / Windows Credential
+   Manager, via `flutter_secure_storage`). This consent step (`lib/state/autofill.dart`) is what
+   arms the gate + autofill from the next launch on. Tapping **今はしない** saves nothing.
+4. **Settings toggle** — a small fingerprint button (bottom-left of the window) opens a native
+   panel with a *「Touch ID でログインを自動化」* switch to enable/disable autofill later.
+   Turning it off forgets the saved credentials.
 
 The password only ever lives in the WebView JS context (as a browser password manager would
 fill it) and in the OS secure store — never in a plain file or a log.
