@@ -43,6 +43,16 @@ dependencies:
   dio_cookie_manager: ^3.1.1
   cookie_jar: ^4.0.8
 
+  # OS-native biometric app-lock (launch gate). Federated plugin: macOS uses
+  # local_auth_darwin (Touch ID), Windows uses local_auth_windows (Windows
+  # Hello). These are pulled in transitively and register automatically.
+  # `biometricOnly: false` lets the OS fall back to the device passcode/password
+  # when biometrics are unavailable or fail.
+  local_auth: ^2.3.0
+  # Persists the "lock enabled" preference across launches (pure-Dart facade
+  # over the platform key/value store).
+  shared_preferences: ^2.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
