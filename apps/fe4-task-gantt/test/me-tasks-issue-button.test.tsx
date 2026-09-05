@@ -60,7 +60,8 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     fireEvent.change(screen.getByTestId("fe4-mytask-create-title"), {
       target: { value: "登壇者へ最終案内メールを送る" },
     });
-    // event link defaults to「紐付けない」(optional); only the title gates submission.
+    // 対象イベント now defaults to the user's first event (gantt parity); only the
+    // title gates submission.
     const submit = screen.getByTestId("fe4-mytask-create-submit");
     expect(submit).not.toBeDisabled();
     fireEvent.click(submit);
@@ -72,6 +73,30 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     });
     fireEvent.click(screen.getByTestId("fe4-mytasks-lens-requested"));
     expect(await screen.findByText("登壇者へ最終案内メールを送る")).toBeInTheDocument();
+  });
+
+  it("gantt parity: a task issued from マイタスク defaults to a real event, so it carries an eventId (shows on that event's gantt)", async () => {
+    const client = new MockApiClient({ events: EVENTS, currentUserId: ME });
+    renderRoute(client);
+
+    const openBtn = await screen.findByTestId("fe4-mytasks-create-open");
+    await waitFor(() => expect(openBtn).not.toBeDisabled());
+    fireEvent.click(openBtn);
+
+    fireEvent.change(screen.getByTestId("fe4-mytask-create-title"), {
+      target: { value: "受付フローを設計する" },
+    });
+    // Do NOT touch the 対象イベント select — the default must already be the first event.
+    fireEvent.click(screen.getByTestId("fe4-mytask-create-submit"));
+
+    // POST /tasks carries the defaulted eventId — the same event-scoped bucket the ガント
+    // reads (GET /tasks?eventId=), so the new task is visible on the timeline (no more
+    // "マイタスクで追加したタスクがガントに無い").
+    await waitFor(() => {
+      const created = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
+      expect(created).toBeTruthy();
+      expect((created?.body as { eventId?: string } | undefined)?.eventId).toBe("evt_conf");
+    });
   });
 
   it("判断44: with no events at all, the button is still pressable and can issue an unlinked task", async () => {
