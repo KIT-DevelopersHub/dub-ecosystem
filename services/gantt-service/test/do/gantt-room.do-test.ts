@@ -15,8 +15,17 @@ const ALLOWED_ORIGIN = "https://app.developershub.jp";
 // GANTT_ROOM is optional on Env (Noop fallback in local/preview) but always bound here.
 const GANTT_ROOM = env.GANTT_ROOM!;
 
-async function ticketFor(eventId: string, userId: string, opts: { exp?: number } = {}): Promise<string> {
-  return signWsTicket(SECRET, { eventId, userId, expEpochMs: opts.exp ?? ticketExpiryMs() });
+async function ticketFor(
+  eventId: string,
+  userId: string,
+  opts: { exp?: number; displayName?: string } = {},
+): Promise<string> {
+  return signWsTicket(SECRET, {
+    eventId,
+    userId,
+    expEpochMs: opts.exp ?? ticketExpiryMs(),
+    displayName: opts.displayName,
+  });
 }
 
 /** Open a WS through the worker's /ws routing (index.ts -> GanttRoom DO). */
@@ -30,26 +39,69 @@ async function connect(
   });
 }
 
-/** Resolve with the next message, or reject after `ms` (used to assert delivery). */
+/** True for a presence-roster frame — informational, fanned out on every join/leave.
+ *  The delta/pong assertions below skip these so a join's roster snapshot never masks the
+ *  row.moved / chart.invalidated / pong they're actually waiting on. */
+function isPresenceFrame(data: string): boolean {
+  if (data === "pong") return false;
+  try {
+    return (JSON.parse(data) as { kind?: unknown }).kind === "presence";
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve with the next NON-presence message, or reject after `ms` (used to assert
+ *  delivery of deltas / pong; presence-roster frames are skipped). */
 function nextMessage(ws: WebSocket, ms = 1000): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timeout waiting for message")), ms);
-    ws.addEventListener(
-      "message",
-      (e: MessageEvent) => {
-        clearTimeout(timer);
-        resolve(e.data as string);
-      },
-      { once: true },
-    );
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as string;
+      if (isPresenceFrame(data)) return; // ignore presence; keep waiting for the real frame
+      clearTimeout(timer);
+      ws.removeEventListener("message", onMessage as EventListener);
+      resolve(data);
+    };
+    ws.addEventListener("message", onMessage as EventListener);
   });
 }
 
-/** Assert NO message arrives within `ms`. */
+/** Resolve with the first presence-roster frame whose users satisfy `predicate` (robust
+ *  against the join/leave frames that race around connect), or reject after `ms`. */
+function awaitPresence(
+  ws: WebSocket,
+  predicate: (users: gantt.GanttPresenceUser[]) => boolean,
+  ms = 1000,
+): Promise<gantt.GanttPresenceUser[]> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout waiting for matching presence")), ms);
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as string;
+      if (!isPresenceFrame(data)) return;
+      const users = (JSON.parse(data) as { users: gantt.GanttPresenceUser[] }).users;
+      if (!predicate(users)) return; // keep waiting for the frame we care about
+      clearTimeout(timer);
+      ws.removeEventListener("message", onMessage as EventListener);
+      resolve(users);
+    };
+    ws.addEventListener("message", onMessage as EventListener);
+  });
+}
+const idsOf = (users: gantt.GanttPresenceUser[]): string[] => users.map((u) => u.userId).sort();
+
+/** Assert NO delta/pong arrives within `ms` (presence frames are ignored). */
 function expectSilence(ws: WebSocket, ms = 250): Promise<void> {
   return new Promise((resolve, reject) => {
-    ws.addEventListener("message", () => reject(new Error("unexpected message")), { once: true });
-    setTimeout(resolve, ms);
+    const onMessage = (e: MessageEvent) => {
+      if (isPresenceFrame(e.data as string)) return;
+      reject(new Error("unexpected message"));
+    };
+    ws.addEventListener("message", onMessage as EventListener);
+    setTimeout(() => {
+      ws.removeEventListener("message", onMessage as EventListener);
+      resolve();
+    }, ms);
   });
 }
 
@@ -258,6 +310,68 @@ describe("DoRealtimePublisher — real RT wiring (read model -> DO)", () => {
     await publisher.publishInvalidated(ev, "task.created");
 
     expect(JSON.parse(await got)).toMatchObject({ kind: "chart.invalidated", eventId: ev, reason: "task.created" });
+    s.webSocket!.close();
+  });
+});
+
+describe("GanttRoom DO — presence roster (Docs-style avatars)", () => {
+  it("hello returns the live roster, deduped by user across a user's tabs", async () => {
+    const ev = "event_presence_hello";
+    const a1 = await connect(ev, await ticketFor(ev, "user_a"));
+    const a2 = await connect(ev, await ticketFor(ev, "user_a")); // same user, 2nd tab
+    const b = await connect(ev, await ticketFor(ev, "user_b"));
+    a1.webSocket!.accept();
+    a2.webSocket!.accept();
+    b.webSocket!.accept();
+
+    const roster = awaitPresence(a1.webSocket!, (u) => u.length === 2);
+    a1.webSocket!.send(JSON.stringify({ t: "hello" }));
+    const users = await roster;
+
+    expect(idsOf(users)).toEqual(["user_a", "user_b"]); // user_a's two tabs collapse to one
+    for (const u of users) {
+      expect(u.editing).toBe(false); // presence is view-only today
+      expect(u.editingTaskIds).toEqual([]);
+    }
+    a1.webSocket!.close();
+    a2.webSocket!.close();
+    b.webSocket!.close();
+  });
+
+  it("fans a join out to existing viewers (a new avatar appears live)", async () => {
+    const ev = "event_presence_join";
+    const a = await connect(ev, await ticketFor(ev, "user_a"));
+    a.webSocket!.accept();
+    // Wait for the roster to grow to include the joiner (ignores the earlier [user_a] frame).
+    const joined = awaitPresence(a.webSocket!, (u) => u.some((x) => x.userId === "user_b"));
+    const b = await connect(ev, await ticketFor(ev, "user_b"));
+    b.webSocket!.accept();
+    expect(idsOf(await joined)).toEqual(["user_a", "user_b"]);
+    a.webSocket!.close();
+    b.webSocket!.close();
+  });
+
+  it("fans a leave out to remaining viewers (the avatar disappears)", async () => {
+    const ev = "event_presence_leave";
+    const a = await connect(ev, await ticketFor(ev, "user_a"));
+    const b = await connect(ev, await ticketFor(ev, "user_b"));
+    a.webSocket!.accept();
+    b.webSocket!.accept();
+    // The leaver must be gone from the roster the remaining socket receives.
+    const afterLeave = awaitPresence(a.webSocket!, (u) => !u.some((x) => x.userId === "user_b"));
+    b.webSocket!.close();
+    expect(idsOf(await afterLeave)).toEqual(["user_a"]);
+    a.webSocket!.close();
+  });
+
+  it("carries the ticket-signed displayName into the roster (non-spoofable label)", async () => {
+    const ev = "event_presence_name";
+    const s = await connect(ev, await ticketFor(ev, "user_c", { displayName: "山田 太郎" }));
+    s.webSocket!.accept();
+    const roster = awaitPresence(s.webSocket!, (u) => u.some((x) => x.userId === "user_c"));
+    s.webSocket!.send(JSON.stringify({ t: "hello" }));
+    const me = (await roster).find((u) => u.userId === "user_c");
+    expect(me?.displayName).toBe("山田 太郎");
     s.webSocket!.close();
   });
 });

@@ -40,6 +40,7 @@ import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
 import { TaskDetailPanel, type RelationEdit } from "./TaskDetailPanel";
 import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
+import { PresenceBar } from "./PresenceBar";
 import styles from "../styles/app.module.css";
 
 export interface TaskWorkspacePageProps {
@@ -131,7 +132,9 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // Realtime sync: apply peers' bar moves straight to the cache, and refetch fresh when a
   // structural change (create/delete/status/assignee/dependency) shifts the derived chart.
   // Best-effort — the chart works without it (RT is a delivery optimisation, not the SoT).
-  useGanttRealtime(eventId, {
+  // Realtime also returns the live presence roster (who else is viewing) + connection
+  // status for the Google-Docs-style avatar cluster in the header.
+  const rt = useGanttRealtime(eventId, {
     applyMove: gantt.setRowScheduleOptimistic,
     invalidate: () => {
       void gantt.refetchFresh();
@@ -230,6 +233,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     for (const u of userList) if (!byId.has(u.id)) byId.set(u.id, u);
     return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "ja"));
   }, [roster, userList]);
+  // userId → display name, for the presence bar avatars (roster ∪ resolved-from-tasks).
+  // The DO may not carry a signed displayName, so the bar resolves labels from here.
+  const displayNameById = useMemo(() => {
+    const m = new Map<common.UserId, string>();
+    for (const u of assignableUsers) m.set(u.id, u.displayName);
+    return m;
+  }, [assignableUsers]);
   const statusById = useMemo(() => new Map(tasks.map((t) => [t.id, t.status] as const)), [tasks]);
   // team accent colour per task (team-grouped rows), and a legend of the teams
   // actually present on the board — drives the row stripe / bar cap / legend chips.
@@ -1089,6 +1099,14 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
           <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
+        {/* Realtime presence: the Google-Docs-style cluster of who is viewing this gantt
+            right now (live). Shown to everyone — viewers included, not just writers. */}
+        <PresenceBar
+          presence={rt.presence}
+          status={rt.status}
+          selfUserId={rt.selfUserId}
+          displayNameById={displayNameById}
+        />
         {caps.canWrite && (
           <div className={styles.headerActions}>
             {/* Organizer edit affordance. Placeholder gating today: canWrite comes

@@ -32,6 +32,9 @@ const DEFAULT_ALLOWED_ORIGINS = "https://app.developershub.jp";
 interface SocketMeta {
   userId: string;
   eventId: string;
+  // Display label the issuer signed into the ws-ticket (non-spoofable). Optional: absent
+  // when the issuer couldn't resolve a name; the client then falls back to its roster.
+  displayName?: string;
 }
 
 function errorResponse(status: number, code: string): Response {
@@ -76,7 +79,12 @@ export class GanttRoom extends DurableObject<GanttRoomEnv> {
     // Hibernation API: the runtime keeps the socket without holding this DO in memory;
     // webSocketMessage/Close re-hydrate it on demand ($0 while idle).
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ userId: claims.userId, eventId } satisfies SocketMeta);
+    server.serializeAttachment({ userId: claims.userId, eventId, displayName: claims.displayName } satisfies SocketMeta);
+
+    // A viewer just joined → fan a fresh presence roster out to EVERY socket (including
+    // this new one, already registered by acceptWebSocket) so every Docs-style avatar
+    // cluster updates live. Best-effort; never blocks the upgrade.
+    this.broadcastPresence(eventId);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -100,23 +108,105 @@ export class GanttRoom extends DurableObject<GanttRoomEnv> {
     return delivered;
   }
 
-  /** Current connection count (presence primitive). */
+  /** Current connection count (presence primitive; counts sockets, not distinct users). */
   async presence(): Promise<number> {
     return this.ctx.getWebSockets().length;
   }
 
-  // Clients are read-only over WS (all writes go through the HTTP master). We only answer
-  // a lightweight liveness ping so the client can detect a stale link and reconnect.
+  /**
+   * Build the deduped presence roster from the live sockets — one entry per userId (a
+   * user with several tabs shows once). `exclude` drops a socket that is closing but may
+   * still appear in getWebSockets() during webSocketClose, so a leaver disappears at once.
+   * Presence is view-only today: editing=false / editingTaskIds=[] (shape kept for a
+   * future edit-intent channel). The socket's very existence IS the presence — exact, in
+   * memory only, $0.
+   */
+  private roster(exclude?: WebSocket): gantt.GanttPresenceUser[] {
+    const byUser = new Map<string, gantt.GanttPresenceUser>();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === exclude) continue;
+      const meta = ws.deserializeAttachment() as SocketMeta | null;
+      if (!meta?.userId) continue;
+      if (!byUser.has(meta.userId)) {
+        byUser.set(meta.userId, {
+          userId: meta.userId,
+          displayName: meta.displayName,
+          editing: false,
+          editingTaskIds: [],
+        });
+      }
+    }
+    return [...byUser.values()];
+  }
+
+  /** Fan a presence snapshot out to every socket (best-effort). `exclude` is passed
+   *  through to roster() so a closing socket is neither counted nor sent to. */
+  private broadcastPresence(eventId: string, exclude?: WebSocket): void {
+    const frame: gantt.GanttRealtimeEvent = {
+      kind: "presence",
+      eventId,
+      users: this.roster(exclude),
+      at: new Date().toISOString(),
+    };
+    const data = JSON.stringify(frame);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === exclude) continue;
+      try {
+        ws.send(data);
+      } catch {
+        // socket already gone; ignore
+      }
+    }
+  }
+
+  /** Send the current presence roster to a single socket (answers a client `hello`). */
+  private sendPresenceTo(ws: WebSocket, eventId: string): void {
+    const frame: gantt.GanttRealtimeEvent = {
+      kind: "presence",
+      eventId,
+      users: this.roster(),
+      at: new Date().toISOString(),
+    };
+    try {
+      ws.send(JSON.stringify(frame));
+    } catch {
+      // socket already gone; ignore
+    }
+  }
+
+  // Clients are read-only over WS (all writes go through the HTTP master). We answer a
+  // lightweight liveness ping so the client can detect a stale link, and a `hello` frame
+  // with the current presence roster (so a just-connected tab can populate its avatars
+  // immediately without waiting for the next join/leave).
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (message === "ping") ws.send("pong");
+    if (message === "ping") {
+      ws.send("pong");
+      return;
+    }
+    if (typeof message === "string") {
+      let parsed: { t?: unknown } | null = null;
+      try {
+        parsed = JSON.parse(message) as { t?: unknown };
+      } catch {
+        return; // ignore non-JSON frames
+      }
+      if (parsed?.t === "hello") {
+        const meta = ws.deserializeAttachment() as SocketMeta | null;
+        if (meta?.eventId) this.sendPresenceTo(ws, meta.eventId);
+      }
+    }
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    const meta = ws.deserializeAttachment() as SocketMeta | null;
     try {
       ws.close(code, reason);
     } catch {
       // already closing
     }
+    // A viewer left → re-broadcast the roster WITHOUT this socket so its avatar drops from
+    // every other cluster the same tick.
+    if (meta?.eventId) this.broadcastPresence(meta.eventId, ws);
   }
 
   override async webSocketError(ws: WebSocket): Promise<void> {

@@ -232,6 +232,18 @@ components:
         expiresAt:
           type: string
           format: date-time
+        self:
+          type: object
+          description: >-
+            The caller's own identity, so the client can mark "（あなた）" in the presence
+            bar without a second /me round-trip. Additive/optional; older clients ignore it.
+          required:
+            - userId
+          properties:
+            userId:
+              type: string
+            displayName:
+              type: string
     Error:
       type: object
       description: Unified error envelope (@dub/errors ErrorResponse). Every non-2xx response uses this shape.

@@ -122,7 +122,33 @@ export type GanttRealtimeEvent =
        *  Informational only; clients treat every invalidation the same (refetch fresh). */
       reason: string;
       at: ISODateTime;
+    }
+  | {
+      // Presence — who is currently viewing this event's gantt (Google-Docs-style
+      // avatar cluster). ADDITIVE to the delta contract above: the GanttRoom DO fans a
+      // fresh, deduped roster snapshot out to every socket whenever someone joins or
+      // leaves (and on a client `hello`). Purely informational; it never mutates the
+      // chart cache, so an older client that doesn't know this kind simply ignores it.
+      // Presence lives only in DO memory (no durable rows, no migration) — a socket's
+      // very existence IS the presence, so it's exact and $0.
+      kind: "presence";
+      eventId: EventId;
+      users: GanttPresenceUser[];
+      at: ISODateTime;
     };
+
+/** One participant connected to an event's gantt room, deduped by userId across that
+ *  user's tabs. `editing` is reserved for a future edit-intent channel; presence today
+ *  is view-only, so it is always false and `editingTaskIds` empty (kept in the shape so
+ *  the avatar UI need not change when edit-intent lands). */
+export interface GanttPresenceUser {
+  userId: UserId;
+  /** Label the DO learned from the SIGNED ws-ticket (non-spoofable). Absent when the
+   *  issuer did not resolve a name — the client then falls back to its own roster. */
+  displayName?: string;
+  editing: boolean;
+  editingTaskIds: TaskId[];
+}
 
 /** GET /gantt/ws-ticket?eventId= response. The ticket is a short-lived HMAC token the
  *  GanttRoom DO verifies before accepting the WS; `doUrl` is the absolute DO-direct URL
@@ -131,4 +157,7 @@ export interface GanttWsTicketResponse {
   ticket: string;
   doUrl: string;
   expiresAt: ISODateTime;
+  /** The caller's own identity, so the client can mark "（あなた）" in the presence bar
+   *  without a second /me round-trip. Additive/optional (older clients ignore it). */
+  self?: { userId: UserId; displayName?: string };
 }
