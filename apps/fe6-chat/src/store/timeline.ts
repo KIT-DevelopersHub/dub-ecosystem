@@ -192,6 +192,12 @@ export function applyRealtimeEvent(
     case "member.added":
     case "member.removed":
       return state;
+    case "reaction.updated":
+      // Converge to the event's authoritative post-toggle reaction set (idempotent:
+      // re-applying the same frame is a no-op). The wire carries the emoji->userIds map;
+      // reactionsFromWire normalizes it to Reaction[]. Unknown message id -> applyReactions
+      // leaves the timeline untouched.
+      return { ...state, messages: applyReactions(state.messages, event.messageId, reactionsFromWire(event.reactions)) };
     default: {
       // exhaustiveness guard over the frozen union
       const _never: never = event;

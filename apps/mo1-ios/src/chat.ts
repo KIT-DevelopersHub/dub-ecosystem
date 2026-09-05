@@ -107,6 +107,8 @@ export function markFailed(state: ChatChannelState, localId: string): ChatChanne
  *   messageId so WS reconnect re-delivery is a no-op.
  * - message.deleted: drop the message (by id).
  * - member.added / member.removed: no message-list change (returned as-is).
+ * - reaction.updated: reactions are not part of mo1-ios's message VM yet, so this
+ *   client ignores the frame (returned as-is) until reactions are modelled here.
  */
 export function applyRealtimeEvent(state: ChatChannelState, ev: chat.ChatRealtimeEvent): ChatChannelState {
   if (ev.channelId !== state.channelId) return state;
@@ -141,6 +143,7 @@ export function applyRealtimeEvent(state: ChatChannelState, ev: chat.ChatRealtim
     }
     case "member.added":
     case "member.removed":
+    case "reaction.updated":
       return state;
   }
 }
