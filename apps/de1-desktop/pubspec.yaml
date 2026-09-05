@@ -41,6 +41,20 @@ dependencies:
   # the web bundle owns all of that.
   flutter_inappwebview: ^6.1.5
 
+  # State management for the *only* native layer: the biometric launch gate and
+  # the credential-autofill controller (pure Dart, no native plugins).
+  flutter_riverpod: ^2.5.1
+
+  # OS-native biometric launch gate. Federated plugin: macOS uses
+  # local_auth_darwin (Touch ID), Windows uses local_auth_windows (Windows
+  # Hello). `biometricOnly: false` lets the OS fall back to the device
+  # passcode/password when biometrics are unavailable or fail.
+  local_auth: ^2.3.0
+
+  # Secure at-rest storage for the saved Dub credentials (email + password).
+  # macOS = Keychain, Windows = Credential Manager (DPAPI). Never a plain file.
+  flutter_secure_storage: ^9.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
