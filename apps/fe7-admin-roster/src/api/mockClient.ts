@@ -6,7 +6,7 @@ import { identity, chat } from "@dub/types"; // value import: identity.PERMISSIO
 import type { common, auditLog, gateway, member } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
 import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
-import { EMAIL_ROUTING_DOMAIN } from "../contracts/pending";
+import { EMAIL_ROUTING_DOMAIN, MAIL_WORKER_DESTINATION } from "../contracts/pending";
 
 // Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
 type MockUser = identity.IdentityUserDetail & { source: UserSource };
@@ -300,20 +300,18 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       return result as unknown as T;
     }
     if (path.endsWith("/admin/email-routing/addresses")) {
-      const req = body as { localPart: string; destination: string };
+      const req = body as { localPart: string };
       const localPart = req.localPart?.trim().toLowerCase();
       if (!localPart || !/^[a-z0-9._-]+$/.test(localPart)) {
         throw err("VALIDATION_FAILED", "invalid local part", [{ field: "localPart", reason: "format" }]);
       }
-      if (!EMAIL_RE.test(req.destination ?? "")) {
-        throw err("VALIDATION_FAILED", "invalid destination", [{ field: "destination", reason: "format" }]);
-      }
       if (s.emailAddresses.some((a) => a.localPart === localPart)) throw err("CONFLICT", "address already exists");
+      // Forward target is fixed to the mail Worker — the caller no longer supplies one.
       const addr: EmailRoutingAddress = {
         id: `eml_${Math.random().toString(36).slice(2, 8)}`,
         localPart,
         address: `${localPart}@${EMAIL_ROUTING_DOMAIN}`,
-        destination: req.destination,
+        destination: MAIL_WORKER_DESTINATION,
         enabled: true,
         createdAt: now(),
       };
