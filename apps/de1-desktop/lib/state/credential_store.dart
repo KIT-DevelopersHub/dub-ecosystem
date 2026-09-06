@@ -45,6 +45,16 @@ class CredentialStore {
     return c != null && c.isComplete;
   }
 
+  /// Identity of the Dub account this device is bound to — the email of the
+  /// saved login — or null when nothing is bound yet. This is the "誰と紐付いたか"
+  /// record: a biometric unlock re-establishes the session for *this* account,
+  /// and the UI surfaces it so the person can see which account is enrolled.
+  Future<String?> boundAccount() async {
+    final email = await _storage.read(key: _kEmail);
+    if (email == null || email.isEmpty) return null;
+    return email;
+  }
+
   /// Read the saved credentials, or null when nothing (complete) is stored.
   Future<Credentials?> read() async {
     final email = await _storage.read(key: _kEmail);

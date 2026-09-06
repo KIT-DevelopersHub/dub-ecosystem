@@ -7,6 +7,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../feature_registry.dart';
+import '../state/app_lock.dart';
 import '../state/autofill.dart';
 import '../state/credential_store.dart';
 
@@ -49,6 +50,11 @@ class _WebShellState extends ConsumerState<WebShell> {
 
   /// Which native overlay (if any) is currently shown on top of the WebView.
   _Overlay _overlay = _Overlay.none;
+
+  /// Email of the account this device is bound to (shown in the settings panel
+  /// so the person can see which account biometric unlock signs in as). Loaded
+  /// lazily when the settings overlay opens.
+  String? _boundAccount;
 
   /// Page script (runs at document start on every navigation). It:
   ///   1. captures the typed credentials on login-form submit,
@@ -137,6 +143,12 @@ class _WebShellState extends ConsumerState<WebShell> {
 ''';
 
   Future<dynamic> _onGetCredentials(List<dynamic> args) async {
+    // Only release the saved credentials to the page when the launch gate was
+    // actually passed by a successful biometric/OS authentication this session.
+    // On the "nothing to protect" bypass (device can't authenticate) we do NOT
+    // auto-fill — the person must log in by hand — so a bound account is never
+    // silently signed in without proving the owner is present.
+    if (!ref.read(appLockControllerProvider).authenticated) return null;
     final creds = await ref.read(credentialStoreProvider).read();
     if (creds == null) return null;
     return {'email': creds.email, 'password': creds.password};
@@ -162,6 +174,24 @@ class _WebShellState extends ConsumerState<WebShell> {
 
   void _closeOverlay() {
     if (mounted) setState(() => _overlay = _Overlay.none);
+  }
+
+  /// Open the settings overlay, loading the bound-account email first so the
+  /// panel can show which account is enrolled.
+  Future<void> _openSettings() async {
+    final bound = await ref.read(credentialStoreProvider).boundAccount();
+    if (!mounted) return;
+    setState(() {
+      _boundAccount = bound;
+      _overlay = _Overlay.settings;
+    });
+  }
+
+  /// Explicit "lock now": sign the current account out of the WebView (clear the
+  /// session) and re-arm the biometric gate. Returns to the lock screen.
+  Future<void> _lockNow() async {
+    _closeOverlay();
+    await ref.read(appLockControllerProvider.notifier).lock();
   }
 
   Future<void> _acceptEnable() async {
@@ -260,7 +290,7 @@ class _WebShellState extends ConsumerState<WebShell> {
               left: 12,
               bottom: 12,
               child: _SettingsButton(
-                onPressed: () => setState(() => _overlay = _Overlay.settings),
+                onPressed: _openSettings,
               ),
             ),
 
@@ -275,7 +305,9 @@ class _WebShellState extends ConsumerState<WebShell> {
             _SettingsCard(
               biometricName: _biometricName,
               enabled: autofill.enabled,
+              boundAccount: _boundAccount,
               onToggle: _toggleFromSettings,
+              onLockNow: autofill.enabled ? _lockNow : null,
               onClose: _closeOverlay,
             ),
 
@@ -394,13 +426,25 @@ class _SettingsCard extends StatelessWidget {
   const _SettingsCard({
     required this.biometricName,
     required this.enabled,
+    required this.boundAccount,
     required this.onToggle,
+    required this.onLockNow,
     required this.onClose,
   });
 
   final String biometricName;
   final bool enabled;
+
+  /// Email of the enrolled account, shown so the person can see which account
+  /// biometric unlock signs in as. Null when nothing is bound.
+  final String? boundAccount;
+
   final Future<void> Function(bool) onToggle;
+
+  /// Sign out + re-lock now. Null (hidden) when there is no bound account to
+  /// lock behind biometrics.
+  final Future<void> Function()? onLockNow;
+
   final VoidCallback onClose;
 
   @override
@@ -435,6 +479,35 @@ class _SettingsCard extends StatelessWidget {
                     : '無効。オンにすると、次のログイン以降 $biometricName で自動入力します。',
               ),
             ),
+            if (enabled && boundAccount != null) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(Icons.account_circle_outlined,
+                      size: 18, color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '$boundAccount として自動ログイン',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (onLockNow != null) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: onLockNow,
+                  icon: const Icon(Icons.lock_outline, size: 18),
+                  label: const Text('今すぐロック（サインアウト）'),
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -24,6 +24,9 @@ class _MemStore extends CredentialStore {
 
   @override
   Future<void> clear() async => _saved = null;
+
+  @override
+  Future<String?> boundAccount() async => _saved?.email;
 }
 
 AutofillController _controller(_MemStore store) {
@@ -98,5 +101,19 @@ void main() {
     final store = _MemStore();
     final c = _controller(store);
     expect(c.shouldPromptAfterLogin, isFalse);
+  });
+
+  test('enrolling binds the account identity (email) for that device', () async {
+    final store = _MemStore();
+    final c = _controller(store);
+    // Nothing bound before enrollment.
+    expect(await store.boundAccount(), isNull);
+    c.capture('alice@dub.dev', 'pw');
+    await c.enableFromPending();
+    // The saved login records *which* account this device is bound to.
+    expect(await store.boundAccount(), 'alice@dub.dev');
+    // Disabling forgets the binding.
+    await c.disable();
+    expect(await store.boundAccount(), isNull);
   });
 }
