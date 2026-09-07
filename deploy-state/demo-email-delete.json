@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "email-delete",
+  "worker": "dub-demo-email-delete",
+  "url": "https://dub-demo-email-delete.developershub-site.workers.dev",
+  "deployedSha": "0c1cf67",
+  "branch": "feat/email-routing-delete-issued",
+  "actor": "Claude Code",
+  "markers": ["fe7-users-manage-addresses","fe7-issued-addresses-dialog"],
+  "live": true,
+  "verifiedAt": "2026-09-07T14:36:00Z",
+  "updatedAt": "2026-09-07T14:36:00Z",
+  "note": "発行済みメールアドレスの削除UI"
+}
