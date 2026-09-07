@@ -74,6 +74,7 @@ describe("assembleFeatureModules", () => {
       "members",
       "participation",
       "driveshare",
+      "lp",
       "admin",
     ]);
   });

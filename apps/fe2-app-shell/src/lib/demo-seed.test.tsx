@@ -78,7 +78,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
     expect(list.items.every((r) => r.isSystem)).toBe(true);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(57);
+    expect(catalog).toHaveLength(59);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
