@@ -23,6 +23,7 @@ import type {
   SyncEmailRoutingResult,
   EmailRoutingSyncPreview,
   CreateEmailAddressRequest,
+  EmailRoutingAddress,
 } from "../contracts/pending";
 
 /** The mail-gateway proxy answers 503 with this code when the CF token is unset.
@@ -392,6 +393,27 @@ export function useCreateEmailAddress() {
   return useMutation({
     mutationFn: (req: CreateEmailAddressRequest) => api.createEmailAddress(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+  });
+}
+
+/** List the issued @developershub.jp RECEIVING addresses (zone-scoped routing rules) —
+ *  the counterpart read for the「発行済みアドレス」management surface (delete pairs with
+ *  NewEmailAddressDialog's issue). */
+export function useEmailAddresses(): UseQueryResult<common.Paginated<EmailRoutingAddress>> {
+  const { api } = useRosterContext();
+  return useQuery({ queryKey: queryKeys.emailAddresses(), queryFn: () => api.listEmailAddresses() });
+}
+
+/** Delete (revoke) an issued @developershub.jp address = drop its Email Routing rule.
+ *  The counterpart to useCreateEmailAddress. The optimistic hide + undo window are owned
+ *  by IssuedAddressesDialog (deferred commit); this hook just fires the DELETE and
+ *  reconciles the cache on settle (a rolled-back/failed delete restores the row). */
+export function useDeleteEmailAddress() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteEmailAddress(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
   });
 }
 
