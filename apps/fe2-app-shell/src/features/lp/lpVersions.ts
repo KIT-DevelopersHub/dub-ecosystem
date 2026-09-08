@@ -36,7 +36,7 @@ export const LP_VERSIONS: readonly LpVersion[] = [
     id: "v1.0",
     name: "v1.0 テキスト版",
     description: "北陸ITカンファレンスの現行 LP。テキスト中心の初版。",
-    url: "https://lp-conference-next.developershub-site.workers.dev",
+    url: "https://hokuriku-it-conf.com",
     updatedAt: "2026-09-07",
     status: "current",
   },
