@@ -51,6 +51,16 @@ function HubBody({ eventId }: { eventId: string }) {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {permissions.write ? (
+              <Button
+                iconLeft={<Icon name="edit" />}
+                variant="secondary"
+                onClick={() => nav.navigate(eventRoutes.settings(eventId))}
+                testId="fe3-hub-edit-event"
+              >
+                編集
+              </Button>
+            ) : null}
             <Button
               iconLeft={<Icon name="list" />}
               variant="secondary"

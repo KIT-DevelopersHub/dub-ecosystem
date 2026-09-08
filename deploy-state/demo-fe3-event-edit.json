@@ -1,0 +1,17 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe3-event-edit",
+  "worker": "dub-demo-fe3-event-edit",
+  "url": "https://dub-demo-fe3-event-edit.developershub-site.workers.dev",
+  "deployedSha": "a2cd6ef",
+  "branch": "feat/fe3-event-detail-edit",
+  "actor": "Claude Code",
+  "markers": [
+    "fe3-hub-edit-event",
+    "fe3-edit-starts"
+  ],
+  "live": true,
+  "verifiedAt": "2026-09-08T17:45:17Z",
+  "updatedAt": "2026-09-08T17:45:17Z",
+  "note": "イベント詳細編集(名称/開始終了/説明) + auth/nav bridge + demo PATCH"
+}
