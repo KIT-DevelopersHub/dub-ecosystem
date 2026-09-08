@@ -85,6 +85,8 @@ export const PERMISSION_CATALOG = [
   { key: "app:driveshare:edit", name: "Edit in Drive共有 app", description: "Manage sharing inside the Drive共有 app (implies view)", domain: "app", dangerous: false },
   { key: "app:admin:view", name: "Open 管理 app", description: "Open and view the 管理 app", domain: "app", dangerous: false },
   { key: "app:admin:edit", name: "Edit in 管理 app", description: "Act inside the 管理 app (implies view)", domain: "app", dangerous: false },
+  { key: "app:lp:view", name: "Open LP管理 app", description: "Open and view the LP管理 app", domain: "app", dangerous: false },
+  { key: "app:lp:edit", name: "Edit in LP管理 app", description: "Manage LP versions inside the LP管理 app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
 // Closed union of the 57 keys (open `${string}:${string}` template retired).

@@ -40,6 +40,7 @@ const APP_LABELS: { id: string; name: string }[] = [
   { id: "members", name: "運営メンバー" },
   { id: "participation", name: "参加届" },
   { id: "driveshare", name: "Drive共有" },
+  { id: "lp", name: "LP管理" },
   { id: "admin", name: "管理" },
 ];
 
