@@ -14,5 +14,11 @@ compatibility_date = "2026-08-01"
 directory = "./out"
 not_found_handling = "404-page"
 
+# Public custom domain (apex). Cloudflare auto-provisions DNS + TLS.
+# apex was free (no existing DNS record) at cutover time.
+[[routes]]
+pattern = "hokuriku-it-conf.com"
+custom_domain = true
+
 [observability]
 enabled = true
