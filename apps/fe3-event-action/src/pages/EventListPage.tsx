@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { event } from "@dub/types";
 import { Button, Icon, LoadMore, SkeletonCard } from "@dub/ui";
 import { useCan } from "../contracts/fe2";
@@ -6,8 +6,10 @@ import { useNavigation } from "../contracts/navigation";
 import { useEventsQuery } from "../hooks/useEventQueries";
 import { EventCard } from "../components/EventCard";
 import { EventCreateModal } from "../components/EventCreateModal";
+import { SavedViewsBar } from "../components/SavedViewsBar";
 import { eventRoutes } from "../lib/routes";
 import { parseEventListFilter, serializeEventListFilter } from "../lib/filterState";
+import { defaultQuery, loadSavedViews } from "../lib/savedViews";
 import { phaseLabel } from "../components/PhaseBadge";
 import styles from "../components/components.module.css";
 
@@ -18,6 +20,18 @@ export function EventListPage() {
   const filter = parseEventListFilter(nav.search);
   const canWrite = useCan("event:write");
   const [createOpen, setCreateOpen] = useState(false);
+
+  // On first open with no explicit URL filter, apply the user's default saved view
+  // (if any). Runs once; a bookmarked/linked filter always wins over the default.
+  const appliedDefault = useRef(false);
+  useEffect(() => {
+    if (appliedDefault.current) return;
+    appliedDefault.current = true;
+    if (nav.search) return;
+    const dq = defaultQuery(loadSavedViews());
+    if (dq != null && dq !== "") nav.setSearch(dq);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const query: event.ListEventsQuery = { includeArchived: filter.includeArchived };
   if (filter.phase) query.phase = filter.phase;
@@ -62,6 +76,11 @@ export function EventListPage() {
           />
           アーカイブを表示
         </label>
+        <span className={styles.spacer} />
+        <SavedViewsBar
+          currentQuery={serializeEventListFilter(filter)}
+          onApply={(q) => nav.setSearch(q)}
+        />
       </div>
 
       {isLoading ? (

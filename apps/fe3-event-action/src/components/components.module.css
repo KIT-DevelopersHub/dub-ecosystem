@@ -468,3 +468,45 @@
   border-color: var(--dub-color-success-600, var(--dub-color-brand-600));
   color: var(--dub-color-success-700, var(--dub-color-brand-700));
 }
+
+/* Saved views (P2-2): save dialog form + management list. */
+.savedViewForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.savedViewFormLabel {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+.savedViewList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.savedViewItem {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+}
+.savedViewItemText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.savedViewName {
+  font-weight: 600;
+  color: var(--dub-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
