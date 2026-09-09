@@ -3,6 +3,12 @@
 // api-client (the adapters translate onto ApiClient.request).
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  RouterProvider,
+  createRouter,
+  createRootRoute,
+  createMemoryHistory,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { gateway } from "@dub/types";
@@ -310,14 +316,23 @@ describe("app client adapters feed ApiClient.request", () => {
 });
 
 describe("runtime providers wrap their routes", () => {
-  it("EventProviders mounts and passes children through", () => {
+  it("EventProviders mounts and passes children through", async () => {
     const { api } = fakeApi();
-    render(
-      <EventProviders api={api}>
-        <div data-testid="child">events-child</div>
-      </EventProviders>,
-    );
-    expect(screen.getByTestId("child")).toHaveTextContent("events-child");
+    // EventProviders now feeds FE3's navigation from the shell router, so it must
+    // render inside a router context.
+    const rootRoute = createRootRoute({
+      component: () => (
+        <EventProviders api={api}>
+          <div data-testid="child">events-child</div>
+        </EventProviders>
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/events/list"] }),
+    });
+    render(<RouterProvider router={router} />);
+    await waitFor(() => expect(screen.getByTestId("child")).toHaveTextContent("events-child"));
   });
 
   it("TaskProviders mounts and passes children through", async () => {

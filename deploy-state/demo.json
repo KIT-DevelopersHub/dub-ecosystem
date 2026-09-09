@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": null,
-  "branch": null,
-  "actor": null,
-  "markers": [],
-  "live": false,
-  "verifiedAt": null,
-  "updatedAt": null,
-  "note": "seed — no deploy recorded yet. Written by scripts/deploy-demo.sh."
+  "deployedSha": "90f617f",
+  "branch": "feat/p2-2-saved-views",
+  "actor": "Claude Code",
+  "markers": ["fe3-savedviews-menu"],
+  "live": true,
+  "verifiedAt": "2026-09-09T11:00:10Z",
+  "updatedAt": "2026-09-09T11:00:10Z",
+  "note": "P2-2 named saved views (event list filter)"
 }

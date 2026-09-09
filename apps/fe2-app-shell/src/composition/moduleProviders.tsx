@@ -7,9 +7,14 @@
 // live shell state via hooks (auth, toast, router) rather than props, so a
 // single wrapper instance stays correct as the session/route changes.
 import { useMemo, type ReactNode } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import type { gateway } from "@dub/types";
-import { EventApiProvider, RegistryProvider, actionTypeRegistry } from "@dub/fe3-event-action";
+import {
+  EventApiProvider,
+  RegistryProvider,
+  actionTypeRegistry,
+  NavigationProvider as EventNavigationProvider,
+} from "@dub/fe3-event-action";
 import { NotificationProvider, type NotificationDeps } from "@dub/fe5-notification-inbox";
 import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
@@ -31,13 +36,39 @@ function useMe(): gateway.MeResponse | null {
   return auth.status === "authenticated" ? auth.me : null;
 }
 
-/** FE3 events: EventApi injection + the app-global ActionTypeRegistry. */
+/** FE3 events: EventApi injection + the app-global ActionTypeRegistry, plus the
+ *  navigation contract fed from the shell's TanStack Router. FE3 pages read
+ *  navigate/params/search/setSearch via useNavigation; without this provider they
+ *  fell back to the no-op default, so the URL-synced event-list filter (phase /
+ *  archived / saved views) silently did nothing in the shell. Mirrors how the FE7
+ *  RosterProviders wires its own NavigationProvider from the router. */
 export function EventProviders({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const eventApi = useMemo(() => createEventApi(api), [api]);
+  const navigate = useNavigate();
+  const params = useParams({ strict: false }) as Record<string, string>;
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchStr = useRouterState({ select: (s) => s.location.searchStr });
+  const navigation = useMemo(
+    () => ({
+      navigate: (path: string) => {
+        void navigate({ to: path });
+      },
+      params,
+      search: searchStr ?? "",
+      setSearch: (query: string) => {
+        // FE3 hands us a raw query string; parse it into the object TanStack expects.
+        const next = Object.fromEntries(new URLSearchParams(query));
+        void navigate({ to: pathname, search: next });
+      },
+    }),
+    [navigate, params, pathname, searchStr],
+  );
   return (
-    <EventApiProvider api={eventApi}>
-      <RegistryProvider registry={actionTypeRegistry}>{children}</RegistryProvider>
-    </EventApiProvider>
+    <EventNavigationProvider value={navigation}>
+      <EventApiProvider api={eventApi}>
+        <RegistryProvider registry={actionTypeRegistry}>{children}</RegistryProvider>
+      </EventApiProvider>
+    </EventNavigationProvider>
   );
 }
 
