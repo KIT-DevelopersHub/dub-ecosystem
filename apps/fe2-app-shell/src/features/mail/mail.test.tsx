@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { common, mail } from "@dub/types";
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import { createMailApi, isValidEmail, parseRecipients, type MailApi } from "./mailApi.tsx";
@@ -19,8 +19,10 @@ import { ThreadDetail } from "./MessageDetail.tsx";
 
 // MailFolderTabs (rendered by Inbox/Sent screens) uses the shell router's useNavigate;
 // screens are unit-tested in isolation (no RouterProvider), so stub it to a no-op.
+// ComposeScreen's UnsavedChangesGuard probes useRouter — returning null here makes the
+// guard a no-op in isolation, matching the real "no router in test" behavior.
 const navigateSpy = vi.fn();
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateSpy }));
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateSpy, useRouter: () => null }));
 
 function fakeApi(result: unknown = undefined): { api: ApiClient; calls: RequestInput[] } {
   const calls: RequestInput[] = [];
@@ -122,6 +124,14 @@ describe("parseRecipients / isValidEmail", () => {
 });
 
 describe("ComposeScreen", () => {
+  beforeEach(() => {
+    try {
+      globalThis.localStorage?.clear();
+    } catch {
+      /* storage disabled */
+    }
+  });
+
   it("blocks submit and shows errors when fields are empty (no send call)", async () => {
     const send = vi.fn();
     const api: MailApi = fullApi({ send });
@@ -144,6 +154,42 @@ describe("ComposeScreen", () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect(send).toHaveBeenCalledWith({ to: [{ email: "alice@example.com" }], subject: "Subject", textBody: "Hello there" });
     await waitFor(() => expect((screen.getByTestId("fe2-mail-compose-subject") as HTMLInputElement).value).toBe(""));
+  });
+
+  it("auto-saves an in-progress draft and restores it on remount", async () => {
+    const api: MailApi = fullApi();
+    const { unmount } = render(wrap(<ComposeScreen />, api));
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-subject"), "下書き件名");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-body"), "書きかけ本文");
+    await waitFor(() => expect(globalThis.localStorage.getItem("fe2.mail.compose")).toContain("下書き件名"));
+
+    unmount(); // simulate leaving the screen
+    render(wrap(<ComposeScreen />, api));
+    expect((screen.getByTestId("fe2-mail-compose-subject") as HTMLInputElement).value).toBe("下書き件名");
+    expect((screen.getByTestId("fe2-mail-compose-body") as HTMLTextAreaElement).value).toBe("書きかけ本文");
+    expect(screen.getByTestId("fe2-mail-compose-draft-notice")).toBeInTheDocument();
+  });
+
+  it("discards the restored draft from the notice", async () => {
+    globalThis.localStorage.setItem("fe2.mail.compose", JSON.stringify({ to: "", subject: "S", body: "B" }));
+    render(wrap(<ComposeScreen />, fullApi()));
+    expect((screen.getByTestId("fe2-mail-compose-subject") as HTMLInputElement).value).toBe("S");
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-draft-notice-discard"));
+    expect((screen.getByTestId("fe2-mail-compose-subject") as HTMLInputElement).value).toBe("");
+    expect(globalThis.localStorage.getItem("fe2.mail.compose")).toBeNull();
+  });
+
+  it("clears the persisted draft after a successful send", async () => {
+    const send = vi.fn().mockResolvedValue({ messageId: "m1", provider: "ses", acceptedAt: "t" });
+    const api: MailApi = fullApi({ send });
+    render(wrap(<ComposeScreen />, api));
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-to"), "alice@example.com");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-subject"), "S");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-body"), "B");
+    await waitFor(() => expect(globalThis.localStorage.getItem("fe2.mail.compose")).not.toBeNull());
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(globalThis.localStorage.getItem("fe2.mail.compose")).toBeNull());
   });
 });
 

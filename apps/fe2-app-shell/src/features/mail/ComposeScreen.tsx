@@ -6,9 +6,11 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Button, Card, Form, FormField, PageHeader, Stack, TextField, Textarea, useToast } from "@dub/ui";
+import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
+import { UnsavedChangesGuard } from "../../lib/UnsavedChangesGuard.tsx";
 import { useMailApi } from "./MailProvider.tsx";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, formatBytes, parseRecipients } from "./mailApi.tsx";
 import { AttachmentErrors, AttachmentTray } from "./AttachmentTray.tsx";
@@ -20,6 +22,11 @@ interface Fields {
   subject: string;
   body: string;
 }
+
+const EMPTY_FIELDS: Fields = { to: "", subject: "", body: "" };
+// Draft key for the single compose form. Attachments are files and are NOT persisted
+// (they can't be serialised to storage) — only the text fields survive a reload.
+const DRAFT_KEY = "fe2.mail.compose";
 
 function validate(fields: Fields): { req?: mail.SendMailRequest; errors: Partial<Record<keyof Fields, string>> } {
   const errors: Partial<Record<keyof Fields, string>> = {};
@@ -37,16 +44,22 @@ export function ComposeScreen(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [fields, setFields] = useState<Fields>({ to: "", subject: "", body: "" });
+  const [fields, setFields] = useState<Fields>(() => peekDraft<Fields>(DRAFT_KEY) ?? EMPTY_FIELDS);
   const att = useComposeAttachments();
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+
+  // Dirty = there is text worth keeping (attachments alone still warn on leave).
+  const dirty =
+    fields.to.trim() !== "" || fields.subject.trim() !== "" || fields.body.trim() !== "" || att.items.length > 0;
+  const draft = useDraftAutosave<Fields>({ storageKey: DRAFT_KEY, value: fields, dirty });
 
   const send = useMutation({
     mutationFn: (req: mail.SendMailRequest) => mailApi.send(req),
     onSuccess: () => {
       toast.show({ kind: "success", title: "メールを送信しました。" });
-      setFields({ to: "", subject: "", body: "" });
+      draft.clear();
+      setFields(EMPTY_FIELDS);
       att.clear();
       setSubmitted(false);
       // Invalidate the Sent list so the just-sent mail shows on arrival (defeats the
@@ -76,9 +89,20 @@ export function ComposeScreen(): JSX.Element {
   return (
     <main data-testid="fe2-mail-compose">
       <PageHeader title="メール作成" />
+      <UnsavedChangesGuard when={dirty} testId="fe2-mail-compose-leave-confirm" />
       <Card>
         <Form testId="fe2-mail-compose-form" onSubmit={onSubmit}>
           <Stack>
+            <DraftRestoredNotice
+              visible={draft.restoredVisible}
+              onDiscard={() => {
+                draft.clear();
+                setFields(EMPTY_FIELDS);
+                att.clear();
+              }}
+              onKeep={draft.acknowledgeRestored}
+              testId="fe2-mail-compose-draft-notice"
+            />
             <FormField label="宛先" htmlFor="mail-to" required {...(showError("to") ? { error: showError("to") } : {})} help="カンマ区切りで複数指定できます。">
               <TextField
                 id="mail-to"
