@@ -3,15 +3,12 @@
   "slug": "fe3-event-edit",
   "worker": "dub-demo-fe3-event-edit",
   "url": "https://dub-demo-fe3-event-edit.developershub-site.workers.dev",
-  "deployedSha": "a2cd6ef",
+  "deployedSha": "387d2ebf",
   "branch": "feat/fe3-event-detail-edit",
-  "actor": "Claude Code",
-  "markers": [
-    "fe3-hub-edit-event",
-    "fe3-edit-starts"
-  ],
+  "actor": "kota",
+  "markers": ["fe3-hub-edit-event","fe3-edit-starts","fe3-hub-edit-form"],
   "live": true,
-  "verifiedAt": "2026-09-08T17:45:17Z",
-  "updatedAt": "2026-09-08T17:45:17Z",
-  "note": "イベント詳細編集(名称/開始終了/説明) + auth/nav bridge + demo PATCH"
+  "verifiedAt": "2026-09-09T12:30:41Z",
+  "updatedAt": "2026-09-09T12:30:41Z",
+  "note": "イベント詳細編集(タイトル/日付)をハブ内その場編集に統一・ナビゲーション不具合を修正"
 }
