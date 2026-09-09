@@ -1208,6 +1208,15 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       if (id) return json(page(EVENT_ACTIONS[id] ?? []));
     }
     {
+      // single action (FE3 ActionDetailPage → getAction /api/v1/actions/:id). Seeded so
+      // the deep イベント>アクション詳細 screen (and its P2-1 breadcrumb) is reachable in demo.
+      const aid = seg(/^\/api\/v1\/actions\/([^/]+)$/);
+      if (aid) {
+        const found = Object.values(EVENT_ACTIONS).flat().find((a) => a.id === aid);
+        return found ? json(found) : notFound(`GET ${pathname}`);
+      }
+    }
+    {
       const id = seg(/^\/api\/v1\/events\/([^/]+)$/);
       if (id) return EVENT_DETAIL[id] ? json(EVENT_DETAIL[id]) : notFound(`GET ${pathname}`);
     }

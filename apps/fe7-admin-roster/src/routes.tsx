@@ -23,9 +23,15 @@ function usersRoute(): Promise<{ Component: ComponentType }> {
 function userDetailRoute(): Promise<{ Component: ComponentType }> {
   return import("./components/UserDetailPage").then(({ UserDetailPage }) => ({
     Component: function UserDetailRoute() {
-      const { params } = useNavigation();
+      const { params, navigate } = useNavigation();
       const { me } = useRosterContext();
-      return <UserDetailPage userId={params.userId ?? ""} currentUserId={me?.user.id ?? ""} />;
+      return (
+        <UserDetailPage
+          userId={params.userId ?? ""}
+          currentUserId={me?.user.id ?? ""}
+          onBack={() => navigate("/admin/users")}
+        />
+      );
     },
   }));
 }
