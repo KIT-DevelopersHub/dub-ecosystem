@@ -173,7 +173,7 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
               </dd>
             </div>
             <div className={styles.detailRow}>
-              <dt className={styles.detailLabel}>期限</dt>
+              <dt className={styles.detailLabel}>終了日</dt>
               <dd className={`${styles.detailValue} ${overdue ? styles.dueOverdue : ""}`} data-testid="fe4-mytask-detail-due">
                 {formatDue(t.dueAt)}
                 {overdue && <span className={styles.overdueTag}> 期限切れ</span>}

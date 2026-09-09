@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
-import { Modal, Button, TextField, Select } from "@dub/ui";
-import { PRIORITY_LABEL, STATUS_LABEL, isoFromDateInput } from "../domain/task-form";
-import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
-import { DateField } from "./DateField";
-import { PredecessorPicker, rememberPredecessors } from "./PredecessorPicker";
+import { Modal, Button } from "@dub/ui";
+import { isoFromDateInput } from "../domain/task-form";
+import { teamOf, type ScopeTask } from "../domain/task-hierarchy";
+import { rememberPredecessors } from "./PredecessorPicker";
+import { TaskFormFields } from "./TaskFormFields";
 import styles from "../styles/app.module.css";
 
 export interface TaskDraft {
@@ -18,6 +18,8 @@ export interface TaskDraft {
   /** WBS parent (親タスク). null = top-level. Chosen before the predecessors. */
   parentTaskId: common.TaskId | null;
   dependsOnIds: common.TaskId[];
+  /** 詳細 (long-form note). null = empty. */
+  description: string | null;
 }
 
 export interface TaskCreateModalProps {
@@ -55,17 +57,8 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   const [due, setDue] = useState<string | null>(null);
   const [parentId, setParentId] = useState<common.TaskId | null>(null);
   const [deps, setDeps] = useState<common.TaskId[]>([]);
+  const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
-
-  // Predecessors are scoped to the chosen TEAM (ADR-0007): same-team tasks across any
-  // hierarchy level are offered; other teams are excluded (their work goes through the
-  // request/approval flow). Recomputes whenever the team changes.
-  const depOptions = useMemo(() => dependencyScopeOptions(scopeTasks, teamId), [scopeTasks, teamId]);
-
-  // 親子は同一チーム: 親を選んだ子タスクは親のチームに固定する。チーム欄は親のチームで
-  // プリフィルし、親がいる間は変更不可（disabled）にして、親子でチームが食い違う状態を
-  // 作らせない（サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保）。親なし＝自由。
-  const teamLockedToParent = parentId != null;
 
   // seed the due date + parent + predecessors when (re)opened (timeline cell /
   // "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
@@ -91,6 +84,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     setDue(null);
     setParentId(null);
     setDeps([]);
+    setDescription("");
   };
 
   const close = () => {
@@ -114,6 +108,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         dueAt: isoFromDateInput(due),
         parentTaskId: parentId,
         dependsOnIds: deps,
+        description: description.trim() ? description.trim() : null,
       });
       // Close ONLY on success — a failed create keeps the form (with its input) open
       // so the user can retry after reading the error dialog. Success shows a toast.
@@ -144,129 +139,37 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         </div>
       }
     >
-      <div className={styles.formGrid}>
-        <div className={styles.formFieldFull}>
-          <label className={styles.formLabel} htmlFor="fe4-create-title">
-            タイトル<span className={styles.req}>*</span>
-          </label>
-          <TextField
-            id="fe4-create-title"
-            value={title}
-            onChange={setTitle}
-            placeholder="例: 会場の最終確認"
-            testId="fe4-create-title"
-          />
-        </div>
-
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-create-status">
-            ステータス
-          </label>
-          <Select
-            id="fe4-create-status"
-            value={status}
-            onChange={(v) => setStatus(v as task.TaskStatus)}
-            options={CREATE_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
-            testId="fe4-create-status"
-          />
-        </div>
-
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-create-priority">
-            優先度
-          </label>
-          <Select
-            id="fe4-create-priority"
-            value={priority}
-            onChange={(v) => setPriority(v as task.TaskPriority)}
-            options={PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABEL[p] }))}
-            testId="fe4-create-priority"
-          />
-        </div>
-
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor="fe4-create-assignee">
-            担当
-          </label>
-          <Select
-            id="fe4-create-assignee"
-            value={assigneeId ?? ""}
-            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
-            testId="fe4-create-assignee"
-          />
-        </div>
-
-        <div className={styles.formRow}>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-create-start">
-              開始日
-            </label>
-            <DateField id="fe4-create-start" value={start} onChange={setStart} testId="fe4-create-start" />
-          </div>
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-create-due">
-              期日
-            </label>
-            <DateField id="fe4-create-due" value={due} onChange={setDue} testId="fe4-create-due" />
-          </div>
-        </div>
-
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-create-team">
-              チーム
-            </label>
-            <Select
-              id="fe4-create-team"
-              value={teamId ?? ""}
-              disabled={teamLockedToParent}
-              onChange={(v) => {
-                const next = v ? (v as common.TeamId) : null;
-                setTeamId(next);
-                // dependencies are same-team only — drop predecessors on other teams.
-                setDeps((d) => pruneToScope(scopeTasks, next, d));
-              }}
-              options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-              testId="fe4-create-team"
-            />
-            {teamLockedToParent && (
-              <p className={styles.fieldHint} data-testid="fe4-create-team-locked">
-                親タスクと同じチームになります（変更できません）
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* 親タスク → then 先行タスク: choose the WBS parent, then dependencies.
-            Predecessors are limited to the chosen TEAM (any hierarchy level, ADR-0007). */}
-        <div className={styles.formFieldFull}>
-          <label className={styles.formLabel} htmlFor="fe4-create-parent">
-            親タスク（任意・未選択でトップレベル）
-          </label>
-          <Select
-            id="fe4-create-parent"
-            value={parentId ?? ""}
-            onChange={(v) => {
-              const next = v ? (v as common.TaskId) : null;
-              setParentId(next);
-              // 親子は同一チーム: 親を選んだらチームを親のチームへ合わせる（親子でチームが
-              // 食い違う状態を作らせない）。トップレベルへ戻す（next=null）ならチームは維持。
-              const parentTeam = next ? teamOf(scopeTasks, next) : teamId;
-              if (next) setTeamId(parentTeam);
-              // deps are team-scoped (ADR-0007): re-scope predecessors to the (parent's) team.
-              setDeps((d) => pruneToScope(scopeTasks, parentTeam, d));
-            }}
-            options={[{ value: "", label: "なし（トップレベル）" }, ...parentOptions.map((o) => ({ value: o.id, label: o.title }))]}
-            testId="fe4-create-parent"
-          />
-        </div>
-
-        <div className={styles.formFieldFull}>
-          <span className={styles.formLabel}>先行タスク（依存・同じチーム内のタスク）</span>
-          <PredecessorPicker options={depOptions} value={deps} onChange={setDeps} testId="fe4-create-deps" />
-        </div>
-      </div>
+      <TaskFormFields
+        idPrefix="fe4-create"
+        title={title}
+        onTitleChange={setTitle}
+        titlePlaceholder="例: 会場の最終確認"
+        statuses={CREATE_STATUSES}
+        status={status}
+        onStatusChange={setStatus}
+        priorities={PRIORITIES}
+        priority={priority}
+        onPriorityChange={setPriority}
+        users={users}
+        assigneeId={assigneeId}
+        onAssigneeChange={setAssigneeId}
+        teams={teams}
+        teamId={teamId}
+        onTeamIdChange={setTeamId}
+        start={start}
+        onStartChange={setStart}
+        due={due}
+        onDueChange={setDue}
+        scopeTasks={scopeTasks}
+        parentOptions={parentOptions}
+        parentId={parentId}
+        onParentIdChange={setParentId}
+        deps={deps}
+        onDepsChange={setDeps}
+        description={description}
+        onDescriptionChange={setDescription}
+        descriptionPlaceholder="タスクの詳細や補足を書けます"
+      />
     </Modal>
   );
 }
