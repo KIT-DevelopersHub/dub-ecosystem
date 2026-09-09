@@ -78,6 +78,10 @@ registerTaskActionPlugin(actionTypeRegistry as unknown as Parameters<typeof regi
 const registry = registerFeatureModules(assembleFeatureModules(api));
 
 const router = createShellRouter(api, registry, {
+  // Shell-wide connection banner (P1-3): probe the real gateway's /healthz, but never
+  // in demo/mock builds (no real backend — a probe there would show a false failure).
+  apiBaseUrl: baseUrl,
+  connectionProbeEnabled: !useDemo && !useMock,
   onNavigate: (path) => {
     router.navigate({ to: path });
   },

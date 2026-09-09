@@ -115,7 +115,14 @@ function ShellRouteContent(): JSX.Element {
 export function createShellRouter(
   api: ApiClient,
   registry: Registry,
-  opts?: { onNavigate?: (p: string) => void; onLogout?: () => void },
+  opts?: {
+    onNavigate?: (p: string) => void;
+    onLogout?: () => void;
+    // Gateway base URL + probe toggle for the shell-wide connection banner (P1-3),
+    // threaded from main.tsx (real backend only; disabled for demo/mock builds).
+    apiBaseUrl?: string;
+    connectionProbeEnabled?: boolean;
+  },
 ) {
   const rootRoute = createRootRoute({ component: Outlet });
 
@@ -144,6 +151,10 @@ export function createShellRouter(
         headerWidgets={registry.headerWidgets}
         leadingHeaderWidgets={registry.leadingHeaderWidgets}
         api={api}
+        {...(opts?.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {})}
+        {...(opts?.connectionProbeEnabled !== undefined
+          ? { connectionProbeEnabled: opts.connectionProbeEnabled }
+          : {})}
         {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
         {...(opts?.onLogout ? { onLogout: opts.onLogout } : {})}
       >

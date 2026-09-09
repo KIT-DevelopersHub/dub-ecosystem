@@ -16,6 +16,8 @@ import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
+import { ConnectionBanner } from "./ConnectionBanner.tsx";
+import { useConnectionHealth } from "../lib/useConnectionHealth.ts";
 import {
   isReleaseGatedFor,
   UNPUBLISHED_TILE_REASON,
@@ -57,6 +59,14 @@ export interface AppShellLayoutProps {
   // Shared api-client — when provided, the floating feedback widget is mounted for
   // authenticated users. Optional so unit tests can render the shell without it.
   api?: ApiClient;
+  // API gateway base URL, used only to probe GET /healthz for the shell-wide
+  // connection banner (P1-3). Optional: when omitted only the /healthz probe is
+  // skipped — the navigator offline signal still drives the banner.
+  apiBaseUrl?: string;
+  // Disables the /healthz probe when false — set for demo/mock builds that have no
+  // real backend, so they never show a false "unreachable" banner. The navigator
+  // offline signal stays active regardless. Defaults to on.
+  connectionProbeEnabled?: boolean;
   children: ReactNode; // routed <Outlet/>
 }
 
@@ -118,10 +128,18 @@ export function AppShellLayout({
   onLogout,
   title = "DevHub",
   api,
+  apiBaseUrl,
+  connectionProbeEnabled = true,
   children,
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
   const { can } = usePermissions();
+  // Shell-wide connection health (P1-3): the navigator offline signal is always on;
+  // the /healthz probe runs only with a base URL and probing enabled (real backend).
+  const connectionHealth = useConnectionHealth({
+    baseUrl: apiBaseUrl ?? "",
+    probeEnabled: connectionProbeEnabled,
+  });
   const [acctOpen, setAcctOpen] = useState(false);
   // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
   const [colorOpen, setColorOpen] = useState(false);
@@ -240,6 +258,7 @@ export function AppShellLayout({
   // No `sidebar` prop -> @dub/ui AppShell renders no left rail; main spans full width.
   return (
     <AppShell header={header} testId="fe2-shell">
+      <ConnectionBanner health={connectionHealth} />
       {children}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}

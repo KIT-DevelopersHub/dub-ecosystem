@@ -141,6 +141,31 @@ svg {
   text-overflow: ellipsis;
 }
 
+/* ---- connection / failure banner (P1-3, shell-wide) ----------------------- */
+
+/* Non-invasive strip at the very top of the shell content: full-width, thin, never
+ * blocks input. Hidden (no space) when healthy; the persistent aria-live region is
+ * kept mounted so degraded states are announced. Tones follow @dub/tokens so
+ * light/dark track automatically: warning for a reachable-but-degraded gateway,
+ * danger for a hard offline. */
+.fe2-connection-banner[hidden] {
+  display: none;
+}
+.fe2-connection-banner {
+  padding: var(--dub-space-2) var(--dub-space-4);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-line-height-tight);
+  text-align: center;
+  background: var(--dub-color-warning-100);
+  color: var(--dub-color-warning-700);
+  border-bottom: 1px solid var(--dub-color-warning-200);
+}
+.fe2-connection-banner[data-health="offline"] {
+  background: var(--dub-color-danger-100);
+  color: var(--dub-color-danger-700);
+  border-bottom-color: var(--dub-color-danger-200);
+}
+
 /* ---- account settings dialog (アカウント設定) ----------------------------------- */
 .fe2-account-form {
   display: flex;
