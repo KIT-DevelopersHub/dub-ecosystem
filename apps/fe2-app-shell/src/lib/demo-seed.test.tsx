@@ -72,7 +72,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 57-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 59-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
