@@ -138,6 +138,11 @@ export function TaskDetailPanel({
   // 親の付け替えで親のチームへ追従する（下の親セレクトの onChange）。親なし＝トップレベルなら自由。
   // サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保。
   const teamLockedToParent = parentId != null;
+  // 親タスク（子を持つ）のステータスは子タスクの内訳から自動集計される表示専用値
+  // （親バーの色分け＝#374）。手動で変えられると集計と食い違って挙動がおかしくなるため、
+  // 子が1件以上ある間はステータス編集を無効化する。childCount は scopeTasks 由来で子の
+  // 増減に追従するので、最後の子が外れて 0 件になれば通常タスクとして自動的に編集可へ戻る。
+  const statusLockedToChildren = childCount > 0;
 
   // status may move only to an allowed target (or stay) — same source as board D&D
   const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
@@ -268,11 +273,16 @@ export function TaskDetailPanel({
             <Select
               id="fe4-detail-status"
               value={status}
-              disabled={!canWrite}
+              disabled={!canWrite || statusLockedToChildren}
               onChange={(v) => setStatus(v as task.TaskStatus)}
               options={statusOptions.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
               testId="fe4-detail-status"
             />
+            {statusLockedToChildren && (
+              <p className={styles.fieldHint} data-testid="fe4-detail-status-locked">
+                子タスクの進捗から自動集計されます（手動では変更できません）
+              </p>
+            )}
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-priority">
