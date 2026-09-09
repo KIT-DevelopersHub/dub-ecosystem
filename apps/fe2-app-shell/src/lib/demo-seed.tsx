@@ -1168,6 +1168,38 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // events — edit (PATCH) + archive (DELETE). Mutates the in-memory seed so the demo
+  // shows optimistic save → persisted reflection for name / schedule / description.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)$/);
+    if (id && (method === "PATCH" || method === "DELETE")) {
+      const cur = EVENT_DETAIL[id];
+      if (!cur) return notFound(`${method} ${pathname}`);
+      if (method === "DELETE") {
+        EVENT_DETAIL[id] = { ...cur, archivedAt: isoNow(), version: cur.version + 1, updatedAt: isoNow() };
+        const li = EVENTS.findIndex((e) => e.id === id);
+        if (li >= 0) EVENTS.splice(li, 1); // drop from the list summary
+        return new Response(null, { status: 204 });
+      }
+      const b = (body ?? {}) as Partial<event.UpdateEventRequest>;
+      const next: event.EventDetail = {
+        ...cur,
+        title: b.title ?? cur.title,
+        description: b.description !== undefined ? b.description : cur.description,
+        phase: b.phase ?? cur.phase,
+        startsAt: b.startsAt !== undefined ? b.startsAt : cur.startsAt,
+        endsAt: b.endsAt !== undefined ? b.endsAt : cur.endsAt,
+        version: cur.version + 1,
+        updatedAt: isoNow(),
+      };
+      EVENT_DETAIL[id] = next;
+      const li = EVENTS.findIndex((e) => e.id === id); // keep the list summary in sync
+      if (li >= 0) EVENTS[li] = { id: next.id, title: next.title, phase: next.phase, startsAt: next.startsAt };
+      const { actions: _actions, ...dubEvent } = next;
+      return json(dubEvent);
+    }
+  }
+
   if (method === "GET") {
     // events
     if (pathname === "/api/v1/events") return json(page(EVENTS));
