@@ -968,6 +968,25 @@ svg {
   max-height: 220px;
   overflow-y: auto;
 }
+/* 最近開いた (P3-1): compact jump-back list; caps its own height so the rail stays
+ * within the one-viewport dashboard. */
+.fe2-home-recent-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.fe2-recent-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--dub-color-text-muted);
+}
+.fe2-recent-icon > svg {
+  width: 16px;
+  height: 16px;
+}
 /* Turn an events row into a full-width clickable link (keeps fe2-list-row look). */
 .fe2-list-link {
   display: flex;
