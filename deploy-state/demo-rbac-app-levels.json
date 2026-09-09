@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "rbac-app-levels",
+  "worker": "dub-demo-rbac-app-levels",
+  "url": "https://dub-demo-rbac-app-levels.developershub-site.workers.dev",
+  "deployedSha": "a6d8413a",
+  "branch": "feat/rbac-app-level-access",
+  "actor": "kota",
+  "markers": ["詳細を見る（個別の権限を調整）","他アプリと機能領域を共有するため"],
+  "live": true,
+  "verifiedAt": "2026-09-09T14:24:00Z",
+  "updatedAt": "2026-09-09T14:24:00Z",
+  "note": "RBAC app-level access: 有効/無効→閲覧/編集/管理"
+}
