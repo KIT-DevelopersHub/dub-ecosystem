@@ -31,9 +31,17 @@ function sameInstant(a: string | null, b: string | null): boolean {
 export function EventEditForm({
   event: ev,
   canWrite,
+  onCancel,
+  onSaved,
 }: {
   event: event.DubEvent;
   canWrite: boolean;
+  /** Rendered as a "キャンセル" button next to 保存 when provided (inline-edit callers). */
+  onCancel?: () => void;
+  /** Fired once the edit is done — on successful save, and also when Save is
+   *  pressed with no actual changes (nothing to round-trip). Lets an inline
+   *  caller (e.g. the hub hero) close its own edit mode without navigating. */
+  onSaved?: () => void;
 }) {
   const update = useUpdateEvent(ev.id);
   const [title, setTitle] = useState(ev.title);
@@ -64,9 +72,12 @@ export function EventEditForm({
 
     // Nothing changed besides version — skip the round-trip.
     const changedKeys = Object.keys(req).filter((k) => k !== "version");
-    if (changedKeys.length === 0) return;
+    if (changedKeys.length === 0) {
+      onSaved?.();
+      return;
+    }
 
-    update.mutate(req);
+    update.mutate(req, { onSuccess: () => onSaved?.() });
   };
 
   return (
@@ -119,9 +130,16 @@ export function EventEditForm({
       {ev.archivedAt !== null ? (
         <div className={styles.errorText}>このイベントはアーカイブ済みのため編集できません。</div>
       ) : null}
-      <Button variant="primary" onClick={save} disabled={readOnly || update.isPending} testId="fe3-settings-save">
-        保存
-      </Button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button variant="primary" onClick={save} disabled={readOnly || update.isPending} testId="fe3-settings-save">
+          保存
+        </Button>
+        {onCancel ? (
+          <Button variant="ghost" onClick={onCancel} disabled={update.isPending} testId="fe3-settings-edit-cancel">
+            キャンセル
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
