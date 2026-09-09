@@ -49,7 +49,9 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     // inline editor + full 33-key matrix appear WITHOUT any navigation
     await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_organizer")).toBeInTheDocument());
     expect(screen.getByTestId("fe7-role-role_organizer-permission-matrix")).toBeInTheDocument();
-    expect(screen.getByTestId("fe7-role-role_organizer-matrix-key-event:read")).toBeInTheDocument();
+    // event is a single-owner domain ("events" app) — its keys are folded into
+    // AppAccessSection's per-app 有効/無効→レベル control, not a flat toggle.
+    expect(screen.getByTestId("fe7-role-role_organizer-app-enable-events")).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
     expect(screen.getByTestId("fe7-roles-open-role_organizer")).toHaveAttribute("aria-expanded", "true");
   });
@@ -103,13 +105,13 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     await waitFor(() =>
       expect((screen.getByTestId("fe7-role-role_admin-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true),
     );
-    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-mail:admin") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-file:admin") as HTMLInputElement).disabled).toBe(false);
     expect(screen.getByTestId("fe7-role-role_admin-save")).toBeInTheDocument();
 
     // a non-admin system role (member) is fully editable, identity:admin included.
     await user.click(screen.getByTestId("fe7-roles-open-role_member"));
     await waitFor(() => expect(screen.getByTestId("fe7-role-role_member-permission-matrix")).toBeInTheDocument());
-    expect((screen.getByTestId("fe7-role-role_member-matrix-key-event:read") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByTestId("fe7-role-role_member-matrix-key-task:read") as HTMLInputElement).disabled).toBe(false);
     expect(screen.getByTestId("fe7-role-role_member-save")).toBeInTheDocument();
   });
 
@@ -139,7 +141,8 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
-    const grid = await screen.findByTestId("fe7-role-role_organizer-matrix-grid-event");
+    // task is a shared domain (tasks+gantt) so it stays a flat grid (unfolded).
+    const grid = await screen.findByTestId("fe7-role-role_organizer-matrix-grid-task");
     expect(grid).toBeInTheDocument();
     expect(grid.style.display).toBe("grid");
     // multi-column track template (auto-fit → 2 columns on a normal-width panel)
@@ -181,7 +184,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
     await waitFor(() =>
-      expect((screen.getByTestId("fe7-role-role_organizer-matrix-key-event:read") as HTMLInputElement).disabled).toBe(true),
+      expect((screen.getByTestId("fe7-role-role_organizer-matrix-key-task:read") as HTMLInputElement).disabled).toBe(true),
     );
     expect(screen.queryByTestId("fe7-role-role_organizer-save")).not.toBeInTheDocument();
   });

@@ -37,7 +37,7 @@ describe("role editor (PermissionMatrix)", () => {
     await waitFor(() => expect(screen.getByTestId("fe7-permission-matrix")).toBeInTheDocument());
 
     await user.type(screen.getByTestId("fe7-role-name"), "reviewer");
-    await user.click(screen.getByTestId("fe7-matrix-key-event:read"));
+    await user.click(screen.getByTestId("fe7-matrix-key-task:read"));
     await user.click(screen.getByTestId("fe7-role-save"));
     // ConfirmDialog appears; confirm. @dub/ui ConfirmDialog does not put testids on
     // its buttons, so click the confirm action by role within the dialog.
@@ -53,7 +53,7 @@ describe("role editor (PermissionMatrix)", () => {
       expect((screen.getByTestId("fe7-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true),
     );
     // Self-lockout guard only pins identity:admin; the rest of the admin role is editable now.
-    expect((screen.getByTestId("fe7-matrix-key-event:read") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByTestId("fe7-matrix-key-task:read") as HTMLInputElement).disabled).toBe(false);
   });
 });
 
@@ -67,9 +67,9 @@ describe("system role editing (self-lockout guard)", () => {
     renderWithProviders(<RolePermissionsEditor role={role} />);
     await waitFor(() => expect(screen.getByTestId("fe7-role-role_member-permission-matrix")).toBeInTheDocument());
 
-    const mail = screen.getByTestId("fe7-role-role_member-matrix-key-mail:read") as HTMLInputElement;
-    expect(mail.disabled).toBe(false);
-    await user.click(mail);
+    const taskRead = screen.getByTestId("fe7-role-role_member-matrix-key-task:read") as HTMLInputElement;
+    expect(taskRead.disabled).toBe(false);
+    await user.click(taskRead);
     await user.click(screen.getByTestId("fe7-role-role_member-save"));
     const confirm = await screen.findByTestId("fe7-role-role_member-save-confirm");
     await user.click(within(confirm).getByRole("button", { name: "確認" }));
@@ -83,6 +83,6 @@ describe("system role editing (self-lockout guard)", () => {
     await waitFor(() => expect(screen.getByTestId("fe7-role-role_admin-permission-matrix")).toBeInTheDocument());
 
     expect((screen.getByTestId("fe7-role-role_admin-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-event:read") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-task:read") as HTMLInputElement).disabled).toBe(false);
   });
 });

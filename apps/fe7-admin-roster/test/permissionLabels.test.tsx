@@ -1,16 +1,20 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { identity } from "@dub/types";
+import { identity, appRegistry } from "@dub/types";
 import { PermissionMatrix } from "../src/components/PermissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../src/lib/permissionLabels";
 
 const catalog = [...identity.PERMISSION_CATALOG];
-// The per-app access tier (domain "app") renders via its own AppAccessSection (2-tier
-// accordion), NOT the flat per-key grid — covered by appAccessMatrix/AppAccessSection
-// tests. The generic-grid assertions below scope to the non-app domains so a per-app
-// row label (e.g. "メール" the app) never collides with a domain heading ("メール").
-const gridCatalog = catalog.filter((e) => e.domain !== "app");
+// The per-app access tier (domain "app") — AND any domain owned by exactly one launcher
+// app (mail/event/notif/chat/usage/drive/infra) — renders via AppAccessSection's 有効/無効
+// →レベル control, NOT the flat per-key grid (covered by appAccessMatrix/AppAccessSection
+// tests). "file" has no owning app at all, so it is the stable example of the flat grid's
+// generic behavior below.
+const domainOwnerCount = new Map<string, number>();
+for (const a of appRegistry.APP_MANIFEST) domainOwnerCount.set(a.domain, (domainOwnerCount.get(a.domain) ?? 0) + 1);
+const foldedDomains = new Set([...domainOwnerCount.entries()].filter(([, n]) => n === 1).map(([d]) => d));
+const gridCatalog = catalog.filter((e) => e.domain !== "app" && !foldedDomains.has(e.domain));
 
 describe("permissionLabels — localization map", () => {
   it("maps every catalog domain to a Japanese group heading", () => {
@@ -38,45 +42,45 @@ describe("permissionLabels — localization map", () => {
 
 describe("PermissionMatrix — Japanese, grouped, on/off legible", () => {
   it("renders Japanese group headings and per-key labels with the raw key as a hint", () => {
-    render(<PermissionMatrix catalog={gridCatalog} selected={["mail:read"]} onChange={() => {}} />);
-    // group heading localized (メール)
-    expect(screen.getByText("メール")).toBeInTheDocument();
+    render(<PermissionMatrix catalog={gridCatalog} selected={["file:read"]} onChange={() => {}} />);
+    // group heading localized (ファイル) — "file" has no owning app so it stays a flat grid.
+    expect(screen.getByText("ファイル")).toBeInTheDocument();
     // key label localized, raw key still visible as a hint
-    expect(screen.getByText("メールの閲覧")).toBeInTheDocument();
-    expect(screen.getByText("mail:read")).toBeInTheDocument();
+    expect(screen.getByText("ファイルの閲覧・DL")).toBeInTheDocument();
+    expect(screen.getByText("file:read")).toBeInTheDocument();
   });
 
   it("shows an オン/オフ state pill per permission reflecting the selection", () => {
-    render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} onChange={() => {}} />);
-    expect(screen.getByTestId("fe7-matrix-state-mail:read")).toHaveTextContent("オン");
-    expect(screen.getByTestId("fe7-matrix-state-mail:send")).toHaveTextContent("オフ");
+    render(<PermissionMatrix catalog={catalog} selected={["file:read"]} onChange={() => {}} />);
+    expect(screen.getByTestId("fe7-matrix-state-file:read")).toHaveTextContent("オン");
+    expect(screen.getByTestId("fe7-matrix-state-file:write")).toHaveTextContent("オフ");
   });
 
   it("shows an N / M 有効 count on each group header", () => {
-    render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} onChange={() => {}} />);
-    // mail domain has 4 keys (send/read/read_all/admin), 1 selected
-    expect(screen.getByTestId("fe7-matrix-count-mail")).toHaveTextContent("1 / 4 有効");
+    render(<PermissionMatrix catalog={catalog} selected={["file:read"]} onChange={() => {}} />);
+    // file domain has 3 keys (read/write/admin), 1 selected
+    expect(screen.getByTestId("fe7-matrix-count-file")).toHaveTextContent("1 / 3 有効");
   });
 
   it("keeps matrix-key testids + on/off + disabled semantics intact (behavior-preserving)", () => {
-    render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} disabled onChange={() => {}} />);
-    const box = screen.getByTestId("fe7-matrix-key-mail:read") as HTMLInputElement;
+    render(<PermissionMatrix catalog={catalog} selected={["file:read"]} disabled onChange={() => {}} />);
+    const box = screen.getByTestId("fe7-matrix-key-file:read") as HTMLInputElement;
     expect(box.checked).toBe(true);
     expect(box.disabled).toBe(true);
   });
 
   it("renders each permission grant as an accessible on/off switch (role=switch)", () => {
-    render(<PermissionMatrix catalog={catalog} selected={["mail:read"]} onChange={() => {}} />);
-    expect(screen.getByTestId("fe7-matrix-key-mail:read")).toHaveAttribute("role", "switch");
-    expect(screen.getByTestId("fe7-matrix-key-mail:send")).toHaveAttribute("role", "switch");
+    render(<PermissionMatrix catalog={catalog} selected={["file:read"]} onChange={() => {}} />);
+    expect(screen.getByTestId("fe7-matrix-key-file:read")).toHaveAttribute("role", "switch");
+    expect(screen.getByTestId("fe7-matrix-key-file:write")).toHaveAttribute("role", "switch");
   });
 
   it("shows an always-visible plain-Japanese description under every permission", () => {
     render(<PermissionMatrix catalog={gridCatalog} selected={[]} onChange={() => {}} />);
     // description is rendered inline (not only a hover tooltip), one per key
-    const desc = screen.getByTestId("fe7-matrix-desc-mail:send");
+    const desc = screen.getByTestId("fe7-matrix-desc-file:write");
     expect(desc).toBeInTheDocument();
-    expect(desc.textContent).toMatch(/メールを送信できる/);
+    expect(desc.textContent).toMatch(/アップロード/);
     // every grid (non-app) catalog key has its own inline description node
     for (const e of gridCatalog) {
       expect(screen.getByTestId(`fe7-matrix-desc-${e.key}`).textContent?.length ?? 0).toBeGreaterThan(0);

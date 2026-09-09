@@ -1,8 +1,21 @@
 import type { identity } from "@dub/types";
+import { appRegistry } from "@dub/types";
 import { Badge, Switch } from "@dub/ui";
 import { groupByDomain, toggleDomain, togglePermission, domainSelectionState, type CatalogEntry } from "../lib/permissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../lib/permissionLabels";
 import { AppAccessSection } from "./AppAccessSection";
+
+// A domain owned by EXACTLY ONE launcher app has its capability keys folded into that
+// app's 有効/無効→レベル control (AppAccessSection), so it must NOT also render as a flat
+// fieldset here — that would show the same keys twice and let the two controls drift out
+// of sync. A domain shared by >1 app (task: tasks+gantt, identity: members/participation/
+// admin) is deliberately NOT folded (see lib/appAccessMatrix's DESIGN DECISION comment,
+// preserving the tested "toggle independently" guarantee), so it keeps rendering here —
+// otherwise its capability keys (task:write, task:delete, identity:admin, …) would have no
+// editing surface at all.
+const domainOwnerCount = new Map<string, number>();
+for (const a of appRegistry.APP_MANIFEST) domainOwnerCount.set(a.domain, (domainOwnerCount.get(a.domain) ?? 0) + 1);
+const FOLDED_DOMAINS = new Set([...domainOwnerCount.entries()].filter(([, n]) => n === 1).map(([d]) => d));
 
 // Design-system tokens (@dub/tokens) with literal fallbacks so the matrix still
 // reads correctly if a token is ever absent. Each permission is an on/off toggle
@@ -83,6 +96,7 @@ export function PermissionMatrix({
           return (
             <AppAccessSection
               key={g.domain}
+              catalog={catalog}
               selected={selected}
               disabled={disabled}
               onChange={onChange}
@@ -91,6 +105,10 @@ export function PermissionMatrix({
             />
           );
         }
+        // Already represented inside AppAccessSection's per-app row (view/edit/manage
+        // tiers) — skip the flat fieldset for this domain so there is exactly one place
+        // to edit it.
+        if (FOLDED_DOMAINS.has(g.domain)) return null;
         const state = domainSelectionState(selected, g.entries);
         const onCount = g.entries.reduce((n, e) => n + (selected.includes(e.key as identity.PermissionKey) ? 1 : 0), 0);
         return (

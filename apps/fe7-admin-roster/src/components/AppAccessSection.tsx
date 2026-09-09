@@ -1,22 +1,28 @@
+import { useState } from "react";
 import type { identity } from "@dub/types";
-import { Badge, SegmentedControl, Switch } from "@dub/ui";
+import { Badge, Button, SegmentedControl, Switch } from "@dub/ui";
 import {
   appAccessRows,
   appAccessLevel,
   appAccessSummary,
+  allRowKeys,
+  availableLevels,
   setAppAccessLevel,
   toggleAppEnabled,
   type AppAccessLevel,
   type AppAccessRow,
+  type LabeledKey,
 } from "../lib/appAccessMatrix";
+import { togglePermission, type CatalogEntry } from "../lib/permissionMatrix";
 
-// PER-APP access tier of the role matrix (catalog domain "app"). Instead of showing
-// the 22 flat app:<id>:view / app:<id>:edit toggles, this folds them into the product
-// UX the coordinator specified: one 有効化 Switch per app that, when ON, discloses a
-// nested indented 「閲覧まで / 編集・作成まで」 selector. Turning an app OFF collapses the
-// nested selector (消えて畳まれる). Every app — including ガント and 参加届 that used to ride
-// a shared domain key — now has its OWN row, so an admin can grant/revoke each app to a
-// role individually. Purely presentational; all set logic lives in lib/appAccessMatrix.
+// PER-APP tier of the role matrix (catalog domain "app" + each app's own domain
+// capabilities). Instead of one "有効化" toggle for JUST app:<id>:view/edit and a
+// separate flat grid of that app's other permission keys elsewhere on the screen, this
+// folds BOTH into one 2段階 control per app: 有効化 Switch → when ON, a LEVEL selector
+// (閲覧まで / 編集・作成まで / 管理まで — 管理 only offered when the app actually has a
+// manage-tier key) that maps to turning the right key GROUP on/off (lib/appAccessMatrix).
+// Turning an app OFF hides/greys everything below it, including the 詳細 (individual-key)
+// escape hatch, so an admin never has to reason about keys for an app the role can't open.
 const cardStyle: React.CSSProperties = {
   border: "1px solid var(--dub-color-border-default, #dde1e9)",
   borderRadius: 8,
@@ -50,6 +56,7 @@ const keyHintStyle: React.CSSProperties = {
   fontFamily: "var(--dub-font-family-mono, monospace)",
 };
 const openHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 11 };
+const sharedHintStyle: React.CSSProperties = { color: "var(--dub-color-warning-700, #b54708)", fontSize: 11 };
 const badgeWrapStyle: React.CSSProperties = { flex: "none" };
 // Nested (indented) level selector — visually reads as a child of the enable toggle.
 const nestStyle: React.CSSProperties = {
@@ -58,7 +65,7 @@ const nestStyle: React.CSSProperties = {
   borderLeft: "2px solid var(--dub-color-border-default, #dde1e9)",
   display: "flex",
   flexDirection: "column",
-  gap: 4,
+  gap: 6,
 };
 const nestLabelStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12 };
 const gridStyle: React.CSSProperties = {
@@ -66,39 +73,95 @@ const gridStyle: React.CSSProperties = {
   gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
   gap: 4,
 };
+const detailListStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, marginTop: 2 };
+const detailRowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "flex-start" };
+const detailLabelStyle: React.CSSProperties = { fontWeight: 600, fontSize: 12.5 };
+const detailDescStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 11.5 };
 
-const LEVEL_OPTIONS: { value: AppAccessLevel; label: string }[] = [
-  { value: "view", label: "閲覧まで" },
-  { value: "edit", label: "編集・作成まで" },
-];
+const LEVEL_LABELS: Record<Exclude<AppAccessLevel, "off">, string> = {
+  view: "閲覧まで",
+  edit: "編集・作成まで",
+  manage: "管理まで",
+};
 
 function levelBadge(level: AppAccessLevel): { tone: "success" | "neutral"; text: string } {
+  if (level === "off") return { tone: "neutral", text: "無効" };
+  if (level === "manage") return { tone: "success", text: "管理" };
   if (level === "edit") return { tone: "success", text: "編集・作成" };
-  if (level === "view") return { tone: "success", text: "閲覧" };
-  return { tone: "neutral", text: "無効" };
+  return { tone: "success", text: "閲覧" };
+}
+
+function DetailKeyRow({
+  entry,
+  checked,
+  disabled,
+  onToggle,
+  testId,
+}: {
+  entry: LabeledKey;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  testId: string;
+}) {
+  return (
+    <div style={detailRowStyle}>
+      <Switch
+        id={`${testId}-sw`}
+        checked={checked}
+        disabled={disabled}
+        onChange={onToggle}
+        testId={testId}
+        label={
+          <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+              <span style={entry.dangerous ? { ...detailLabelStyle, color: "var(--dub-color-danger-600, #d92d20)" } : detailLabelStyle}>
+                {entry.label}
+                {entry.dangerous ? " ⚠" : ""}
+              </span>
+              <span style={keyHintStyle}>{entry.key}</span>
+            </span>
+            <span style={detailDescStyle}>{entry.description}</span>
+          </span>
+        }
+      />
+    </div>
+  );
 }
 
 export function AppAccessSection({
+  catalog,
   selected,
   disabled,
   onChange,
   idPrefix = "fe7",
   lockedKeys = [],
 }: {
+  catalog: readonly CatalogEntry[];
   selected: readonly identity.PermissionKey[];
   disabled?: boolean;
   onChange: (next: identity.PermissionKey[]) => void;
   idPrefix?: string;
-  // Per-app access keys that must stay granted (e.g. app:admin:view/edit on the admin
+  // Keys that must stay granted (e.g. app:admin:view/edit + identity:admin on the admin
   // role) — the enable toggle + level selector are frozen ON to prevent self-lockout.
   lockedKeys?: readonly identity.PermissionKey[];
 }) {
-  const rows = appAccessRows();
+  const rows = appAccessRows(catalog);
   const locked = new Set(lockedKeys);
-  const summary = appAccessSummary(selected);
+  const summary = appAccessSummary(selected, rows);
+  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set());
 
-  const setLevel = (row: AppAccessRow, level: AppAccessLevel) => onChange(setAppAccessLevel(selected, row, level));
-  const setEnabled = (row: AppAccessRow, enabled: boolean) => onChange(toggleAppEnabled(selected, row, enabled));
+  const setLevel = (row: AppAccessRow, level: AppAccessLevel) =>
+    onChange(setAppAccessLevel(selected, row, level, lockedKeys));
+  const setEnabled = (row: AppAccessRow, enabled: boolean) =>
+    onChange(toggleAppEnabled(selected, row, enabled, lockedKeys));
+  const toggleDetail = (id: string) =>
+    setOpenDetails((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <fieldset style={cardStyle} data-testid={`${idPrefix}-app-access-section`}>
@@ -111,14 +174,18 @@ export function AppAccessSection({
         </span>
       </legend>
       <p style={groupHintStyle}>
-        アプリごとに「有効化」で使える/使えないを切り替えます。有効にすると、そのロールに「閲覧まで」か「編集・作成まで」を選べます。
+        アプリごとに「有効化」で使える/使えないを切り替えます。有効にすると「閲覧まで／編集・作成まで」（アプリによっては「管理まで」）を選べます。
+        個別の権限を微調整したい場合は各アプリの「詳細」を開いてください。
       </p>
       <div style={gridStyle} data-testid={`${idPrefix}-app-access-grid`}>
         {rows.map((row) => {
           const level = appAccessLevel(selected, row);
           const enabled = level !== "off";
-          const isLocked = locked.has(row.view) || locked.has(row.edit);
+          const isLocked = allRowKeys(row).some((k) => locked.has(k));
           const badge = levelBadge(level);
+          const levels = availableLevels(row).filter((l): l is Exclude<AppAccessLevel, "off"> => l !== "off");
+          const hasDetails = row.viewKeys.length + row.editKeys.length + row.manageKeys.length > 0;
+          const detailOpen = openDetails.has(row.id);
           return (
             <div key={row.id} style={{ ...rowBaseStyle, ...(enabled ? rowOnStyle : null) }} data-testid={`${idPrefix}-app-${row.id}`}>
               <div style={rowHeadStyle}>
@@ -137,6 +204,11 @@ export function AppAccessSection({
                           {isLocked ? <span style={{ ...openHintStyle, fontWeight: 600 }}>🔒 固定</span> : null}
                         </span>
                         {row.openToAll ? <span style={openHintStyle}>ログイン中の全員に公開（無効化で運営限定にできます）</span> : null}
+                        {row.sharedDomain ? (
+                          <span style={sharedHintStyle}>
+                            他アプリと機能領域を共有するため、このアプリは「開く／編集・作成」の2段階のみです。
+                          </span>
+                        ) : null}
                       </span>
                     }
                   />
@@ -155,14 +227,40 @@ export function AppAccessSection({
                     aria-label={`${row.label} の許可範囲`}
                     value={level}
                     onChange={(next) => setLevel(row, next)}
-                    options={LEVEL_OPTIONS.map((o) => ({
-                      value: o.value,
-                      label: o.label,
+                    options={levels.map((l) => ({
+                      value: l,
+                      label: LEVEL_LABELS[l],
                       disabled: disabled || isLocked,
-                      testId: `${idPrefix}-app-level-${row.id}-${o.value}`,
+                      testId: `${idPrefix}-app-level-${row.id}-${l}`,
                     }))}
                     testId={`${idPrefix}-app-level-seg-${row.id}`}
                   />
+                  {hasDetails ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleDetail(row.id)}
+                        testId={`${idPrefix}-app-details-toggle-${row.id}`}
+                      >
+                        {detailOpen ? "詳細を隠す" : "詳細を見る（個別の権限を調整）"}
+                      </Button>
+                      {detailOpen ? (
+                        <div style={detailListStyle} data-testid={`${idPrefix}-app-details-${row.id}`}>
+                          {[...row.viewKeys, ...row.editKeys, ...row.manageKeys].map((entry) => (
+                            <DetailKeyRow
+                              key={entry.key}
+                              entry={entry}
+                              checked={selected.includes(entry.key)}
+                              disabled={Boolean(disabled) || locked.has(entry.key)}
+                              onToggle={() => onChange(togglePermission(selected, entry.key))}
+                              testId={`${idPrefix}-app-detail-${row.id}-${entry.key}`}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
