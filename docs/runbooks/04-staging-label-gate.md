@@ -79,6 +79,11 @@ webhook-ingest）で満杯のため、staging が cron を足すと CF がデプ
 | `stagingへ` | （任意） | 付けると staging.yml が発火し、その PR を staging にデプロイ。以降その PR の push でも再デプロイ |
 | `確認した` | `#0E8A16` | staging 確認済み。**本番マージの許可ゲート**。付いていない PR は（カットオーバー後）main にマージ不可 |
 
+**GUARD**: `stagingへ` を付けた PR が open な間は、他の PR の main マージで発火する
+push:main の自動 staging 再デプロイが **自動でスキップ**される（`staging.yml` の `guard` ジョブ）。
+main HEAD による上書きから、その PR（統合ブランチ含む）が確認中の staging デプロイを守るための恒久対策。
+ラベルを外す（マージ/クローズ）と push:main の mirror-main デプロイは自動的に再開する。
+
 `確認した` は作成済み。`stagingへ` が未作成なら:
 
 ```
