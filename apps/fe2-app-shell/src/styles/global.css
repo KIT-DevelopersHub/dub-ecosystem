@@ -610,7 +610,17 @@ svg {
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-secondary);
 }
-@media (max-width: 860px) {
+/* Stack to a single column as soon as the KPI row itself compacts (<=1100px, see
+ * .fe2-kpi-row below). Below that width the two-column body (2.1fr main / 1fr
+ * aside) leaves the aside noticeably SHORTER than the main column (fewer, smaller
+ * cards vs. the viz cards + full app launcher grid) — the aside then sits at the
+ * top of a taller shared row and .fe2-dash-body's single scrollbar drags it out of
+ * view before the main column's bottom (app grid) comes into sight, reading as the
+ * events card "collapsing"/disappearing on a half-width window (bug report: 半画面
+ * でイベント欄が潰れる). Stacking removes the side-by-side height mismatch — every
+ * card renders full-width, full-height, in document order, so nothing gets scrolled
+ * away half-seen. Matches the KPI breakpoint so both regions compact together. */
+@media (max-width: 1100px) {
   .fe2-dash-body {
     grid-template-columns: 1fr;
   }
