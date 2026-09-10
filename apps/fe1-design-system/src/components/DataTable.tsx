@@ -3,7 +3,7 @@ import type { ColumnDef, DataTableProps, SortState } from "../types";
 import styles from "./DataTable.module.css";
 import { cx } from "../utils/cx";
 import { Icon } from "./Icon";
-import { Spinner } from "./Spinner";
+import { Skeleton } from "./Skeleton";
 import { Popover } from "./Tooltip";
 import { Button } from "./Button";
 import { Checkbox } from "./Inputs";
@@ -225,7 +225,7 @@ export function DataTable<Row>({
     <>
       {picker}
       <div className={cx(styles.wrap)} data-testid={testId}>
-        <table className={cx(styles.table)}>
+        <table className={cx(styles.table)} aria-busy={loading || undefined}>
           <thead>
             <tr>
               {selection && (
@@ -269,11 +269,30 @@ export function DataTable<Row>({
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td className={cx(styles.loadingCell)} colSpan={visibleColumns.length + (selection ? 1 : 0)}>
-                  <Spinner />
-                </td>
-              </tr>
+              // Loading placeholder rows reuse the SAME <tr>/<td> structure (and per-column
+              // widths/alignment) as loaded rows, so the skeleton lines up 1:1 with real data
+              // — no vertical shift when it resolves (FE1 §5 loading principle).
+              Array.from({ length: 6 }).map((_, r) => (
+                <tr key={`dt-skeleton-${r}`} className={cx(styles.tr)} aria-hidden="true">
+                  {selection && (
+                    <td className={cx(styles.checkCell)}>
+                      <Skeleton variant="rect" width={16} height={16} />
+                    </td>
+                  )}
+                  {visibleColumns.map((col) => (
+                    <td
+                      key={col.key}
+                      className={cx(styles.td, col.noWrap && styles.noWrap)}
+                      style={{ minWidth: col.minWidth, textAlign: col.align ?? "left" }}
+                    >
+                      <Skeleton
+                        variant="text"
+                        width={col.align === "right" ? "3rem" : "70%"}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))
             ) : (
               rows.map((row) => {
                 const key = rowKey(row);
