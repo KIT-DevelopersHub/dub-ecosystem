@@ -2,7 +2,7 @@
 // the roster right-pane (UserListPage) — design "1画面で完結". This standalone page is
 // kept only so an existing `/admin/users/:id` deep link still resolves; it reuses the
 // same UserInlineEditor so behaviour is identical to the inline pane.
-import { PageHeader, ErrorState, EmptyState } from "@dub/ui";
+import { PageHeader, Breadcrumbs, ErrorState, EmptyState } from "@dub/ui";
 import { UserStatusBadge } from "./UserStatusBadge";
 import { UserInlineEditor } from "./UserInlineEditor";
 import { useUser } from "../hooks/useRosterApi";
@@ -12,10 +12,12 @@ export function UserDetailPage({
   userId,
   currentUserId,
   events = [],
+  onBack,
 }: {
   userId: string;
   currentUserId: string;
   events?: { id: string; name: string }[];
+  onBack?: () => void;
 }) {
   const user = useUser(userId);
 
@@ -32,6 +34,15 @@ export function UserDetailPage({
         title={user.data.displayName}
         testId="fe7-user-header"
         actions={<UserStatusBadge status={user.data.status} testId="fe7-user-status" />}
+        breadcrumbs={
+          <Breadcrumbs
+            testId="fe7-user-breadcrumbs"
+            items={[
+              { label: "メール名簿", icon: "users", onClick: onBack },
+              { label: user.data.displayName },
+            ]}
+          />
+        }
       />
       <UserInlineEditor user={user.data} currentUserId={currentUserId} events={events} />
     </div>

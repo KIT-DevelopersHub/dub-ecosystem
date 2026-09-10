@@ -18,6 +18,21 @@ import {
 } from "./appClients.tsx";
 import { EventProviders, TaskProviders } from "./moduleProviders.tsx";
 
+// EventProviders/RosterProviders read the shell router (useNavigate/useParams/
+// useRouterState) to feed each feature's NavigationApi. These providers are
+// mount-tested in isolation (no RouterProvider), so stub the router hooks — same
+// pattern as the mail screen tests.
+vi.mock("@tanstack/react-router", async (orig) => {
+  const actual = await orig<typeof import("@tanstack/react-router")>();
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+    useParams: () => ({}),
+    useRouterState: (opts?: { select?: (s: unknown) => unknown }) =>
+      opts?.select ? opts.select({ location: { pathname: "/", searchStr: "" } }) : undefined,
+  };
+});
+
 /** /me session used to drive TaskProviders' TaskRouteContext wiring. */
 const TASK_ME: gateway.MeResponse = {
   user: { id: "usr_me", displayName: "私", avatarUrl: null },
@@ -126,12 +141,13 @@ describe("assembleFeatureModules", () => {
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理・メールアドレス管理 independent tiles; 変更履歴 gone", () => {
+  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理 an independent tile; 変更履歴 gone; メールアドレス管理 route revived but not a launcher tile", () => {
     // 統合: 運営メンバー(member-service) + 名簿(FE7 /admin/users) + 参加届/回答(participation) を
     // 1 タイル「運営メンバー・名簿」(/members) に合体し、共有サブナビ(MemberRosterNav)で横断する。
     // ロール管理(/admin/roles) はそこから括り出して独立ランチャータイルに戻す。変更履歴(/admin/history)
-    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) はPR#245で一度完全
-    // 撤去されたが、ユーザー明示決定で再実装(復活)し独立ランチャータイルに戻った。
+    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) はPR#245で一度
+    // 完全撤去されたがユーザー明示決定で route のみ復活した — ランチャータイルにはせず、運営メンバー・
+    // 名簿の共有サブナビ(MemberRosterNav)側にタブとして統合したため、nav には引き続き未登録。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
@@ -144,16 +160,12 @@ describe("assembleFeatureModules", () => {
     const rolesNav = registry.nav.find((n) => n.path === "/admin/roles");
     expect(rolesNav?.label).toBe("ロール管理");
     expect(rolesNav?.appId).toBe("admin");
-    // メールアドレス管理も独立タイルとして復活
-    expect(navPaths).toContain("/admin/email-routing");
-    const emailNav = registry.nav.find((n) => n.path === "/admin/email-routing");
-    expect(emailNav?.label).toBe("メールアドレス管理");
-    expect(emailNav?.appId).toBe("admin");
     // 名簿/参加届/回答 は統合タイル内サブナビから開くので個別タイルは無い。変更履歴タイルは消滅。
     expect(navPaths).not.toContain("/admin/users");
     expect(navPaths).not.toContain("/admin/history");
     expect(navPaths).not.toContain("/participation");
     expect(navPaths).not.toContain("/participation/list");
+    expect(navPaths).not.toContain("/admin/email-routing");
     // 他アプリは絶対に減らさない
     expect(navPaths).toEqual(
       expect.arrayContaining([
@@ -167,11 +179,10 @@ describe("assembleFeatureModules", () => {
         "/members",
         "/driveshare",
         "/admin/roles",
-        "/admin/email-routing",
       ]),
     );
-    // admin/participation routes（名簿/ロール/メール/参加届/回答）は保持（統合ナビ + deep-link 生存）。
-    // 変更履歴ルート(/admin/history) は撤去済みなので存在しないこと。
+    // admin/participation routes（名簿/ロール/メールアドレス管理/参加届/回答）は保持（統合ナビ +
+    // deep-link 生存）。変更履歴ルート(/admin/history) は撤去済みなので存在しないこと。
     const routePaths = registry.routes.map((r) => r.path);
     expect(routePaths).toEqual(
       expect.arrayContaining([
@@ -186,6 +197,9 @@ describe("assembleFeatureModules", () => {
       ]),
     );
     expect(routePaths).not.toContain("/admin/history");
+    // メールアドレス管理はルートとしては存在するが、独立ランチャータイル(nav)としては
+    // 登録しない — 運営メンバー・名簿の共有サブナビ側のタブから開く配置にしたため。
+    expect(navPaths).not.toContain("/admin/email-routing");
   });
 
   it("carries badge sources through for notifications and chat", () => {
@@ -318,14 +332,22 @@ describe("app client adapters feed ApiClient.request", () => {
 });
 
 describe("runtime providers wrap their routes", () => {
-  it("EventProviders mounts and passes children through", () => {
+  it("EventProviders mounts and passes children through", async () => {
     const { api } = fakeApi();
+    // EventProviders reads the shell session (to bridge it into FE3's auth store),
+    // so it must render under an AuthProvider — the real shell path.
+    const authApi = { auth: { me: () => Promise.resolve(TASK_ME) } } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <EventProviders api={api}>
-        <div data-testid="child">events-child</div>
-      </EventProviders>,
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={authApi}>
+          <EventProviders api={api}>
+            <div data-testid="child">events-child</div>
+          </EventProviders>
+        </AuthProvider>
+      </QueryClientProvider>,
     );
-    expect(screen.getByTestId("child")).toHaveTextContent("events-child");
+    await waitFor(() => expect(screen.getByTestId("child")).toHaveTextContent("events-child"));
   });
 
   it("TaskProviders mounts and passes children through", async () => {

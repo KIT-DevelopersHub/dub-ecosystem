@@ -23,9 +23,15 @@ function usersRoute(): Promise<{ Component: ComponentType }> {
 function userDetailRoute(): Promise<{ Component: ComponentType }> {
   return import("./components/UserDetailPage").then(({ UserDetailPage }) => ({
     Component: function UserDetailRoute() {
-      const { params } = useNavigation();
+      const { params, navigate } = useNavigation();
       const { me } = useRosterContext();
-      return <UserDetailPage userId={params.userId ?? ""} currentUserId={me?.user.id ?? ""} />;
+      return (
+        <UserDetailPage
+          userId={params.userId ?? ""}
+          currentUserId={me?.user.id ?? ""}
+          onBack={() => navigate("/admin/users")}
+        />
+      );
     },
   }));
 }
@@ -61,6 +67,11 @@ function emailRoutingRoute(): Promise<{ Component: ComponentType }> {
 // (EmailRoutingPage/専用hook/型/route/nav)。backendのadmin API(addresses/rules)は撤去時から
 // 残置されており継続使用されているため、今回はユーザー明示決定で再実装した(復活)。現行の
 // issued-addresses API・型・デザインシステムに合わせて再構築している(旧コードの単純コピーではない)。
+// 今回は独立ランチャータイルではなく「運営メンバー・名簿」の共有サブナビ(FE2側
+// MemberRosterNav)に新タブとして統合する配置にした(ユーザー明示指定)。そのため routes には
+// 追加するが、この下の `nav` 配列(=独立ランチャータイル用)には追加しない — fe2 の
+// adaptAdmin() はこの `nav` を素通しせず手書きの NavEntry を返すので、ここに足しても
+// ランチャーには何も効果が無い(死んだコードになる)。
 // 変更履歴 (/admin/history) の UI アプリ（AuditHistoryPage・ルート・タイル・サブナビ項目）は
 // ユーザー明示指示で完全撤去した。監査ログの取得基盤（rosterApi.auditLogs / useAuditLogs /
 // buildAuditQuery とバックエンドの収集）は壊さず残置している（他機能/将来の再利用のため）。
@@ -76,7 +87,6 @@ export const routes: FeatureRoute[] = [
 export const nav: NavEntry[] = [
   { label: "メール名簿", path: "/admin/users", icon: "users", order: 10 },
   { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 20 },
-  { label: "メールアドレス管理", path: "/admin/email-routing", icon: "inbox", order: 25 },
 ];
 
 // headerWidget: mounted by the FE2 shell above the module surface (same slot as FE5's

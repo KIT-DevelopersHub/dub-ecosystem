@@ -15,11 +15,12 @@ import type { ApiClient } from "../lib/api-client.tsx";
 import type { Registry, ResolvedRoute } from "../modules/types.tsx";
 import { RequireAuth, RequirePermission, usePermissions } from "../auth/AuthProvider.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
-import type { FeatureModuleId } from "../modules/types.tsx";
+import type { FeatureModuleId, NavEntry } from "../modules/types.tsx";
 import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
 import { MemberRosterSubnav, activeSectionId } from "../features/members/MemberRosterNav.tsx";
 import { RosterContentSkeleton } from "../features/members/RosterContentSkeleton.tsx";
+import { useVisitTracker } from "./useVisitTracker.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { HomeScreen } from "./screens/HomeScreen.tsx";
 import { PublicParticipationPage, PUBLIC_PARTICIPATION_PATH } from "../features/participation/index.tsx";
@@ -99,8 +100,11 @@ function guard(route: ResolvedRoute, Body: ComponentType): () => JSX.Element {
  * instead of the whole area collapsing to the top loading bar. Non-roster routes keep
  * the thin RouteLoadingBar fallback as before.
  */
-function ShellRouteContent(): JSX.Element {
+function ShellRouteContent({ navEntries }: { navEntries: NavEntry[] }): JSX.Element {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // Record the current route into the "最近開いた" history (P3-1). Mounted here so it
+  // sees every feature navigation while persisting across route changes.
+  useVisitTracker(navEntries);
   const inRoster = activeSectionId(pathname) != null;
   return (
     <>
@@ -148,7 +152,7 @@ export function createShellRouter(
         {...(opts?.onLogout ? { onLogout: opts.onLogout } : {})}
       >
         <RequireAuth loadingFallback={<RouteLoadingBar active />}>
-          <ShellRouteContent />
+          <ShellRouteContent navEntries={registry.nav} />
         </RequireAuth>
       </AppShellLayout>
     ),
@@ -157,22 +161,14 @@ export function createShellRouter(
   const homeRoute = createRoute({
     getParentRoute: () => shellRoute,
     path: "/",
-    component: () => {
-      // usePermissions() needs <AuthProvider> in the tree, which this route always
-      // has (nested under shellRoute's <RequireAuth>); HomeScreen itself stays
-      // context-free/testable by taking `can` as a plain prop (see HomeScreen.tsx).
-      const { can } = usePermissions();
-      return (
-        <HomeScreen
-          api={api}
-          homeWidgets={registry.homeWidgets}
-          navEntries={registry.nav}
-          can={can}
-          onOpenNotifications={openNotificationDialog}
-          {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
-        />
-      );
-    },
+    component: () => (
+      <HomeScreen
+        api={api}
+        homeWidgets={registry.homeWidgets}
+        onOpenNotifications={openNotificationDialog}
+        {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
+      />
+    ),
   });
 
   const featureRoutes = registry.routes.map((r) => {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { identity } from "@dub/types";
-import { PageHeader, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
+import { PageHeader, Breadcrumbs, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { PermissionMatrix } from "./PermissionMatrix";
 import { useRoles, usePermissionCatalog, useCreateRole, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
@@ -59,7 +59,19 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
 
   return (
     <div>
-      <PageHeader title={roleId ? "ロールを編集" : "ロールを作成"} testId="fe7-role-editor-header" />
+      <PageHeader
+        title={roleId ? "ロールを編集" : "ロールを作成"}
+        testId="fe7-role-editor-header"
+        breadcrumbs={
+          <Breadcrumbs
+            testId="fe7-role-editor-breadcrumbs"
+            items={[
+              { label: "ロール管理", icon: "shield", onClick: onDone },
+              { label: roleId ? "ロールを編集" : "ロールを作成" },
+            ]}
+          />
+        }
+      />
       <Card testId="fe7-role-editor">
         <FormField label="ロール名" htmlFor="fe7-role-name">
           <TextField id="fe7-role-name" value={name} onChange={(v) => setName(v)} disabled={nameDisabled} testId="fe7-role-name" />

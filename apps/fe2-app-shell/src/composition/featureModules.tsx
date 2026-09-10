@@ -349,17 +349,11 @@ function adaptAdmin(api: ApiClient): FeatureModule {
   // 出さない）。ロール管理(/admin/roles*) は独立タイルとして単独で成立する（従来どおり帯なし）。
   const src = adminModule.routes as readonly SourceRoute[];
   const routes = src.map((r) => wrapRoute(r, provider));
-  // 独立ランチャータイルは「ロール管理」(/admin/roles) と「メールアドレス管理」(/admin/email-routing)。
-  // 名簿(/admin/users) は運営メンバー・名簿タイル内の共有サブナビ(MemberRosterNav)から開くので個別
-  // タイルを出さない。変更履歴(/admin/history) の UI は撤去済み（ルート/コンポーネントごと削除・監査
-  // ログのデータ基盤は残置）。メールアドレス管理はPR#245で一度完全撤去されたが、ユーザー明示決定で
-  // 再実装(復活)した — ルート側の requiredPermissions (mail:admin) が実ゲート。route ガード
-  // (requiredPermissions)・headerWidget は維持。app:admin:view が名簿タブ・ロール管理・メールアドレス
-  // 管理タイルの全てをガードする。
-  const nav: NavEntry[] = [
-    { label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50 },
-    { label: "メールアドレス管理", path: "/admin/email-routing", icon: "inbox", order: 51 },
-  ];
+  // 独立ランチャータイルは「ロール管理」(/admin/roles) の 1 つだけ。名簿(/admin/users) は運営メンバー・
+  // 名簿タイル内の共有サブナビ(MemberRosterNav)から開くので個別タイルを出さない。変更履歴(/admin/history)
+  // の UI は撤去済み（ルート/コンポーネントごと削除・監査ログのデータ基盤は残置）。route ガード
+  // (requiredPermissions)・headerWidget は維持。app:admin:view が名簿タブとロール管理タイルの両方をガードする。
+  const nav: NavEntry[] = [{ label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50 }];
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
 

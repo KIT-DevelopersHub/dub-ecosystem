@@ -17,11 +17,10 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
-import type { identity } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
-import type { HomeWidget, NavEntry } from "../../modules/types.tsx";
+import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
-import { isReleaseGatedFor } from "../../lib/releaseGate.ts";
+import { useRecentVisits } from "../useVisitTracker.tsx";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
@@ -50,16 +49,7 @@ interface AppTile {
 
 // The primary app launchpad. Paths mirror the registered feature nav entries
 // (see composition.test.tsx) so a tile always lands on a real, populated route.
-// We never hide apps here — this is the full daily-workspace set. Admin-tier
-// tools (ロール管理・メールアドレス管理・LP管理) are NOT in this fixed list — they are
-// viewer-specific (only a真の admin can use them), so they are appended below,
-// under a separate "管理" heading, only for a viewer who actually can() open them
-// (see adminTilesFrom / navEntries prop). Everyone still has the 9-dot "アプリ一覧"
-// launcher (AppShellLayout) as the exhaustive, permission-aware app list; this just
-// surfaces admin tools directly on the dashboard too, so an admin does not have to
-// know to open the launcher to find them (#reported: "メールアドレス管理のボタンが
-// 見当たらない" — the tile was already registered/working, only reachable from the
-// launcher, which a first-time admin viewer did not think to open).
+// We never hide apps here — this is the full daily-workspace set.
 const APP_TILES: AppTile[] = [
   { id: "events", label: "イベント", desc: "運営中のイベントと進行", icon: "calendar", path: "/events" },
   { id: "tasks", label: "マイタスク", desc: "自分の担当タスク", icon: "check-square", path: "/me/tasks" },
@@ -112,23 +102,6 @@ function NavTile({
   );
 }
 
-/** Derives the dashboard's "管理" row from the registered nav entries: only the
- *  admin-owned tiles (appId "admin" — ロール管理 / メールアドレス管理), and only the ones
- *  this viewer can actually open (same can()/release-gate check the 9-dot launcher
- *  applies in AppShellLayout's toLauncherItems). Unlike the launcher, an app the
- *  viewer cannot open is simply omitted here (not greyed) — the dashboard is a
- *  quick-access surface, not the exhaustive app list. Non-admins therefore see no
- *  change; a real admin (or the demo's broad-permission session) now sees these
- *  tiles without having to discover the 9-dot launcher. */
-function adminTilesFrom(navEntries: NavEntry[], can: (p: identity.PermissionKey) => boolean): AppTile[] {
-  return navEntries
-    .filter((entry) => entry.appId === "admin")
-    .filter((entry) => !isReleaseGatedFor(entry.appId, can))
-    .filter((entry) => (entry.requiredPermissions ?? []).every((p) => can(p)))
-    .sort((a, b) => a.order - b.order)
-    .map((entry) => ({ id: entry.path, label: entry.label, desc: entry.label, icon: entry.icon, path: entry.path }));
-}
-
 /** Higher completion is better (opposite of usage): good ≥60, warn ≥30, else critical. */
 function completionStatus(pct: number): MetricStatus {
   if (pct >= 60) return "good";
@@ -171,26 +144,66 @@ function useViewportFit<T extends HTMLElement>(): RefObject<T> {
   return ref;
 }
 
+// Max rows shown in the "最近開いた" card (the store keeps up to 8; the card shows
+// the freshest handful so the rail stays compact within the one-viewport dashboard).
+const RECENT_VISIBLE = 5;
+
+/** "最近開いた" — one-click jump back to recently visited pages (P3-1). Reads the
+ *  client-side visit history and navigates via the shell router. Hidden until the
+ *  viewer has opened at least one trackable page. */
+function RecentOpenedCard({ onNavigate }: { onNavigate?: (path: string) => void }): JSX.Element | null {
+  const visits = useRecentVisits();
+  if (visits.length === 0) return null;
+  const rows = visits.slice(0, RECENT_VISIBLE);
+  return (
+    <Card
+      testId="fe2-home-recent"
+      header={
+        <span className="fe2-stat-label">
+          <Icon name="clock" />
+          最近開いた
+        </span>
+      }
+    >
+      <ul className="fe2-list fe2-home-recent-scroll">
+        {rows.map((v) => (
+          <li key={v.path} className="fe2-list-row">
+            <a
+              href={v.path}
+              className="fe2-list-link"
+              data-testid={`fe2-home-recent-item-${v.path}`}
+              title={`${v.label}（${v.app}）へ移動`}
+              onClick={(e) => {
+                if (onNavigate) {
+                  e.preventDefault();
+                  onNavigate(v.path);
+                }
+              }}
+            >
+              <span className="fe2-recent-icon" aria-hidden="true">
+                <Icon name={v.icon} />
+              </span>
+              <span className="fe2-list-main">
+                <span className="fe2-list-title">{v.label}</span>
+                {v.app !== v.label ? <span className="fe2-list-meta">{v.app}</span> : null}
+              </span>
+              <Icon name="chevron-right" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export function HomeScreen({
   api,
   homeWidgets = [],
-  navEntries = [],
-  can = () => false,
   onOpenNotifications,
   onNavigate,
 }: {
   api: ApiClient;
   homeWidgets?: HomeWidget[];
-  // Registered feature nav (registry.nav from the shell router) — used only to
-  // derive the "管理" row (adminTilesFrom) below the daily-workspace app grid.
-  // Optional/defaults to [] so existing unit tests that don't pass it are
-  // unaffected (no admin row renders without it).
-  navEntries?: NavEntry[];
-  // Permission check for the admin row above (usePermissions().can from the router,
-  // which itself needs <AuthProvider>). Passed as a plain prop — like onNavigate —
-  // rather than called internally, so this screen stays context-free and testable
-  // in isolation. Fail-closed default (always false) when omitted.
-  can?: (p: identity.PermissionKey) => boolean;
   // When provided, the "未読の通知" card becomes a button that opens the shared
   // notification dialog — the SAME modal the header bell opens.
   onOpenNotifications?: () => void;
@@ -198,7 +211,6 @@ export function HomeScreen({
   // from the shell router (main.tsx wires router.navigate). Absent in unit tests.
   onNavigate?: (path: string) => void;
 }): JSX.Element {
-  const adminTiles = adminTilesFrom(navEntries, can);
   const { data, isPending, errorFor, refetch } = useBffHome(api);
   const eventsError = errorFor("event-service");
   // The gateway BFF (bff-home) reports the notification upstream as "notification-service"
@@ -422,27 +434,12 @@ export function HomeScreen({
               ))}
             </div>
           </section>
-
-          {/* 管理: admin-only tools (ロール管理・メールアドレス管理). Rendered only when
-              adminTiles is non-empty — i.e. only for a viewer who can() actually open at
-              least one of them (see adminTilesFrom) — so a non-admin's dashboard is
-              unchanged. These same tools also stay reachable via the 9-dot "アプリ一覧"
-              launcher (AppShellLayout); this section just surfaces them here too, since
-              an admin should not have to discover the launcher to find them. */}
-          {adminTiles.length > 0 ? (
-            <section className="fe2-home-apps" aria-label="管理機能へ移動">
-              <h2 className="fe2-dash-section-title">管理</h2>
-              <div className="fe2-home-apps-grid" data-testid="fe2-home-admin-apps-grid">
-                {adminTiles.map((tile) => (
-                  <NavTile key={tile.id} tile={tile} {...(onNavigate ? { onNavigate } : {})} />
-                ))}
-              </div>
-            </section>
-          ) : null}
         </div>
 
         {/* ── right: live BFF panels (unchanged testIds/behavior) ───────────────── */}
         <aside className="fe2-home-side">
+          {/* 最近開いた (P3-1): client-side jump-back, above the live panels. */}
+          <RecentOpenedCard {...(onNavigate ? { onNavigate } : {})} />
           <Card
             testId="fe2-home-events"
             header={
