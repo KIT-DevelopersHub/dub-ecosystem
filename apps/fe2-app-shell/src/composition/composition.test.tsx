@@ -18,6 +18,21 @@ import {
 } from "./appClients.tsx";
 import { EventProviders, TaskProviders } from "./moduleProviders.tsx";
 
+// EventProviders/RosterProviders read the shell router (useNavigate/useParams/
+// useRouterState) to feed each feature's NavigationApi. These providers are
+// mount-tested in isolation (no RouterProvider), so stub the router hooks — same
+// pattern as the mail screen tests.
+vi.mock("@tanstack/react-router", async (orig) => {
+  const actual = await orig<typeof import("@tanstack/react-router")>();
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+    useParams: () => ({}),
+    useRouterState: (opts?: { select?: (s: unknown) => unknown }) =>
+      opts?.select ? opts.select({ location: { pathname: "/", searchStr: "" } }) : undefined,
+  };
+});
+
 /** /me session used to drive TaskProviders' TaskRouteContext wiring. */
 const TASK_ME: gateway.MeResponse = {
   user: { id: "usr_me", displayName: "私", avatarUrl: null },
@@ -311,14 +326,22 @@ describe("app client adapters feed ApiClient.request", () => {
 });
 
 describe("runtime providers wrap their routes", () => {
-  it("EventProviders mounts and passes children through", () => {
+  it("EventProviders mounts and passes children through", async () => {
     const { api } = fakeApi();
+    // EventProviders reads the shell session (to bridge it into FE3's auth store),
+    // so it must render under an AuthProvider — the real shell path.
+    const authApi = { auth: { me: () => Promise.resolve(TASK_ME) } } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <EventProviders api={api}>
-        <div data-testid="child">events-child</div>
-      </EventProviders>,
+      <QueryClientProvider client={qc}>
+        <AuthProvider api={authApi}>
+          <EventProviders api={api}>
+            <div data-testid="child">events-child</div>
+          </EventProviders>
+        </AuthProvider>
+      </QueryClientProvider>,
     );
-    expect(screen.getByTestId("child")).toHaveTextContent("events-child");
+    await waitFor(() => expect(screen.getByTestId("child")).toHaveTextContent("events-child"));
   });
 
   it("TaskProviders mounts and passes children through", async () => {

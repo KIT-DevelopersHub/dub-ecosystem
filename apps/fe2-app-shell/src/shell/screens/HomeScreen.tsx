@@ -20,13 +20,14 @@
 // modal with an inline 編集モード — tap "編集" and the widgets on THIS screen become
 // the draggable rows (iOS ホーム画面編集 style: dashed frame + light jiggle + a grip
 // handle + a per-widget hide toggle); tap "完了" to exit. See HomeEditableRegion.tsx.
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Badge, Button, Card, Icon, PageHeader, SegmentedControl, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useUiStore, type HomeDensity } from "../../store/uiStore.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
+import { useRecentVisits } from "../useVisitTracker.tsx";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
@@ -157,6 +158,65 @@ function useViewportFit<T extends HTMLElement>(): RefObject<T> {
   return ref;
 }
 
+// Max rows shown in the "最近開いた" card (the store keeps up to 8; the card shows
+// the freshest handful so the rail stays compact within the one-viewport dashboard).
+const RECENT_VISIBLE = 5;
+
+/** "最近開いた" — one-click jump back to recently visited pages (P3-1). Reads the
+ *  client-side visit history and navigates via the shell router. Hidden until the
+ *  viewer has opened at least one trackable page. */
+function RecentOpenedCard({
+  onNavigate,
+  style,
+}: {
+  onNavigate?: (path: string) => void;
+  style?: CSSProperties;
+}): JSX.Element | null {
+  const visits = useRecentVisits();
+  if (visits.length === 0) return null;
+  const rows = visits.slice(0, RECENT_VISIBLE);
+  return (
+    <Card
+      testId="fe2-home-recent"
+      style={style}
+      header={
+        <span className="fe2-stat-label">
+          <Icon name="clock" />
+          最近開いた
+        </span>
+      }
+    >
+      <ul className="fe2-list fe2-home-recent-scroll">
+        {rows.map((v) => (
+          <li key={v.path} className="fe2-list-row">
+            <a
+              href={v.path}
+              className="fe2-list-link"
+              data-testid={`fe2-home-recent-item-${v.path}`}
+              title={`${v.label}（${v.app}）へ移動`}
+              onClick={(e) => {
+                if (onNavigate) {
+                  e.preventDefault();
+                  onNavigate(v.path);
+                }
+              }}
+            >
+              <span className="fe2-recent-icon" aria-hidden="true">
+                <Icon name={v.icon} />
+              </span>
+              <span className="fe2-list-main">
+                <span className="fe2-list-title">{v.label}</span>
+                {v.app !== v.label ? <span className="fe2-list-meta">{v.app}</span> : null}
+              </span>
+              <Icon name="chevron-right" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export function HomeScreen({
   api,
   homeWidgets = [],
@@ -246,6 +306,7 @@ export function HomeScreen({
     { id: "card-usage", label: "無料枠の使用状況", region: "cards", resizable: false },
     { id: "card-tasks", label: "タスクの内訳", region: "cards", resizable: false },
     { id: "section-apps", label: "アプリランチャー", region: "apps", resizable: false },
+    { id: "panel-recent", label: "最近開いた", region: "side", defaultSize: "medium" },
     { id: "panel-events", label: "直近のイベント", region: "side", defaultSize: "medium" },
     { id: "panel-notifications", label: "未読の通知", region: "side", defaultSize: "medium" },
     ...homeWidgets.map((w) => ({ id: `widget-${w.id}`, label: w.title, region: "side" as const, defaultSize: "medium" as const })),
@@ -438,6 +499,12 @@ export function HomeScreen({
   );
 
   const sideNodes: Record<string, JSX.Element> = {
+    "panel-recent": (
+      <RecentOpenedCard
+        style={widgetStyle("panel-recent")}
+        {...(onNavigate ? { onNavigate } : {})}
+      />
+    ),
     "panel-events": (
       <Card
         testId="fe2-home-events"

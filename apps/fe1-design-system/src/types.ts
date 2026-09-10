@@ -493,6 +493,23 @@ export interface PageHeaderProps extends TestableProps {
   breadcrumbs?: ReactNode;
 }
 
+/**
+ * One hop in a breadcrumb trail (P2-1). The LAST item in `BreadcrumbsProps.items`
+ * is the current page (rendered as text, never a link); every earlier item is an
+ * ancestor the user can click to walk back up.
+ */
+export interface BreadcrumbItem {
+  label: ReactNode;
+  onClick?: () => void; // plain handler (FE1 stays router-free)
+  href?: string; // renderLink maps this to a router Link when provided
+  icon?: IconName; // optional leading icon, e.g. the app icon on the root crumb
+}
+export interface BreadcrumbsProps extends TestableProps {
+  items: BreadcrumbItem[];
+  // Inject a router Link around each ancestor (parity with SidebarProps.renderLink).
+  renderLink?: (item: BreadcrumbItem, node: ReactNode) => ReactNode;
+}
+
 export interface StackProps extends TestableProps {
   direction?: "row" | "column"; // default "column"
   gap?: keyof import("@dub/tokens").DubTokens["space"];
