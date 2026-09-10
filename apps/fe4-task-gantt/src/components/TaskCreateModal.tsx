@@ -41,13 +41,17 @@ export interface TaskCreateModalProps {
   initialParentId?: common.TaskId | null;
   /** predecessor ids preset when opened with a dependency already in mind. */
   initialDependsOn?: readonly common.TaskId[];
+  /** 担当 preset when opened via "タスク詳細から子タスクを作成" (= 親タスクの担当).
+   *  Initial value only — the user can still change it before submitting. Null/未設定
+   *  when the parent has no assignee, or when opened without a parent preset. */
+  initialAssigneeId?: common.UserId | null;
 }
 
 // A newly-created task starts in "todo"; only todo-reachable states are offered.
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn, initialAssigneeId }: TaskCreateModalProps) {
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<task.TaskStatus>("todo");
   const [priority, setPriority] = useState<task.TaskPriority>("medium");
@@ -60,9 +64,10 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // seed the due date + parent + predecessors when (re)opened (timeline cell /
-  // "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
-  // チームも親のチームで固定する。
+  // seed the due date + parent + predecessors + assignee when (re)opened (timeline
+  // cell / "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
+  // チームも親のチームで固定する。担当は親タスクの担当をプリセット（未設定なら未割当のまま）
+  // — 初期値のみで、送信前にユーザーが変更できる。
   useEffect(() => {
     if (open) {
       setDue(initialDue ?? null);
@@ -70,9 +75,10 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
       setParentId(nextParent);
       if (nextParent) setTeamId(teamOf(scopeTasks, nextParent));
       setDeps(initialDependsOn ? [...initialDependsOn] : []);
+      setAssigneeId(initialAssigneeId ?? null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialDue, initialParentId, initialDependsOn]);
+  }, [open, initialDue, initialParentId, initialDependsOn, initialAssigneeId]);
 
   const reset = () => {
     setTitle("");
