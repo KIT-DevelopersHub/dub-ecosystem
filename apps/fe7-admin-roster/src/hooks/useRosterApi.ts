@@ -4,14 +4,13 @@
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { identity, common, auditLog, auth, chat, member } from "@dub/types";
-import { isErrorResponse } from "@dub/errors";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
 import { queryKeys } from "../lib/queryKeys";
 import { type UserListFilters } from "../lib/listUsersQuery";
 import { type AuditFilters } from "../lib/auditQuery";
 import { type MailStatusResponse } from "../lib/mailStatus";
-import { presentError } from "../lib/errorDisplay";
+import { presentError, toErrorResponse } from "../lib/errorDisplay";
 import { applyRoleGrant, makePendingAssignment, addUserRoleId, removeUserRoleId } from "../lib/optimistic";
 import { runOffboard } from "../lib/offboard";
 import type {
@@ -29,7 +28,10 @@ import type {
  *  The sync surface reads it to show a "未接続" notice instead of a generic error. */
 export const EMAIL_ROUTING_UNCONFIGURED = "MAIL_EMAIL_ROUTING_UNCONFIGURED";
 export function isEmailRoutingUnconfigured(err: unknown): boolean {
-  return isErrorResponse(err) && err.error.code === EMAIL_ROUTING_UNCONFIGURED;
+  // Unwrap ApiError (FE2-injected transport) as well as the bare envelope so the
+  // 「未接続」notice shows on both transports, not only in the standalone harness.
+  const envelope = toErrorResponse(err);
+  return !!envelope && envelope.error.code === EMAIL_ROUTING_UNCONFIGURED;
 }
 
 // ---- queries ----
