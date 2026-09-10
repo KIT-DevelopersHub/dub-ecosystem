@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
 
@@ -132,5 +132,68 @@ describe("CommandPalette", () => {
     expect(active).toBeTruthy();
     const activeOption = document.getElementById(active!);
     expect(activeOption).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+// ①グローバル検索拡張: task/event CONTENT results via the `contentSearch` prop.
+describe("CommandPalette — content search (①グローバル検索)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  function contentResult(id: string, label: string, group: string, run: () => void = vi.fn()): PaletteCommand {
+    return { id, label, group, icon: "check-square", run };
+  }
+
+  it("does not call contentSearch while the query is empty", async () => {
+    const search = vi.fn().mockResolvedValue([]);
+    render(<CommandPalette commands={makeCommands()} contentSearch={search} />);
+    await openPalette();
+    await screen.findByTestId("fe2-cmdk");
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("debounces then calls contentSearch, showing results grouped ahead of app matches", async () => {
+    const run = vi.fn();
+    const search = vi.fn().mockResolvedValue([contentResult("content:task:t1", "登壇者スケジュール確定", "タスク", run)]);
+    render(<CommandPalette commands={makeCommands()} contentSearch={search} />);
+    await openPalette();
+    await userEvent.type(await screen.findByTestId("fe2-cmdk-input"), "登壇者");
+    await waitFor(() => expect(search).toHaveBeenCalledWith("登壇者", expect.any(AbortSignal)));
+    expect(await screen.findByTestId("fe2-cmdk-item-content-task-t1")).toBeInTheDocument();
+    expect(await screen.findByText("タスク")).toBeInTheDocument();
+    // Content group renders first (before the app matches' own group heading).
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveAttribute("data-testid", "fe2-cmdk-item-content-task-t1");
+    await userEvent.click(options[0]!);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears content results the instant the query is emptied (no stale flash)", async () => {
+    const search = vi.fn().mockResolvedValue([contentResult("content:event:e1", "北陸ITカンファレンス", "イベント")]);
+    render(<CommandPalette commands={makeCommands()} contentSearch={search} />);
+    await openPalette();
+    const input = await screen.findByTestId("fe2-cmdk-input");
+    await userEvent.type(input, "カンファ");
+    expect(await screen.findByTestId("fe2-cmdk-item-content-event-e1")).toBeInTheDocument();
+    await userEvent.clear(input);
+    await waitFor(() => expect(screen.queryByTestId("fe2-cmdk-item-content-event-e1")).not.toBeInTheDocument());
+  });
+
+  it("degrades to app/action-only results when contentSearch rejects", async () => {
+    const search = vi.fn().mockRejectedValue(new Error("network"));
+    render(<CommandPalette commands={makeCommands()} contentSearch={search} />);
+    await openPalette();
+    await userEvent.type(await screen.findByTestId("fe2-cmdk-input"), "mail");
+    await waitFor(() => expect(search).toHaveBeenCalled());
+    expect(await screen.findByTestId("fe2-cmdk-item-app-mail")).toBeInTheDocument();
+  });
+
+  it("announces content-search progress/result count via an aria-live status region", async () => {
+    const search = vi.fn().mockResolvedValue([contentResult("content:task:t1", "会場レイアウト図作成", "タスク")]);
+    render(<CommandPalette commands={makeCommands()} contentSearch={search} />);
+    await openPalette();
+    await userEvent.type(await screen.findByTestId("fe2-cmdk-input"), "会場");
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("1件見つかりました"));
   });
 });

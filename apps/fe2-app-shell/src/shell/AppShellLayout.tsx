@@ -16,6 +16,7 @@ import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
+import { createGlobalContentSearch } from "./globalContentSearch.ts";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
 import {
   isReleaseGatedFor,
@@ -331,12 +332,26 @@ export function AppShellLayout({
     ...(showAccount ? { onOpenAccount: () => setAcctOpen(true) } : {}),
     ...(authed && onLogout ? { onLogout } : {}),
   });
+  // ①グローバル検索: task/event CONTENT results (see globalContentSearch.ts) — needs
+  // both a live api-client and the viewer's own id (task search is self-scoped).
+  // Undefined (not wired) when either is missing, which keeps the palette in its
+  // existing app/action-only mode instead of erroring.
+  const contentSearch =
+    api && onNavigate
+      ? createGlobalContentSearch({
+          api,
+          currentUserId: auth.status === "authenticated" ? auth.me.user.id : null,
+          onNavigate,
+        })
+      : undefined;
 
   // No `sidebar` prop -> @dub/ui AppShell renders no left rail; main spans full width.
   return (
     <AppShell header={header} testId="fe2-shell">
       {children}
-      {authed ? <CommandPalette commands={paletteCommands} /> : null}
+      {authed ? (
+        <CommandPalette commands={paletteCommands} {...(contentSearch ? { contentSearch } : {})} />
+      ) : null}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
       <ColorSettingsDialog open={colorOpen} onClose={() => setColorOpen(false)} />

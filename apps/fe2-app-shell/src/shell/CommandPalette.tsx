@@ -1,7 +1,10 @@
-// CommandPalette (P06 グローバルコマンドパレット). A keyboard-first launcher opened with
-// Cmd/Ctrl+K from anywhere in the shell. It mirrors the 9-dot AppLauncher's apps as
-// runnable commands and adds the global self-service actions (ホームへ / アカウント設定 /
-// ログアウト), so a user can switch app or fire an action without touching the mouse.
+// CommandPalette (P06 グローバルコマンドパレット + ①グローバル検索拡張). A keyboard-first
+// launcher opened with Cmd/Ctrl+K from anywhere in the shell. It mirrors the 9-dot
+// AppLauncher's apps as runnable commands, adds the global self-service actions
+// (ホームへ / アカウント設定 / ログアウト), and — once a query is typed — cross-service
+// CONTENT results (task/event, extensible to more) supplied by the optional
+// `contentSearch` prop, so a user can jump straight to a task or event without
+// touching the mouse.
 //
 // Composition-only: FE2 wires the command list (apps + actions, gating included) and
 // this component renders/dispatches. It owns no router and no auth — every command
@@ -11,7 +14,8 @@
 // a11y: the text field is a combobox (aria-expanded/-controls/-activedescendant); the
 // results are a listbox of options. Focus stays in the input while ↑/↓ move the active
 // option (aria-activedescendant pattern), Enter runs it, Esc closes. Opening restores
-// focus to the previously-focused element on close.
+// focus to the previously-focused element on close. Content-search progress/result
+// counts are announced via a visually-hidden aria-live region.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "@dub/ui";
@@ -87,16 +91,27 @@ function toSections(commands: PaletteCommand[]): Section[] {
   return order.map((group) => ({ group, items: byGroup.get(group)! }));
 }
 
+/** Debounce before a content-search fetch fires, so fast typing sends one request
+ *  per pause rather than one per keystroke. */
+const CONTENT_SEARCH_DEBOUNCE_MS = 200;
+
 export interface CommandPaletteProps {
   commands: PaletteCommand[];
   testId?: string;
+  /** Cross-service CONTENT search (task/event, extensible) — called (debounced)
+   *  whenever the query is non-empty. Results are additional PaletteCommands, grouped
+   *  by their own `group` (e.g. "タスク" / "イベント") and shown ahead of the app/action
+   *  matches. Omit to run the palette in app/action-only mode (e.g. unauthenticated). */
+  contentSearch?: (query: string, signal: AbortSignal) => Promise<PaletteCommand[]>;
 }
 
-export function CommandPalette({ commands, testId = "fe2-cmdk" }: CommandPaletteProps): JSX.Element {
+export function CommandPalette({ commands, testId = "fe2-cmdk", contentSearch }: CommandPaletteProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
+  const [contentResults, setContentResults] = useState<PaletteCommand[]>([]);
+  const [contentLoading, setContentLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -147,12 +162,48 @@ export function CommandPalette({ commands, testId = "fe2-cmdk" }: CommandPalette
     };
   }, [open]);
 
+  // Cross-service CONTENT search (task/event, …): debounced, aborts a stale request
+  // when the query changes again before it resolves, and clears results the moment
+  // the query goes empty (so closing back to the app list is instant, not stale).
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || !contentSearch || !q) {
+      setContentResults([]);
+      setContentLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setContentLoading(true);
+    const timer = setTimeout(() => {
+      contentSearch(q, controller.signal)
+        .then((results) => {
+          if (!controller.signal.aborted) setContentResults(results);
+        })
+        .catch(() => {
+          // A failed content search degrades to "no content matches" — the app/action
+          // list (never network-dependent) stays usable regardless.
+          if (!controller.signal.aborted) setContentResults([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setContentLoading(false);
+        });
+    }, CONTENT_SEARCH_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, open, contentSearch]);
+
   const filtered = useMemo(() => commands.filter((c) => matches(c, query)), [commands, query]);
 
   // With an empty query, float recently-used commands to the top (most-recent first),
   // so the palette opens onto "what you just did" — the common re-navigation path.
+  // With a query, CONTENT matches (already query-matched server/API-side) lead, then
+  // the app/action matches — the whole point of typing is usually to find a specific
+  // task/event, so its result should not be buried below every matching app tile.
   const ordered = useMemo(() => {
-    if (query || recent.length === 0) return filtered;
+    if (query) return [...contentResults, ...filtered];
+    if (recent.length === 0) return filtered;
     const rank = new Map(recent.map((id, i) => [id, i]));
     const recents = filtered
       .filter((c) => rank.has(c.id))
@@ -160,7 +211,7 @@ export function CommandPalette({ commands, testId = "fe2-cmdk" }: CommandPalette
       .map((c) => ({ ...c, group: "最近使った項目" }));
     const rest = filtered.filter((c) => !rank.has(c.id));
     return [...recents, ...rest];
-  }, [filtered, query, recent]);
+  }, [filtered, contentResults, query, recent]);
 
   const sections = useMemo(() => toSections(ordered), [ordered]);
   // Flatten in render order so ↑/↓ traverse the visible list regardless of grouping.
@@ -249,7 +300,7 @@ export function CommandPalette({ commands, testId = "fe2-cmdk" }: CommandPalette
             type="text"
             className="fe2-cmdk-input"
             data-testid={`${testId}-input`}
-            placeholder="アプリやアクションを検索…"
+            placeholder={contentSearch ? "アプリ・タスク・イベントを検索…" : "アプリやアクションを検索…"}
             role="combobox"
             aria-expanded="true"
             aria-controls={listboxId}
@@ -269,9 +320,19 @@ export function CommandPalette({ commands, testId = "fe2-cmdk" }: CommandPalette
           </kbd>
         </div>
 
+        {/* Visually-hidden a11y status: announces content-search progress/result count
+            (the visible list already conveys this to sighted users via groups/empty-state). */}
+        <div role="status" aria-live="polite" className="fe2-cmdk-sr-status">
+          {contentSearch && query
+            ? contentLoading
+              ? "検索中…"
+              : `${contentResults.length}件見つかりました`
+            : ""}
+        </div>
+
         {flat.length === 0 ? (
           <div className="fe2-cmdk-empty" data-testid={`${testId}-empty`}>
-            該当する項目がありません
+            {contentLoading ? "検索中…" : "該当する項目がありません"}
           </div>
         ) : (
           <ul
