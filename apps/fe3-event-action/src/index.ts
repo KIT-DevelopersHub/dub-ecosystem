@@ -15,6 +15,7 @@ export {
 // Shared components/hooks for other units
 export { EventPicker, type EventPickerProps } from "./components/EventPicker";
 export { EventAppHeader } from "./components/EventAppHeader";
+export { EventAuthBridge, type EventAuthBridgeProps } from "./components/EventAuthBridge";
 export { EventDetailsPanel } from "./components/EventDetailsPanel";
 export {
   useCurrentEventId,
