@@ -126,11 +126,12 @@ describe("assembleFeatureModules", () => {
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理 an independent tile; 変更履歴 gone", () => {
+  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理・メールアドレス管理 independent tiles; 変更履歴 gone", () => {
     // 統合: 運営メンバー(member-service) + 名簿(FE7 /admin/users) + 参加届/回答(participation) を
     // 1 タイル「運営メンバー・名簿」(/members) に合体し、共有サブナビ(MemberRosterNav)で横断する。
     // ロール管理(/admin/roles) はそこから括り出して独立ランチャータイルに戻す。変更履歴(/admin/history)
-    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) は従前どおり未登録。
+    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) はPR#245で一度完全
+    // 撤去されたが、ユーザー明示決定で再実装(復活)し独立ランチャータイルに戻った。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
@@ -143,12 +144,16 @@ describe("assembleFeatureModules", () => {
     const rolesNav = registry.nav.find((n) => n.path === "/admin/roles");
     expect(rolesNav?.label).toBe("ロール管理");
     expect(rolesNav?.appId).toBe("admin");
+    // メールアドレス管理も独立タイルとして復活
+    expect(navPaths).toContain("/admin/email-routing");
+    const emailNav = registry.nav.find((n) => n.path === "/admin/email-routing");
+    expect(emailNav?.label).toBe("メールアドレス管理");
+    expect(emailNav?.appId).toBe("admin");
     // 名簿/参加届/回答 は統合タイル内サブナビから開くので個別タイルは無い。変更履歴タイルは消滅。
     expect(navPaths).not.toContain("/admin/users");
     expect(navPaths).not.toContain("/admin/history");
     expect(navPaths).not.toContain("/participation");
     expect(navPaths).not.toContain("/participation/list");
-    expect(navPaths).not.toContain("/admin/email-routing");
     // 他アプリは絶対に減らさない
     expect(navPaths).toEqual(
       expect.arrayContaining([
@@ -162,15 +167,17 @@ describe("assembleFeatureModules", () => {
         "/members",
         "/driveshare",
         "/admin/roles",
+        "/admin/email-routing",
       ]),
     );
-    // admin/participation routes（名簿/ロール/参加届/回答）は保持（統合ナビ + deep-link 生存）。
+    // admin/participation routes（名簿/ロール/メール/参加届/回答）は保持（統合ナビ + deep-link 生存）。
     // 変更履歴ルート(/admin/history) は撤去済みなので存在しないこと。
     const routePaths = registry.routes.map((r) => r.path);
     expect(routePaths).toEqual(
       expect.arrayContaining([
         "/admin/users",
         "/admin/roles",
+        "/admin/email-routing",
         "/participation",
         "/participation/list",
         "/members",
