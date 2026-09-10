@@ -22,8 +22,9 @@ import type {
   RosterUser,
   SyncEmailRoutingResult,
   EmailRoutingSyncPreview,
-  CreateEmailAddressRequest,
   EmailRoutingAddress,
+  CreateEmailAddressRequest,
+  UpdateEmailAddressRequest,
 } from "../contracts/pending";
 
 /** The mail-gateway proxy answers 503 with this code when the CF token is unset.
@@ -383,10 +384,19 @@ export function useSyncEmailRouting() {
   });
 }
 
-// ---- Email Routing (@developershub.jp address issuance, used by the roster) ----
+// ---- Email Routing (@developershub.jp address management) ----
+
+/** List issued @developershub.jp addresses — powers the メールアドレス管理 screen
+ *  (admin console, gated `mail:admin`) as well as anywhere else that needs the raw
+ *  issued-address list (the roster itself reads roster-addresses separately). */
+export function useEmailAddresses(): UseQueryResult<common.Paginated<EmailRoutingAddress>> {
+  const { api } = useRosterContext();
+  return useQuery({ queryKey: queryKeys.emailAddresses(), queryFn: () => api.listEmailAddresses() });
+}
 
 /** NON-optimistic: issue a new @developershub.jp address (create Email Routing rule).
- *  Used by the roster's NewEmailAddressDialog (name-book), which re-syncs after issue. */
+ *  Used by the roster's NewEmailAddressDialog (name-book), which re-syncs after issue,
+ *  and by メールアドレス管理's own "発行" action. */
 export function useCreateEmailAddress() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
@@ -396,24 +406,38 @@ export function useCreateEmailAddress() {
   });
 }
 
-/** List the issued @developershub.jp RECEIVING addresses (zone-scoped routing rules) —
- *  the counterpart read for the「発行済みアドレス」management surface (delete pairs with
- *  NewEmailAddressDialog's issue). */
-export function useEmailAddresses(): UseQueryResult<common.Paginated<EmailRoutingAddress>> {
+/** NON-optimistic (mirrors `user.status`'s await-server policy): enable/disable an
+ *  issued address. Re-pointing the destination is no longer offered — the forward
+ *  target is fixed server-side to the mail Worker. */
+export function useUpdateEmailAddress() {
   const { api } = useRosterContext();
-  return useQuery({ queryKey: queryKeys.emailAddresses(), queryFn: () => api.listEmailAddresses() });
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (input: { id: string; req: UpdateEmailAddressRequest }) => api.updateEmailAddress(input.id, input.req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+    onError: (err) => {
+      const p = presentError(err);
+      toast({ kind: "error", title: "更新に失敗しました", description: "message" in p ? p.message : undefined });
+    },
+  });
 }
 
-/** Delete (revoke) an issued @developershub.jp address = drop its Email Routing rule.
- *  The counterpart to useCreateEmailAddress. The optimistic hide + undo window are owned
- *  by IssuedAddressesDialog (deferred commit); this hook just fires the DELETE and
- *  reconciles the cache on settle (a rolled-back/failed delete restores the row). */
+/** NON-optimistic: delete an issued address (destructive; called after ConfirmDialog). */
 export function useDeleteEmailAddress() {
   const { api } = useRosterContext();
   const qc = useQueryClient();
+  const { toast } = useToast();
   return useMutation({
     mutationFn: (id: string) => api.deleteEmailAddress(id),
-    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() });
+      toast({ kind: "success", title: "アドレスを削除しました" });
+    },
+    onError: (err) => {
+      const p = presentError(err);
+      toast({ kind: "error", title: "削除に失敗しました", description: "message" in p ? p.message : undefined });
+    },
   });
 }
 

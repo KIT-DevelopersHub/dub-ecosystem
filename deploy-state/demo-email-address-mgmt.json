@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "email-address-mgmt",
+  "worker": "dub-demo-email-address-mgmt",
+  "url": "https://dub-demo-email-address-mgmt.developershub-site.workers.dev",
+  "deployedSha": "d994fee5",
+  "branch": "feat/email-address-mgmt",
+  "actor": "kota",
+  "markers": ["fe7-email-header","fe7-email-new","fe7-email-toggle-","member-roster-subnav"],
+  "live": true,
+  "verifiedAt": "2026-09-10T13:15:09Z",
+  "updatedAt": "2026-09-10T13:15:09Z",
+  "note": "メールアドレス管理を運営メンバー・名簿の共有サブナビにタブ統合(ダッシュボード独立タイル案は却下されたため撤回)"
+}

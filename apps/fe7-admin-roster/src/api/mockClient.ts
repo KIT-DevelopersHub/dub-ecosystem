@@ -423,6 +423,14 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       s.members[idx] = updated;
       return updated as unknown as T;
     }
+    const emailMatch = path.match(/\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
+    if (emailMatch) {
+      const addr = s.emailAddresses.find((a) => a.id === emailMatch[1]!);
+      if (!addr) throw err("NOT_FOUND", "address not found");
+      const req = body as { enabled?: boolean };
+      if (req.enabled !== undefined) addr.enabled = req.enabled;
+      return addr as unknown as T;
+    }
     throw err("NOT_FOUND", `unhandled PATCH ${path}`);
   }
 

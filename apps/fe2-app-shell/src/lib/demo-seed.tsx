@@ -896,9 +896,9 @@ function createRosterStore() {
       if (pathname === "/api/v1/mail/status") {
         return json({ service: "mail-gateway", provider: "resend", rateLimit: { active: false, cooldownSec: 60 } });
       }
-      // 発行済み受信アドレス一覧（メール名簿の「発行済みアドレス」ダイアログ）。バックエンドの
-      // /issued-addresses（zone ルール由来）に合わせる。旧 /addresses（アカウント送信先）はもう
-      // フロントから呼ばれない。
+      // 発行済み受信アドレス一覧（メール名簿の「発行済みアドレス」ダイアログ／メールアドレス管理
+      // 画面が共有）。バックエンドの /issued-addresses（zone ルール由来）に合わせる。旧
+      // /addresses（アカウント送信先）はもうフロントから呼ばれない。
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
       // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
       if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
@@ -952,7 +952,7 @@ function createRosterStore() {
         // Forward target is fixed to the mail Worker — the caller no longer supplies one.
         const addr: DemoEmailAddress = { id: rid("eml"), localPart, address: `${localPart}@${EMAIL_DOMAIN}`, destination: MAIL_WORKER_DESTINATION, enabled: true, createdAt: new Date().toISOString() };
         emails.push(addr);
-        return json(addr);
+        return json({ ...addr, confirmationEmailSent: true });
       }
       return null;
     }
@@ -987,6 +987,9 @@ function createRosterStore() {
         if (id) {
           const addr = emails.find((a) => a.id === id);
           if (!addr) return problem("NOT_FOUND", "address not found", 404);
+          // issued-addresses only supports the enable/disable toggle server-side
+          // (destination is fixed to the mail Worker); /addresses (legacy) still
+          // accepts a destination re-point for back-compat with existing callers.
           const req = body as { enabled?: boolean; destination?: string };
           if (req?.destination !== undefined) {
             if (!EMAIL_RE.test(req.destination)) return problem("VALIDATION_FAILED", "転送先のメール形式が不正です", 400, [{ field: "destination", reason: "format" }]);
