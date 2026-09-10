@@ -23,6 +23,7 @@ import { UserInlineEditor } from "./UserInlineEditor";
 import { InlineRoleEditor } from "./InlineRoleEditor";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
+import { IssuedAddressesDialog } from "./IssuedAddressesDialog";
 import { SyncPreviewDialog } from "./SyncPreviewDialog";
 import { MemberLinkDialog } from "./MemberLinkDialog";
 import {
@@ -97,6 +98,7 @@ export function UserListPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
+  const [manageAddressesOpen, setManageAddressesOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkAccount, setLinkAccount] = useState<RosterUser | null>(null);
   const { can } = usePermissions();
@@ -244,6 +246,11 @@ export function UserListPage() {
                 アドレスを発行
               </Button>
             ) : null}
+            {canManageRouting ? (
+              <Button variant="secondary" onClick={() => setManageAddressesOpen(true)} testId="fe7-users-manage-addresses">
+                発行済みアドレス
+              </Button>
+            ) : null}
             {canInvite ? (
               <Button variant="secondary" onClick={() => setInviteOpen(true)} testId="fe7-users-invite">
                 ユーザーを招待
@@ -375,6 +382,7 @@ export function UserListPage() {
         onClose={() => setIssueOpen(false)}
         onCreated={openPreview}
       />
+      <IssuedAddressesDialog open={manageAddressesOpen} onClose={() => setManageAddressesOpen(false)} />
       <SyncPreviewDialog
         open={previewOpen}
         preview={preview.data ?? null}

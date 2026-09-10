@@ -896,7 +896,14 @@ function createRosterStore() {
       if (pathname === "/api/v1/mail/status") {
         return json({ service: "mail-gateway", provider: "resend", rateLimit: { active: false, cooldownSec: 60 } });
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") return json(page(emails));
+      // 発行済み受信アドレス一覧（メール名簿の「発行済みアドレス」ダイアログ／メールアドレス管理
+      // 画面が共有）。バックエンドの /issued-addresses（zone ルール由来）に合わせる。旧
+      // /addresses（アカウント送信先）はもうフロントから呼ばれない。
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
+      // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
+      if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
+        return json({ items: emails.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })) });
+      }
       return null;
     }
 
@@ -937,7 +944,7 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         return json(user);
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") {
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
         const localPart = req?.localPart?.trim().toLowerCase() ?? "";
         if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
@@ -945,7 +952,7 @@ function createRosterStore() {
         // Forward target is fixed to the mail Worker — the caller no longer supplies one.
         const addr: DemoEmailAddress = { id: rid("eml"), localPart, address: `${localPart}@${EMAIL_DOMAIN}`, destination: MAIL_WORKER_DESTINATION, enabled: true, createdAt: new Date().toISOString() };
         emails.push(addr);
-        return json(addr);
+        return json({ ...addr, confirmationEmailSent: true });
       }
       return null;
     }
@@ -976,10 +983,13 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const addr = emails.find((a) => a.id === id);
           if (!addr) return problem("NOT_FOUND", "address not found", 404);
+          // issued-addresses only supports the enable/disable toggle server-side
+          // (destination is fixed to the mail Worker); /addresses (legacy) still
+          // accepts a destination re-point for back-compat with existing callers.
           const req = body as { enabled?: boolean; destination?: string };
           if (req?.destination !== undefined) {
             if (!EMAIL_RE.test(req.destination)) return problem("VALIDATION_FAILED", "転送先のメール形式が不正です", 400, [{ field: "destination", reason: "format" }]);
@@ -1023,7 +1033,7 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const idx = emails.findIndex((a) => a.id === id);
           if (idx >= 0) emails.splice(idx, 1);
