@@ -100,5 +100,68 @@ describe("homeLayout", () => {
       expect(spanStyle("medium")).toEqual({ gridColumn: "span 2", gridRow: "span 1" });
       expect(spanStyle("large")).toEqual({ gridColumn: "span 2", gridRow: "span 2" });
     });
+
+    // ── area-equivalence swap: 小2=中1, 中2=大1 (iOS 風) ───────────────────────────
+    // The whole "mixed sizes interchange in the same grid" feature rests on this one
+    // invariant: each size's cell-area (col-span × row-span) is exactly double the
+    // one below it. As long as this holds, a native CSS Grid with `grid-auto-flow:
+    // dense` back-fills a same-area group (2 small ⇄ 1 medium, 2 medium ⇄ 1 large,
+    // 1 medium + 2 small ⇄ 1 large) with no custom bin-packing code — see
+    // HomeEditableRegion/global.css. This test is the regression guard for that
+    // invariant so nobody can change WIDGET_SIZE_SPAN and silently break the ratio.
+    it("cell-area doubles at each size step (小1 = 中2分の1 = 大4分の1)", () => {
+      const area = (s: WidgetSize) => {
+        const span = spanStyle(s);
+        const cols = Number(span.gridColumn.replace("span ", ""));
+        const rows = Number(span.gridRow.replace("span ", ""));
+        return cols * rows;
+      };
+      const small = area("small");
+      const medium = area("medium");
+      const large = area("large");
+      expect(small).toBe(1);
+      expect(medium).toBe(small * 2);
+      expect(large).toBe(medium * 2);
+      expect(large).toBe(small * 4);
+    });
+
+    // ── swap成立: サイズをまたいだ並べ替えが region 越境なしで成立する ──────────────────
+    // mergeRegionOrder/regionOrdered never look at size — a drag that moves a small
+    // widget to where a medium widget sat (or vice versa) is just an array move; the
+    // resulting grid position comes from the browser's dense-fill, not from this
+    // logic. This proves the order layer stays size-agnostic so that swap works for
+    // ANY size combination without special-casing.
+    it("reordering across mixed sizes never depends on size and never crosses regions", () => {
+      const mixed: HomeWidgetMeta[] = [
+        { id: "side-large", label: "大", region: "side", defaultSize: "large" },
+        { id: "side-medium-1", label: "中1", region: "side", defaultSize: "medium" },
+        { id: "side-medium-2", label: "中2", region: "side", defaultSize: "medium" },
+        { id: "side-small-1", label: "小1", region: "side", defaultSize: "small" },
+        { id: "side-small-2", label: "小2", region: "side", defaultSize: "small" },
+        { id: "kpi-only", label: "K", region: "kpi" },
+      ];
+      // Drag "小1"+"小2" to sit where "中1" was (i.e. right after "大", before "中1"):
+      // the same area-swap the user does by hand (小2つ ⇄ 中1つ).
+      const next = mergeRegionOrder(mixed, [], "side", [
+        "side-large",
+        "side-small-1",
+        "side-small-2",
+        "side-medium-1",
+        "side-medium-2",
+      ]);
+      expect(regionOrdered(mixed, next, "side").map((w) => w.id)).toEqual([
+        "side-large",
+        "side-small-1",
+        "side-small-2",
+        "side-medium-1",
+        "side-medium-2",
+      ]);
+      // The untouched kpi region is unaffected — no cross-region leakage from the swap.
+      expect(regionOrdered(mixed, next, "kpi").map((w) => w.id)).toEqual(["kpi-only"]);
+      // sizeOf keeps reporting each widget's own size — reordering never mutates it.
+      expect(sizeOf(mixed, {}, "side-small-1")).toBe("small");
+      expect(sizeOf(mixed, {}, "side-medium-1")).toBe("medium");
+      expect(sizeOf(mixed, {}, "side-large")).toBe("large");
+    });
   });
 });
