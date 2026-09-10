@@ -18,7 +18,8 @@
 // messages (which do not contain the token). A missing zone/account id for the
 // requested operation is a 503 (mis-provisioned), distinct from a bad request (400).
 import { DubError } from "@dub/errors";
-import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
+import { consoleSink } from "@dub/observability";
+import { DEFAULT_SEND_TIMEOUT_MS, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 import { parseTimeoutMs } from "./resilience";
 
@@ -307,7 +308,18 @@ export class CfEmailRoutingClient {
 
     const parsed = (await res.json().catch(() => null)) as CfEnvelope<T> | null;
     if (!res.ok || !parsed || parsed.success !== true) {
-      throw new DubError("MAIL_EMAIL_ROUTING_UPSTREAM", cfErrorDetail(res.status, parsed, res.statusText || "request rejected"), {
+      const detail = cfErrorDetail(res.status, parsed, res.statusText || "request rejected");
+      // The client-facing 502 is redacted to "Internal error" (5xx redaction policy —
+      // see @dub/errors toErrorResponse), so log the token-free detail server-side or
+      // this failure mode is impossible to diagnose from the outside (bit us once: the
+      // admin UI toggle 502'd with no visible cause until this was added + wrangler tail).
+      consoleSink({
+        level: "error",
+        message: "mail-gateway: Cloudflare Email Routing API call rejected",
+        service: SERVICE_NAME,
+        fields: { method, path, status: res.status, detail },
+      });
+      throw new DubError("MAIL_EMAIL_ROUTING_UPSTREAM", detail, {
         status: 502,
         retryable: res.status >= 500 || res.status === 429,
       });
@@ -347,9 +359,30 @@ export class CfEmailRoutingClient {
     return env.result;
   }
 
+  async getRule(id: string): Promise<CfRoutingRule> {
+    const zone = this.requireZone();
+    const env = await this.call<CfRoutingRule>("GET", `/zones/${zone}/email/routing/rules/${encodeURIComponent(id)}`);
+    return env.result;
+  }
+
   async updateRule(id: string, patch: UpdateRuleInput): Promise<CfRoutingRule> {
     const zone = this.requireZone();
-    const env = await this.call<CfRoutingRule>("PATCH", `/zones/${zone}/email/routing/rules/${encodeURIComponent(id)}`, patch);
+    // Cloudflare's Email Routing Rules API has no PATCH verb on this resource — the
+    // "Update Email Routing Rule" operation is PUT, and PUT REPLACES the whole rule:
+    // confirmed live against the real API (see wrangler tail on dub-mail-gateway-staging)
+    // that a body carrying only the changed field (e.g. { enabled }) 422s with
+    // "Invalid Input: actions: must have actions; matchers: must have matchers." So
+    // fetch the current rule and merge the patch on top before PUTting the full body —
+    // callers (the admin UI's enable/disable toggle) can still pass a partial patch.
+    const current = await this.getRule(id);
+    const merged: CreateRuleInput = {
+      name: patch.name ?? current.name,
+      enabled: patch.enabled ?? current.enabled,
+      matchers: patch.matchers ?? current.matchers,
+      actions: patch.actions ?? current.actions,
+      ...((patch.priority ?? current.priority) !== undefined ? { priority: patch.priority ?? current.priority } : {}),
+    };
+    const env = await this.call<CfRoutingRule>("PUT", `/zones/${zone}/email/routing/rules/${encodeURIComponent(id)}`, merged);
     return env.result;
   }
 
