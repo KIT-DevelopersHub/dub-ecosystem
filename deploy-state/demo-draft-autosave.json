@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "draft-autosave",
+  "worker": "dub-demo-draft-autosave",
+  "url": "https://dub-demo-draft-autosave.developershub-site.workers.dev",
+  "deployedSha": "9b373f40",
+  "branch": "feat/p1-2-draft-autosave",
+  "actor": "kota",
+  "markers": ["data-p12-role-draft-fix"],
+  "live": true,
+  "verifiedAt": "2026-09-10T11:13:25Z",
+  "updatedAt": "2026-09-10T11:13:25Z",
+  "note": "P1-2 bugfix: draft autosave/leave-guard wired into RolePermissionsEditor (the actual reachable role-edit UI)"
+}
