@@ -4,18 +4,31 @@
 //
 // Create-mode and the standalone /admin/roles/new screen still live in RoleEditorPage;
 // this component only edits an already-loaded role.
+//
+// P1-2 fix: this is the ONLY reachable "ロール編集" surface (RoleListPage no longer
+// navigates to RoleEditorPage for existing roles — see routes.tsx), but the original
+// P1-2 commit wired the autosave/leave-guard into RoleEditorPage's dead edit branch
+// instead. Reloading mid-edit here lost all changes with no warning. Wired directly
+// here so it protects the actual UI users touch.
 import { useState } from "react";
 import type { identity } from "@dub/types";
 import { TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
+import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { PermissionMatrix } from "./PermissionMatrix";
 import { usePermissionCatalog, useUpdateRole } from "../hooks/useRosterApi";
 import { usePermissions } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
 import { errorMessage } from "../lib/errorDisplay";
+import { UnsavedChangesGuard } from "../lib/UnsavedChangesGuard";
 
 const noteStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, marginTop: 8 };
 const actionsStyle: React.CSSProperties = { marginTop: 12 };
+
+interface RoleDraft {
+  name: string;
+  permissions: identity.PermissionKey[];
+}
 
 export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   const catalog = usePermissionCatalog();
@@ -23,10 +36,16 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   const { can } = usePermissions();
   const { toast } = useToast();
 
-  // Each editor instance seeds from its own role; it is mounted only while expanded,
-  // so opening a different role always starts from that role's saved state.
-  const [name, setName] = useState(role.name);
-  const [perms, setPerms] = useState<identity.PermissionKey[]>([...role.permissions]);
+  // Same storageKey shape as RoleEditorPage's edit branch (fe7.role.<id>) so a stray
+  // draft written by either surface is still found and restored.
+  const draftKey = `fe7.role.${role.id}`;
+  const initialDraft = peekDraft<RoleDraft>(draftKey);
+
+  // Each editor instance seeds from its own role (or a restored draft, which wins);
+  // it is mounted only while expanded, so opening a different role always starts
+  // from that role's saved state.
+  const [name, setName] = useState(initialDraft?.name ?? role.name);
+  const [perms, setPerms] = useState<identity.PermissionKey[]>(initialDraft?.permissions ?? [...role.permissions]);
   const [confirmSave, setConfirmSave] = useState(false);
 
   // System roles are now editable by admins; only the identity:admin authz gate
@@ -36,6 +55,18 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   const lockedKeys = lockedKeysForRole(role);
   // testid namespace so multiple accordions never collide (matrix keys are shared).
   const ns = `fe7-role-${role.id}`;
+
+  // Dirty relative to the pristine baseline (server role). `role` is always loaded by
+  // the time this component mounts (RoleListPage only renders it once `active` exists),
+  // so there is no async-race window where this evaluates false while the user has
+  // already typed (unlike the old roleId-edit branch in RoleEditorPage).
+  const dirty = !!buildRoleUpdate({ name: role.name, permissions: role.permissions }, { name, permissions: perms });
+  const draft = useDraftAutosave<RoleDraft>({
+    storageKey: draftKey,
+    value: { name, permissions: perms },
+    dirty,
+    enabled: !readOnly,
+  });
 
   function save() {
     setConfirmSave(false);
@@ -50,13 +81,24 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
       return;
     }
     update.mutate(patch, {
-      onSuccess: () => toast({ kind: "success", title: "ロールを保存しました" }),
+      onSuccess: () => { draft.clear(); toast({ kind: "success", title: "ロールを保存しました" }); },
       onError: (err) => toast({ kind: "error", title: "保存に失敗しました", description: errorMessage(err) }),
     });
   }
 
   return (
     <div data-testid={`fe7-role-inline-${role.id}`}>
+      <UnsavedChangesGuard when={dirty} testId={`${ns}-leave-confirm`} />
+      <DraftRestoredNotice
+        visible={draft.restoredVisible}
+        onDiscard={() => {
+          draft.clear();
+          setName(role.name);
+          setPerms([...role.permissions]);
+        }}
+        onKeep={draft.acknowledgeRestored}
+        testId={`${ns}-draft-notice`}
+      />
       {!role.isSystem ? (
         <FormField label="ロール名" htmlFor={`${ns}-name`}>
           <TextField id={`${ns}-name`} value={name} onChange={(v) => setName(v)} disabled={readOnly} testId={`${ns}-name`} />
