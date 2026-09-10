@@ -6,6 +6,7 @@ import { Tabs } from "../src/components/Tabs";
 import { EmptyState, ErrorState, SkeletonLoader } from "../src/components/States";
 import { Tooltip, Popover } from "../src/components/Tooltip";
 import { Card, Divider, PageHeader } from "../src/components/Layout";
+import { Breadcrumbs } from "../src/components/Breadcrumbs";
 
 describe("testId passthrough (e2e contract 凍結案 1-7)", () => {
   it("forwards testId to the DOM data-testid across components", () => {
@@ -148,5 +149,76 @@ describe("PageHeader", () => {
     expect(screen.getByRole("heading", { name: "タイトル" })).toBeInTheDocument();
     expect(screen.getByText("説明")).toBeInTheDocument();
     expect(screen.getByText("新規")).toBeInTheDocument();
+  });
+
+  it("renders the breadcrumbs slot above the title", () => {
+    render(
+      <PageHeader
+        title="ロールを編集"
+        breadcrumbs={<Breadcrumbs testId="ph-crumbs" items={[{ label: "ロール管理" }, { label: "ロールを編集" }]} />}
+      />,
+    );
+    expect(screen.getByTestId("ph-crumbs")).toBeInTheDocument();
+  });
+});
+
+describe("Breadcrumbs (P2-1 深い階層の現在地/戻る導線)", () => {
+  it("renders nothing for an empty trail", () => {
+    const { container } = render(<Breadcrumbs items={[]} />);
+    expect(container.querySelector("nav")).toBeNull();
+  });
+
+  it("marks the last item as the current page and never links it", () => {
+    render(
+      <Breadcrumbs
+        testId="bc"
+        items={[
+          { label: "イベント", onClick: () => {} },
+          { label: "現在地", onClick: () => {} },
+        ]}
+      />,
+    );
+    // last crumb is aria-current and rendered as text, not a button
+    const current = screen.getByText("現在地");
+    expect(current.closest('[aria-current="page"]')).not.toBeNull();
+    expect(current.closest("button")).toBeNull();
+    // exactly one clickable ancestor (the non-last item)
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("invokes an ancestor's onClick when it is activated (戻る)", async () => {
+    const onClick = vi.fn();
+    render(
+      <Breadcrumbs
+        items={[
+          { label: "イベント", onClick },
+          { label: "アクション詳細" },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "イベント" }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes an accessible nav landmark and per-item testIds", () => {
+    render(
+      <Breadcrumbs
+        testId="bc"
+        items={[{ label: "親", onClick: () => {} }, { label: "子" }]}
+      />,
+    );
+    expect(screen.getByRole("navigation", { name: "パンくずリスト" })).toBeInTheDocument();
+    expect(screen.getByTestId("bc-item-0")).toBeInTheDocument();
+    expect(screen.getByTestId("bc-item-1")).toBeInTheDocument();
+  });
+
+  it("wraps ancestors with renderLink when provided (router injection)", () => {
+    render(
+      <Breadcrumbs
+        items={[{ label: "親", href: "/parent" }, { label: "子" }]}
+        renderLink={(item, node) => <a href={item.href} data-testid="injected-link">{node}</a>}
+      />,
+    );
+    expect(screen.getByTestId("injected-link")).toHaveAttribute("href", "/parent");
   });
 });
