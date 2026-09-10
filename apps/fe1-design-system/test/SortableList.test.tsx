@@ -65,4 +65,38 @@ describe("SortableList", () => {
     // overlay clone carries a duplicate handle only while dragging — none at rest
     expect(screen.getAllByTestId("handle-a")).toHaveLength(1);
   });
+
+  // reorderMode="swap" (dashboard mixed-size widget grid — see HomeEditableRegion):
+  // wires dnd-kit's rectSwappingStrategy instead of the default vertical/rect
+  // strategy so a variable-size CSS Grid drag exchanges exactly the dragged item and
+  // its drop target, leaving every other row untouched. dnd-kit's pointer drag itself
+  // can't be simulated meaningfully under jsdom (no real layout/rects) — the actual
+  // swap behavior is proven end-to-end in a real browser by
+  // apps/fe2-app-shell/e2e/home-widget-area-swap-mutual.spec.ts. This is a wiring
+  // smoke test: the prop is accepted and renders without error.
+  it("renders without error when reorderMode is 'swap'", () => {
+    render(
+      <SortableList<Row>
+        items={ITEMS}
+        getItemId={(r) => r.id}
+        onReorder={() => {}}
+        reorderMode="swap"
+        strategy="rect"
+        testId="swap-list"
+        aria-label="rows"
+        getItemStyle={(r) => ({ gridColumn: r.id === "a" ? "span 2" : "span 1" })}
+        renderItem={(r, ctx) => (
+          <div data-testid={`row-${r.id}`}>
+            <button type="button" data-testid={`handle-${r.id}`} {...ctx.dragHandleProps}>
+              ⠿
+            </button>
+            {r.label}
+          </div>
+        )}
+      />,
+    );
+    const list = screen.getByTestId("swap-list");
+    expect(within(list).getByText("Alpha")).toBeInTheDocument();
+    expect(within(list).getByText("Charlie")).toBeInTheDocument();
+  });
 });
