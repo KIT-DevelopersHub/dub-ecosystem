@@ -73,6 +73,7 @@ export const APP_MANIFEST = [
   { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"], access: { view: "app:members:view", edit: "app:members:edit" } },
   { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], access: { view: "app:participation:view", edit: "app:participation:edit" }, openToAllAuthenticated: true },
   { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true },
+  { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" } },
   { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" } },
 ] as const satisfies readonly AppManifestEntry[];
 
