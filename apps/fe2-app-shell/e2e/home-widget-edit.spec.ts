@@ -80,3 +80,71 @@ test("編集モード: pointer drag, keyboard reorder, and persistence across re
   const reloadedOrder = await kpiOrder(page);
   expect(reloadedOrder).toEqual(liveOrder);
 });
+
+// P3-4: iOS 風 3 サイズ (small/medium/large) — a tile can be resized, mixed sizes
+// reorder together in the same grid, and the choice persists across reload.
+test("編集モード: resize a tile to 大, mix sizes while reordering, and persist across reload", async ({ page }) => {
+  // The 編集モード jiggle (a continuous rotate animation on every tile, like iOS) keeps
+  // Playwright's `.click()` actionability check from ever seeing the size-picker
+  // buttons as "stable" — reduced-motion is exactly the escape hatch the CSS already
+  // wires up (`@media (prefers-reduced-motion: reduce)` drops the jiggle), and the
+  // pointer-drag test above deliberately drives raw mouse events instead, so this is
+  // the only spec that needs it.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await expect(page.getByTestId("fe2-home")).toBeVisible();
+  await expect(page.getByTestId("fe2-kpi-members")).toBeVisible();
+
+  await page.getByTestId("fe2-home-edit-toggle").click();
+  await expect(page.getByTestId("fe2-home")).toHaveAttribute("data-editing", "true");
+
+  // Every KPI tile starts 小 (small) — the size picker is present per-widget.
+  await expect(page.getByTestId("fe2-widget-size-kpi-countdown-small")).toHaveAttribute("aria-selected", "true");
+
+  // Switch the first tile to 大 (large) — its span grows to a 2x2 block.
+  await page.getByTestId("fe2-widget-size-kpi-countdown-large").click();
+  await expect(page.getByTestId("fe2-widget-size-kpi-countdown-large")).toHaveAttribute("aria-selected", "true");
+  // `grid-row: span 2` (a single-value shorthand) sets grid-row-START to "span 2" and
+  // leaves grid-row-end at its "auto" default — the span itself lives on the start
+  // property's computed value. It's set on the SortableList ROW (getItemStyle) — the
+  // actual CSS Grid item — which is the parent of the `fe2-widget-edit-*` chrome div.
+  const largeStyle = await page
+    .getByTestId("fe2-widget-edit-kpi-countdown")
+    .evaluate((el) => getComputedStyle(el.parentElement!).gridRowStart);
+  expect(largeStyle).toContain("span 2");
+
+  // Reorder still works with mixed sizes in play (drag the now-大 tile past its neighbour).
+  // Measure the WHOLE tile (not the small drag-handle icon) for the overlay-size check below.
+  const fromTileBox = await page.getByTestId("fe2-widget-edit-kpi-countdown").boundingBox();
+  const fromHandle = page.getByTestId("fe2-widget-handle-kpi-countdown");
+  const toHandle = page.getByTestId("fe2-widget-handle-kpi-tasks");
+  const fromBox = await fromHandle.boundingBox();
+  const toBox = await toHandle.boundingBox();
+  if (!fromBox || !toBox || !fromTileBox) throw new Error("drag handles/tile not measurable");
+  await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
+  await page.mouse.down();
+  // While dragging, the floating overlay clone is sized to match the WHOLE source tile
+  // (regression guard for "the lifted tile looks like a different size/shape") — not
+  // just the small handle icon that started the drag.
+  await page.mouse.move(fromBox.x + fromBox.width / 2 + 30, fromBox.y + fromBox.height / 2 + 10, { steps: 5 });
+  const overlay = page.getByTestId("fe2-home-kpis-overlay");
+  await expect(overlay).toBeVisible();
+  const overlayBox = await overlay.boundingBox();
+  expect(overlayBox).toBeTruthy();
+  expect(Math.abs((overlayBox?.width ?? 0) - fromTileBox.width)).toBeLessThan(4);
+  expect(Math.abs((overlayBox?.height ?? 0) - fromTileBox.height)).toBeLessThan(4);
+  await page.mouse.move(toBox.x + toBox.width / 2, toBox.y + toBox.height / 2, { steps: 10 });
+  await page.mouse.up();
+  // Let the drop settle (SortableList's drop animation) before the next click — a
+  // click mid-animation lands fine functionally, but waiting keeps this deterministic.
+  await page.waitForTimeout(350);
+
+  await page.getByTestId("fe2-home-edit-toggle").click();
+  await expect(page.getByTestId("fe2-home")).toHaveAttribute("data-editing", "false");
+
+  // Persists: reload and the tile is still 大.
+  await page.reload();
+  await expect(page.getByTestId("fe2-home")).toBeVisible();
+  await page.getByTestId("fe2-home-edit-toggle").click();
+  await expect(page.getByTestId("fe2-widget-size-kpi-countdown-large")).toHaveAttribute("aria-selected", "true");
+});

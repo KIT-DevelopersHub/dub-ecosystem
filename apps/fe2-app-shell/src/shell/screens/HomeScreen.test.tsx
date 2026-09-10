@@ -142,18 +142,18 @@ describe("HomeScreen", () => {
   describe("編集モード (P3-3)", () => {
     beforeEach(() => {
       localStorage.clear();
-      useUiStore.setState({ homeDensity: "comfortable", homeLayout: { order: [], hidden: [] } });
+      useUiStore.setState({ homeDensity: "comfortable", homeLayout: { order: [], hidden: [], sizes: {} } });
     });
 
     it("reflects the persisted density on the dashboard root", async () => {
-      useUiStore.setState({ homeDensity: "compact", homeLayout: { order: [], hidden: [] } });
+      useUiStore.setState({ homeDensity: "compact", homeLayout: { order: [], hidden: [], sizes: {} } });
       render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
       await waitFor(() => expect(screen.getByTestId("fe2-kpi-members-value")).toHaveTextContent("12"));
       expect(screen.getByTestId("fe2-home")).toHaveAttribute("data-density", "compact");
     });
 
     it("hides a widget the viewer has hidden and keeps the rest", async () => {
-      useUiStore.setState({ homeLayout: { order: [], hidden: ["kpi-members", "card-usage"] } });
+      useUiStore.setState({ homeLayout: { order: [], hidden: ["kpi-members", "card-usage"], sizes: {} } });
       render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
       await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toBeInTheDocument());
       expect(screen.queryByTestId("fe2-kpi-members")).not.toBeInTheDocument();
@@ -164,7 +164,7 @@ describe("HomeScreen", () => {
     });
 
     it("renders KPI tiles in the viewer's saved order", async () => {
-      useUiStore.setState({ homeLayout: { order: ["kpi-members", "kpi-countdown"], hidden: [] } });
+      useUiStore.setState({ homeLayout: { order: ["kpi-members", "kpi-countdown"], hidden: [], sizes: {} } });
       render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
       await waitFor(() => expect(screen.getByTestId("fe2-kpi-members")).toBeInTheDocument());
       const ids = Array.from(screen.getByTestId("fe2-home-kpis").children).map((el) => el.getAttribute("data-testid"));
@@ -230,13 +230,13 @@ describe("HomeScreen", () => {
     });
 
     it("既定に戻す resets order/hidden/density from inside 編集モード", async () => {
-      useUiStore.setState({ homeDensity: "compact", homeLayout: { order: [], hidden: ["kpi-members"] } });
+      useUiStore.setState({ homeDensity: "compact", homeLayout: { order: [], hidden: ["kpi-members"], sizes: {} } });
       render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
       await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toBeInTheDocument());
       expect(screen.queryByTestId("fe2-kpi-members")).not.toBeInTheDocument();
       fireEvent.click(screen.getByTestId("fe2-home-edit-toggle"));
       fireEvent.click(screen.getByTestId("fe2-home-edit-reset"));
-      expect(useUiStore.getState().homeLayout).toEqual({ order: [], hidden: [] });
+      expect(useUiStore.getState().homeLayout).toEqual({ order: [], hidden: [], sizes: {} });
       expect(useUiStore.getState().homeDensity).toBe("comfortable");
       expect(screen.getByTestId("fe2-widget-edit-kpi-members")).toHaveAttribute("data-hidden", "false");
     });

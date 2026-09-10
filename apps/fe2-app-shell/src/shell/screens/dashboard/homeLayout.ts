@@ -12,10 +12,63 @@
 export const HOME_REGIONS = ["kpi", "cards", "apps", "side"] as const;
 export type HomeRegion = (typeof HOME_REGIONS)[number];
 
+// ---- widget size (P3-4: iOS 風 3 サイズ) ------------------------------------------
+// Each resizable widget can be small / medium / large, expressed as a CSS Grid span
+// (columns x rows) so a region's grid can freely mix sizes and pack the gaps with
+// `grid-auto-flow: dense`. Modeled on the iOS ホーム画面ウィジェット 3 段階— small is a
+// single cell, medium is a wide single row, large is a big 2x2 block.
+export const HOME_WIDGET_SIZES = ["small", "medium", "large"] as const;
+export type WidgetSize = (typeof HOME_WIDGET_SIZES)[number];
+
+export const WIDGET_SIZE_SPAN: Record<WidgetSize, { col: number; row: number }> = {
+  small: { col: 1, row: 1 },
+  medium: { col: 2, row: 1 },
+  large: { col: 2, row: 2 },
+};
+
+/** CSS Grid span for a widget's effective size, ready to spread into a `style` object.
+ *  Only takes effect on an element that is actually a direct child of a CSS Grid
+ *  container — harmless (ignored) anywhere else, so it is safe to apply unconditionally
+ *  to a widget's own root node regardless of whether the dashboard is resting or being
+ *  edited (in 編集モード the true grid item is the SortableList row wrapper instead —
+ *  see HomeEditableRegion's `getItemStyle`). */
+export function spanStyle(size: WidgetSize): { gridColumn: string; gridRow: string } {
+  const s = WIDGET_SIZE_SPAN[size];
+  return { gridColumn: `span ${s.col}`, gridRow: `span ${s.row}` };
+}
+
 export interface HomeWidgetMeta {
   id: string;
   label: string;
   region: HomeRegion;
+  /** Whether this widget participates in the small/medium/large size system. A
+   *  structural, single-purpose section (the full-width app launchpad, the two fixed
+   *  visualization cards) opts out with `false` — it always renders at its own
+   *  region-defined size, and the 編集モード size picker is hidden for it. Defaults
+   *  to true. */
+  resizable?: boolean;
+  /** The size a resizable widget starts at before the viewer ever picks one — lets a
+   *  region keep its CURRENT look by default (e.g. a side-rail panel defaults to
+   *  "medium" = full width, matching the pre-P3-4 stacked layout) while still letting
+   *  the viewer size it down. Defaults to "small". */
+  defaultSize?: WidgetSize;
+}
+
+/** The effective size of a widget: the viewer's stored choice if valid, else the
+ *  catalog's `defaultSize` (or "small"). A non-resizable widget always reports
+ *  "small" (a 1x1 span — its actual on-screen size is fixed by its own region CSS,
+ *  not by this system, so the span is inert for it). */
+export function sizeOf(catalog: HomeWidgetMeta[], sizes: Record<string, WidgetSize>, id: string): WidgetSize {
+  const meta = catalog.find((w) => w.id === id);
+  if (!meta || meta.resizable === false) return "small";
+  const stored = sizes[id];
+  if (stored === "small" || stored === "medium" || stored === "large") return stored;
+  return meta.defaultSize ?? "small";
+}
+
+/** Whether a widget takes part in the small/medium/large size system at all. */
+export function isResizableWidget(w: HomeWidgetMeta): boolean {
+  return w.resizable !== false;
 }
 
 /** Rank map from a stored preferred order (id -> position). Ids not present rank

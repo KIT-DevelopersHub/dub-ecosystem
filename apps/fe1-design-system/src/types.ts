@@ -3,7 +3,7 @@
 // FE1 never imports @dub/types / @dub/errors (leaf package). `DisplayableError`
 // below is the single display-only projection FE2 api-client produces via
 // `toDisplayableError` (凍結案 1-4-4).
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 export type Size = "sm" | "md" | "lg";
 export type Variant = "primary" | "secondary" | "ghost" | "danger";
@@ -512,6 +512,11 @@ export interface CardProps extends TestableProps {
   header?: ReactNode;
   footer?: ReactNode;
   padded?: boolean; // default true
+  /** Extra inline style on the card's root element — e.g. a CSS Grid `gridColumn`/
+   *  `gridRow` span so the card can be a variable-size tile in a grid layout
+   *  (a resizable Home dashboard widget). Only takes effect when the root is
+   *  actually a grid item; inert otherwise. */
+  style?: CSSProperties;
   children: ReactNode;
 }
 

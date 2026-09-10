@@ -3,11 +3,14 @@
 // so one widget throwing never blanks the whole dashboard — the shell shows an
 // in-frame fallback for that card only (mirrors useBffHome's per-frame partial
 // policy: no global toast).
-import { Component, type ComponentType, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode } from "react";
 
 interface Props {
   title: string;
   testId: string;
+  /** CSS Grid span from the Home dashboard's small/medium/large widget size (P3-4).
+   *  Inert unless this frame is a direct child of a grid container. */
+  style?: CSSProperties;
   children: ReactNode;
 }
 interface State {
@@ -29,7 +32,7 @@ export class HomeWidgetFrame extends Component<Props, State> {
 
   override render(): ReactNode {
     return (
-      <section data-widget={this.props.testId}>
+      <section data-widget={this.props.testId} style={this.props.style}>
         <h2>{this.props.title}</h2>
         {this.state.failed ? (
           <p role="alert" data-testid={`${this.props.testId}-error`}>
@@ -44,9 +47,9 @@ export class HomeWidgetFrame extends Component<Props, State> {
 }
 
 /** Render a feature-contributed widget body inside its titled, isolated frame. */
-export function renderHomeWidget(id: string, title: string, Body: ComponentType): JSX.Element {
+export function renderHomeWidget(id: string, title: string, Body: ComponentType, style?: CSSProperties): JSX.Element {
   return (
-    <HomeWidgetFrame key={id} title={title} testId={`home-widget-${id}`}>
+    <HomeWidgetFrame key={id} title={title} testId={`home-widget-${id}`} {...(style ? { style } : {})}>
       <Body />
     </HomeWidgetFrame>
   );

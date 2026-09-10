@@ -625,6 +625,10 @@ svg {
 .fe2-kpi-row {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
+  /* P3-4: a "large" (2x2) tile spans 2 rows — dense back-fills the gap that leaves
+   * beside it with smaller tiles that come later in the order, instead of leaving a
+   * hole (the browser default "sparse" placement never fills backwards). */
+  grid-auto-flow: dense;
   gap: var(--dub-space-3);
 }
 @media (max-width: 1100px) {
@@ -978,6 +982,13 @@ svg {
  * launching while they jiggle. */
 .fe2-widget-edit {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  /* Fill the FULL grid cell the SortableList row reserves — including a "large"
+   * (P3-4) tile's 2-row-tall cell — so the dashed frame always wraps the widget's
+   * whole footprint instead of shrink-wrapping its content and leaving a gap below. */
+  height: 100%;
+  box-sizing: border-box;
   border: 1.5px dashed var(--dub-color-border-strong);
   border-radius: var(--dub-radius-md);
   padding: var(--dub-space-1);
@@ -1005,10 +1016,23 @@ svg {
   }
 }
 .fe2-widget-edit-inner {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   pointer-events: none;
 }
 .fe2-widget-edit-inner[data-hidden="true"] {
   opacity: 0.45;
+}
+/* P3-4 size picker (小/中/大) — a compact SegmentedControl pinned to the widget's own
+ * footer, below the (inert) content preview. Never overlaps the hide badge / drag
+ * handle, which stay pinned to the top corners. Hidden for non-resizable widgets
+ * (the app launchpad, the two fixed visualization cards) — HomeEditableRegion simply
+ * doesn't render it for those. */
+.fe2-widget-edit-sizes {
+  flex: none;
+  margin-top: var(--dub-space-1);
 }
 .fe2-widget-edit-hide,
 .fe2-widget-edit-handle {
@@ -1054,14 +1078,26 @@ svg {
 }
 
 /* Right: live BFF panels. The column fills the body height and scrolls internally
- * (its own safety valve) so it never pushes the page — the dashboard stays clamped. */
+ * (its own safety valve) so it never pushes the page — the dashboard stays clamped.
+ * A 2-column CSS Grid (P3-4) so panels can mix small/medium/large sizes — every panel
+ * defaults to "medium" (spans both columns = full width), so the resting look is
+ * IDENTICAL to the pre-P3-4 stacked flex column until a viewer picks "small" for one.
+ * `grid-auto-flow: dense` back-fills any gap a "large" (2x2) panel leaves beside it. */
 .fe2-home-side {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: dense;
   gap: var(--dub-space-4);
+  align-content: start;
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
+}
+@media (max-width: 560px) {
+  /* Too narrow for two "small" panels side by side — force everything full width. */
+  .fe2-home-side {
+    grid-template-columns: 1fr;
+  }
 }
 .fe2-home-card-head {
   display: flex;

@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
   HOME_REGIONS,
+  HOME_WIDGET_SIZES,
+  isResizableWidget,
   mergeRegionOrder,
   regionOrdered,
+  sizeOf,
   sortByOrder,
+  spanStyle,
   visibleRegion,
   type HomeWidgetMeta,
+  type WidgetSize,
 } from "./homeLayout.ts";
 
 const CATALOG: HomeWidgetMeta[] = [
@@ -14,9 +19,9 @@ const CATALOG: HomeWidgetMeta[] = [
   { id: "kpi-c", label: "C", region: "kpi" },
   { id: "card-x", label: "X", region: "cards" },
   { id: "card-y", label: "Y", region: "cards" },
-  { id: "section-apps", label: "Apps", region: "apps" },
-  { id: "panel-1", label: "P1", region: "side" },
-  { id: "panel-2", label: "P2", region: "side" },
+  { id: "section-apps", label: "Apps", region: "apps", resizable: false },
+  { id: "panel-1", label: "P1", region: "side", defaultSize: "medium" },
+  { id: "panel-2", label: "P2", region: "side", defaultSize: "medium" },
 ];
 
 describe("homeLayout", () => {
@@ -52,5 +57,48 @@ describe("homeLayout", () => {
 
   it("exposes the four fixed regions in render order", () => {
     expect(HOME_REGIONS).toEqual(["kpi", "cards", "apps", "side"]);
+  });
+
+  // ── P3-4: iOS 風 3 サイズ (small/medium/large) ─────────────────────────────────
+  describe("widget size", () => {
+    it("exposes the three sizes small/medium/large", () => {
+      expect(HOME_WIDGET_SIZES).toEqual(["small", "medium", "large"]);
+    });
+
+    it("sizeOf falls back to small when no size is stored and the widget has no default", () => {
+      expect(sizeOf(CATALOG, {}, "kpi-a")).toBe("small");
+    });
+
+    it("sizeOf falls back to the catalog's defaultSize when no size is stored", () => {
+      expect(sizeOf(CATALOG, {}, "panel-1")).toBe("medium");
+    });
+
+    it("sizeOf prefers a stored size over the catalog default", () => {
+      expect(sizeOf(CATALOG, { "panel-1": "large" }, "panel-1")).toBe("large");
+    });
+
+    it("sizeOf ignores a malformed stored value and falls back", () => {
+      const sizes = { "kpi-a": "huge" as unknown as WidgetSize };
+      expect(sizeOf(CATALOG, sizes, "kpi-a")).toBe("small");
+    });
+
+    it("sizeOf always reports small for a non-resizable widget, even with a stored size", () => {
+      expect(sizeOf(CATALOG, { "section-apps": "large" }, "section-apps")).toBe("small");
+    });
+
+    it("sizeOf reports small for an unknown widget id", () => {
+      expect(sizeOf(CATALOG, {}, "does-not-exist")).toBe("small");
+    });
+
+    it("isResizableWidget reflects the catalog's resizable flag (default true)", () => {
+      expect(isResizableWidget(CATALOG.find((w) => w.id === "kpi-a")!)).toBe(true);
+      expect(isResizableWidget(CATALOG.find((w) => w.id === "section-apps")!)).toBe(false);
+    });
+
+    it("spanStyle maps each size to its CSS Grid column/row span", () => {
+      expect(spanStyle("small")).toEqual({ gridColumn: "span 1", gridRow: "span 1" });
+      expect(spanStyle("medium")).toEqual({ gridColumn: "span 2", gridRow: "span 1" });
+      expect(spanStyle("large")).toEqual({ gridColumn: "span 2", gridRow: "span 2" });
+    });
   });
 });

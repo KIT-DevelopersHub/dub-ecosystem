@@ -9,6 +9,9 @@
 // layout survives reload. The HomeScreen owns the widget catalog and applies these
 // prefs; the store only stores and persists them.
 import { create } from "zustand";
+import type { WidgetSize } from "../shell/screens/dashboard/homeLayout.ts";
+
+export type { WidgetSize };
 
 // FE2 owns the theme source of truth including "system" (@dub/ui ThemeProvider is
 // controlled and only accepts the resolved "light"|"dark"; AppRoot resolves "system").
@@ -25,6 +28,9 @@ export type HomeDensity = "comfortable" | "compact";
 export interface HomeLayout {
   order: string[];
   hidden: string[];
+  /** Per-widget size (P3-4: small/medium/large). A widget absent from this map uses
+   *  the catalog's default size (see `sizeOf` in homeLayout.ts). */
+  sizes: Record<string, WidgetSize>;
 }
 
 const THEME_KEY = "dub.ui.theme";
@@ -46,6 +52,8 @@ export interface UiStore {
   /** Replace the full preferred widget order (the HomeScreen computes the merged,
    *  region-aware sequence and commits it here). */
   setHomeWidgetOrder(order: string[]): void;
+  /** Set a single Home widget's size (small/medium/large). */
+  setHomeWidgetSize(id: string, size: WidgetSize): void;
   /** Restore the default Home dashboard (default order, nothing hidden, comfortable). */
   resetHomeLayout(): void;
 }
@@ -78,22 +86,32 @@ function readHomeDensity(): HomeDensity {
   return "comfortable";
 }
 
+function isWidgetSize(v: unknown): v is WidgetSize {
+  return v === "small" || v === "medium" || v === "large";
+}
+
 function readHomeLayout(): HomeLayout {
   try {
     const raw = globalThis.localStorage?.getItem(HOME_LAYOUT_KEY);
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
-        const p = parsed as { order?: unknown; hidden?: unknown };
+        const p = parsed as { order?: unknown; hidden?: unknown; sizes?: unknown };
         const order = Array.isArray(p.order) ? p.order.filter((x): x is string => typeof x === "string") : [];
         const hidden = Array.isArray(p.hidden) ? p.hidden.filter((x): x is string => typeof x === "string") : [];
-        return { order, hidden };
+        const sizes: Record<string, WidgetSize> = {};
+        if (p.sizes && typeof p.sizes === "object") {
+          for (const [id, v] of Object.entries(p.sizes as Record<string, unknown>)) {
+            if (isWidgetSize(v)) sizes[id] = v;
+          }
+        }
+        return { order, hidden, sizes };
       }
     }
   } catch {
     /* no storage / malformed */
   }
-  return { order: [], hidden: [] };
+  return { order: [], hidden: [], sizes: {} };
 }
 
 function persist(key: string, value: string): void {
@@ -135,18 +153,25 @@ export const useUiStore = create<UiStore>((set, get) => ({
     const has = cur.hidden.includes(id);
     if (hidden === has) return; // no-op
     const nextHidden = hidden ? [...cur.hidden, id] : cur.hidden.filter((x) => x !== id);
-    const next: HomeLayout = { order: cur.order, hidden: nextHidden };
+    const next: HomeLayout = { order: cur.order, hidden: nextHidden, sizes: cur.sizes };
     persistLayout(next);
     set({ homeLayout: next });
   },
   setHomeWidgetOrder: (order: string[]) => {
     const cur = get().homeLayout;
-    const next: HomeLayout = { order, hidden: cur.hidden };
+    const next: HomeLayout = { order, hidden: cur.hidden, sizes: cur.sizes };
+    persistLayout(next);
+    set({ homeLayout: next });
+  },
+  setHomeWidgetSize: (id: string, size: WidgetSize) => {
+    const cur = get().homeLayout;
+    if (cur.sizes[id] === size) return; // no-op
+    const next: HomeLayout = { order: cur.order, hidden: cur.hidden, sizes: { ...cur.sizes, [id]: size } };
     persistLayout(next);
     set({ homeLayout: next });
   },
   resetHomeLayout: () => {
-    const next: HomeLayout = { order: [], hidden: [] };
+    const next: HomeLayout = { order: [], hidden: [], sizes: {} };
     persistLayout(next);
     persist(HOME_DENSITY_KEY, "comfortable");
     set({ homeLayout: next, homeDensity: "comfortable" });

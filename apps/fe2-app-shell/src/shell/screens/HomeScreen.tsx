@@ -31,7 +31,7 @@ import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import { HomeEditableRegion } from "./dashboard/HomeEditableRegion.tsx";
-import type { HomeWidgetMeta } from "./dashboard/homeLayout.ts";
+import { sizeOf, spanStyle, type HomeWidgetMeta } from "./dashboard/homeLayout.ts";
 import {
   CONFERENCE,
   daysUntil,
@@ -227,9 +227,15 @@ export function HomeScreen({
   // reload. The catalog below is the single list of reorderable / hideable units.
   const density = useUiStore((s) => s.homeDensity);
   const setHomeDensity = useUiStore((s) => s.setHomeDensity);
+  const sizes = useUiStore((s) => s.homeLayout.sizes);
   const resetHomeLayout = useUiStore((s) => s.resetHomeLayout);
   const [isEditing, setIsEditing] = useState(false);
 
+  // P3-4: each widget can be small/medium/large (iOS 風グリッド). The full-width app
+  // launchpad and the two fixed visualization cards opt out (`resizable: false`) —
+  // their content doesn't read well shrunk to a small tile. Side-rail panels default
+  // to "medium" (= full width, spanning both grid columns) so the dashboard looks
+  // IDENTICAL to before P3-4 until a viewer deliberately shrinks one to "small".
   const catalog: HomeWidgetMeta[] = [
     { id: "kpi-countdown", label: "本戦まで", region: "kpi" },
     { id: "kpi-tasks", label: "タスク完了率", region: "kpi" },
@@ -237,13 +243,22 @@ export function HomeScreen({
     { id: "kpi-unread", label: "未読の通知（指標）", region: "kpi" },
     { id: "kpi-events", label: "直近のイベント（指標）", region: "kpi" },
     { id: "kpi-members", label: "運営メンバー", region: "kpi" },
-    { id: "card-usage", label: "無料枠の使用状況", region: "cards" },
-    { id: "card-tasks", label: "タスクの内訳", region: "cards" },
-    { id: "section-apps", label: "アプリランチャー", region: "apps" },
-    { id: "panel-events", label: "直近のイベント", region: "side" },
-    { id: "panel-notifications", label: "未読の通知", region: "side" },
-    ...homeWidgets.map((w) => ({ id: `widget-${w.id}`, label: w.title, region: "side" as const })),
+    { id: "card-usage", label: "無料枠の使用状況", region: "cards", resizable: false },
+    { id: "card-tasks", label: "タスクの内訳", region: "cards", resizable: false },
+    { id: "section-apps", label: "アプリランチャー", region: "apps", resizable: false },
+    { id: "panel-events", label: "直近のイベント", region: "side", defaultSize: "medium" },
+    { id: "panel-notifications", label: "未読の通知", region: "side", defaultSize: "medium" },
+    ...homeWidgets.map((w) => ({ id: `widget-${w.id}`, label: w.title, region: "side" as const, defaultSize: "medium" as const })),
   ];
+  // A widget's own root-node style — a CSS Grid span from its effective size. Inert
+  // unless that node is actually a direct child of a CSS Grid container (the resting
+  // dashboard regions); harmlessly ignored during 編集モード, where HomeEditableRegion
+  // sizes the SortableList row itself instead. Non-resizable widgets get no style (they
+  // keep their region's own fixed layout, unchanged).
+  const widgetStyle = (id: string) => {
+    const meta = catalog.find((w) => w.id === id);
+    return meta?.resizable === false ? undefined : spanStyle(sizeOf(catalog, sizes, id));
+  };
 
   // Rendered node per widget id. KPI nodes are placed only in the loaded branch below
   // (during load the KPI strip shows one skeleton per tile instead, and edit mode is
@@ -252,6 +267,7 @@ export function HomeScreen({
     "kpi-countdown": (
       <KpiTile
         testId="fe2-kpi-countdown"
+        style={widgetStyle("kpi-countdown")}
         icon="clock"
         label="本戦まで"
         value={days === null ? "—" : String(days)}
@@ -263,6 +279,7 @@ export function HomeScreen({
     "kpi-tasks": (
       <KpiTile
         testId="fe2-kpi-tasks"
+        style={widgetStyle("kpi-tasks")}
         icon="check-square"
         label="タスク完了率"
         value={hasTasks ? `${Math.round(completion)}%` : "—"}
@@ -274,6 +291,7 @@ export function HomeScreen({
     "kpi-freetier": (
       <KpiTile
         testId="fe2-kpi-freetier"
+        style={widgetStyle("kpi-freetier")}
         icon="shield"
         label="無料枠 最逼迫"
         value={worst ? `${Math.round(worst.pct)}%` : "—"}
@@ -285,6 +303,7 @@ export function HomeScreen({
     "kpi-unread": (
       <KpiTile
         testId="fe2-kpi-unread"
+        style={widgetStyle("kpi-unread")}
         icon="bell"
         label="未読の通知"
         value={notificationsError ? "—" : String(unread)}
@@ -296,6 +315,7 @@ export function HomeScreen({
     "kpi-events": (
       <KpiTile
         testId="fe2-kpi-events"
+        style={widgetStyle("kpi-events")}
         icon="calendar"
         label="直近のイベント"
         value={eventsError ? "—" : String(events.length)}
@@ -307,6 +327,7 @@ export function HomeScreen({
     "kpi-members": (
       <KpiTile
         testId="fe2-kpi-members"
+        style={widgetStyle("kpi-members")}
         icon="users"
         label="運営メンバー"
         value={orgMembers !== undefined ? String(orgMembers) : "—"}
@@ -420,6 +441,7 @@ export function HomeScreen({
     "panel-events": (
       <Card
         testId="fe2-home-events"
+        style={widgetStyle("panel-events")}
         header={
           <div className="fe2-home-card-head">
             <span className="fe2-stat-label">
@@ -469,6 +491,7 @@ export function HomeScreen({
     "panel-notifications": (
       <Card
         testId="fe2-home-notifications"
+        style={widgetStyle("panel-notifications")}
         header={
           <span className="fe2-stat-label">
             <Icon name="bell" />
@@ -535,7 +558,9 @@ export function HomeScreen({
         )}
       </Card>
     ),
-    ...Object.fromEntries(homeWidgets.map((w) => [`widget-${w.id}`, renderHomeWidget(w.id, w.title, w.Body)])),
+    ...Object.fromEntries(
+      homeWidgets.map((w) => [`widget-${w.id}`, renderHomeWidget(w.id, w.title, w.Body, widgetStyle(`widget-${w.id}`))]),
+    ),
   };
 
   const editingDisabled = isPending;

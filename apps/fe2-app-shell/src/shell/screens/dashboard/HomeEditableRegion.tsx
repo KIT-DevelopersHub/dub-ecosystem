@@ -11,9 +11,25 @@
 // regions). Not editing ⇒ a plain, layout-neutral render of the visible widgets only
 // (identical DOM shape to before P3-3, so the resting dashboard is unchanged).
 import { Fragment } from "react";
-import { Icon, SortableList, type SortableReorderEvent } from "@dub/ui";
+import { Icon, SegmentedControl, SortableList, type SortableReorderEvent } from "@dub/ui";
 import { useUiStore } from "../../../store/uiStore.tsx";
-import { mergeRegionOrder, regionOrdered, visibleRegion, type HomeRegion, type HomeWidgetMeta } from "./homeLayout.ts";
+import {
+  isResizableWidget,
+  mergeRegionOrder,
+  regionOrdered,
+  sizeOf,
+  spanStyle,
+  visibleRegion,
+  type HomeRegion,
+  type HomeWidgetMeta,
+  type WidgetSize,
+} from "./homeLayout.ts";
+
+const SIZE_OPTIONS: { value: WidgetSize; label: string }[] = [
+  { value: "small", label: "小" },
+  { value: "medium", label: "中" },
+  { value: "large", label: "大" },
+];
 
 /** Move an id to a new index within a list (translate a drop into the region's next
  *  id order). Mirrors the P3-2 カスタマイズ modal's helper. */
@@ -55,8 +71,10 @@ export function HomeEditableRegion({
 }): JSX.Element {
   const order = useUiStore((s) => s.homeLayout.order);
   const hidden = useUiStore((s) => s.homeLayout.hidden);
+  const sizes = useUiStore((s) => s.homeLayout.sizes);
   const setHomeWidgetHidden = useUiStore((s) => s.setHomeWidgetHidden);
   const setHomeWidgetOrder = useUiStore((s) => s.setHomeWidgetOrder);
+  const setHomeWidgetSize = useUiStore((s) => s.setHomeWidgetSize);
   const hiddenSet = new Set(hidden);
   const resolvedTestId = testId ?? `fe2-home-region-${region}`;
 
@@ -92,14 +110,28 @@ export function HomeEditableRegion({
       className={className}
       aria-label={`${regionLabel}の並べ替え`}
       testId={resolvedTestId}
+      // The region's own className is a CSS Grid (kpi-row / cards / side rail), not a
+      // single vertical stack — `rect` reflows by intersecting rectangles (correct for
+      // any grid), where the default `vertical` strategy assumes one column and computes
+      // the wrong offsets across multiple columns (the visible bug: neighbours overlap /
+      // the dragged tile paints behind another one mid-reflow).
+      strategy="rect"
+      // Give every resizable widget's SortableList row the same CSS Grid span its
+      // resting-dashboard node carries (see spanStyle/sizeOf) — so 編集モード's grid
+      // keeps mixing sizes exactly like the resting one, and the floating DragOverlay
+      // clone (sized from THIS row, see SortableList) matches the tile's real footprint.
+      getItemStyle={(w) => (isResizableWidget(w) ? spanStyle(sizeOf(catalog, sizes, w.id)) : undefined)}
       renderItem={(w, ctx) => {
         const isHidden = hiddenSet.has(w.id);
+        const resizable = isResizableWidget(w);
+        const size = sizeOf(catalog, sizes, w.id);
         return (
           <div
             className="fe2-widget-edit"
             data-testid={`fe2-widget-edit-${w.id}`}
             data-hidden={isHidden}
             data-dragging={ctx.isDragging || undefined}
+            data-size={resizable ? size : undefined}
           >
             <button
               type="button"
@@ -122,6 +154,17 @@ export function HomeEditableRegion({
             <div className="fe2-widget-edit-inner" data-hidden={isHidden} aria-hidden={isHidden || undefined}>
               {nodes[w.id]}
             </div>
+            {resizable ? (
+              <SegmentedControl<WidgetSize>
+                className="fe2-widget-edit-sizes"
+                size="sm"
+                value={size}
+                onChange={(next) => setHomeWidgetSize(w.id, next)}
+                aria-label={`${w.label}のサイズ`}
+                testId={`fe2-widget-size-${w.id}`}
+                options={SIZE_OPTIONS.map((o) => ({ ...o, testId: `fe2-widget-size-${w.id}-${o.value}` }))}
+              />
+            ) : null}
           </div>
         );
       }}
