@@ -274,7 +274,16 @@ function LeftPaneRow({
       {number && (
         <span className={styles.tlRowNum} data-testid={`fe4-gantt-num-${r.taskId}`}>{number}</span>
       )}
-      <span className={styles.tlRowName}>{r.title}</span>
+      {/* 判断30/46 fix: `statusById` here is the container's DISPLAYED-status map
+          (effectiveStatusById — a WBS parent's subtree-aggregated plurality, not its own
+          stale status column), so this reads "cancelled" for a parent/grandparent whose
+          descendants are cancelled too, not just a cancelled leaf. */}
+      <span
+        className={`${styles.tlRowName} ${statusById?.get(r.taskId) === "cancelled" ? styles.tlRowNameCancelled : ""}`}
+        data-testid={`fe4-gantt-row-title-${r.taskId}`}
+      >
+        {r.title}
+      </span>
       {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
     </button>
   );
@@ -900,8 +909,17 @@ export function GanttView({
     // per-status slices (see effectiveChildProgressById); its single dominantStatus
     // must NOT paint the whole bar, or the slices underneath would be invisible.
     const isParentWithProgress = parentIds.has(taskId) && effectiveChildProgressById.has(taskId);
-    const status = statusById?.get(taskId);
+    // effectiveStatusById (not the raw statusById column) so a parent's own — stale —
+    // status never overrides its subtree's aggregated/recursive plurality.
+    const status = effectiveStatusById.get(taskId);
     const cls = isParentWithProgress ? styles.barParent : status ? STATUS_BAR_CLASS[status] : "";
+    // 判断30/46 fix: a WBS parent (any depth) whose DISPLAYED status is "cancelled"
+    // (its subtree's aggregated leaf mix, not its own stored column) must show the
+    // same strikethrough a cancelled leaf gets — previously only STATUS_BAR_CLASS's
+    // .barCancelled (leaf-only branch above) carried that style, so it never reached a
+    // parent bar (which always renders .barParent for its segment track). This layers
+    // just the label strikethrough on top, leaving the segment colouring untouched.
+    const cancelledLabel = isParentWithProgress && status === "cancelled" ? styles.barCancelledLabel : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
     const selected = selectedIds.has(taskId) ? styles.barSelected : "";
     // Parent (work-package) rows keep the rollup behaviour (their span still auto-
@@ -909,7 +927,7 @@ export function GanttView({
     // hollow "bracket summary" look was reverted per feedback #97 (見づらい). The
     // parent/child vs dependency distinction is carried by indent + tree lines +
     // the dashed dependency arrows + the legend, not by a special bar shape.
-    return `${styles.bar} ${cls} ${dragging} ${selected}`;
+    return `${styles.bar} ${cls} ${cancelledLabel} ${dragging} ${selected}`;
   };
 
   // ---- left-pane resize ----
@@ -1267,7 +1285,7 @@ export function GanttView({
                         )}
                         <span className={`${styles.tlDot} ${effectiveStatusById.get(row.taskId) ? STATUS_BAR_CLASS[effectiveStatusById.get(row.taskId)!] : ""}`} aria-hidden />
                         {numberById?.get(row.taskId) && <span className={styles.tlRowNum}>{numberById.get(row.taskId)}</span>}
-                        <span className={styles.tlRowName}>{row.title}</span>
+                        <span className={`${styles.tlRowName} ${effectiveStatusById.get(row.taskId) === "cancelled" ? styles.tlRowNameCancelled : ""}`}>{row.title}</span>
                       </div>
                     );
                     // Group drag (⑤a): float the WHOLE selection as a stacked deck under the
