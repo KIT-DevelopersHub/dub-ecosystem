@@ -157,14 +157,22 @@ export function createShellRouter(
   const homeRoute = createRoute({
     getParentRoute: () => shellRoute,
     path: "/",
-    component: () => (
-      <HomeScreen
-        api={api}
-        homeWidgets={registry.homeWidgets}
-        onOpenNotifications={openNotificationDialog}
-        {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
-      />
-    ),
+    component: () => {
+      // usePermissions() needs <AuthProvider> in the tree, which this route always
+      // has (nested under shellRoute's <RequireAuth>); HomeScreen itself stays
+      // context-free/testable by taking `can` as a plain prop (see HomeScreen.tsx).
+      const { can } = usePermissions();
+      return (
+        <HomeScreen
+          api={api}
+          homeWidgets={registry.homeWidgets}
+          navEntries={registry.nav}
+          can={can}
+          onOpenNotifications={openNotificationDialog}
+          {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
+        />
+      );
+    },
   });
 
   const featureRoutes = registry.routes.map((r) => {
