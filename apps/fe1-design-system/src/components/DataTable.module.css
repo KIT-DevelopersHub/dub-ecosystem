@@ -2,6 +2,21 @@
   width: 100%;
   overflow-x: auto;
 }
+/* Virtualized (windowed) mode: the body scrolls inside a fixed-height viewport so
+ * only on-screen rows mount. Also becomes the vertical scroll parent the windowing
+ * hook measures. */
+.scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Keep the header visible while the body scrolls under it (windowed mode). The
+ * th's own solid background stops rows showing through the sticky row. */
+.stickyHead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dub-color-surface-raised, #fff);
+}
 .table {
   width: 100%;
   border-collapse: collapse;
