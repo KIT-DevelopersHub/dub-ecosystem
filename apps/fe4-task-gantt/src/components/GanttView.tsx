@@ -22,6 +22,7 @@ import {
   type TimelineBar,
   ROW_HEIGHT,
   BAR_HEIGHT,
+  MS_PER_DAY,
   bottomTicks,
   canvasWidth,
   dayAtX,
@@ -39,6 +40,7 @@ import {
 } from "../domain/timeline-axis";
 import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import { visibleTreeRows } from "../domain/gantt-layout";
+import { clampBulkResizeDelta } from "../domain/bulk-resize";
 import styles from "../styles/app.module.css";
 
 const HEADER_TOP = 28;
@@ -118,6 +120,13 @@ export interface GanttViewProps {
   /** Shift a marquee-selected set left/right by whole days (arrow keys / group drag).
    *  Each selection root moves its own subtree, preserving relative positions + spans. */
   onBulkShiftDays?: (ids: readonly common.TaskId[], deltaDays: number) => void;
+  /** RESIZE a marquee-selected set: dragging the selection bounding box's left/right
+   *  handle stretches every selected task by the SAME whole-day delta (等量デルタ) —
+   *  right edge shifts each task's END, left edge shifts each task's START. Mirrors
+   *  onParentResize's contract (edge + delta only) — the container applies the same
+   *  min-length guard + parent-scale fallback per selected root. Absent ⇒ no group
+   *  resize handles (single-bar resize still works via onSchedule/onParentResize). */
+  onBulkResizeDays?: (ids: readonly common.TaskId[], edge: "start" | "end", deltaDays: number) => void;
   /** Move a marquee-selected set up/down one slot (手動 mode only). */
   onBulkMoveVertical?: (ids: readonly common.TaskId[], dir: -1 | 1) => void;
   /** Group drag-reorder (⑤): drop a marquee-selected block at `overId`; the whole selection
@@ -294,6 +303,7 @@ export function GanttView({
   numberById,
   onBulkDelete,
   onBulkShiftDays,
+  onBulkResizeDays,
   onBulkMoveVertical,
   onBulkReorderTo,
   canWrite = true,
@@ -303,6 +313,14 @@ export function GanttView({
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W);
   const [collapsed, setCollapsed] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // ---- multi-select group RESIZE (選択範囲の端ハンドル) ----
+  // Live state for a drag on the SELECTION bounding box's left/right handle — distinct
+  // from `drag` (single-bar move/resize) so the two never conflate; only one session is
+  // ever active (the handle only renders when selectedIds.size > 1, and a bar's own
+  // pointer-down is swallowed by the bar itself first).
+  const [groupResize, setGroupResize] = useState<{ edge: "start" | "end"; dxPx: number } | null>(null);
+  const groupResizeStartX = useRef(0);
+  const groupResizeMovedRef = useRef(false);
   // 拡大（全画面）閲覧モード: みんなで投影して「見るだけ」の大画面表示。ON の間は
   // 編集（バーのドラッグ/リサイズ・詳細を開く・新規作成・並べ替え）を全て無効化し、
   // ズーム（日/週/月）と横スクロールだけを許す。Fullscreen API を使い、非対応/失敗時も
@@ -559,6 +577,49 @@ export function GanttView({
   const titleById = useMemo(() => new Map(rows.map((r) => [r.taskId, r.title])), [rows]);
   const barById = useMemo(() => new Map(bars.map((b) => [b.taskId, b])), [bars]);
 
+  // ---- multi-select group resize: the selection's bounding box ----
+  // Union rect over every currently-selected bar (unpreviewed geometry) — only
+  // meaningful with >1 selected (single selection resizes via the ordinary per-bar
+  // handles). Drives both the visible box/handles and the live drag preview below.
+  const selectionBox = useMemo(() => {
+    if (selectedIds.size <= 1) return null;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const b of bars) {
+      if (!b.hasBar || !selectedIds.has(b.taskId)) continue;
+      minX = Math.min(minX, b.x);
+      maxX = Math.max(maxX, b.x + b.width);
+      minY = Math.min(minY, b.y);
+      maxY = Math.max(maxY, b.y + ROW_HEIGHT);
+    }
+    if (!Number.isFinite(minX)) return null;
+    return { x: minX, width: maxX - minX, y: minY, height: maxY - minY };
+  }, [bars, selectedIds]);
+
+  // Whole-day durations of the selection's dated LEAF roots — the live-preview
+  // counterpart of planBulkResize's min-length guard, so the box never visually
+  // shrinks past what the commit would actually allow. Parents guard themselves
+  // (scaleChildrenForParentResize), so only leaves bound the preview here.
+  const selectionLeafDurationsDays = useMemo(() => {
+    if (selectedIds.size <= 1) return [];
+    const out: number[] = [];
+    for (const r of rows) {
+      if (!selectedIds.has(r.taskId) || r.hasChildren || !r.startsAt || !r.endsAt) continue;
+      out.push((Date.parse(r.endsAt) - Date.parse(r.startsAt)) / MS_PER_DAY);
+    }
+    return out;
+  }, [rows, selectedIds]);
+
+  // Live-preview geometry for the selection box while a group-resize drag is active.
+  const selectionBoxGeom = (): { left: number; width: number } | null => {
+    if (!selectionBox) return null;
+    if (!groupResize) return { left: selectionBox.x, width: selectionBox.width };
+    const clamped = clampBulkResizeDelta(selectionLeafDurationsDays, groupResize.edge, pxToDays(groupResize.dxPx, win));
+    const d = clamped * win.px; // back to px so the box moves in whole-day steps, same as bars
+    if (groupResize.edge === "start")
+      return { left: selectionBox.x + Math.min(d, selectionBox.width - BAR_HEIGHT), width: Math.max(selectionBox.width - d, BAR_HEIGHT) };
+    return { left: selectionBox.x, width: Math.max(selectionBox.width + d, BAR_HEIGHT) };
+  };
+
   // Every row (visible or hidden) by id — used to walk the WBS up to a visible anchor.
   const rowByIdAll = useMemo(() => new Map(dto.rows.map((r) => [r.taskId, r] as const)), [dto.rows]);
   // Resolve a dependency endpoint to the nearest row that is actually drawn: if the
@@ -733,7 +794,27 @@ export function GanttView({
     setDrag({ taskId: bar.taskId, mode, startsAt: row.startsAt, endsAt: row.endsAt, dxPx: 0 });
   };
 
+  // ---- group RESIZE pointer session: drag the SELECTION bounding box's left/right
+  // handle to stretch every selected task's start (left) or end (right) by the SAME
+  // whole-day delta. Only offered while >1 bar is selected (see selectionBox above);
+  // a lone selection keeps using the ordinary per-bar handles instead.
+  const beginGroupResize = (e: React.PointerEvent, edge: "start" | "end") => {
+    if (!editing || !onBulkResizeDays || selectedIds.size <= 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    groupResizeStartX.current = e.clientX;
+    groupResizeMovedRef.current = false;
+    setGroupResize({ edge, dxPx: 0 });
+  };
+
   const onPointerMove = (e: React.PointerEvent) => {
+    if (groupResize) {
+      const dx = e.clientX - groupResizeStartX.current;
+      if (Math.abs(dx) > CLICK_THRESHOLD_PX) groupResizeMovedRef.current = true;
+      setGroupResize({ ...groupResize, dxPx: dx });
+      return;
+    }
     if (!drag) return;
     const dx = e.clientX - dragStartX.current;
     if (Math.abs(dx) > CLICK_THRESHOLD_PX) movedRef.current = true;
@@ -741,6 +822,16 @@ export function GanttView({
   };
 
   const onPointerUp = () => {
+    if (groupResize) {
+      const { edge, dxPx } = groupResize;
+      if (groupResizeMovedRef.current && onBulkResizeDays) {
+        const deltaDays = pxToDays(dxPx, win);
+        if (deltaDays !== 0) onBulkResizeDays([...selectedIds], edge, deltaDays);
+      }
+      setGroupResize(null);
+      groupResizeMovedRef.current = false;
+      return;
+    }
     if (!drag) return;
     const { taskId, mode, startsAt, endsAt, dxPx } = drag;
     if (!movedRef.current) {
@@ -785,6 +876,15 @@ export function GanttView({
 
   // live-preview geometry for the bar under an active drag
   const previewGeom = (bar: TimelineBar): { left: number; width: number } => {
+    // Group RESIZE: stretch EVERY selected bar's start/end edge by the same
+    // (clamped) delta — mirrors selectionBoxGeom so the box and its bars agree.
+    if (groupResize && selectedIds.has(bar.taskId)) {
+      const clamped = clampBulkResizeDelta(selectionLeafDurationsDays, groupResize.edge, pxToDays(groupResize.dxPx, win));
+      const d = clamped * win.px;
+      if (groupResize.edge === "start")
+        return { left: bar.x + Math.min(d, bar.width - BAR_HEIGHT), width: Math.max(bar.width - d, BAR_HEIGHT) };
+      return { left: bar.x, width: Math.max(bar.width + d, BAR_HEIGHT) };
+    }
     // Group move: shift EVERY selected bar by the same dx (not just the grabbed one).
     if (isGroupMove && selectedIds.has(bar.taskId)) return { left: bar.x + drag!.dxPx, width: bar.width };
     if (!drag || drag.taskId !== bar.taskId) return { left: bar.x, width: bar.width };
@@ -1431,6 +1531,38 @@ export function GanttView({
                   );
                 })}
 
+                {/* group-resize box (複数選択の一括リサイズ): a bounding outline over every
+                    selected bar with a handle at each end — dragging one stretches every
+                    selected task's start (left) or end (right) by the same whole-day delta.
+                    Move (drag any selected bar) and resize (drag an end handle here) are
+                    both available at once; only the grabbed affordance differs. */}
+                {editing && onBulkResizeDays && selectionBox && (() => {
+                  const g = selectionBoxGeom()!;
+                  return (
+                    <div
+                      className={styles.tlGroupResizeBox}
+                      style={{ left: g.left, top: selectionBox.y, width: g.width, height: selectionBox.height }}
+                      data-testid="fe4-gantt-group-resize-box"
+                      data-fe4-keep-selection="true"
+                    >
+                      <span
+                        className={`${styles.tlGroupResizeHandle} ${styles.tlGroupResizeHandleL}`}
+                        data-testid="fe4-gantt-group-resize-l"
+                        title="ドラッグして選択中の全タスクの開始日をまとめて変更"
+                        aria-label="選択中の全タスクの開始日をまとめて変更"
+                        onPointerDown={(e) => beginGroupResize(e, "start")}
+                      />
+                      <span
+                        className={`${styles.tlGroupResizeHandle} ${styles.tlGroupResizeHandleR}`}
+                        data-testid="fe4-gantt-group-resize-r"
+                        title="ドラッグして選択中の全タスクの終了日をまとめて変更"
+                        aria-label="選択中の全タスクの終了日をまとめて変更"
+                        onPointerDown={(e) => beginGroupResize(e, "end")}
+                      />
+                    </div>
+                  );
+                })()}
+
                 {/* marquee (範囲ドラッグ) rectangle while selecting */}
                 {marquee && (
                   <div
@@ -1453,7 +1585,8 @@ export function GanttView({
             {selectedIds.size} 件選択中
           </span>
           <span className={styles.tlSelectionHint}>
-            ←→ で移動{isManualSort ? " ・ ↑↓ で並べ替え" : ""} ・ Backspace で削除 ・ Esc で解除
+            ←→ で移動{selectedIds.size > 1 && onBulkResizeDays ? " ・ 端ハンドルでまとめてリサイズ" : ""}
+            {isManualSort ? " ・ ↑↓ で並べ替え" : ""} ・ Backspace で削除 ・ Esc で解除
           </span>
           {canWrite && onBulkDelete && (
             <button

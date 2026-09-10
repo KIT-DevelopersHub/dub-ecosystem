@@ -21,6 +21,7 @@ import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "..
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { childProgressByParent } from "../domain/child-progress";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
+import { planBulkResizeFromRows } from "../domain/bulk-resize";
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRowsMulti, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
@@ -1081,6 +1082,40 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     });
   };
 
+  // Bulk RESIZE (複数選択の一括リサイズ): the selection bounding box's left/right handle
+  // stretches every selected task by the SAME whole-day delta — right edge shifts each
+  // task's END, left edge shifts each task's START (等量デルタ; see domain/bulk-resize.ts).
+  // A leaf persists its own row directly; a selected WBS parent instead SCALES its
+  // descendants — its own span is DERIVED from them (read model returns it null), so
+  // writing the parent's own row would be discarded on the next GET, same as the
+  // single-parent resize (onParentResize above). selectionRoots dedupes a selected
+  // descendant of another selected parent so it is never resized twice.
+  const onBulkResizeDays = (ids: readonly common.TaskId[], edge: "start" | "end", deltaDays: number) => {
+    if (deltaDays === 0 || ids.length === 0) return;
+    const rows = gantt.currentRows();
+    const roots = selectionRoots(rows, new Set(ids));
+    if (roots.length === 0) return;
+    const plan = planBulkResizeFromRows(rows, roots, edge, deltaDays);
+    if (plan.writes.length === 0) return; // the tightest task was already at the 1-day floor
+    const after = plan.writes.map((w) => ({
+      id: w.taskId as common.TaskId,
+      startsAt: w.startsAt as common.ISODateTime,
+      endsAt: w.endsAt as common.ISODateTime,
+    }));
+    // Snapshot the children's/leaves' CURRENT dates so undo restores them exactly
+    // (scaling has no clean day-aligned inverse — same discipline as onParentResize).
+    const before = after
+      .map(({ id }) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r && !!r.startsAt && !!r.endsAt)
+      .map((r) => ({ id: r.taskId, startsAt: r.startsAt!, endsAt: r.endsAt! }));
+    void applyChildScheduleSet(after);
+    history.push({
+      label: "選択タスクの一括リサイズ",
+      undo: () => applyChildScheduleSet(before),
+      redo: () => applyChildScheduleSet(after),
+    });
+  };
+
   // Bulk up/down reorder (手動 mode only): slide the selection one slot within each
   // sibling group, persist the manual order, and record undo/redo. Reuses the same
   // order machinery as the single-row drag reorder.
@@ -1264,6 +1299,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           {...(rowGroupById ? { rowGroupById } : {})}
           onBulkDelete={caps.canDelete ? onBulkDelete : undefined}
           onBulkShiftDays={caps.canWrite ? onBulkShiftDays : undefined}
+          onBulkResizeDays={caps.canWrite ? onBulkResizeDays : undefined}
           onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
           onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
