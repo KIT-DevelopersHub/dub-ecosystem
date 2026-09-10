@@ -3,12 +3,12 @@
   "slug": "home-widget-dnd",
   "worker": "dub-demo-home-widget-dnd",
   "url": "https://dub-demo-home-widget-dnd.developershub-site.workers.dev",
-  "deployedSha": "681d5477",
-  "branch": "feat/home-widget-dnd",
+  "deployedSha": "4076656c",
+  "branch": "feat/home-widget-dnd-v2",
   "actor": "kota",
-  "markers": ["fe2-home-edit-toggle","fe2-widget-edit-handle"],
+  "markers": ["fe2-widget-edit-sizes","fe2-widget-size-","fe2-home-edit-toggle"],
   "live": true,
-  "verifiedAt": "2026-09-10T10:40:25Z",
-  "updatedAt": "2026-09-10T10:40:25Z",
-  "note": "Home widget D&D edit mode (iOS-style)"
+  "verifiedAt": "2026-09-10T11:36:03Z",
+  "updatedAt": "2026-09-10T11:36:03Z",
+  "note": "P3-4: dragオーバーレイのlayer/sizeバグ修正 + 小中大3サイズ混在グリッド"
 }
