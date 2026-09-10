@@ -73,6 +73,12 @@ export interface CreateEmailAddressRequest {
   destination?: string;
 }
 
+// PATCH /admin/email-routing/issued-addresses/:id — the only editable field is the
+// enable/disable toggle (destination is fixed server-side, see CreateEmailAddressRequest).
+export interface UpdateEmailAddressRequest {
+  enabled?: boolean;
+}
+
 // ---- Roster provenance + Email Routing sync (identity-roster) ----
 // identity-roster tags each roster row with its provenance and exposes a sync
 // endpoint that upserts the @developershub.jp Email Routing addresses by email.
