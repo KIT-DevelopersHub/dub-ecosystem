@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ConfirmDialog, ErrorDialog, Modal } from "../src/components/Modal";
+import { ConfirmDialog, Drawer, ErrorDialog, Modal } from "../src/components/Modal";
 
 describe("Modal", () => {
   it("does not render when closed", () => {
@@ -105,6 +105,81 @@ describe("Modal", () => {
       <Modal open onClose={() => {}} title="タイトル">
         <button type="button">中身のボタン</button>
       </Modal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("focuses the first input field in the body on open, not the header close button", () => {
+    render(
+      <Modal open onClose={() => {}} title="タイトル">
+        <input data-testid="dialog-initial-focus-target" placeholder="タイトル" />
+      </Modal>,
+    );
+    expect(document.activeElement).toBe(screen.getByTestId("dialog-initial-focus-target"));
+    expect(document.activeElement).not.toBe(screen.getByLabelText("閉じる"));
+  });
+
+  it("focuses a textarea in the body when there is no earlier input", () => {
+    render(
+      <Modal open onClose={() => {}} title="タイトル">
+        <textarea data-testid="dialog-initial-focus-textarea" />
+      </Modal>,
+    );
+    expect(document.activeElement).toBe(screen.getByTestId("dialog-initial-focus-textarea"));
+  });
+
+  it("focuses the FIRST of multiple input fields in the body", () => {
+    render(
+      <Modal open onClose={() => {}} title="タイトル">
+        <input data-testid="dialog-initial-focus-first" />
+        <input data-testid="dialog-initial-focus-second" />
+      </Modal>,
+    );
+    expect(document.activeElement).toBe(screen.getByTestId("dialog-initial-focus-first"));
+  });
+
+  it("skips disabled/readonly/hidden inputs and focuses the first usable one", () => {
+    render(
+      <Modal open onClose={() => {}} title="タイトル">
+        <input type="hidden" data-testid="dialog-initial-focus-hidden" defaultValue="x" />
+        <input disabled data-testid="dialog-initial-focus-disabled" />
+        <input readOnly data-testid="dialog-initial-focus-readonly" defaultValue="x" />
+        <input data-testid="dialog-initial-focus-usable" />
+      </Modal>,
+    );
+    expect(document.activeElement).toBe(screen.getByTestId("dialog-initial-focus-usable"));
+  });
+
+  it("falls back to the first focusable element (e.g. a button-only body) when there is no input", () => {
+    // Regression guard: dialogs without any input field (ConfirmDialog-like bodies)
+    // must keep the pre-existing "focus the first focusable element" behavior.
+    render(
+      <Modal open onClose={() => {}} title="タイトル">
+        <button type="button">中身のボタン</button>
+      </Modal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+});
+
+describe("Drawer", () => {
+  it("focuses the first input field in the body on open, not the header close button", () => {
+    render(
+      <Drawer open onClose={() => {}} title="タイトル">
+        <input data-testid="drawer-initial-focus-target" />
+      </Drawer>,
+    );
+    expect(document.activeElement).toBe(screen.getByTestId("drawer-initial-focus-target"));
+    expect(document.activeElement).not.toBe(screen.getByLabelText("閉じる"));
+  });
+
+  it("falls back to focus-trap behavior when the body has no input", () => {
+    render(
+      <Drawer open onClose={() => {}} title="タイトル">
+        <button type="button">中身のボタン</button>
+      </Drawer>,
     );
     const dialog = screen.getByRole("dialog");
     expect(dialog.contains(document.activeElement)).toBe(true);

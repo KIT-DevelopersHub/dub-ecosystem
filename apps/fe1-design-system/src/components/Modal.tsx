@@ -54,7 +54,44 @@ function OverlayPortal({ children }: { children: React.ReactNode }) {
   return createPortal(children, document.body);
 }
 
-// Minimal focus trap: keep Tab within the dialog container.
+// A real, typeable field — the thing a user opening a dialog actually wants focused,
+// as opposed to a header's close button or a footer's submit button. Excludes hidden/
+// disabled/readonly/non-typing input types so e.g. a hidden CSRF field never "wins".
+const MEANINGFUL_INPUT_SELECTOR =
+  'input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([disabled]):not([readonly]), ' +
+  "textarea:not([disabled]):not([readonly]), " +
+  "select:not([disabled]), " +
+  '[contenteditable="true"]';
+
+// Initial focus on open: prefer the first meaningful input field inside the dialog BODY
+// (so opening e.g. a task-create modal drops the caret straight into 「タイトル」), and
+// only fall back to the first focusable element overall (header close button etc.) when
+// the body has no input — e.g. ConfirmDialog, which is button-only and should keep the
+// previous "focus the first focusable thing" behavior.
+function useInitialFocus(
+  open: boolean,
+  containerRef: React.RefObject<HTMLElement>,
+  bodyRef: React.RefObject<HTMLElement>,
+) {
+  useEffect(() => {
+    if (!open || !containerRef.current) return;
+    const container = containerRef.current;
+    const body = bodyRef.current;
+    const meaningfulField = body?.querySelector<HTMLElement>(MEANINGFUL_INPUT_SELECTOR);
+    if (meaningfulField) {
+      meaningfulField.focus();
+      return;
+    }
+    const firstFocusable = container.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    const first = Array.from(firstFocusable).find((el) => !el.hasAttribute("disabled"));
+    first?.focus();
+  }, [open, containerRef, bodyRef]);
+}
+
+// Minimal focus trap: keep Tab within the dialog container. Initial focus placement is
+// handled separately by useInitialFocus so it can prioritize meaningful input fields.
 function useFocusTrap(open: boolean, ref: React.RefObject<HTMLElement>) {
   useEffect(() => {
     if (!open || !ref.current) return;
@@ -65,8 +102,6 @@ function useFocusTrap(open: boolean, ref: React.RefObject<HTMLElement>) {
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
         ),
       ).filter((el) => !el.hasAttribute("disabled"));
-    const first = focusable()[0];
-    first?.focus();
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
       const items = focusable();
@@ -97,8 +132,10 @@ export function Modal({
   children,
 }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useEscToClose(open, onClose);
   useFocusTrap(open, ref);
+  useInitialFocus(open, ref, bodyRef);
   useScrollLock(open);
   useFocusRestore(open);
   if (!open) return null;
@@ -123,7 +160,7 @@ export function Modal({
             <h2 className={cx(styles.title)}>{title}</h2>
             <IconButton name="x" aria-label="閉じる" onClick={onClose} />
           </header>
-          <div className={cx(styles.body)}>{children}</div>
+          <div ref={bodyRef} className={cx(styles.body)}>{children}</div>
           {footer && <footer className={cx(styles.footer)}>{footer}</footer>}
         </div>
       </div>
@@ -228,8 +265,10 @@ export function ErrorDialog({
 
 export function Drawer({ open, onClose, title, side = "right", testId, children }: DrawerProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useEscToClose(open, onClose);
   useFocusTrap(open, ref);
+  useInitialFocus(open, ref, bodyRef);
   useScrollLock(open);
   useFocusRestore(open);
   if (!open) return null;
@@ -254,7 +293,7 @@ export function Drawer({ open, onClose, title, side = "right", testId, children 
             {title && <h2 className={cx(styles.title)}>{title}</h2>}
             <IconButton name="x" aria-label="閉じる" onClick={onClose} />
           </header>
-          <div className={cx(styles.body)}>{children}</div>
+          <div ref={bodyRef} className={cx(styles.body)}>{children}</div>
         </div>
       </div>
     </OverlayPortal>
