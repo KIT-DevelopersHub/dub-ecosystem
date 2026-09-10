@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "email-address-mgmt",
+  "worker": "dub-demo-email-address-mgmt",
+  "url": "https://dub-demo-email-address-mgmt.developershub-site.workers.dev",
+  "deployedSha": "ea64941c",
+  "branch": "feat/email-address-mgmt",
+  "actor": "kota",
+  "markers": ["fe7-email-header","fe7-email-new","fe7-email-toggle-"],
+  "live": true,
+  "verifiedAt": "2026-09-10T10:56:53Z",
+  "updatedAt": "2026-09-10T10:56:53Z",
+  "note": "メールアドレス管理を復活実装(PR#245の逆diff+issued-addresses API対応)"
+}
