@@ -37,6 +37,205 @@ export function spanStyle(size: WidgetSize): { gridColumn: string; gridRow: stri
   return { gridColumn: `span ${s.col}`, gridRow: `span ${s.row}` };
 }
 
+// ---- mixed-size drag swap (postmortem redesign) -----------------------------------
+// BACKGROUND (2 rejected fixes — see PR #484 / fix/widget-area-swap-mutual): a region
+// mixing small/medium/large widgets renders with `grid-auto-flow: dense` so gaps a
+// wide/tall tile leaves get back-filled by smaller tiles later in the id order. Both
+// prior attempts ("move" = arrayMove/insert, then "swap" = dnd-kit rectSwappingStrategy
+// + arraySwap) operated purely on the FLAT ID ARRAY and assumed "exchange 2 ids in the
+// array" <=> "exchange 2 widgets' on-screen rectangles". That equivalence does NOT hold
+// under `dense`: the browser's placement algorithm re-derives every widget's actual
+// (row, col) from the WHOLE sequence + spans on every reflow, backfilling non-adjacent
+// small tiles into gaps left by a wide/tall neighbour — so swapping two array slots can
+// silently reshuffle (or fail to move) tiles that were never touched, which is read by a
+// real user, dragging with a real mouse, as "sizes different ⇒ can't swap" — even though
+// an id-order-only regression test (checking DOM child order, not on-screen geometry)
+// keeps passing.
+//
+// FIX: stop trying to infer the visual effect of an array swap. Instead:
+//   1. `computeDensePositions` is a small, exact simulator of the CSS `dense` auto-
+//      placement algorithm (scan row-major from the grid origin for the first free
+//      cell that fits each item, in order) — for a given id order + column count it
+//      returns EXACTLY the (row, col) the browser will paint each widget at.
+//   2. `computeBlocks` unions widgets that end up sharing any occupied row into one
+//      swappable BLOCK (this is what makes "medium ⇄ 2 small" and "large ⇄ 2 medium"
+//      well-defined: the 2 smalls that a `dense` backfill packs into one row together
+//      ARE one block, matching what the user actually sees as "this row").
+//   3. `swapBlocks` exchanges the ENTIRE block containing the dragged widget with the
+//      entire block containing the drop target — never a lone id — and returns the
+//      flattened id order. Every OTHER block's ids/relative order are untouched, so
+//      re-simulating that new order reproduces "these two rows traded places, nothing
+//      else moved" instead of an emergent, order-dependent reshuffle.
+//   4. `positionStyle` turns a simulated (row, col) into an EXPLICIT CSS Grid placement
+//      (`<line> / span <n>`) so what's rendered is driven by the SAME simulation that
+//      decided the swap — not a second, independent pass through the browser's own
+//      (also `dense`) auto-placement, which is exactly the two-source-of-truth gap that
+//      let the previous fixes diverge from what the user's browser actually painted.
+
+export interface GridSpan {
+  col: number;
+  row: number;
+}
+
+export interface WidgetBlock {
+  /** ids grouped into this one swappable row-unit, in their original relative order.
+   *  Length 1 for a solo tile (medium/large, or an unpaired "orphan" small); length
+   *  ≥2 for a run of small tiles `dense` packs into the same row (possibly a `dense`
+   *  backfill of a NON-adjacent small — see computeBlocks). */
+  ids: string[];
+}
+
+/** Exact simulator of CSS Grid's `dense` auto-placement for a fixed-column-count grid:
+ *  for each id (in order), scan cells row-major from (1,1) and place it at the first
+ *  cell whose span fits with no overlap — precisely what `grid-auto-flow: dense` does.
+ *  Given the same id order + spans + column count, this returns the same (row, col)
+ *  the browser will actually paint, so it is the single source of truth for both
+ *  "which widgets share a row" (computeBlocks) and "where does each widget render"
+ *  (positionStyle) — the previous fixes broke because those two questions were
+ *  answered by two DIFFERENT mechanisms (JS array-swap intent vs. the browser's own
+ *  independent `dense` pass) that could disagree. */
+export function computeDensePositions(
+  ids: string[],
+  spanOf: (id: string) => GridSpan,
+  columns: number,
+): Map<string, { row: number; col: number }> {
+  const cols = Math.max(1, columns);
+  const occupied = new Set<string>();
+  const fits = (row: number, col: number, span: GridSpan): boolean => {
+    if (col + span.col - 1 > cols) return false;
+    for (let r = row; r < row + span.row; r++) {
+      for (let c = col; c < col + span.col; c++) {
+        if (occupied.has(`${r},${c}`)) return false;
+      }
+    }
+    return true;
+  };
+  const occupy = (row: number, col: number, span: GridSpan): void => {
+    for (let r = row; r < row + span.row; r++) {
+      for (let c = col; c < col + span.col; c++) occupied.add(`${r},${c}`);
+    }
+  };
+  const positions = new Map<string, { row: number; col: number }>();
+  for (const id of ids) {
+    const raw = spanOf(id);
+    const span: GridSpan = { col: Math.max(1, Math.min(raw.col, cols)), row: Math.max(1, raw.row) };
+    let row = 1;
+    // Bounded by ids.length rows-per-item worst case (every item alone on its own
+    // row) + a small margin — always terminates; this is a finite occupancy scan,
+    // never an infinite loop.
+    const maxRow = ids.length * Math.max(1, span.row) + 4;
+    outer: for (; row <= maxRow; row++) {
+      for (let col = 1; col <= cols - span.col + 1; col++) {
+        if (fits(row, col, span)) {
+          positions.set(id, { row, col });
+          occupy(row, col, span);
+          break outer;
+        }
+      }
+    }
+    if (!positions.has(id)) positions.set(id, { row: maxRow, col: 1 });
+  }
+  return positions;
+}
+
+/** Group a region's ordered widgets into swappable BLOCKS (see module doc above).
+ *  Two widgets land in the same block iff `computeDensePositions` places them so
+ *  their occupied rows overlap — this is what makes a `dense` backfill pairing (two
+ *  non-adjacent small ids sharing one row) count as ONE unit instead of two. */
+export function computeBlocks(ids: string[], spanOf: (id: string) => GridSpan, columns: number): WidgetBlock[] {
+  if (ids.length === 0) return [];
+  const positions = computeDensePositions(ids, spanOf, columns);
+  const parent = new Map<string, string>(ids.map((id) => [id, id]));
+  const find = (x: string): string => {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root) as string;
+    let cur = x;
+    while (parent.get(cur) !== root) {
+      const next = parent.get(cur) as string;
+      parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  };
+  const union = (a: string, b: string): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  const byRow = new Map<number, string[]>();
+  for (const id of ids) {
+    const pos = positions.get(id);
+    if (!pos) continue;
+    const span = spanOf(id);
+    for (let r = pos.row; r < pos.row + Math.max(1, span.row); r++) {
+      const arr = byRow.get(r) ?? [];
+      arr.push(id);
+      byRow.set(r, arr);
+    }
+  }
+  for (const arr of byRow.values()) {
+    const [first, ...rest] = arr;
+    if (!first) continue;
+    for (const id of rest) union(first, id);
+  }
+  const groups = new Map<string, string[]>();
+  for (const id of ids) {
+    const root = find(id);
+    const arr = groups.get(root) ?? [];
+    arr.push(id);
+    groups.set(root, arr);
+  }
+  const minRow = (groupIds: string[]): number =>
+    Math.min(...groupIds.map((id) => positions.get(id)?.row ?? Number.POSITIVE_INFINITY));
+  return Array.from(groups.values())
+    .map((groupIds) => ({ ids: ids.filter((id) => groupIds.includes(id)) }))
+    .sort((a, b) => minRow(a.ids) - minRow(b.ids));
+}
+
+/** Turn a drop into the region's next full id order by exchanging the ENTIRE block
+ *  containing `fromId` with the entire block containing `toId` — never a lone id (see
+ *  module doc). Same-block drops (e.g. one small dropped on its own row-mate) swap
+ *  just those two ids within the block. Every other block's ids and relative order
+ *  are returned byte-for-byte unchanged. Falls back to the original flattened order if
+ *  either id can't be located. */
+export function swapBlocks(blocks: WidgetBlock[], fromId: string, toId: string): string[] {
+  const flat = blocks.flatMap((b) => b.ids);
+  if (fromId === toId) return flat;
+  const fromIdx = blocks.findIndex((b) => b.ids.includes(fromId));
+  const toIdx = blocks.findIndex((b) => b.ids.includes(toId));
+  if (fromIdx < 0 || toIdx < 0) return flat;
+  const next = blocks.slice();
+  if (fromIdx === toIdx) {
+    const block = blocks[fromIdx];
+    if (!block) return flat;
+    const ids = block.ids.slice();
+    const a = ids.indexOf(fromId);
+    const b = ids.indexOf(toId);
+    if (a < 0 || b < 0) return flat;
+    const tmp = ids[a] as string;
+    ids[a] = ids[b] as string;
+    ids[b] = tmp;
+    next[fromIdx] = { ids };
+    return next.flatMap((bl) => bl.ids);
+  }
+  const fromBlock = blocks[fromIdx];
+  const toBlock = blocks[toIdx];
+  if (!fromBlock || !toBlock) return flat;
+  next[fromIdx] = toBlock;
+  next[toIdx] = fromBlock;
+  return next.flatMap((bl) => bl.ids);
+}
+
+/** Explicit CSS Grid placement (line-based, not `span`-only) for a widget's simulated
+ *  `computeDensePositions` cell — pairs with `spanStyle`'s span but ALSO pins the
+ *  start line, so the render is driven by the exact same simulation `computeBlocks`/
+ *  `swapBlocks` reasoned about, not a second independent `dense` auto-placement pass
+ *  that could disagree with it (see module doc). */
+export function positionStyle(pos: { row: number; col: number }, size: WidgetSize): { gridColumn: string; gridRow: string } {
+  const s = WIDGET_SIZE_SPAN[size];
+  return { gridColumn: `${pos.col} / span ${s.col}`, gridRow: `${pos.row} / span ${s.row}` };
+}
+
 export interface HomeWidgetMeta {
   id: string;
   label: string;

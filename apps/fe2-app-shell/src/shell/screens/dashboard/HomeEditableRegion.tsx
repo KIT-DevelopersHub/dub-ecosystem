@@ -10,37 +10,32 @@
 // the region-scoped ordering rule (`mergeRegionOrder` never moves a widget across
 // regions). Not editing ⇒ a plain, layout-neutral render of the visible widgets only
 // (identical DOM shape to before P3-3, so the resting dashboard is unchanged).
-import { Fragment } from "react";
+import { cloneElement, Fragment } from "react";
 import { Icon, SegmentedControl, SortableList, type SortableReorderEvent } from "@dub/ui";
 import { useUiStore } from "../../../store/uiStore.tsx";
 import {
+  computeBlocks,
+  computeDensePositions,
   isResizableWidget,
   mergeRegionOrder,
+  positionStyle,
   regionOrdered,
   sizeOf,
   spanStyle,
+  swapBlocks,
   visibleRegion,
+  WIDGET_SIZE_SPAN,
   type HomeRegion,
   type HomeWidgetMeta,
   type WidgetSize,
 } from "./homeLayout.ts";
+import { useGridColumns } from "./useGridColumns.ts";
 
 const SIZE_OPTIONS: { value: WidgetSize; label: string }[] = [
   { value: "small", label: "小" },
   { value: "medium", label: "中" },
   { value: "large", label: "大" },
 ];
-
-/** Move an id to a new index within a list (translate a drop into the region's next
- *  id order). Mirrors the P3-2 カスタマイズ modal's helper. */
-function moveTo(ids: string[], from: number, to: number): string[] {
-  if (from < 0 || to < 0 || from === to) return ids;
-  const next = ids.slice();
-  const [moved] = next.splice(from, 1);
-  if (moved === undefined) return ids;
-  next.splice(to, 0, moved);
-  return next;
-}
 
 export function HomeEditableRegion({
   region,
@@ -77,16 +72,47 @@ export function HomeEditableRegion({
   const setHomeWidgetSize = useUiStore((s) => s.setHomeWidgetSize);
   const hiddenSet = new Set(hidden);
   const resolvedTestId = testId ?? `fe2-home-region-${region}`;
+  // Fallback column count BEFORE the container is measured (first paint / no
+  // ResizeObserver support) — matches this region's declared `grid-template-columns`
+  // at the desktop breakpoint (see global.css .fe2-kpi-row / .fe2-home-side); the live
+  // measurement below self-corrects at narrower breakpoints.
+  const fallbackColumns = region === "kpi" ? 6 : 2;
+  const { ref: containerRef, columns } = useGridColumns(fallbackColumns);
+  const spanOfId = (id: string): { col: number; row: number } => {
+    const meta = catalog.find((w) => w.id === id);
+    return meta && isResizableWidget(meta) ? WIDGET_SIZE_SPAN[sizeOf(catalog, sizes, id)] : { col: 1, row: 1 };
+  };
 
   if (!isEditing) {
-    // Resting dashboard: visible widgets only, in the saved order — no wrapper divs,
-    // no drag machinery. Same shape as pre-P3-3.
+    // Resting dashboard: visible widgets only, in the saved order — no drag machinery.
+    // Each resizable widget's rendered node gets an EXPLICIT grid placement computed by
+    // the SAME `computeDensePositions` simulation `computeBlocks`/`swapBlocks` (below)
+    // reason about while editing — not a second, independent `dense` auto-placement
+    // pass that could disagree with it (see homeLayout.ts module doc: that exact
+    // disagreement is why the previous two swap fixes read as broken to a real user).
     const visible = visibleRegion(catalog, order, hidden, region);
+    const positions = computeDensePositions(
+      visible.map((w) => w.id),
+      spanOfId,
+      columns,
+    );
     return (
-      <div className={className} data-testid={resolvedTestId} {...(containerAriaLabel ? { "aria-label": containerAriaLabel } : {})}>
-        {visible.map((w) => (
-          <Fragment key={w.id}>{nodes[w.id]}</Fragment>
-        ))}
+      <div
+        ref={containerRef}
+        className={className}
+        data-testid={resolvedTestId}
+        {...(containerAriaLabel ? { "aria-label": containerAriaLabel } : {})}
+      >
+        {visible.map((w) => {
+          const node = nodes[w.id];
+          if (!node) return null;
+          if (!isResizableWidget(w)) return <Fragment key={w.id}>{node}</Fragment>;
+          const pos = positions.get(w.id);
+          const size = sizeOf(catalog, sizes, w.id);
+          const existingStyle = (node.props as { style?: object }).style;
+          const style = pos ? { ...existingStyle, ...positionStyle(pos, size) } : undefined;
+          return <Fragment key={w.id}>{style ? cloneElement(node, { style }) : node}</Fragment>;
+        })}
       </div>
     );
   }
@@ -96,9 +122,25 @@ export function HomeEditableRegion({
   const items = regionOrdered(catalog, order, region);
   if (items.length === 0) return <></>;
 
+  // Swappable row-units for THIS render's order/sizes/columns — see homeLayout.ts
+  // module doc. A drop exchanges the whole block the dragged widget belongs to with
+  // the whole block its drop target belongs to (never a lone id), so e.g. dragging a
+  // "medium" onto one of two "small" tiles trades it with BOTH smalls' row — matching
+  // what dense packing actually painted as "this row" — and leaves every other row's
+  // widgets untouched.
+  const blocks = computeBlocks(
+    items.map((w) => w.id),
+    spanOfId,
+    columns,
+  );
+  const positions = computeDensePositions(
+    items.map((w) => w.id),
+    spanOfId,
+    columns,
+  );
+
   const onReorder = (e: SortableReorderEvent): void => {
-    const ids = items.map((w) => w.id);
-    const next = moveTo(ids, e.oldIndex, e.newIndex);
+    const next = swapBlocks(blocks, e.activeId, e.overId);
     setHomeWidgetOrder(mergeRegionOrder(catalog, order, region, next));
   };
 
@@ -107,20 +149,30 @@ export function HomeEditableRegion({
       items={items}
       getItemId={(w) => w.id}
       onReorder={onReorder}
+      // Supply the FULL next id order synchronously (dnd-kit's default single-item
+      // arrayMove is wrong here — see module doc) so the optimistic re-render and the
+      // persisted order always agree, and so every OTHER widget whose block moved as a
+      // side effect of the swap (e.g. a dragged medium's pair-mate) FLIPs into its new
+      // slot instead of popping.
+      computeNextOrder={(activeId, overId) => swapBlocks(blocks, activeId, overId)}
       className={className}
       aria-label={`${regionLabel}の並べ替え`}
       testId={resolvedTestId}
+      containerRef={containerRef}
       // The region's own className is a CSS Grid (kpi-row / cards / side rail), not a
       // single vertical stack — `rect` reflows by intersecting rectangles (correct for
       // any grid), where the default `vertical` strategy assumes one column and computes
       // the wrong offsets across multiple columns (the visible bug: neighbours overlap /
       // the dragged tile paints behind another one mid-reflow).
       strategy="rect"
-      // Give every resizable widget's SortableList row the same CSS Grid span its
-      // resting-dashboard node carries (see spanStyle/sizeOf) — so 編集モード's grid
-      // keeps mixing sizes exactly like the resting one, and the floating DragOverlay
-      // clone (sized from THIS row, see SortableList) matches the tile's real footprint.
-      getItemStyle={(w) => (isResizableWidget(w) ? spanStyle(sizeOf(catalog, sizes, w.id)) : undefined)}
+      // Explicit placement (line + span), not `spanStyle`'s span-only — see module doc:
+      // this pins each row to the SAME simulated cell `computeBlocks`/`swapBlocks`
+      // reasoned about, so the drag preview and the committed swap always agree.
+      getItemStyle={(w) => {
+        if (!isResizableWidget(w)) return undefined;
+        const pos = positions.get(w.id);
+        return pos ? positionStyle(pos, sizeOf(catalog, sizes, w.id)) : spanStyle(sizeOf(catalog, sizes, w.id));
+      }}
       renderItem={(w, ctx) => {
         const isHidden = hiddenSet.has(w.id);
         const resizable = isResizableWidget(w);

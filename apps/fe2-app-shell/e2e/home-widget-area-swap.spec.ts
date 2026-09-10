@@ -104,11 +104,11 @@ test("サイドパネル: 小2つ=中1つ・大隣接の混在をdenseで詰め�
   // contract — rather than a pixel ratio that content height would make flaky).
   const eventsRowSpan = await page
     .getByTestId("fe2-home-events")
-    .evaluate((el) => getComputedStyle(el).gridRowStart);
+    .evaluate((el) => getComputedStyle(el).gridRowEnd);
   expect(eventsRowSpan).toContain("span 2");
   const smallRowSpan = await page
     .getByTestId("fe2-home-recent")
-    .evaluate((el) => getComputedStyle(el).gridRowStart);
+    .evaluate((el) => getComputedStyle(el).gridRowEnd);
   expect(smallRowSpan).toContain("span 1");
 
   // No dense-fill collision: 大 does not overlap the 小+小 row placed beside/above it.
@@ -143,7 +143,7 @@ test("サイドパネル: 小2つ=中1つ・大隣接の混在をdenseで詰め�
   // Sizes travel WITH the widget, not the slot — 未読の通知 is still 小 (span 1) after moving.
   const notifRowSpanAfterSwap = await page
     .getByTestId("fe2-home-notifications")
-    .evaluate((el) => getComputedStyle(el).gridRowStart);
+    .evaluate((el) => getComputedStyle(el).gridRowEnd);
   expect(notifRowSpanAfterSwap).toContain("span 1");
 
   // ── persistence: reload and both the sizes and the new order survive ──────────

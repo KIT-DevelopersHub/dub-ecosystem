@@ -110,7 +110,7 @@ test("編集モード: resize a tile to 大, mix sizes while reordering, and per
   // actual CSS Grid item — which is the parent of the `fe2-widget-edit-*` chrome div.
   const largeStyle = await page
     .getByTestId("fe2-widget-edit-kpi-countdown")
-    .evaluate((el) => getComputedStyle(el.parentElement!).gridRowStart);
+    .evaluate((el) => getComputedStyle(el.parentElement!).gridRowEnd);
   expect(largeStyle).toContain("span 2");
 
   // Reorder still works with mixed sizes in play (drag the now-大 tile past its neighbour).

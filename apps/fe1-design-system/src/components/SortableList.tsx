@@ -1,4 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type CSSProperties, type HTMLAttributes } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type CSSProperties,
+  type HTMLAttributes,
+  type Ref,
+} from "react";
 import {
   DndContext,
   DragOverlay,
@@ -114,6 +125,12 @@ export interface SortableListProps<T> {
    *  variable-size tile) merged onto the row's own wrapper — UNDER dnd-kit's own
    *  transform/opacity styling, so a name clash always defers to dnd-kit. */
   getItemStyle?: (item: T) => CSSProperties | undefined;
+  /** Ref onto the list's own rendered container (the actual CSS Grid/flex element,
+   *  same node that carries `className`/`data-testid`) — lets a consumer measure the
+   *  container's LIVE layout (e.g. `getComputedStyle(el).gridTemplateColumns` to know
+   *  the real column count at the current breakpoint) instead of assuming a hardcoded
+   *  value that a responsive `className` might not match. */
+  containerRef?: Ref<HTMLDivElement>;
   testId?: string;
   "aria-label"?: string;
 }
@@ -240,6 +257,7 @@ export function SortableList<T>({
   overlayClassName,
   strategy = "vertical",
   getItemStyle,
+  containerRef,
   testId,
   ...rest
 }: SortableListProps<T>) {
@@ -474,7 +492,7 @@ export function SortableList<T>({
       onDragCancel={onDragCancel}
     >
       <SortableContext items={ids} strategy={sortingStrategy}>
-        <div className={className} data-testid={testId} aria-label={ariaLabel}>
+        <div ref={containerRef} className={className} data-testid={testId} aria-label={ariaLabel}>
           {orderedItems.map((item) => {
             const rid = getItemId(item);
             return (

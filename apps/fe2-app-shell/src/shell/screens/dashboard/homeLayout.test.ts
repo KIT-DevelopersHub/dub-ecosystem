@@ -1,15 +1,22 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeBlocks,
+  computeDensePositions,
   HOME_REGIONS,
   HOME_WIDGET_SIZES,
   isResizableWidget,
   mergeRegionOrder,
+  positionStyle,
   regionOrdered,
   sizeOf,
   sortByOrder,
   spanStyle,
+  swapBlocks,
   visibleRegion,
+  WIDGET_SIZE_SPAN,
+  type GridSpan,
   type HomeWidgetMeta,
+  type WidgetBlock,
   type WidgetSize,
 } from "./homeLayout.ts";
 
@@ -162,6 +169,156 @@ describe("homeLayout", () => {
       expect(sizeOf(mixed, {}, "side-small-1")).toBe("small");
       expect(sizeOf(mixed, {}, "side-medium-1")).toBe("medium");
       expect(sizeOf(mixed, {}, "side-large")).toBe("large");
+    });
+  });
+
+  // ---- mixed-size drag SWAP redesign (postmortem for PR #484 / fix/widget-area-swap-mutual)
+  // Two prior fixes ("move"=arrayMove, then "swap"=dnd-kit rectSwappingStrategy+arraySwap)
+  // operated on the flat id array and were regression-tested by DOM-order assertions only
+  // — never by the actual on-screen geometry a `grid-auto-flow: dense` region paints, which
+  // is why a real mouse drag still read as "sizes different ⇒ can't swap" even after both
+  // "fixes" shipped. These tests pin the exact (row, col) a `dense` grid renders (matching
+  // the CSS spec's own auto-placement algorithm) and the swap semantics derived from it.
+  describe("computeDensePositions (exact `dense` auto-placement simulator)", () => {
+    const span = (sizes: Record<string, GridSpan>) => (id: string) => sizes[id] ?? { col: 1, row: 1 };
+
+    it("packs same-size small tiles left-to-right, wrapping rows", () => {
+      const spanOf = span({ a: { col: 1, row: 1 }, b: { col: 1, row: 1 }, c: { col: 1, row: 1 } });
+      const pos = computeDensePositions(["a", "b", "c"], spanOf, 2);
+      expect(pos.get("a")).toEqual({ row: 1, col: 1 });
+      expect(pos.get("b")).toEqual({ row: 1, col: 2 });
+      expect(pos.get("c")).toEqual({ row: 2, col: 1 });
+    });
+
+    it("`dense` backfills a non-adjacent small into the gap a wide tile leaves — the exact\n     mechanism the previous array-swap fixes never modeled", () => {
+      // [medium(A,full row), small(B), medium(C,full row), small(D)] in a 2-col grid:
+      // dense does NOT put B and D on separate half-empty rows — it backfills D into
+      // the half-cell B's row leaves open, because C can't fit there.
+      const spanOf = span({
+        A: { col: 2, row: 1 },
+        B: { col: 1, row: 1 },
+        C: { col: 2, row: 1 },
+        D: { col: 1, row: 1 },
+      });
+      const pos = computeDensePositions(["A", "B", "C", "D"], spanOf, 2);
+      expect(pos.get("A")).toEqual({ row: 1, col: 1 });
+      expect(pos.get("B")).toEqual({ row: 2, col: 1 });
+      expect(pos.get("C")).toEqual({ row: 3, col: 1 });
+      expect(pos.get("D")).toEqual({ row: 2, col: 2 }); // backfilled next to B, not its own row
+    });
+
+    it("places a 2x2 large tile and lets a later small backfill beside it", () => {
+      const spanOf = span({
+        recent: { col: 1, row: 1 },
+        events: { col: 2, row: 2 },
+        notifications: { col: 1, row: 1 },
+      });
+      const pos = computeDensePositions(["recent", "events", "notifications"], spanOf, 2);
+      expect(pos.get("recent")).toEqual({ row: 1, col: 1 });
+      expect(pos.get("events")).toEqual({ row: 2, col: 1 }); // 2x2, needs a fresh 2-col row
+      expect(pos.get("notifications")).toEqual({ row: 1, col: 2 }); // backfills beside recent
+    });
+  });
+
+  describe("computeBlocks (swappable row-units)", () => {
+    const spanOf = (sizes: Record<string, WidgetSize>) => (id: string) => WIDGET_SIZE_SPAN[sizes[id] ?? "small"];
+
+    it("groups a `dense`-backfilled pair of NON-adjacent smalls into ONE block", () => {
+      // Same arrangement as the computeDensePositions backfill test above: B and D end
+      // up sharing a row even though C sits between them in the id array — they must be
+      // ONE swappable block, not two, or a drag involving either would silently touch
+      // the wrong widgets.
+      const sizes: Record<string, WidgetSize> = { A: "medium", B: "small", C: "medium", D: "small" };
+      const blocks = computeBlocks(["A", "B", "C", "D"], spanOf(sizes), 2);
+      expect(blocks.map((b) => b.ids)).toEqual([["A"], ["B", "D"], ["C"]]);
+    });
+
+    it("groups the small+small pair that shares a row with a large's backfill (同面積 case)", () => {
+      const sizes: Record<string, WidgetSize> = { recent: "small", events: "large", notifications: "small" };
+      const blocks = computeBlocks(["recent", "events", "notifications"], spanOf(sizes), 2);
+      // recent and notifications end up sharing row1 (dense backfill) — one block;
+      // events (2x2) stands alone.
+      expect(blocks.map((b) => b.ids)).toEqual([["recent", "notifications"], ["events"]]);
+    });
+
+    it("one medium is its own solo block beside an adjacent small pair", () => {
+      const sizes: Record<string, WidgetSize> = { recent: "medium", events: "small", notifications: "small" };
+      const blocks = computeBlocks(["recent", "events", "notifications"], spanOf(sizes), 2);
+      expect(blocks.map((b) => b.ids)).toEqual([["recent"], ["events", "notifications"]]);
+    });
+
+    it("three solo full-width blocks when every widget is medium/large", () => {
+      const sizes: Record<string, WidgetSize> = { recent: "large", events: "medium", notifications: "medium" };
+      const blocks = computeBlocks(["recent", "events", "notifications"], spanOf(sizes), 2);
+      expect(blocks.map((b) => b.ids)).toEqual([["recent"], ["events"], ["notifications"]]);
+    });
+  });
+
+  describe("swapBlocks (a drop exchanges ENTIRE blocks, never a lone id)", () => {
+    it("swaps two solo blocks and leaves every other block untouched", () => {
+      const blocks: WidgetBlock[] = [{ ids: ["large-1"] }, { ids: ["medium-1"] }, { ids: ["medium-2"] }];
+      expect(swapBlocks(blocks, "large-1", "medium-2")).toEqual(["medium-2", "medium-1", "large-1"]);
+    });
+
+    it("dragging a solo medium onto ONE small trades it with the small's WHOLE pair —\n     the exact semantic both prior array-swap fixes got wrong", () => {
+      const blocks: WidgetBlock[] = [{ ids: ["medium"] }, { ids: ["small-1", "small-2"] }];
+      // Drop the medium on small-2 specifically — the swap still moves the WHOLE pair
+      // (small-1 rides along even though it was never touched by the pointer), because
+      // the pair is one row-unit. Both smalls keep their relative order.
+      expect(swapBlocks(blocks, "medium", "small-2")).toEqual(["small-1", "small-2", "medium"]);
+    });
+
+    it("dragging one small onto its own pair-mate swaps just those two ids in place", () => {
+      const blocks: WidgetBlock[] = [{ ids: ["medium"] }, { ids: ["small-1", "small-2"] }];
+      expect(swapBlocks(blocks, "small-1", "small-2")).toEqual(["medium", "small-2", "small-1"]);
+    });
+
+    it("is a no-op (returns the flattened original) when either id is unknown", () => {
+      const blocks: WidgetBlock[] = [{ ids: ["a"] }, { ids: ["b", "c"] }];
+      expect(swapBlocks(blocks, "a", "ghost")).toEqual(["a", "b", "c"]);
+    });
+
+    it("dragging widget onto itself is a no-op", () => {
+      const blocks: WidgetBlock[] = [{ ids: ["a"] }, { ids: ["b", "c"] }];
+      expect(swapBlocks(blocks, "a", "a")).toEqual(["a", "b", "c"]);
+    });
+  });
+
+  describe("swap end-to-end: block-swap composed with computeDensePositions reproduces the\n    intended visual trade, and re-simulating the swapped order agrees with computeBlocks", () => {
+    it("中(medium)⇄小2つ(2 small): after the swap, the 2 smalls occupy the medium's OLD\n       row and the medium occupies the smalls' OLD row — nothing else moves", () => {
+      const sizes: Record<string, WidgetSize> = { recent: "medium", events: "small", notifications: "small" };
+      const spanOf = (id: string) => WIDGET_SIZE_SPAN[sizes[id as keyof typeof sizes] ?? "small"];
+      const before = computeDensePositions(["recent", "events", "notifications"], spanOf, 2);
+      expect(before.get("recent")).toEqual({ row: 1, col: 1 });
+      expect(before.get("events")).toEqual({ row: 2, col: 1 });
+      expect(before.get("notifications")).toEqual({ row: 2, col: 2 });
+
+      const blocks = computeBlocks(["recent", "events", "notifications"], spanOf, 2);
+      const nextIds = swapBlocks(blocks, "recent", "notifications");
+      const after = computeDensePositions(nextIds, spanOf, 2);
+      // The 2-small row now sits where the medium used to be (row1); the medium now
+      // sits where the small pair used to be (row2) — a true reciprocal trade.
+      expect(after.get("events")).toEqual({ row: 1, col: 1 });
+      expect(after.get("notifications")).toEqual({ row: 1, col: 2 });
+      expect(after.get("recent")).toEqual({ row: 2, col: 1 });
+    });
+
+    it("大(large)⇄中2つ(2 separate mediums): dragging large onto the SECOND medium swaps\n       only those two — the untouched medium keeps its own row", () => {
+      const sizes: Record<string, WidgetSize> = { recent: "large", events: "medium", notifications: "medium" };
+      const spanOf = (id: string) => WIDGET_SIZE_SPAN[sizes[id as keyof typeof sizes] ?? "small"];
+      const blocks = computeBlocks(["recent", "events", "notifications"], spanOf, 2);
+      const nextIds = swapBlocks(blocks, "recent", "notifications");
+      const after = computeDensePositions(nextIds, spanOf, 2);
+      expect(after.get("notifications")).toEqual({ row: 1, col: 1 }); // took recent's old row
+      expect(after.get("events")).toEqual({ row: 2, col: 1 }); // untouched widget, own row
+      expect(after.get("recent")).toEqual({ row: 3, col: 1 }); // took notifications' old row
+    });
+  });
+
+  describe("positionStyle", () => {
+    it("emits an explicit line + span placement, not a span-only rule", () => {
+      expect(positionStyle({ row: 2, col: 1 }, "medium")).toEqual({ gridColumn: "1 / span 2", gridRow: "2 / span 1" });
+      expect(positionStyle({ row: 1, col: 2 }, "small")).toEqual({ gridColumn: "2 / span 1", gridRow: "1 / span 1" });
     });
   });
 });
