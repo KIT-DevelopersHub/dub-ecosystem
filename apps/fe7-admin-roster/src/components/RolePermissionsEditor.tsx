@@ -87,7 +87,7 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   }
 
   return (
-    <div data-testid={`fe7-role-inline-${role.id}`}>
+    <div data-testid={`fe7-role-inline-${role.id}`} data-p12-role-draft-fix="1">
       <UnsavedChangesGuard when={dirty} testId={`${ns}-leave-confirm`} />
       <DraftRestoredNotice
         visible={draft.restoredVisible}
