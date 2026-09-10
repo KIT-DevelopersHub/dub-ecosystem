@@ -1,22 +1,26 @@
 name: Deploy (staging)
 
-# STAGING deploy — two entry points into the SAME single shared staging environment:
+# STAGING deploy — ONE entry point into the single shared staging environment:
 #
-#   1. push to `main`  -> redeploy staging from main's HEAD on every merge. This keeps
-#      staging a faithful mirror of production: whatever lands in main (and thus goes to
-#      prod via deploy.yml) is always ALSO on staging, so the two never drift.
+#   PR + `stagingへ` label  -> deploy that PR's head to the single `-staging` slot.
+#     There is ONE shared staging environment. The reviewer adds the `stagingへ` label to
+#     the ONE PR that should occupy staging (in practice the demo-approved INTEGRATION PR,
+#     #444 `staging/demo-approved-integ`, per the "統合ブランチ方式" in the dub dev-flow),
+#     and that PR (plus its later `synchronize` pushes) owns the staging slot.
 #
-#   2. PR + `stagingへ` label  -> pre-merge preview. There is ONE shared staging
-#      environment but many concurrent open PRs, so we do NOT auto-deploy every PR push;
-#      the reviewer adds the `stagingへ` label to the ONE PR under review and that PR
-#      (plus its later pushes) temporarily occupies staging for verification. Per-PR
-#      preview environments would be needed for "every PR auto-deploys" — a future step.
+# WHY there is NO `push: main` mirror here (this is the fix for the recurring overwrite):
+#   A `push: branches: [main]` trigger used to ALSO redeploy staging from main's HEAD on
+#   every merge, on the theory of keeping staging == prod. But staging's job is to preview
+#   the demo-approved INTEGRATION branch, which is a SUPERSET of main (main + the
+#   demo-approved features not yet merged). The main mirror clobbered that integration
+#   deploy with main's (feature-less) HEAD every time ANY unrelated PR merged to main —
+#   the reviewer then opened staging and found launcher / P10 roster / fe7 skeleton /
+#   presence etc. GONE. Since the integration PR always merges current main into itself,
+#   staging already contains everything on main; the mirror added nothing but the clobber.
+#   Production is still deployed on push:main by deploy.yml — that path is untouched.
 #
-# Both paths build the fe2 bundle against the STAGING gateway with VITE_DEMO_AUTOLOGIN=1
-# and deploy the `-staging` Worker set (infra/deploy/deploy-staging.sh). The `concurrency`
-# group below serializes them: a label preview and a main-follow deploy queue rather than
-# race for the single slot. After a merge, only the push:main run fires (merge does not
-# emit `synchronize`), so staging converges on main's HEAD.
+# Both label and later synchronize pushes build the fe2 bundle against the STAGING gateway
+# with VITE_DEMO_AUTOLOGIN=1 and deploy the `-staging` Worker set (deploy-staging.sh).
 #
 # Flow (label preview):
 #   add `stagingへ` label  -> build PR head, deploy `-staging` set, post/update a sticky
@@ -27,9 +31,6 @@ name: Deploy (staging)
 # this public repo. See docs/runbooks/04-staging-label-gate.md.
 
 on:
-  # Mirror production: every merge to main redeploys staging from main's HEAD.
-  push:
-    branches: [main]
   pull_request:
     # `labeled` fires when `stagingへ` is added; `synchronize` redeploys new pushes of
     # an already-labelled PR; `reopened` re-covers a reopened labelled PR.
@@ -51,13 +52,11 @@ env:
 jobs:
   staging:
     name: build · deploy-staging · comment
-    # Run on every push to main (mirror prod), OR on a PR that currently carries the
-    # `stagingへ` label (covers both the `labeled` event and later `synchronize` pushes
-    # while it stays on). The label condition is NOT applied to push:main.
+    # Run only for a PR that currently carries the `stagingへ` label (covers both the
+    # `labeled` event and later `synchronize` pushes while the label stays on).
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'stagingへ'))
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'stagingへ')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: staging
@@ -65,8 +64,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      # pull_request: build the PR head. push:main: pull_request is null, so the ||
-      # falls back to github.sha (main's HEAD) — the exact tree that goes to prod.
+      # Build the PR head (the labelled PR's tip). The `|| github.sha` fallback is kept
+      # defensively; with only the pull_request trigger, head.sha is always set.
       - name: Checkout target SHA
         uses: actions/checkout@v4
         with:
