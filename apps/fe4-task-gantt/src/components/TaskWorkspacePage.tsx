@@ -7,6 +7,7 @@ import { useUndoRedo, useUndoRedoHotkeys } from "@dub/app-ui";
 import { useApiClient } from "../api/client-context";
 import { getTask, patchGanttRow, replaceDependencies, resolveUsers, updateTask } from "../api/endpoints";
 import { useGanttData } from "../api/useGanttData";
+import { useGanttRealtime } from "../api/useGanttRealtime";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
 import { useRoster } from "../api/useRoster";
@@ -22,7 +23,7 @@ import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRowsMulti, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
-import { PRIORITY_LABEL } from "../domain/task-form";
+import { PRIORITY_LABEL, DATE_LABEL } from "../domain/task-form";
 import { useGanttSort } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
 import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
@@ -39,6 +40,7 @@ import { TeamViewSwitcher } from "./TeamViewSwitcher";
 import { GanttView } from "./GanttView";
 import { TaskDetailPanel, type RelationEdit } from "./TaskDetailPanel";
 import { TaskCreateModal, type TaskDraft } from "./TaskCreateModal";
+import { PresenceBar } from "./PresenceBar";
 import styles from "../styles/app.module.css";
 
 export interface TaskWorkspacePageProps {
@@ -61,9 +63,9 @@ const NEUTRAL_GROUP_COLOR = "#6f7a90"; // gray.500
 /** Human labels for validation `field` keys shown in the ErrorDialog breakdown. */
 const FIELD_LABEL: Record<string, string> = {
   title: "タイトル",
-  dueAt: "期日",
-  startsAt: "開始日",
-  endsAt: "終了日",
+  dueAt: DATE_LABEL.end,
+  startsAt: DATE_LABEL.start,
+  endsAt: DATE_LABEL.end,
   status: "ステータス",
   priority: "優先度",
   assigneeId: "担当",
@@ -127,6 +129,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   };
   const caps = useMemo(() => taskCapabilities(permissions), [permissions]);
   const gantt = useGanttData(eventId);
+  // Realtime sync: apply peers' bar moves straight to the cache, and refetch fresh when a
+  // structural change (create/delete/status/assignee/dependency) shifts the derived chart.
+  // Best-effort — the chart works without it (RT is a delivery optimisation, not the SoT).
+  // Realtime also returns the live presence roster (who else is viewing) + connection
+  // status for the Google-Docs-style avatar cluster in the header.
+  const rt = useGanttRealtime(eventId, {
+    applyMove: gantt.setRowScheduleOptimistic,
+    invalidate: () => {
+      void gantt.refetchFresh();
+    },
+  });
   // Per-user view state — carries the personal manual row order (drag reorder).
   const view = useGanttView(eventId);
   const orderedTaskIds = useMemo(() => view.data?.orderedTaskIds ?? [], [view.data]);
@@ -220,6 +233,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     for (const u of userList) if (!byId.has(u.id)) byId.set(u.id, u);
     return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "ja"));
   }, [roster, userList]);
+  // userId → display name, for the presence bar avatars (roster ∪ resolved-from-tasks).
+  // The DO may not carry a signed displayName, so the bar resolves labels from here.
+  const displayNameById = useMemo(() => {
+    const m = new Map<common.UserId, string>();
+    for (const u of assignableUsers) m.set(u.id, u.displayName);
+    return m;
+  }, [assignableUsers]);
   const statusById = useMemo(() => new Map(tasks.map((t) => [t.id, t.status] as const)), [tasks]);
   // team accent colour per task (team-grouped rows), and a legend of the teams
   // actually present on the board — drives the row stripe / bar cap / legend chips.
@@ -726,6 +746,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       {
         eventId,
         title: draft.title,
+        ...(draft.description ? { description: draft.description } : {}),
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(teamId ? { teamId } : {}),
@@ -795,8 +816,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return true;
   };
 
-  const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit) => {
-    if (!selectedTask) return;
+  // Returns a promise that resolves true on success / false on failure so the detail
+  // panel's auto-save indicator can show 保存中…→保存しました/保存に失敗しました.
+  const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit): Promise<boolean> => {
+    if (!selectedTask) return Promise.resolve(false);
     const needsRelations = relations.parentChanged || relations.depsChanged;
     // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
     // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
@@ -833,7 +856,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           fieldOnlyPatch.dueAt !== undefined ? fieldOnlyPatch.dueAt : barBefore?.endsAt ?? null;
         gantt.setRowScheduleOptimistic(id, nextStarts, nextEnds);
       }
-      void store
+      const savePromise = store
         .patchOptimistic(client, id, fieldOnlyPatch, selectedTask.version, fieldOnlyPatch)
         .then((ok) => {
           if (ok) {
@@ -843,6 +866,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
             // Save failed (reason surfaced by the store) — restore the true bar position.
             void gantt.refetchFresh();
           }
+          return ok !== null; // Task on success, null on failure → boolean for the indicator
         });
       if (Object.keys(afterFields).length > 0) {
         history.push({
@@ -855,7 +879,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           },
         });
       }
-      return;
+      return savePromise;
     }
     // Relation edit (親子 / 依存). Snapshot the BEFORE state so Ctrl-Z can restore
     // the previous parent/predecessors, apply the AFTER state, then record it.
@@ -869,9 +893,12 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // stale panel version — the reparent→依存 failure class. The optimistic parent + 依存
     // reflection (and its rollback) now lives INSIDE applyRelationsRaw, so save + undo +
     // redo all reflect instantly. On success we confirm with a success toast.
-    void applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined).then((ok) => {
-      if (ok) feedback.success();
-    });
+    const relPromise = applyRelationsRaw(id, nextParent, nextDeps, hasFieldPatch ? fieldOnlyPatch : undefined).then(
+      (ok) => {
+        if (ok) feedback.success();
+        return ok;
+      },
+    );
     history.push({
       label: relations.depsChanged ? "先行タスク（依存）の変更" : "親タスク（親子）の変更",
       undo: async () => {
@@ -881,6 +908,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         await applyRelationsRaw(id, nextParent, nextDeps);
       },
     });
+    return relPromise;
   };
 
   const onDeleteDetail = () => {
@@ -1070,8 +1098,16 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       <header className={styles.pageHeader}>
         <div className={styles.pageHeaderText}>
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
-          <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
+          <p className={styles.pageSubtitle}>終了日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
+        {/* Realtime presence: the Google-Docs-style cluster of who is viewing this gantt
+            right now (live). Shown to everyone — viewers included, not just writers. */}
+        <PresenceBar
+          presence={rt.presence}
+          status={rt.status}
+          selfUserId={rt.selfUserId}
+          displayNameById={displayNameById}
+        />
         {caps.canWrite && (
           <div className={styles.headerActions}>
             {/* Organizer edit affordance. Placeholder gating today: canWrite comes

@@ -8,6 +8,7 @@ import type { AppDeps } from "./ports";
 import { createHttpUpstream } from "./upstream";
 import { createViewRepo } from "./views";
 import { createKvCache } from "./cache";
+import { buildRealtime } from "./realtime";
 
 const authClientByEnv = new WeakMap<Env, AuthClient>();
 
@@ -25,4 +26,5 @@ export const defaultDeps: AppDeps = {
   views: (env) => createViewRepo(createDbClient(env.DB, { namespace: "gantt" })),
   cache: (env) => createKvCache(env.GANTT_KV),
   authClient: getAuthClient,
+  realtime: (env) => buildRealtime(env.GANTT_ROOM),
 };

@@ -85,7 +85,7 @@ Non-2xx must return the standard envelope `{ error: { code, message, retryable, 
 
 A second admin tool in the same console: manage the org's `@developershub.jp`
 addresses backed by **Cloudflare Email Routing** (each managed address = one
-Email Routing rule forwarding `localPart@developershub.jp` → `destination`).
+Email Routing rule forwarding `localPart@developershub.jp` → the mail Worker).
 Reached from the launcher, **gated on `mail:admin`** (admin + maintainer hold it
 in the demo). UI: `EmailRoutingPage` + `NewEmailAddressDialog` (FE7). Backend is
 the separate Email Routing proxy service.
@@ -93,7 +93,7 @@ the separate Email Routing proxy service.
 | Action | Method & path | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|
 | list | `GET /api/v1/admin/email-routing/addresses` | `mail:admin` | – | `Paginated<EmailRoutingAddress>` | – |
-| issue | `POST /api/v1/admin/email-routing/addresses` | `mail:admin` | `{ localPart, destination }` | `EmailRoutingAddress` (`enabled:true`) | `400` bad localPart (`^[a-z0-9._-]+$`) / bad destination email; `409` duplicate localPart |
+| issue | `POST /api/v1/admin/email-routing/addresses` | `mail:admin` | `{ localPart }` (`destination` optional/ignored — fixed to the mail Worker server-side) | `EmailRoutingAddress` (`enabled:true`) | `400` bad localPart (`^[a-z0-9._-]+$`); `409` duplicate localPart |
 | enable/disable · repoint | `PATCH /api/v1/admin/email-routing/addresses/:id` | `mail:admin` | `{ enabled?, destination? }` | `EmailRoutingAddress` | `400` bad destination; `404` |
 | delete | `DELETE /api/v1/admin/email-routing/addresses/:id` | `mail:admin` | – | `204` | `404` |
 

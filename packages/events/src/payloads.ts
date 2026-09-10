@@ -45,7 +45,12 @@ export interface NotificationRequestedPayload {
 export interface PublicInquiryReceivedPayload { kind: string; name: string; email: string; message: string }
 
 // ---- chat (△ pending 9-C) ----
-export interface ChatMessageCreatedPayload { channelId: ChannelId; messageId: MessageId; authorId: UserId }
+// `mentions` = the userIds `<@id>`-mentioned in the body (author excluded), populated
+// by chat-service at post time. Optional/additive for backward-compat: older publishers
+// omit it (notification then resolves to no recipients = a legitimate no-op). This is
+// how a chat @mention becomes an in-app notification without the consumer re-parsing
+// the body (it never sees the message text).
+export interface ChatMessageCreatedPayload { channelId: ChannelId; messageId: MessageId; authorId: UserId; mentions?: readonly UserId[] }
 export interface ChatMessageDeletedPayload { channelId: ChannelId; messageId: MessageId }
 export interface ChatChannelCreatedPayload { channelId: ChannelId; name: string }
 export interface ChatMemberChangedPayload { channelId: ChannelId; userId: UserId; change: "added" | "removed" }

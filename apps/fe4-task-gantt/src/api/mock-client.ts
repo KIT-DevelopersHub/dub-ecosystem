@@ -145,6 +145,11 @@ export class MockApiClient implements ApiClient {
     if (path === "/api/v1/gantt/views" && req.method === "GET") return this.getView(String(req.query?.eventId)) as T;
     if (path === "/api/v1/gantt/views" && req.method === "PUT")
       return this.putView(String(req.query?.eventId), req.body as gantt.PutGanttViewRequest) as T;
+    // Realtime is a backend (DO+WS) feature — the mock cannot open a socket. Return a
+    // ticket with an empty doUrl so the client treats RT as intentionally unavailable
+    // (no connect, no reconnect loop) in mock/demo mode.
+    if (path === "/api/v1/gantt/ws-ticket" && req.method === "GET")
+      return ({ ticket: "mock", doUrl: "", expiresAt: new Date(Date.now() + 60_000).toISOString() } as gantt.GanttWsTicketResponse) as T;
     // --- teams (canonical team.Team; future: member-service) ---
     if ((path === "/api/v1/members/teams" || path === "/api/v1/teams") && req.method === "GET")
       // Mirror member-service's canonical { teams } envelope so the mock and prod

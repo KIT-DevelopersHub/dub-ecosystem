@@ -30,7 +30,9 @@ export function Tag({ tone = "neutral", onRemove, testId, children }: TagProps) 
 }
 
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  // Fail-safe: a shared leaf primitive must never throw on a null/undefined name
+  // (would take the whole host app down via its error boundary). Coerce to "".
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   if (parts.length === 1) return (parts[0]?.slice(0, 2) ?? "?").toUpperCase();
   return `${parts[0]?.[0] ?? ""}${parts[parts.length - 1]?.[0] ?? ""}`.toUpperCase();

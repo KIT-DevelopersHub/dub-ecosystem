@@ -151,6 +151,9 @@ export class ChatRepository {
       case "member.removed":
         // Membership changes do not affect the message store (out of P0 client-core).
         break;
+      case "reaction.updated":
+        // Reactions are not modelled in mo2-android's message store yet; ignore the frame.
+        break;
     }
   }
 

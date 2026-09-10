@@ -64,7 +64,12 @@ export interface GetChannelResponse {
 export interface Message extends common.Versioned {
   id: common.MessageId; // ULID — ascending order is chronological
   channelId: common.ChannelId;
-  authorId: common.UserId;
+  // null = system post (chat-service `kind: "system"`, e.g. "Channel #general
+  // created.", notification→chat delivery). System posts have no author — the wire
+  // is `authorId: UserId | null` (services/chat-service/src/types.ts). Modeling it
+  // non-null let a null slip into the Avatar (initials(null).trim()) and crash the
+  // whole chat screen; renderers must treat null as "system".
+  authorId: common.UserId | null;
   body: string; // Markdown subset; mentions encoded as <@userId>
   threadRootId: common.MessageId | null; // null = top-level
   replyCount: number;

@@ -41,6 +41,13 @@ export interface InboxItem {
   /** Additive: audience of the underlying notification (defaults to "members" for rows
    *  produced before the field existed). Members only ever receive "members" rows. */
   audience?: NotificationAudience;
+  /** Additive: the acting user behind this notification (e.g. the feedback submitter),
+   *  when one exists — otherwise null/undefined. Persisted on the source notification. */
+  actorId?: string | null;
+  /** Additive: the actor's human display name, resolved server-side from the identity
+   *  roster at read time. Null when the actor is unknown/unresolvable — the UI then
+   *  falls back to showing actorId. Absent on rows that have no actor. */
+  actorName?: string | null;
 }
 export interface ListInboxQuery extends CursorQuery {
   unreadOnly?: boolean;

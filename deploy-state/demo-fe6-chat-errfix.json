@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe6-chat-errfix",
+  "worker": "dub-demo-fe6-chat-errfix",
+  "url": "https://dub-demo-fe6-chat-errfix.developershub-site.workers.dev",
+  "deployedSha": "63654cb",
+  "branch": "HEAD",
+  "actor": "Claude (kota)",
+  "markers": ["Channel #general created."],
+  "live": true,
+  "verifiedAt": "2026-09-01T16:26:24Z",
+  "updatedAt": "2026-09-01T16:26:24Z",
+  "note": "fe6 chat open-crash fix: system posts (authorId=null) render as システム instead of crashing @dub/ui Avatar"
+}

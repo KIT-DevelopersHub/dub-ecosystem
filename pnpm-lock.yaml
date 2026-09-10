@@ -1164,6 +1164,9 @@ importers:
         specifier: ^4
         version: 4.13.1
     devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: ^0.8.71
+        version: 0.8.71(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@2.1.9)(@vitest/snapshot@2.1.9)(vitest@2.1.9(@types/node@22.20.1)(jsdom@25.0.1))
       '@cloudflare/workers-types':
         specifier: ^4
         version: 4.20260702.1

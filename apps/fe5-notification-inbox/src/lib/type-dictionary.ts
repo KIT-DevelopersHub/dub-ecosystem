@@ -98,14 +98,15 @@ export const NOTIFICATION_GROUP_META: Record<NotificationGroup, { label: string;
 // the filter bar tabs, the client-side tab filtering, the list section grouping, and the
 // card badge all derive from the constants below — never re-declared elsewhere. Keyed on the
 // notification `type` string produced by the services:
-//   - 参加届 (participation) = member.participation.*  (member-service participationNotify)
-//   - メール (mail)          = mail.*                  (mail-gateway / mail-automation)
-//   - アプリアップデート     = deploy.* + release/release.*  (deploy admin notifications + release notes)
-//   - その他 (other)         = everything else (tasks/events/system/…): shown only under "All"
+//   - 参加届 (participation)     = member.participation.*  (member-service participationNotify)
+//   - アプリアップデート         = deploy.* + release/release.*  (deploy admin notifications + release notes)
+//   - フィードバック (feedback)  = feedback/feedback.*     (in-app feedback → admin notification, config.FEEDBACK_NOTIFY_TYPE)
+//   - メール (mail)              = mail.*                  (mail-gateway / mail-automation)
+//   - その他 (other)             = everything else (tasks/events/system/…): shown only under "All"
 // The taxonomy is intentionally separate from NotificationGroup above (which stays the
 // per-app display grouping used by preferences + the type dictionary). Categories are what the
 // user asked the tabs to reflect.
-export type NotificationCategory = "app_update" | "mail" | "participation" | "other";
+export type NotificationCategory = "app_update" | "mail" | "participation" | "feedback" | "other";
 
 // The tab selector value: a concrete category or "all" (no filtering).
 export type CategoryFilter = NotificationCategory | "all";
@@ -115,6 +116,7 @@ export type CategoryFilter = NotificationCategory | "all";
 // First match wins; order the more specific prefixes first if they ever overlap.
 const CATEGORY_RULES: { match: string; category: NotificationCategory }[] = [
   { match: "member.participation", category: "participation" },
+  { match: "feedback", category: "feedback" },
   { match: "mail", category: "mail" },
   { match: "deploy", category: "app_update" },
   { match: "release", category: "app_update" },
@@ -141,26 +143,29 @@ export interface NotificationCategoryMeta {
 // Display metadata for each category: the section header + the colored card badge.
 export const NOTIFICATION_CATEGORY_META: Record<NotificationCategory, NotificationCategoryMeta> = {
   app_update: { label: "アプリアップデート", icon: "megaphone", tone: "brand" },
-  mail: { label: "メール", icon: "at-sign", tone: "info" },
   participation: { label: "参加届", icon: "user", tone: "success" },
+  feedback: { label: "フィードバック", icon: "message-square", tone: "warning" },
+  mail: { label: "メール", icon: "at-sign", tone: "info" },
   other: { label: "その他", icon: "bell", tone: "neutral" },
 };
 
 // Section display order for the grouped inbox (highest-signal first). "other" is last.
 export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
   "app_update",
-  "mail",
   "participation",
+  "feedback",
+  "mail",
   "other",
 ];
 
-// The inbox filter-bar tabs: "All" + the three named categories. "other" is intentionally
+// The inbox filter-bar tabs: "All" + the named categories. "other" is intentionally
 // NOT a tab — unclassified notifications appear only under "All" (per the design ask).
 export const NOTIFICATION_CATEGORY_TABS: { id: CategoryFilter; label: string }[] = [
   { id: "all", label: "すべて" },
-  { id: "app_update", label: NOTIFICATION_CATEGORY_META.app_update.label },
-  { id: "mail", label: NOTIFICATION_CATEGORY_META.mail.label },
   { id: "participation", label: NOTIFICATION_CATEGORY_META.participation.label },
+  { id: "app_update", label: NOTIFICATION_CATEGORY_META.app_update.label },
+  { id: "feedback", label: NOTIFICATION_CATEGORY_META.feedback.label },
+  { id: "mail", label: NOTIFICATION_CATEGORY_META.mail.label },
 ];
 
 // True when an item belongs to the active tab. "all" matches everything.

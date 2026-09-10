@@ -43,6 +43,7 @@ import {
   decodeCursor,
   dmKey as deriveDmKey,
   encodeCursor,
+  extractMentions,
   toChannel,
   toMember,
   toMessage,
@@ -349,10 +350,13 @@ export class ChatService {
       await this.deps.fileClient.registerLinks({ requestId: ctx.requestId, userId: ctx.userId }, row.id, row.attachmentFileIds);
     }
 
-    // post-commit fan-out
+    // post-commit fan-out. `mentions` (author excluded) rides the domain event so
+    // notification can turn a chat @mention into an in-app notification WITHOUT ever
+    // seeing the message text (it never reads chat D1). A self-mention never notifies.
+    const mentions = extractMentions(text).filter((uid) => uid !== ctx.userId);
     await this.deps.publisher.publish(
       "chat.message.created",
-      { channelId: channel.id, messageId: row.id, authorId: ctx.userId },
+      { channelId: channel.id, messageId: row.id, authorId: ctx.userId, ...(mentions.length > 0 ? { mentions } : {}) },
       this.actor(ctx),
     );
     await this.deps.realtime.publishToChannel(channel.id, {
@@ -512,7 +516,22 @@ export class ChatService {
     if (has) await this.deps.repo.removeReaction(id, clean, ctx.userId);
     else await this.deps.repo.addReaction(id, clean, ctx.userId, this.deps.now());
     const reactions = await this.deps.repo.reactionsFor([id]);
-    return { messageId: id, reactions: reactions.get(id) ?? {} };
+    const set = reactions.get(id) ?? {};
+    // post-commit RT fan-out so a reaction shows on every open client live (Slack
+    // parity). Carries the full post-toggle reaction set → each client converges with
+    // one idempotent apply. Best-effort (DoRealtimePublisher swallows failures): a
+    // fanout miss never fails the write that already succeeded.
+    await this.deps.realtime.publishToChannel(channel.id, {
+      kind: "reaction.updated",
+      channelId: channel.id,
+      messageId: id,
+      emoji: clean,
+      userId: ctx.userId,
+      op: has ? "removed" : "added",
+      reactions: set,
+      at: this.deps.now(),
+    });
+    return { messageId: id, reactions: set };
   }
 
   // ---- search (workspace / single-channel; readable scope enforced in the repo) ----

@@ -83,6 +83,55 @@
   font-weight: var(--dub-font-weight-medium);
   color: var(--dub-color-text-muted);
 }
+
+/* Filter box. Sits between the heading and the grid with generous breathing room
+   (spacing tokens only, no bespoke px) so the field never crowds the tiles. */
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 var(--dub-space-1) var(--dub-space-3);
+}
+.searchIcon {
+  position: absolute;
+  left: var(--dub-space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dub-color-text-muted);
+  pointer-events: none;
+}
+.searchInput {
+  width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-3) var(--dub-space-2)
+    calc(var(--dub-space-3) + 16px + var(--dub-space-2));
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  outline: none;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.searchInput::placeholder {
+  color: var(--dub-color-text-muted);
+}
+.searchInput:focus-visible {
+  border-color: var(--dub-color-border-focus, var(--dub-color-accent, #2563eb));
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--dub-color-border-focus, var(--dub-color-accent, #2563eb)) 30%, transparent);
+}
+
+/* Empty filter result. The apps still exist — this only tells the user the current
+   query matched none of them; clearing the box brings every tile back. */
+.empty {
+  padding: var(--dub-space-4) var(--dub-space-2) var(--dub-space-3);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+  text-align: center;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -109,6 +158,12 @@
   background: var(--dub-color-surface-sunken);
   border-color: var(--dub-color-border-default);
 }
+/* Keyboard-active tile (↑/↓ moves this while focus stays in the filter box).
+   Mirrors the hover affordance and adds an accent ring so it reads as selected. */
+.tileActive:not(:disabled) {
+  background: var(--dub-color-surface-sunken);
+  border-color: var(--dub-color-border-focus, var(--dub-color-accent, #2563eb));
+}
 /* Release-gated tile: greyed and non-interactive, but still present in the grid
    (消さない). Keep the label/icon readable enough to recognise the app. */
 .tile:disabled {
@@ -130,7 +185,8 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-secondary);
 }
-.tile:hover:not(:disabled) .tileIcon {
+.tile:hover:not(:disabled) .tileIcon,
+.tileActive:not(:disabled) .tileIcon {
   background: var(--dub-color-surface-raised);
   color: var(--dub-color-text-primary);
 }

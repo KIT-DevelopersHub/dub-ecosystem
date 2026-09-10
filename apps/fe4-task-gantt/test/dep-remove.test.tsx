@@ -56,7 +56,7 @@ async function removePredecessorAndSave() {
   fireEvent.click(await screen.findByTestId("fe4-gantt-row-t2"));
   const panel = await screen.findByTestId("fe4-detail-panel");
   fireEvent.click(await within(panel).findByLabelText("会場予約 を外す"));
-  fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+  // no save button: removing the predecessor auto-saves after the debounce
   return panel;
 }
 

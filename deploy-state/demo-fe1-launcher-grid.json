@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe1-launcher-grid",
+  "worker": "dub-demo-fe1-launcher-grid",
+  "url": "https://dub-demo-fe1-launcher-grid.developershub-site.workers.dev",
+  "deployedSha": "e266dc9",
+  "branch": "feat/fe1-launcher-search",
+  "actor": "Claude (stg-unwedge)",
+  "markers": ["fe1-launcher-grid-2d"],
+  "live": true,
+  "verifiedAt": "2026-09-03T16:01:23Z",
+  "updatedAt": "2026-09-03T16:01:23Z",
+  "note": "fe1 launcher arrow keys -> 2D grid nav"
+}

@@ -96,7 +96,8 @@ export function ChannelHeader({
   onJumpToMessage,
 }: ChannelHeaderProps) {
   const isDm = channel.type === "dm";
-  const nameOf = (id: common.UserId): string => resolveUser?.(id)?.displayName ?? id;
+  // authorId is null for system posts (pinned system message) — render "システム".
+  const nameOf = (id: common.UserId | null): string => (id === null ? "システム" : (resolveUser?.(id)?.displayName ?? id));
 
   return (
     <header className={styles.channelHeader} data-testid="fe6-channel-header">

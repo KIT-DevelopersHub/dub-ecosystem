@@ -4,6 +4,7 @@ import type { RequestContext } from "@dub/http";
 import type { task, gantt, common } from "@dub/types";
 import type { AuthClient } from "@dub/auth-client";
 import type { Env } from "./env";
+import type { RealtimePublisher } from "./realtime";
 
 export interface UpstreamPort {
   /** Non-archived tasks for an event (pagination followed). */
@@ -39,4 +40,7 @@ export interface AppDeps {
   views: (env: Env) => ViewRepo;
   cache: (env: Env) => DtoCache;
   authClient: (env: Env) => AuthClient;
+  // Realtime fanout (DO + WS). A seam so tests inject a fake publisher; production wires
+  // the real DO-backed one (Noop when no GANTT_ROOM binding exists).
+  realtime: (env: Env) => RealtimePublisher;
 }

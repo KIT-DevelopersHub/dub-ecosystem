@@ -70,7 +70,7 @@ describe("TaskWorkspacePage — gantt-only workspace", () => {
     fireEvent.click(await screen.findByTestId("fe4-gantt-row-t2"));
     const panel = await screen.findByTestId("fe4-detail-panel");
     fireEvent.change(within(panel).getByTestId("fe4-detail-title"), { target: { value: "登壇者の最終調整" } });
-    fireEvent.click(within(panel).getByTestId("fe4-detail-save"));
+    // no save button: the title edit auto-saves after the debounce
     expect((await screen.findAllByText("登壇者の最終調整")).length).toBeGreaterThan(0);
   });
 

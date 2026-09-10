@@ -6,11 +6,10 @@ import { ApiClientProvider } from "../src/api/client-context";
 import { MockApiClient } from "../src/api/mock-client";
 import { MeTasksRoute, TaskRouteProvider } from "../src/routes/taskRoutes";
 
-// 判断44:「タスクを発行」is always pressable because a task's link to an event is now
-// OPTIONAL — you can issue a standalone (unlinked) task. This supersedes the earlier
-// events-driven disable (the root of「adminなのに押せない」): there is no longer any
-// data/permission precondition on issuing a task. Event linking remains available as an
-// optional「対象イベント（任意）」selector when events exist.
+// 判断44 + taskform統一:「タスクを発行」is always pressable because a task's link to an
+// event is now OPTIONAL — you can issue a standalone (unlinked) task. The event link is
+// resolved from CONTEXT (never a visible field), so タスク発行 renders 寸分違わず同一 with
+// the gantt タスク作成. The マイタスク hub is cross-event → no context event → unlinked task.
 
 const ME = "usr_me" as common.UserId;
 
@@ -28,8 +27,8 @@ function renderRoute(client: MockApiClient, currentUserId: common.UserId | null 
   ) as unknown as ReactElement;
 }
 
-describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (issue fix)", () => {
-  it("enables 「タスクを発行」 once the real event list loads", async () => {
+describe("MeTasksRoute — 「タスクを発行」 is pressable (unlinked-issue, context event)", () => {
+  it("「タスクを発行」 is always pressable (no event/data precondition)", async () => {
     const client = new MockApiClient({ events: EVENTS, currentUserId: ME });
     renderRoute(client);
 
@@ -37,7 +36,7 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     await waitFor(() => expect(btn).not.toBeDisabled());
   });
 
-  it("opening the modal shows the fetched event as a 対象イベント option", async () => {
+  it("the create modal shows NO 対象イベント field (event link is context-resolved)", async () => {
     const client = new MockApiClient({ events: EVENTS, currentUserId: ME });
     renderRoute(client);
 
@@ -45,11 +44,11 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     await waitFor(() => expect(btn).not.toBeDisabled());
     fireEvent.click(btn);
 
-    const eventSelect = await screen.findByTestId("fe4-mytask-create-event");
-    expect(eventSelect).toHaveTextContent("北陸ITカンファレンス2026");
+    await screen.findByTestId("fe4-mytask-create-title");
+    expect(screen.queryByTestId("fe4-mytask-create-event")).toBeNull();
   });
 
-  it("admin can press 発行 and issue a task — it lands in the list", async () => {
+  it("admin can press 発行 and issue an unlinked task — it lands in the list", async () => {
     const client = new MockApiClient({ events: EVENTS, currentUserId: ME });
     renderRoute(client);
 
@@ -60,29 +59,27 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     fireEvent.change(screen.getByTestId("fe4-mytask-create-title"), {
       target: { value: "登壇者へ最終案内メールを送る" },
     });
-    // event link defaults to「紐付けない」(optional); only the title gates submission.
+    // Only the title gates submission (event comes from context, not the form).
     const submit = screen.getByTestId("fe4-mytask-create-submit");
     expect(submit).not.toBeDisabled();
     fireEvent.click(submit);
 
-    // POST /tasks was issued (created_by = current user), proving the button is live.
+    // POST /tasks was issued (created_by = current user) with no eventId (unlinked).
     await waitFor(() => {
       const created = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
       expect(created).toBeTruthy();
+      expect((created?.body as { eventId?: string } | undefined)?.eventId).toBeUndefined();
     });
     fireEvent.click(screen.getByTestId("fe4-mytasks-lens-requested"));
     expect(await screen.findByText("登壇者へ最終案内メールを送る")).toBeInTheDocument();
   });
 
-  it("判断44: with no events at all, the button is still pressable and can issue an unlinked task", async () => {
+  it("判断44: with no events at all, the button is still pressable and issues an unlinked task", async () => {
     const client = new MockApiClient({ currentUserId: ME });
     renderRoute(client);
     const btn = await screen.findByTestId("fe4-mytasks-create-open");
-    // No events/tasks precondition — the button never gets disabled now.
-    await waitFor(() => expect(client.calls.some((c) => c.path === "/api/v1/events")).toBe(true));
     expect(btn).not.toBeDisabled();
 
-    // Open the modal and issue a task WITHOUT selecting an event (default 紐付けない).
     fireEvent.click(btn);
     fireEvent.change(screen.getByTestId("fe4-mytask-create-title"), {
       target: { value: "会場の下見をする" },
@@ -91,7 +88,6 @@ describe("MeTasksRoute — 「タスクを発行」 is pressable for admins (iss
     expect(submit).not.toBeDisabled();
     fireEvent.click(submit);
 
-    // POST /tasks was issued with no eventId (unlinked task).
     await waitFor(() => {
       const created = client.calls.find((c) => c.path === "/api/v1/tasks" && c.method === "POST");
       expect(created).toBeTruthy();

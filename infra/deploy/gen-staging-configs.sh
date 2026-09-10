@@ -124,6 +124,25 @@ gen_one() {
         match($0, /"[^"]*"/); v=substr($0,RSTART+1,RLENGTH-2); rest=substr($0,RSTART+RLENGTH)
         print "bucket_name = \"" v "-staging\"" rest; next
       }
+      # --- gantt realtime vars: the DO-direct WS base + Origin allow-list must point at
+      #     the STAGING gantt worker + staging fe2 origin, not prod (the generic id/CORS
+      #     swaps below do not touch a worker hostname inside an arbitrary var value). ---
+      /^GANTT_RT_DO_URL_BASE = "/ {
+        sub(/dub-gantt-service\./, "dub-gantt-service-staging."); print; next
+      }
+      /^GANTT_RT_ALLOWED_ORIGINS = "/ {
+        print "GANTT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
+      }
+      # --- chat realtime vars: same as gantt above. The DO-direct WS base + Origin
+      #     allow-list must point at the STAGING chat worker + staging fe2 origin, else
+      #     staging fe2 opens the WS against the PROD chat worker and its staging-signed
+      #     ticket is rejected (401) — chat realtime silently dead on staging. ---
+      /^CHAT_RT_DO_URL_BASE = "/ {
+        sub(/dub-chat-service\./, "dub-chat-service-staging."); print; next
+      }
+      /^CHAT_RT_ALLOWED_ORIGINS = "/ {
+        print "CHAT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
+      }
       # --- default: swap resource ids + extend gateway CORS, then print ---
       {
         gsub(DUBCORE_ID, DUBCORE_STG)

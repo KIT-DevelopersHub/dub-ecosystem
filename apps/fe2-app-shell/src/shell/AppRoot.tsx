@@ -2,7 +2,7 @@
 // QueryClient (server state), controlled ThemeProvider bound to UiStore (FE2 is
 // theme source of truth), FE1 ToastProvider, AuthProvider, and a top-level
 // ErrorBoundary rendering GlobalErrorFallback.
-import { Component } from "react";
+import { Component, useEffect, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, ToastProvider } from "@dub/ui";
@@ -48,15 +48,24 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: unknown 
 
 // @dub/ui ThemeProvider is controlled and only accepts "light"|"dark"; FE2 resolves
 // "system" here against the OS preference (UiStore stays the source of truth).
-function resolveTheme(theme: "light" | "dark" | "system"): ThemeName {
-  if (theme !== "system") return theme;
-  const prefersDark = globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-  return prefersDark ? "dark" : "light";
-}
-
 function ThemeBridge({ children }: { children: ReactNode }): JSX.Element {
   const theme = useUiStore((s) => s.theme);
-  return <ThemeProvider theme={resolveTheme(theme)}>{children}</ThemeProvider>;
+  // When the choice is "system", the resolved light/dark tracks the OS live: without
+  // this subscription, flipping the OS appearance would only take effect on reload
+  // (the previous behaviour read matchMedia once). Explicit light/dark ignore the OS.
+  const [systemDark, setSystemDark] = useState<boolean>(
+    () => globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
+  );
+  useEffect(() => {
+    const mq = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mq) return undefined;
+    const onChange = (e: MediaQueryListEvent): void => setSystemDark(e.matches);
+    mq.addEventListener("change", onChange);
+    setSystemDark(mq.matches);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const resolved: ThemeName = theme === "system" ? (systemDark ? "dark" : "light") : theme;
+  return <ThemeProvider theme={resolved}>{children}</ThemeProvider>;
 }
 
 export function AppRoot({

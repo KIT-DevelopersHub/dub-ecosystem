@@ -4,7 +4,8 @@ import { createEvent } from "@dub/events";
 import { createApp } from "../src/app";
 import type { Env } from "../src/env";
 import type { AppDeps, DtoCache, UpstreamPort } from "../src/ports";
-import { fakeAuthClient, fakeUpstream, fakeViewRepo, fakeCache, mkTask } from "./helpers";
+import { fakeAuthClient, fakeUpstream, fakeViewRepo, fakeCache, fakeRealtime, mkTask } from "./helpers";
+import type { FakeRealtime } from "./helpers";
 
 const ENV = {} as Env;
 const H = (extra: Record<string, string> = {}) => ({ "x-dub-request-id": "req_test", ...extra });
@@ -15,13 +16,16 @@ function deps(over: {
   cache?: DtoCache;
   allow?: boolean;
   views?: AppDeps["views"];
+  realtime?: FakeRealtime;
 }): AppDeps {
   const auth = fakeAuthClient({ allow: over.allow ?? true });
+  const rt = over.realtime ?? fakeRealtime();
   return {
     upstream: () => over.upstream ?? fakeUpstream({}),
     cache: () => over.cache ?? fakeCache(),
     views: over.views ?? (() => fakeViewRepo()),
     authClient: () => auth,
+    realtime: () => rt,
   };
 }
 

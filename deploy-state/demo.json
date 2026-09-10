@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": null,
-  "branch": null,
-  "actor": null,
-  "markers": [],
-  "live": false,
-  "verifiedAt": null,
-  "updatedAt": null,
-  "note": "seed — no deploy recorded yet. Written by scripts/deploy-demo.sh."
+  "deployedSha": "3cb2410",
+  "branch": "feat/lp-management",
+  "actor": "Claude Code",
+  "markers": ["fe2-lp-screen", "LP管理"],
+  "live": true,
+  "verifiedAt": "2026-09-07T14:16:05Z",
+  "updatedAt": "2026-09-07T14:16:05Z",
+  "note": "LP管理アプリ追加（バージョン一覧・閲覧 v1.0）"
 }

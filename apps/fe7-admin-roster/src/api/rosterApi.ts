@@ -136,9 +136,13 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     auditLogs: (filters) =>
       client.get<auditLog.AuditLogPage>(`${BASE}/audit/logs`, { ...buildAuditQuery(filters) }),
     mailStatus: () => client.get<MailStatusResponse>(`${BASE}/mail/status`),
-    listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/addresses`),
-    createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/addresses`, req),
-    deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/addresses/${id}`),
+    // Issued RECEIVING addresses (zone-scoped routing rules that forward to the mail
+    // Worker) — the surface that actually makes an issued @developershub.jp address work.
+    // Distinct from `/addresses` (account-scoped forward-target destinations, a separate
+    // Cloudflare feature). Issuing here also sends a confirmation mail to the new address.
+    listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/issued-addresses`),
+    createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses`, req),
+    deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/issued-addresses/${id}`),
     getChatDeletionPolicy: () => client.get<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`),
     updateChatDeletionPolicy: (req) => client.patch<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`, req),
   };

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, resolveUsers, createTaskAttachment } from "../api/endpoints";
+import { listTasks, createTask, updateTask, replaceDependencies, resolveUsers } from "../api/endpoints";
+import type { ScopeTask } from "../domain/task-hierarchy";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
   type MyTasksFilter,
@@ -15,7 +16,7 @@ import {
 } from "../domain/my-tasks";
 import { MyTasksFilterBar } from "./MyTasksFilterBar";
 import { MyTaskList } from "./MyTaskList";
-import { MyTaskCreateModal, type MyTaskDraft, type EventOption } from "./MyTaskCreateModal";
+import { MyTaskCreateModal, type MyTaskDraft } from "./MyTaskCreateModal";
 import { TaskDetailDialog } from "./TaskDetailDialog";
 import styles from "../styles/app.module.css";
 
@@ -32,7 +33,6 @@ export interface MyTasksPageProps {
   /** roster for the filter selects + create modal 依頼先. */
   people: readonly identity.UserSummary[];
   teams: readonly team.Team[];
-  events: readonly EventOption[];
 }
 
 /**
@@ -41,7 +41,7 @@ export interface MyTasksPageProps {
  * 「すべて」, unified into one list that shows 依頼→担当 (from→to). Create is
  * optimistic (the new task appears instantly, rolls back on error).
  */
-export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPageProps) {
+export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) {
   const client = useApiClient();
   const toast = useToast();
 
@@ -57,24 +57,29 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
 
   const teamNames = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
 
-  // Fallbacks so the hub works in the shell too, where the caller may not have a
-  // roster / event list to hand: people fall back to whoever appears in the tasks,
-  // events fall back to the distinct events those tasks belong to (id as label).
+  // Fallback so the hub works in the shell too, where the caller may not have a roster
+  // to hand: people fall back to whoever appears in the tasks.
   const effectivePeople = useMemo<readonly identity.UserSummary[]>(
     () => (people.length > 0 ? people : [...users.values()]),
     [people, users],
   );
-  const effectiveEvents = useMemo<readonly EventOption[]>(() => {
-    if (events.length > 0) return events;
-    const seen = new Map<common.EventId, EventOption>();
-    for (const t of tasks) {
-      if (t.eventId && !seen.has(t.eventId)) seen.set(t.eventId, { id: t.eventId, name: t.eventId });
-    }
-    return [...seen.values()];
-  }, [events, tasks]);
   const currentUserName = useMemo(
     () => users.get(currentUserId)?.displayName ?? people.find((p) => p.id === currentUserId)?.displayName ?? "自分",
     [users, people, currentUserId],
+  );
+
+  // 親タスク / 先行タスク pickers draw from the tasks currently loaded in the hub
+  // (real ids only — never the optimistic temp rows). Predecessors are team-scoped
+  // (ADR-0007) so scopeTasks carries each task's teamId; the server also enforces the
+  // same-team + parent rules (二重の担保).
+  const realTasks = useMemo(() => tasks.filter((t) => !t.id.startsWith("task_temp_")), [tasks]);
+  const parentOptions = useMemo(
+    () => realTasks.map((t) => ({ id: t.id, title: t.title })),
+    [realTasks],
+  );
+  const scopeTasks = useMemo<readonly ScopeTask[]>(
+    () => realTasks.map((t) => ({ id: t.id, title: t.title, parentTaskId: t.parentTaskId ?? null, teamId: t.teamId ?? null })),
+    [realTasks],
   );
 
   // fetch the lens' task set (one or two self-scoped queries, merged + deduped).
@@ -134,11 +139,13 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       eventId: draft.eventId,
       title: draft.title,
       description: draft.description,
-      status: "todo",
+      status: draft.status,
       priority: draft.priority,
       assigneeId: draft.assigneeId,
       teamId: draft.teamId,
+      parentTaskId: draft.parentTaskId,
       createdBy: currentUserId,
+      startAt: draft.startAt,
       dueAt: draft.dueAt,
       origin: "internal",
       archivedAt: null,
@@ -157,37 +164,37 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
         priority: draft.priority,
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
+        ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
+        ...(draft.parentTaskId ? { parentTaskId: draft.parentTaskId } : {}),
       });
-      // Persist attachments after the task exists (they need its real id). Best-effort:
-      // a failed attachment must not undo an already-created task.
-      const attachCount = draft.attachments.files.length + draft.attachments.urls.length;
-      if (attachCount > 0) {
+      // Status is not part of CreateTaskRequest (a task starts "todo") — apply a
+      // non-todo choice with a follow-up patch, mirroring the gantt create form.
+      let created2 = created;
+      if (draft.status !== "todo") {
         try {
-          for (const f of draft.attachments.files) {
-            await createTaskAttachment(client, created.id, {
-              kind: "file",
-              name: f.name,
-              url: f.url,
-              mimeType: f.mimeType,
-              sizeBytes: f.sizeBytes,
-            });
-          }
-          for (const u of draft.attachments.urls) {
-            await createTaskAttachment(client, created.id, { kind: "url", name: u.name, url: u.url });
-          }
+          created2 = await updateTask(client, created.id, { version: created.version, status: draft.status });
+        } catch {
+          /* status patch is best-effort — the task exists in todo; the user can change it */
+        }
+      }
+      // 先行タスク (依存): same-team edges only — the server门番 rejects cross-team; a
+      // rejection must not undo the already-created task.
+      if (draft.dependsOnIds.length > 0) {
+        try {
+          await replaceDependencies(client, created.id, { version: created2.version, dependsOnIds: draft.dependsOnIds });
         } catch {
           toast.show({
             kind: "error",
-            title: "一部の添付を保存できませんでした",
-            description: "タスクは作成済みです。詳細から再度添付できます。",
+            title: "一部の先行タスクを設定できませんでした",
+            description: "タスクは発行済みです。詳細から設定し直せます。",
           });
         }
       }
       // reconcile the temp row with the server task (or drop it if out of lens).
       setTasks((prev) => {
         const withoutTemp = prev.filter((t) => t.id !== tempId);
-        return belongs ? [created, ...withoutTemp] : withoutTemp;
+        return belongs ? [created2, ...withoutTemp] : withoutTemp;
       });
       toast.show({ kind: "success", title: "タスクを発行しました" });
     } catch (e) {
@@ -254,9 +261,10 @@ export function MyTasksPage({ currentUserId, people, teams, events }: MyTasksPag
       <MyTaskCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        events={effectiveEvents}
         people={effectivePeople}
         teams={teams}
+        parentOptions={parentOptions}
+        scopeTasks={scopeTasks}
         onCreate={onCreate}
         requesterName={currentUserName}
       />

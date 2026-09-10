@@ -84,7 +84,13 @@ export type IconName =
   | "send"
   | "reply"
   | "pin"
-  | "hash";
+  | "hash"
+  // theme switch (fe2 設定メニューのテーマ切替 — system/light/dark). Additive, closed-union preserved.
+  | "sun"
+  | "moon"
+  | "monitor"
+  // カラー設定 (fe2 設定メニュー → カラー設定ダイアログのエントリ). Additive, closed-union preserved.
+  | "palette";
 
 export interface IconProps extends TestableProps {
   name: IconName;
@@ -456,6 +462,10 @@ export interface AppLauncherProps extends TestableProps {
   onSelect?: (item: AppLauncherItem) => void; // click/Enter on a tile
   label?: string; // aria-label for the waffle trigger (default: "アプリ")
   title?: string; // heading shown atop the popover grid
+  // Placeholder + aria-label for the filter box shown when the popover opens. The
+  // box narrows the *displayed* tiles by substring; it never removes apps from the
+  // catalog (消さない). Default: "アプリを検索".
+  searchPlaceholder?: string;
 }
 
 export interface SidebarItem {
@@ -481,6 +491,23 @@ export interface PageHeaderProps extends TestableProps {
   description?: string;
   actions?: ReactNode;
   breadcrumbs?: ReactNode;
+}
+
+/**
+ * One hop in a breadcrumb trail (P2-1). The LAST item in `BreadcrumbsProps.items`
+ * is the current page (rendered as text, never a link); every earlier item is an
+ * ancestor the user can click to walk back up.
+ */
+export interface BreadcrumbItem {
+  label: ReactNode;
+  onClick?: () => void; // plain handler (FE1 stays router-free)
+  href?: string; // renderLink maps this to a router Link when provided
+  icon?: IconName; // optional leading icon, e.g. the app icon on the root crumb
+}
+export interface BreadcrumbsProps extends TestableProps {
+  items: BreadcrumbItem[];
+  // Inject a router Link around each ancestor (parity with SidebarProps.renderLink).
+  renderLink?: (item: BreadcrumbItem, node: ReactNode) => ReactNode;
 }
 
 export interface StackProps extends TestableProps {

@@ -43,6 +43,23 @@ describe("createDemoFetch", () => {
     expect(gantt.rows.length).toBeGreaterThan(0);
   });
 
+  it("persists an event edit (PATCH) so the save reflects on re-read", async () => {
+    const a = api();
+    const before = await a.request<{ version: number; title: string }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    const updated = await a.request<{ version: number; title: string; startsAt: string | null; description: string | null }>({
+      method: "PATCH",
+      path: "/api/v1/events/evt_1",
+      body: { version: before.version, title: "編集済みイベント", startsAt: "2026-10-01T00:30:00.000Z", description: "更新後の説明" },
+    });
+    expect(updated.title).toBe("編集済みイベント");
+    expect(updated.startsAt).toBe("2026-10-01T00:30:00.000Z");
+    expect(updated.description).toBe("更新後の説明");
+    expect(updated.version).toBe(before.version + 1);
+    // re-read reflects the change (persisted in-memory), and the list summary is in sync
+    const after = await a.request<{ title: string }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    expect(after.title).toBe("編集済みイベント");
+  });
+
   it("still surfaces NOT_FOUND for un-seeded routes (in-frame fallback)", async () => {
     let caught: unknown;
     try {
@@ -72,13 +89,13 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 57-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 59-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
     expect(list.items.every((r) => r.isSystem)).toBe(true);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(57);
+    expect(catalog).toHaveLength(59);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -164,23 +181,23 @@ describe("admin email routing (@developershub.jp address management)", () => {
     expect(addrs.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
   });
 
-  it("issue: POST creates an address; bad local part and bad destination 400", async () => {
+  it("issue: POST creates an address with only a local part (destination fixed to the mail Worker); bad local part 400", async () => {
     const a = api();
     const before = (await list(a)).items.length;
-    const created = await a.request<Addr>({ method: "POST", path: BASE, body: { localPart: "events", destination: "team@example.com" } });
+    // No destination supplied — the forward target is fixed to the mail Worker server-side.
+    const created = await a.request<Addr>({ method: "POST", path: BASE, body: { localPart: "events" } });
     expect(created.address).toBe("events@developershub.jp");
     expect(created.enabled).toBe(true);
+    expect(created.destination).toBe("mail-gateway (Worker)");
     expect((await list(a)).items.length).toBe(before + 1);
 
-    for (const bad of [{ localPart: "Bad Space", destination: "team@example.com" }, { localPart: "ok", destination: "not-an-email" }]) {
-      let e: unknown;
-      try {
-        await a.request({ method: "POST", path: BASE, body: bad });
-      } catch (err) {
-        e = err;
-      }
-      expect((e as ApiError).status).toBe(400);
+    let e: unknown;
+    try {
+      await a.request({ method: "POST", path: BASE, body: { localPart: "Bad Space" } });
+    } catch (err) {
+      e = err;
     }
+    expect((e as ApiError).status).toBe(400);
   });
 
   it("enable/disable via PATCH and delete via DELETE persist", async () => {

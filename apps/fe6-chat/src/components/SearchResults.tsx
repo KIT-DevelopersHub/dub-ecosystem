@@ -26,7 +26,8 @@ function timeShort(iso: string): string {
 }
 
 export function SearchResults({ query, loading, results, resolveUser, onSelect, onClose }: SearchResultsProps) {
-  const nameOf = (id: common.UserId): string => resolveUser?.(id)?.displayName ?? id;
+  // System posts (authorId null) render as "システム" — never pass null downstream.
+  const nameOf = (id: common.UserId | null): string => (id === null ? "システム" : (resolveUser?.(id)?.displayName ?? id));
   return (
     <div className={styles.searchResults} data-testid="fe6-search-results">
       <div className={styles.searchResultsHead}>

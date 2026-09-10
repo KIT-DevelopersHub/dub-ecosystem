@@ -94,6 +94,9 @@ MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
 CF_EMAIL_ROUTING_ZONE_ID = ""        # developershub.jp zone id (rules API)
 CF_EMAIL_ROUTING_ACCOUNT_ID = ""     # account id (destination addresses API)
 CF_EMAIL_ROUTING_ZONE_NAME = "developershub.jp"  # anti-spoof matcher check
+# Email Routing "send to Worker" target for an ISSUED receiving address. Must equal this
+# service's deployed Worker name AND be enabled as an email Worker on the zone.
+CF_EMAIL_ROUTING_WORKER_NAME = "dub-mail-gateway"
 
 # Retention purge Cron (03:20 UTC daily): send_log 30d / inbound 30d.
 [triggers]
