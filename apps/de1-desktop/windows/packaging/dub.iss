@@ -28,7 +28,15 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-; Per-user install so it works without admin rights (SmartScreen-friendlier).
+; Per-user install by default (no forced UAC prompt) so DefaultDirName
+; ({autopf}\Dub) resolves to %LocalAppData%\Programs\Dub — a folder the app's
+; own (non-elevated) process can always write into. The user can still opt
+; into an all-users/Program Files install via the dialog if they choose.
+; Belt-and-suspenders alongside the explicit WebView2 userDataFolder set in
+; lib/main.dart: that fix alone already makes WebView2 itself installation-
+; path-independent, but a writable install dir avoids the same class of
+; access-denied surprise for any other local state the app may need later.
+PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputBaseFilename=Dub-Windows-{#MyAppVersion}-Setup-unsigned
 Compression=lzma2

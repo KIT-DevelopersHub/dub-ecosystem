@@ -59,6 +59,13 @@ class _WebShellState extends State<WebShell> {
   bool _checkingRuntime = true;
   WebRuntimeStatus _runtimeStatus = WebRuntimeStatus.available;
 
+  /// Windows-only: an explicit WebView2 environment pointed at a guaranteed-
+  /// writable user data folder (see [resolveWindowsUserDataFolder] for why
+  /// this is required — without it, installs under `%ProgramFiles%` fail to
+  /// create *any* WebView, silently, with no callback ever firing). `null` on
+  /// every other platform, where `InAppWebView` manages its own environment.
+  WebViewEnvironment? _webViewEnvironment;
+
   bool _loading = true;
   String? _loadError;
   Timer? _loadTimeoutTimer;
@@ -92,11 +99,41 @@ class _WebShellState extends State<WebShell> {
   /// against. See `webview_runtime_check.dart` for the full explanation.
   Future<void> _runRuntimeCheck() async {
     setState(() => _checkingRuntime = true);
+    final isWindows = !kIsWeb && Platform.isWindows;
     final status = await checkWebRuntime(
-      isWindows: !kIsWeb && Platform.isWindows,
+      isWindows: isWindows,
       getAvailableVersion: WebViewEnvironment.getAvailableVersion,
     );
     if (!mounted) return;
+
+    if (status == WebRuntimeStatus.available && isWindows) {
+      // Runtime is installed — but that alone doesn't guarantee WebView2 can
+      // actually create a WebView (see resolveWindowsUserDataFolder). Force
+      // an explicit, writable user data folder up front so a Program-Files
+      // install doesn't fail silently and masquerade as a network timeout.
+      final userDataFolder = resolveWindowsUserDataFolder(
+        isWindows: true,
+        localAppData: Platform.environment['LOCALAPPDATA'],
+        temp: Platform.environment['TEMP'],
+      );
+      try {
+        _webViewEnvironment = await WebViewEnvironment.create(
+          settings: WebViewEnvironmentSettings(userDataFolder: userDataFolder),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _checkingRuntime = false;
+          _runtimeStatus = status;
+          _loading = false;
+          _loadError = 'WebView2 の初期化に失敗しました（$e）。'
+              'ユーザーが書き込み可能なフォルダに再インストールするか、'
+              '管理者権限なしで再試行してください。';
+        });
+        return;
+      }
+    }
+
     setState(() {
       _runtimeStatus = status;
       _checkingRuntime = false;
@@ -111,7 +148,8 @@ class _WebShellState extends State<WebShell> {
     _loadTimeoutTimer = Timer(_loadTimeout, () {
       if (mounted && _loading) {
         _onLoadFailed(
-          '読み込みがタイムアウトしました（${_loadTimeout.inSeconds}秒）。'
+          '読み込みがタイムアウトしました（${_loadTimeout.inSeconds}秒）。\n'
+          '接続先: ${FeatureRegistry.entryUrl()}\n'
           'ネットワーク接続を確認して再試行してください。',
         );
       }
@@ -139,6 +177,14 @@ class _WebShellState extends State<WebShell> {
   }
 
   void _retry() {
+    if (_webViewEnvironment == null && !kIsWeb && Platform.isWindows) {
+      // Either the runtime check or the WebView2 environment creation itself
+      // previously failed (see _runRuntimeCheck) — re-run the whole preflight
+      // rather than just remounting the WebView, which would silently fail
+      // again with no environment.
+      _runRuntimeCheck();
+      return;
+    }
     setState(() {
       _loading = true;
       _loadError = null;
@@ -187,6 +233,11 @@ class _WebShellState extends State<WebShell> {
             children: [
               InAppWebView(
                 key: _webViewKey,
+                // Windows only: forces a guaranteed-writable WebView2 user
+                // data folder (see resolveWindowsUserDataFolder). Null on
+                // every other platform, where the plugin's own default is
+                // fine.
+                webViewEnvironment: _webViewEnvironment,
                 initialUrlRequest: URLRequest(
                   // Web app root, resolved through the registry seam. Today this
                   // is the SPA root (pure 完コピ); later the shell can route

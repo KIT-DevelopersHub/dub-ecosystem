@@ -55,3 +55,42 @@ Future<WebRuntimeStatus> checkWebRuntime({
     return WebRuntimeStatus.missingOnWindows;
   }
 }
+
+/// Computes a writable folder for the WebView2 *user data* store.
+///
+/// Root cause of the "WebView2 Runtime IS installed, yet the app still shows
+/// a 20s timeout / never loads" follow-up bug: `flutter_inappwebview`'s
+/// `InAppWebView` calls `CreateCoreWebView2EnvironmentWithOptions(nullptr,
+/// nullptr, ...)` by default. Per Microsoft's own docs, when `userDataFolder`
+/// is null, WebView2 tries to create `<exe folder>\<exe name>.WebView2`
+/// *right next to the compiled app* — and "WebView2 creation fails if the
+/// compiled code is running in a directory in which the process does not
+/// have permission to create a new directory."
+///
+/// This app's Windows installer (`windows/packaging/dub.iss`) installs into
+/// `{autopf}\Dub`, i.e. `%ProgramFiles%\Dub` once the user accepts the UAC
+/// elevation prompt Inno Setup shows by default. A normal (non-elevated)
+/// desktop process has no write access there, so environment creation fails
+/// with an access-denied HRESULT *before any WebView or navigation exists* —
+/// none of `onWebViewCreated` / `onLoadStop` / `onReceivedError` ever fire,
+/// and the shell's failsafe timer eventually fires a generic "timed out"
+/// message even though no network request was ever attempted.
+///
+/// Fix: always point WebView2 at an explicit folder under the current user's
+/// profile (`%LOCALAPPDATA%`, guaranteed writable regardless of where the app
+/// itself is installed), falling back to `%TEMP%` if that is somehow unset.
+/// Returns `null` on non-Windows platforms (irrelevant there) or if neither
+/// environment variable is available, in which case the caller falls back to
+/// the plugin's own (unreliable) default.
+String? resolveWindowsUserDataFolder({
+  required bool isWindows,
+  required String? localAppData,
+  required String? temp,
+}) {
+  if (!isWindows) return null;
+  final base = (localAppData != null && localAppData.isNotEmpty)
+      ? localAppData
+      : temp;
+  if (base == null || base.isEmpty) return null;
+  return '$base\\Dub\\WebView2';
+}

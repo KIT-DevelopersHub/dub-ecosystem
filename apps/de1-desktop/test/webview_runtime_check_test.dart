@@ -43,4 +43,56 @@ void main() {
       expect(status, WebRuntimeStatus.missingOnWindows);
     });
   });
+
+  group('resolveWindowsUserDataFolder', () {
+    // Root-cause regression test for the follow-up bug: WebView2 Runtime IS
+    // installed, yet the app still hangs/times out because the default (null)
+    // userDataFolder resolves to a subfolder of the app's own install
+    // directory, which is unwritable when installed under Program Files.
+
+    test('non-Windows platforms need no override', () {
+      final folder = resolveWindowsUserDataFolder(
+        isWindows: false,
+        localAppData: r'C:\Users\someone\AppData\Local',
+        temp: r'C:\Users\someone\AppData\Local\Temp',
+      );
+      expect(folder, isNull);
+    });
+
+    test('Windows uses %LOCALAPPDATA%\\Dub\\WebView2 when available', () {
+      final folder = resolveWindowsUserDataFolder(
+        isWindows: true,
+        localAppData: r'C:\Users\someone\AppData\Local',
+        temp: r'C:\Users\someone\AppData\Local\Temp',
+      );
+      expect(folder, r'C:\Users\someone\AppData\Local\Dub\WebView2');
+    });
+
+    test('Windows falls back to %TEMP% when LOCALAPPDATA is unset', () {
+      final folder = resolveWindowsUserDataFolder(
+        isWindows: true,
+        localAppData: null,
+        temp: r'C:\Users\someone\AppData\Local\Temp',
+      );
+      expect(folder, r'C:\Users\someone\AppData\Local\Temp\Dub\WebView2');
+    });
+
+    test('Windows falls back to %TEMP% when LOCALAPPDATA is empty', () {
+      final folder = resolveWindowsUserDataFolder(
+        isWindows: true,
+        localAppData: '',
+        temp: r'C:\Temp',
+      );
+      expect(folder, r'C:\Temp\Dub\WebView2');
+    });
+
+    test('Windows returns null when neither env var is available', () {
+      final folder = resolveWindowsUserDataFolder(
+        isWindows: true,
+        localAppData: null,
+        temp: null,
+      );
+      expect(folder, isNull);
+    });
+  });
 }
