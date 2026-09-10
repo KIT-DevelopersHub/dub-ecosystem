@@ -50,6 +50,8 @@ export type {
   SidebarItem,
   SidebarProps,
   PageHeaderProps,
+  BreadcrumbItem,
+  BreadcrumbsProps,
   StackProps,
   GridProps,
   CardProps,
@@ -102,6 +104,7 @@ export { Modal, ConfirmDialog, Drawer, ErrorDialog } from "./components/Modal";
 export { ToastProvider, useToast } from "./components/Toast";
 export { ThemeProvider } from "./components/ThemeProvider";
 export { AppShell, PageHeader, Stack, Grid, Card, Divider } from "./components/Layout";
+export { Breadcrumbs } from "./components/Breadcrumbs";
 export { AppLauncher } from "./components/AppLauncher";
 export { Sidebar } from "./components/Sidebar";
 export { Tabs } from "./components/Tabs";
