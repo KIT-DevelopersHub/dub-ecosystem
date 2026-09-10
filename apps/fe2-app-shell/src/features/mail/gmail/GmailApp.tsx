@@ -7,11 +7,61 @@ import { useEffect, useRef } from "react";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
-import { ComposeWindow } from "./ComposeWindow.tsx";
+import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
 import { inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
 import { MailStoreProvider, useMailStore } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
+
+/** P1-2 follow-up: floating compose windows are pure client state (useMailStore starts
+ *  with composes: [] on every mount/reload) — a reload while typing loses the OPEN
+ *  window entirely, so there is nothing left for ComposeWindow's own restore notice to
+ *  attach to. This re-opens one window per leftover draft found in storage (each under
+ *  its original compose.id, keyed via composeWindowDraftKey) so the restore notice and
+ *  ongoing leave-guard are reachable again after an accidental reload/crash. Runs once
+ *  per GmailApp mount; a deliberate send/discard already clears its own key (see
+ *  ComposeWindow), so a normal close never resurrects here. */
+function useRestoreComposeDraftsOnMount(): void {
+  const { dispatch } = useMailStore();
+  useEffect(() => {
+    let store: Storage | null;
+    try {
+      store = globalThis.localStorage ?? null;
+    } catch {
+      store = null;
+    }
+    if (!store) return;
+    const keys: string[] = [];
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (k && k.startsWith(COMPOSE_WINDOW_DRAFT_PREFIX)) keys.push(k);
+    }
+    for (const key of keys) {
+      const id = key.slice(COMPOSE_WINDOW_DRAFT_PREFIX.length);
+      try {
+        const raw = store.getItem(key);
+        if (!raw) continue;
+        const draft = JSON.parse(raw) as { to?: string; cc?: string; bcc?: string; showCc?: boolean; showBcc?: boolean; subject?: string; body?: string };
+        dispatch({
+          type: "OPEN_COMPOSE",
+          compose: {
+            id,
+            to: draft.to ?? "",
+            cc: draft.cc ?? "",
+            bcc: draft.bcc ?? "",
+            showCc: draft.showCc ?? false,
+            showBcc: draft.showBcc ?? false,
+            subject: draft.subject ?? "",
+            body: draft.body ?? "",
+          },
+        });
+      } catch {
+        /* corrupt draft — leave it; ComposeWindow's own peekDraft will no-op on it too */
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
 
 function SearchBar(): JSX.Element {
   const { state, dispatch } = useMailStore();
@@ -128,6 +178,7 @@ function Shortcuts(): null {
 function GmailBody(): JSX.Element {
   const { state } = useMailStore();
   useMailSync(); // hydrate inbox + Sent from the gateway; lazy-load bodies on open
+  useRestoreComposeDraftsOnMount(); // re-open any compose window left dirty by a reload/crash
   // A purged (完全に削除) thread is never shown, even if it was the open one when a reload's
   // APPLY_FLAGS marked it purged — fall back to the list.
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId && !t.purged) : undefined;

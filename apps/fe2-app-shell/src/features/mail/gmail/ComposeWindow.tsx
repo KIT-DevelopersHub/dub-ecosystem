@@ -4,16 +4,48 @@
 // (chips + autocomplete), fed the feature's parseRecipients and correspondent
 // candidates from the store. On send it appends to the Sent folder via the store
 // and best-effort posts through the real MailApi (ignored under the demo mock).
+//
+// P1-2 follow-up: this — NOT ComposeScreen (/mail/compose, a standalone route kept
+// only for deep-links) — is the compose surface a real user actually reaches (the
+// "メール" launcher tile renders GmailApp, whose own compose affordance is this
+// floating window). The original P1-2 commit wired the leave-guard into
+// ComposeScreen only, leaving this orphaned exactly like RoleEditorPage vs
+// RolePermissionsEditor (see RolePermissionsEditor.tsx) — reload/tab-close and
+// in-app navigation both silently dropped an in-progress message with no warning.
+// Same @dub/app-ui draft-autosave/leave-guard pattern, keyed per compose.id so
+// multiple simultaneous windows never collide; GmailApp.tsx's
+// useRestoreComposeDraftsOnMount() re-opens any leftover draft found in storage
+// on mount so a restored window is reachable to show the notice/beforeunload
+// guard again.
 import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { mail } from "@dub/types";
-import { EmailAddressSelect, type EmailToken } from "@dub/app-ui";
+import { EmailAddressSelect, type EmailToken, DraftRestoredNotice, useDraftAutosave } from "@dub/app-ui";
 import { parseRecipients } from "../mailApi.tsx";
 import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
+import { UnsavedChangesGuard } from "../../../lib/UnsavedChangesGuard.tsx";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore, type ComposeState } from "./useMailStore.tsx";
+
+/** localStorage key prefix for a floating compose window's draft — one per compose.id
+ *  (several windows can be open at once, Gmail-style). Exported so GmailApp can scan
+ *  for leftover drafts on mount and re-open a window for each. */
+export const COMPOSE_WINDOW_DRAFT_PREFIX = "fe2.mail.compose.window.";
+export function composeWindowDraftKey(id: string): string {
+  return `${COMPOSE_WINDOW_DRAFT_PREFIX}${id}`;
+}
+
+interface ComposeWindowDraft {
+  to: string;
+  cc: string;
+  bcc: string;
+  showCc: boolean;
+  showBcc: boolean;
+  subject: string;
+  body: string;
+}
 
 export function ComposeWindow({ compose, offset }: { compose: ComposeState; offset: number }): JSX.Element {
   const { state, dispatch } = useMailStore();
@@ -47,6 +79,29 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const [previewId, setPreviewId] = useState<string | null>(null);
   const dragDepth = useRef(0);
 
+  // Dirty = there is text worth keeping/warning about (matches ComposeScreen's rule;
+  // attachments alone still warn on leave since they'd otherwise vanish silently).
+  const draftKey = composeWindowDraftKey(compose.id);
+  const dirty =
+    compose.to.trim() !== "" ||
+    compose.cc.trim() !== "" ||
+    compose.bcc.trim() !== "" ||
+    compose.subject.trim() !== "" ||
+    compose.body.trim() !== "" ||
+    att.items.length > 0;
+  const draft = useDraftAutosave<ComposeWindowDraft>({
+    storageKey: draftKey,
+    value: { to: compose.to, cc: compose.cc, bcc: compose.bcc, showCc: compose.showCc, showBcc: compose.showBcc, subject: compose.subject, body: compose.body },
+    dirty,
+  });
+
+  // Discard/close (header ✕ or the trash "下書きを破棄" button): a deliberate close
+  // clears the draft so it never resurrects on a later reload/restore scan.
+  const closeAndDiscard = (): void => {
+    draft.clear();
+    dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+  };
+
   const onDragEnter = (e: DragEvent): void => {
     if (minimized || !Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
     e.preventDefault();
@@ -77,6 +132,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     // Don't drop a file that is still being read: wait for the read to finish (Gmail keeps
     // Send disabled until the upload settles). The button is disabled while hasPending.
     if (att.hasPending) return;
+    draft.clear(); // sent — nothing left to warn about or restore
     // Optimistic: show it in Sent immediately. The real send follows; once the gateway
     // confirms, REQUEST_SYNC re-fetches GET /mail/sent so the entry is server-backed and
     // survives a reload (the From is the gateway-resolved <user>@developershub.jp).
@@ -105,6 +161,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   return (
     <div
       data-testid="fe2-mail-compose-window"
+      data-p12-mail-window-draft-fix="1"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -121,6 +178,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         overflow: "hidden",
       }}
     >
+      <UnsavedChangesGuard when={dirty} testId={`fe2-mail-compose-window-leave-confirm-${compose.id}`} />
       {dragOver && !minimized ? (
         <div
           data-testid="fe2-mail-compose-dropzone"
@@ -167,13 +225,22 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         <button type="button" aria-label={maximized ? "元のサイズに戻す" : "全画面表示"} onClick={(e) => { e.stopPropagation(); patch({ maximized: !maximized, minimized: false }); }} style={hdrBtn}>
           <MailIcon name="expand" size={16} />
         </button>
-        <button type="button" data-testid="fe2-mail-compose-close" aria-label="閉じる" onClick={(e) => { e.stopPropagation(); dispatch({ type: "CLOSE_COMPOSE", id: compose.id }); }} style={hdrBtn}>
+        <button type="button" data-testid="fe2-mail-compose-close" aria-label="閉じる" onClick={(e) => { e.stopPropagation(); closeAndDiscard(); }} style={hdrBtn}>
           <MailIcon name="x" size={16} />
         </button>
       </div>
 
       {minimized ? null : (
         <>
+          <DraftRestoredNotice
+            visible={draft.restoredVisible}
+            onDiscard={() => {
+              draft.clear();
+              patch({ to: "", cc: "", bcc: "", showCc: false, showBcc: false, subject: "", body: "" });
+            }}
+            onKeep={draft.acknowledgeRestored}
+            testId="fe2-mail-compose-window-draft-notice"
+          />
           <EmailAddressSelect
             variant="flush"
             label="To"
@@ -258,7 +325,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
               </span>
             ) : null}
             <span style={{ flex: 1 }} />
-            <button type="button" aria-label="下書きを破棄" onClick={() => dispatch({ type: "CLOSE_COMPOSE", id: compose.id })} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 6 }}>
+            <button type="button" aria-label="下書きを破棄" onClick={closeAndDiscard} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 6 }}>
               <MailIcon name="trash" size={18} />
             </button>
           </div>

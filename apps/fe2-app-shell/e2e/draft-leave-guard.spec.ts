@@ -67,26 +67,53 @@ test.describe("draft leave guard — real browser, no auto-accept", () => {
     expect(fired, "beforeunload dialog should fire for マイタスク タスクを発行").toBe(true);
   });
 
-  test("mail compose (fe2) — beforeunload + real in-app nav blocker", async ({ page }) => {
+  test("mail compose — LEGACY standalone route (/mail/compose, ComposeScreen) — beforeunload + real in-app nav blocker", async ({ page }) => {
+    // Deep-link-only route ("Standalone compose route retained for deep-links / mail:send
+    // gating" — see module.tsx). Kept for regression, but this is NOT what a user reaches
+    // by clicking メール in the launcher — see the next test for that surface.
     await page.goto("/mail/compose");
     await expect(page.getByTestId("fe2-mail-compose-subject")).toBeVisible();
-    await page.getByTestId("fe2-mail-compose-subject").fill("投稿テスト: 離脱ガード確認 mail");
+    await page.getByTestId("fe2-mail-compose-subject").fill("投稿テスト: 離脱ガード確認 mail (legacy route)");
     await page.waitForTimeout(600);
 
-    // (a) native beforeunload (reload / tab close path)
     const fired = await reloadAndCheckBeforeUnload(page);
-    console.log(`[RESULT] fe2-mail-compose beforeunload fired = ${fired}`);
-    expect(fired, "beforeunload dialog should fire for mail compose").toBe(true);
+    console.log(`[RESULT] fe2-mail-compose (legacy route) beforeunload fired = ${fired}`);
+    expect(fired, "beforeunload dialog should fire for mail compose (legacy route)").toBe(true);
 
-    // (b) real in-app SPA navigation via the AppLauncher (client-side router nav)
     await navigateViaLauncher(page, "fe2-app-launcher-item-mail");
     const blockDialog = page.getByTestId("fe2-mail-compose-leave-confirm");
     const blocked = await blockDialog.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`[RESULT] fe2-mail-compose in-app nav blocker shown = ${blocked}`);
+    console.log(`[RESULT] fe2-mail-compose (legacy route) in-app nav blocker shown = ${blocked}`);
     if (blocked) {
-      // stay on the page — cancel the navigation attempt
       await page.getByRole("button", { name: "編集を続ける" }).click().catch(() => {});
     }
+  });
+
+  test("mail compose — REAL surface (floating ComposeWindow from the メール launcher tile) — beforeunload + real in-app nav blocker", async ({ page }) => {
+    // This is what a user actually reaches: the launcher's メール tile renders GmailApp,
+    // whose OWN compose affordance is this floating window (module.tsx: "It carries its
+    // own compose affordance, so no navigation to a separate compose route is needed").
+    // The P1-2 fix originally missed this surface entirely — /mail/compose (tested above)
+    // is a legacy deep-link route nobody reaches through normal navigation.
+    await page.goto("/events");
+    await page.getByTestId("fe2-app-launcher").click();
+    await page.getByTestId("fe2-app-launcher-item-mail").click();
+    await expect(page.getByTestId("fe2-mail-gmail")).toBeVisible();
+    await page.getByTestId("fe2-mail-compose-open").click();
+    await expect(page.getByTestId("fe2-mail-compose-window")).toBeVisible();
+    await page.getByTestId("fe2-mail-compose-subject").fill("投稿テスト: 離脱ガード確認 mail (real ComposeWindow)");
+    await page.waitForTimeout(600);
+
+    const fired = await reloadAndCheckBeforeUnload(page);
+    console.log(`[RESULT] fe2-mail-compose-window (real surface) beforeunload fired = ${fired}`);
+    expect(fired, "beforeunload dialog should fire for the real floating ComposeWindow").toBe(true);
+
+    // in-app SPA navigation away from /mail entirely (the window unmounts with the route)
+    await navigateViaLauncher(page, "fe2-app-launcher-item-events");
+    const blockDialog = page.getByTestId(/fe2-mail-compose-window-leave-confirm-.*/);
+    const blocked = await blockDialog.first().isVisible({ timeout: 3000 }).catch(() => false);
+    console.log(`[RESULT] fe2-mail-compose-window (real surface) in-app nav blocker shown = ${blocked}`);
+    expect(blocked, "in-app nav blocker should show for the real floating ComposeWindow").toBe(true);
   });
 
   test("role editor create (/admin/roles/new) — beforeunload + real in-app nav blocker", async ({ page }) => {
