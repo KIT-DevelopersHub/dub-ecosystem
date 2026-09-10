@@ -914,6 +914,45 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--dub-color-brand-500) 22%, transparent);
 }
 
+/* group-resize box (複数選択の一括リサイズ): a bounding outline over every selected
+   bar with a handle at each end. Dashed (vs. the marquee's solid border) so it
+   reads as "this is the current selection's extent", not a live drag rectangle.
+   pointer-events: none on the box itself — only the two handles are grabbable, so
+   the box never blocks clicking a bar or dragging out a fresh marquee underneath. */
+.tlGroupResizeBox {
+  position: absolute;
+  z-index: 6;
+  border: 1.5px dashed var(--dub-color-brand-600, var(--dub-color-brand-500));
+  border-radius: 8px;
+  pointer-events: none;
+}
+.tlGroupResizeHandle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 28px;
+  border-radius: 5px;
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
+  border: 2px solid var(--dub-color-surface-base, #fff);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+.tlGroupResizeHandle::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 1px;
+}
+.tlGroupResizeHandleL { left: -7px; }
+.tlGroupResizeHandleR { right: -7px; }
+
 /* the marquee rectangle the user drags out over the empty canvas */
 .tlMarquee {
   position: absolute;
