@@ -16,13 +16,30 @@ mkdirSync(SHOTS, { recursive: true });
 const shot = (name: string): string => join(SHOTS, name);
 
 // Resolutions the dashboard must fit without a page scrollbar (desktop → mobile).
+// The half-width-* entries cover the gap between small-laptop (1280) and the
+// tall tablet/mobile shapes below it: a browser snapped to HALF of a common
+// desktop screen (1920/1366/1280 wide) lands squarely in 640-960px landscape —
+// a width the previous list never exercised, which is how the "半画面でイベント
+// 欄が潰れる" regression shipped unnoticed (bug report + fix: see .fe2-dash-body
+// in styles/global.css, single-column breakpoint raised 860px → 1100px).
 const VIEWPORTS = [
   { name: "desktop-1440x900", width: 1440, height: 900 },
   { name: "laptop-1366x768", width: 1366, height: 768 },
   { name: "small-laptop-1280x720", width: 1280, height: 720 },
+  { name: "half-width-1024x768", width: 1024, height: 768 },
+  { name: "half-width-960x900", width: 960, height: 900 },
+  { name: "half-width-768x900", width: 768, height: 900 },
+  { name: "half-width-540x900", width: 540, height: 900 },
   { name: "tablet-834x1112", width: 834, height: 1112 },
   { name: "mobile-390x844", width: 390, height: 844 },
 ] as const;
+
+// Width below which .fe2-dash-body stacks to a single column (see global.css).
+// Below it, the main column (viz cards + app grid) and the right rail (events /
+// notifications) must render full-width, stacked in document order — never
+// side-by-side — so a shared scrollbar can never drag the shorter column out of
+// view while the taller one is still being read (the original bug).
+const DASH_BODY_STACK_BREAKPOINT = 1100;
 
 /** Vertical overflow of the page scroller in px (0 = no page scroll). */
 async function pageVerticalOverflow(page: Page): Promise<number> {
@@ -75,6 +92,34 @@ test("home dashboard: brand-first header, home导线, and zero page scroll at ev
       })
       .toBeLessThanOrEqual(1);
 
+    // (1b) Below the stack breakpoint, main and aside must be full-width and
+    // stacked (never side-by-side) — this is what stops a shared scrollbar from
+    // dragging the shorter aside out of view while the taller main column (viz
+    // cards + app grid) is still being scrolled through. Regression test for the
+    // "半画面でイベント欄が潰れる" report.
+    if (vp.width <= DASH_BODY_STACK_BREAKPOINT) {
+      const rects = await page.evaluate(() => {
+        const main = document.querySelector(".fe2-dash-main")?.getBoundingClientRect();
+        const aside = document.querySelector(".fe2-home-side")?.getBoundingClientRect();
+        return main && aside ? { mainLeft: main.left, mainBottom: main.bottom, asideLeft: aside.left, asideTop: aside.top } : null;
+      });
+      expect(rects, `main/aside must be present at ${vp.name}`).not.toBeNull();
+      // Stacked ⇒ same left edge, and aside begins at/after main's bottom edge
+      // (allow a few px for the column gap/rounding), never floating beside it.
+      expect(Math.abs(rects!.mainLeft - rects!.asideLeft), `main/aside must share a left edge (stacked) at ${vp.name}`).toBeLessThanOrEqual(1);
+      expect(rects!.asideTop, `aside must start at/after main's bottom (stacked, not side-by-side) at ${vp.name}`).toBeGreaterThanOrEqual(rects!.mainBottom - 1);
+
+      // The events card itself must render at full column width (never clipped
+      // to a narrow side-rail sliver) once stacked.
+      const eventsCard = page.getByTestId("fe2-home-events");
+      await expect(eventsCard).toBeVisible();
+      const eventsWidth = await eventsCard.evaluate((el) => el.getBoundingClientRect().width);
+      expect(eventsWidth, `events card must be full-width when stacked at ${vp.name}`).toBeGreaterThan(vp.width * 0.8);
+    }
+
+    if (vp.name === "half-width-960x900") {
+      await page.screenshot({ path: shot("00-dashboard-half-width-960.png") });
+    }
     if (vp.name === "desktop-1440x900") {
       await page.screenshot({ path: shot("01-dashboard-desktop.png") });
     }
