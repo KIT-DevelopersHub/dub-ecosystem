@@ -49,6 +49,10 @@ export interface TaskWorkspacePageProps {
   eventId: common.EventId;
   /** effectivePermissions from GET /api/v1/me (null = still loading -> deny). */
   permissions: readonly identity.PermissionKey[] | null;
+  /** Deep-link target from `/events/:eventId/tasks/:taskId` (parseTaskIdFromPath in
+   *  taskRoutes.tsx). Auto-opens that task's detail panel once it appears in the
+   *  loaded list; applied at most once per mount (a later manual selection wins). */
+  initialSelectedTaskId?: common.TaskId | null;
 }
 
 // Solid fill colours for the sort-group brackets (@dub/tokens hex). Priorities map to
@@ -83,7 +87,7 @@ const FIELD_LABEL: Record<string, string> = {
  * edit/delete) wired through the optimistic store. The former list/board view
  * switch was removed — the gantt is the one canvas.
  */
-export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePageProps) {
+export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId = null }: TaskWorkspacePageProps) {
   const client = useApiClient();
   const toast = useToast();
   const feedback = useWriteFeedback();
@@ -221,6 +225,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   }, [query]);
 
   const tasks = store.list();
+
+  // Deep-link open (⌘K search etc.): once the URL's :taskId appears in the loaded
+  // list, select it so the detail panel opens automatically. Applies at most once —
+  // a subsequent manual selection (or clearing it) is never overridden back.
+  const appliedInitialSelect = useRef(false);
+  useEffect(() => {
+    if (appliedInitialSelect.current || !initialSelectedTaskId) return;
+    if (tasks.some((t) => t.id === initialSelectedTaskId)) {
+      appliedInitialSelect.current = true;
+      setSelected(initialSelectedTaskId);
+    }
+  }, [tasks, initialSelectedTaskId]);
 
   // batch-resolve assignee display names (N+1 avoided — one request per new set)
   useEffect(() => {
