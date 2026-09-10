@@ -5,9 +5,9 @@ import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
 import { renderWithProviders } from "./helpers-providers";
 
-// 親タスク（子を持つ）のステータスは子タスクの内訳から自動集計される表示専用値
-// （親バーの色分け＝#374 child-progress）。手動で編集できると集計と食い違って挙動が
-// おかしくなるため、子を1件以上持つ間はステータス編集を無効化する（feedback 追加要望）。
+// 親タスク（子を持つ）のステータスは子孫タスクの内訳から自動集計される表示専用値
+// （親バーの色分け・ドロップダウン表示＝domain/child-progress の再帰集計）。手動で編集できると
+// 集計と食い違って挙動がおかしくなるため、子を1件以上持つ間はステータス編集を無効化する。
 // 子タスク自身（親を持つがそれ自身は子を持たない）や、子が0件のトップレベルは従来どおり編集可。
 
 const mkTask = (id: string, status: task.TaskStatus = "todo"): task.Task => ({

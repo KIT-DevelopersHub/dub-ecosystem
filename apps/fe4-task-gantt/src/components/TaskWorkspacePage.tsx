@@ -19,6 +19,7 @@ import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
+import { childProgressByParent } from "../domain/child-progress";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
 import { planBulkResizeFromRows } from "../domain/bulk-resize";
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
@@ -364,6 +365,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
   const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
+
+  // Every WBS parent's (any depth) leaf-status roll-up, computed ONCE here from the
+  // FULL (unfiltered) row set + the live/optimistic statusById, and shared by both the
+  // gantt bars/dots AND the detail panel's status field/badge — a single source so a
+  // parent's displayed status never disagrees between the two surfaces (症状#1). Recomputes
+  // whenever a task's status changes (statusById depends on `tasks`, so an optimistic
+  // child-status edit propagates to every ancestor's aggregate the same render, 症状#5).
+  const childProgressById = useMemo(
+    () => childProgressByParent(allRows, statusById),
+    [allRows, statusById],
+  );
   // Prefer the store's fresh title so the parent / 先行タスク pickers relabel the same
   // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
   // which the store list omits).
@@ -1292,6 +1304,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onSelect={setSelected}
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
+          childProgressById={childProgressById}
           assigneeNameById={assigneeNameById}
           titleOverrides={titleById}
           teamColorById={teamColorById}
@@ -1336,6 +1349,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           barStartsAt={selectedRow?.startsAt ?? null}
           barEndsAt={selectedRow?.endsAt ?? null}
           hasChildren={selectedRow?.hasChildren ?? false}
+          aggregatedStatus={selectedTask ? childProgressById.get(selectedTask.id)?.dominantStatus : undefined}
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}

@@ -84,8 +84,18 @@ export interface GanttViewProps {
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
   onCreateOnDate?: (dueAt: common.ISODateTime | null) => void;
-  /** taskId -> status, for status-legible bar colouring. */
+  /** taskId -> status, for status-legible bar colouring. This is each row's OWN
+   *  stored status column — for a WBS parent it is NOT the authoritative display value
+   *  (see childProgressById): the container still supplies it so a parent with no
+   *  known progress mix (e.g. computed elsewhere is absent) has some fallback colour. */
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
+  /** taskId -> its subtree's leaf-status roll-up (recursive: any depth), for parent
+   *  (work-package) bars. When present for a taskId, that row's DISPLAYED status
+   *  (bar colour segments, row dot, "n/m 完了" count) is derived from this — never
+   *  from statusById's own stored column, which is stale/unrelated once a task has
+   *  children (症状: 子を変えても親のバー/ドロップダウンが追従しない・2階層までしか
+   *  集計されない). Absent ⇒ falls back to a flat single-status bar like a leaf. */
+  childProgressById?: ReadonlyMap<common.TaskId, ChildProgress>;
   /** taskId -> assignee display name, shown as a left-pane property. */
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> title from the optimistic task store (task-service = the authority on
@@ -144,9 +154,9 @@ const STATUS_BAR_CLASS: Record<task.TaskStatus, string> = {
 };
 
 // Per-status slice fill for a parent (work-package) bar. Reuses the SAME pastel
-// tokens as the leaf status bars above, so a parent whose children are all 完了
-// reads identically to a 完了 leaf bar, and a mixed parent shows those exact hues
-// in proportion (design: 親バーを子ステータスの割合で色分け).
+// tokens as the leaf status bars above, so a parent whose leaf descendants are all
+// 完了 reads identically to a 完了 leaf bar, and a mixed parent shows those exact hues
+// in proportion (design: 親バーを子孫ステータスの割合で色分け・#374 / 再帰集計版).
 const STATUS_SEG_CLASS: Record<task.TaskStatus, string> = {
   todo: styles.barSegTodo!,
   in_progress: styles.barSegInProgress!,
@@ -284,6 +294,7 @@ export function GanttView({
   onSelect,
   onCreateOnDate,
   statusById,
+  childProgressById,
   assigneeNameById,
   titleOverrides,
   teamColorById,
@@ -441,6 +452,29 @@ export function GanttView({
     return s;
   }, [dto.rows]);
 
+  // parentId -> its subtree's (recursive, any depth) leaf-status mix. The container
+  // normally computes this once (from the FULL row set + status map, shared with the
+  // detail panel so both surfaces agree — 症状#1 バーとドロップダウンの不一致対策) and
+  // passes it down; falling back to a local compute keeps this view correct even when
+  // used standalone (tests / no container wiring).
+  const effectiveChildProgressById = useMemo<Map<common.TaskId, ChildProgress>>(
+    () => (childProgressById ? new Map(childProgressById) : childProgressByParent(dto.rows, statusById ?? new Map())),
+    [childProgressById, dto.rows, statusById],
+  );
+
+  // Displayed status per row: a WBS parent (any depth) shows its subtree's PLURALITY
+  // leaf status (dominantStatus) — never its own stored status column, which is stale/
+  // unrelated once it has children. Leaves fall back to their own statusById entry.
+  const effectiveStatusById = useMemo<Map<common.TaskId, task.TaskStatus>>(() => {
+    const m = new Map<common.TaskId, task.TaskStatus>();
+    for (const r of dto.rows) {
+      const prog = effectiveChildProgressById.get(r.taskId);
+      const status = prog ? prog.dominantStatus : statusById?.get(r.taskId);
+      if (status) m.set(r.taskId, status);
+    }
+    return m;
+  }, [dto.rows, effectiveChildProgressById, statusById]);
+
   // Auto-expand a row the instant it becomes a parent (gains its first child). Adding
   // a subtask to a previously-childless task must reveal that child at once — otherwise
   // the new toggle appears collapsed and the child stays hidden ("追加した子タスクが
@@ -461,15 +495,6 @@ export function GanttView({
       return next;
     });
   }, [parentIds]);
-
-  // parentId -> its children's status mix (完了/進行中/未着手…), for the at-a-glance
-  // "子: n/m 完了" bar. Computed from ALL rows (not just the visible/rolled set) so a
-  // collapsed parent still shows its full progress. Pure + memoised; re-derives when a
-  // child's status changes (optimistic status edits flow through statusById).
-  const childProgressById = useMemo<Map<common.TaskId, ChildProgress>>(
-    () => (statusById ? childProgressByParent(dto.rows, statusById) : new Map()),
-    [dto.rows, statusById],
-  );
 
   // taskId -> the ROLLED row (parent dates are the union of their children). Drag
   // start/end must read these displayed dates, not the parent's pre-rollup seed.
@@ -871,10 +896,10 @@ export function GanttView({
   };
 
   const barClassOf = (taskId: common.TaskId) => {
-    // Parent (work-package) bars with a known child-status mix render as a neutral
-    // track filled by per-status slices (see childProgressById); their own single
-    // status must NOT paint the whole bar, or the slices would be invisible.
-    const isParentWithProgress = parentIds.has(taskId) && childProgressById.has(taskId);
+    // A WBS parent with a known leaf-status mix renders as a neutral track filled by
+    // per-status slices (see effectiveChildProgressById); its single dominantStatus
+    // must NOT paint the whole bar, or the slices underneath would be invisible.
+    const isParentWithProgress = parentIds.has(taskId) && effectiveChildProgressById.has(taskId);
     const status = statusById?.get(taskId);
     const cls = isParentWithProgress ? styles.barParent : status ? STATUS_BAR_CLASS[status] : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
@@ -1227,7 +1252,7 @@ export function GanttView({
                         number={numberById?.get(r.taskId)}
                         onSelect={interactive ? onSelect : undefined}
                         toggleParent={toggleParent}
-                        statusById={statusById}
+                        statusById={effectiveStatusById}
                         assigneeNameById={assigneeNameById}
                       />
                     );
@@ -1240,7 +1265,7 @@ export function GanttView({
                         {teamColorById?.get(row.taskId) && (
                           <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(row.taskId) }} aria-hidden />
                         )}
-                        <span className={`${styles.tlDot} ${statusById?.get(row.taskId) ? STATUS_BAR_CLASS[statusById.get(row.taskId)!] : ""}`} aria-hidden />
+                        <span className={`${styles.tlDot} ${effectiveStatusById.get(row.taskId) ? STATUS_BAR_CLASS[effectiveStatusById.get(row.taskId)!] : ""}`} aria-hidden />
                         {numberById?.get(row.taskId) && <span className={styles.tlRowNum}>{numberById.get(row.taskId)}</span>}
                         <span className={styles.tlRowName}>{row.title}</span>
                       </div>
@@ -1428,12 +1453,12 @@ export function GanttView({
                   const g = previewGeom(b);
                   const showInside = g.width > 66;
                   const title = titleById.get(b.taskId) ?? "";
-                  // Parent bars are painted by their children's status mix (完了/進行中/
-                  // 未着手…) instead of one flat progress fill, plus a "n/m 完了" count.
-                  const prog = childProgressById.get(b.taskId);
+                  // Parent bars are painted by their (recursive, any-depth) leaf-status
+                  // mix instead of one flat progress fill, plus a "n/m 完了" count.
+                  const prog = effectiveChildProgressById.get(b.taskId);
                   const countText = prog ? `${prog.doneCount}/${prog.total} 完了` : null;
                   const barTitle = prog
-                    ? `${title} — 子タスク ${prog.doneCount}/${prog.total} 完了` +
+                    ? `${title} — 子孫タスク ${prog.doneCount}/${prog.total} 完了` +
                       (prog.inProgressCount ? `・進行中 ${prog.inProgressCount}` : "")
                     : title;
                   return (

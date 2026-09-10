@@ -1011,7 +1011,7 @@
   pointer-events: none;
 }
 
-/* ---- parent (work-package) bar: children's status mix as proportional slices ---- */
+/* ---- parent (work-package) bar: descendant leaf-status mix as proportional slices ---- */
 /* Neutral track; the slices below carry all the colour. */
 .barParent { background: var(--dub-color-gray-100); }
 /* The status slices use the light *-300 pastels in BOTH themes (shared scales), so
@@ -1033,7 +1033,7 @@
 .barSeg + .barSeg { box-shadow: inset 1px 0 0 rgba(15, 23, 42, 0.12); }
 
 /* Same pastel tokens as the leaf status bars (barDone/barInProgress/…) so a
-   parent whose children are all 完了 reads identically to a 完了 leaf bar. */
+   parent whose descendants are all 完了 reads identically to a 完了 leaf bar. */
 .barSegDone { background: var(--dub-color-success-300, var(--dub-color-success-400)); }
 .barSegInProgress { background: var(--dub-color-brand-300, var(--dub-color-brand-400)); }
 .barSegBlocked { background: var(--dub-color-warning-300, var(--dub-color-warning-400)); }
@@ -1048,6 +1048,7 @@
   font-size: var(--dub-font-size-xs, 0.72rem);
   opacity: 0.82;
 }
+
 .barLabel {
   position: relative;
   z-index: 1;
