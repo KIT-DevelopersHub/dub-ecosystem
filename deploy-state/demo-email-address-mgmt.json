@@ -3,12 +3,12 @@
   "slug": "email-address-mgmt",
   "worker": "dub-demo-email-address-mgmt",
   "url": "https://dub-demo-email-address-mgmt.developershub-site.workers.dev",
-  "deployedSha": "ea64941c",
-  "branch": "feat/email-address-mgmt",
+  "deployedSha": "afe8baf5",
+  "branch": "fix/email-mgmt-demo-entry",
   "actor": "kota",
-  "markers": ["fe7-email-header","fe7-email-new","fe7-email-toggle-"],
+  "markers": ["fe7-email-header","fe7-email-new","fe7-email-toggle-","fe2-home-admin-apps-grid"],
   "live": true,
-  "verifiedAt": "2026-09-10T10:56:53Z",
-  "updatedAt": "2026-09-10T10:56:53Z",
-  "note": "メールアドレス管理を復活実装(PR#245の逆diff+issued-addresses API対応)"
+  "verifiedAt": "2026-09-10T12:02:16Z",
+  "updatedAt": "2026-09-10T12:02:16Z",
+  "note": "admin tiles (メールアドレス管理等) now also surfaced on the home dashboard, not only the 9-dot launcher"
 }
