@@ -3,13 +3,14 @@
 // partial-error surfacing (no global toast), and that feature-contributed
 // homeWidgets render inside isolated error boundaries — one throwing widget
 // never blanks the dashboard. All run against a faked ApiClient (no network).
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { gateway } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
+import { useUiStore } from "../../store/uiStore.tsx";
 import { HomeScreen } from "./HomeScreen.tsx";
 
 function makeApi(home: gateway.BffHomeResponse): ApiClient {
@@ -135,5 +136,109 @@ describe("HomeScreen", () => {
     // ...while the dashboard-owned cards still resolve and render normally.
     expect(await screen.findByText("Conf")).toBeInTheDocument();
     expect(await screen.findByTestId("fe2-home-unread-count")).toBeInTheDocument();
+  });
+
+  // ── P3-3: inline 編集モード (reorder / hide / density on the live dashboard) ──────
+  describe("編集モード (P3-3)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      useUiStore.setState({ homeDensity: "comfortable", homeLayout: { order: [], hidden: [] } });
+    });
+
+    it("reflects the persisted density on the dashboard root", async () => {
+      useUiStore.setState({ homeDensity: "compact", homeLayout: { order: [], hidden: [] } });
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-members-value")).toHaveTextContent("12"));
+      expect(screen.getByTestId("fe2-home")).toHaveAttribute("data-density", "compact");
+    });
+
+    it("hides a widget the viewer has hidden and keeps the rest", async () => {
+      useUiStore.setState({ homeLayout: { order: [], hidden: ["kpi-members", "card-usage"] } });
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toBeInTheDocument());
+      expect(screen.queryByTestId("fe2-kpi-members")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("fe2-home-usage")).not.toBeInTheDocument();
+      // Untouched widgets still render.
+      expect(screen.getByTestId("fe2-kpi-tasks")).toBeInTheDocument();
+      expect(screen.getByTestId("fe2-home-tasks")).toBeInTheDocument();
+    });
+
+    it("renders KPI tiles in the viewer's saved order", async () => {
+      useUiStore.setState({ homeLayout: { order: ["kpi-members", "kpi-countdown"], hidden: [] } });
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-members")).toBeInTheDocument());
+      const ids = Array.from(screen.getByTestId("fe2-home-kpis").children).map((el) => el.getAttribute("data-testid"));
+      // The two reordered tiles come first, in the saved order.
+      expect(ids.indexOf("fe2-kpi-members")).toBeLessThan(ids.indexOf("fe2-kpi-countdown"));
+      expect(ids[0]).toBe("fe2-kpi-members");
+    });
+
+    it("the 編集 button starts idle: no drag handles / hide toggles on the resting dashboard", async () => {
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-members")).toBeInTheDocument());
+      expect(screen.getByTestId("fe2-home-edit-toggle")).toHaveTextContent("編集");
+      expect(screen.queryByTestId("fe2-widget-handle-kpi-members")).not.toBeInTheDocument();
+      expect(screen.getByTestId("fe2-home")).toHaveAttribute("data-editing", "false");
+    });
+
+    it("編集 reveals a drag handle + hide toggle per widget, and 完了 exits cleanly", async () => {
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-members")).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId("fe2-home-edit-toggle"));
+      expect(screen.getByTestId("fe2-home")).toHaveAttribute("data-editing", "true");
+      expect(screen.getByTestId("fe2-home-edit-toggle")).toHaveTextContent("完了");
+      // The handle is keyboard-operable (dnd-kit sortable a11y attributes) —
+      // pointer AND keyboard reorder both go through this same element.
+      const handle = screen.getByTestId("fe2-widget-handle-kpi-members");
+      expect(handle).toHaveAttribute("aria-roledescription", "sortable");
+      expect(handle).toHaveAttribute("tabindex", "0");
+      expect(screen.getByTestId("fe2-widget-hide-kpi-members")).toBeInTheDocument();
+      // Density toggle + reset are only surfaced while editing.
+      expect(screen.getByTestId("fe2-home-density-compact")).toBeInTheDocument();
+      expect(screen.getByTestId("fe2-home-edit-reset")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("fe2-home-edit-toggle"));
+      expect(screen.getByTestId("fe2-home")).toHaveAttribute("data-editing", "false");
+      expect(screen.queryByTestId("fe2-widget-handle-kpi-members")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("fe2-home-density-compact")).not.toBeInTheDocument();
+      // The widget itself is unaffected by the round trip.
+      expect(screen.getByTestId("fe2-kpi-members")).toBeInTheDocument();
+    });
+
+    it("toggling a widget's hide button in 編集モード hides it on the dashboard and persists", async () => {
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-members")).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId("fe2-home-edit-toggle"));
+      fireEvent.click(screen.getByTestId("fe2-widget-hide-kpi-members"));
+      // Still present but dimmed/inert while editing (reversible without leaving edit mode)...
+      expect(screen.getByTestId("fe2-widget-edit-kpi-members")).toHaveAttribute("data-hidden", "true");
+      // ...and persisted for the resting dashboard / next load.
+      expect(useUiStore.getState().homeLayout.hidden).toContain("kpi-members");
+      expect(JSON.parse(localStorage.getItem("dub.ui.home.layout")!).hidden).toContain("kpi-members");
+      fireEvent.click(screen.getByTestId("fe2-home-edit-toggle"));
+      expect(screen.queryByTestId("fe2-kpi-members")).not.toBeInTheDocument();
+    });
+
+    it("switching density from the 編集 toolbar persists immediately", async () => {
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-members")).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId("fe2-home-edit-toggle"));
+      fireEvent.click(screen.getByTestId("fe2-home-density-compact"));
+      expect(screen.getByTestId("fe2-home")).toHaveAttribute("data-density", "compact");
+      expect(localStorage.getItem("dub.ui.home.density")).toBe("compact");
+    });
+
+    it("既定に戻す resets order/hidden/density from inside 編集モード", async () => {
+      useUiStore.setState({ homeDensity: "compact", homeLayout: { order: [], hidden: ["kpi-members"] } });
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toBeInTheDocument());
+      expect(screen.queryByTestId("fe2-kpi-members")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("fe2-home-edit-toggle"));
+      fireEvent.click(screen.getByTestId("fe2-home-edit-reset"));
+      expect(useUiStore.getState().homeLayout).toEqual({ order: [], hidden: [] });
+      expect(useUiStore.getState().homeDensity).toBe("comfortable");
+      expect(screen.getByTestId("fe2-widget-edit-kpi-members")).toHaveAttribute("data-hidden", "false");
+    });
   });
 });

@@ -935,6 +935,124 @@ svg {
   box-shadow: 0 0 0 2px var(--dub-color-surface-raised);
 }
 
+/* ---- home density (P3-2: compact / comfortable) --------------------------- */
+/* Compact tightens every dashboard gap + KPI tile padding so a role that prefers a
+ * denser overview fits more without the page ever scrolling (still clamped). Toggled
+ * from the 編集 toolbar; the choice is stored per-viewer in UiStore. */
+.fe2-home.fe2-dashboard[data-density="compact"] {
+  gap: var(--dub-space-2);
+}
+.fe2-home[data-density="compact"] .fe2-dash-body,
+.fe2-home[data-density="compact"] .fe2-dash-main,
+.fe2-home[data-density="compact"] .fe2-dash-cards,
+.fe2-home[data-density="compact"] .fe2-home-side {
+  gap: var(--dub-space-2);
+}
+.fe2-home[data-density="compact"] .fe2-kpi-row {
+  gap: var(--dub-space-2);
+}
+.fe2-home[data-density="compact"] .fe2-kpi {
+  padding: var(--dub-space-2);
+  gap: var(--dub-space-1);
+  min-height: 76px;
+}
+
+/* ---- home 編集モード toolbar (P3-3) ----------------------------------------- */
+.fe2-home-edit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+.fe2-home-edit-hint {
+  margin: calc(var(--dub-space-2) * -1) 0 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-secondary);
+}
+
+/* ---- home widget 編集モード chrome (P3-3) ----------------------------------- */
+/* Each widget becomes an iOS ホーム画面編集-style draggable row: a dashed frame, a
+ * light jiggle (desynced per item so the whole region doesn't breathe in lockstep),
+ * a grip handle (top-right) driving @dnd-kit pointer+keyboard drag, and a hide/show
+ * toggle (top-left, like the removal badge). The underlying widget content is inert
+ * (no click-through / navigation) while editing, exactly like iOS icons not
+ * launching while they jiggle. */
+.fe2-widget-edit {
+  position: relative;
+  border: 1.5px dashed var(--dub-color-border-strong);
+  border-radius: var(--dub-radius-md);
+  padding: var(--dub-space-1);
+  animation: fe2-widget-jiggle 0.26s ease-in-out infinite;
+}
+/* Desync neighbours so the region doesn't visibly breathe as one block — matches
+ * how iOS staggers its icon wiggle. */
+.fe2-widget-edit:nth-child(odd) {
+  animation-delay: -0.13s;
+}
+.fe2-widget-edit:nth-child(3n) {
+  animation-delay: -0.19s;
+}
+/* Never jiggle the row actually being dragged (it rides the floating overlay; the
+ * hidden in-place slot should hold still), and use a solid brand outline instead of
+ * the dashed frame to read as "picked up". */
+.fe2-widget-edit[data-dragging="true"] {
+  border-style: solid;
+  border-color: var(--dub-color-brand-500);
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe2-widget-edit {
+    animation: none;
+  }
+}
+.fe2-widget-edit-inner {
+  pointer-events: none;
+}
+.fe2-widget-edit-inner[data-hidden="true"] {
+  opacity: 0.45;
+}
+.fe2-widget-edit-hide,
+.fe2-widget-edit-handle {
+  position: absolute;
+  top: calc(var(--dub-space-2) * -1);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-raised);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+}
+.fe2-widget-edit-hide {
+  left: calc(var(--dub-space-2) * -1);
+  border: none;
+  color: var(--dub-color-text-inverse, #fff);
+  background: var(--dub-color-danger-500, #e5484d);
+  cursor: pointer;
+}
+.fe2-widget-edit-hide[aria-pressed="false"] {
+  background: var(--dub-color-brand-500);
+}
+.fe2-widget-edit-handle {
+  right: calc(var(--dub-space-2) * -1);
+  color: var(--dub-color-text-tertiary);
+  cursor: grab;
+  touch-action: none;
+}
+.fe2-widget-edit-handle:active {
+  cursor: grabbing;
+}
+@keyframes fe2-widget-jiggle {
+  0%,
+  100% {
+    transform: rotate(-1deg);
+  }
+  50% {
+    transform: rotate(1deg);
+  }
+}
+
 /* Right: live BFF panels. The column fills the body height and scrolls internally
  * (its own safety valve) so it never pushes the page — the dashboard stays clamped. */
 .fe2-home-side {
