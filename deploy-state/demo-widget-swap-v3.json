@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "widget-swap-v3",
+  "worker": "dub-demo-widget-swap-v3",
+  "url": "https://dub-demo-widget-swap-v3.developershub-site.workers.dev",
+  "deployedSha": "87aafb6d",
+  "branch": "fix/widget-area-swap-v3",
+  "actor": "kota",
+  "markers": ["panel-recent","fe2-widget-edit-hide"],
+  "live": true,
+  "verifiedAt": "2026-09-10T15:50:38Z",
+  "updatedAt": "2026-09-10T15:50:38Z",
+  "note": "block-swap redesign for mixed-size Home widget drag (postmortem for PR #484 / fix/widget-area-swap-mutual)"
+}
