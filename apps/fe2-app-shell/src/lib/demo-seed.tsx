@@ -153,6 +153,38 @@ const TASKS: task.Task[] = [
     status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
   },
+  // ── 階層集計デモ (3-level WBS: 祖父tsk_10 → 親tsk_11 → 葉tsk_12/13/14) ──────────
+  // Regression fixture for the recursive parent-status roll-up (症状#1〜#3): tsk_10
+  // has only ONE direct child (tsk_11), so its displayed status/bar can only be
+  // correct if the aggregation walks all the way down to the THREE leaves under
+  // tsk_11 — 2 levels below tsk_10. Leaves are 2x done + 1x blocked (mixed, majority
+  // = done) so both the proportional bar colouring AND the dropdown's plurality
+  // pick are visible/checkable at a glance.
+  {
+    version: 1, id: "tsk_10", eventId: "evt_1", title: "階層集計デモ：全体進行（3階層サンプル）", description: "子孫タスクの完了状況から自動集計される表示専用ステータスの確認用",
+    status: "todo", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: "2026-08-15T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_11", eventId: "evt_1", title: "階層集計デモ：中間フェーズ", description: null,
+    status: "todo", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: "2026-08-14T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_12", eventId: "evt_1", title: "階層集計デモ：作業A", description: null,
+    status: "done", priority: "medium", assigneeId: ME_ID, teamId: "team_hq", dueAt: "2026-08-10T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_13", eventId: "evt_1", title: "階層集計デモ：作業B", description: null,
+    status: "done", priority: "medium", assigneeId: ME_ID, teamId: "team_hq", dueAt: "2026-08-12T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_14", eventId: "evt_1", title: "階層集計デモ：作業C", description: null,
+    status: "blocked", priority: "medium", assigneeId: "usr_bob", teamId: "team_hq", dueAt: "2026-08-13T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
   // ── evt_3 (学生ハッカソン Hackit 秋) — a 2nd event WITH a gantt so the global
   //    header イベント switcher demonstrably reloads the timeline on switch. ──
   {
@@ -189,6 +221,14 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
       { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
       { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
       { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
+      // 階層集計デモ: tsk_10(祖父) -> tsk_11(親) -> tsk_12/13/14(葉、2完了+1ブロック)。
+      // tsk_10 の直接の子は tsk_11 だけ — バー/ドロップダウンが正しければ、2階層下の
+      // 3枚の葉から再帰集計された「完了寄り」が出る(祖父の直下だけを見ていたら出ない)。
+      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, hasChildren: true },
+      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_10", depth: 1, hasChildren: true },
+      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", parentTaskId: "tsk_11", depth: 2 },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
