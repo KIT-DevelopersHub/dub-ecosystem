@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "widget-area-swap-v2",
+  "worker": "dub-demo-widget-area-swap-v2",
+  "url": "https://dub-demo-widget-area-swap-v2.developershub-site.workers.dev",
+  "deployedSha": "cf1791d7",
+  "branch": "fix/widget-area-swap-mutual",
+  "actor": "kota",
+  "markers": ["fe2-widget-edit-hide","fe2-home-edit-toggle"],
+  "live": true,
+  "verifiedAt": "2026-09-10T14:56:46Z",
+  "updatedAt": "2026-09-10T14:56:46Z",
+  "note": "面積の異なるウィジェット同士の相互スワップ修正 (PR #484)"
+}
