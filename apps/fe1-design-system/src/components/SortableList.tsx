@@ -18,6 +18,7 @@ import {
   useSortable,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
+  rectSortingStrategy,
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -102,6 +103,17 @@ export interface SortableListProps<T> {
   className?: string;
   /** Extra class on the floating overlay wrapper (which already carries the elevation). */
   overlayClassName?: string;
+  /** Sorting strategy fed to dnd-kit's `SortableContext`: "vertical" (default) for a
+   *  single-column stacked list, "rect" for a CSS Grid / wrapping layout where items
+   *  can sit beside each other (dnd-kit computes reflow offsets from each item's
+   *  rectangle rather than assuming a single vertical axis — using "vertical" in a
+   *  multi-column grid produces wrong reflow transforms and makes rows visually
+   *  overlap / swap paint order mid-drag). */
+  strategy?: "vertical" | "rect";
+  /** Extra per-item style (e.g. a CSS Grid `gridColumn`/`gridRow` span for a
+   *  variable-size tile) merged onto the row's own wrapper — UNDER dnd-kit's own
+   *  transform/opacity styling, so a name clash always defers to dnd-kit. */
+  getItemStyle?: (item: T) => CSSProperties | undefined;
   testId?: string;
   "aria-label"?: string;
 }
@@ -142,6 +154,7 @@ function SortableRow<T>({
   activeId,
   collapsed,
   placeholderHeight,
+  itemStyle,
 }: {
   id: string;
   item: T;
@@ -159,6 +172,10 @@ function SortableRow<T>({
    *  grows to this height (= liftedCount rows) so the reflow opens a MULTI-row gap
    *  that follows the cursor — sized to how many rows are floating (⑤a). */
   placeholderHeight: number | null;
+  /** Extra style (e.g. a grid span) from `getItemStyle`, applied under dnd-kit's own
+   *  transform/opacity/height so this row is a correctly-sized grid item WHILE it is
+   *  still draggable/reflowable. */
+  itemStyle?: CSSProperties;
 }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id, disabled });
   // Compose dnd-kit's node ref with the list's node registry (used by the group-move
@@ -184,6 +201,7 @@ function SortableRow<T>({
   const heightTransition = reduced ? null : `height ${SORTABLE_DROP_REVEAL_MS}ms ${SORTABLE_DROP_EASING}`;
   const groupHeight = collapsed || placeholderHeight != null;
   const style: CSSProperties = {
+    ...itemStyle,
     transform: CSS.Transform.toString(transform),
     transition:
       [transition, opacityTransition, groupHeight ? heightTransition : null].filter(Boolean).join(", ") || undefined,
@@ -220,11 +238,20 @@ export function SortableList<T>({
   disabled = false,
   className,
   overlayClassName,
+  strategy = "vertical",
+  getItemStyle,
   testId,
   ...rest
 }: SortableListProps<T>) {
   const ariaLabel = rest["aria-label"];
+  const sortingStrategy = strategy === "rect" ? rectSortingStrategy : verticalListSortingStrategy;
   const [activeId, setActiveId] = useState<string | null>(null);
+  // The dragged row's measured box (width/height) at pickup — applied to the floating
+  // DragOverlay clone so it renders at the SAME size as the in-grid row instead of
+  // shrink/growing to its content's intrinsic size once it's outside the grid/flex
+  // container (the visible symptom: the lifted tile looks a different size/shape than
+  // the one just picked up). null when idle.
+  const [overlayRect, setOverlayRect] = useState<{ width: number; height: number } | null>(null);
   // The lifted group as a Set (stable per liftedIds content). A drag on a member with
   // group size > 1 triggers the multi-row-gap behaviour (⑤a).
   const liftedSet = useMemo(() => new Set(liftedIds ?? []), [liftedIds]);
@@ -308,12 +335,20 @@ export function SortableList<T>({
       setOverrideIds(null);
       const id = e.active ? String(e.active.id) : null;
       setActiveId(id);
+      // Measure the picked-up row NOW (while it is still in its normal grid/flex slot)
+      // so the floating overlay clone can be sized to match exactly.
+      const activeEl = id ? nodeMap.current.get(id) : null;
+      if (activeEl) {
+        const r = activeEl.getBoundingClientRect();
+        setOverlayRect({ width: r.width, height: r.height });
+      } else {
+        setOverlayRect(null);
+      }
       // Group drag (⑤a): when the grabbed row is a member of a >1 lifted set, size the
       // moving gap to the whole deck — measure the grabbed row's height and reserve
       // liftedCount × that as its placeholder slot (the other members collapse to 0).
       if (id && liftedSet.has(id) && liftedSet.size > 1) {
-        const el = nodeMap.current.get(id);
-        const h = el ? el.getBoundingClientRect().height : 0;
+        const h = activeEl ? activeEl.getBoundingClientRect().height : 0;
         setGroupGapPx(h > 0 ? h * liftedSet.size : null);
       } else {
         setGroupGapPx(null);
@@ -326,6 +361,7 @@ export function SortableList<T>({
     (e: DragEndEvent) => {
       setActiveId(null);
       setGroupGapPx(null);
+      setOverlayRect(null);
       const activeId = e.active ? String(e.active.id) : null;
       const overId = e.over ? String(e.over.id) : null;
       if (!activeId || !overId || activeId === overId) return;
@@ -406,6 +442,7 @@ export function SortableList<T>({
   const onDragCancel = useCallback(() => {
     setActiveId(null);
     setGroupGapPx(null);
+    setOverlayRect(null);
   }, []);
 
   // A group drag is in flight when we've reserved a multi-row gap for the grabbed row.
@@ -436,7 +473,7 @@ export function SortableList<T>({
       onDragEnd={onDragEnd}
       onDragCancel={onDragCancel}
     >
-      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+      <SortableContext items={ids} strategy={sortingStrategy}>
         <div className={className} data-testid={testId} aria-label={ariaLabel}>
           {orderedItems.map((item) => {
             const rid = getItemId(item);
@@ -451,6 +488,7 @@ export function SortableList<T>({
                 activeId={activeId}
                 collapsed={groupActive && liftedSet.has(rid) && rid !== activeId}
                 placeholderHeight={groupActive && rid === activeId ? groupGapPx : null}
+                itemStyle={getItemStyle?.(item)}
               />
             );
           })}
@@ -458,10 +496,18 @@ export function SortableList<T>({
       </SortableContext>
       {/* The clone eases (~200ms ease-out) from where it was released into its new slot
           — never back to the source, since the list is already reordered synchronously —
-          so the drop reads as a gentle "settle into the open gap", no return-to-origin. */}
-      <DragOverlay dropAnimation={dropAnimation}>
+          so the drop reads as a gentle "settle into the open gap", no return-to-origin.
+          `overlayRect` (measured at pickup) pins the clone's width/height to the source
+          row's own size — without it, a clone rendered outside the grid/flex container
+          falls back to its content's intrinsic size, which reads as "the wrong tile" for
+          anything narrower/shorter than its natural content width (e.g. a grid tile). */}
+      <DragOverlay dropAnimation={dropAnimation} zIndex={1000} className={styles.overlayLayer}>
         {activeItem ? (
-          <div className={cx(styles.overlay, overlayClassName)}>
+          <div
+            className={cx(styles.overlay, overlayClassName)}
+            style={overlayRect ? { width: overlayRect.width, height: overlayRect.height } : undefined}
+            data-testid={testId ? `${testId}-overlay` : undefined}
+          >
             {renderOverlay ? renderOverlay(activeItem) : renderItem(activeItem, { isDragging: false, dragHandleProps: {}, dragActiveId: activeId })}
           </div>
         ) : null}

@@ -61,9 +61,9 @@ export function Grid({ columns = 12, gap = 4, testId, children }: GridProps) {
   );
 }
 
-export function Card({ header, footer, padded = true, testId, children }: CardProps) {
+export function Card({ header, footer, padded = true, style, testId, children }: CardProps) {
   return (
-    <section className={cx(styles.card)} data-testid={testId}>
+    <section className={cx(styles.card)} style={style} data-testid={testId}>
       {header && <header className={cx(styles.cardHeader)}>{header}</header>}
       <div className={cx(padded && styles.cardBody)}>{children}</div>
       {footer && <footer className={cx(styles.cardFooter)}>{footer}</footer>}
