@@ -712,6 +712,10 @@
 /* thin team-coloured cap at the left edge of each bar. */
 .barTeamCap { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-top-left-radius: inherit; border-bottom-left-radius: inherit; }
 .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Left-pane row title for a task whose DISPLAYED status is "cancelled" — a leaf's own
+   status OR (判断30/46) a WBS parent/grandparent whose aggregated leaf-status mix is
+   cancelled. Same declarations as .barCancelled's label below (reused, not a new look). */
+.tlRowNameCancelled { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 .tlRowMeta {
   flex: 0 0 auto;
   max-width: 40%;
@@ -1018,6 +1022,16 @@
    the INSIDE label must stay dark in dark mode too — gray-900 is theme-independent.
    The OUTSIDE label (.barLabelOut) sits on the page bg, so it keeps its theme colour. */
 .barParent .barLabel { color: var(--dub-color-gray-900); }
+/* A WBS parent (or grandparent) whose aggregated/recursive leaf-status mix is
+   cancelled (dominantStatus — see effectiveChildProgressById/effectiveStatusById in
+   GanttView) must show the SAME strikethrough a cancelled leaf gets, layered on top of
+   .barParent so the per-status segment track colouring underneath stays intact. Placed
+   AFTER .barParent .barLabel so its muted colour wins over that rule's gray-900 (same
+   specificity, source order decides). Reuses .barCancelled's declarations, not a new look. */
+.barCancelledLabel .barLabel, .barCancelledLabel .barLabelOut {
+  text-decoration: line-through;
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+}
 
 .barSegTrack {
   position: absolute;
