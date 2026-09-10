@@ -98,6 +98,10 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const [createPresetDue, setCreatePresetDue] = useState<string | null>(null);
   const [createPresetParent, setCreatePresetParent] = useState<common.TaskId | null>(null);
   const [createPresetDeps, setCreatePresetDeps] = useState<common.TaskId[]>([]);
+  // Preset assignee ("タスク詳細から子タスクを作成" prefills the child's 担当 with the
+  // 親タスクの担当 — the user can still change it before submitting; unset parent
+  // assignee -> stays 未割当).
+  const [createPresetAssigneeId, setCreatePresetAssigneeId] = useState<common.UserId | null>(null);
   // When set, a task created from the modal is linked as this task's predecessor
   // ("先行タスクを作成" from the detail panel).
   const [createPredecessorFor, setCreatePredecessorFor] = useState<common.TaskId | null>(null);
@@ -671,11 +675,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     });
   };
 
-  const openCreate = (opts: { due?: string | null; parent?: common.TaskId | null; deps?: common.TaskId[]; predecessorFor?: common.TaskId | null }) => {
+  const openCreate = (opts: {
+    due?: string | null;
+    parent?: common.TaskId | null;
+    deps?: common.TaskId[];
+    predecessorFor?: common.TaskId | null;
+    assigneeId?: common.UserId | null;
+  }) => {
     setCreatePresetDue(opts.due ?? null);
     setCreatePresetParent(opts.parent ?? null);
     setCreatePresetDeps(opts.deps ?? []);
     setCreatePredecessorFor(opts.predecessorFor ?? null);
+    setCreatePresetAssigneeId(opts.assigneeId ?? null);
     setCreating(true);
   };
 
@@ -685,6 +696,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     setCreatePresetParent(null);
     setCreatePresetDeps([]);
     setCreatePredecessorFor(null);
+    setCreatePresetAssigneeId(null);
   };
 
   const onCreateOnDate = (dueAt: common.ISODateTime | null) => {
@@ -693,13 +705,15 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
 
   // "＋ 子タスクを作成": open the create modal with this task preset as the PARENT
   // (真の親子関係). The child's due is a few days after the parent's end so it gets
-  // a bar and the rollup visibly extends the parent.
+  // a bar and the rollup visibly extends the parent. The 担当 also prefills from the
+  // 親タスクの担当 (未設定なら未割当のまま) — the user can still change it before submit.
   const onCreateChild = (parentId: common.TaskId) => {
     const row = gantt.data?.rows.find((r) => r.taskId === parentId);
     const anchor = row?.endsAt ?? tasks.find((t) => t.id === parentId)?.dueAt ?? null;
     const childDue = anchor ? new Date(Date.parse(anchor) + 3 * MS_PER_DAY).toISOString().slice(0, 10) : null;
+    const parentAssigneeId = tasks.find((t) => t.id === parentId)?.assigneeId ?? null;
     setSelected(null);
-    openCreate({ due: childDue, parent: parentId });
+    openCreate({ due: childDue, parent: parentId, assigneeId: parentAssigneeId });
   };
 
   // "＋ 先行タスクを作成": create a new task in the SAME SCOPE as this one (same
@@ -1262,6 +1276,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
         initialDue={createPresetDue}
         initialParentId={createPresetParent}
         initialDependsOn={createPresetDeps}
+        initialAssigneeId={createPresetAssigneeId}
         onClose={closeCreate}
         users={assignableUsers}
         teams={teams}
