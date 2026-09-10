@@ -1,11 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button } from "@dub/ui";
+import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { isoFromDateInput } from "../domain/task-form";
 import { teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { rememberPredecessors } from "./PredecessorPicker";
 import { TaskFormFields } from "./TaskFormFields";
 import styles from "../styles/app.module.css";
+
+// P1-2 follow-up: unlike the edit-existing-task panel (TaskDetailPanel), which
+// auto-saves straight to the server, a NEW task has nothing to persist to until
+// 作成する is pressed — a reload mid-typing here silently dropped the whole form
+// with no warning. Same @dub/app-ui draft-autosave/leave-guard pattern as
+// mail compose (FE2) / role editor (FE7) / event edit (FE3): localStorage draft +
+// beforeunload prompt + restore-on-return notice. This modal is mounted once and
+// toggled via `open` (not remounted per open), so the draft is peeked at that one
+// mount and the form is reset (which also clears the draft) on cancel/success —
+// only an accidental reload/crash should ever trigger a restore.
+const DRAFT_KEY = "fe4.task.create";
+
+interface TaskCreateDraft {
+  title: string;
+  description: string;
+  status: task.TaskStatus;
+  priority: task.TaskPriority;
+  assigneeId: common.UserId | null;
+  teamId: common.TeamId | null;
+  start: string | null;
+  due: string | null;
+  parentId: common.TaskId | null;
+  deps: common.TaskId[];
+}
 
 export interface TaskDraft {
   title: string;
@@ -48,33 +73,63 @@ const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "d
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
 export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn }: TaskCreateModalProps) {
-  const [title, setTitle] = useState("");
-  const [status, setStatus] = useState<task.TaskStatus>("todo");
-  const [priority, setPriority] = useState<task.TaskPriority>("medium");
-  const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
-  const [teamId, setTeamId] = useState<common.TeamId | null>(null);
-  const [start, setStart] = useState<string | null>(null);
-  const [due, setDue] = useState<string | null>(null);
-  const [parentId, setParentId] = useState<common.TaskId | null>(null);
-  const [deps, setDeps] = useState<common.TaskId[]>([]);
-  const [description, setDescription] = useState("");
+  // Seed once from any draft left by an accidental reload; otherwise the usual blank form.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const initialDraft = useMemo(() => peekDraft<TaskCreateDraft>(DRAFT_KEY), []);
+  const [title, setTitle] = useState(initialDraft?.title ?? "");
+  const [status, setStatus] = useState<task.TaskStatus>(initialDraft?.status ?? "todo");
+  const [priority, setPriority] = useState<task.TaskPriority>(initialDraft?.priority ?? "medium");
+  const [assigneeId, setAssigneeId] = useState<common.UserId | null>(initialDraft?.assigneeId ?? null);
+  const [teamId, setTeamId] = useState<common.TeamId | null>(initialDraft?.teamId ?? null);
+  const [start, setStart] = useState<string | null>(initialDraft?.start ?? null);
+  const [due, setDue] = useState<string | null>(initialDraft?.due ?? null);
+  const [parentId, setParentId] = useState<common.TaskId | null>(initialDraft?.parentId ?? null);
+  const [deps, setDeps] = useState<common.TaskId[]>(initialDraft?.deps ?? []);
+  const [description, setDescription] = useState(initialDraft?.description ?? "");
   const [saving, setSaving] = useState(false);
+
+  // Dirty = there is something here worth keeping/warning about (blank-create baseline).
+  const dirty =
+    title.trim() !== "" ||
+    description.trim() !== "" ||
+    status !== "todo" ||
+    priority !== "medium" ||
+    assigneeId != null ||
+    teamId != null ||
+    start != null ||
+    due != null ||
+    parentId != null ||
+    deps.length > 0;
+  const draft = useDraftAutosave<TaskCreateDraft>({
+    storageKey: DRAFT_KEY,
+    value: { title, description, status, priority, assigneeId, teamId, start, due, parentId, deps },
+    dirty,
+  });
 
   // seed the due date + parent + predecessors when (re)opened (timeline cell /
   // "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
   // チームも親のチームで固定する。
+  //
+  // A restored draft (peeked at mount, above) wins over a preset-less open — without
+  // this guard, simply opening the modal via the plain "＋タスク作成" button (no
+  // preset) would silently blank out a due/parent/predecessors restored after an
+  // accidental reload, same as RoleEditorPage not letting `existing` clobber a
+  // restored draft. An EXPLICIT preset (a timeline cell / "ここから子タスクを作成")
+  // still always wins — that's a fresh, deliberate context the user just picked.
   useEffect(() => {
-    if (open) {
-      setDue(initialDue ?? null);
-      const nextParent = initialParentId ?? null;
-      setParentId(nextParent);
-      if (nextParent) setTeamId(teamOf(scopeTasks, nextParent));
-      setDeps(initialDependsOn ? [...initialDependsOn] : []);
-    }
+    if (!open) return;
+    const hasExplicitPreset = initialDue != null || initialParentId != null || (initialDependsOn?.length ?? 0) > 0;
+    if (draft.restoredVisible && !hasExplicitPreset) return;
+    setDue(initialDue ?? null);
+    const nextParent = initialParentId ?? null;
+    setParentId(nextParent);
+    if (nextParent) setTeamId(teamOf(scopeTasks, nextParent));
+    setDeps(initialDependsOn ? [...initialDependsOn] : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialDue, initialParentId, initialDependsOn]);
 
   const reset = () => {
+    draft.clear(); // deliberate cancel/success — don't resurrect this as a "restored" draft later
     setTitle("");
     setStatus("todo");
     setPriority("medium");
@@ -139,6 +194,12 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         </div>
       }
     >
+      <DraftRestoredNotice
+        visible={draft.restoredVisible}
+        onDiscard={reset}
+        onKeep={draft.acknowledgeRestored}
+        testId="fe4-create-draft-notice"
+      />
       <TaskFormFields
         idPrefix="fe4-create"
         title={title}

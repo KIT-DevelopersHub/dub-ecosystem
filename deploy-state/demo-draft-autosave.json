@@ -3,12 +3,12 @@
   "slug": "draft-autosave",
   "worker": "dub-demo-draft-autosave",
   "url": "https://dub-demo-draft-autosave.developershub-site.workers.dev",
-  "deployedSha": "9b373f40",
+  "deployedSha": "e3c04947",
   "branch": "feat/p1-2-draft-autosave",
   "actor": "kota",
-  "markers": ["data-p12-role-draft-fix"],
+  "markers": ["data-p12-role-draft-fix","fe4-create-draft-notice"],
   "live": true,
-  "verifiedAt": "2026-09-10T11:13:25Z",
-  "updatedAt": "2026-09-10T11:13:25Z",
-  "note": "P1-2 bugfix: draft autosave/leave-guard wired into RolePermissionsEditor (the actual reachable role-edit UI)"
+  "verifiedAt": "2026-09-10T12:14:15Z",
+  "updatedAt": "2026-09-10T12:14:15Z",
+  "note": "P1-2 bugfix round 2: draft-autosave wired into Gantt task-create modals (TaskCreateModal/MyTaskCreateModal); role-editor preset/restore race fixed"
 }
