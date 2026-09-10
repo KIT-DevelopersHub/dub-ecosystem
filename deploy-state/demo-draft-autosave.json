@@ -3,12 +3,12 @@
   "slug": "draft-autosave",
   "worker": "dub-demo-draft-autosave",
   "url": "https://dub-demo-draft-autosave.developershub-site.workers.dev",
-  "deployedSha": "2dc27b04",
+  "deployedSha": "6e5999ca",
   "branch": "HEAD",
   "actor": "kota",
-  "markers": ["fe4-create-draft-notice","fe4-mytask-create-draft-notice","fe2-mail-compose-draft-notice","fe7-role-draft-notice","fe3-settings-draft-notice","data-p12-role-draft-fix"],
+  "markers": ["fe4-create-draft-notice","fe4-mytask-create-draft-notice","fe2-mail-compose-draft-notice","fe2-mail-compose-window-draft-notice","fe7-role-draft-notice","fe3-settings-draft-notice","data-p12-role-draft-fix","data-p12-mail-window-draft-fix"],
   "live": true,
-  "verifiedAt": "2026-09-10T15:16:06Z",
-  "updatedAt": "2026-09-10T15:16:06Z",
-  "note": "P1-2 round 3: current main rebased in (fe3 hub-edit redesign + fe7 breadcrumbs merged), real-browser dialog-detection e2e added, all 6 forms reverified with genuine no-auto-accept Playwright"
+  "verifiedAt": "2026-09-10T15:38:13Z",
+  "updatedAt": "2026-09-10T15:38:13Z",
+  "note": "Mail fix: real floating ComposeWindow (GmailApp) now wired with draft-autosave/leave-guard — previous round's mail PASS was against the orphaned /mail/compose legacy route only"
 }
