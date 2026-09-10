@@ -19,7 +19,9 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   rectSortingStrategy,
+  rectSwappingStrategy,
   arrayMove,
+  arraySwap,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cx } from "../utils/cx";
@@ -108,8 +110,27 @@ export interface SortableListProps<T> {
    *  can sit beside each other (dnd-kit computes reflow offsets from each item's
    *  rectangle rather than assuming a single vertical axis — using "vertical" in a
    *  multi-column grid produces wrong reflow transforms and makes rows visually
-   *  overlap / swap paint order mid-drag). */
+   *  overlap / swap paint order mid-drag). Ignored when `reorderMode="swap"` (that
+   *  mode always uses dnd-kit's `rectSwappingStrategy` — see below). */
   strategy?: "vertical" | "rect";
+  /** How a drop is turned into a new id order. "move" (default) is a plain
+   *  arrayMove/insert — dragging item A onto item B's slot shifts EVERY item between
+   *  them by one position (the classic reorder-a-list feel; correct for a uniform
+   *  single-size list). "swap" instead exchanges EXACTLY the dragged item and its
+   *  drop target (`arraySwap`) and leaves every other row untouched — required for a
+   *  variable-size CSS Grid (`getItemStyle` spans differ per item, e.g. this dashboard's
+   *  small/medium/large widgets): both of dnd-kit's built-in strategies compute each
+   *  row's live reflow-preview transform assuming every item is the SAME size, so with
+   *  mixed spans they produce wildly wrong deltas for the rows in between (a neighbour
+   *  visibly flies off to the wrong spot or disappears mid-drag) — the underlying
+   *  `mergeRegionOrder`/persisted order was still consistent, but the drag itself
+   *  read as broken and the reported bug ("面積の異なるウィジェット同士の相互スワップが
+   *  動いていない"). `rectSwappingStrategy` sidesteps this: only the active row and the
+   *  row under it move (scaling to trade footprints), everything else stays put —
+   *  exactly the "these two trade places" interaction a size-swap needs. Pair with
+   *  `strategy` left at its default; `swap` always drives dnd-kit's swapping strategy
+   *  regardless of what `strategy` is set to. */
+  reorderMode?: "move" | "swap";
   /** Extra per-item style (e.g. a CSS Grid `gridColumn`/`gridRow` span for a
    *  variable-size tile) merged onto the row's own wrapper — UNDER dnd-kit's own
    *  transform/opacity styling, so a name clash always defers to dnd-kit. */
@@ -239,12 +260,14 @@ export function SortableList<T>({
   className,
   overlayClassName,
   strategy = "vertical",
+  reorderMode = "move",
   getItemStyle,
   testId,
   ...rest
 }: SortableListProps<T>) {
   const ariaLabel = rest["aria-label"];
-  const sortingStrategy = strategy === "rect" ? rectSortingStrategy : verticalListSortingStrategy;
+  const sortingStrategy =
+    reorderMode === "swap" ? rectSwappingStrategy : strategy === "rect" ? rectSortingStrategy : verticalListSortingStrategy;
   const [activeId, setActiveId] = useState<string | null>(null);
   // The dragged row's measured box (width/height) at pickup — applied to the floating
   // DragOverlay clone so it renders at the SAME size as the in-grid row instead of
@@ -392,8 +415,11 @@ export function SortableList<T>({
         return;
       }
       // Apply the reorder to the rendered list NOW (batched with setActiveId above) so
-      // the drop settles smoothly into place; persist via the consumer.
-      const next = arrayMove(currentIds, oldIndex, newIndex);
+      // the drop settles smoothly into place; persist via the consumer. `swap` exchanges
+      // EXACTLY the two rows involved (matching the rectSwappingStrategy preview above);
+      // `move` (default) shifts everything between them, matching verticalListSortingStrategy
+      // / rectSortingStrategy's preview.
+      const next = reorderMode === "swap" ? arraySwap(currentIds, oldIndex, newIndex) : arrayMove(currentIds, oldIndex, newIndex);
       setOverrideIds(next);
       // Safety net: if the consumer rejects the move (no items change, e.g. a
       // cross-parent drop the container ignores), release the override shortly after
@@ -402,7 +428,7 @@ export function SortableList<T>({
       overrideTimer.current = setTimeout(() => setOverrideIds(null), 400);
       onReorder({ activeId, overId, oldIndex, newIndex });
     },
-    [orderedItems, getItemId, onReorder, computeNextOrder, liftedSet],
+    [orderedItems, getItemId, onReorder, computeNextOrder, liftedSet, reorderMode],
   );
 
   // Play the group-move FLIP after the reorder commit: every moved row (except the

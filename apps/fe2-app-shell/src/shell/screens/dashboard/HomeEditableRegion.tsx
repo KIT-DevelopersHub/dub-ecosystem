@@ -31,14 +31,25 @@ const SIZE_OPTIONS: { value: WidgetSize; label: string }[] = [
   { value: "large", label: "大" },
 ];
 
-/** Move an id to a new index within a list (translate a drop into the region's next
- *  id order). Mirrors the P3-2 カスタマイズ modal's helper. */
-function moveTo(ids: string[], from: number, to: number): string[] {
-  if (from < 0 || to < 0 || from === to) return ids;
+/** Exchange the ids at two indices, leaving every other id untouched (translate a
+ *  drop into the region's next id order). A region mixes small/medium/large widgets
+ *  (see homeLayout's WIDGET_SIZE_SPAN) — a plain "move" (splice out, splice back in
+ *  elsewhere) would shift every id BETWEEN the two positions by one slot, which is
+ *  the right feel for a uniform list but not for "swap this small tile with that
+ *  large one": the whole point of a mixed-size grid's drag is that exactly the
+ *  dragged widget and its drop target trade places (their sizes travel WITH each
+ *  widget, so the CSS Grid's dense auto-flow then re-packs everyone else around that
+ *  swap on its own). Paired with `<SortableList reorderMode="swap">`, whose
+ *  `rectSwappingStrategy` preview only ever moves these same two rows — so the
+ *  drag preview and the committed order always agree. */
+export function swapAt(ids: string[], from: number, to: number): string[] {
+  if (from < 0 || to < 0 || from === to || from >= ids.length || to >= ids.length) return ids;
   const next = ids.slice();
-  const [moved] = next.splice(from, 1);
-  if (moved === undefined) return ids;
-  next.splice(to, 0, moved);
+  const a = next[from];
+  const b = next[to];
+  if (a === undefined || b === undefined) return ids;
+  next[from] = b;
+  next[to] = a;
   return next;
 }
 
@@ -98,7 +109,7 @@ export function HomeEditableRegion({
 
   const onReorder = (e: SortableReorderEvent): void => {
     const ids = items.map((w) => w.id);
-    const next = moveTo(ids, e.oldIndex, e.newIndex);
+    const next = swapAt(ids, e.oldIndex, e.newIndex);
     setHomeWidgetOrder(mergeRegionOrder(catalog, order, region, next));
   };
 
@@ -116,6 +127,17 @@ export function HomeEditableRegion({
       // the wrong offsets across multiple columns (the visible bug: neighbours overlap /
       // the dragged tile paints behind another one mid-reflow).
       strategy="rect"
+      // A region's widgets can be small/medium/large side by side (see WIDGET_SIZE_SPAN)
+      // — both of dnd-kit's built-in strategies (including "rect" above) compute every
+      // row's live drag-preview transform assuming UNIFORM item sizes, so with mixed
+      // spans the rows between the dragged tile and its target get wildly wrong preview
+      // deltas (one visibly flies off-position or disappears mid-drag) even though the
+      // final committed order is fine — which is exactly what made "面積の異なるウィジェ
+      // ット同士の相互スワップ" read as broken. `reorderMode="swap"` swaps ONLY the
+      // dragged tile and its drop target (both visually and in the committed order via
+      // `swapAt` above) and leaves every other row untouched, so a small can swap with a
+      // large (or vice versa) cleanly regardless of how many other widgets sit between them.
+      reorderMode="swap"
       // Give every resizable widget's SortableList row the same CSS Grid span its
       // resting-dashboard node carries (see spanStyle/sizeOf) — so 編集モード's grid
       // keeps mixing sizes exactly like the resting one, and the floating DragOverlay
