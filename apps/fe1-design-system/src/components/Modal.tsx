@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ConfirmDialogProps, DrawerProps, ErrorDialogProps, ModalProps } from "../types";
 import styles from "./Modal.module.css";
@@ -36,11 +36,22 @@ function useScrollLock(open: boolean) {
   }, [open]);
 }
 
-// Restore focus to the element that was focused before the overlay opened, so
-// keyboard users return to their place in the page after closing.
+// Restore focus to the element that was focused before the overlay opened (the
+// button/menu-item that triggered it), so keyboard users return to their place in
+// the page after closing.
+//
+// Must be captured with useLayoutEffect, not useEffect: layout effects across the
+// whole commit flush before any passive effects run, so this snapshot lands before
+// useInitialFocus's (passive) effect moves focus INTO the dialog. If this instead
+// ran as a passive effect declared after useInitialFocus, it would fire after
+// useInitialFocus already stole focus (regardless of declaration order — layout
+// effects always precede passive effects within a commit) and capture the dialog's
+// own initial-focus target instead of the real invoker. Restoring focus to that
+// (now-unmounted, on close) element is then a silent no-op, dropping focus to
+// <body> instead of back on the trigger.
 function useFocusRestore(open: boolean) {
   const previouslyFocused = useRef<HTMLElement | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open || typeof document === "undefined") return;
     previouslyFocused.current = document.activeElement as HTMLElement | null;
     return () => previouslyFocused.current?.focus?.();
@@ -155,6 +166,7 @@ export function Modal({
           className={cx(styles.dialog)}
           data-size={size}
           data-testid={testId}
+          data-dub-focustrap="p16"
         >
           <header className={cx(styles.header)}>
             <h2 className={cx(styles.title)}>{title}</h2>
@@ -288,6 +300,7 @@ export function Drawer({ open, onClose, title, side = "right", testId, children 
           className={cx(styles.drawer)}
           data-side={side}
           data-testid={testId}
+          data-dub-focustrap="p16"
         >
           <header className={cx(styles.header)}>
             {title && <h2 className={cx(styles.title)}>{title}</h2>}

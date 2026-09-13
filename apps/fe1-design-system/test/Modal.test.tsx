@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConfirmDialog, Drawer, ErrorDialog, Modal } from "../src/components/Modal";
 
@@ -161,6 +162,83 @@ describe("Modal", () => {
     );
     const dialog = screen.getByRole("dialog");
     expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  // P16: Tab/Shift+Tab must cycle WITHIN the dialog (wrap at the edges) rather than
+  // escaping to the browser chrome / page-behind, and closing must hand focus back
+  // to whatever triggered the dialog.
+  it("Tab wraps from the last focusable element back to the first (does not escape the dialog)", async () => {
+    render(
+      <Modal
+        open
+        onClose={() => {}}
+        title="タイトル"
+        footer={
+          <>
+            <button type="button">キャンセル</button>
+            <button type="button">保存</button>
+          </>
+        }
+      >
+        body
+      </Modal>,
+    );
+    const closeBtn = screen.getByLabelText("閉じる");
+    const saveBtn = screen.getByRole("button", { name: "保存" });
+    // Initial focus (no input in body) lands on the first focusable element.
+    expect(document.activeElement).toBe(closeBtn);
+    saveBtn.focus(); // simulate having tabbed to the last item
+    expect(document.activeElement).toBe(saveBtn);
+    await userEvent.tab();
+    expect(document.activeElement).toBe(closeBtn);
+  });
+
+  it("Shift+Tab wraps from the first focusable element to the last (does not escape the dialog)", async () => {
+    render(
+      <Modal
+        open
+        onClose={() => {}}
+        title="タイトル"
+        footer={
+          <>
+            <button type="button">キャンセル</button>
+            <button type="button">保存</button>
+          </>
+        }
+      >
+        body
+      </Modal>,
+    );
+    const closeBtn = screen.getByLabelText("閉じる");
+    const saveBtn = screen.getByRole("button", { name: "保存" });
+    expect(document.activeElement).toBe(closeBtn); // initial focus
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(saveBtn);
+  });
+
+  it("restores focus to the element that triggered the dialog once it closes", () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            開く
+          </button>
+          <Modal open={open} onClose={() => setOpen(false)} title="タイトル">
+            body
+          </Modal>
+        </>
+      );
+    }
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "開く" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(document.activeElement).not.toBe(trigger);
+    fireEvent.click(screen.getByLabelText("閉じる"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
   });
 });
 
