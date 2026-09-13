@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "event-area-reorder",
+  "worker": "dub-demo-event-area-reorder",
+  "url": "https://dub-demo-event-area-reorder.developershub-site.workers.dev",
+  "deployedSha": "7a004579",
+  "branch": "feat/event-area-reorder-demo",
+  "actor": "kota",
+  "markers": ["fe3-layout-edit-toggle","fe3-layout-edit-hint","fe3-section-handle-"],
+  "live": true,
+  "verifiedAt": "2026-09-13T13:01:16Z",
+  "updatedAt": "2026-09-13T13:01:16Z",
+  "note": "イベント詳細ページのセクション(重要リンク/連絡先等)並べ替え・表示切替。導線: イベントHubの「並べ替え」ボタン"
+}
