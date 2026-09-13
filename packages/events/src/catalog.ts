@@ -4,6 +4,8 @@ import type {
   ActionCreatedPayload, ActionUpdatedPayload, ActionStatusChangedPayload, ActionArchivedPayload,
   TaskCreatedPayload, TaskUpdatedPayload, TaskAssignedPayload, TaskStatusChangedPayload,
   TaskDueSoonPayload, TaskArchivedPayload, TaskDependencyChangedPayload,
+  TaskRequestCreatedPayload, TaskRequestAcceptedPayload, TaskRequestDeclinedPayload,
+  TaskRequestCancelledPayload, TaskCrossLinkCreatedPayload,
   NotificationRequestedPayload, PublicInquiryReceivedPayload,
   ChatMessageCreatedPayload, ChatMessageDeletedPayload, ChatChannelCreatedPayload, ChatMemberChangedPayload,
   FileRegisteredPayload, FileUpdatedPayload, FileDeletedPayload, FileLinkedPayload, FileUnlinkedPayload,
@@ -41,6 +43,11 @@ export interface DubEventPayloadMap {
   "task.due_soon": TaskDueSoonPayload;
   "task.archived": TaskArchivedPayload;
   "task.dependency_changed": TaskDependencyChangedPayload;
+  "task.request.created": TaskRequestCreatedPayload;
+  "task.request.accepted": TaskRequestAcceptedPayload;
+  "task.request.declined": TaskRequestDeclinedPayload;
+  "task.request.cancelled": TaskRequestCancelledPayload;
+  "task.cross_link.created": TaskCrossLinkCreatedPayload;
   "notification.requested": NotificationRequestedPayload;
   "public.inquiry.received": PublicInquiryReceivedPayload;
   "chat.message.created": ChatMessageCreatedPayload;
@@ -110,6 +117,13 @@ export const SUBSCRIPTIONS = {
   "task.due_soon": ["notification", "mobile-bff"],
   "task.archived": ["notification", "github-sync", "gantt", "file-meta", "mobile-bff"],
   "task.dependency_changed": ["gantt"],
+  // send / receive (ADR-0007). request lifecycle → notify (+mobile); accept/cross_link
+  // also feed gantt so it can project the arrow-less crossTeamRole (no dependency line).
+  "task.request.created": ["notification", "mobile-bff"],
+  "task.request.accepted": ["notification", "gantt", "mobile-bff"],
+  "task.request.declined": ["notification", "mobile-bff"],
+  "task.request.cancelled": ["notification", "mobile-bff"],
+  "task.cross_link.created": ["gantt", "mobile-bff"],
   "notification.requested": ["notification"],
   "public.inquiry.received": ["notification"],
   "chat.message.created": ["notification"],
