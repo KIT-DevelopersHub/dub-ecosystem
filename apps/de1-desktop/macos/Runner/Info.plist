@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Biometric launch gate (local_auth): required so macOS shows the Touch ID
+	     prompt before revealing the app and auto-filling saved credentials. -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Dub のロック解除に Touch ID を使用します。</string>
 </dict>
 </plist>
