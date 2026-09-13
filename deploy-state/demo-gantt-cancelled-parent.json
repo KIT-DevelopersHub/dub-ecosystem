@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-cancelled-parent",
+  "worker": "dub-demo-gantt-cancelled-parent",
+  "url": "https://dub-demo-gantt-cancelled-parent.developershub-site.workers.dev",
+  "deployedSha": "126ed275",
+  "branch": "fix/gantt-parent-status-agg",
+  "actor": "kota",
+  "markers": ["tlRowNameCancelled","barCancelledLabel"],
+  "live": true,
+  "verifiedAt": "2026-09-10T14:13:51Z",
+  "updatedAt": "2026-09-10T14:13:51Z",
+  "note": "cancelled strikethrough propagates to parent/grandparent title+bar (PR#482 follow-up)"
+}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, Drawer, Icon, TextField, Textarea, Select, ConfirmDialog } from "@dub/ui";
-import { allowedTransitions } from "../domain/status-transitions";
+import { allowedTransitions, BOARD_COLUMNS } from "../domain/status-transitions";
 import { PRIORITY_LABEL, STATUS_LABEL, DATE_LABEL, dateInputFromIso, isoFromDateInput } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
@@ -64,6 +64,13 @@ export interface TaskDetailPanelProps {
    *  ROLLUP of its children, so the rolled bar window — not the parent's own (possibly
    *  stale) start_at/due_at column — is the authoritative value to show (症状#7 値ズレ). */
   hasChildren?: boolean;
+  /** This task's subtree PLURALITY leaf status (recursive, any depth — see
+   *  domain/child-progress), computed by the host from the SAME map that colours the
+   *  gantt bars. When this task has children, this — NOT `task.status` — is the value
+   *  shown in the status field/badge (症状#1: ドロップダウンが自分の status 列のままで
+   *  子の集計と食い違う). Absent/undefined for a task with no children (nothing to
+   *  aggregate; the field shows/edits `task.status` as before). */
+  aggregatedStatus?: task.TaskStatus;
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
@@ -90,6 +97,7 @@ export function TaskDetailPanel({
   barStartsAt = null,
   barEndsAt = null,
   hasChildren = false,
+  aggregatedStatus,
   fieldErrors,
   canWrite,
   canDelete,
@@ -138,9 +146,26 @@ export function TaskDetailPanel({
   // 親の付け替えで親のチームへ追従する（下の親セレクトの onChange）。親なし＝トップレベルなら自由。
   // サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保。
   const teamLockedToParent = parentId != null;
+  // 親タスク（子を持つ）のステータスは子孫タスクの内訳から自動集計される表示専用値
+  // （親バーの色分け＝#374／再帰集計＝domain/child-progress）。手動で変えられると集計と
+  // 食い違って挙動がおかしくなるため、子が1件以上ある間はステータス編集を無効化する。
+  // childCount は scopeTasks 由来で子の増減に追従するので、最後の子が外れて0件になれば
+  // 通常タスクとして自動的に編集可へ戻る。
+  const statusLockedToChildren = childCount > 0;
+  // ロック中に画面へ出す値。集計結果(aggregatedStatus)を優先し、まだ届いていなければ
+  // 現在の status state にフォールバックする（集計はあくまで表示専用: `status`/`dirty`/
+  // `save()` は一切これを経由しないので、自動保存が集計値で t.status を上書きすることはない）。
+  const displayStatus: task.TaskStatus =
+    statusLockedToChildren && aggregatedStatus != null ? aggregatedStatus : status;
 
-  // status may move only to an allowed target (or stay) — same source as board D&D
-  const statusOptions = [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
+  // status may move only to an allowed target (or stay) — same source as board D&D.
+  // Locked (子を持つ親): the field is disabled and shows the AGGREGATED value, which is
+  // never a manual transition target — offer every status so `displayStatus` always
+  // matches a real option (otherwise a Select could render blank for an aggregated
+  // value outside t.status's own transition set).
+  const statusOptions = statusLockedToChildren
+    ? BOARD_COLUMNS
+    : [t.status, ...allowedTransitions(t.status)].filter((s, i, arr) => arr.indexOf(s) === i);
   const nextStartIso = isoFromDateInput(start);
   const nextDueIso = isoFromDateInput(due);
   // A date edit relative to the seeded (displayed) window.
@@ -245,7 +270,7 @@ export function TaskDetailPanel({
         <div className={styles.detailDrawerScroll}>
       <div className={styles.detailPanelBody} aria-label="タスク詳細">
         <div className={styles.panelHeadInfo}>
-          <TaskStatusBadge status={t.status} />
+          <TaskStatusBadge status={statusLockedToChildren ? displayStatus : t.status} />
         </div>
 
         <div className={styles.formField}>
@@ -267,12 +292,17 @@ export function TaskDetailPanel({
             </label>
             <Select
               id="fe4-detail-status"
-              value={status}
-              disabled={!canWrite}
+              value={displayStatus}
+              disabled={!canWrite || statusLockedToChildren}
               onChange={(v) => setStatus(v as task.TaskStatus)}
               options={statusOptions.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
               testId="fe4-detail-status"
             />
+            {statusLockedToChildren && (
+              <p className={styles.fieldHint} data-testid="fe4-detail-status-locked">
+                子タスクの進捗から自動集計されます（手動では変更できません）
+              </p>
+            )}
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-priority">

@@ -6,6 +6,7 @@ import type { GanttSortActions, GanttSortState } from "../domain/gantt-sort-pref
 import { GanttSortControl } from "./GanttSortControl";
 import { groupRuns, type RowGroup } from "../domain/row-groups";
 import { readableTextColor } from "../domain/color-contrast";
+import { childProgressByParent, type ChildProgress } from "../domain/child-progress";
 import type { common, gantt, task } from "@dub/types";
 
 /** arrayMove — pure list move (kept local so fe4 needs no direct @dnd-kit/sortable dep;
@@ -83,8 +84,18 @@ export interface GanttViewProps {
   onSelect?: (taskId: common.TaskId) => void;
   /** Click an empty timeline cell / the add-row button to create (date preset). */
   onCreateOnDate?: (dueAt: common.ISODateTime | null) => void;
-  /** taskId -> status, for status-legible bar colouring. */
+  /** taskId -> status, for status-legible bar colouring. This is each row's OWN
+   *  stored status column — for a WBS parent it is NOT the authoritative display value
+   *  (see childProgressById): the container still supplies it so a parent with no
+   *  known progress mix (e.g. computed elsewhere is absent) has some fallback colour. */
   statusById?: ReadonlyMap<common.TaskId, task.TaskStatus>;
+  /** taskId -> its subtree's leaf-status roll-up (recursive: any depth), for parent
+   *  (work-package) bars. When present for a taskId, that row's DISPLAYED status
+   *  (bar colour segments, row dot, "n/m 完了" count) is derived from this — never
+   *  from statusById's own stored column, which is stale/unrelated once a task has
+   *  children (症状: 子を変えても親のバー/ドロップダウンが追従しない・2階層までしか
+   *  集計されない). Absent ⇒ falls back to a flat single-status bar like a leaf. */
+  childProgressById?: ReadonlyMap<common.TaskId, ChildProgress>;
   /** taskId -> assignee display name, shown as a left-pane property. */
   assigneeNameById?: ReadonlyMap<common.TaskId, string>;
   /** taskId -> title from the optimistic task store (task-service = the authority on
@@ -140,6 +151,18 @@ const STATUS_BAR_CLASS: Record<task.TaskStatus, string> = {
   blocked: styles.barBlocked!,
   done: styles.barDone!,
   cancelled: styles.barCancelled!,
+};
+
+// Per-status slice fill for a parent (work-package) bar. Reuses the SAME pastel
+// tokens as the leaf status bars above, so a parent whose leaf descendants are all
+// 完了 reads identically to a 完了 leaf bar, and a mixed parent shows those exact hues
+// in proportion (design: 親バーを子孫ステータスの割合で色分け・#374 / 再帰集計版).
+const STATUS_SEG_CLASS: Record<task.TaskStatus, string> = {
+  todo: styles.barSegTodo!,
+  in_progress: styles.barSegInProgress!,
+  blocked: styles.barSegBlocked!,
+  done: styles.barSegDone!,
+  cancelled: styles.barSegCancelled!,
 };
 
 type DragMode = "move" | "resize-start" | "resize-end";
@@ -251,7 +274,16 @@ function LeftPaneRow({
       {number && (
         <span className={styles.tlRowNum} data-testid={`fe4-gantt-num-${r.taskId}`}>{number}</span>
       )}
-      <span className={styles.tlRowName}>{r.title}</span>
+      {/* 判断30/46 fix: `statusById` here is the container's DISPLAYED-status map
+          (effectiveStatusById — a WBS parent's subtree-aggregated plurality, not its own
+          stale status column), so this reads "cancelled" for a parent/grandparent whose
+          descendants are cancelled too, not just a cancelled leaf. */}
+      <span
+        className={`${styles.tlRowName} ${statusById?.get(r.taskId) === "cancelled" ? styles.tlRowNameCancelled : ""}`}
+        data-testid={`fe4-gantt-row-title-${r.taskId}`}
+      >
+        {r.title}
+      </span>
       {assigneeNameById?.get(r.taskId) && <span className={styles.tlRowMeta}>{assigneeNameById.get(r.taskId)}</span>}
     </button>
   );
@@ -271,6 +303,7 @@ export function GanttView({
   onSelect,
   onCreateOnDate,
   statusById,
+  childProgressById,
   assigneeNameById,
   titleOverrides,
   teamColorById,
@@ -427,6 +460,29 @@ export function GanttView({
     for (const r of dto.rows) if (r.hasChildren) s.add(r.taskId);
     return s;
   }, [dto.rows]);
+
+  // parentId -> its subtree's (recursive, any depth) leaf-status mix. The container
+  // normally computes this once (from the FULL row set + status map, shared with the
+  // detail panel so both surfaces agree — 症状#1 バーとドロップダウンの不一致対策) and
+  // passes it down; falling back to a local compute keeps this view correct even when
+  // used standalone (tests / no container wiring).
+  const effectiveChildProgressById = useMemo<Map<common.TaskId, ChildProgress>>(
+    () => (childProgressById ? new Map(childProgressById) : childProgressByParent(dto.rows, statusById ?? new Map())),
+    [childProgressById, dto.rows, statusById],
+  );
+
+  // Displayed status per row: a WBS parent (any depth) shows its subtree's PLURALITY
+  // leaf status (dominantStatus) — never its own stored status column, which is stale/
+  // unrelated once it has children. Leaves fall back to their own statusById entry.
+  const effectiveStatusById = useMemo<Map<common.TaskId, task.TaskStatus>>(() => {
+    const m = new Map<common.TaskId, task.TaskStatus>();
+    for (const r of dto.rows) {
+      const prog = effectiveChildProgressById.get(r.taskId);
+      const status = prog ? prog.dominantStatus : statusById?.get(r.taskId);
+      if (status) m.set(r.taskId, status);
+    }
+    return m;
+  }, [dto.rows, effectiveChildProgressById, statusById]);
 
   // Auto-expand a row the instant it becomes a parent (gains its first child). Adding
   // a subtask to a previously-childless task must reveal that child at once — otherwise
@@ -849,8 +905,21 @@ export function GanttView({
   };
 
   const barClassOf = (taskId: common.TaskId) => {
-    const status = statusById?.get(taskId);
-    const cls = status ? STATUS_BAR_CLASS[status] : "";
+    // A WBS parent with a known leaf-status mix renders as a neutral track filled by
+    // per-status slices (see effectiveChildProgressById); its single dominantStatus
+    // must NOT paint the whole bar, or the slices underneath would be invisible.
+    const isParentWithProgress = parentIds.has(taskId) && effectiveChildProgressById.has(taskId);
+    // effectiveStatusById (not the raw statusById column) so a parent's own — stale —
+    // status never overrides its subtree's aggregated/recursive plurality.
+    const status = effectiveStatusById.get(taskId);
+    const cls = isParentWithProgress ? styles.barParent : status ? STATUS_BAR_CLASS[status] : "";
+    // 判断30/46 fix: a WBS parent (any depth) whose DISPLAYED status is "cancelled"
+    // (its subtree's aggregated leaf mix, not its own stored column) must show the
+    // same strikethrough a cancelled leaf gets — previously only STATUS_BAR_CLASS's
+    // .barCancelled (leaf-only branch above) carried that style, so it never reached a
+    // parent bar (which always renders .barParent for its segment track). This layers
+    // just the label strikethrough on top, leaving the segment colouring untouched.
+    const cancelledLabel = isParentWithProgress && status === "cancelled" ? styles.barCancelledLabel : "";
     const dragging = drag?.taskId === taskId && movedRef.current ? styles.barDragging : "";
     const selected = selectedIds.has(taskId) ? styles.barSelected : "";
     // Parent (work-package) rows keep the rollup behaviour (their span still auto-
@@ -858,7 +927,7 @@ export function GanttView({
     // hollow "bracket summary" look was reverted per feedback #97 (見づらい). The
     // parent/child vs dependency distinction is carried by indent + tree lines +
     // the dashed dependency arrows + the legend, not by a special bar shape.
-    return `${styles.bar} ${cls} ${dragging} ${selected}`;
+    return `${styles.bar} ${cls} ${cancelledLabel} ${dragging} ${selected}`;
   };
 
   // ---- left-pane resize ----
@@ -1201,7 +1270,7 @@ export function GanttView({
                         number={numberById?.get(r.taskId)}
                         onSelect={interactive ? onSelect : undefined}
                         toggleParent={toggleParent}
-                        statusById={statusById}
+                        statusById={effectiveStatusById}
                         assigneeNameById={assigneeNameById}
                       />
                     );
@@ -1214,9 +1283,9 @@ export function GanttView({
                         {teamColorById?.get(row.taskId) && (
                           <span className={styles.tlTeamStripe} style={{ background: teamColorById.get(row.taskId) }} aria-hidden />
                         )}
-                        <span className={`${styles.tlDot} ${statusById?.get(row.taskId) ? STATUS_BAR_CLASS[statusById.get(row.taskId)!] : ""}`} aria-hidden />
+                        <span className={`${styles.tlDot} ${effectiveStatusById.get(row.taskId) ? STATUS_BAR_CLASS[effectiveStatusById.get(row.taskId)!] : ""}`} aria-hidden />
                         {numberById?.get(row.taskId) && <span className={styles.tlRowNum}>{numberById.get(row.taskId)}</span>}
-                        <span className={styles.tlRowName}>{row.title}</span>
+                        <span className={`${styles.tlRowName} ${effectiveStatusById.get(row.taskId) === "cancelled" ? styles.tlRowNameCancelled : ""}`}>{row.title}</span>
                       </div>
                     );
                     // Group drag (⑤a): float the WHOLE selection as a stacked deck under the
@@ -1401,20 +1470,45 @@ export function GanttView({
                   if (!b.hasBar) return null;
                   const g = previewGeom(b);
                   const showInside = g.width > 66;
+                  const title = titleById.get(b.taskId) ?? "";
+                  // Parent bars are painted by their (recursive, any-depth) leaf-status
+                  // mix instead of one flat progress fill, plus a "n/m 完了" count.
+                  const prog = effectiveChildProgressById.get(b.taskId);
+                  const countText = prog ? `${prog.doneCount}/${prog.total} 完了` : null;
+                  const barTitle = prog
+                    ? `${title} — 子孫タスク ${prog.doneCount}/${prog.total} 完了` +
+                      (prog.inProgressCount ? `・進行中 ${prog.inProgressCount}` : "")
+                    : title;
                   return (
                     <div
                       key={b.taskId}
                       className={barClassOf(b.taskId)}
                       style={{ left: g.left, top: b.y + (ROW_HEIGHT - BAR_HEIGHT) / 2, width: g.width, height: BAR_HEIGHT }}
-                      title={titleById.get(b.taskId) ?? ""}
+                      title={barTitle}
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
+                      data-child-done={prog ? prog.doneCount : undefined}
+                      data-child-total={prog ? prog.total : undefined}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
                       {...(selectedIds.has(b.taskId) ? { "data-fe4-keep-selection": "true" } : {})}
                     >
                       {teamColorById?.get(b.taskId) && (
                         <span className={styles.barTeamCap} style={{ background: teamColorById.get(b.taskId) }} aria-hidden />
                       )}
-                      <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
+                      {prog ? (
+                        // stacked per-status slices (design 案A — 割合の積み上げ)
+                        <div className={styles.barSegTrack} aria-hidden data-testid={`fe4-gantt-segs-${b.taskId}`}>
+                          {prog.segments.map((s) => (
+                            <span
+                              key={s.status}
+                              className={`${styles.barSeg} ${STATUS_SEG_CLASS[s.status]}`}
+                              style={{ width: `${s.fraction * 100}%` }}
+                              data-status={s.status}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
+                      )}
                       {editing && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleL}
@@ -1423,7 +1517,16 @@ export function GanttView({
                           aria-hidden
                         />
                       )}
-                      {showInside && <span className={styles.barLabel}>{titleById.get(b.taskId)}</span>}
+                      {showInside && (
+                        <span className={styles.barLabel}>
+                          {title}
+                          {countText && (
+                            <span className={styles.barCount} data-testid={`fe4-gantt-count-${b.taskId}`}>
+                              {countText}
+                            </span>
+                          )}
+                        </span>
+                      )}
                       {editing && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleR}
@@ -1432,7 +1535,16 @@ export function GanttView({
                           aria-hidden
                         />
                       )}
-                      {!showInside && <span className={styles.barLabelOut} style={{ left: g.width + 8 }}>{titleById.get(b.taskId)}</span>}
+                      {!showInside && (
+                        <span className={styles.barLabelOut} style={{ left: g.width + 8 }}>
+                          {title}
+                          {countText && (
+                            <span className={styles.barCount} data-testid={`fe4-gantt-count-${b.taskId}`}>
+                              {countText}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
