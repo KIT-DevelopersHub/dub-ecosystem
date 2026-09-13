@@ -17,13 +17,20 @@ const DURATION_DAYS_BY_PRIORITY: Record<task.TaskPriority, number> = {
 
 const MS_PER_DAY = 86_400_000;
 
+const PROVISIONAL_PREFIX = "task_tmp_";
+
 /** A unique, obviously-temporary task id (swapped out on server confirm). */
 export function provisionalTaskId(): common.TaskId {
   const rand =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-  return `task_tmp_${rand}` as common.TaskId;
+  return `${PROVISIONAL_PREFIX}${rand}` as common.TaskId;
+}
+
+/** True for ids minted by {@link provisionalTaskId} (still awaiting the server). */
+export function isProvisionalId(id: common.TaskId): boolean {
+  return typeof id === "string" && id.startsWith(PROVISIONAL_PREFIX);
 }
 
 export interface ProvisionalDraft {
@@ -101,4 +108,33 @@ export function provisionalGanttRow(
     depth: parentTaskId ? 1 : 0,
     hasChildren: false,
   };
+}
+
+/** Provisional dependency (先行タスク＝依存) connector lines so the arrows draw the
+ *  same tick the user hits 作成 — instead of waiting on the persist + refetch. Each
+ *  line points predecessor(from) → dependent(to). `dependsOnIds` make the new task
+ *  depend on existing tasks (from = existing, to = newTaskId); `predecessorFor` is
+ *  the「＋先行タスクを作成」target, where the new task becomes ITS predecessor
+ *  (from = newTaskId, to = predecessorFor). The `id` mirrors the server/read-model
+ *  convention `${toTaskId}->${fromTaskId}` (same as setDependenciesOptimistic) so the
+ *  optimistic edge lines up 1:1 with what the authoritative refetch returns. */
+export function buildProvisionalDeps(
+  newTaskId: common.TaskId,
+  dependsOnIds: readonly common.TaskId[],
+  predecessorFor: common.TaskId | null,
+): gantt.GanttDependencyLine[] {
+  const line = (from: common.TaskId, to: common.TaskId): gantt.GanttDependencyLine => ({
+    id: `${to}->${from}`,
+    fromTaskId: from,
+    toTaskId: to,
+    type: "FS",
+    lagDays: 0,
+  });
+  const deps: gantt.GanttDependencyLine[] = [];
+  for (const from of dependsOnIds) {
+    if (from === newTaskId) continue; // no self-edge
+    deps.push(line(from, newTaskId));
+  }
+  if (predecessorFor && predecessorFor !== newTaskId) deps.push(line(newTaskId, predecessorFor));
+  return deps;
 }
