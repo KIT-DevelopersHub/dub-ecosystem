@@ -22,6 +22,7 @@ function dtcgType(path: string): string {
   if (path.startsWith("shadow.")) return "shadow";
   if (path.startsWith("zIndex.")) return "number";
   if (path.startsWith("breakpoint.")) return "dimension";
+  if (path.startsWith("measure.")) return "dimension";
   if (path.startsWith("motion.easing")) return "cubicBezier";
   if (path.startsWith("motion.")) return "duration";
   return "other";

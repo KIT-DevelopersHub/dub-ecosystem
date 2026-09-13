@@ -689,6 +689,12 @@
 .pending {
   opacity: 0.55;
 }
+.pendingBody {
+  /* P18: match .mdParagraph's reading measure so the row doesn't widen/narrow
+     when the pending row swaps to the parsed MessageBody render. */
+  max-width: var(--dub-measure-body);
+  line-height: var(--dub-font-lineHeight-body);
+}
 .failed {
   box-shadow: inset 3px 0 0 var(--dub-color-danger-500);
 }
@@ -970,6 +976,11 @@
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+  /* P18: comfortable reading measure + looser line-height for long-form message
+     text. .codeBlock / .mdQuote deliberately keep the column's natural width
+     (design ledger P18: コード/引用ブロックは対象外). */
+  max-width: var(--dub-measure-body);
+  line-height: var(--dub-font-lineHeight-body);
 }
 .mdParagraph + .mdParagraph {
   margin-top: var(--dub-space-1);
@@ -983,6 +994,8 @@
 .mdList {
   margin: var(--dub-space-1) 0;
   padding-left: var(--dub-space-5);
+  max-width: var(--dub-measure-body);
+  line-height: var(--dub-font-lineHeight-body);
 }
 .mdList li {
   margin: 1px 0;

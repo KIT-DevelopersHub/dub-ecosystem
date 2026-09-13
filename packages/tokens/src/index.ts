@@ -41,13 +41,15 @@ export interface DubTokens {
     family: { sans: string; mono: string };
     size: { xs: string; sm: string; md: string; lg: string; xl: string; "2xl": string; "3xl": string };
     weight: { regular: number; medium: number; bold: number };
-    lineHeight: { tight: number; normal: number; relaxed: number };
+    lineHeight: { tight: number; normal: number; relaxed: number; body: number };
   };
   radius: { none: string; sm: string; md: string; lg: string; full: string };
   shadow: { sm: string; md: string; lg: string; overlay: string };
   zIndex: { base: number; dropdown: number; sticky: number; modal: number; toast: number; tooltip: number };
   breakpoint: { sm: string; md: string; lg: string; xl: string };
   motion: { fast: string; normal: string; slow: string; easing: string };
+  /** P18: reading-measure widths for long-form body text (chat/mail prose). */
+  measure: { body: string };
 }
 
 const brand: ColorScale = {
@@ -89,10 +91,17 @@ const font: DubTokens["font"] = {
   },
   size: { xs: "12px", sm: "14px", md: "16px", lg: "18px", xl: "20px", "2xl": "24px", "3xl": "30px" },
   weight: { regular: 400, medium: 500, bold: 700 },
-  lineHeight: { tight: 1.2, normal: 1.5, relaxed: 1.75 },
+  // body: long-form prose (chat/mail message text, P18) — a touch looser than
+  // `normal` for comfortable re-reading of multi-line paragraphs.
+  lineHeight: { tight: 1.2, normal: 1.5, relaxed: 1.75, body: 1.6 },
 };
 
 const radius: DubTokens["radius"] = { none: "0", sm: "4px", md: "8px", lg: "12px", full: "9999px" };
+
+// P18: reading-measure max-width for long-form body text (chat messages, mail
+// bodies). ~68 characters keeps line length in the comfortable reading range;
+// code/quote blocks are intentionally excluded by callers (design §readability).
+const measure: DubTokens["measure"] = { body: "68ch" };
 
 const zIndex: DubTokens["zIndex"] = {
   base: 0, dropdown: 1000, sticky: 1100, modal: 1300, toast: 1400, tooltip: 1500,
@@ -126,6 +135,7 @@ const lightTokens: DubTokens = {
   zIndex,
   breakpoint,
   motion,
+  measure,
 };
 
 const darkTokens: DubTokens = {
@@ -147,6 +157,7 @@ const darkTokens: DubTokens = {
   zIndex,
   breakpoint,
   motion,
+  measure,
 };
 
 export const tokens: Record<ThemeName, DubTokens> = {

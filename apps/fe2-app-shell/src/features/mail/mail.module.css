@@ -1,0 +1,33 @@
+/* Mail body readability (P18: 本文の行長最適化). @dub/tokens CSS variables only.
+ *
+ * `.mailBody` covers the plain-text render path (a single leaf node — the whole
+ * body is prose, so the measure applies directly to it).
+ *
+ * `.mailBody.mailBodyHtml` covers the sanitized-HTML fallback path: the wrapper
+ * itself stays full width (so a wide table/image is never clipped), and the
+ * measure is applied only to its direct prose children. `blockquote`/`pre`/
+ * `code`/`table` are intentionally NOT listed, so quoted text and code blocks
+ * keep the message column's natural width (design ledger P18: "コード/引用
+ * ブロックは対象外").
+ */
+.mailBody {
+  line-height: var(--dub-font-lineHeight-body);
+  max-width: var(--dub-measure-body);
+}
+.mailBody.mailBodyHtml {
+  max-width: none;
+}
+.mailBody.mailBodyHtml > p,
+.mailBody.mailBodyHtml > div,
+.mailBody.mailBodyHtml > span,
+.mailBody.mailBodyHtml > li,
+.mailBody.mailBodyHtml > ul,
+.mailBody.mailBodyHtml > ol,
+.mailBody.mailBodyHtml > h1,
+.mailBody.mailBodyHtml > h2,
+.mailBody.mailBodyHtml > h3,
+.mailBody.mailBodyHtml > h4,
+.mailBody.mailBodyHtml > h5,
+.mailBody.mailBodyHtml > h6 {
+  max-width: var(--dub-measure-body);
+}
