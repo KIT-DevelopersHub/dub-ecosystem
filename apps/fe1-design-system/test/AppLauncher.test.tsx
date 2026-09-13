@@ -169,4 +169,27 @@ describe("AppLauncher (waffle app switcher 凍結案 1-4-3)", () => {
     search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  // P19: mobile bottom sheet. The scrim + drag handle only *look* like a sheet
+  // under the CSS media query (jsdom doesn't evaluate max-width), but both must
+  // be in the DOM whenever the panel is open, and every app must still render —
+  // the sheet only repositions the existing popover, it doesn't hide or drop
+  // anything from the catalog ([[dub-never-hide-or-reduce-apps]]).
+  it("renders the scrim and drag handle whenever the panel is open, with every app still present", async () => {
+    render(<AppLauncher items={ITEMS} testId="launcher" />);
+    expect(screen.queryByTestId("launcher-backdrop")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    expect(screen.getByTestId("launcher-backdrop")).toBeInTheDocument();
+    expect(screen.getByTestId("launcher-drag-handle")).toBeInTheDocument();
+    expect(screen.getByText("イベント")).toBeInTheDocument();
+    expect(screen.getByText("チャット")).toBeInTheDocument();
+  });
+
+  it("closes when the scrim is tapped (bottom-sheet dismissal)", async () => {
+    render(<AppLauncher items={ITEMS} testId="launcher" />);
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("launcher-backdrop"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });
