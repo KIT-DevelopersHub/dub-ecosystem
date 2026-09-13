@@ -26,8 +26,9 @@ function ok(result: unknown) {
   return new Response(JSON.stringify({ success: true, errors: [], messages: [], result }), { status: 200 });
 }
 
-/** CF stub that answers the rules LIST (GET) and CREATE/PATCH/DELETE (mutations) distinctly. */
-function stubCf(opts: { list?: unknown[]; onCreate?: (body: unknown) => Response; mutate?: unknown } = {}) {
+/** CF stub that answers the rules LIST (GET), single-rule GET (updateRule's fetch-before-PUT), and
+ *  CREATE/PUT/DELETE (mutations) distinctly. */
+function stubCf(opts: { list?: unknown[]; onCreate?: (body: unknown) => Response; mutate?: unknown; get?: unknown } = {}) {
   const calls: Array<{ method: string; url: string; body: unknown }> = [];
   vi.stubGlobal(
     "fetch",
@@ -35,7 +36,14 @@ function stubCf(opts: { list?: unknown[]; onCreate?: (body: unknown) => Response
       const method = (init.method ?? "GET").toUpperCase();
       const body = init.body ? JSON.parse(init.body as string) : undefined;
       calls.push({ method, url, body });
-      if (method === "GET") return ok(opts.list ?? []);
+      if (method === "GET") {
+        // updateRule() fetches the current rule (a single-resource GET, url ends in
+        // .../rules/{id}) before merging + PUTting — distinct from the list GET
+        // (.../rules?per_page=...) used elsewhere.
+        const isSingleRule = /\/email\/routing\/rules\/[^/?]+$/.test(url);
+        if (isSingleRule) return ok(opts.get ?? opts.mutate ?? {});
+        return ok(opts.list ?? []);
+      }
       if (method === "POST" && opts.onCreate) return opts.onCreate(body);
       return ok(opts.mutate ?? { id: "r1" });
     }),
@@ -148,7 +156,7 @@ describe("issued-addresses — issue (create rule + confirmation mail)", () => {
 
 describe("issued-addresses — toggle & revoke", () => {
   it("PATCH disables an issued address and audits", async () => {
-    stubCf({ mutate: { ...workerRule("r1", "sales@developershub.jp"), enabled: false } });
+    const calls = stubCf({ get: workerRule("r1", "sales@developershub.jp"), mutate: { ...workerRule("r1", "sales@developershub.jp"), enabled: false } });
     const { env, sends } = wiredEnv();
     const res = await app.fetch(
       new Request("https://svc/mail/admin/email-routing/issued-addresses/r1", { method: "PATCH", headers: adminHeaders(), body: JSON.stringify({ enabled: false }) }),
@@ -157,6 +165,16 @@ describe("issued-addresses — toggle & revoke", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { enabled: boolean }).enabled).toBe(false);
     expect(sends.audit[0]!.payload).toMatchObject({ action: "mail.email_routing.address.update", result: "success", resourceId: "r1" });
+    // Regression: Cloudflare's Email Routing Rules API has no PATCH verb — the update
+    // operation must reach Cloudflare as PUT, or it fails 502 upstream (found via live
+    // staging verification: every 有効/無効 toggle in the admin UI 502'd).
+    const cfCall = calls.find((c) => c.url.includes("/email/routing/rules/r1") && c.method === "PUT");
+    expect(cfCall).toBeDefined();
+    // And CF's PUT replaces the whole rule — a body with only `enabled` 422s live
+    // ("must have actions; matchers: must have matchers"), so the client must fetch
+    // the current rule first and merge it into the PUT body (matchers/actions carried
+    // over from the existing rule, not dropped).
+    expect(cfCall!.body).toMatchObject({ enabled: false, matchers: expect.any(Array), actions: expect.any(Array) });
   });
 
   it("DELETE revokes an issued address and audits", async () => {
