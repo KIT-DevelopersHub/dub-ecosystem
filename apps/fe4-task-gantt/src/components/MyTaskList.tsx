@@ -85,7 +85,7 @@ export function MyTaskList({
       <table className={styles.myTable}>
         <thead>
           <tr>
-            {onComplete && <th className={styles.colComplete} aria-label="完了" />}
+            {onComplete && <th className={styles.colComplete}>完了</th>}
             <th className={styles.colFromTo}>依頼 → 担当</th>
             <th>タイトル</th>
             <th>チーム</th>

@@ -1595,31 +1595,43 @@
 /* ---- P11: quick-complete checkbox (MyTaskList) ----
  * Checking draws the checkmark (stroke-dashoffset) and flashes the row green,
  * fading back out — "完了操作に達成感・誤タップ視認" (the check itself is also the
- * misclick affordance: a plain box vs. a filled green square with a check). */
-.colComplete { width: 32px; }
+ * misclick affordance: a plain box vs. a filled green square with a check).
+ * 判断: 見当たらない/分かりにくい指摘の修正 — ヘッダーに可視ラベル「完了」を追加
+ * (旧: aria-labelのみで見た目は空欄)、ヒットエリア・視認性を拡大(常時ほんのり
+ * 塗りつぶし + hover/focusで背景を強調)して、行内で一目で見つかる操作にする。 */
+.colComplete { width: 52px; text-align: center; }
 .completeCheck {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: none;
-  background: transparent;
+  background: var(--dub-color-surface-sunken);
   cursor: pointer;
-  border-radius: var(--dub-radius-sm, 4px);
+  border-radius: var(--dub-radius-md, 6px);
+  transition: background var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease),
+    transform var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
 }
-.completeCheck:disabled { cursor: not-allowed; }
+.completeCheck:not(:disabled):hover {
+  background: var(--dub-color-brand-50, var(--dub-color-brand-100));
+  transform: scale(1.06);
+}
+.completeCheck:disabled { cursor: not-allowed; opacity: 0.5; }
 .completeCheck:focus-visible {
   outline: 2px solid var(--dub-color-border-focus);
   outline-offset: 2px;
 }
 .completeCheckBox {
   fill: var(--dub-color-surface-raised);
-  stroke: var(--dub-color-border-strong);
-  stroke-width: 1.5;
+  stroke: var(--dub-color-text-secondary);
+  stroke-width: 1.75;
   transition: fill var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease),
     stroke var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+}
+.completeCheck:not(:disabled):hover .completeCheckBox {
+  stroke: var(--dub-color-brand-600, var(--dub-color-brand-500));
 }
 .completeCheckOn .completeCheckBox {
   fill: var(--dub-color-success-500);

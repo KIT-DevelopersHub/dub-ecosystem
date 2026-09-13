@@ -101,6 +101,22 @@ describe("MyTaskList — P11 quick-complete checkbox", () => {
     vi.useRealTimers();
   });
 
+  it("shows a visible column header label so the checkbox is discoverable (not aria-only)", () => {
+    const t = mk({ id: "t5" });
+    render(
+      <MyTaskList
+        tasks={[t]}
+        users={users}
+        teamNames={teamNames}
+        onSelect={() => {}}
+        onComplete={vi.fn()}
+        visibleCount={25}
+        onShowMore={() => {}}
+      />,
+    );
+    expect(screen.getByRole("columnheader", { name: "完了" })).toBeInTheDocument();
+  });
+
   it("disables the checkbox when the task cannot transition directly to done (blocked)", () => {
     const t = mk({ id: "t4", status: "blocked" }); // TASK_STATUS_TRANSITIONS.blocked has no "done"
     render(

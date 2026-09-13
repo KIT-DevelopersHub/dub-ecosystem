@@ -49,7 +49,7 @@ export function TaskCompleteCheck({ checked, disabled, onCheck, label, testId }:
         if (!disabled && !checked) onCheck();
       }}
     >
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
+      <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden focusable="false">
         <rect x="1" y="1" width="14" height="14" rx="4" className={styles.completeCheckBox} />
         <path d="M4 8.4 L6.8 11.2 L12 5.4" className={styles.completeCheckMark} />
       </svg>
