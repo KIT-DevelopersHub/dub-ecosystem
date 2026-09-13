@@ -68,9 +68,10 @@ export function ParticipationListPage(): JSX.Element {
   const teamsQuery = useParticipationTeams();
   const resolveMut = useResolveParticipation();
   const [selected, setSelected] = useState<Participation | null>(null);
-  // 「追加する」フロー対象 (候補ダイアログを開く) / 「対象外」確認対象。
+  // 「追加する」フロー対象 (候補ダイアログを開く) / 「対象外」確認対象 / 「紐付け取消」確認対象。
   const [addTarget, setAddTarget] = useState<Participation | null>(null);
   const [skipTarget, setSkipTarget] = useState<Participation | null>(null);
+  const [unlinkTarget, setUnlinkTarget] = useState<Participation | null>(null);
 
   const teamName = useMemo(() => {
     const map = new Map((teamsQuery.data?.teams ?? []).map((t) => [t.id, t.name]));
@@ -81,6 +82,7 @@ export function ParticipationListPage(): JSX.Element {
     resolveMut.mutate({ id, body });
     setAddTarget(null);
     setSkipTarget(null);
+    setUnlinkTarget(null);
   };
 
   // 左端「運営メンバー反映」列。行クリック(Drawer)とは独立させるため stopPropagation。
@@ -95,7 +97,14 @@ export function ParticipationListPage(): JSX.Element {
         <Badge tone={REVIEW_TONE[p.reviewState]} testId={`participation-reviewstate-${p.id}`}>
           {reviewLabel(p)}
         </Badge>
-        {p.reviewState === "added" ? null : (
+        {p.reviewState === "added" ? (
+          // 紐付け(link/create)を取り消して紐付け前へ戻す導線。スナップショットを持つ行だけ。
+          p.canUnlink ? (
+            <Button size="sm" variant="ghost" onClick={() => setUnlinkTarget(p)} testId={`participation-unlink-${p.id}`}>
+              紐付けを取り消す
+            </Button>
+          ) : null
+        ) : (
           <>
             <Button size="sm" variant="primary" onClick={() => setAddTarget(p)} testId={`participation-add-${p.id}`}>
               追加する
@@ -186,6 +195,23 @@ export function ParticipationListPage(): JSX.Element {
         }}
         onCancel={() => setSkipTarget(null)}
         testId="participation-skip-confirm"
+      />
+
+      <ConfirmDialog
+        open={unlinkTarget !== null}
+        title="運営メンバーへの紐付けを取り消す"
+        message={
+          unlinkTarget
+            ? `「${unlinkTarget.name}」の運営メンバーへの紐付けを取り消し、紐付け前の状態に戻します。参加届の内容で足した情報（メール・電話・所属チームなど）も撤回されます。よろしいですか？`
+            : ""
+        }
+        confirmLabel="紐付けを取り消す"
+        cancelLabel="キャンセル"
+        onConfirm={() => {
+          if (unlinkTarget) doResolve(unlinkTarget.id, { action: "unlink" });
+        }}
+        onCancel={() => setUnlinkTarget(null)}
+        testId="participation-unlink-confirm"
       />
     </div>
   );

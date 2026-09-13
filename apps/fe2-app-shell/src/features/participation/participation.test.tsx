@@ -285,4 +285,25 @@ describe("ParticipationListPage", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "対象外にする" }));
     await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "skip" }));
   });
+
+  it("反映済み(canUnlink)の行は「紐付けを取り消す」→ 確認 → unlink を確定する", async () => {
+    const added = { ...SUBMISSION, reviewState: "added" as const, matchKind: "linked_existing" as const, canUnlink: true };
+    const resolve = vi.fn((id: string) =>
+      Promise.resolve({ participation: { ...added, id, reviewState: "pending" as const, canUnlink: false }, member: null }),
+    );
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [added] })), resolve });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-unlink-p_1"));
+    const dialog = await screen.findByTestId("participation-unlink-confirm");
+    await userEvent.click(within(dialog).getByRole("button", { name: "紐付けを取り消す" }));
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "unlink" }));
+  });
+
+  it("反映済みでも canUnlink=false（過去の自動反映など）は取消ボタンを出さない", async () => {
+    const added = { ...SUBMISSION, reviewState: "added" as const, canUnlink: false };
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [added] })) });
+    render(wrap(<ParticipationListPage />, api));
+    await screen.findByTestId("participation-reviewstate-p_1");
+    expect(screen.queryByTestId("participation-unlink-p_1")).toBeNull();
+  });
 });
