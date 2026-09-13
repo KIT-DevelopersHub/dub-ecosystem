@@ -291,6 +291,53 @@ function ganttViewFor(eventId: string): gantt.GanttViewState {
   return GANTT_VIEWS[eventId]!;
 }
 
+// Shared event-detail-page section layout (D&D order/visibility of 重要リンク/連絡先/
+// 概要/... — see @dub/fe3-event-action's EventDetailsPanel). UNLIKE GANTT_VIEWS above
+// (in-memory, per-session only), this is localStorage-backed like the mail Sent/
+// thread-flags stores below — a demo reviewer reloading mid-review must still see
+// their reorder/hide hold. Version-locked with the SAME error code the real
+// event-service returns (EVENT_VERSION_CONFLICT) so the optimistic-mutation rollback
+// path is exercised identically to staging/prod.
+interface DemoSectionLayoutData {
+  order: string[];
+  hidden: string[];
+}
+interface DemoSectionLayout {
+  eventId: string;
+  data: DemoSectionLayoutData;
+  version: number;
+  updatedAt: string | null;
+}
+function sectionLayoutKey(eventId: string): string {
+  return `dub_demo_section_layout:${eventId}`;
+}
+function loadDemoSectionLayout(eventId: string): DemoSectionLayout {
+  try {
+    const raw = globalThis.localStorage?.getItem(sectionLayoutKey(eventId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DemoSectionLayout> & { data?: Partial<DemoSectionLayoutData> };
+      const order = Array.isArray(parsed.data?.order) ? parsed.data!.order.filter((x): x is string => typeof x === "string") : [];
+      const hidden = Array.isArray(parsed.data?.hidden) ? parsed.data!.hidden.filter((x): x is string => typeof x === "string") : [];
+      return {
+        eventId,
+        version: typeof parsed.version === "number" ? parsed.version : 0,
+        updatedAt: parsed.updatedAt ?? null,
+        data: { order, hidden },
+      };
+    }
+  } catch {
+    /* private mode / quota — fall through to the default layout */
+  }
+  return { eventId, data: { order: [], hidden: [] }, version: 0, updatedAt: null };
+}
+function saveDemoSectionLayout(next: DemoSectionLayout): void {
+  try {
+    globalThis.localStorage?.setItem(sectionLayoutKey(next.eventId), JSON.stringify(next));
+  } catch {
+    /* private mode / quota — non-fatal for the demo */
+  }
+}
+
 // ── notifications ─────────────────────────────────────────────────────────────
 const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
@@ -1211,6 +1258,24 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // Shared section layout save — version-locked (see DemoSectionLayout above).
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
+    if (id && method === "PUT") {
+      const b = (body ?? {}) as { data?: Partial<DemoSectionLayoutData>; version?: number };
+      const current = loadDemoSectionLayout(id);
+      if (typeof b.version !== "number" || b.version !== current.version) {
+        const err: ErrorResponse = { error: { code: "EVENT_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      const order = Array.isArray(b.data?.order) ? b.data!.order.filter((x): x is string => typeof x === "string") : [];
+      const hidden = Array.isArray(b.data?.hidden) ? b.data!.hidden.filter((x): x is string => typeof x === "string") : [];
+      const next: DemoSectionLayout = { eventId: id, data: { order, hidden }, version: current.version + 1, updatedAt: isoNow() };
+      saveDemoSectionLayout(next);
+      return json(next);
+    }
+  }
+
   // events — edit (PATCH) + archive (DELETE). Mutates the in-memory seed so the demo
   // shows optimistic save → persisted reflection for name / schedule / description.
   {
@@ -1258,6 +1323,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         const found = Object.values(EVENT_ACTIONS).flat().find((a) => a.id === aid);
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
+    }
+    {
+      const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
+      if (id) return json(loadDemoSectionLayout(id));
     }
     {
       const id = seg(/^\/api\/v1\/events\/([^/]+)$/);

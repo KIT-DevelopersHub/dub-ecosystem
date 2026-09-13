@@ -2,8 +2,17 @@
 // client). All timestamps come from the service (nowIso), never DDL DEFAULT (D2).
 import type { DbClient } from "@dub/db";
 import type { common, event } from "@dub/types";
-import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventDetailsData, Keyset } from "./types";
-import { EMPTY_EVENT_DETAILS, normalizeEventDetails } from "./domain";
+import type {
+  EventRepo,
+  EventRow,
+  ActionRow,
+  EventDetailsRow,
+  EventDetailsData,
+  EventSectionLayoutRow,
+  EventSectionLayoutData,
+  Keyset,
+} from "./types";
+import { EMPTY_EVENT_DETAILS, normalizeEventDetails, EMPTY_EVENT_SECTION_LAYOUT, normalizeEventSectionLayout } from "./domain";
 
 interface EventDbRow {
   id: string;
@@ -53,6 +62,28 @@ function toDetailsRow(r: EventDetailsDbRow): EventDetailsRow {
   return {
     eventId: r.event_id,
     data: parseDetailsData(r.data),
+    version: r.version,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+  };
+}
+
+// event_event_section_layout row shape is identical to event_event_details (event_id
+// PK + JSON data blob + version); kept as its own table (see schema.ts) so the two
+// optimistic version locks never collide.
+type EventSectionLayoutDbRow = EventDetailsDbRow;
+
+function parseSectionLayoutData(json: string): EventSectionLayoutData {
+  try {
+    return normalizeEventSectionLayout(JSON.parse(json) as Partial<EventSectionLayoutData>);
+  } catch {
+    return { ...EMPTY_EVENT_SECTION_LAYOUT };
+  }
+}
+function toSectionLayoutRow(r: EventSectionLayoutDbRow): EventSectionLayoutRow {
+  return {
+    eventId: r.event_id,
+    data: parseSectionLayoutData(r.data),
     version: r.version,
     updatedBy: r.updated_by,
     updatedAt: r.updated_at,
@@ -247,6 +278,33 @@ export function createD1EventRepo(db: DbClient): EventRepo {
       }
       const res = await db.run(
         `UPDATE event_event_details SET data = ?, version = ?, updated_by = ?, updated_at = ?
+         WHERE event_id = ? AND version = ?`,
+        dataJson, next.version, next.updatedBy, next.updatedAt, next.eventId, expectedVersion,
+      );
+      return res.meta.changes > 0;
+    },
+
+    async getEventSectionLayout(eventId: common.EventId): Promise<EventSectionLayoutRow | null> {
+      const r = await db.first<EventSectionLayoutDbRow>(
+        `SELECT * FROM event_event_section_layout WHERE event_id = ?`,
+        eventId,
+      );
+      return r ? toSectionLayoutRow(r) : null;
+    },
+
+    async upsertEventSectionLayout(next: EventSectionLayoutRow, expectedVersion: number): Promise<boolean> {
+      const dataJson = JSON.stringify(next.data);
+      if (expectedVersion === 0) {
+        const res = await db.run(
+          `INSERT OR IGNORE INTO event_event_section_layout
+             (event_id, data, version, updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          next.eventId, dataJson, next.version, next.updatedBy, next.updatedAt,
+        );
+        return res.meta.changes > 0;
+      }
+      const res = await db.run(
+        `UPDATE event_event_section_layout SET data = ?, version = ?, updated_by = ?, updated_at = ?
          WHERE event_id = ? AND version = ?`,
         dataJson, next.version, next.updatedBy, next.updatedAt, next.eventId, expectedVersion,
       );
