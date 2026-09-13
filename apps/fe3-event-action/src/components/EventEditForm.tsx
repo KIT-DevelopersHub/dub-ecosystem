@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { event } from "@dub/types";
 import { Button, FormField } from "@dub/ui";
+import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { fieldErrorsOf, normalizeError } from "../lib/errorMap";
 import { useUpdateEvent } from "../hooks/useEventMutations";
 import styles from "./components.module.css";
@@ -28,6 +29,13 @@ function sameInstant(a: string | null, b: string | null): boolean {
   return new Date(a).getTime() === new Date(b).getTime();
 }
 
+interface EventEditDraft {
+  title: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+}
+
 export function EventEditForm({
   event: ev,
   canWrite,
@@ -44,14 +52,32 @@ export function EventEditForm({
   onSaved?: () => void;
 }) {
   const update = useUpdateEvent(ev.id);
-  const [title, setTitle] = useState(ev.title);
-  const [description, setDescription] = useState(ev.description ?? "");
-  const [startsAt, setStartsAt] = useState(toLocalInput(ev.startsAt));
-  const [endsAt, setEndsAt] = useState(toLocalInput(ev.endsAt));
+  // FE3 owns no router (navigation goes through @dub/app-ui's NavigationApi), so the
+  // in-app leave guard used in FE2/FE7 (TanStack useBlocker) isn't available here.
+  // useDraftAutosave still fully protects the work: the draft is auto-saved and
+  // restored on return, and a beforeunload prompt covers reload / tab close.
+  const draftKey = `fe3.event.${ev.id}`;
+  const seed = peekDraft<EventEditDraft>(draftKey);
+  const [title, setTitle] = useState(seed?.title ?? ev.title);
+  const [description, setDescription] = useState(seed?.description ?? ev.description ?? "");
+  const [startsAt, setStartsAt] = useState(seed?.startsAt ?? toLocalInput(ev.startsAt));
+  const [endsAt, setEndsAt] = useState(seed?.endsAt ?? toLocalInput(ev.endsAt));
   const [localError, setLocalError] = useState<string | null>(null);
 
   const readOnly = !canWrite || ev.archivedAt !== null;
   const fieldErrors = update.isError ? fieldErrorsOf(normalizeError(update.error)) : {};
+
+  const dirty =
+    title !== ev.title ||
+    description !== (ev.description ?? "") ||
+    startsAt !== toLocalInput(ev.startsAt) ||
+    endsAt !== toLocalInput(ev.endsAt);
+  const draft = useDraftAutosave<EventEditDraft>({
+    storageKey: draftKey,
+    value: { title, description, startsAt, endsAt },
+    dirty,
+    enabled: !readOnly,
+  });
 
   const save = () => {
     setLocalError(null);
@@ -73,15 +99,33 @@ export function EventEditForm({
     // Nothing changed besides version — skip the round-trip.
     const changedKeys = Object.keys(req).filter((k) => k !== "version");
     if (changedKeys.length === 0) {
+      draft.clear();
       onSaved?.();
       return;
     }
 
-    update.mutate(req, { onSuccess: () => onSaved?.() });
+    update.mutate(req, {
+      onSuccess: () => {
+        draft.clear();
+        onSaved?.();
+      },
+    });
   };
 
   return (
     <div data-testid="fe3-settings-edit-form">
+      <DraftRestoredNotice
+        visible={draft.restoredVisible}
+        onDiscard={() => {
+          draft.clear();
+          setTitle(ev.title);
+          setDescription(ev.description ?? "");
+          setStartsAt(toLocalInput(ev.startsAt));
+          setEndsAt(toLocalInput(ev.endsAt));
+        }}
+        onKeep={draft.acknowledgeRestored}
+        testId="fe3-settings-draft-notice"
+      />
       <FormField label="タイトル" error={fieldErrors.title} htmlFor="fe3-edit-title">
         <input
           id="fe3-edit-title"

@@ -24,6 +24,14 @@ export {
 export { RolePicker, type RolePickerProps, type RoleOption } from "./components/RolePicker";
 export { DialogActions, type DialogActionsProps } from "./components/DialogActions";
 export { FormError, type FormErrorProps } from "./components/FormError";
+export { DraftRestoredNotice, type DraftRestoredNoticeProps } from "./components/DraftRestoredNotice";
+
+export {
+  useDraftAutosave,
+  peekDraft,
+  type UseDraftAutosaveOptions,
+  type DraftAutosave,
+} from "./hooks/useDraftAutosave";
 
 export {
   useUndoRedo,
