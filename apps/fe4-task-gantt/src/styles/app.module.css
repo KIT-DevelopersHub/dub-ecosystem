@@ -236,9 +236,17 @@
   border-radius: var(--dub-radius-md, 8px);
   padding: var(--dub-space-2);
   min-height: 200px;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
 }
 .columnHead { font-weight: 600; margin-bottom: var(--dub-space-2); }
-.columnBlocked { outline: 2px dashed var(--dub-color-danger-500); outline-offset: -2px; }
+/* invalid drop target under the card currently being dragged */
+.columnBlocked { outline-color: var(--dub-color-danger-500); outline-style: dashed; }
+/* valid drop target under the card currently being dragged — kept unconditional
+ * (not gated behind prefers-reduced-motion): it is a static color change, the
+ * one cue reduced-motion users still get in place of the card's lift/scale. */
+.columnValid { outline-color: var(--dub-color-brand-500); }
 .card {
   background: var(--dub-color-surface-raised);
   border: 1px solid var(--dub-color-border-default);
@@ -246,6 +254,35 @@
   padding: var(--dub-space-2);
   margin-bottom: var(--dub-space-2);
   cursor: grab;
+}
+.card:active { cursor: grabbing; }
+/* source node while its DragOverlay clone is being carried — dimmed so the
+ * lift reads as "this card left its slot", not a duplicate. */
+.cardDragging { opacity: 0.35; }
+/* the DragOverlay clone: carried under the pointer with a raised shadow.
+ * Shadow is a static depth cue and stays for everyone; the scale (the actual
+ * motion/interpolated part of the lift) is reduced-motion gated. */
+.cardOverlay {
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm, 6px);
+  padding: var(--dub-space-2);
+  cursor: grabbing;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cardOverlay { transform: scale(1.03); }
+}
+/* brief fade+scale-back settle once a card lands in its new column */
+@keyframes fe4CardSettle {
+  from { opacity: 0.5; transform: scale(1.04); }
+  to { opacity: 1; transform: scale(1); }
+}
+.cardSettling {
+  animation: fe4CardSettle var(--dub-motion-normal, 200ms) var(--dub-motion-easing, ease) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cardSettling { animation: none; }
 }
 
 /* ================= Notion-style timeline ================= */
