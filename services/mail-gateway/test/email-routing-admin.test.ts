@@ -139,7 +139,11 @@ describe("email-routing admin — rules CRUD", () => {
   });
 
   it("PATCH updates a rule and audits", async () => {
-    stubCf(() => ok({ id: "r1", ...validRule, enabled: false, priority: 0 }));
+    let cfMethod: string | undefined;
+    stubCf((_url, init) => {
+      cfMethod = (init.method ?? "GET").toUpperCase();
+      return ok({ id: "r1", ...validRule, enabled: false, priority: 0 });
+    });
     const { env, sends } = wiredEnv();
     const res = await app.fetch(
       new Request("https://svc/mail/admin/email-routing/rules/r1", { method: "PATCH", headers: adminHeaders(), body: JSON.stringify({ enabled: false }) }),
@@ -147,6 +151,10 @@ describe("email-routing admin — rules CRUD", () => {
     );
     expect(res.status).toBe(200);
     expect(sends.audit[0]!.payload).toMatchObject({ action: "mail.email_routing.rule.update", result: "success", resourceId: "r1" });
+    // Regression: Cloudflare's Email Routing Rules API has no PATCH verb — our own
+    // external route stays PATCH, but the outbound Cloudflare call must be PUT (found
+    // via live staging verification: every toggle 502'd against the real CF API).
+    expect(cfMethod).toBe("PUT");
   });
 
   it("DELETE removes a rule and audits", async () => {

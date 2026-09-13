@@ -9,6 +9,7 @@ describe("useUiStore", () => {
       theme: "system",
       homeGrid: { positions: {}, sizes: {} },
       homeGridEditMode: false,
+      homeGridHidden: [],
     });
   });
 
@@ -117,6 +118,64 @@ describe("useUiStore", () => {
       vi.resetModules();
       const fresh = await import("./uiStore.tsx");
       expect(fresh.useUiStore.getState().homeGridEditMode).toBe(false);
+    });
+  });
+
+  describe("homeGridHidden (ウィジェットの追加・削除)", () => {
+    it("defaults to no hidden widgets", () => {
+      expect(useUiStore.getState().homeGridHidden).toEqual([]);
+    });
+
+    it("hideHomeWidget adds the id and persists it", () => {
+      useUiStore.getState().hideHomeWidget("usage");
+      expect(useUiStore.getState().homeGridHidden).toEqual(["usage"]);
+      expect(JSON.parse(localStorage.getItem("dub.ui.home.gridHidden")!)).toEqual(["usage"]);
+    });
+
+    it("hideHomeWidget is idempotent (does not duplicate an already-hidden id)", () => {
+      useUiStore.getState().hideHomeWidget("usage");
+      useUiStore.getState().hideHomeWidget("usage");
+      expect(useUiStore.getState().homeGridHidden).toEqual(["usage"]);
+    });
+
+    it("hideHomeWidget appends without disturbing other hidden ids", () => {
+      useUiStore.getState().hideHomeWidget("usage");
+      useUiStore.getState().hideHomeWidget("tasks");
+      expect(useUiStore.getState().homeGridHidden).toEqual(["usage", "tasks"]);
+    });
+
+    it("showHomeWidget removes the id and persists it", () => {
+      useUiStore.getState().hideHomeWidget("usage");
+      useUiStore.getState().hideHomeWidget("tasks");
+      useUiStore.getState().showHomeWidget("usage");
+      expect(useUiStore.getState().homeGridHidden).toEqual(["tasks"]);
+      expect(JSON.parse(localStorage.getItem("dub.ui.home.gridHidden")!)).toEqual(["tasks"]);
+    });
+
+    it("showHomeWidget on an id that is not hidden is a no-op", () => {
+      useUiStore.getState().showHomeWidget("usage");
+      expect(useUiStore.getState().homeGridHidden).toEqual([]);
+    });
+
+    it("a persisted hidden list survives a fresh module init (reload)", async () => {
+      localStorage.setItem("dub.ui.home.gridHidden", JSON.stringify(["notifications"]));
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGridHidden).toEqual(["notifications"]);
+    });
+
+    it("ignores a malformed dub.ui.home.gridHidden value in storage (falls back to empty)", async () => {
+      localStorage.setItem("dub.ui.home.gridHidden", "{not json");
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGridHidden).toEqual([]);
+    });
+
+    it("drops non-string entries read from storage but keeps valid siblings", async () => {
+      localStorage.setItem("dub.ui.home.gridHidden", JSON.stringify(["usage", 42, null, "tasks"]));
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGridHidden).toEqual(["usage", "tasks"]);
     });
   });
 });
