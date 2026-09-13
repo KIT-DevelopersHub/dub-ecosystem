@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p16-focustrap",
+  "worker": "dub-demo-p16-focustrap",
+  "url": "https://dub-demo-p16-focustrap.developershub-site.workers.dev",
+  "deployedSha": "d451df3c",
+  "branch": "feat/p16-focustrap",
+  "actor": "kota",
+  "markers": ["data-dub-focustrap\":\"p16"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:33:39Z",
+  "updatedAt": "2026-09-13T16:33:39Z",
+  "note": ""
+}
