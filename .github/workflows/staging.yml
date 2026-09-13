@@ -12,11 +12,26 @@ name: Deploy (staging)
 #      (plus its later pushes) temporarily occupies staging for verification. Per-PR
 #      preview environments would be needed for "every PR auto-deploys" — a future step.
 #
+#      This also covers the "demo-parity integration branch" workflow (see
+#      docs — Dub development flow): several demo-approved-but-not-yet-merged-to-main
+#      features are combined onto one integration branch/PR (e.g. `staging/*-integ`),
+#      labelled `stagingへ`, and deployed so staging == the set of demo-approved features.
+#
+# GUARD (see the `guard` job below): while ANY open PR still carries the `stagingへ`
+# label, a push:main run SKIPS its own deploy step instead of redeploying staging from
+# main's HEAD. Without this, a routine merge to main (of work unrelated to the
+# integration branch) would fire path ①, rebuild from main's HEAD, and overwrite the
+# integration branch's staging deployment — silently dropping every demo-approved
+# feature that is on the integration branch but not yet merged to main. The label is the
+# signal that "someone is mid-review of a deliberately-curated staging state"; once it is
+# removed (verified + merged, or abandoned), push:main resumes mirroring main normally.
+#
 # Both paths build the fe2 bundle against the STAGING gateway with VITE_DEMO_AUTOLOGIN=1
 # and deploy the `-staging` Worker set (infra/deploy/deploy-staging.sh). The `concurrency`
 # group below serializes them: a label preview and a main-follow deploy queue rather than
 # race for the single slot. After a merge, only the push:main run fires (merge does not
-# emit `synchronize`), so staging converges on main's HEAD.
+# emit `synchronize`), so staging converges on main's HEAD — unless another `stagingへ`
+# PR is still open, in which case the guard keeps deferring to it (see above).
 #
 # Flow (label preview):
 #   add `stagingへ` label  -> build PR head, deploy `-staging` set, post/update a sticky
@@ -49,15 +64,63 @@ env:
   DO_NOT_TRACK: 1
 
 jobs:
+  # Only meaningful for push:main. Answers: "is there an open PR right now that is
+  # deliberately holding staging (via the `stagingへ` label), e.g. a demo-parity
+  # integration branch under review?" If yes, the `staging` job below skips its deploy so
+  # this push does not stomp that PR's staging deployment with main's HEAD.
+  #
+  # Fail-open by design: if the `gh api` lookup itself fails (rate limit, transient
+  # error), we do NOT block the mirror-main deploy — that would silently stop staging
+  # from following main, which is worse than the rare clobber this guard exists to
+  # prevent. A failed lookup is logged as a warning and treated as "no active label".
+  guard:
+    name: guard · integration-branch-active?
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      integ_active: ${{ steps.check.outputs.active }}
+    steps:
+      - name: Check for an open PR carrying the `stagingへ` label
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          COUNT="$(gh api "repos/${REPO}/pulls?state=open&per_page=100" --paginate \
+            --jq '[.[] | select(.labels[].name == "stagingへ")] | length' 2>&1)"
+          RC=$?
+          set -e
+          if [ $RC -ne 0 ] || ! [[ "${COUNT}" =~ ^[0-9]+$ ]]; then
+            echo "::warning::could not query open PRs for the \`stagingへ\` label (gh api failed: ${COUNT}) — failing OPEN, i.e. this push:main deploy will proceed as before."
+            echo "active=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${COUNT}" -gt 0 ]; then
+            echo "active=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::${COUNT} open PR(s) carry the \`stagingへ\` label — SKIPPING this push:main staging redeploy so their staging deployment is not overwritten by main's HEAD. Staging resumes mirroring main automatically once that label is removed (PR merged/closed)."
+          else
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          fi
+
   staging:
     name: build · deploy-staging · comment
-    # Run on every push to main (mirror prod), OR on a PR that currently carries the
-    # `stagingへ` label (covers both the `labeled` event and later `synchronize` pushes
-    # while it stays on). The label condition is NOT applied to push:main.
+    needs: [guard]
+    # Run on a PR that currently carries the `stagingへ` label (covers both the
+    # `labeled` event and later `synchronize` pushes while it stays on), OR on push:main
+    # PROVIDED no other open PR is holding staging via that same label (see `guard`
+    # above). `always()` is required because `guard` intentionally no-ops (does not run)
+    # on pull_request events, and a needed-but-skipped job would otherwise skip us too.
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'stagingへ'))
+      always() &&
+      (
+        (github.event_name == 'pull_request' &&
+         contains(github.event.pull_request.labels.*.name, 'stagingへ')) ||
+        (github.event_name == 'push' && needs.guard.outputs.integ_active != 'true')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: staging

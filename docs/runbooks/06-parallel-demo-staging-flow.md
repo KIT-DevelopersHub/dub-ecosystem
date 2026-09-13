@@ -119,6 +119,12 @@ bash scripts/verify-live.sh staging 'data-testid="gantt-marquee"' '一括削除'
 反映後 staging = **demo承認済みの全部入り**（demo=staging 一致）。以降は 04 の `確認した` ラベル→main
 マージ→自動 prod（一度OKは再確認なし＝[[dub-approval-ship-no-re-review]]）。
 
+> **統合ブランチPRが `stagingへ` を付けたまま開いている間は、無関係な main への push は staging を
+> 上書きしない**（staging.yml の `guard` ジョブが push:main を自動スキップ）。以前は他PRのmainマージが
+> 発火する push:main 自動再デプロイが main HEAD で staging を丸ごと上書きし、統合ブランチにしか無い
+> demo承認済み機能が staging から消えていた。ラベルを外す（マージ/クローズ）と push:main の
+> mirror-main デプロイは自動的に再開する。詳細: staging.yml 冒頭コメントの GUARD 節。
+
 ## 5. なぜこの形か（フローのルールと対応）
 
 | dub-development-flow のルール | このフローでの担保 |
