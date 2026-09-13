@@ -302,7 +302,7 @@ export function UserListPage() {
         <EmptyState title="該当するユーザーがいません" testId="fe7-users-empty" />
       ) : (
         <div style={splitStyle}>
-          <div style={tableColStyle}>
+          <div style={tableColStyle} data-feature="fe7-virtual-roster">
             <p style={summaryStyle} data-testid="fe7-users-count">
               {countSummary}
               {effectiveSelected.length > 0 ? `・${effectiveSelected.length}件を選択中` : ""}
@@ -325,6 +325,9 @@ export function UserListPage() {
               onSortChange={setSort}
               selection={canBulk ? { selectedKeys: selectedIds, onChange: setSelectedIds } : undefined}
               onRowClick={(u) => setSelectedId(u.id)}
+              // 名簿は数百〜千人規模になりうるので、長い一覧は仮想スクロールで描画する
+              // (画面内の行だけをマウント)。少人数の名簿では従来どおり全行描画のまま。
+              virtualize={{ threshold: 50, estimateRowHeight: 52, maxHeight: 600 }}
               testId="fe7-users-table"
             />
             <LoadMore
