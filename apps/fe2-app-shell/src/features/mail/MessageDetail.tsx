@@ -11,6 +11,7 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
 import { sanitizeHtml } from "./sanitize.tsx";
 import { formatBytes, saveBlob } from "./mailApi.tsx";
+import styles from "./mail.module.css";
 
 function formatReceived(iso: string): string {
   const d = new Date(iso);
@@ -25,7 +26,11 @@ function addressLabel(a: mail.MailAddress): string {
 function MessageBody({ message }: { message: mail.MailMessageDetail }): JSX.Element {
   if (message.textBody && message.textBody.trim().length > 0) {
     return (
-      <div data-testid="fe2-mail-body-text" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+      <div
+        data-testid="fe2-mail-body-text"
+        className={styles.mailBody}
+        style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+      >
         {message.textBody}
       </div>
     );
@@ -33,7 +38,13 @@ function MessageBody({ message }: { message: mail.MailMessageDetail }): JSX.Elem
   if (message.htmlBody) {
     const safe = sanitizeHtml(message.htmlBody);
     // safe is an allowlisted subset produced by sanitize.tsx (no scripts/handlers/js: urls).
-    return <div data-testid="fe2-mail-body-html" dangerouslySetInnerHTML={{ __html: safe }} />;
+    return (
+      <div
+        data-testid="fe2-mail-body-html"
+        className={`${styles.mailBody} ${styles.mailBodyHtml}`}
+        dangerouslySetInnerHTML={{ __html: safe }}
+      />
+    );
   }
   return <em data-testid="fe2-mail-body-empty">(本文なし)</em>;
 }
