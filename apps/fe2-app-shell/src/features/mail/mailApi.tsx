@@ -38,6 +38,8 @@ export interface MailApi {
   getThread(threadId: string): Promise<MailThread>;
   /** Mark a message read (idempotent). Returns the resulting read state (mail:read). */
   markRead(id: string): Promise<MailMessageState>;
+  /** Mark a message unread again (idempotent inverse of markRead). Returns the read state. */
+  markUnread(id: string): Promise<MailMessageState>;
   /** List sent messages, newest first (mail:read). */
   listSent(query?: SentQuery): Promise<Paginated<MailSentListItem>>;
   /** Fetch one sent message's full detail — body + recipients (mail:read). */
@@ -67,6 +69,7 @@ export function createMailApi(api: ApiClient): MailApi {
     getMessage: (id) => api.request<MailMessageDetail>({ method: "GET", path: `${MAIL}/messages/${encodeURIComponent(id)}` }),
     getThread: (threadId) => api.request<MailThread>({ method: "GET", path: `${MAIL}/threads/${encodeURIComponent(threadId)}` }),
     markRead: (id) => api.request<MailMessageState>({ method: "POST", path: `${MAIL}/messages/${encodeURIComponent(id)}/read` }),
+    markUnread: (id) => api.request<MailMessageState>({ method: "POST", path: `${MAIL}/messages/${encodeURIComponent(id)}/unread` }),
     listSent: (query) => {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;

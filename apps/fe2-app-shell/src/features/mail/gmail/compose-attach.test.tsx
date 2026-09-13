@@ -18,6 +18,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getMessage: vi.fn(),
     getThread: vi.fn(),
     markRead: vi.fn().mockResolvedValue({ read: true }),
+    markUnread: vi.fn().mockResolvedValue({ read: false }),
     listSent: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     getSent: vi.fn(),
     downloadAttachment: vi.fn().mockResolvedValue(new Blob(["x"])),
