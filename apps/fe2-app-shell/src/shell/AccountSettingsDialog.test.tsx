@@ -129,4 +129,40 @@ describe("AccountSettingsDialog", () => {
     // Profile was untouched → updateProfile not called.
     expect(updateProfile).not.toHaveBeenCalled();
   });
+
+  it("P12: flashes success on the save button, then closes (button-position feedback)", async () => {
+    const onClose = vi.fn();
+    const updateProfile = vi.fn(() => Promise.resolve({ displayName: "コウタ", avatarUrl: null }));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(queryKeys.me, ME);
+    const shellApi = {
+      auth: {
+        updateProfile,
+        changePassword: vi.fn(() => Promise.resolve()),
+        getSelfParticipation: vi.fn(() => Promise.resolve(PART)),
+        updateSelfParticipation: vi.fn((p: Partial<SelfParticipation>) => Promise.resolve({ ...PART, ...p })),
+      },
+    } as unknown as ApiClient;
+    render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <AccountSettingsDialog api={shellApi} open onClose={onClose} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const nameInput = screen.getByTestId("fe2-account-name") as HTMLInputElement;
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "コウタ");
+    const save = screen.getByTestId("fe2-account-settings-save");
+    await userEvent.click(save);
+
+    // The button shows its success flash BEFORE the dialog closes.
+    await waitFor(() => expect(updateProfile).toHaveBeenCalled());
+    await waitFor(() => expect(save).toHaveAttribute("data-success", "true"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    // ...then closes shortly after (real timer, matches the 650ms flash window).
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
 });

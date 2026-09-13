@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "delight-ux-p11-14",
+  "worker": "dub-demo-delight-ux-p11-14",
+  "url": "https://dub-demo-delight-ux-p11-14.developershub-site.workers.dev",
+  "deployedSha": "b60d6ade",
+  "branch": "feat/delight-ux-p11-14",
+  "actor": "kota",
+  "markers": ["fe4-mytask-complete-","fe2-app-fade","data-sent","data-success"],
+  "live": true,
+  "verifiedAt": "2026-09-13T12:20:56Z",
+  "updatedAt": "2026-09-13T12:20:56Z",
+  "note": "P11-P14 delight UX batch"
+}

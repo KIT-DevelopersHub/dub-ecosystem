@@ -1,10 +1,13 @@
+import { useState } from "react";
 import type { task, common } from "@dub/types";
 import { Badge, SkeletonTable, EmptyState, LoadMore, type BadgeTone } from "@dub/ui";
 import type { UserCache } from "../domain/user-cache";
 import { isOverdue } from "../domain/my-tasks";
 import { PRIORITY_LABEL } from "../domain/task-form";
+import { canTransition } from "../domain/status-transitions";
 import { FromToCell } from "./FromToCell";
 import { TaskStatusBadge } from "./TaskStatusBadge";
+import { TaskCompleteCheck } from "./TaskCompleteCheck";
 import styles from "../styles/app.module.css";
 
 const PRIORITY_TONE: Record<task.TaskPriority, BadgeTone> = {
@@ -25,6 +28,12 @@ export interface MyTaskListProps {
   loading?: boolean;
   /** open the task detail dialog (feedback #2 — row click shows 内容, not navigate). */
   onSelect: (task: task.Task) => void;
+  /**
+   * P11 delight UX — quick-complete checkbox (mark done directly from the
+   * list, without opening the detail dialog). Omit to hide the column
+   * entirely (keeps this additive for any other MyTaskList consumer).
+   */
+  onComplete?: (task: task.Task) => void | Promise<void>;
   /** number of rows currently revealed (windowing for large lists). */
   visibleCount: number;
   onShowMore: () => void;
@@ -43,10 +52,14 @@ export function MyTaskList({
   teamNames,
   loading,
   onSelect,
+  onComplete,
   visibleCount,
   onShowMore,
   now = Date.now(),
 }: MyTaskListProps) {
+  // P11: which row is mid-flash right now (green flash → fade, paired with the
+  // checkbox's own checkmark draw). Cleared automatically after the animation.
+  const [justCompletedId, setJustCompletedId] = useState<common.TaskId | null>(null);
   if (loading) {
     return (
       <div data-testid="fe4-mytasks-loading">
@@ -72,6 +85,7 @@ export function MyTaskList({
       <table className={styles.myTable}>
         <thead>
           <tr>
+            {onComplete && <th className={styles.colComplete} aria-label="完了" />}
             <th className={styles.colFromTo}>依頼 → 担当</th>
             <th>タイトル</th>
             <th>チーム</th>
@@ -84,10 +98,14 @@ export function MyTaskList({
           {shown.map((t) => {
             const overdue = isOverdue(t, now);
             const team = t.teamId ? teamNames.get(t.teamId) : null;
+            const done = t.status === "done";
+            const canComplete = !done && canTransition(t.status, "done");
             return (
               <tr
                 key={t.id}
-                className={`${styles.myRow} ${overdue ? styles.rowOverdue : ""}`}
+                className={`${styles.myRow} ${overdue ? styles.rowOverdue : ""} ${
+                  justCompletedId === t.id ? styles.rowJustCompleted : ""
+                }`}
                 onClick={() => onSelect(t)}
                 data-testid={`fe4-mytask-row-${t.id}`}
                 tabIndex={0}
@@ -100,6 +118,21 @@ export function MyTaskList({
                   }
                 }}
               >
+                {onComplete && (
+                  <td className={styles.colComplete}>
+                    <TaskCompleteCheck
+                      checked={done}
+                      disabled={!canComplete}
+                      label={done ? `${t.title} は完了済み` : `${t.title} を完了にする`}
+                      testId={`fe4-mytask-complete-${t.id}`}
+                      onCheck={() => {
+                        setJustCompletedId(t.id);
+                        setTimeout(() => setJustCompletedId((cur) => (cur === t.id ? null : cur)), 900);
+                        void onComplete(t);
+                      }}
+                    />
+                  </td>
+                )}
                 <td className={styles.colFromTo}>
                   <FromToCell fromId={t.createdBy ?? null} toId={t.assigneeId} users={users} testId={`fe4-fromto-${t.id}`} />
                 </td>
