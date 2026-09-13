@@ -16,6 +16,38 @@
 .app.withThread {
   grid-template-columns: 68px 260px minmax(0, 1fr) 380px;
 }
+/* Mobile (P21): the workspace rail + channel sidebar move into a slide-in
+   drawer (see ChatApp's useIsMobile branch) and the thread pane becomes a
+   right-side drawer too, so the grid itself collapses to a single column and
+   the message area gets the full width. */
+@media (max-width: 768px) {
+  .app,
+  .app.withThread {
+    grid-template-columns: 1fr;
+  }
+}
+/* The shared @dub/ui Drawer's body has generic dialog padding + no flex
+   context, meant for prose/form content. Our nav (rail+sidebar) and thread
+   pane are full-bleed and manage their own internal scroll regions, so strip
+   the padding and restore the flex context each replaces from the desktop
+   grid (nav = row, thread = column filling the drawer's full height). These
+   are plain attribute selectors (not CSS-module class names) so they reach
+   into the Drawer's portal content at document.body regardless of module
+   scoping — matched only by the testId this file itself passes to Drawer. */
+[data-testid="fe6-mobile-nav-drawer"] > div {
+  padding: 0;
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  min-height: 0;
+}
+[data-testid="fe6-mobile-thread-drawer"] > div {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
 
 /* ───────────────────── Leftmost workspace / team rail ──────────────────── */
 .rail {
@@ -99,6 +131,12 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.workspaceHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  flex-shrink: 0;
 }
 .workspaceAction {
   display: inline-flex;
@@ -299,6 +337,30 @@
   align-items: center;
   gap: var(--dub-space-2);
   min-width: 0;
+}
+/* Hamburger that opens the channel-list drawer — hidden on desktop (the sidebar
+   is always visible there) and shown once the layout drops to a single column. */
+.mobileMenuBtn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--dub-radius-md);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  cursor: pointer;
+}
+.mobileMenuBtn:hover {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
+}
+@media (max-width: 768px) {
+  .mobileMenuBtn {
+    display: inline-flex;
+  }
 }
 .channelTitle {
   display: inline-flex;
@@ -898,6 +960,7 @@
 .thread {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
   border-left: 1px solid var(--dub-color-border-default);
   background: var(--dub-color-surface-base);
