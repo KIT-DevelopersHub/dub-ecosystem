@@ -23,6 +23,7 @@ export interface HomeGridPrefs {
 const THEME_KEY = "dub.ui.theme";
 const SIDEBAR_KEY = "dub.ui.sidebar";
 const HOME_GRID_KEY = "dub.ui.home.grid";
+const HOME_GRID_EDIT_MODE_KEY = "dub.ui.home.gridEditMode";
 
 const EMPTY_HOME_GRID: HomeGridPrefs = { positions: {}, sizes: {} };
 
@@ -30,6 +31,11 @@ export interface UiStore {
   sidebarOpen: boolean;
   theme: ThemeValue;
   homeGrid: HomeGridPrefs;
+  /** Whether the Home widget grid is currently editable (drag/resize UI shown,
+   *  react-grid-layout dragging enabled). Defaults to false (normal/static
+   *  mode) on first-ever load; once toggled, persists across reloads so a
+   *  viewer mid-rearrange doesn't get bounced back to static on refresh. */
+  homeGridEditMode: boolean;
   toggleSidebar(): void;
   setSidebarOpen(open: boolean): void;
   setTheme(t: ThemeValue): void;
@@ -42,6 +48,9 @@ export interface UiStore {
   setHomeWidgetSize(id: string, size: WidgetSize): void;
   /** Restore the default (never-customized) Home widget arrangement. */
   resetHomeGrid(): void;
+  /** Enter/exit the Home widget grid's edit mode (drag handle + size control
+   *  become visible/active only while true). */
+  setHomeGridEditMode(editing: boolean): void;
 }
 
 function readTheme(): ThemeValue {
@@ -111,10 +120,21 @@ function persistHomeGrid(prefs: HomeGridPrefs): void {
   persist(HOME_GRID_KEY, JSON.stringify(prefs));
 }
 
+function readHomeGridEditMode(): boolean {
+  try {
+    // Absence of the key (first-ever load, or a viewer who never entered edit
+    // mode) MUST resolve to false — normal/static is the default, not opt-out.
+    return globalThis.localStorage?.getItem(HOME_GRID_EDIT_MODE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export const useUiStore = create<UiStore>((set, get) => ({
   sidebarOpen: readSidebar(),
   theme: readTheme(),
   homeGrid: readHomeGrid(),
+  homeGridEditMode: readHomeGridEditMode(),
   toggleSidebar: () => {
     const next = !get().sidebarOpen;
     persist(SIDEBAR_KEY, next ? "open" : "closed");
@@ -146,5 +166,9 @@ export const useUiStore = create<UiStore>((set, get) => ({
   resetHomeGrid: () => {
     persistHomeGrid(EMPTY_HOME_GRID);
     set({ homeGrid: { positions: {}, sizes: {} } });
+  },
+  setHomeGridEditMode: (editing: boolean) => {
+    persist(HOME_GRID_EDIT_MODE_KEY, editing ? "1" : "0");
+    set({ homeGridEditMode: editing });
   },
 }));

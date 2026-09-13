@@ -76,20 +76,102 @@ async function dragWidgetTo(page: Page, widgetId: string, targetX: number, targe
   await page.waitForTimeout(150);
 }
 
+async function disableTransitions(page: Page): Promise<void> {
+  // react-grid-layout animates every reposition with a 200ms CSS transition
+  // (see react-grid-layout/css/styles.css: "transition: all 200ms ease").
+  // Reading getBoundingClientRect() mid-animation would catch an interpolated,
+  // in-between frame and misreport it as an "overlap" that never actually
+  // exists at rest — a pure animation artifact, not a placement bug. Disable
+  // all CSS transitions/animations for the page so every pixel read below
+  // reflects the SETTLED layout only.
+  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
+}
+
+/** Enter edit mode via the toolbar toggle (normal/static is the default on
+ *  every fresh load — drag/resize are only reachable after this). */
+async function enterEditMode(page: Page): Promise<void> {
+  const toggle = page.getByTestId("fe2-home-widget-grid-edit-toggle");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+}
+
+test.describe("Home widget grid: edit mode <-> normal (static) mode toggle", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+    await expect(page.getByTestId("fe2-home")).toBeVisible();
+    await expect(page.getByTestId("fe2-home-widget-grid")).toBeVisible();
+    await disableTransitions(page);
+  });
+
+  test("normal mode (default): no grab handle/size control, and a real-mouse drag attempt does not move anything", async ({
+    page,
+  }) => {
+    const toggle = page.getByTestId("fe2-home-widget-grid-edit-toggle");
+    await expect(toggle).toHaveText("編集");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    // No editing affordances rendered at all in static mode.
+    await expect(page.getByTestId("fe2-widget-grab-usage")).toHaveCount(0);
+    await expect(page.getByTestId("fe2-widget-size-usage")).toHaveCount(0);
+    await expect(page.getByTestId("fe2-home-widget-grid-reset")).toHaveCount(0);
+
+    const before = await widgetRect(page, "usage");
+    // Attempt a real-mouse drag starting from where the grab handle WOULD be
+    // (top-left of the widget's chrome area) — must be a no-op since there is
+    // no draggable handle and RGL's isDraggable is false in this mode.
+    await page.mouse.move(before.x + 12, before.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(before.x + 220, before.y + 160, { steps: 10 });
+    await page.waitForTimeout(100);
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+
+    const after = await widgetRect(page, "usage");
+    expect(Math.abs(after.x - before.x)).toBeLessThan(2);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(2);
+  });
+
+  test("編集 button enters edit mode (handle + size control appear, dashed outline shown) and 完了 returns to static", async ({
+    page,
+  }) => {
+    const toggle = page.getByTestId("fe2-home-widget-grid-edit-toggle");
+    await toggle.click();
+    await expect(toggle).toHaveText("完了");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("fe2-widget-grab-usage")).toBeVisible();
+    await expect(page.getByTestId("fe2-widget-size-usage")).toBeVisible();
+    await expect(page.getByTestId("fe2-home-widget-grid-reset")).toBeVisible();
+    await expect(page.getByTestId("fe2-home-widget-grid")).toHaveClass(/fe2-widget-grid-wrap--editing/);
+
+    await toggle.click();
+    await expect(toggle).toHaveText("編集");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("fe2-widget-grab-usage")).toHaveCount(0);
+    await expect(page.getByTestId("fe2-widget-size-usage")).toHaveCount(0);
+    await expect(page.getByTestId("fe2-home-widget-grid")).not.toHaveClass(/fe2-widget-grid-wrap--editing/);
+  });
+
+  test("edit-mode preference survives reload", async ({ page }) => {
+    await enterEditMode(page);
+    await page.reload();
+    await expect(page.getByTestId("fe2-home")).toBeVisible();
+    const toggle = page.getByTestId("fe2-home-widget-grid-edit-toggle");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("fe2-widget-grab-usage")).toBeVisible();
+  });
+});
+
 test.describe("Home widget grid: real cell grid, drag reflows, sizes are cell spans", () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 }); // wide grid (6 cols)
     await page.goto("/");
     await expect(page.getByTestId("fe2-home")).toBeVisible();
     await expect(page.getByTestId("fe2-home-widget-grid")).toBeVisible();
-    // react-grid-layout animates every reposition with a 200ms CSS transition
-    // (see react-grid-layout/css/styles.css: "transition: all 200ms ease").
-    // Reading getBoundingClientRect() mid-animation would catch an interpolated,
-    // in-between frame and misreport it as an "overlap" that never actually
-    // exists at rest — a pure animation artifact, not a placement bug. Disable
-    // all CSS transitions/animations for the page so every pixel read below
-    // reflects the SETTLED layout only.
-    await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
+    // All drag/resize below requires edit mode — static (default) mode has no
+    // grab handle/size control at all (covered separately above).
+    await enterEditMode(page);
+    await disableTransitions(page);
   });
 
   test("renders every widget as a real, non-overlapping grid cell (no overlaps at rest)", async ({ page }) => {

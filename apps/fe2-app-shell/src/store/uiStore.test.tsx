@@ -4,7 +4,12 @@ import { useUiStore } from "./uiStore.tsx";
 describe("useUiStore", () => {
   beforeEach(() => {
     localStorage.clear();
-    useUiStore.setState({ sidebarOpen: true, theme: "system", homeGrid: { positions: {}, sizes: {} } });
+    useUiStore.setState({
+      sidebarOpen: true,
+      theme: "system",
+      homeGrid: { positions: {}, sizes: {} },
+      homeGridEditMode: false,
+    });
   });
 
   it("defaults theme to system and sidebar open", () => {
@@ -80,6 +85,38 @@ describe("useUiStore", () => {
         positions: { usage: { x: 0, y: 0 } },
         sizes: { tasks: "medium" },
       });
+    });
+  });
+
+  describe("homeGridEditMode (静的表示 <-> 編集モード toggle)", () => {
+    it("defaults to false (normal/static mode) on first-ever load", () => {
+      expect(useUiStore.getState().homeGridEditMode).toBe(false);
+    });
+
+    it("setHomeGridEditMode(true) enters edit mode and persists it", () => {
+      useUiStore.getState().setHomeGridEditMode(true);
+      expect(useUiStore.getState().homeGridEditMode).toBe(true);
+      expect(localStorage.getItem("dub.ui.home.gridEditMode")).toBe("1");
+    });
+
+    it("setHomeGridEditMode(false) ('完了') returns to static mode and persists it", () => {
+      useUiStore.getState().setHomeGridEditMode(true);
+      useUiStore.getState().setHomeGridEditMode(false);
+      expect(useUiStore.getState().homeGridEditMode).toBe(false);
+      expect(localStorage.getItem("dub.ui.home.gridEditMode")).toBe("0");
+    });
+
+    it("a persisted edit-mode=true survives a fresh module init (reload)", async () => {
+      localStorage.setItem("dub.ui.home.gridEditMode", "1");
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGridEditMode).toBe(true);
+    });
+
+    it("a fresh init with no stored key at all defaults to static mode, not edit mode", async () => {
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGridEditMode).toBe(false);
     });
   });
 });

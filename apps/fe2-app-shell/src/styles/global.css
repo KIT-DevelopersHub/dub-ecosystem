@@ -608,11 +608,21 @@ svg {
   flex-direction: column;
   gap: var(--dub-space-2);
 }
+/* Edit mode's only always-visible cue besides the grab handle/size control
+ * themselves — a viewer who scrolled past the toolbar should still be able to
+ * tell, at a glance, that this area is currently rearrangeable. */
+.fe2-widget-grid-wrap--editing {
+  outline: 2px dashed var(--dub-color-border-focus);
+  outline-offset: var(--dub-space-2);
+  border-radius: var(--dub-radius-lg);
+}
 .fe2-widget-grid-toolbar-row {
   display: flex;
   justify-content: flex-end;
+  gap: var(--dub-space-2);
 }
-.fe2-widget-grid-reset {
+.fe2-widget-grid-reset,
+.fe2-widget-grid-edit-toggle {
   padding: var(--dub-space-1) var(--dub-space-3);
   font-size: var(--dub-font-size-xs);
   font-weight: var(--dub-font-weight-medium);
@@ -622,9 +632,22 @@ svg {
   border-radius: var(--dub-radius-full);
   cursor: pointer;
 }
-.fe2-widget-grid-reset:hover {
+.fe2-widget-grid-reset:hover,
+.fe2-widget-grid-edit-toggle:hover {
   border-color: var(--dub-color-border-strong);
   color: var(--dub-color-text-primary);
+}
+/* "完了" (edit mode currently on) reads as an active/pressed toggle, not a
+ * plain secondary button — same brand-tinted pattern used elsewhere for a
+ * selected state. */
+.fe2-widget-grid-edit-toggle[aria-pressed="true"] {
+  background: var(--dub-color-brand-100);
+  border-color: var(--dub-color-brand-500);
+  color: var(--dub-color-brand-700);
+}
+.fe2-widget-grid-edit-toggle[aria-pressed="true"]:hover {
+  border-color: var(--dub-color-brand-500);
+  color: var(--dub-color-brand-700);
 }
 .fe2-widget-grid-item {
   display: flex;

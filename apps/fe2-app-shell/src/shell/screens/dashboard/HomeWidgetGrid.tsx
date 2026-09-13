@@ -48,6 +48,11 @@ export function HomeWidgetGrid({
   const setHomeGridPositions = useUiStore((s) => s.setHomeGridPositions);
   const setHomeWidgetSize = useUiStore((s) => s.setHomeWidgetSize);
   const resetHomeGrid = useUiStore((s) => s.resetHomeGrid);
+  // Normal mode (default) is a static display — no drag handle, no size
+  // control, react-grid-layout dragging disabled. Editing (move/resize/reset)
+  // is only possible after switching into edit mode via the toolbar toggle.
+  const editMode = useUiStore((s) => s.homeGridEditMode);
+  const setHomeGridEditMode = useUiStore((s) => s.setHomeGridEditMode);
 
   // A SINGLE width measurement drives both `cols` (our narrow/wide breakpoint)
   // and the pixel `width` react-grid-layout uses to compute column geometry.
@@ -87,15 +92,30 @@ export function HomeWidgetGrid({
   if (present.length === 0) return null;
 
   return (
-    <div ref={containerRef} className="fe2-widget-grid-wrap" data-testid="fe2-home-widget-grid">
+    <div
+      ref={containerRef}
+      className={`fe2-widget-grid-wrap${editMode ? " fe2-widget-grid-wrap--editing" : ""}`}
+      data-testid="fe2-home-widget-grid"
+    >
       <div className="fe2-widget-grid-toolbar-row">
+        {editMode ? (
+          <button
+            type="button"
+            className="fe2-widget-grid-reset"
+            data-testid="fe2-home-widget-grid-reset"
+            onClick={() => resetHomeGrid()}
+          >
+            配置をリセット
+          </button>
+        ) : null}
         <button
           type="button"
-          className="fe2-widget-grid-reset"
-          data-testid="fe2-home-widget-grid-reset"
-          onClick={() => resetHomeGrid()}
+          className="fe2-widget-grid-edit-toggle"
+          data-testid="fe2-home-widget-grid-edit-toggle"
+          aria-pressed={editMode}
+          onClick={() => setHomeGridEditMode(!editMode)}
         >
-          配置をリセット
+          {editMode ? "完了" : "編集"}
         </button>
       </div>
       {width > 0 ? (
@@ -110,9 +130,13 @@ export function HomeWidgetGrid({
           preventCollision={false}
           allowOverlap={false}
           isResizable={false}
-          isDraggable
+          // Normal mode: fully static (no drag at all) — the whole point of the
+          // toggle is that a viewer who is just LOOKING at the dashboard can
+          // never accidentally move a widget.
+          isDraggable={editMode}
           draggableHandle=".fe2-widget-grab"
           onLayoutChange={(next) => {
+            if (!editMode) return; // ignore RGL's own mount-time layout echo while static
             setHomeGridPositions(next.map((it) => ({ id: it.i, x: it.x, y: it.y })));
           }}
         >
@@ -120,31 +144,33 @@ export function HomeWidgetGrid({
             const size = sizeOf(present, sizes, w.id);
             return (
               <div key={w.id} data-testid={`fe2-widget-grid-item-${w.id}`} className="fe2-widget-grid-item">
-                <div className="fe2-widget-grid-chrome">
-                  <span
-                    className="fe2-widget-grab"
-                    data-testid={`fe2-widget-grab-${w.id}`}
-                    role="button"
-                    tabIndex={-1}
-                    aria-label={`${w.label}をドラッグして移動`}
-                    title="ドラッグして移動"
-                  >
-                    <Icon name="drag" />
-                  </span>
-                  <SegmentedControl<WidgetSize>
-                    className="fe2-widget-grid-size"
-                    size="sm"
-                    value={size}
-                    onChange={(next) => setHomeWidgetSize(w.id, next)}
-                    aria-label={`${w.label}のサイズ`}
-                    testId={`fe2-widget-size-${w.id}`}
-                    options={WIDGET_SIZES.map((s) => ({
-                      value: s,
-                      label: SIZE_LABEL[s],
-                      testId: `fe2-widget-size-${w.id}-${s}`,
-                    }))}
-                  />
-                </div>
+                {editMode ? (
+                  <div className="fe2-widget-grid-chrome">
+                    <span
+                      className="fe2-widget-grab"
+                      data-testid={`fe2-widget-grab-${w.id}`}
+                      role="button"
+                      tabIndex={-1}
+                      aria-label={`${w.label}をドラッグして移動`}
+                      title="ドラッグして移動"
+                    >
+                      <Icon name="drag" />
+                    </span>
+                    <SegmentedControl<WidgetSize>
+                      className="fe2-widget-grid-size"
+                      size="sm"
+                      value={size}
+                      onChange={(next) => setHomeWidgetSize(w.id, next)}
+                      aria-label={`${w.label}のサイズ`}
+                      testId={`fe2-widget-size-${w.id}`}
+                      options={WIDGET_SIZES.map((s) => ({
+                        value: s,
+                        label: SIZE_LABEL[s],
+                        testId: `fe2-widget-size-${w.id}-${s}`,
+                      }))}
+                    />
+                  </div>
+                ) : null}
                 <div className="fe2-widget-grid-body">{nodes[w.id]}</div>
               </div>
             );
