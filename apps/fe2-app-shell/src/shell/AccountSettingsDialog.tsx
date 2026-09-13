@@ -116,6 +116,14 @@ export function AccountSettingsDialog({
   const [avatar, setAvatar] = useState<string | null>(currentAvatar);
   const [part, setPart] = useState<PartDraft>({});
   const [submitting, setSubmitting] = useState(false);
+  // P12 delight UX: the save button flashes a checkmark in place before the dialog
+  // closes, so success reads at the button — the toast stays as a secondary trail,
+  // not the only signal.
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -158,10 +166,10 @@ export function AccountSettingsDialog({
   const profileDirty = trimmed !== currentName || avatar !== currentAvatar;
   const participationDirty = loadedPart != null && partSeeded.current && !draftEquals(part, toDraft(loadedPart));
   const dirty = profileDirty || participationDirty;
-  const canSubmit = dirty && !nameEmpty && !tooLong && !submitting;
+  const canSubmit = dirty && !nameEmpty && !tooLong && !submitting && !saveSuccess;
 
   function close() {
-    if (submitting) return;
+    if (submitting || saveSuccess) return;
     onClose();
   }
 
@@ -217,7 +225,13 @@ export function AccountSettingsDialog({
       await Promise.all(ops);
       toast.show({ kind: "success", title: "アカウント設定を保存しました" });
       setSubmitting(false);
-      onClose();
+      // Show the button's own success flash before closing (P12) — a beat long
+      // enough to register, short enough not to feel like a stall.
+      setSaveSuccess(true);
+      closeTimer.current = setTimeout(() => {
+        setSaveSuccess(false);
+        onClose();
+      }, 650);
     } catch (e) {
       // Roll back BOTH optimistic patches and explain.
       if (prevMe) qc.setQueryData(queryKeys.me, prevMe);
@@ -254,7 +268,14 @@ export function AccountSettingsDialog({
             <Button variant="secondary" onClick={close} testId="fe2-account-settings-cancel">
               キャンセル
             </Button>
-            <Button variant="primary" onClick={save} disabled={!canSubmit} loading={submitting} testId="fe2-account-settings-save">
+            <Button
+              variant="primary"
+              onClick={save}
+              disabled={!canSubmit}
+              loading={submitting}
+              success={saveSuccess}
+              testId="fe2-account-settings-save"
+            >
               保存する
             </Button>
           </>
