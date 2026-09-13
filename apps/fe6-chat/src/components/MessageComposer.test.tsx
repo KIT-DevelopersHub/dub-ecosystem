@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageComposer } from "./MessageComposer";
 import { loadDraft } from "../store/draft";
@@ -142,5 +142,24 @@ describe("MessageComposer", () => {
     input.setSelectionRange(0, 1);
     await user.keyboard("{Meta>}b{/Meta}");
     expect(input.value).toBe("*x*");
+  });
+
+  it("P13: pulses the send button (data-sent) briefly after sending, then clears it", async () => {
+    const user = userEvent.setup();
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} />);
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    const send = screen.getByTestId("fe6-composer-send");
+    await user.type(input, "hi");
+    expect(send).not.toHaveAttribute("data-sent");
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(send);
+    expect(send).toHaveAttribute("data-sent", "true");
+
+    act(() => {
+      vi.advanceTimersByTime(260);
+    });
+    expect(send).not.toHaveAttribute("data-sent");
+    vi.useRealTimers();
   });
 });
