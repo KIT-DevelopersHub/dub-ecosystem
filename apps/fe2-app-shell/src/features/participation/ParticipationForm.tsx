@@ -215,7 +215,10 @@ export function ParticipationForm(): JSX.Element {
             <Textarea id="p-note" value={note} onChange={setNote} rows={3} />
           </FormField>
           <div className={styles.actions}>
-            <Button variant="primary" onClick={onSubmit} loading={submit.isPending} testId="participation-submit">
+            {/* type="submit": ネイティブの form submit を経由させ、<Form> 側の
+                「送信失敗時に最初のエラー欄へフォーカス」(P17) を効かせる。
+                onClick は付けない(付けると onSubmit が二重発火する)。 */}
+            <Button variant="primary" type="submit" loading={submit.isPending} testId="participation-submit">
               参加届を送信
             </Button>
           </div>

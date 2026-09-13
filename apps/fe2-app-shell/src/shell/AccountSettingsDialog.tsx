@@ -179,10 +179,12 @@ export function AccountSettingsDialog({
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setError("画像ファイルを選択してください。");
+      focusSettingsError();
       return;
     }
     if (file.size > MAX_AVATAR_BYTES) {
       setError("画像サイズが大きすぎます（512KB 以下にしてください）。");
+      focusSettingsError();
       return;
     }
     const reader = new FileReader();
@@ -190,8 +192,19 @@ export function AccountSettingsDialog({
       setError(null);
       setAvatar(typeof reader.result === "string" ? reader.result : null);
     };
-    reader.onerror = () => setError("画像の読み込みに失敗しました。");
+    reader.onerror = () => {
+      setError("画像の読み込みに失敗しました。");
+      focusSettingsError();
+    };
     reader.readAsDataURL(file);
+  }
+
+  // a11y (P17): この画面のエラーは項目ごとに1つの入力欄へ紐付けられない
+  // (アバター/表示名/参加情報のどれが原因か文言によって変わる)。そのため
+  // role="alert" のバナー自体を可視・非可視どちらのユーザーにも分かるよう
+  // フォーカス可能にし、送信/操作失敗時にそこへフォーカスを移す。
+  function focusSettingsError(): void {
+    requestAnimationFrame(() => document.getElementById("fe2-account-settings-error")?.focus());
   }
 
   async function save() {
@@ -238,6 +251,7 @@ export function AccountSettingsDialog({
       if (prevPart) qc.setQueryData(PARTICIPATION_KEY, prevPart);
       const msg = ApiError.isApiError(e) ? toDisplayableError(e).message : "保存に失敗しました。";
       setError(msg);
+      focusSettingsError();
       toast.show({ kind: "error", title: "アカウント設定を保存できませんでした", description: msg });
       setSubmitting(false);
     }
@@ -370,7 +384,13 @@ export function AccountSettingsDialog({
           </div>
 
           {error ? (
-            <p role="alert" data-testid="fe2-account-settings-error" className="fe2-account-error">
+            <p
+              id="fe2-account-settings-error"
+              role="alert"
+              tabIndex={-1}
+              data-testid="fe2-account-settings-error"
+              className="fe2-account-error"
+            >
               {error}
             </p>
           ) : null}

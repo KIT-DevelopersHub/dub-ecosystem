@@ -32,6 +32,11 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     } catch (e) {
       setBusy(false);
       setError(messageFor(e, "メールアドレスまたはパスワードが正しくありません。"));
+      // a11y: 認証失敗はメール/パスワードどちらが原因か特定できないため、
+      // 先頭の入力欄(メールアドレス)へフォーカスを戻す。エラー文言自体は
+      // role="alert" (下記) により、フォーカス移動と独立してSRに読み上げられる。
+      // rAF: aria-invalid/aria-describedby の再描画コミット後にフォーカスする。
+      requestAnimationFrame(() => document.getElementById("fe2-login-email")?.focus());
     }
   }
 
@@ -50,6 +55,9 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     } catch (e) {
       setBusy(false);
       setError(messageFor(e, "デモログインに失敗しました。"));
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>('[data-testid="fe2-login-demo"]')?.focus(),
+      );
     }
   }
 
@@ -86,6 +94,8 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
               placeholder="you@developershub.jp"
               disabled={busy}
               testId="fe2-login-email"
+              invalid={!!error}
+              aria-describedby={error ? "fe2-login-error" : undefined}
             />
           </div>
           <div className="fe2-login-field">
@@ -100,6 +110,8 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
               placeholder="パスワード"
               disabled={busy}
               testId="fe2-login-password"
+              invalid={!!error}
+              aria-describedby={error ? "fe2-login-error" : undefined}
             />
           </div>
           <Button
@@ -129,7 +141,7 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
         ) : null}
 
         {error ? (
-          <p role="alert" data-testid="fe2-login-error" className="fe2-login-error">
+          <p id="fe2-login-error" role="alert" data-testid="fe2-login-error" className="fe2-login-error">
             {error}
           </p>
         ) : null}
