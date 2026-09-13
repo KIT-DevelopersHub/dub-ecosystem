@@ -689,6 +689,32 @@
 .pending {
   opacity: 0.55;
 }
+/* P13: slide-in the instant the OWN optimistic row mounts (own send) — the visual
+ * counterpart of a receiving bubble's entrance — paired with .sendButtonSent above
+ * so the whole send action reads as one motion. Applied to BOTH eventual states
+ * (`.pending` and `.failed`, not just `.pending`) because a demo/offline transport
+ * can resolve to "failed" before the first paint — the entrance is about the
+ * moment of sending, not the eventual delivery outcome. Each send mounts a new
+ * row (fresh `clientTempId` key), so this replays every time; a later retry
+ * reuses the same key/DOM node and does not replay it. */
+.justSent {
+  animation: dub-message-slide-in var(--dub-motion-normal) var(--dub-motion-easing);
+}
+@keyframes dub-message-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .justSent {
+    animation: none;
+  }
+}
 .failed {
   box-shadow: inset 3px 0 0 var(--dub-color-danger-500);
 }
@@ -826,6 +852,22 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-muted);
   cursor: not-allowed;
+}
+/* P13: press-and-away pulse the instant a message is sent — pairs with the
+ * pending row's slide-in below so the whole send reads as one motion. */
+.sendButtonSent {
+  animation: dub-send-pulse 260ms var(--dub-motion-easing);
+}
+@keyframes dub-send-pulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.86); }
+  70% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sendButtonSent {
+    animation: none;
+  }
 }
 .composerError {
   color: var(--dub-color-danger-500);
