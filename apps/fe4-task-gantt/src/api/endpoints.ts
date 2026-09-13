@@ -47,6 +47,14 @@ export function deleteTask(client: ApiClient, id: common.TaskId): Promise<void> 
   return client.request<void>({ method: "DELETE", path: `${P}/tasks/${id}` as ApiPath });
 }
 
+/** Restore (un-archive) a soft-deleted task — the inverse of deleteTask, used by the
+ *  gantt "削除を元に戻す" (Ctrl/⌘-Z) undo. Returns the restored task (archived_at cleared,
+ *  parent/assignee/dependencies intact). Idempotent server-side (restoring a live task
+ *  is a no-op that echoes the live task). */
+export function restoreTask(client: ApiClient, id: common.TaskId): Promise<task.Task> {
+  return client.request<task.Task>({ method: "POST", path: `${P}/tasks/${id}/restore` as ApiPath });
+}
+
 // ---- task attachments (task-service; task_attachments) ----
 export function listTaskAttachments(
   client: ApiClient,

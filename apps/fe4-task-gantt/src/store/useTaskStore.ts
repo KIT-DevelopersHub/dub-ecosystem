@@ -62,6 +62,9 @@ export interface TaskStoreState {
   create: (client: ApiClient, body: task.CreateTaskRequest, provisional?: task.Task) => Promise<task.Task | null>;
   // delete — optimistic (removed instantly, restored on failure).
   removeTask: (client: ApiClient, id: common.TaskId) => Promise<boolean>;
+  // restore (undo of delete) — optimistic: re-insert the snapshot instantly, then
+  // un-archive on the server; drop it again + surface the reason on failure.
+  restoreTask: (client: ApiClient, id: common.TaskId, snapshot: task.Task) => Promise<boolean>;
   /** Surface an error raised OUTSIDE the store (e.g. a relation save / dependency
    *  replace that bypasses the store) so it is never lost. */
   reportError: (e: unknown) => void;
@@ -193,6 +196,20 @@ export const useTaskStore = create<TaskStoreState>((set, get) => ({
         tasks: snapshot ? upsert(s.tasks, snapshot) : s.tasks,
         ...errState(e),
       }));
+      return false;
+    }
+  },
+
+  async restoreTask(client, id, snapshot) {
+    // Optimistic inverse of removeTask: put the row back the same tick, then persist
+    // the un-archive. On failure drop it again and surface the reason.
+    set((s) => ({ tasks: upsert(s.tasks, snapshot) }));
+    try {
+      const server = await api.restoreTask(client, id);
+      set((s) => ({ tasks: upsert(s.tasks, server), lastError: null, lastErrorDetail: null }));
+      return true;
+    } catch (e) {
+      set((s) => ({ tasks: remove(s.tasks, id), ...errState(e) }));
       return false;
     }
   },

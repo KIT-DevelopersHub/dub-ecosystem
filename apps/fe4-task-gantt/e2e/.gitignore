@@ -1,0 +1,4 @@
+# Playwright run artifacts (traces, error contexts, screenshots) — not committed.
+.output/
+/test-results/
+/playwright-report/

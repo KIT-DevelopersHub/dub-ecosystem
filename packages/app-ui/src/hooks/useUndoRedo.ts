@@ -11,10 +11,23 @@
 // deep-cloning an entire cache. See docs/FRONTEND_GUIDE.md.
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/** A confirmation prompt a command can request before its `undo` runs. Heavy or
+ *  destructive inverses (e.g. restoring a deleted record — which re-writes to the
+ *  server) set this so the driver raises a dialog first instead of reversing silently.
+ *  The hook itself never blocks; it only exposes the descriptor (see `peekUndo`). */
+export interface UndoConfirm {
+  title?: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+}
+
 /** A reversible action. `undo` puts the world back; `redo` re-applies it. Both may
- *  be async (they can re-issue API calls). `label` powers "元に戻す: <label>" hints. */
+ *  be async (they can re-issue API calls). `label` powers "元に戻す: <label>" hints.
+ *  `confirm`, when present, asks the driver to confirm before running `undo`. */
 export interface UndoableCommand {
   label?: string;
+  confirm?: UndoConfirm;
   undo: () => void | Promise<void>;
   redo: () => void | Promise<void>;
 }
@@ -28,6 +41,10 @@ export interface UndoRedo {
   redo: () => Promise<boolean>;
   /** Drop all history (e.g. when the underlying document is reloaded/replaced). */
   clear: () => void;
+  /** Peek the command that the next `undo()` would reverse WITHOUT running it — lets a
+   *  driver read `.confirm` and gate a heavy inverse behind a dialog. Undefined at the
+   *  boundary (empty undo stack). */
+  peekUndo: () => UndoableCommand | undefined;
   canUndo: boolean;
   canRedo: boolean;
   undoLabel: string | undefined;
@@ -98,11 +115,17 @@ export function useUndoRedo(options: UseUndoRedoOptions = {}): UndoRedo {
     rerender();
   }, [rerender]);
 
+  const peekUndo = useCallback(
+    (): UndoableCommand | undefined => undoStack.current[undoStack.current.length - 1],
+    [],
+  );
+
   return {
     push,
     undo,
     redo,
     clear,
+    peekUndo,
     canUndo: undoStack.current.length > 0,
     canRedo: redoStack.current.length > 0,
     undoLabel: undoStack.current[undoStack.current.length - 1]?.label,
