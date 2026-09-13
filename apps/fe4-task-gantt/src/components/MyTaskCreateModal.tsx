@@ -1,10 +1,29 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button } from "@dub/ui";
+import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { isoFromDateInput } from "../domain/task-form";
 import { type ScopeTask } from "../domain/task-hierarchy";
 import { TaskFormFields } from "./TaskFormFields";
 import styles from "../styles/app.module.css";
+
+// P1-2 follow-up — same draft-autosave/leave-guard as TaskCreateModal (the gantt
+// タスク作成 form). Separate storage key: this is "タスク発行" (マイタスク), a distinct
+// form with no event/parent/dep presets to reconcile.
+const DRAFT_KEY = "fe4.mytask.create";
+
+interface MyTaskCreateDraft {
+  title: string;
+  description: string;
+  status: task.TaskStatus;
+  priority: task.TaskPriority;
+  assigneeId: common.UserId | null;
+  teamId: common.TeamId | null;
+  start: string | null;
+  due: string | null;
+  parentId: common.TaskId | null;
+  deps: common.TaskId[];
+}
 
 export interface MyTaskDraft {
   /** Event link — resolved from CONTEXT, never a visible field (判断44). The gantt
@@ -57,19 +76,39 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
  * (from) is the current user, stamped server-side as created_by.
  */
 export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions, scopeTasks, onCreate, requesterName, defaultEventId = null }: MyTaskCreateModalProps) {
-  const [title, setTitle] = useState("");
-  const [status, setStatus] = useState<task.TaskStatus>("todo");
-  const [assigneeId, setAssigneeId] = useState<common.UserId | null>(null);
-  const [priority, setPriority] = useState<task.TaskPriority>("medium");
-  const [teamId, setTeamId] = useState<common.TeamId | null>(null);
-  const [start, setStart] = useState<string | null>(null);
-  const [due, setDue] = useState<string | null>(null);
-  const [parentId, setParentId] = useState<common.TaskId | null>(null);
-  const [deps, setDeps] = useState<common.TaskId[]>([]);
-  const [description, setDescription] = useState("");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const initialDraft = useMemo(() => peekDraft<MyTaskCreateDraft>(DRAFT_KEY), []);
+  const [title, setTitle] = useState(initialDraft?.title ?? "");
+  const [status, setStatus] = useState<task.TaskStatus>(initialDraft?.status ?? "todo");
+  const [assigneeId, setAssigneeId] = useState<common.UserId | null>(initialDraft?.assigneeId ?? null);
+  const [priority, setPriority] = useState<task.TaskPriority>(initialDraft?.priority ?? "medium");
+  const [teamId, setTeamId] = useState<common.TeamId | null>(initialDraft?.teamId ?? null);
+  const [start, setStart] = useState<string | null>(initialDraft?.start ?? null);
+  const [due, setDue] = useState<string | null>(initialDraft?.due ?? null);
+  const [parentId, setParentId] = useState<common.TaskId | null>(initialDraft?.parentId ?? null);
+  const [deps, setDeps] = useState<common.TaskId[]>(initialDraft?.deps ?? []);
+  const [description, setDescription] = useState(initialDraft?.description ?? "");
   const [saving, setSaving] = useState(false);
 
+  const dirty =
+    title.trim() !== "" ||
+    description.trim() !== "" ||
+    status !== "todo" ||
+    priority !== "medium" ||
+    assigneeId != null ||
+    teamId != null ||
+    start != null ||
+    due != null ||
+    parentId != null ||
+    deps.length > 0;
+  const draft = useDraftAutosave<MyTaskCreateDraft>({
+    storageKey: DRAFT_KEY,
+    value: { title, description, status, priority, assigneeId, teamId, start, due, parentId, deps },
+    dirty,
+  });
+
   const reset = () => {
+    draft.clear(); // deliberate cancel/success — don't resurrect this as a "restored" draft later
     setTitle("");
     setStatus("todo");
     setAssigneeId(null);
@@ -137,6 +176,12 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
           依頼主: <strong>{requesterName}</strong>
         </p>
       )}
+      <DraftRestoredNotice
+        visible={draft.restoredVisible}
+        onDiscard={reset}
+        onKeep={draft.acknowledgeRestored}
+        testId="fe4-mytask-create-draft-notice"
+      />
       <TaskFormFields
         idPrefix="fe4-mytask-create"
         title={title}
