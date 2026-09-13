@@ -577,31 +577,18 @@ svg {
 .fe2-home > [data-testid="fe2-home-header"] {
   padding-bottom: 0;
 }
-/* Dashboard body fills the remaining height below the KPI row. Every inner region
- * (app launcher, cards, rail) renders at its natural, comfortable size — NONE of
- * them get their own scrollbar. If the sum can't fit a short viewport, the body is
- * the SINGLE, tidy scroll fallback (never a nested scrollbar), and the page itself
- * still never scrolls (the dashboard stays clamped with overflow:hidden). */
+/* Dashboard body fills the remaining height below the KPI row: the customizable
+ * widget grid, then the fixed app launchpad, stacked full-width in document
+ * order. Neither gets its own scrollbar — if the sum can't fit a short
+ * viewport, the body is the SINGLE, tidy scroll fallback (never a nested
+ * scrollbar), and the page itself still never scrolls (the dashboard stays
+ * clamped with overflow:hidden). */
 .fe2-dash-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: minmax(0, 2.1fr) minmax(280px, 1fr);
-  gap: var(--dub-space-4);
-  align-items: start;
-  align-content: start;
-}
-.fe2-dash-main {
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--dub-space-4);
-}
-/* The two visualization cards sit side by side to save vertical space. */
-.fe2-dash-cards {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: var(--dub-space-4);
 }
 .fe2-dash-section-title {
@@ -610,23 +597,96 @@ svg {
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-secondary);
 }
-/* Stack to a single column as soon as the KPI row itself compacts (<=1100px, see
- * .fe2-kpi-row below). Below that width the two-column body (2.1fr main / 1fr
- * aside) leaves the aside noticeably SHORTER than the main column (fewer, smaller
- * cards vs. the viz cards + full app launcher grid) — the aside then sits at the
- * top of a taller shared row and .fe2-dash-body's single scrollbar drags it out of
- * view before the main column's bottom (app grid) comes into sight, reading as the
- * events card "collapsing"/disappearing on a half-width window (bug report: 半画面
- * でイベント欄が潰れる). Stacking removes the side-by-side height mismatch — every
- * card renders full-width, full-height, in document order, so nothing gets scrolled
- * away half-seen. Matches the KPI breakpoint so both regions compact together. */
-@media (max-width: 1100px) {
-  .fe2-dash-body {
-    grid-template-columns: 1fr;
-  }
-  .fe2-dash-cards {
-    grid-template-columns: 1fr;
-  }
+
+/* ---- customizable widget grid (react-grid-layout) -------------------------- */
+/* Each widget is a real, placeable grid cell (see dashboard/homeGrid.ts): 小=1x2
+ * / 中=2x2 / 大=3x3 cells. Dragging one over another's cells pushes the other
+ * down the column (the library's own vertical compaction) — genuine collision
+ * avoidance, not a row-order swap. */
+.fe2-widget-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.fe2-widget-grid-toolbar-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.fe2-widget-grid-reset {
+  padding: var(--dub-space-1) var(--dub-space-3);
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-full);
+  cursor: pointer;
+}
+.fe2-widget-grid-reset:hover {
+  border-color: var(--dub-color-border-strong);
+  color: var(--dub-color-text-primary);
+}
+.fe2-widget-grid-item {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  box-shadow: var(--dub-shadow-sm);
+}
+/* The nested Card (usage/tasks/events/notifications/homeWidget) already carries
+ * its own surface/border; strip those so the grid item's chrome is the ONLY
+ * visible frame (avoids a double-bordered "card inside a card" look). */
+.fe2-widget-grid-item [data-testid] > .fe2-widget-grid-body,
+.fe2-widget-grid-body {
+  min-height: 0;
+}
+.fe2-widget-grid-body > section {
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  background: transparent;
+}
+.fe2-widget-grid-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  padding: 2px var(--dub-space-2);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-sunken);
+  flex: 0 0 auto;
+}
+.fe2-widget-grab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--dub-radius-md);
+  color: var(--dub-color-text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+.fe2-widget-grab:active {
+  cursor: grabbing;
+}
+.fe2-widget-grab > svg {
+  width: 14px;
+  height: 14px;
+}
+.fe2-widget-grid-item.react-draggable-dragging {
+  box-shadow: var(--dub-shadow-md);
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+}
+.react-grid-placeholder {
+  background: var(--dub-color-brand-100) !important;
+  border-radius: var(--dub-radius-lg);
+  opacity: 0.6;
 }
 
 /* ---- KPI row (at-a-glance overview) --------------------------------------- */
@@ -945,16 +1005,6 @@ svg {
   box-shadow: 0 0 0 2px var(--dub-color-surface-raised);
 }
 
-/* Right: live BFF panels. The column fills the body height and scrolls internally
- * (its own safety valve) so it never pushes the page — the dashboard stays clamped. */
-.fe2-home-side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-4);
-  min-height: 0;
-  min-width: 0;
-  overflow-y: auto;
-}
 .fe2-home-card-head {
   display: flex;
   align-items: center;
