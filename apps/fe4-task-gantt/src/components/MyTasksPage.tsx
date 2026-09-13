@@ -130,6 +130,21 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
     }
   };
 
+  // P11 delight UX — quick-complete from the list checkbox. Optimistic (the row
+  // flips to 完了 instantly so the checkmark/flash animation plays right away),
+  // rolled back with a toast on failure — same shape as `onCreate` above.
+  const onComplete = async (t: task.Task) => {
+    const prevTasks = tasks;
+    setTasks((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: "done" as const } : x)));
+    try {
+      const updated = await updateTask(client, t.id, { version: t.version, status: "done" });
+      setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
+    } catch {
+      setTasks(prevTasks);
+      toast.show({ kind: "error", title: "完了にできませんでした", description: "もう一度お試しください。" });
+    }
+  };
+
   const onCreate = async (draft: MyTaskDraft) => {
     // optimistic: show the new task immediately with a temporary id.
     const tempId = `task_temp_${Date.now()}` as common.TaskId;
@@ -246,6 +261,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         teamNames={teamNames}
         loading={loading}
         onSelect={setSelected}
+        onComplete={onComplete}
         visibleCount={visibleCount}
         onShowMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
       />
