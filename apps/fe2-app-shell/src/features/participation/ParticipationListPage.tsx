@@ -147,6 +147,8 @@ export function ParticipationListPage(): JSX.Element {
         rows={rows}
         rowKey={(p) => p.id}
         onRowClick={(p) => setSelected(p)}
+        stickyHeader
+        zebra
         testId="participation-list-table"
         emptyState={<EmptyState title="まだ参加届はありません" description="公開フォームから送信された参加届がここに表示されます" icon="check-square" />}
       />
