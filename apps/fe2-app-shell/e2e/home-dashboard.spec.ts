@@ -6,6 +6,17 @@
 //       account email small & muted beside it;
 //   (3) clicking "DevHub" returns to Home (logo = home导线).
 // Screenshots (desktop + mobile) are written to ~/DubVault/docs/home-header-refine/.
+//
+// The dashboard body used to be a 2-column CSS grid (viz cards + app launcher on
+// the left, a fixed vertical stack of live panels on the right, `.fe2-dash-main`
+// / `.fe2-home-side`) that stacked to one column below 1100px. That structure is
+// gone: the customizable widget area is now a single full-width cell grid (see
+// dashboard/HomeWidgetGrid.tsx) sitting above the (still fixed, full-width) app
+// launcher — there is no longer a "main column vs. side rail" split to assert
+// geometry on, at any width. The invariant that mattered (never let a widget get
+// squished into an unreadably narrow sliver) is instead enforced by the grid
+// itself dropping to a narrow (2-col) layout below its own measured container
+// width — see the narrow-width assertion below.
 import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -34,12 +45,10 @@ const VIEWPORTS = [
   { name: "mobile-390x844", width: 390, height: 844 },
 ] as const;
 
-// Width below which .fe2-dash-body stacks to a single column (see global.css).
-// Below it, the main column (viz cards + app grid) and the right rail (events /
-// notifications) must render full-width, stacked in document order — never
-// side-by-side — so a shared scrollbar can never drag the shorter column out of
-// view while the taller one is still being read (the original bug).
-const DASH_BODY_STACK_BREAKPOINT = 1100;
+// Width below which the widget grid itself narrows to 2 columns (see
+// dashboard/homeGrid.ts HOME_GRID_NARROW_BREAKPOINT) — every widget then reads
+// at a comfortable minimum width instead of shrinking indefinitely.
+const WIDGET_GRID_NARROW_BREAKPOINT = 640;
 
 /** Vertical overflow of the page scroller in px (0 = no page scroll). */
 async function pageVerticalOverflow(page: Page): Promise<number> {
@@ -63,6 +72,11 @@ test("home dashboard: brand-first header, home导线, and zero page scroll at ev
 }) => {
   await page.goto("/");
   await expect(page.getByTestId("fe2-home")).toBeVisible();
+  // The widget grid animates every reposition with a 200ms CSS transition
+  // (react-grid-layout); each setViewportSize below re-triggers that transition
+  // as the grid's column count adapts. Disable transitions so every rect read
+  // in this test reflects the settled layout, not an interpolated frame.
+  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
 
   // (2) Header is brand-first: "DevHub" bold + small muted account email.
   const brand = page.getByTestId("fe2-brand-home");
@@ -92,29 +106,32 @@ test("home dashboard: brand-first header, home导线, and zero page scroll at ev
       })
       .toBeLessThanOrEqual(1);
 
-    // (1b) Below the stack breakpoint, main and aside must be full-width and
-    // stacked (never side-by-side) — this is what stops a shared scrollbar from
-    // dragging the shorter aside out of view while the taller main column (viz
-    // cards + app grid) is still being scrolled through. Regression test for the
-    // "半画面でイベント欄が潰れる" report.
-    if (vp.width <= DASH_BODY_STACK_BREAKPOINT) {
+    // (1b) The widget grid never overlaps its own items, at any width — the
+    // regression this guards is the same one the old "半画面でイベント欄が潰れる"
+    // report was about (a widget getting squished/clipped at in-between
+    // widths), just asserted against the new architecture: read every visible
+    // widget's real pixel rect and confirm no two intersect.
+    const grid = page.getByTestId("fe2-home-widget-grid");
+    if (await grid.count()) {
       const rects = await page.evaluate(() => {
-        const main = document.querySelector(".fe2-dash-main")?.getBoundingClientRect();
-        const aside = document.querySelector(".fe2-home-side")?.getBoundingClientRect();
-        return main && aside ? { mainLeft: main.left, mainBottom: main.bottom, asideLeft: aside.left, asideTop: aside.top } : null;
+        const items = Array.from(document.querySelectorAll('[data-testid^="fe2-widget-grid-item-"]'));
+        return items.map((el) => el.getBoundingClientRect()).map((r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }));
       });
-      expect(rects, `main/aside must be present at ${vp.name}`).not.toBeNull();
-      // Stacked ⇒ same left edge, and aside begins at/after main's bottom edge
-      // (allow a few px for the column gap/rounding), never floating beside it.
-      expect(Math.abs(rects!.mainLeft - rects!.asideLeft), `main/aside must share a left edge (stacked) at ${vp.name}`).toBeLessThanOrEqual(1);
-      expect(rects!.asideTop, `aside must start at/after main's bottom (stacked, not side-by-side) at ${vp.name}`).toBeGreaterThanOrEqual(rects!.mainBottom - 1);
-
-      // The events card itself must render at full column width (never clipped
-      // to a narrow side-rail sliver) once stacked.
-      const eventsCard = page.getByTestId("fe2-home-events");
-      await expect(eventsCard).toBeVisible();
-      const eventsWidth = await eventsCard.evaluate((el) => el.getBoundingClientRect().width);
-      expect(eventsWidth, `events card must be full-width when stacked at ${vp.name}`).toBeGreaterThan(vp.width * 0.8);
+      for (let a = 0; a < rects.length; a++) {
+        for (let b = a + 1; b < rects.length; b++) {
+          const p = rects[a]!;
+          const q = rects[b]!;
+          const overlaps = p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom;
+          expect(overlaps, `widgets ${a} and ${b} must not overlap at ${vp.name}`).toBe(false);
+        }
+      }
+      // Below the grid's own narrow breakpoint every widget must still read at a
+      // sane minimum width (never an unreadable sliver).
+      if (vp.width <= WIDGET_GRID_NARROW_BREAKPOINT) {
+        for (const r of rects) {
+          expect(r.right - r.left, `a widget must not be squished at ${vp.name}`).toBeGreaterThan(100);
+        }
+      }
     }
 
     if (vp.name === "half-width-960x900") {

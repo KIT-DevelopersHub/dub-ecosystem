@@ -1,10 +1,15 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useUiStore } from "./uiStore.tsx";
 
 describe("useUiStore", () => {
   beforeEach(() => {
     localStorage.clear();
-    useUiStore.setState({ sidebarOpen: true, theme: "system" });
+    useUiStore.setState({
+      sidebarOpen: true,
+      theme: "system",
+      homeGrid: { positions: {}, sizes: {} },
+      homeGridEditMode: false,
+    });
   });
 
   it("defaults theme to system and sidebar open", () => {
@@ -23,5 +28,95 @@ describe("useUiStore", () => {
     useUiStore.getState().toggleSidebar();
     expect(useUiStore.getState().sidebarOpen).toBe(false);
     expect(localStorage.getItem("dub.ui.sidebar")).toBe("closed");
+  });
+
+  describe("homeGrid (Home widget placement)", () => {
+    it("defaults to no positions and no sizes", () => {
+      expect(useUiStore.getState().homeGrid).toEqual({ positions: {}, sizes: {} });
+    });
+
+    it("setHomeGridPositions merges (does not replace) the position map and persists it", () => {
+      useUiStore.getState().setHomeGridPositions([{ id: "usage", x: 0, y: 0 }]);
+      useUiStore.getState().setHomeGridPositions([{ id: "tasks", x: 2, y: 0 }]);
+      expect(useUiStore.getState().homeGrid.positions).toEqual({
+        usage: { x: 0, y: 0 },
+        tasks: { x: 2, y: 0 },
+      });
+      const persisted = JSON.parse(localStorage.getItem("dub.ui.home.grid")!);
+      expect(persisted.positions.usage).toEqual({ x: 0, y: 0 });
+    });
+
+    it("a later position for the same widget overwrites its earlier one", () => {
+      useUiStore.getState().setHomeGridPositions([{ id: "usage", x: 0, y: 0 }]);
+      useUiStore.getState().setHomeGridPositions([{ id: "usage", x: 3, y: 1 }]);
+      expect(useUiStore.getState().homeGrid.positions.usage).toEqual({ x: 3, y: 1 });
+    });
+
+    it("setHomeWidgetSize sets one widget's size and persists it", () => {
+      useUiStore.getState().setHomeWidgetSize("usage", "large");
+      expect(useUiStore.getState().homeGrid.sizes.usage).toBe("large");
+      const persisted = JSON.parse(localStorage.getItem("dub.ui.home.grid")!);
+      expect(persisted.sizes.usage).toBe("large");
+    });
+
+    it("resetHomeGrid clears both maps and persists the reset", () => {
+      useUiStore.getState().setHomeGridPositions([{ id: "usage", x: 0, y: 0 }]);
+      useUiStore.getState().setHomeWidgetSize("usage", "large");
+      useUiStore.getState().resetHomeGrid();
+      expect(useUiStore.getState().homeGrid).toEqual({ positions: {}, sizes: {} });
+      expect(JSON.parse(localStorage.getItem("dub.ui.home.grid")!)).toEqual({ positions: {}, sizes: {} });
+    });
+
+    it("ignores a malformed dub.ui.home.grid value in storage (falls back to empty) on fresh init", async () => {
+      localStorage.setItem("dub.ui.home.grid", "{not json");
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGrid).toEqual({ positions: {}, sizes: {} });
+    });
+
+    it("drops an invalid size value read from storage but keeps a valid sibling", async () => {
+      localStorage.setItem(
+        "dub.ui.home.grid",
+        JSON.stringify({ positions: { usage: { x: 0, y: 0 } }, sizes: { usage: "huge", tasks: "medium" } }),
+      );
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGrid).toEqual({
+        positions: { usage: { x: 0, y: 0 } },
+        sizes: { tasks: "medium" },
+      });
+    });
+  });
+
+  describe("homeGridEditMode (静的表示 <-> 編集モード toggle)", () => {
+    it("defaults to false (normal/static mode) on first-ever load", () => {
+      expect(useUiStore.getState().homeGridEditMode).toBe(false);
+    });
+
+    it("setHomeGridEditMode(true) enters edit mode and persists it", () => {
+      useUiStore.getState().setHomeGridEditMode(true);
+      expect(useUiStore.getState().homeGridEditMode).toBe(true);
+      expect(localStorage.getItem("dub.ui.home.gridEditMode")).toBe("1");
+    });
+
+    it("setHomeGridEditMode(false) ('完了') returns to static mode and persists it", () => {
+      useUiStore.getState().setHomeGridEditMode(true);
+      useUiStore.getState().setHomeGridEditMode(false);
+      expect(useUiStore.getState().homeGridEditMode).toBe(false);
+      expect(localStorage.getItem("dub.ui.home.gridEditMode")).toBe("0");
+    });
+
+    it("a persisted edit-mode=true survives a fresh module init (reload)", async () => {
+      localStorage.setItem("dub.ui.home.gridEditMode", "1");
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGridEditMode).toBe(true);
+    });
+
+    it("a fresh init with no stored key at all defaults to static mode, not edit mode", async () => {
+      vi.resetModules();
+      const fresh = await import("./uiStore.tsx");
+      expect(fresh.useUiStore.getState().homeGridEditMode).toBe(false);
+    });
   });
 });
