@@ -41,6 +41,14 @@ dependencies:
   # the web bundle owns all of that.
   flutter_inappwebview: ^6.1.5
 
+# Vendored patch for a Windows-only vertical-scroll bug in
+# flutter_inappwebview_windows 0.6.0 (the latest stable release — the fix is
+# not upstream yet). See third_party/README.md for the full root-cause
+# writeup and links to the upstream issues.
+dependency_overrides:
+  flutter_inappwebview_windows:
+    path: third_party/flutter_inappwebview_windows
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
