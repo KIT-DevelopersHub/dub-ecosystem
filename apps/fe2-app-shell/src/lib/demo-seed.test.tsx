@@ -169,7 +169,10 @@ describe("admin RBAC console (interactive roster surface)", () => {
 describe("admin email routing (@developershub.jp address management)", () => {
   interface Addr { id: string; localPart: string; address: string; destination: string; enabled: boolean }
   interface Page<T> { items: T[] }
-  const BASE = "/api/v1/mail/admin/email-routing/addresses";
+  // Frontend calls the ISSUED (zone-rule) surface since #468 — the demo mock must serve
+  // it, not the removed account-scoped /addresses path (regression: the 発行済みアドレス
+  // dialog listed via /issued-addresses and 404'd against the stale mock).
+  const BASE = "/api/v1/mail/admin/email-routing/issued-addresses";
   const list = (a: ReturnType<typeof api>) => a.request<Page<Addr>>({ method: "GET", path: BASE });
 
   it("the demo admin holds mail:admin (so the tab is reachable) and lists @developershub.jp addresses", async () => {
@@ -208,5 +211,15 @@ describe("admin email routing (@developershub.jp address management)", () => {
 
     await a.request({ method: "DELETE", path: `${BASE}/${target.id}` });
     expect((await list(a)).items.some((x) => x.id === target.id)).toBe(false);
+  });
+
+  it("roster-addresses (sync source) lists the receiving addresses for Email Routing 同期", async () => {
+    const a = api();
+    const res = await a.request<{ items: Array<{ address: string; destination: string; enabled: boolean }> }>({
+      method: "GET",
+      path: "/api/v1/mail/admin/email-routing/roster-addresses",
+    });
+    expect(res.items.length).toBeGreaterThan(0);
+    expect(res.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
   });
 });
