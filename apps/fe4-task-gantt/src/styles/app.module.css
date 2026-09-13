@@ -1685,11 +1685,82 @@
 .demoTabActive { background: var(--dub-color-surface-base); color: var(--dub-color-brand-700); box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08)); }
 .demoMain { display: block; }
 
+/* ---- P20: マイタスク一覧をモバイル幅で1タスク=1カードに積層 ----
+   Same table/tr/td DOM as desktop (no duplicate nodes, no extra testids) — only
+   restyled via CSS Grid so a `fe4-mytask-row-<id>` stays a single element either
+   way. Column order is fixed (依頼→担当・タイトル・チーム・状態・優先度・終了日),
+   so nth-child maps each <td> onto a named grid area regardless of its own class. */
 @media (max-width: 720px) {
   .myPage { padding: var(--dub-space-4); }
-  .colFromTo { min-width: 140px; }
-  .partyName { display: none; }
+
+  .myTable,
+  .myTable tbody { display: block; width: 100%; }
   .myTable thead { display: none; }
+
+  .myTable tbody tr.myRow {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "title  status"
+      "fromto fromto"
+      "team   priority"
+      "due    due";
+    align-items: start;
+    column-gap: var(--dub-space-3);
+    row-gap: var(--dub-space-2);
+    padding: var(--dub-space-3);
+    margin-bottom: var(--dub-space-3);
+    border: 1px solid var(--dub-color-border-default);
+    border-radius: var(--dub-radius-lg, 12px);
+    background: var(--dub-color-surface-raised);
+    box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+    min-height: 44px; /* touch target */
+  }
+  .myTable tbody tr.myRow:last-child { margin-bottom: 0; }
+  .myTable tbody tr.myRow:hover { background: var(--dub-color-surface-raised); }
+  .myTable tbody tr.rowOverdue {
+    background: var(--dub-color-danger-50, rgba(220, 38, 38, 0.05));
+    border-color: var(--dub-color-danger-200, var(--dub-color-danger-500));
+  }
+
+  .myTable tbody td {
+    display: block;
+    padding: 0;
+    border-bottom: none;
+    min-width: 0;
+  }
+  .myTable tbody td:nth-child(1) { grid-area: fromto; }
+  .myTable tbody td:nth-child(2) { grid-area: title; align-self: center; }
+  .myTable tbody td:nth-child(3) { grid-area: team; }
+  .myTable tbody td:nth-child(4) { grid-area: status; justify-self: end; }
+  .myTable tbody td:nth-child(5) { grid-area: priority; }
+  .myTable tbody td:nth-child(6) {
+    grid-area: due;
+    padding-top: var(--dub-space-2);
+    border-top: 1px dashed var(--dub-color-border-default);
+    font-size: var(--dub-font-size-sm, 0.8rem);
+  }
+  .myTable tbody td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: var(--dub-font-size-xs, 0.68rem);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+    margin-bottom: 2px;
+  }
+  /* Badges already carry their own word (状態/優先度/チーム名) — a repeated
+     ラベル above them would be noise, not clarity. Only the plain date needs one. */
+  .myTable tbody td:nth-child(3)::before,
+  .myTable tbody td:nth-child(4)::before,
+  .myTable tbody td:nth-child(5)::before { content: none; }
+
+  .cellTitle { font-size: var(--dub-font-size-md, 0.95rem); line-height: 1.4; }
+  .colFromTo { min-width: 0; }
+  /* Full card width now (not a squeezed column) — show names again, wrapping
+     if a very narrow phone can't fit both parties on one line. */
+  .fromTo { flex-wrap: wrap; row-gap: 4px; }
+  .partyName { max-width: 40vw; }
 }
 
 /* ── task attachments (create modal draft + detail view) ─────────────────── */

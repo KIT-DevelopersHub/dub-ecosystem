@@ -69,6 +69,11 @@ export function MyTaskList({
 
   return (
     <div data-testid="fe4-mytasks-list">
+      {/* Desktop: a normal 6-column table. Mobile (<=720px, see .myTable in the
+          media query): the SAME markup is restyled into 1-task-per-card via CSS
+          Grid areas (table/tbody/tr/td → block/grid) — no duplicate DOM, so a
+          row keeps exactly one fe4-mytask-row-<id> node either way. `data-label`
+          feeds the ::before card labels the (now-hidden) <thead> would have shown. */}
       <table className={styles.myTable}>
         <thead>
           <tr>
@@ -104,14 +109,14 @@ export function MyTaskList({
                   <FromToCell fromId={t.createdBy ?? null} toId={t.assigneeId} users={users} testId={`fe4-fromto-${t.id}`} />
                 </td>
                 <td className={styles.cellTitle}>{t.title}</td>
-                <td>{team ? <Badge tone="info">{team}</Badge> : <span className={styles.muted}>―</span>}</td>
-                <td>
+                <td data-label="チーム">{team ? <Badge tone="info">{team}</Badge> : <span className={styles.muted}>―</span>}</td>
+                <td data-label="状態">
                   <TaskStatusBadge status={t.status} />
                 </td>
-                <td>
+                <td data-label="優先度">
                   <Badge tone={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</Badge>
                 </td>
-                <td className={overdue ? styles.dueOverdue : undefined}>
+                <td className={overdue ? styles.dueOverdue : undefined} data-label="終了日">
                   {formatDue(t.dueAt)}
                   {overdue && <span className={styles.overdueTag}> 期限切れ</span>}
                 </td>
