@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "home-widget-area-swap",
+  "worker": "dub-demo-home-widget-area-swap",
+  "url": "https://dub-demo-home-widget-area-swap.developershub-site.workers.dev",
+  "deployedSha": "3d8053b9",
+  "branch": "feat/home-widget-area-swap",
+  "actor": "kota",
+  "markers": ["fe2-home-recent","panel-recent"],
+  "live": true,
+  "verifiedAt": "2026-09-10T12:35:21Z",
+  "updatedAt": "2026-09-10T12:35:21Z",
+  "note": "Home widget area-equivalent size swap (小2=中/中2=大)"
+}
