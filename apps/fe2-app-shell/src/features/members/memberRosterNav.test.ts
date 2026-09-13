@@ -7,6 +7,7 @@ describe("activeSectionId", () => {
     expect(activeSectionId("/members")).toBe("members");
     expect(activeSectionId("/members/roster")).toBe("member-roster");
     expect(activeSectionId("/admin/users")).toBe("roster");
+    expect(activeSectionId("/admin/email-routing")).toBe("email-routing");
     expect(activeSectionId("/participation")).toBe("participation");
     expect(activeSectionId("/participation/list")).toBe("participation-list");
   });
@@ -18,6 +19,13 @@ describe("activeSectionId", () => {
     expect(activeSectionId("/members")).toBe("members");
     // /participation/list は独立タブ（最長一致で 提出フォームより回答一覧が勝つ）
     expect(activeSectionId("/participation/list")).toBe("participation-list");
+  });
+
+  it("does not confuse メール名簿(/admin/users) with メールアドレス管理(/admin/email-routing)", () => {
+    // 前方一致の誤爆防止: どちらも /admin/ 配下だが別セクション
+    expect(activeSectionId("/admin/email-routing")).toBe("email-routing");
+    expect(activeSectionId("/admin/users")).toBe("roster");
+    expect(activeSectionId("/admin/users/usr_1")).toBe("roster");
   });
 
   it("does not surface ロール管理 / 変更履歴 in the roster subnav (own tile / removed)", () => {

@@ -7,6 +7,10 @@
 //   運営メンバー   → /members（内部に チーム別/組織図 タブ）
 //   運営名簿       → /members/roster（運営メンバー全員の情報をフラットな一覧で並べる）
 //   メール名簿     → /admin/users（Email Routing アドレス／メールアカウントの一覧・発行・同期）
+//   メールアドレス管理 → /admin/email-routing（発行済み @developershub.jp アドレスの一覧・発行・
+//                    停止/再開・削除。PR#245で一度完全撤去、ユーザー明示決定で再実装（復活）。
+//                    今回は独立ランチャータイルではなく、名簿系の延長としてこのサブナビに統合する
+//                    配置にした（旧案「ダッシュボードの管理セクション」はユーザーが却下）。）
 //   参加届         → /participation（提出フォーム）
 //   参加届の回答   → /participation/list（回答管理）
 // データ源は member-service / identity-roster のままで、突合キーは member.identityUserId
@@ -43,6 +47,13 @@ const SECTIONS: SectionTab[] = [
   { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["identity:read", "app:members:view"] },
   { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["identity:read", "app:members:view"] },
   { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
+  // メールアドレス管理: ルート側(fe7 routes.tsx)は requiredPermissions: ["mail:admin"] のみを
+  // 宣言しているが、registry.flatten() が admin モジュールの module.requiredPermissions
+  // (withAppAccessGate が付けた "app:admin:view") を全ルートに AND するため、実効ガードは
+  // ["mail:admin", "app:admin:view"] になる。ここは identity:read を含めない — 含めると
+  // 実際のルートガードより厳しくなり、mail:admin だけ持つ非 identity:read 管理者にタブが
+  // 見えなくなる（デッドタブの逆＝「開けるのにタブが無い」）事故になる。
+  { id: "email-routing", label: "メールアドレス管理", path: "/admin/email-routing", requiredPermissions: ["app:admin:view", "mail:admin"] },
   { id: "participation", label: "参加届", path: "/participation", requiredPermissions: ["app:participation:view"] },
   { id: "participation-list", label: "参加届の回答", path: "/participation/list", requiredPermissions: ["identity:read", "app:participation:view"] },
 ];

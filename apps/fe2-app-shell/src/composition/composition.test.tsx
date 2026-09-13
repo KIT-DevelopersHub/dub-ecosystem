@@ -141,11 +141,13 @@ describe("assembleFeatureModules", () => {
     for (const n of registry.nav) expect(typeof n.icon).toBe("string");
   });
 
-  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理 an independent tile; 変更履歴 gone", () => {
+  it("運営メンバー・名簿 into ONE tile (名簿/参加届 off-launcher); ロール管理 an independent tile; 変更履歴 gone; メールアドレス管理 route revived but not a launcher tile", () => {
     // 統合: 運営メンバー(member-service) + 名簿(FE7 /admin/users) + 参加届/回答(participation) を
     // 1 タイル「運営メンバー・名簿」(/members) に合体し、共有サブナビ(MemberRosterNav)で横断する。
     // ロール管理(/admin/roles) はそこから括り出して独立ランチャータイルに戻す。変更履歴(/admin/history)
-    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) は従前どおり未登録。
+    // の UI は完全撤去（ルートごと削除）。メールアドレス管理(/admin/email-routing) はPR#245で一度
+    // 完全撤去されたがユーザー明示決定で route のみ復活した — ランチャータイルにはせず、運営メンバー・
+    // 名簿の共有サブナビ(MemberRosterNav)側にタブとして統合したため、nav には引き続き未登録。
     const { api } = fakeApi();
     const registry = buildRegistry(assembleFeatureModules(api));
     const navPaths = registry.nav.map((n) => n.path);
@@ -179,13 +181,14 @@ describe("assembleFeatureModules", () => {
         "/admin/roles",
       ]),
     );
-    // admin/participation routes（名簿/ロール/参加届/回答）は保持（統合ナビ + deep-link 生存）。
-    // 変更履歴ルート(/admin/history) は撤去済みなので存在しないこと。
+    // admin/participation routes（名簿/ロール/メールアドレス管理/参加届/回答）は保持（統合ナビ +
+    // deep-link 生存）。変更履歴ルート(/admin/history) は撤去済みなので存在しないこと。
     const routePaths = registry.routes.map((r) => r.path);
     expect(routePaths).toEqual(
       expect.arrayContaining([
         "/admin/users",
         "/admin/roles",
+        "/admin/email-routing",
         "/participation",
         "/participation/list",
         "/members",
@@ -194,6 +197,9 @@ describe("assembleFeatureModules", () => {
       ]),
     );
     expect(routePaths).not.toContain("/admin/history");
+    // メールアドレス管理はルートとしては存在するが、独立ランチャータイル(nav)としては
+    // 登録しない — 運営メンバー・名簿の共有サブナビ側のタブから開く配置にしたため。
+    expect(navPaths).not.toContain("/admin/email-routing");
   });
 
   it("carries badge sources through for notifications and chat", () => {
