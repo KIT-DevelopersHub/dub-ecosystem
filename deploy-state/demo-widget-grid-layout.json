@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "widget-grid-layout",
+  "worker": "dub-demo-widget-grid-layout",
+  "url": "https://dub-demo-widget-grid-layout.developershub-site.workers.dev",
+  "deployedSha": "e5c8163e",
+  "branch": "feat/home-widget-grid-layout",
+  "actor": "kota",
+  "markers": ["\"data-testid\":\"fe2-home-widget-grid\""],
+  "live": true,
+  "verifiedAt": "2026-09-13T13:13:32Z",
+  "updatedAt": "2026-09-13T13:13:32Z",
+  "note": "P3-5 real cell grid (react-grid-layout) widget placement"
+}
