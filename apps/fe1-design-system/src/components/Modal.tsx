@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { ConfirmDialogProps, DrawerProps, ErrorDialogProps, ModalProps } from "../types";
 import styles from "./Modal.module.css";
 import { cx } from "../utils/cx";
+import { OverlayPortal, useScrollLock } from "../utils/overlay";
 import { Button, IconButton } from "./Button";
 import { Icon } from "./Icon";
 
@@ -17,25 +17,6 @@ function useEscToClose(open: boolean, onClose: () => void) {
   }, [open, onClose]);
 }
 
-// Ref-counted scroll lock so nested/stacked overlays don't fight over body.style,
-// and the original overflow is restored only once every overlay has closed.
-let scrollLockCount = 0;
-let savedBodyOverflow = "";
-function useScrollLock(open: boolean) {
-  useEffect(() => {
-    if (!open || typeof document === "undefined") return;
-    if (scrollLockCount === 0) {
-      savedBodyOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-    }
-    scrollLockCount += 1;
-    return () => {
-      scrollLockCount -= 1;
-      if (scrollLockCount === 0) document.body.style.overflow = savedBodyOverflow;
-    };
-  }, [open]);
-}
-
 // Restore focus to the element that was focused before the overlay opened, so
 // keyboard users return to their place in the page after closing.
 function useFocusRestore(open: boolean) {
@@ -45,13 +26,6 @@ function useFocusRestore(open: boolean) {
     previouslyFocused.current = document.activeElement as HTMLElement | null;
     return () => previouslyFocused.current?.focus?.();
   }, [open]);
-}
-
-// Render overlays at <body> via a portal so `position: fixed` is measured against
-// the viewport and the overlay escapes any ancestor stacking context / overflow clip.
-function OverlayPortal({ children }: { children: React.ReactNode }) {
-  if (typeof document === "undefined") return null;
-  return createPortal(children, document.body);
 }
 
 // A real, typeable field — the thing a user opening a dialog actually wants focused,

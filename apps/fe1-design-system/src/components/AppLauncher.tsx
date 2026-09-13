@@ -30,6 +30,43 @@ import { Badge } from "./Display";
 import styles from "./AppLauncher.module.css";
 import { cx } from "../utils/cx";
 import { isImeComposing } from "../utils/keyboard";
+import { OverlayPortal, useScrollLock } from "../utils/overlay";
+
+// P19: below this width the popover becomes a bottom sheet (see AppLauncher.module.css).
+// Kept as a single source of truth for the JS/CSS split below — same number as the
+// `@media (max-width: 640px)` block in the CSS module.
+const MOBILE_SHEET_QUERY = "(max-width: 640px)";
+
+// True once the viewport is narrow enough for the bottom-sheet presentation. Only
+// used to decide WHERE the panel renders (portalled to <body> vs inline) — the
+// visual difference itself stays CSS/width-driven via MOBILE_SHEET_QUERY above.
+// Defensive about environments without `matchMedia` (older engines, some test
+// runners): falls back to `false`, i.e. the existing inline desktop popover.
+function useIsMobileSheet(query: string): boolean {
+  const supported = typeof window !== "undefined" && typeof window.matchMedia === "function";
+  const [matches, setMatches] = useState<boolean>(() => (supported ? window.matchMedia(query).matches : false));
+
+  useEffect(() => {
+    if (!supported) return undefined;
+    const mql = window.matchMedia(query);
+    const onChange = (): void => setMatches(mql.matches);
+    onChange();
+    // addEventListener is the modern API; addListener is the Safari <14 fallback.
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }, [query, supported]);
+
+  return matches;
+}
+
+/** Renders `children` in place, or portalled to <body> when `when` is true. */
+function MaybePortal({ when, children }: { when: boolean; children: ReactNode }): JSX.Element {
+  return when ? <OverlayPortal>{children}</OverlayPortal> : <>{children}</>;
+}
 
 /** Self-drawn 3×3 dot grid (waffle). Not Google's asset — nine plain circles. */
 function WaffleGlyph(): JSX.Element {
@@ -54,7 +91,17 @@ export function AppLauncher({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
+  // P19: at mobile widths the panel is portalled to <body> and rendered as a
+  // bottom sheet — see useIsMobileSheet's doc comment for why the portal is
+  // required (the sticky header's backdrop-filter would otherwise become the
+  // `position: fixed` containing block instead of the real viewport).
+  const isMobileSheet = useIsMobileSheet(MOBILE_SHEET_QUERY);
+  useScrollLock(open && isMobileSheet);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Portalled content (mobile sheet) is NOT a DOM descendant of rootRef even
+  // though it's still a React-tree descendant, so the native mousedown listener
+  // below needs its own ref to recognise clicks inside the panel as "inside".
+  const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
@@ -97,7 +144,10 @@ export function AppLauncher({
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      const insideRoot = rootRef.current?.contains(target) ?? false;
+      const insidePanel = panelRef.current?.contains(target) ?? false; // portalled sheet
+      if (!insideRoot && !insidePanel) setOpen(false);
     };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") setOpen(false);
@@ -205,7 +255,32 @@ export function AppLauncher({
         <WaffleGlyph />
       </button>
       {open && (
-        <div role="dialog" aria-label={title} id={panelId} className={cx(styles.panel)} data-testid="dub-launcher-panel">
+        <MaybePortal when={isMobileSheet}>
+          {/* Mobile-only scrim behind the bottom sheet (P19). Hidden on desktop via
+              CSS — the popover has no backdrop there. Tapping it closes the sheet,
+              same as the existing outside-click/Escape handling above. */}
+          <div
+            className={cx(styles.backdrop)}
+            aria-hidden="true"
+            data-testid={testId ? `${testId}-backdrop` : "dub-launcher-backdrop"}
+            onClick={() => setOpen(false)}
+          />
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-label={title}
+            id={panelId}
+            className={cx(styles.panel)}
+            data-testid="dub-launcher-panel"
+          >
+          {/* Drag-handle affordance, shown only when the panel renders as a bottom
+              sheet (mobile). Decorative — dismissal is via scrim tap/outside-click/Esc,
+              not a drag gesture. */}
+          <div
+            className={cx(styles.dragHandle)}
+            aria-hidden="true"
+            data-testid={testId ? `${testId}-drag-handle` : "dub-launcher-drag-handle"}
+          />
           <div className={cx(styles.panelTitle)}>{title}</div>
           <div className={cx(styles.search)}>
             <span className={cx(styles.searchIcon)} aria-hidden="true">
@@ -280,7 +355,8 @@ export function AppLauncher({
               })}
             </div>
           )}
-        </div>
+          </div>
+        </MaybePortal>
       )}
     </div>
   );
