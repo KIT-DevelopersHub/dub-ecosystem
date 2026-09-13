@@ -52,7 +52,14 @@ describe("ChangePasswordDialog", () => {
     await user.type(screen.getByTestId("fe2-cp-confirm"), "new-pass-12345");
     await user.click(screen.getByTestId("fe2-change-password-submit"));
 
-    await waitFor(() => expect(screen.getByTestId("fe2-change-password-error")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("パスワードの変更に失敗しました。"));
     expect(screen.queryByTestId("fe2-change-password-done")).not.toBeInTheDocument();
+
+    // a11y: エラーは「現在のパスワード」欄に aria-describedby で紐付き、aria-invalid が立ち、
+    // フォーカスも同欄に戻る（P17: フォームエラーの入力欄への紐付け）。
+    const current = screen.getByTestId("fe2-cp-current");
+    expect(current).toHaveAttribute("aria-invalid", "true");
+    expect(current.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
+    await waitFor(() => expect(current).toHaveFocus());
   });
 });

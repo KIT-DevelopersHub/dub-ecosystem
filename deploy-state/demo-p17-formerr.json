@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p17-formerr",
+  "worker": "dub-demo-p17-formerr",
+  "url": "https://dub-demo-p17-formerr.developershub-site.workers.dev",
+  "deployedSha": "d451df3c",
+  "branch": "feat/p17-form-error-a11y",
+  "actor": "kota",
+  "markers": ["aria-describedby","fe2-login-error"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:30:50Z",
+  "updatedAt": "2026-09-13T16:30:50Z",
+  "note": "P17: フォームエラーの入力欄への紐付け(a11y)"
+}

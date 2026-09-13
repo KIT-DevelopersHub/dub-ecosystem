@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -48,5 +49,23 @@ describe("Form", () => {
     );
     await userEvent.click(screen.getByText("送信"));
     expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("a11y (P17): moves focus to the first invalid field after a failed submit", async () => {
+    function Sample() {
+      const [error, setError] = useState<string | undefined>(undefined);
+      return (
+        <Form onSubmit={() => setError("必須です")} testId="f">
+          <FormField label="メール" htmlFor="email" {...(error ? { error } : {})}>
+            <TextField id="email" value="" onChange={() => {}} testId="email-input" />
+          </FormField>
+          <button type="submit">送信</button>
+        </Form>
+      );
+    }
+    render(<Sample />);
+    await userEvent.click(screen.getByText("送信"));
+    const input = screen.getByTestId("email-input");
+    await vi.waitFor(() => expect(input).toHaveFocus());
   });
 });
