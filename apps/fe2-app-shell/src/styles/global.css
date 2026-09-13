@@ -618,8 +618,16 @@ svg {
 }
 .fe2-widget-grid-toolbar-row {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--dub-space-2);
+}
+/* The "ウィジェットを追加" trigger is a @dub/ui Button (Menu's own trigger markup)
+ * rather than the bespoke pill above — align its footprint (height/font-size) to
+ * its 配置をリセット/編集 siblings so the row reads as one consistent control set. */
+.fe2-widget-grid-toolbar-row [data-testid="fe2-widget-grid-add-trigger"] {
+  font-size: var(--dub-font-size-xs);
+  padding: var(--dub-space-1) var(--dub-space-3);
 }
 .fe2-widget-grid-reset,
 .fe2-widget-grid-edit-toggle {
@@ -682,6 +690,29 @@ svg {
   border-bottom: 1px solid var(--dub-color-border-default);
   background: var(--dub-color-surface-sunken);
   flex: 0 0 auto;
+}
+/* Groups the grab handle + size control together so `justify-content: space-
+ * between` on the chrome puts them at the START and the remove (×) button
+ * cleanly at the END, instead of splitting three items unevenly. */
+.fe2-widget-grid-chrome-start {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  min-width: 0;
+}
+/* Remove (×) sits apart from the grab/size controls with a touch more room so a
+ * viewer scanning the chrome doesn't mistake it for part of the size toggle. */
+.fe2-widget-grid-chrome [data-testid^="fe2-widget-grid-remove-"] {
+  margin-left: var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+}
+.fe2-widget-grid-chrome [data-testid^="fe2-widget-grid-remove-"]:hover {
+  color: var(--dub-color-danger-600, var(--dub-color-danger-500));
+}
+[data-testid="fe2-home-widget-grid-empty"] {
+  padding: var(--dub-space-6) var(--dub-space-4);
+  border: 1px dashed var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
 }
 .fe2-widget-grab {
   display: inline-flex;

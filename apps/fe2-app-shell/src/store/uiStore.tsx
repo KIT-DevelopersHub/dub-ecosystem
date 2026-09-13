@@ -5,7 +5,10 @@
 // It is also the persisted receptacle for the Home dashboard's customizable
 // widget grid (each widget's cell position + small/medium/large size — see
 // shell/screens/dashboard/homeGrid.ts for the placement engine itself). Persists
-// to "dub.ui.home.grid" so a viewer's arrangement survives reload.
+// to "dub.ui.home.grid" so a viewer's arrangement survives reload. Which widgets
+// are shown at all (add/remove, edit mode only) is a separate map persisted to
+// "dub.ui.home.gridHidden" — removing a widget keeps its position/size intact so
+// re-adding it restores the old spot rather than a fresh pack.
 import { create } from "zustand";
 import { isWidgetSize, type WidgetSize } from "../shell/screens/dashboard/homeGrid.ts";
 
@@ -24,6 +27,7 @@ const THEME_KEY = "dub.ui.theme";
 const SIDEBAR_KEY = "dub.ui.sidebar";
 const HOME_GRID_KEY = "dub.ui.home.grid";
 const HOME_GRID_EDIT_MODE_KEY = "dub.ui.home.gridEditMode";
+const HOME_GRID_HIDDEN_KEY = "dub.ui.home.gridHidden";
 
 const EMPTY_HOME_GRID: HomeGridPrefs = { positions: {}, sizes: {} };
 
@@ -36,6 +40,11 @@ export interface UiStore {
    *  mode) on first-ever load; once toggled, persists across reloads so a
    *  viewer mid-rearrange doesn't get bounced back to static on refresh. */
   homeGridEditMode: boolean;
+  /** Widget ids the viewer has explicitly removed from the grid (edit mode's ×
+   *  button). Distinct from a widget being absent from `catalog`/`nodes` (no data
+   *  to show yet, e.g. "最近開いた" before any visit) — a hidden id's stored
+   *  position/size are kept untouched so re-adding it restores its old spot. */
+  homeGridHidden: string[];
   toggleSidebar(): void;
   setSidebarOpen(open: boolean): void;
   setTheme(t: ThemeValue): void;
@@ -51,6 +60,10 @@ export interface UiStore {
   /** Enter/exit the Home widget grid's edit mode (drag handle + size control
    *  become visible/active only while true). */
   setHomeGridEditMode(editing: boolean): void;
+  /** Remove a widget from the grid (edit mode's × button). Idempotent. */
+  hideHomeWidget(id: string): void;
+  /** Restore a previously-removed widget to the grid ("ウィジェットを追加"). Idempotent. */
+  showHomeWidget(id: string): void;
 }
 
 function readTheme(): ThemeValue {
@@ -130,11 +143,28 @@ function readHomeGridEditMode(): boolean {
   }
 }
 
+function readHomeGridHidden(): string[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(HOME_GRID_HIDDEN_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    return [];
+  }
+}
+
+function persistHomeGridHidden(hidden: string[]): void {
+  persist(HOME_GRID_HIDDEN_KEY, JSON.stringify(hidden));
+}
+
 export const useUiStore = create<UiStore>((set, get) => ({
   sidebarOpen: readSidebar(),
   theme: readTheme(),
   homeGrid: readHomeGrid(),
   homeGridEditMode: readHomeGridEditMode(),
+  homeGridHidden: readHomeGridHidden(),
   toggleSidebar: () => {
     const next = !get().sidebarOpen;
     persist(SIDEBAR_KEY, next ? "open" : "closed");
@@ -170,5 +200,19 @@ export const useUiStore = create<UiStore>((set, get) => ({
   setHomeGridEditMode: (editing: boolean) => {
     persist(HOME_GRID_EDIT_MODE_KEY, editing ? "1" : "0");
     set({ homeGridEditMode: editing });
+  },
+  hideHomeWidget: (id: string) => {
+    const cur = get().homeGridHidden;
+    if (cur.includes(id)) return; // no-op
+    const next = [...cur, id];
+    persistHomeGridHidden(next);
+    set({ homeGridHidden: next });
+  },
+  showHomeWidget: (id: string) => {
+    const cur = get().homeGridHidden;
+    if (!cur.includes(id)) return; // no-op
+    const next = cur.filter((v) => v !== id);
+    persistHomeGridHidden(next);
+    set({ homeGridHidden: next });
   },
 }));

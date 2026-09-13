@@ -8,10 +8,16 @@
 // the live BFF side panels, and any FE3-7 contributed homeWidget) — the KPI
 // strip and the app launchpad stay outside it as fixed, structural sections
 // (they are stat tiles / navigation, not independently placeable panels).
+//
+// Edit mode also lets the viewer remove a widget (×, per widget) and add one
+// back ("ウィジェットを追加" menu, listing whatever is currently removed but has
+// data to show). Membership persists via useUiStore's homeGridHidden — separate
+// from a widget being absent because it has no data yet (e.g. "最近開いた"
+// before any visit), which never appears in the add menu either way.
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import RGL from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
-import { Icon, SegmentedControl } from "@dub/ui";
+import { EmptyState, Icon, IconButton, Menu, SegmentedControl } from "@dub/ui";
 import { useUiStore } from "../../../store/uiStore.tsx";
 import {
   HOME_GRID_MARGIN,
@@ -53,6 +59,10 @@ export function HomeWidgetGrid({
   // is only possible after switching into edit mode via the toolbar toggle.
   const editMode = useUiStore((s) => s.homeGridEditMode);
   const setHomeGridEditMode = useUiStore((s) => s.setHomeGridEditMode);
+  // Add/remove: which widget ids the viewer explicitly removed (edit mode only).
+  const hidden = useUiStore((s) => s.homeGridHidden);
+  const hideHomeWidget = useUiStore((s) => s.hideHomeWidget);
+  const showHomeWidget = useUiStore((s) => s.showHomeWidget);
 
   // A SINGLE width measurement drives both `cols` (our narrow/wide breakpoint)
   // and the pixel `width` react-grid-layout uses to compute column geometry.
@@ -81,7 +91,14 @@ export function HomeWidgetGrid({
   }, []);
 
   const cols = colsForWidth(width);
-  const present = useMemo(() => catalog.filter((w) => nodes[w.id] != null), [catalog, nodes]);
+  // `available`: has data to render, regardless of the viewer's remove choice —
+  // this is what the toolbar (and the add menu) reason about, so the toolbar
+  // itself never disappears just because everything currently on-screen was
+  // removed. `present`: what actually occupies a grid cell (available minus
+  // hidden) — this is what react-grid-layout renders.
+  const available = useMemo(() => catalog.filter((w) => nodes[w.id] != null), [catalog, nodes]);
+  const present = useMemo(() => available.filter((w) => !hidden.includes(w.id)), [available, hidden]);
+  const addable = useMemo(() => available.filter((w) => hidden.includes(w.id)), [available, hidden]);
   const presentKey = present.map((w) => w.id).join(",");
   const layout = useMemo(
     () => layoutFor(present, { positions, sizes }, cols),
@@ -89,7 +106,7 @@ export function HomeWidgetGrid({
     [presentKey, positions, sizes, cols],
   );
 
-  if (present.length === 0) return null;
+  if (available.length === 0) return null;
 
   return (
     <div
@@ -108,6 +125,34 @@ export function HomeWidgetGrid({
             配置をリセット
           </button>
         ) : null}
+        {editMode ? (
+          <Menu
+            label="ウィジェットを追加"
+            icon="plus"
+            variant="secondary"
+            align="end"
+            testId="fe2-widget-grid-add"
+            items={
+              addable.length > 0
+                ? addable.map((w) => ({
+                    id: w.id,
+                    label: w.label,
+                    icon: "plus" as const,
+                    onSelect: () => showHomeWidget(w.id),
+                    testId: `fe2-widget-grid-add-item-${w.id}`,
+                  }))
+                : [
+                    {
+                      id: "__empty",
+                      label: "追加できるウィジェットはありません",
+                      disabled: true,
+                      onSelect: () => {},
+                      testId: "fe2-widget-grid-add-empty",
+                    },
+                  ]
+            }
+          />
+        ) : null}
         <button
           type="button"
           className="fe2-widget-grid-edit-toggle"
@@ -118,7 +163,16 @@ export function HomeWidgetGrid({
           {editMode ? "完了" : "編集"}
         </button>
       </div>
-      {width > 0 ? (
+      {present.length === 0 ? (
+        editMode ? (
+          <EmptyState
+            testId="fe2-home-widget-grid-empty"
+            icon="plus"
+            title="ウィジェットがありません"
+            description="「ウィジェットを追加」から表示するウィジェットを選んでください。"
+          />
+        ) : null
+      ) : width > 0 ? (
         <RGL
           className="fe2-widget-grid"
           layout={layout}
@@ -146,28 +200,38 @@ export function HomeWidgetGrid({
               <div key={w.id} data-testid={`fe2-widget-grid-item-${w.id}`} className="fe2-widget-grid-item">
                 {editMode ? (
                   <div className="fe2-widget-grid-chrome">
-                    <span
-                      className="fe2-widget-grab"
-                      data-testid={`fe2-widget-grab-${w.id}`}
-                      role="button"
-                      tabIndex={-1}
-                      aria-label={`${w.label}をドラッグして移動`}
-                      title="ドラッグして移動"
-                    >
-                      <Icon name="drag" />
-                    </span>
-                    <SegmentedControl<WidgetSize>
-                      className="fe2-widget-grid-size"
+                    <div className="fe2-widget-grid-chrome-start">
+                      <span
+                        className="fe2-widget-grab"
+                        data-testid={`fe2-widget-grab-${w.id}`}
+                        role="button"
+                        tabIndex={-1}
+                        aria-label={`${w.label}をドラッグして移動`}
+                        title="ドラッグして移動"
+                      >
+                        <Icon name="drag" />
+                      </span>
+                      <SegmentedControl<WidgetSize>
+                        className="fe2-widget-grid-size"
+                        size="sm"
+                        value={size}
+                        onChange={(next) => setHomeWidgetSize(w.id, next)}
+                        aria-label={`${w.label}のサイズ`}
+                        testId={`fe2-widget-size-${w.id}`}
+                        options={WIDGET_SIZES.map((s) => ({
+                          value: s,
+                          label: SIZE_LABEL[s],
+                          testId: `fe2-widget-size-${w.id}-${s}`,
+                        }))}
+                      />
+                    </div>
+                    <IconButton
+                      name="x"
                       size="sm"
-                      value={size}
-                      onChange={(next) => setHomeWidgetSize(w.id, next)}
-                      aria-label={`${w.label}のサイズ`}
-                      testId={`fe2-widget-size-${w.id}`}
-                      options={WIDGET_SIZES.map((s) => ({
-                        value: s,
-                        label: SIZE_LABEL[s],
-                        testId: `fe2-widget-size-${w.id}-${s}`,
-                      }))}
+                      variant="ghost"
+                      aria-label={`${w.label}を削除`}
+                      onClick={() => hideHomeWidget(w.id)}
+                      testId={`fe2-widget-grid-remove-${w.id}`}
                     />
                   </div>
                 ) : null}
