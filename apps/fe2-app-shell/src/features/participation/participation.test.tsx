@@ -113,6 +113,19 @@ describe("ParticipationPage", () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
+  it("a11y (P17): wires the error to its field and focuses the first invalid field on submit failure", async () => {
+    const api = makeApi();
+    render(wrap(<ParticipationPage />, api));
+    await userEvent.click(screen.getByTestId("participation-submit"));
+
+    const lastName = screen.getByTestId("participation-last-name");
+    expect(lastName).toHaveAttribute("aria-invalid", "true");
+    const describedBy = lastName.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)).toHaveTextContent("苗字を入力してください");
+    await waitFor(() => expect(lastName).toHaveFocus());
+  });
+
   it("requires both the school email and the Gmail address", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));

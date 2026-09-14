@@ -57,23 +57,80 @@
   padding: var(--dub-space-3);
 }
 
-/* Mobile / narrow viewport (dub-launcher-panel-mobile). The panel is anchored
-   `right: 0` to the waffle trigger, which does NOT sit at the viewport's right
-   edge (the switcher is left of it, the bell/menu buttons right of it). A fixed
-   320px panel therefore spilled off the LEFT edge and clipped every tile label
-   ("アプリ"→"リ", "イベント"→"ベント", …). On narrow screens we detach from the
-   trigger and pin the panel to the viewport itself so it always fits: full width
-   minus an 8px gutter each side, dropped just below the stacked mobile top bar. */
+/* Scrim behind the mobile bottom sheet (P19). Hidden entirely on desktop — the
+   popover there has no backdrop. Shown only inside the mobile media query below. */
+.backdrop {
+  display: none;
+}
+
+/* Drag-handle affordance at the top of the bottom sheet (P19). Purely decorative
+   (dismissal is scrim-tap / outside-click / Esc, same as desktop) — hidden on
+   desktop, shown only inside the mobile media query below. */
+.dragHandle {
+  display: none;
+  width: 36px;
+  height: 4px;
+  margin: 0 auto var(--dub-space-2);
+  border-radius: var(--dub-radius-full, 9999px);
+  background: var(--dub-color-border-default);
+  flex-shrink: 0;
+}
+
+/* Mobile / narrow viewport — bottom sheet (P19, 判断19). The waffle popover
+   becomes a sheet that slides up from the screen's bottom edge (thumb reach on a
+   phone) instead of a panel pinned below the header. Same markup/behaviour as
+   desktop (search, grid, keyboard nav, onSelect) — this block only repositions
+   it and adds the scrim + handle; nothing is removed or hidden from the app
+   catalog ([[dub-never-hide-or-reduce-apps]]). */
 @media (max-width: 640px) {
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: var(--dub-zIndex-modal, 1300);
+    background: rgba(15, 23, 42, 0.45);
+    animation: dub-launcher-backdrop-in var(--dub-motion-normal, 200ms) var(--dub-motion-easing, ease-out);
+  }
+  .dragHandle {
+    display: block;
+  }
   .panel {
     position: fixed;
-    top: calc(100px + var(--dub-space-2)); /* clears the ~100px stacked mobile header */
-    left: var(--dub-space-2);
-    right: var(--dub-space-2);
+    z-index: var(--dub-zIndex-modal, 1300);
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: auto;
     max-width: none;
-    max-height: calc(100vh - 120px);
-    max-height: min(78dvh, calc(100dvh - 120px));
+    max-height: min(85dvh, calc(100dvh - var(--dub-space-6, 24px)));
+    border-radius: var(--dub-radius-lg) var(--dub-radius-lg) 0 0;
+    padding-bottom: calc(var(--dub-space-4) + env(safe-area-inset-bottom, 0px));
+    box-shadow: var(--dub-shadow-overlay);
+    animation: dub-launcher-sheet-in var(--dub-motion-normal, 200ms) var(--dub-motion-easing, ease-out);
+  }
+}
+
+@keyframes dub-launcher-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes dub-launcher-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .backdrop {
+    animation: none;
   }
 }
 

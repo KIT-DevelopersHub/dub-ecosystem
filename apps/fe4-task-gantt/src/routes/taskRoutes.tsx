@@ -48,6 +48,20 @@ export function parseEventIdFromPath(pathname: string): common.EventId | null {
   return m ? m[1]! : null;
 }
 
+// The legacy sub-segments that `/events/:eventId/tasks/<seg>` can carry alongside a
+// real `:taskId` — matched so a stale `.../board` or `.../gantt` link never gets
+// mistaken for a task id and force-opens a non-existent task's detail panel.
+const LEGACY_TASK_SUBSEGMENTS = new Set(["board", "gantt"]);
+
+/** Derive a deep-linked `:taskId` from `/events/:eventId/tasks/:taskId` (e.g. the
+ *  ⌘K global search's task results), else null. */
+export function parseTaskIdFromPath(pathname: string): common.TaskId | null {
+  const m = pathname.match(/\/events\/[^/]+\/tasks\/([^/]+)\/?$/);
+  if (!m) return null;
+  const seg = m[1]!;
+  return LEGACY_TASK_SUBSEGMENTS.has(seg) ? null : (seg as common.TaskId);
+}
+
 /**
  * Event-scoped workspace route: serves `/events/:eventId/tasks` (and the legacy
  * `.../board`, `.../gantt`, `.../:taskId` sub-segments, all now the single gantt
@@ -61,8 +75,11 @@ export function TaskWorkspaceRoute() {
   // window.location parse for standalone mounts / shells that don't feed it.
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
   const eventId = ctxEventId ?? parseEventIdFromPath(pathname);
+  const initialSelectedTaskId = parseTaskIdFromPath(pathname);
   if (!eventId) return <p className={styles.banner}>イベントが指定されていません。</p>;
-  return <TaskWorkspacePage eventId={eventId} permissions={permissions} />;
+  return (
+    <TaskWorkspacePage eventId={eventId} permissions={permissions} initialSelectedTaskId={initialSelectedTaskId} />
+  );
 }
 
 /**

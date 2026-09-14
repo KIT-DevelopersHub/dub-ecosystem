@@ -11,6 +11,7 @@ import type {
   RoleAssignment,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
+  UpdateEmailAddressRequest,
   EmailRoutingSyncPreview,
   OffboardUserResult,
   RosterUser,
@@ -85,6 +86,9 @@ export interface RosterApi {
   // ---- Email Routing (@developershub.jp address management) ----
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
+  /** Enable/disable an issued address (re-pointing the destination is no longer
+   *  supported client-side — the forward target is fixed to the mail Worker). */
+  updateEmailAddress(id: string, req: UpdateEmailAddressRequest): Promise<EmailRoutingAddress>;
   deleteEmailAddress(id: string): Promise<void>;
   // ---- チャット: メッセージ削除ポリシー (RBAC-configurable delete behaviour) ----
   getChatDeletionPolicy(): Promise<chat.DeletionPolicyResponse>;
@@ -142,6 +146,7 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     // Cloudflare feature). Issuing here also sends a confirmation mail to the new address.
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/issued-addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses`, req),
+    updateEmailAddress: (id, req) => client.patch<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses/${id}`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/issued-addresses/${id}`),
     getChatDeletionPolicy: () => client.get<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`),
     updateChatDeletionPolicy: (req) => client.patch<chat.DeletionPolicyResponse>(`${CHAT}/settings/deletion-policy`, req),

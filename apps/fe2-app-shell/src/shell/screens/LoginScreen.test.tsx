@@ -52,6 +52,17 @@ describe("LoginScreen — email/password", () => {
 
     await waitFor(() => expect(screen.getByTestId("fe2-login-error")).toBeInTheDocument());
     expect(assignSpy).not.toHaveBeenCalled();
+
+    // a11y (P17): 両フィールドが aria-invalid になり、エラー文言の id へ aria-describedby
+    // で紐付く。送信失敗後はメールアドレス欄へフォーカスが戻る。
+    const email = screen.getByTestId("fe2-login-email");
+    const password = screen.getByTestId("fe2-login-password");
+    const err = screen.getByTestId("fe2-login-error");
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(email.getAttribute("aria-describedby")).toBe(err.id);
+    expect(password.getAttribute("aria-describedby")).toBe(err.id);
+    await waitFor(() => expect(email).toHaveFocus());
   });
 
   it("has no Google login button (Google OAuth removed)", () => {

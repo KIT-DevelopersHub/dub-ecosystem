@@ -3,6 +3,7 @@
 // badge. "New channel" (+) is gated by can("chat:create") upstream via canCreate.
 // Slack-style information design — built from @dub/ui + own glyphs, no Slack assets.
 import { useState } from "react";
+import { Icon } from "@dub/ui";
 import type { common } from "@dub/types";
 import type { Channel, ChannelType } from "../api/contract";
 import { groupChannels } from "../lib/channel-group";
@@ -18,6 +19,10 @@ export interface ChannelListProps {
   workspaceName?: string;
   onSelect: (channelId: common.ChannelId) => void;
   onCreate?: () => void;
+  // Set only when rendered inside the mobile nav drawer (P21) — adds a close (X)
+  // affordance next to the workspace name so the drawer can be dismissed without
+  // picking a channel first (backdrop-tap / Esc already close it too).
+  onCloseMobile?: () => void;
 }
 
 function Dot({ p }: { p: Presence }) {
@@ -32,6 +37,7 @@ export function ChannelList({
   workspaceName = "DevHub",
   onSelect,
   onCreate,
+  onCloseMobile,
 }: ChannelListProps) {
   const groups = groupChannels(channels);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -41,18 +47,32 @@ export function ChannelList({
     <nav className={styles.sidebar} aria-label="チャネル一覧" data-testid="fe6-channel-list">
       <div className={styles.workspaceHeader}>
         <span className={styles.workspaceName}>{workspaceName}</span>
-        {canCreate && (
-          <button
-            type="button"
-            className={styles.workspaceAction}
-            onClick={onCreate}
-            data-testid="fe6-channel-create"
-            aria-label="チャネルを作成"
-            title="チャネルを作成"
-          >
-            ＋
-          </button>
-        )}
+        <span className={styles.workspaceHeaderActions}>
+          {canCreate && (
+            <button
+              type="button"
+              className={styles.workspaceAction}
+              onClick={onCreate}
+              data-testid="fe6-channel-create"
+              aria-label="チャネルを作成"
+              title="チャネルを作成"
+            >
+              ＋
+            </button>
+          )}
+          {onCloseMobile && (
+            <button
+              type="button"
+              className={styles.workspaceAction}
+              onClick={onCloseMobile}
+              data-testid="fe6-mobile-nav-close"
+              aria-label="チャネル一覧を閉じる"
+              title="閉じる"
+            >
+              <Icon name="x" size="sm" />
+            </button>
+          )}
+        </span>
       </div>
 
       <div className={styles.sidebarScroll}>

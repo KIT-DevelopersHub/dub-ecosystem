@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-parent-status-lock",
+  "worker": "dub-demo-gantt-parent-status-lock",
+  "url": "https://dub-demo-gantt-parent-status-lock.developershub-site.workers.dev",
+  "deployedSha": "3e7b10a3",
+  "branch": "feat/fe4-gantt-parent-status-readonly",
+  "actor": "kota",
+  "markers": ["fe4-detail-status-locked"],
+  "live": true,
+  "verifiedAt": "2026-09-09T12:45:25Z",
+  "updatedAt": "2026-09-09T12:45:25Z",
+  "note": "親タスク(子あり)のステータス編集を無効化+自動集計ヒント(PR#474)"
+}
