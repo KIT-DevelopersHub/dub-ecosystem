@@ -5,11 +5,12 @@
 // channel-settings modal. The main section and the ThreadPane are returned as
 // sibling fragment children so both land as columns of the ChatApp grid.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConfirmDialog, Modal, useToast } from "@dub/ui";
+import { ConfirmDialog, Drawer, Modal, useToast } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
 import { useChannelView } from "../hooks/useChannelView";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { ReadTracker } from "../store/read-tracker";
 import { mapChatError } from "../lib/errors";
 import { ChatApiError } from "../api/client";
@@ -28,16 +29,21 @@ export function ChannelPage({
   onThreadOpenChange,
   onSelectChannel,
   onChannelsChanged,
+  onOpenMobileNav,
 }: {
   channelId: common.ChannelId;
   onThreadOpenChange?: (open: boolean) => void;
   onSelectChannel?: (channelId: common.ChannelId) => void;
   onChannelsChanged?: () => void;
+  // Hamburger callback for the mobile channel-list drawer (P21) — forwarded to
+  // ChannelHeader, which only shows the button under the mobile breakpoint.
+  onOpenMobileNav?: () => void;
 }) {
   const { api, can, currentUserId } = useChatRuntime();
   const view = useChannelView(channelId);
   const { show } = useToast();
   const markRead = useChatStore((s) => s.markRead);
+  const isMobile = useIsMobile();
 
   const [channel, setChannel] = useState<Channel | null>(null);
   const [membership, setMembership] = useState<ChannelMember | null>(null);
@@ -266,6 +272,7 @@ export function ChannelPage({
             onSearchChange={setSearchQuery}
             onUnpin={onUnpin}
             onJumpToMessage={jumpToMessage}
+            onOpenMobileNav={onOpenMobileNav}
           />
         )}
         {searchOpen && (
@@ -313,18 +320,32 @@ export function ChannelPage({
         />
       </section>
 
-      {thread && (
-        <ThreadPane
-          channelId={channelId}
-          root={thread}
-          currentUserId={currentUserId}
-          canModerate={canModerate}
-          resolveUser={resolveUser}
-          resolveMentionCandidates={resolveMentionCandidates}
-          onToggleReaction={(id, emoji) => void view.toggleReaction(id, emoji)}
-          onClose={() => setThread(null)}
-        />
-      )}
+      {thread &&
+        (() => {
+          const pane = (
+            <ThreadPane
+              channelId={channelId}
+              root={thread}
+              currentUserId={currentUserId}
+              canModerate={canModerate}
+              resolveUser={resolveUser}
+              resolveMentionCandidates={resolveMentionCandidates}
+              onToggleReaction={(id, emoji) => void view.toggleReaction(id, emoji)}
+              onClose={() => setThread(null)}
+            />
+          );
+          // Mobile (P21): the thread pane is a 4th grid column on desktop, which
+          // has no room on a phone screen — slide it in as a right-side drawer
+          // instead. ThreadPane keeps its own header/close button either way, so
+          // the Drawer chrome is hidden (hideHeader) to avoid a duplicate one.
+          return isMobile ? (
+            <Drawer open onClose={() => setThread(null)} side="right" hideHeader title="スレッド" testId="fe6-mobile-thread-drawer">
+              {pane}
+            </Drawer>
+          ) : (
+            pane
+          );
+        })()}
 
       {channel && settingsOpen && (
         <Modal open onClose={() => setSettingsOpen(false)} title={`#${channel.name} の設定`} size="sm">
