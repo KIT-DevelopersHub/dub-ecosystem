@@ -14,6 +14,9 @@ import type {
   EventDetailsRow,
   EventDetailsResponse,
   SaveEventDetailsRequest,
+  EventSectionLayoutRow,
+  EventSectionLayoutResponse,
+  SaveEventSectionLayoutRequest,
   Keyset,
 } from "./types";
 import {
@@ -27,6 +30,8 @@ import {
   decodeCursor,
   normalizeEventDetails,
   EMPTY_EVENT_DETAILS,
+  normalizeEventSectionLayout,
+  EMPTY_EVENT_SECTION_LAYOUT,
   DEFAULT_LIMIT,
   MAX_LIMIT,
   INCLUDE_ACTIONS_CAP,
@@ -286,6 +291,47 @@ export class EventService {
     if (!ok) throw errVersionConflict(id);
 
     await this.auditWrite(ctx, "event.event.details_updated", "event", id, {
+      version: next.version,
+    });
+    return { eventId: id, data: next.data, version: next.version, updatedAt: next.updatedAt };
+  }
+
+  // ---- event section layout (shared D&D order/visibility; event:write to edit) ----
+  async getEventSectionLayout(_ctx: ReqCtx, id: common.EventId): Promise<EventSectionLayoutResponse> {
+    await this.loadEvent(id); // 404 if missing / cross-org
+    const row = await this.deps.repo.getEventSectionLayout(id);
+    if (!row) {
+      return { eventId: id, data: { ...EMPTY_EVENT_SECTION_LAYOUT }, version: 0, updatedAt: null };
+    }
+    return { eventId: id, data: row.data, version: row.version, updatedAt: row.updatedAt };
+  }
+
+  async saveEventSectionLayout(
+    ctx: ReqCtx,
+    id: common.EventId,
+    body: SaveEventSectionLayoutRequest,
+  ): Promise<EventSectionLayoutResponse> {
+    if (typeof body.version !== "number") {
+      throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    }
+    const ev = await this.loadEvent(id);
+    if (ev.archivedAt) throw errArchivedImmutable(id);
+
+    const current = await this.deps.repo.getEventSectionLayout(id);
+    const currentVersion = current?.version ?? 0;
+    if (body.version !== currentVersion) throw errVersionConflict(id);
+
+    const next: EventSectionLayoutRow = {
+      eventId: id,
+      data: normalizeEventSectionLayout(body.data),
+      version: currentVersion + 1,
+      updatedBy: ctx.userId,
+      updatedAt: this.deps.now(),
+    };
+    const ok = await this.deps.repo.upsertEventSectionLayout(next, currentVersion);
+    if (!ok) throw errVersionConflict(id);
+
+    await this.auditWrite(ctx, "event.event.section_layout_updated", "event", id, {
       version: next.version,
     });
     return { eventId: id, data: next.data, version: next.version, updatedAt: next.updatedAt };

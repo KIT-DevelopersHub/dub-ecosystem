@@ -6,7 +6,13 @@ import type { Context } from "hono";
 import { dubContext, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
 import type { event } from "@dub/types";
-import type { AppDeps, CreateActionRequest, UpdateActionRequest, SaveEventDetailsRequest } from "./types";
+import type {
+  AppDeps,
+  CreateActionRequest,
+  UpdateActionRequest,
+  SaveEventDetailsRequest,
+  SaveEventSectionLayoutRequest,
+} from "./types";
 import { EventService, type ReqCtx } from "./service";
 
 function reqCtx(c: Context): ReqCtx {
@@ -99,6 +105,16 @@ export function createApp(deps: AppDeps): Hono {
   app.put("/events/:id/details", authz.requirePermission("event:write", eventIdScope), async (c) => {
     const body = await readJson<SaveEventDetailsRequest>(c);
     return c.json(await svc.saveEventDetails(reqCtx(c), c.req.param("id"), body));
+  });
+
+  // ---- event section layout (shared D&D order/visibility of the detail sections) ----
+  app.get("/events/:id/section-layout", authz.requirePermission("event:read", eventIdScope), async (c) => {
+    return c.json(await svc.getEventSectionLayout(reqCtx(c), c.req.param("id")));
+  });
+
+  app.put("/events/:id/section-layout", authz.requirePermission("event:write", eventIdScope), async (c) => {
+    const body = await readJson<SaveEventSectionLayoutRequest>(c);
+    return c.json(await svc.saveEventSectionLayout(reqCtx(c), c.req.param("id"), body));
   });
 
   // ---- actions (hierarchy: created only under an event) ----
