@@ -85,7 +85,12 @@ describe("AccountSettingsDialog", () => {
       expect(me?.user.displayName).toBe("Kota");
     });
     // An inline error is surfaced.
-    expect(await screen.findByTestId("fe2-account-settings-error")).toBeInTheDocument();
+    const err = await screen.findByTestId("fe2-account-settings-error");
+    expect(err).toBeInTheDocument();
+    // a11y (P17): role="alert" のエラーバナー自体へフォーカスが移る
+    // (原因の入力欄を一意に特定できないため、バナーをフォーカス先にする)。
+    expect(err).toHaveAttribute("role", "alert");
+    await waitFor(() => expect(err).toHaveFocus());
   });
 
   it("clears the avatar to initials with イニシャルに戻す", async () => {
