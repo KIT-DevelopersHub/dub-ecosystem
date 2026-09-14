@@ -184,3 +184,61 @@
 .drawer .body {
   min-height: 0;
 }
+
+/* ---- P23: mobile-width full-screen bottom sheet for Modal/ConfirmDialog/ErrorDialog ----
+   Below @dub/tokens breakpoint.sm (640px) a small centered dialog is hard to read/tap, so
+   the same Modal renders as a full-height sheet instead: docked to the bottom, full width,
+   no rounded corners, with the existing header (title + 閉じる IconButton) acting as the
+   sticky "close bar" at the top. Desktop stays the current centered dialog — this block
+   only fires under the media query, no JS/behavior branching. Drawer is left as-is (already
+   near full-width on small screens via min(420px, 90vw)). Rules are placed last in the file
+   and match the specificity of the size rules above so they win by source order (no
+   !important needed). */
+@media (max-width: 640px) {
+  .overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .dialog,
+  .dialog[data-size="sm"],
+  .dialog[data-size="md"],
+  .dialog[data-size="lg"],
+  .dialog[data-size="full"] {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    overflow: hidden;
+    animation: dub-modal-sheet-in 0.22s ease-out;
+  }
+  /* .dialog is overflow:hidden above, so header/footer stay fixed in the flex column
+     as plain flex items and only .body (flex:1) scrolls — no position:sticky needed. */
+  .header {
+    flex: none;
+    padding-top: max(var(--dub-space-4), env(safe-area-inset-top));
+  }
+  .body {
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .footer {
+    flex: none;
+    padding-bottom: max(var(--dub-space-4), env(safe-area-inset-bottom));
+  }
+  /* Reduced motion wins regardless of rule order in the file (nested media, not a
+     separate top-level block competing on source order with the rule above). */
+  @media (prefers-reduced-motion: reduce) {
+    .dialog {
+      animation: none;
+    }
+  }
+}
+@keyframes dub-modal-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
