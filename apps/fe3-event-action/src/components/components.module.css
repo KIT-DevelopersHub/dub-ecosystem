@@ -343,6 +343,107 @@
   grid-column: 1 / -1;
 }
 
+/* ---- section レイアウト編集モード (shared D&D order/visibility) ----
+ * Each width-uniform layout group (see lib/sectionLayout.ts) renders through ONE of
+ * these two containers in BOTH view and edit mode, so the surrounding .detailGrid
+ * never reflows when 編集 is toggled: a narrow group repeats the outer grid's own
+ * auto-fit/minmax columns (its members are the same size as any other narrow
+ * section); a wide group stacks its (already full-width) members in a column. Both
+ * span the whole outer grid row via grid-column: 1 / -1. */
+.sectionGroupGrid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--dub-space-4);
+  align-items: start;
+}
+.sectionGroupColumn {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+
+/* Ported from FE2's Home dashboard 編集モード chrome (P3-3): a dashed frame + light
+ * jiggle (desynced per item) + a grip handle + a hide/show toggle around each
+ * section while editing the shared layout. See FRONTEND_GUIDE "並べ替え UI". */
+.sectionEdit {
+  position: relative;
+  border: 1.5px dashed var(--dub-color-border-strong);
+  border-radius: var(--dub-radius-md);
+  padding: var(--dub-space-1);
+  animation: fe3-section-jiggle 0.26s ease-in-out infinite;
+}
+.sectionEdit:nth-child(odd) {
+  animation-delay: -0.13s;
+}
+.sectionEdit:nth-child(3n) {
+  animation-delay: -0.19s;
+}
+.sectionEdit[data-dragging="true"] {
+  border-style: solid;
+  border-color: var(--dub-color-brand-500);
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sectionEdit {
+    animation: none;
+  }
+}
+.sectionEditInner {
+  pointer-events: none;
+}
+.sectionEditInner[data-hidden="true"] {
+  opacity: 0.45;
+}
+.sectionEditHide,
+.sectionEditHandle {
+  position: absolute;
+  top: calc(var(--dub-space-2) * -1);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-raised);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+}
+.sectionEditHide {
+  left: calc(var(--dub-space-2) * -1);
+  border: none;
+  color: var(--dub-color-text-inverse, #fff);
+  background: var(--dub-color-danger-500, #e5484d);
+  cursor: pointer;
+}
+.sectionEditHide[aria-pressed="false"] {
+  background: var(--dub-color-brand-500);
+}
+.sectionEditHandle {
+  right: calc(var(--dub-space-2) * -1);
+  color: var(--dub-color-text-tertiary);
+  cursor: grab;
+  touch-action: none;
+}
+.sectionEditHandle:active {
+  cursor: grabbing;
+}
+@keyframes fe3-section-jiggle {
+  0%,
+  100% {
+    transform: rotate(-1deg);
+  }
+  50% {
+    transform: rotate(1deg);
+  }
+}
+.layoutEditHint {
+  margin: calc(var(--dub-space-2) * -1) 0 var(--dub-space-2);
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-secondary);
+}
+
 /* Grouping heading between blocks of related sections (開催情報 / 当日 など). */
 .groupHeading {
   grid-column: 1 / -1;

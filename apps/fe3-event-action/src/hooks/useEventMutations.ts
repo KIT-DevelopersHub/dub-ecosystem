@@ -10,6 +10,7 @@ import { eventKeys } from "../lib/queryKeys";
 import { normalizeError } from "../lib/errorMap";
 import type { CreateActionRequest, ListActionsResponse, UpdateActionRequest } from "../api/actionContracts";
 import type { EventDetails, EventDetailsData } from "../api/detailsContracts";
+import type { EventSectionLayout, EventSectionLayoutData } from "../api/sectionLayoutContracts";
 
 // ---- Event: create (non-optimistic; server mints id) ----
 export function useCreateEvent() {
@@ -65,6 +66,25 @@ export function useSaveEventDetails(eventId: common.EventId) {
       return { ...prev, data, version: prev.version + 1 };
     },
     successMessage: "保存しました",
+  });
+}
+
+// ---- Event section layout: save the shared order/hidden set (optimistic; silent —
+// no success toast, matching the Home dashboard D&D's feel: reordering itself IS the
+// feedback). A stale version rolls back + refetches like any other optimistic save. ----
+export interface SaveSectionLayoutVars {
+  data: EventSectionLayoutData;
+  version: number;
+}
+export function useSaveSectionLayout(eventId: common.EventId) {
+  const api = useEventApi();
+  return createOptimisticMutation<EventSectionLayout, SaveSectionLayoutVars, EventSectionLayout>({
+    mutationFn: ({ data, version }) => api.saveEventSectionLayout(eventId, { data, version }),
+    queryKey: eventKeys.sectionLayout(eventId),
+    optimisticUpdate: (prev, { data }) => {
+      if (!prev) return prev;
+      return { ...prev, data, version: prev.version + 1 };
+    },
   });
 }
 
