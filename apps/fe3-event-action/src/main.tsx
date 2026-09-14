@@ -12,6 +12,7 @@ import { NavigationProvider, type NavigationApi } from "./contracts/navigation";
 import { EventApiProvider, RegistryProvider } from "./context/ApiContext";
 import { createMockEventApi } from "./api/mockData";
 import { actionTypeRegistry } from "./module";
+import { EventAppHeader } from "./components/EventAppHeader";
 import { EventListPage } from "./pages/EventListPage";
 import { EventDetailPage } from "./pages/EventDetailPage";
 import { ActionDetailPage } from "./pages/ActionDetailPage";
@@ -45,11 +46,15 @@ function App() {
   const setMe = useAuthStore((s) => s.setMe);
 
   useEffect(() => {
-    // Fully permissioned dev session.
+    // Fully permissioned dev session by default. `?readonly=1` (page query string,
+    // not the hash-router's own search) drops to event:read-only — used by the
+    // section-layout E2E to prove the 並べ替え toggle/edit chrome never renders for
+    // a viewer without event:write, in a real browser.
+    const readonly = new URLSearchParams(window.location.search).get("readonly") === "1";
     setMe({
       user: { id: "usr_dev", displayName: "開発ユーザー", avatarUrl: null },
       orgId: "org_devhub",
-      permissions: ["event:read", "event:write", "event:admin"],
+      permissions: readonly ? ["event:read"] : ["event:read", "event:write", "event:admin"],
       sessionExpiresAt: Date.now() + 3600_000,
     });
     const onHash = () => setLoc(parseHash());
@@ -77,7 +82,13 @@ function App() {
     <EventApiProvider api={api}>
       <RegistryProvider registry={actionTypeRegistry}>
         <NavigationProvider value={nav}>
-          <ToastProvider>{render()}</ToastProvider>
+          <ToastProvider>
+            {/* The global イベント switcher every event-scoped screen (incl.
+                EventHubPage) assumes is already on-screen — see its own header
+                comment. FE2 supplies this in production; here it's this harness. */}
+            <EventAppHeader />
+            {render()}
+          </ToastProvider>
         </NavigationProvider>
       </RegistryProvider>
     </EventApiProvider>

@@ -5,6 +5,7 @@ import { useEventApi } from "../context/ApiContext";
 import { eventKeys } from "../lib/queryKeys";
 import type { ListActionsQuery, ListActionsResponse } from "../api/actionContracts";
 import type { EventDetails } from "../api/detailsContracts";
+import type { EventSectionLayout } from "../api/sectionLayoutContracts";
 
 export function useEventsQuery(query: event.ListEventsQuery) {
   const api = useEventApi();
@@ -31,6 +32,19 @@ export function useEventDetailsQuery(eventId: common.EventId | null) {
     enabled: eventId !== null,
     // Settle fast on a hard failure so the panel degrades to its empty state
     // instead of holding the skeleton across long default back-off (⑤).
+    retry: 1,
+  });
+}
+
+export function useSectionLayoutQuery(eventId: common.EventId | null) {
+  const api = useEventApi();
+  return useQuery<EventSectionLayout>({
+    queryKey: eventId ? eventKeys.sectionLayout(eventId) : eventKeys.details(),
+    queryFn: () => api.getEventSectionLayout(eventId as common.EventId),
+    enabled: eventId !== null,
+    // Settle fast (same rationale as useEventDetailsQuery ⑤): a layout fetch failure
+    // must not block the sections themselves — the panel falls back to catalog
+    // default order / nothing hidden.
     retry: 1,
   });
 }
