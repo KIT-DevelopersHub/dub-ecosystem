@@ -1592,6 +1592,89 @@
 .listFoot { display: flex; align-items: center; justify-content: space-between; gap: var(--dub-space-3); margin-top: var(--dub-space-3); flex-wrap: wrap; }
 .countHint { font-size: var(--dub-font-size-sm, 0.8rem); color: var(--dub-color-text-secondary); }
 
+/* ---- P11: quick-complete checkbox (MyTaskList) ----
+ * Checking draws the checkmark (stroke-dashoffset) and flashes the row green,
+ * fading back out — "完了操作に達成感・誤タップ視認" (the check itself is also the
+ * misclick affordance: a plain box vs. a filled green square with a check).
+ * 判断: 見当たらない/分かりにくい指摘の修正 — ヘッダーに可視ラベル「完了」を追加
+ * (旧: aria-labelのみで見た目は空欄)、ヒットエリア・視認性を拡大(常時ほんのり
+ * 塗りつぶし + hover/focusで背景を強調)して、行内で一目で見つかる操作にする。 */
+.colComplete { width: 52px; text-align: center; }
+.completeCheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  background: var(--dub-color-surface-sunken);
+  cursor: pointer;
+  border-radius: var(--dub-radius-md, 6px);
+  transition: background var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease),
+    transform var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+}
+.completeCheck:not(:disabled):hover {
+  background: var(--dub-color-brand-50, var(--dub-color-brand-100));
+  transform: scale(1.06);
+}
+.completeCheck:disabled { cursor: not-allowed; opacity: 0.5; }
+.completeCheck:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+.completeCheckBox {
+  fill: var(--dub-color-surface-raised);
+  stroke: var(--dub-color-text-secondary);
+  stroke-width: 1.75;
+  transition: fill var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease),
+    stroke var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+}
+.completeCheck:not(:disabled):hover .completeCheckBox {
+  stroke: var(--dub-color-brand-600, var(--dub-color-brand-500));
+}
+.completeCheckOn .completeCheckBox {
+  fill: var(--dub-color-success-500);
+  stroke: var(--dub-color-success-500);
+}
+.completeCheckMark {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 12;
+  stroke-dashoffset: 12;
+}
+.completeCheckOn .completeCheckMark {
+  animation: dub-complete-draw var(--dub-motion-normal, 200ms) var(--dub-motion-easing, ease) forwards;
+}
+@keyframes dub-complete-draw {
+  to { stroke-dashoffset: 0; }
+}
+.completeCheckFlash {
+  animation: dub-complete-pop 220ms var(--dub-motion-easing, ease);
+}
+@keyframes dub-complete-pop {
+  0% { transform: scale(0.7); }
+  60% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+/* the row itself: a green flash that fades back to transparent (完了操作の達成感). */
+.rowJustCompleted {
+  animation: dub-row-complete-flash 900ms ease-out;
+}
+@keyframes dub-row-complete-flash {
+  0% { background-color: var(--dub-color-success-100); }
+  100% { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .completeCheckMark { animation: none; }
+  .completeCheckOn .completeCheckMark { stroke-dashoffset: 0; }
+  .completeCheckFlash { animation: none; }
+  .rowJustCompleted { animation: none; }
+}
+
 /* ---- from → to cell ---- */
 .fromTo { display: inline-flex; align-items: center; gap: var(--dub-space-2); min-width: 0; }
 .party { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
