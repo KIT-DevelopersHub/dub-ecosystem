@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toTanstackPath, createShellRouter } from "./router.tsx";
+import { toTanstackPath, createShellRouter, appSegment } from "./router.tsx";
 import { buildRegistry } from "../modules/registry.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 
@@ -10,6 +10,27 @@ describe("toTanstackPath", () => {
   });
   it("converts trailing wildcard /* to /$", () => {
     expect(toTanstackPath("/admin/*")).toBe("/admin/$");
+  });
+});
+
+// P14 delight UX: ShellRouteContent keys its crossfade wrapper by `appSegment`, so
+// switching apps (a launcher tile) remounts + fades, while navigating within the
+// same app does not (state/scroll stays, no fade replay).
+describe("appSegment", () => {
+  it("takes the first path segment as the app identity", () => {
+    expect(appSegment("/chat")).toBe("chat");
+    expect(appSegment("/chat/settings")).toBe("chat");
+    expect(appSegment("/tasks/evt_1/board")).toBe("tasks");
+  });
+  it("treats the root path as a stable 'home' app", () => {
+    expect(appSegment("/")).toBe("home");
+    expect(appSegment("")).toBe("home");
+  });
+  it("is stable across sub-navigation within the same app (no remount)", () => {
+    expect(appSegment("/mail/inbox")).toBe(appSegment("/mail/sent"));
+  });
+  it("differs across a real app switch (triggers the fade)", () => {
+    expect(appSegment("/tasks")).not.toBe(appSegment("/chat"));
   });
 });
 
