@@ -3,3 +3,5 @@ packages:
   - "services/*"
   - "apps/*"
   - "infra/*"
+  - "commander/web"
+  - "commander/daemon"

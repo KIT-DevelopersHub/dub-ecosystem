@@ -1,0 +1,17 @@
+{
+  "name": "@dub/commander-daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Commander exec bridge — LOCAL Node daemon that spawns the Claude Code CLI headless and relays stream-json over SSE. Never deployed to Workers.",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
