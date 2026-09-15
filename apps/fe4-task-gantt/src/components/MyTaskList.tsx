@@ -90,7 +90,7 @@ export function MyTaskList({
             <th>タイトル</th>
             <th>チーム</th>
             <th>状態</th>
-            <th>優先度</th>
+            <th>重要度</th>
             <th>終了日</th>
           </tr>
         </thead>

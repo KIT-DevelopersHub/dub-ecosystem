@@ -12,7 +12,7 @@ import styles from "../styles/app.module.css";
  * two never drift apart again (ユーザー確定レイアウト・共通コンポーネント化):
  *
  *   タイトル                （全幅）
- *   ステータス   優先度      （2カラム・同一行）
+ *   ステータス   重要度      （2カラム・同一行）
  *   担当         チーム      （2カラム・同一行）
  *   開始日       終了日      （2カラム・同一行）
  *   親タスク                （全幅）
@@ -139,7 +139,7 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
         />
       </div>
 
-      {/* ステータス / 優先度 (2カラム・同一行) */}
+      {/* ステータス / 重要度 (2カラム・同一行) */}
       <div className={styles.formRow}>
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor={`${idPrefix}-status`}>
@@ -155,7 +155,7 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
         </div>
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor={`${idPrefix}-priority`}>
-            優先度
+            重要度
           </label>
           <Select
             id={`${idPrefix}-priority`}
