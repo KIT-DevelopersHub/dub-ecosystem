@@ -13,6 +13,8 @@ export interface DaemonRunEvent {
 
 export interface CommanderClient {
   startRun(prompt: string): Promise<{ runId: string }>;
+  /** Cancel a running run (best-effort). Resolves once the daemon acknowledges. */
+  cancelRun(runId: string): Promise<void>;
   /** Stream a run's events. Returns an unsubscribe fn. */
   streamEvents(
     runId: string,
@@ -25,17 +27,35 @@ const DEFAULT_BASE =
   (import.meta.env?.VITE_COMMANDER_DAEMON as string | undefined) ??
   "http://127.0.0.1:4319";
 
+const DEFAULT_TOKEN = import.meta.env?.VITE_COMMANDER_TOKEN as string | undefined;
+
 export class HttpCommanderClient implements CommanderClient {
-  constructor(private baseUrl: string = DEFAULT_BASE) {}
+  constructor(
+    private baseUrl: string = DEFAULT_BASE,
+    private token: string | undefined = DEFAULT_TOKEN,
+  ) {}
+
+  private headers(base: Record<string, string> = {}): Record<string, string> {
+    return this.token ? { ...base, authorization: `Bearer ${this.token}` } : base;
+  }
 
   async startRun(prompt: string): Promise<{ runId: string }> {
     const res = await fetch(`${this.baseUrl}/runs`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: this.headers({ "content-type": "application/json" }),
       body: JSON.stringify({ prompt }),
     });
     if (!res.ok) throw new Error(`daemon returned ${res.status}`);
     return (await res.json()) as { runId: string };
+  }
+
+  async cancelRun(runId: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    // 404 = already finished/gone; treat as a no-op success (idempotent cancel).
+    if (!res.ok && res.status !== 404) throw new Error(`daemon returned ${res.status}`);
   }
 
   streamEvents(
@@ -43,7 +63,10 @@ export class HttpCommanderClient implements CommanderClient {
     onEvent: (ev: DaemonRunEvent) => void,
     onClose: () => void,
   ): () => void {
-    const es = new EventSource(`${this.baseUrl}/runs/${runId}/events`);
+    // EventSource cannot set an Authorization header, so the shared token rides a
+    // query param for the SSE stream (loopback-only; the daemon accepts either).
+    const q = this.token ? `?token=${encodeURIComponent(this.token)}` : "";
+    const es = new EventSource(`${this.baseUrl}/runs/${runId}/events${q}`);
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data) as DaemonRunEvent;
       onEvent(ev);

@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Commander web UI — command console that drives the local Claude Code exec bridge (commander-daemon) over SSE. Foundation PoC; becomes a Dub app in a later phase.",
+  "description": "Commander web UI — command console that drives the local Claude Code exec bridge (commander-daemon) over SSE. Consumed standalone and as a Dub app (apps/fe2-app-shell).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

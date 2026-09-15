@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (59 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (61 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -87,9 +87,11 @@ export const PERMISSION_CATALOG = [
   { key: "app:admin:edit", name: "Edit in 管理 app", description: "Act inside the 管理 app (implies view)", domain: "app", dangerous: false },
   { key: "app:lp:view", name: "Open LP管理 app", description: "Open and view the LP管理 app", domain: "app", dangerous: false },
   { key: "app:lp:edit", name: "Edit in LP管理 app", description: "Manage LP versions inside the LP管理 app (implies view)", domain: "app", dangerous: false },
+  { key: "app:commander:view", name: "Open Commander app", description: "Open and view the Commander app (drives the local Claude Code exec bridge)", domain: "app", dangerous: true },
+  { key: "app:commander:edit", name: "Edit in Commander app", description: "Run commands / advance phases inside the Commander app (implies view)", domain: "app", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 59 keys (open `${string}:${string}` template retired).
+// Closed union of the 61 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

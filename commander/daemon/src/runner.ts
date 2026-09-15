@@ -1,20 +1,34 @@
 // Run store + claude spawner. Each run spawns the local Claude Code CLI in
 // headless mode (`claude -p <prompt> --output-format stream-json --verbose`),
 // parses its line-delimited JSON stdout, and fans events out to SSE listeners.
+// A run can be cancelled (kills the child) and is killed automatically if it
+// exceeds the configured wall-clock timeout. Every run + event is mirrored to an
+// optional RunSink (persistence via commander-service).
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { DaemonConfig, Run, RunEvent, StartRunInput } from "./types.ts";
+import { nullSink, type RunSink } from "./sink.ts";
 
 type Listener = (event: RunEvent) => void;
+
+interface Active {
+  child: ChildProcess;
+  timer?: ReturnType<typeof setTimeout>;
+  cancelled: boolean;
+  timedOut: boolean;
+}
 
 export class RunStore {
   private runs = new Map<string, Run>();
   private listeners = new Map<string, Set<Listener>>();
+  private active = new Map<string, Active>();
   private config: DaemonConfig;
+  private sink: RunSink;
 
-  constructor(config: DaemonConfig) {
+  constructor(config: DaemonConfig, sink: RunSink = nullSink) {
     this.config = config;
+    this.sink = sink;
   }
 
   list(): Run[] {
@@ -25,6 +39,11 @@ export class RunStore {
 
   get(id: string): Run | undefined {
     return this.runs.get(id);
+  }
+
+  /** True while the run is still executing (a child process is live). */
+  isActive(id: string): boolean {
+    return this.active.has(id);
   }
 
   /** Subscribe to a run's live events. Returns an unsubscribe fn. */
@@ -42,6 +61,7 @@ export class RunStore {
 
   private emit(run: Run, event: RunEvent): void {
     run.events.push(event);
+    this.sink.runEvent(run.id, event);
     const set = this.listeners.get(run.id);
     if (set) for (const l of set) l(event);
   }
@@ -59,8 +79,22 @@ export class RunStore {
       events: [],
     };
     this.runs.set(id, run);
+    this.sink.runStarted(run);
     this.spawnClaude(run);
     return run;
+  }
+
+  /**
+   * Request cancellation of a running run. Kills the child process; the `close`
+   * handler then records the cancellation and marks the run failed. Returns true
+   * if a live run was signalled, false if the run is unknown or already finished.
+   */
+  cancel(id: string): boolean {
+    const a = this.active.get(id);
+    if (!a) return false;
+    a.cancelled = true;
+    a.child.kill("SIGTERM");
+    return true;
   }
 
   private setStatus(run: Run, status: Run["status"]): void {
@@ -78,7 +112,7 @@ export class RunStore {
       ...this.config.extraArgs,
     ];
 
-    let child;
+    let child: ChildProcess;
     try {
       child = spawn(this.config.claudeBin, args, {
         cwd: run.cwd,
@@ -95,12 +129,23 @@ export class RunStore {
       return;
     }
 
+    const entry: Active = { child, cancelled: false, timedOut: false };
+    this.active.set(run.id, entry);
+
+    // Wall-clock cap: kill a run that outlives runTimeoutMs (0/negative = disabled).
+    if (this.config.runTimeoutMs > 0) {
+      entry.timer = setTimeout(() => {
+        entry.timedOut = true;
+        child.kill("SIGTERM");
+      }, this.config.runTimeoutMs);
+    }
+
     this.setStatus(run, "running");
 
     // Parse stdout as newline-delimited JSON (stream-json = one object per line).
     let stdoutBuf = "";
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    child.stdout!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => {
       stdoutBuf += chunk;
       let nl: number;
       while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
@@ -111,8 +156,8 @@ export class RunStore {
     });
 
     let stderrBuf = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
+    child.stderr!.setEncoding("utf8");
+    child.stderr!.on("data", (chunk: string) => {
       stderrBuf += chunk;
       let nl: number;
       while ((nl = stderrBuf.indexOf("\n")) !== -1) {
@@ -131,6 +176,8 @@ export class RunStore {
     });
 
     child.on("close", (code) => {
+      if (entry.timer) clearTimeout(entry.timer);
+      this.active.delete(run.id);
       if (stdoutBuf.trim()) this.handleStdoutLine(run, stdoutBuf.trim());
       if (stderrBuf) {
         this.emit(run, {
@@ -139,10 +186,26 @@ export class RunStore {
           line: stderrBuf,
         });
       }
+      // Surface WHY a killed run ended before the terminal status.
+      if (entry.timedOut) {
+        this.emit(run, {
+          type: "error",
+          at: new Date().toISOString(),
+          message: `run timed out after ${this.config.runTimeoutMs}ms`,
+        });
+      } else if (entry.cancelled) {
+        this.emit(run, {
+          type: "error",
+          at: new Date().toISOString(),
+          message: "run cancelled by operator",
+        });
+      }
       run.exitCode = code;
       run.endedAt = new Date().toISOString();
       this.emit(run, { type: "exit", at: run.endedAt, code });
-      this.setStatus(run, code === 0 ? "succeeded" : "failed");
+      // A killed run (cancel/timeout) is a failure regardless of the reported code.
+      const ok = code === 0 && !entry.cancelled && !entry.timedOut;
+      this.setStatus(run, ok ? "succeeded" : "failed");
     });
   }
 

@@ -75,6 +75,10 @@ export const APP_MANIFEST = [
   { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true },
   { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" } },
   { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" } },
+  // Commander: admin/dev tooling that drives the LOCAL Claude Code exec bridge and gates
+  // demo→staging→prod phase moves. Admin-only by design (identity:admin) and NOT in the
+  // launcher's PUBLISHED_APPS, so it is greyed (member-hidden) until explicitly released.
+  { id: "commander", label: "Commander", navPath: "/commander", domain: "identity", permissions: ["identity:admin"], access: { view: "app:commander:view", edit: "app:commander:edit" } },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

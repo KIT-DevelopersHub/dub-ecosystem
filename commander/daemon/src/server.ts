@@ -1,16 +1,24 @@
 // Minimal HTTP + SSE server for the exec bridge. Zero external deps (node:http).
 //
 // Routes:
-//   GET  /health             -> { ok, service, version }
-//   POST /runs               -> { runId }            (body: { prompt, cwd? })
-//   GET  /runs               -> Run[]                (history, newest first)
-//   GET  /runs/:id           -> Run                  (with buffered events)
-//   GET  /runs/:id/events    -> text/event-stream    (replays history, then live)
-//   GET  /                   -> tiny built-in test UI (zero-build smoke check)
+//   GET    /health             -> { ok, service, version }        (always open)
+//   GET    /                   -> tiny built-in test UI           (always open)
+//   POST   /runs               -> { runId }            (body: { prompt, cwd? })
+//   GET    /runs               -> Run[]                (history, newest first)
+//   GET    /runs/:id           -> Run                  (with buffered events)
+//   DELETE /runs/:id           -> 202 (cancel) | 404   (cancel a running run)
+//   GET    /runs/:id/events    -> text/event-stream    (replays history, then live)
+//
+// Auth (ADR 0003): when config.operatorToken is set, every route EXCEPT GET /health
+// and GET / requires the shared token — `Authorization: Bearer <token>` or, for the
+// SSE stream (EventSource cannot set headers), a `?token=` query param. When the
+// token is empty the daemon is open (single-operator loopback dev).
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import type { DaemonConfig } from "./types.ts";
 import { RunStore } from "./runner.ts";
+import { nullSink, HttpRunSink, type RunSink } from "./sink.ts";
 import { INDEX_HTML } from "./index-html.ts";
 
 export const VERSION = "0.1.0";
@@ -38,8 +46,24 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+/** Constant-time token compare; extracts the token from the Bearer header or ?token=. */
+function tokenMatches(expected: string, req: IncomingMessage, url: URL): boolean {
+  const header = req.headers["authorization"];
+  const bearer =
+    typeof header === "string" && header.startsWith("Bearer ")
+      ? header.slice("Bearer ".length)
+      : undefined;
+  const presented = bearer ?? url.searchParams.get("token") ?? "";
+  const a = Buffer.from(presented);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export function createDaemonServer(config: DaemonConfig) {
-  const store = new RunStore(config);
+  const sink: RunSink = config.serviceUrl
+    ? new HttpRunSink(config.serviceUrl, config.serviceToken)
+    : nullSink;
+  const store = new RunStore(config, sink);
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${config.port}`);
@@ -50,21 +74,26 @@ export function createDaemonServer(config: DaemonConfig) {
     if (method === "OPTIONS") {
       res.writeHead(204, {
         "access-control-allow-origin": "*",
-        "access-control-allow-methods": "GET, POST, OPTIONS",
-        "access-control-allow-headers": "content-type",
+        "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+        "access-control-allow-headers": "content-type, authorization",
       });
       res.end();
       return;
     }
 
+    // Always-open routes (liveness + zero-build smoke UI).
     if (method === "GET" && pathname === "/health") {
       return json(res, 200, { ok: true, service: SERVICE, version: VERSION });
     }
-
     if (method === "GET" && pathname === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(INDEX_HTML);
       return;
+    }
+
+    // Shared-token gate for everything else (when a token is configured).
+    if (config.operatorToken && !tokenMatches(config.operatorToken, req, url)) {
+      return json(res, 401, { error: "unauthorized" });
     }
 
     if (method === "POST" && pathname === "/runs") {
@@ -87,6 +116,15 @@ export function createDaemonServer(config: DaemonConfig) {
     }
 
     const runMatch = pathname.match(/^\/runs\/([^/]+)(\/events)?$/);
+
+    // Cancel a running run.
+    if (method === "DELETE" && runMatch && !runMatch[2]) {
+      const id = runMatch[1]!;
+      const cancelled = store.cancel(id);
+      if (!cancelled) return json(res, 404, { error: "run_not_active" });
+      return json(res, 202, { runId: id, status: "cancelling" });
+    }
+
     if (method === "GET" && runMatch) {
       const id = runMatch[1]!;
       const run = store.get(id);

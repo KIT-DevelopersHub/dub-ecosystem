@@ -108,6 +108,9 @@ importers:
       '@dub/app-ui':
         specifier: workspace:*
         version: link:../../packages/app-ui
+      '@dub/commander-web':
+        specifier: workspace:*
+        version: link:../../commander/web
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors
