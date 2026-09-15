@@ -112,6 +112,38 @@ svg {
 
 /* ---- shell chrome (FE2 wiring around @dub/ui AppShell) --------------------- */
 
+/* P14 delight UX: crossfade when the launcher switches TOP-LEVEL app (see
+ * ShellRouteContent in shell/router.tsx — keyed by the path's first segment, so
+ * this only replays on an actual app switch, not on sub-navigation within one).
+ *
+ * Duration/easing are scoped LOCAL custom properties (not the shared
+ * --dub-motion-* tokens) — those tokens are reused across 10+ other
+ * animations in this file, so widening them here would ripple app-wide.
+ * The original 200ms opacity-only fade read as an instant cut (user report:
+ * "切り替わりが一瞬に見える"); this widens the duration and adds a small
+ * translateY + scale settle so the transition is clearly perceptible without
+ * feeling sluggish. */
+.fe2-app-fade {
+  --fe2-app-fade-duration: 360ms;
+  --fe2-app-fade-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  animation: fe2-app-fade-in var(--fe2-app-fade-duration) var(--fe2-app-fade-easing);
+}
+@keyframes fe2-app-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe2-app-fade {
+    animation: none;
+  }
+}
+
 /* Header brand lockup: "DevHub" (bold, primary) is the app label AND the home导线;
  * the account email rides alongside — small, muted, secondary. Rendered inside the
  * @dub/ui PageHeader <h1>, so the anchor inherits the bold title weight/size. */
