@@ -34,6 +34,13 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   // instead of the raw machine name.
   { pattern: "deploy.*", label: "デプロイ", icon: "info", group: "system" },
   { pattern: "feedback", label: "フィードバック", icon: "alert", group: "system" },
+  // Chat @mention / DM (fe6-chat, via chat.message.created -> notification). No dedicated
+  // NotificationGroup (the group enum stays task/event/system/release; チャット gets its
+  // own CATEGORY/tab below instead) — grouped under システム here only for the preference
+  // matrix's generic row label.
+  { pattern: "chat.*", label: "Chat", icon: "message-square", group: "system" },
+  { pattern: "chat.mention", label: "チャットでメンションされました", icon: "message-square", group: "system" },
+  { pattern: "chat.dm", label: "ダイレクトメッセージ", icon: "message-square", group: "system" },
   // Release notes (new-feature announcements). Its own group so it gets a dedicated
   // "新機能" filter chip and a distinct 🎉 badge in the inbox.
   { pattern: "release", label: "🎉 新機能", icon: "megaphone", group: "release" },
@@ -102,11 +109,12 @@ export const NOTIFICATION_GROUP_META: Record<NotificationGroup, { label: string;
 //   - アプリアップデート         = deploy.* + release/release.*  (deploy admin notifications + release notes)
 //   - フィードバック (feedback)  = feedback/feedback.*     (in-app feedback → admin notification, config.FEEDBACK_NOTIFY_TYPE)
 //   - メール (mail)              = mail.*                  (mail-gateway / mail-automation)
+//   - チャット (chat)            = chat.*                  (fe6-chat @mention / DM, via chat.message.created)
 //   - その他 (other)             = everything else (tasks/events/system/…): shown only under "All"
 // The taxonomy is intentionally separate from NotificationGroup above (which stays the
 // per-app display grouping used by preferences + the type dictionary). Categories are what the
 // user asked the tabs to reflect.
-export type NotificationCategory = "app_update" | "mail" | "participation" | "feedback" | "other";
+export type NotificationCategory = "app_update" | "mail" | "participation" | "feedback" | "chat" | "other";
 
 // The tab selector value: a concrete category or "all" (no filtering).
 export type CategoryFilter = NotificationCategory | "all";
@@ -120,6 +128,7 @@ const CATEGORY_RULES: { match: string; category: NotificationCategory }[] = [
   { match: "mail", category: "mail" },
   { match: "deploy", category: "app_update" },
   { match: "release", category: "app_update" },
+  { match: "chat", category: "chat" },
 ];
 
 function ruleMatches(match: string, type: string): boolean {
@@ -146,6 +155,7 @@ export const NOTIFICATION_CATEGORY_META: Record<NotificationCategory, Notificati
   participation: { label: "参加届", icon: "user", tone: "success" },
   feedback: { label: "フィードバック", icon: "message-square", tone: "warning" },
   mail: { label: "メール", icon: "at-sign", tone: "info" },
+  chat: { label: "チャット", icon: "message-square", tone: "info" },
   other: { label: "その他", icon: "bell", tone: "neutral" },
 };
 
@@ -155,6 +165,7 @@ export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
   "participation",
   "feedback",
   "mail",
+  "chat",
   "other",
 ];
 
@@ -166,6 +177,7 @@ export const NOTIFICATION_CATEGORY_TABS: { id: CategoryFilter; label: string }[]
   { id: "app_update", label: NOTIFICATION_CATEGORY_META.app_update.label },
   { id: "feedback", label: NOTIFICATION_CATEGORY_META.feedback.label },
   { id: "mail", label: NOTIFICATION_CATEGORY_META.mail.label },
+  { id: "chat", label: NOTIFICATION_CATEGORY_META.chat.label },
 ];
 
 // True when an item belongs to the active tab. "all" matches everything.
