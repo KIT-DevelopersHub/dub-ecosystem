@@ -147,6 +147,41 @@ export interface SaveEventDetailsRequest {
   version: number;
 }
 
+// ---- event section layout (shared, org/event-scoped D&D customization) ----
+// Which detail sections (重要リンク / 連絡先 / 概要 / ...) are shown, hidden, and in
+// what order. ONE layout per event, shared by every viewer (unlike a per-user
+// dashboard) — editable only by event:write roles (admin/organizer/maintainer),
+// viewed read-only by everyone else. Kept as its own row/table (not folded into
+// EventDetailsData) so a layout reorder never races a content edit's optimistic
+// version lock.
+export interface EventSectionLayoutData {
+  /** Full preferred order of section ids. Ids absent fall back to catalog order. */
+  order: string[];
+  /** Section ids currently hidden from the resting (non-edit) view. */
+  hidden: string[];
+}
+
+export interface EventSectionLayoutRow {
+  eventId: common.EventId;
+  data: EventSectionLayoutData;
+  version: number;
+  updatedBy: common.UserId;
+  updatedAt: common.ISODateTime;
+}
+
+// Wire response. version 0 + updatedAt null => never saved yet (default layout).
+export interface EventSectionLayoutResponse {
+  eventId: common.EventId;
+  data: EventSectionLayoutData;
+  version: number;
+  updatedAt: common.ISODateTime | null;
+}
+
+export interface SaveEventSectionLayoutRequest {
+  data: EventSectionLayoutData;
+  version: number;
+}
+
 // ---- pagination keyset ----
 export interface Keyset {
   // For events sort=startsAt, `s` is the last starts_at (null sorts last).
@@ -224,6 +259,12 @@ export interface EventRepo {
   // Optimistic upsert: expectedVersion 0 inserts (fails if a row already exists),
   // >0 updates WHERE version=expectedVersion. Returns false on conflict/mismatch.
   upsertEventDetails(next: EventDetailsRow, expectedVersion: number): Promise<boolean>;
+
+  // Shared event/org-scoped section layout (order + hidden). null => no row yet
+  // (caller returns the default layout: catalog order, nothing hidden).
+  getEventSectionLayout(eventId: common.EventId): Promise<EventSectionLayoutRow | null>;
+  // Same optimistic upsert contract as upsertEventDetails.
+  upsertEventSectionLayout(next: EventSectionLayoutRow, expectedVersion: number): Promise<boolean>;
 }
 
 export interface AppDeps {
