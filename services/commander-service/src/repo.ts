@@ -193,16 +193,18 @@ export async function transitionFeature(
   const at = nowIso();
   const txId = newId("ptx");
 
-  await db
-    .prepare("UPDATE commander_features SET phase = ?, updated_at = ? WHERE id = ?")
-    .bind(to, at, featureId)
-    .run();
-  await db
-    .prepare(
-      "INSERT INTO commander_phase_transitions (id, feature_id, from_phase, to_phase, approved_by_user, actor, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(txId, featureId, from, to, approvedByUser ? 1 : 0, actor, opts.note ?? null, at)
-    .run();
+  // Atomic: advance the phase AND append the audit row together, so the phase can
+  // never move without its immutable PhaseTransition record (D1 batch = one tx).
+  await db.batch([
+    db
+      .prepare("UPDATE commander_features SET phase = ?, updated_at = ? WHERE id = ?")
+      .bind(to, at, featureId),
+    db
+      .prepare(
+        "INSERT INTO commander_phase_transitions (id, feature_id, from_phase, to_phase, approved_by_user, actor, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind(txId, featureId, from, to, approvedByUser ? 1 : 0, actor, opts.note ?? null, at),
+  ]);
 
   return {
     ok: true,
