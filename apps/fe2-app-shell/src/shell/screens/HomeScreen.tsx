@@ -283,7 +283,7 @@ export function HomeScreen({
             <KpiTile
               testId="fe2-kpi-countdown"
               icon="clock"
-              label="本戦まで"
+              label="開催まで"
               value={days === null ? "—" : String(days)}
               unit="日"
               status={cdStatus}
