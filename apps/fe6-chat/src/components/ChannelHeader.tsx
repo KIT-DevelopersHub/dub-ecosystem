@@ -20,6 +20,10 @@ export interface ChannelHeaderProps {
   onSearchChange: (value: string) => void;
   onUnpin?: (messageId: common.MessageId) => void;
   onJumpToMessage?: (messageId: common.MessageId) => void;
+  // Hamburger that opens the channel-list drawer on mobile widths (P21). The
+  // button itself is only shown under the mobile breakpoint via CSS, so passing
+  // this has no visual effect on desktop.
+  onOpenMobileNav?: () => void;
 }
 
 function initials(name: string): string {
@@ -94,6 +98,7 @@ export function ChannelHeader({
   onSearchChange,
   onUnpin,
   onJumpToMessage,
+  onOpenMobileNav,
 }: ChannelHeaderProps) {
   const isDm = channel.type === "dm";
   // authorId is null for system posts (pinned system message) — render "システム".
@@ -102,6 +107,18 @@ export function ChannelHeader({
   return (
     <header className={styles.channelHeader} data-testid="fe6-channel-header">
       <div className={styles.channelHeaderLeft}>
+        {onOpenMobileNav && (
+          <button
+            type="button"
+            className={styles.mobileMenuBtn}
+            onClick={onOpenMobileNav}
+            aria-label="チャネル一覧を開く"
+            title="チャネル一覧"
+            data-testid="fe6-mobile-nav-open"
+          >
+            <Icon name="menu" size="sm" />
+          </button>
+        )}
         <button
           type="button"
           className={styles.channelTitle}
