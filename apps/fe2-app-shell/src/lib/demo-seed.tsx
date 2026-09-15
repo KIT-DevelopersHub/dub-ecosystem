@@ -88,6 +88,39 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
       { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
     ],
   },
+  // evt_2 / evt_3 keep the SAME title/phase/startsAt as their EVENTS summary row above
+  // (list and detail must never drift). Added so every event the header's global イベント
+  // switcher lists is also openable via GET /events/:id — not just evt_1 — which the
+  // ダッシュボード「開催まで」 countdown now depends on (it fetches the switcher's
+  // selected event's detail directly rather than the curated /bff/home subset).
+  evt_2: {
+    version: 1,
+    id: "evt_2",
+    orgId: ORG,
+    title: "運営定例ミーティング",
+    description: "週次の運営定例。進捗確認とブロッカーの棚卸し。",
+    phase: "planning",
+    startsAt: "2026-08-12T09:00:00Z",
+    endsAt: "2026-08-12T10:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-07-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    actions: [],
+  },
+  evt_3: {
+    version: 1,
+    id: "evt_3",
+    orgId: ORG,
+    title: "学生ハッカソン Hackit 秋",
+    description: "学生向けハッカソン。協賛調整・募集LP・当日運営を並行で進行中。",
+    phase: "open",
+    startsAt: "2026-09-01T00:00:00Z",
+    endsAt: "2026-09-02T00:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-07-15T00:00:00Z",
+    updatedAt: "2026-08-20T00:00:00Z",
+    actions: [],
+  },
 };
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
