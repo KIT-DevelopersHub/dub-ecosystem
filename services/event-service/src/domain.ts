@@ -14,6 +14,7 @@ import type {
   EventSpeaker,
   EventSponsor,
   EventChecklistItem,
+  EventSectionLayoutData,
 } from "./types";
 
 // Linear phase order (forward = higher index). Back-transition or ->closed = admin.
@@ -189,5 +190,39 @@ export function normalizeEventDetails(input: Partial<EventDetailsData> | undefin
     checklist,
     links,
     contacts,
+  };
+}
+
+// ---- event section layout (shared D&D order/visibility of the details sections) ----
+// The backend does NOT know the section catalog (it lives in the frontend, like the
+// Home dashboard's widget catalog) — it only bounds/sanitizes an opaque id list so a
+// future catalog change never needs a migration here.
+export const EMPTY_EVENT_SECTION_LAYOUT: EventSectionLayoutData = { order: [], hidden: [] };
+
+const MAX_SECTION_IDS = 100; // generous ceiling; the real catalog is ~15 sections
+const MAX_SECTION_ID_LEN = 100;
+
+/** Bound + dedupe an id list: strings only, capped length, first occurrence wins,
+ *  capped count. Order of first appearance is preserved. */
+function idList(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of input) {
+    if (typeof raw !== "string") continue;
+    const v = raw.slice(0, MAX_SECTION_ID_LEN);
+    if (v === "" || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+    if (out.length >= MAX_SECTION_IDS) break;
+  }
+  return out;
+}
+
+/** Coerce arbitrary client input into a well-formed EventSectionLayoutData. */
+export function normalizeEventSectionLayout(input: Partial<EventSectionLayoutData> | undefined): EventSectionLayoutData {
+  return {
+    order: idList(input?.order),
+    hidden: idList(input?.hidden),
   };
 }
