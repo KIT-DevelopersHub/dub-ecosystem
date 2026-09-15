@@ -306,7 +306,7 @@ export function TaskDetailPanel({
           </div>
           <div className={styles.formField}>
             <label className={styles.formLabel} htmlFor="fe4-detail-priority">
-              優先度
+              重要度
             </label>
             <Select
               id="fe4-detail-priority"
