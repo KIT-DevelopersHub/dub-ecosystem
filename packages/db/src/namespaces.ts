@@ -21,6 +21,7 @@ export const NAMESPACES = [
   "usage", // usage-meter (free-tier usage snapshots + billing guard)
   "member", // member-service (運営メンバー管理: invite status + team membership)
   "driveshare", // drive-share-service (role-based Google Drive grants + fan-out ledger)
+  "commander", // commander (feature phase state machine: demo→staging→prod ledger)
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

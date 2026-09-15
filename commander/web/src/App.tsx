@@ -5,14 +5,18 @@ import {
   type CommanderClient,
   type DaemonRunEvent,
 } from "./lib/client.ts";
+import { FeatureBoard } from "./FeatureBoard.tsx";
+import type { CommanderApi } from "./lib/commanderApi.ts";
 
 interface AppProps {
   client?: CommanderClient;
+  /** Phase-gate API (commander-service). Omit to use the default HTTP client. */
+  api?: CommanderApi;
 }
 
 const defaultClient = new HttpCommanderClient();
 
-export function App({ client = defaultClient }: AppProps) {
+export function App({ client = defaultClient, api }: AppProps) {
   const [prompt, setPrompt] = useState("Reply with the single word: PONG");
   const [status, setStatus] = useState<string>("idle");
   const [log, setLog] = useState<string[]>([]);
@@ -117,6 +121,8 @@ export function App({ client = defaultClient }: AppProps) {
       >
         {log.join("\n")}
       </pre>
+
+      <FeatureBoard api={api} />
     </div>
   );
 }

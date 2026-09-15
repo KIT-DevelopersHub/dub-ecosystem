@@ -1,0 +1,22 @@
+# Free-tier deploy of commander-service as `dub-commander-service` (internal; would be
+# reached via an api-gateway SVC_COMMANDER binding — workers.dev disabled). Scaffold
+# only; NOT wired into the gateway yet (the Commander app is still foundation-phase).
+#
+# Deploy (when wired):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
+#   # one-time: apply the commander schema to dub-core (idempotent)
+#   npx wrangler d1 execute dub-core --remote \
+#     --file infra/d1/migrations/commander/0001_commander_init.sql
+#   npx wrangler deploy --config services/commander-service/wrangler.free.toml
+name = "dub-commander-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+
+[observability]
+enabled = true

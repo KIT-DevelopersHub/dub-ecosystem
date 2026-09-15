@@ -1,0 +1,197 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { createApp } from "../src/app";
+import type { Env } from "../src/env";
+import { makeD1 } from "./d1";
+
+function makeEnv(overrides: Partial<Env> = {}): Env {
+  return { DB: makeD1().d1, ...overrides };
+}
+
+async function call(
+  app: ReturnType<typeof createApp>,
+  env: Env,
+  method: string,
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {},
+) {
+  const req = new Request(`http://x${path}`, {
+    method,
+    headers: { "content-type": "application/json", ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const res = await app.fetch(req, env as never);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const json = (await res.json().catch(() => null)) as any;
+  return { status: res.status, json };
+}
+
+describe("commander-service phase gate", () => {
+  let app: ReturnType<typeof createApp>;
+  let env: Env;
+
+  beforeEach(() => {
+    app = createApp();
+    env = makeEnv();
+  });
+
+  it("creates a feature at demo_building", async () => {
+    const r = await call(app, env, "POST", "/features", {
+      title: "使用量ダッシュボード",
+      ledgerRef: "Dub_フィーチャー台帳#usage",
+    });
+    expect(r.status).toBe(201);
+    expect(r.json.feature.phase).toBe("demo_building");
+    expect(r.json.feature.ledgerRef).toBe("Dub_フィーチャー台帳#usage");
+  });
+
+  it("advances a system edge without approval (demo_building -> demo_review)", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    const r = await call(app, env, "POST", `/features/${id}/transition`, {
+      to: "demo_review",
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.feature.phase).toBe("demo_review");
+    expect(r.json.transition.actor).toBe("system");
+    expect(r.json.transition.approvedByUser).toBe(false);
+  });
+
+  it("段飛ばし: demo_review -> prod_shipped is 409 and does NOT mutate", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    await call(app, env, "POST", `/features/${id}/transition`, { to: "demo_review" });
+
+    const r = await call(app, env, "POST", `/features/${id}/transition`, {
+      to: "prod_shipped",
+      approvedByUser: true,
+    });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe("illegal_transition");
+
+    const after = await call(app, env, "GET", `/features/${id}`);
+    expect(after.json.feature.phase).toBe("demo_review"); // unchanged
+  });
+
+  it("自己承認: approval-required edge without approvedByUser is 403 and does NOT mutate", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    await call(app, env, "POST", `/features/${id}/transition`, { to: "demo_review" });
+
+    const r = await call(app, env, "POST", `/features/${id}/transition`, {
+      to: "staging_deployed",
+    });
+    expect(r.status).toBe(403);
+    expect(r.json.error).toBe("approval_required");
+
+    const after = await call(app, env, "GET", `/features/${id}`);
+    expect(after.json.feature.phase).toBe("demo_review"); // unchanged
+  });
+
+  it("承認あり: demo_review -> staging_deployed with approvedByUser records actor=user", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    await call(app, env, "POST", `/features/${id}/transition`, { to: "demo_review" });
+
+    const r = await call(app, env, "POST", `/features/${id}/transition`, {
+      to: "staging_deployed",
+      approvedByUser: true,
+      note: "demo確認OK",
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.feature.phase).toBe("staging_deployed");
+    expect(r.json.transition.actor).toBe("user");
+    expect(r.json.transition.approvedByUser).toBe(true);
+    expect(r.json.transition.note).toBe("demo確認OK");
+  });
+
+  it("records an immutable audit trail across the happy path to prod", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    await call(app, env, "POST", `/features/${id}/transition`, { to: "demo_review" });
+    await call(app, env, "POST", `/features/${id}/transition`, {
+      to: "staging_deployed",
+      approvedByUser: true,
+    });
+    await call(app, env, "POST", `/features/${id}/transition`, { to: "staging_review" });
+    const shipped = await call(app, env, "POST", `/features/${id}/transition`, {
+      to: "prod_shipped",
+      approvedByUser: true,
+    });
+    expect(shipped.status).toBe(200);
+    expect(shipped.json.feature.phase).toBe("prod_shipped");
+
+    const detail = await call(app, env, "GET", `/features/${id}`);
+    expect(detail.json.transitions).toHaveLength(4);
+    expect(detail.json.transitions.map((t: { toPhase: string }) => t.toPhase)).toEqual([
+      "demo_review",
+      "staging_deployed",
+      "staging_review",
+      "prod_shipped",
+    ]);
+    // prod_shipped is terminal: no further edges offered.
+    expect(detail.json.allowedTransitions).toHaveLength(0);
+  });
+
+  it("rejects an unknown target phase with 400", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    const r = await call(app, env, "POST", `/features/${id}/transition`, { to: "nope" });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toBe("invalid_phase");
+  });
+
+  it("404s a transition on a missing feature", async () => {
+    const r = await call(app, env, "POST", "/features/feat_missing/transition", {
+      to: "demo_review",
+    });
+    expect(r.status).toBe(404);
+  });
+
+  it("exposes allowedTransitions with approval flags for the UI", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    await call(app, env, "POST", `/features/${id}/transition`, { to: "demo_review" });
+    const detail = await call(app, env, "GET", `/features/${id}`);
+    const staging = detail.json.allowedTransitions.find(
+      (t: { to: string }) => t.to === "staging_deployed",
+    );
+    expect(staging.requiresApproval).toBe(true);
+    const reject = detail.json.allowedTransitions.find(
+      (t: { to: string }) => t.to === "demo_rejected",
+    );
+    expect(reject.requiresApproval).toBe(false);
+  });
+
+  it("creates and lists tasks under a feature", async () => {
+    const c = await call(app, env, "POST", "/features", { title: "F" });
+    const id = c.json.feature.id;
+    const t = await call(app, env, "POST", `/features/${id}/tasks`, {
+      title: "implement API",
+      status: "doing",
+    });
+    expect(t.status).toBe(201);
+    expect(t.json.task.status).toBe("doing");
+    const list = await call(app, env, "GET", `/features/${id}/tasks`);
+    expect(list.json.tasks).toHaveLength(1);
+  });
+});
+
+describe("commander-service operator token", () => {
+  it("blocks POST without the token and allows it with the token", async () => {
+    const app = createApp();
+    const env: Env = { DB: makeD1().d1, COMMANDER_OPERATOR_TOKEN: "s3cret" };
+
+    const denied = await call(app, env, "POST", "/features", { title: "F" });
+    expect(denied.status).toBe(401);
+
+    const ok = await call(app, env, "POST", "/features", { title: "F" }, {
+      "x-commander-token": "s3cret",
+    });
+    expect(ok.status).toBe(201);
+
+    // reads stay open
+    const list = await call(app, env, "GET", "/features");
+    expect(list.status).toBe(200);
+  });
+});

@@ -5,21 +5,30 @@
 リアルタイムに Web へストリームする。進行管理（demo→staging→本番）はフェーズ状態機械で
 段飛ばし・自己承認を禁止する。Dub エコシステムの 1 アプリとして組み込む前提。
 
-> 基盤フェーズ（本 PR）のスコープ = 疎通 PoC ＋ 意思決定 docs 初版 ＋ 状態機械コア。
-> 状態機械 UI・フェーズゲート・Dub アプリ統合は次フェーズ。
+> フェーズ2（本 PR）のスコープ = フェーズ状態機械の **D1 永続化** ＋ **フェーズゲート API/UI**。
+> Dub アプリランチャー統合・daemon 堅牢化（cancel/timeout/共有トークン認証）は次フェーズ。
 
 ## 構成
 
 ```
 commander/
   daemon/   @dub/commander-daemon  ローカル exec ブリッジ (Node標準ライブラリのみ / SSE)
-  web/      @dub/commander-web      最小 Web フロント (Vite + React)
-  docs/     inception deck / ADR(0001-0003) / data-model / sequence
+  web/      @dub/commander-web      Web フロント (Vite + React) — 実行コンソール ＋ フェーズ管理
+  docs/     inception deck / ADR(0001-0004) / data-model / sequence
+packages/
+  commander-phases/  @dub/commander-phases  フェーズ FSM の単一の真実（純粋・依存ゼロ）
+services/
+  commander-service/ @dub/commander-service フェーズゲート API（Hono / dub-core D1 commander_ ns）
+infra/d1/migrations/commander/  additive migration（commander_ テーブル群）
 ```
 
 - **daemon はローカル専用**。Cloudflare Workers には**デプロイしない**（Claude Code は
   Workers 上で動かないため）。`127.0.0.1` にのみバインドする（ADR 0003）。
-- daemon は外部ランタイム依存ゼロ。Node のネイティブ型ストリップで `.ts` を直接実行する。
+- **フェーズの状態は共有 D1 `dub-core` の `commander_` 名前空間に永続化**する。CRUD と
+  遷移ゲート（段飛ばし=409・自己承認=403）は `commander-service` ワーカーが担う（ADR 0004）。
+- 遷移表は `@dub/commander-phases` に集約（daemon とワーカーが共有・二重定義禁止）。daemon の
+  `phases.ts` は re-export のみ。そのため daemon の `start`（raw node）実行前にこのパッケージの
+  build が必要（`pnpm --filter @dub/commander-phases build`、通常は turbo が自動）。
 
 ## 前提
 
@@ -67,6 +76,19 @@ pnpm --filter @dub/commander-web dev
 ```
 
 daemon のアドレスを変えた場合は `VITE_COMMANDER_DAEMON` で上書き（既定 `http://127.0.0.1:4319`）。
+フェーズゲート API のアドレスは `VITE_COMMANDER_API` で上書き（既定 `http://127.0.0.1:8787`）。
+
+### 3) フェーズゲート API（commander-service・任意）
+
+フェーズ管理 UI を動かすときだけ起動する（実 D1 が要る）。
+
+```
+# ローカル D1 にスキーマ適用（冪等・集約マイグレーション経由）
+pnpm db:migrate
+# ワーカー起動（miniflare のローカル D1 を使用）
+pnpm --filter @dub/commander-service exec wrangler dev
+# => http://127.0.0.1:8787
+```
 
 ## HTTP API（daemon）
 
@@ -79,14 +101,28 @@ daemon のアドレスを変えた場合は `VITE_COMMANDER_DAEMON` で上書き
 | GET | `/runs/:id/events` | SSE。履歴を replay 後、ライブイベントを配信し、完了で close |
 | GET | `/` | 組み込みテスト UI（ゼロビルド疎通用） |
 
+## HTTP API（commander-service・フェーズゲート）
+
+| method | path | 説明 |
+|---|---|---|
+| GET | `/health` | `{ ok, service, version }` |
+| GET | `/features` | 機能一覧（新しい順） |
+| POST | `/features` | `{ title, ledgerRef? }` → 新規機能（`demo_building` で開始） |
+| GET | `/features/:id` | `{ feature, allowedTransitions, transitions }`（次に進める辺＋監査履歴） |
+| POST | `/features/:id/transition` | `{ to, approvedByUser?, note? }`。段飛ばし=**409**・自己承認=**403** |
+| GET/POST | `/features/:id/tasks` | 機能配下タスクの一覧/作成（最小） |
+
+`COMMANDER_OPERATOR_TOKEN`（任意）を設定すると、POST 系は `x-commander-token` ヘッダ一致を要求
+（未設定なら開放。共有トークン認証の本実装は次フェーズ）。
+
 ## 開発（型/テスト/ビルド）
 
 ```
-pnpm --filter @dub/commander-daemon typecheck
-pnpm --filter @dub/commander-daemon test     # phases(状態機械) + runner(exec bridge)
-pnpm --filter @dub/commander-web  typecheck
-pnpm --filter @dub/commander-web  test        # App コンポーネント
-pnpm --filter @dub/commander-web  build
+pnpm --filter @dub/commander-phases  test      # フェーズ FSM（happy/段飛ばし/未承認/終端）
+pnpm --filter @dub/commander-service test      # フェーズゲート API（409/403 を実 SQLite で実測）
+pnpm --filter @dub/commander-daemon  test      # phases(re-export) + runner(exec bridge)
+pnpm --filter @dub/commander-web     test      # 実行コンソール ＋ フェーズ管理 UI
+pnpm --filter @dub/commander-web     build
 ```
 
 ## 設計ドキュメント
@@ -95,5 +131,6 @@ pnpm --filter @dub/commander-web  build
 - `docs/adr/0001-exec-bridge-local-daemon.md` — exec ブリッジ方式
 - `docs/adr/0002-phase-state-machine-in-db.md` — フェーズ状態機械
 - `docs/adr/0003-auth-single-operator-loopback.md` — 認証（単独運用・ループバック）
+- `docs/adr/0004-persist-phase-fsm-in-dub-core.md` — FSM の dub-core 永続化 ＋ commander-service
 - `docs/data-model.md` — 最小スキーマ（Feature/Task/Run/RunEvent/PhaseTransition）
 - `docs/sequence.md` — Web→daemon→claude→log→Web / フェーズ移行ゲート

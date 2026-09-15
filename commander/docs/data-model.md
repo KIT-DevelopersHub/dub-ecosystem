@@ -58,7 +58,9 @@ erDiagram
 
 ## 状態機械（`Feature.phase`）
 
-遷移の唯一の真実は `commander/daemon/src/phases.ts`。要点:
+遷移の唯一の真実は `@dub/commander-phases`（`packages/commander-phases`）。daemon の
+`commander/daemon/src/phases.ts` はこのパッケージを re-export するだけ（二重定義禁止）。
+`commander-service` ワーカーも同じパッケージを import して遷移ゲートを適用する。要点:
 
 | from | to | 承認要否 | 意味 |
 |---|---|---|---|
@@ -77,6 +79,13 @@ erDiagram
 
 ## 永続化の段階
 
-- **現 PoC**: `Run` / `RunEvent` は daemon 内メモリ（`RunStore`）。プロセス再起動で消える。
-- **次フェーズ**: `Feature` / `Task` / `PHASE_TRANSITION` を D1 に永続化し、`Dub_フィーチャー台帳`
-  を single source として同期。`Run`/`RunEvent` は必要に応じて永続化 or 監査のみ保存。
+- **完了（このフェーズ）**: `Feature` / `Task` / `PhaseTransition` を共有 D1 `dub-core` の
+  `commander_` 名前空間に永続化（additive migration
+  `infra/d1/migrations/commander/0001_commander_init.sql`）。CRUD + 遷移ゲートは
+  `commander-service` ワーカー（`services/commander-service`）が担う。`commander_features`
+  は 1 機能 = 1 行 = `Dub_フィーチャー台帳` の 1 エントリに対応（`ledger_ref` で紐付け）。
+  `commander_phase_transitions` は追記専用の監査ログ。
+  - 遷移ゲート: 遷移表に無い辺 = 段飛ばし → **409**、承認必須辺で `approvedByUser` 無し =
+    自己承認 → **403**（`@dub/commander-phases`）。
+- **現 PoC のまま**: `Run` / `RunEvent` は daemon 内メモリ（`RunStore`）。`commander_runs` /
+  `commander_run_events` のスキーマは先行して用意済み（daemon からの永続化配線は次フェーズ）。
