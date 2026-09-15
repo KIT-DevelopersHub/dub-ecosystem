@@ -30,7 +30,8 @@
       "@dub/auth-client": ["packages/auth-client/src/index.ts"],
       "@dub/tokens": ["packages/tokens/src/index.ts"],
       "@dub/tokens/css": ["packages/tokens/src/css.ts"],
-      "@dub/app-ui": ["packages/app-ui/src/index.ts"]
+      "@dub/app-ui": ["packages/app-ui/src/index.ts"],
+      "@dub/commander-phases": ["packages/commander-phases/src/index.ts"]
     }
   }
 }

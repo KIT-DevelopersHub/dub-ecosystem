@@ -63,9 +63,10 @@ function fakeD1() {
 }
 
 describe("@dub/db namespaces + ids", () => {
-  it("freezes 19 namespaces and resolves longest-prefix", () => {
-    expect(NAMESPACES.length).toBe(19);
+  it("freezes 20 namespaces and resolves longest-prefix", () => {
+    expect(NAMESPACES.length).toBe(20);
     expect(namespaceOf("file_meta_files")).toBe("file_meta");
+    expect(namespaceOf("commander_features")).toBe("commander");
     expect(namespaceOf("task_dependencies")).toBe("task");
     expect(namespaceOf("unknown_table")).toBe(null);
     expect(isTableInNamespace("task_tasks", "task")).toBe(true);
