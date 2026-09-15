@@ -237,7 +237,7 @@ export function ErrorDialog({
   );
 }
 
-export function Drawer({ open, onClose, title, side = "right", testId, children }: DrawerProps) {
+export function Drawer({ open, onClose, title, side = "right", testId, hideHeader, children }: DrawerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   useEscToClose(open, onClose);
@@ -263,10 +263,12 @@ export function Drawer({ open, onClose, title, side = "right", testId, children 
           data-side={side}
           data-testid={testId}
         >
-          <header className={cx(styles.header)}>
-            {title && <h2 className={cx(styles.title)}>{title}</h2>}
-            <IconButton name="x" aria-label="閉じる" onClick={onClose} />
-          </header>
+          {!hideHeader && (
+            <header className={cx(styles.header)}>
+              {title && <h2 className={cx(styles.title)}>{title}</h2>}
+              <IconButton name="x" aria-label="閉じる" onClick={onClose} />
+            </header>
+          )}
           <div ref={bodyRef} className={cx(styles.body)}>{children}</div>
         </div>
       </div>
