@@ -44,4 +44,22 @@ export interface DaemonConfig {
   defaultCwd: string;
   /** Extra args appended to every `claude -p` invocation. */
   extraArgs: string[];
+  /**
+   * Shared operator token (ADR 0003). When set, every request except GET /health must
+   * present it (Authorization: Bearer <token>, or ?token= for the SSE stream); when
+   * empty the daemon is open (single-operator loopback dev). [[secrets-stay-local]].
+   */
+  operatorToken: string;
+  /**
+   * Hard wall-clock cap per run (ms). A run still executing after this is killed and
+   * marked failed (guards against a hung `claude`). <= 0 disables the cap.
+   */
+  runTimeoutMs: number;
+  /**
+   * Optional commander-service base URL. When set, each run + its events are persisted
+   * there (commander_runs / commander_run_events) best-effort (never fails the run).
+   */
+  serviceUrl?: string;
+  /** Token presented to commander-service (x-commander-token) when persisting. */
+  serviceToken?: string;
 }

@@ -2,16 +2,20 @@
 //   node --experimental-strip-types commander/daemon/src/index.ts
 //
 // Env:
-//   COMMANDER_PORT       (default 4319)
-//   COMMANDER_CLAUDE_BIN (default: "claude" on PATH)
-//   COMMANDER_CWD        (default: process.cwd())
-//   COMMANDER_CLAUDE_ARGS extra args, space-separated (e.g. "--model sonnet")
+//   COMMANDER_PORT           (default 4319)
+//   COMMANDER_CLAUDE_BIN     (default: "claude" on PATH)
+//   COMMANDER_CWD            (default: process.cwd())
+//   COMMANDER_CLAUDE_ARGS    extra args, space-separated (e.g. "--model sonnet")
+//   COMMANDER_OPERATOR_TOKEN shared token; when set, all routes but /health & / need it
+//   COMMANDER_RUN_TIMEOUT_MS per-run wall-clock cap (default 600000 = 10min; 0 disables)
+//   COMMANDER_SERVICE_URL    commander-service base URL; when set, runs are persisted
+//   COMMANDER_SERVICE_TOKEN  token sent to commander-service (x-commander-token)
 
 import { createDaemonServer, VERSION } from "./server.ts";
 import type { DaemonConfig } from "./types.ts";
 
 function loadConfig(): DaemonConfig {
-  return {
+  const config: DaemonConfig = {
     port: Number(process.env.COMMANDER_PORT ?? 4319),
     claudeBin: process.env.COMMANDER_CLAUDE_BIN ?? "claude",
     defaultCwd: process.env.COMMANDER_CWD ?? process.cwd(),
@@ -19,7 +23,12 @@ function loadConfig(): DaemonConfig {
       .split(" ")
       .map((s) => s.trim())
       .filter(Boolean),
+    operatorToken: process.env.COMMANDER_OPERATOR_TOKEN ?? "",
+    runTimeoutMs: Number(process.env.COMMANDER_RUN_TIMEOUT_MS ?? 600_000),
   };
+  if (process.env.COMMANDER_SERVICE_URL) config.serviceUrl = process.env.COMMANDER_SERVICE_URL;
+  if (process.env.COMMANDER_SERVICE_TOKEN) config.serviceToken = process.env.COMMANDER_SERVICE_TOKEN;
+  return config;
 }
 
 const config = loadConfig();
@@ -29,6 +38,8 @@ server.listen(config.port, "127.0.0.1", () => {
   // Bound to loopback only: single-operator, no network exposure (ADR 0003).
   console.log(
     `[commander-daemon ${VERSION}] listening on http://127.0.0.1:${config.port}` +
-      ` (claude=${config.claudeBin}, cwd=${config.defaultCwd})`,
+      ` (claude=${config.claudeBin}, cwd=${config.defaultCwd},` +
+      ` auth=${config.operatorToken ? "on" : "off"}, timeout=${config.runTimeoutMs}ms,` +
+      ` persist=${config.serviceUrl ? "on" : "off"})`,
   );
 });
