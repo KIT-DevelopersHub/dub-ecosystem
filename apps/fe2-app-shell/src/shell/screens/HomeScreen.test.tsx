@@ -1,19 +1,48 @@
 // HomeScreen (design 2-1): FE2 owns the dashboard frame. Verifies the two
 // BFF-data-driven cards (upcoming events, unread notifications), per-frame
-// partial-error surfacing (no global toast), and that feature-contributed
+// partial-error surfacing (no global toast), the 開催まで countdown against the
+// header-selected event (GET /events/:id), and that feature-contributed
 // homeWidgets render inside isolated error boundaries — one throwing widget
 // never blanks the dashboard. All run against a faked ApiClient (no network).
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
-import type { gateway } from "@dub/types";
+import { afterEach, describe, expect, it } from "vitest";
+import type { event, gateway } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
+import { SELECTED_EVENT_STORAGE_KEY, saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { HomeScreen } from "./HomeScreen.tsx";
 
-function makeApi(home: gateway.BffHomeResponse): ApiClient {
-  return { bff: { home: () => Promise.resolve(home) } } as unknown as ApiClient;
+function makeApi(home: gateway.BffHomeResponse, events: Record<string, event.GetEventResponse> = {}): ApiClient {
+  return {
+    bff: { home: () => Promise.resolve(home) },
+    events: {
+      get: (path: string) => {
+        const id = path.replace(/^\//, "");
+        const found = events[id];
+        return found ? Promise.resolve(found) : Promise.reject(new Error(`no mock event for ${path}`));
+      },
+    },
+  } as unknown as ApiClient;
+}
+
+function eventDetail(overrides: Partial<event.GetEventResponse> = {}): event.GetEventResponse {
+  return {
+    version: 1,
+    id: "evt_1",
+    orgId: "org_1",
+    title: "Conf",
+    description: null,
+    phase: "preparing",
+    startsAt: null,
+    endsAt: null,
+    archivedAt: null,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    actions: [],
+    ...overrides,
+  };
 }
 
 function wrap(ui: ReactNode): JSX.Element {
@@ -43,6 +72,12 @@ const OK_HOME: gateway.BffHomeResponse = {
 };
 
 describe("HomeScreen", () => {
+  // The 開催まで countdown reads the header switcher's localStorage pick — clear it
+  // after every test so one test's selection never leaks into the next.
+  afterEach(() => {
+    localStorage.removeItem(SELECTED_EVENT_STORAGE_KEY);
+  });
+
   it("renders the events and unread-notifications cards from /bff/home", async () => {
     render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
     await waitFor(() => expect(screen.getByText("Conf")).toBeInTheDocument());
@@ -135,5 +170,35 @@ describe("HomeScreen", () => {
     // ...while the dashboard-owned cards still resolve and render normally.
     expect(await screen.findByText("Conf")).toBeInTheDocument();
     expect(await screen.findByTestId("fe2-home-unread-count")).toBeInTheDocument();
+  });
+
+  describe("開催まで countdown (selected event)", () => {
+    it("prompts to pick an event when the header switcher has no selection yet", async () => {
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—"));
+      expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("イベントを選択してください");
+    });
+
+    it("counts down to the selected event's startsAt (fetched via GET /events/:id)", async () => {
+      saveSelectedEvent("evt_1");
+      const farFuture = "2999-01-01T00:00:00Z";
+      const api = makeApi(OK_HOME, { evt_1: eventDetail({ title: "北陸ITカンファレンス 2026", startsAt: farFuture }) });
+      render(wrap(<HomeScreen api={api} />));
+      await waitFor(() =>
+        expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent(
+          `北陸ITカンファレンス 2026・${new Date(farFuture).toLocaleDateString("ja-JP")}`,
+        ),
+      );
+      // A real day count, not the "no data" dash.
+      expect(screen.getByTestId("fe2-kpi-countdown-value")).not.toHaveTextContent("—");
+    });
+
+    it("falls back to 日程未定 when the selected event's startsAt is unset", async () => {
+      saveSelectedEvent("evt_2");
+      const api = makeApi(OK_HOME, { evt_2: eventDetail({ id: "evt_2", title: "Meetup", startsAt: null }) });
+      render(wrap(<HomeScreen api={api} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("Meetup・日程未定"));
+      expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—");
+    });
   });
 });

@@ -62,7 +62,8 @@ export function statusMeta(status: MetricStatus): StatusMeta {
 }
 
 /** Whole days from `now` until `targetISO` (rounded up; never negative). Used for
- *  the conference countdown — a genuinely live figure. Returns null on a bad date. */
+ *  the dashboard's 開催まで countdown against the selected event's startsAt — a
+ *  genuinely live figure. Returns null on a bad date. */
 export function daysUntil(targetISO: string, now: Date = new Date()): number | null {
   const target = new Date(targetISO);
   if (Number.isNaN(target.getTime())) return null;
@@ -71,13 +72,14 @@ export function daysUntil(targetISO: string, now: Date = new Date()): number | n
   return Math.ceil(ms / 86_400_000);
 }
 
-// ── the headline event the countdown tracks (本戦) ──────────────────────────────
-export const CONFERENCE = {
-  name: "北陸ITカンファレンス",
-  /** 本戦 開催日 (JST). Live countdown target. */
-  dateISO: "2026-08-22T01:00:00+09:00",
-  dateLabel: "2026/08/22",
-} as const;
+/** Format an event's 開催日時 (startsAt) for the countdown hint; "日程未定" when unset
+ *  or unparsable (mirrors fe3's EventCard fallback wording so it reads the same
+ *  app-wide). Locale-formatted (ja-JP), no time-of-day — this is a headline date. */
+export function eventDateLabel(startsAt: string | null): string {
+  if (!startsAt) return "日程未定";
+  const d = new Date(startsAt);
+  return Number.isNaN(d.getTime()) ? "日程未定" : d.toLocaleDateString("ja-JP");
+}
 
 // ── free-tier usage (Cloudflare / Resend), live from usage-meter via /bff/home ──
 export interface FreeTierMetric {
