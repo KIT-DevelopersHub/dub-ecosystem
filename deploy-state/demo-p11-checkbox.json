@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p11-checkbox",
+  "worker": "dub-demo-p11-checkbox",
+  "url": "https://dub-demo-p11-checkbox.developershub-site.workers.dev",
+  "deployedSha": "decb2a3b",
+  "branch": "fix/p11-checkbox-visibility",
+  "actor": "kota",
+  "markers": ["scale(1.06)"],
+  "live": true,
+  "verifiedAt": "2026-09-13T17:11:37Z",
+  "updatedAt": "2026-09-13T17:11:37Z",
+  "note": "P11 checkbox visibility fix (PR #511)"
+}

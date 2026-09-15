@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Button, IconButton } from "../src/components/Button";
 
@@ -57,6 +57,69 @@ describe("Button", () => {
     );
     await userEvent.click(screen.getByTestId("t"));
     expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  describe("success flash (P12)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("shows a checkmark and data-success on the rising edge, then reverts automatically", () => {
+      vi.useFakeTimers();
+      const { rerender } = render(
+        <Button testId="t" success={false}>
+          Save
+        </Button>,
+      );
+      const btn = screen.getByTestId("t");
+      expect(btn).not.toHaveAttribute("data-success");
+
+      rerender(
+        <Button testId="t" success>
+          Save
+        </Button>,
+      );
+      expect(btn).toHaveAttribute("data-success");
+      expect(btn.querySelector('[data-icon="check"]')).not.toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(btn).not.toHaveAttribute("data-success");
+    });
+
+    it("does not show the checkmark while loading, even if success is true", () => {
+      render(
+        <Button testId="t" loading success>
+          Save
+        </Button>,
+      );
+      const btn = screen.getByTestId("t");
+      expect(btn).not.toHaveAttribute("data-success");
+      expect(btn.querySelector('[data-icon="check"]')).toBeNull();
+    });
+
+    it("does not re-flash on re-renders while success stays true", () => {
+      vi.useFakeTimers();
+      const { rerender } = render(
+        <Button testId="t" success>
+          Save
+        </Button>,
+      );
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(screen.getByTestId("t")).not.toHaveAttribute("data-success");
+
+      // Re-render with the same success=true (e.g. a parent re-render) must not
+      // restart the flash — only a false→true edge should.
+      rerender(
+        <Button testId="t" success>
+          Save
+        </Button>,
+      );
+      expect(screen.getByTestId("t")).not.toHaveAttribute("data-success");
+    });
   });
 });
 

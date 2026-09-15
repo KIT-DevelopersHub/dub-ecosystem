@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p23-dialogsheet",
+  "worker": "dub-demo-p23-dialogsheet",
+  "url": "https://dub-demo-p23-dialogsheet.developershub-site.workers.dev",
+  "deployedSha": "ff4ef6cb",
+  "branch": "feat/p23-dialog-mobile-sheet",
+  "actor": "kota",
+  "markers": ["dub-modal-sheet-in"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:38:23Z",
+  "updatedAt": "2026-09-13T16:38:23Z",
+  "note": "P23 mobile Dialog/Modal full-screen sheet"
+}
