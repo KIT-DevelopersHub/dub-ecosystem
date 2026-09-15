@@ -99,6 +99,45 @@ describe("marquee multi-select", () => {
     expect(screen.queryByTestId("fe4-gantt-selection-count")).toBeNull();
   });
 
+  it("dragging the selection box's RIGHT handle bulk-resizes every selected task's END by the same delta", () => {
+    const onBulkResizeDays = vi.fn();
+    render(<GanttView dto={flatDto} zoom="day" canWrite onBulkResizeDays={onBulkResizeDays} />);
+    marqueeRows0And1();
+    const handle = screen.getByTestId("fe4-gantt-group-resize-r");
+    const scroll = screen.getByTestId("fe4-gantt-scroll");
+    fireEvent.pointerDown(handle, { clientX: 200, pointerId: 1 });
+    fireEvent.pointerMove(scroll, { clientX: 268, pointerId: 1 }); // +68px / 34px-per-day = +2 days
+    fireEvent.pointerUp(scroll, { clientX: 268, pointerId: 1 });
+    expect(onBulkResizeDays).toHaveBeenCalledTimes(1);
+    const [ids, edge, delta] = onBulkResizeDays.mock.calls[0]!;
+    expect([...ids].sort()).toEqual(["A", "B"]);
+    expect(edge).toBe("end");
+    expect(delta).toBe(2);
+  });
+
+  it("dragging the selection box's LEFT handle bulk-resizes every selected task's START", () => {
+    const onBulkResizeDays = vi.fn();
+    render(<GanttView dto={flatDto} zoom="day" canWrite onBulkResizeDays={onBulkResizeDays} />);
+    marqueeRows0And1();
+    const handle = screen.getByTestId("fe4-gantt-group-resize-l");
+    const scroll = screen.getByTestId("fe4-gantt-scroll");
+    fireEvent.pointerDown(handle, { clientX: 200, pointerId: 1 });
+    fireEvent.pointerMove(scroll, { clientX: 166, pointerId: 1 }); // -34px = -1 day
+    fireEvent.pointerUp(scroll, { clientX: 166, pointerId: 1 });
+    expect(onBulkResizeDays).toHaveBeenCalledTimes(1);
+    const [ids, edge, delta] = onBulkResizeDays.mock.calls[0]!;
+    expect([...ids].sort()).toEqual(["A", "B"]);
+    expect(edge).toBe("start");
+    expect(delta).toBe(-1);
+  });
+
+  it("the group-resize handles do NOT render for a single-bar selection (still uses per-bar handles)", () => {
+    render(<GanttView dto={flatDto} zoom="day" canWrite onBulkResizeDays={vi.fn()} onBulkDelete={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("fe4-gantt-bar-A"));
+    // a plain click just opens detail (no marquee) — no multi-selection exists yet
+    expect(screen.queryByTestId("fe4-gantt-group-resize-box")).toBeNull();
+  });
+
   it("does not hijack keys while typing in a field", () => {
     const onBulkShiftDays = vi.fn();
     render(<GanttView dto={flatDto} zoom="day" canWrite onBulkShiftDays={onBulkShiftDays} />);

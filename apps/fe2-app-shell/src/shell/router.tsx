@@ -90,6 +90,12 @@ function guard(route: ResolvedRoute, Body: ComponentType): () => JSX.Element {
   };
 }
 
+/** First path segment ("/chat/settings" -> "chat"; "/" -> "home") — identifies
+ *  which *app* the launcher pointed at, ignoring sub-navigation within it. */
+export function appSegment(pathname: string): string {
+  return pathname.split("/").filter(Boolean)[0] ?? "home";
+}
+
 /**
  * Persistent shell content region: renders the feature route via <Outlet/> under a
  * single Suspense boundary. For the 統合アプリ「運営メンバー・名簿」sections the shared
@@ -99,6 +105,11 @@ function guard(route: ResolvedRoute, Body: ComponentType): () => JSX.Element {
  * タブ下の本体 (Outlet) suspends, and it shows a skeleton (FE1 §5 loading principle)
  * instead of the whole area collapsing to the top loading bar. Non-roster routes keep
  * the thin RouteLoadingBar fallback as before.
+ *
+ * P14 delight UX: the Outlet is wrapped in a div keyed by `appSegment` — switching
+ * TOP-LEVEL app (launcher tile, e.g. /tasks → /chat) remounts it and plays a
+ * crossfade-in; navigating WITHIN an app (e.g. /chat → /chat/settings) keeps the
+ * same key so state isn't lost and no fade replays.
  */
 function ShellRouteContent({ navEntries }: { navEntries: NavEntry[] }): JSX.Element {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -110,7 +121,9 @@ function ShellRouteContent({ navEntries }: { navEntries: NavEntry[] }): JSX.Elem
     <>
       {inRoster && <MemberRosterSubnav />}
       <Suspense fallback={inRoster ? <RosterContentSkeleton /> : <RouteLoadingBar active />}>
-        <Outlet />
+        <div key={appSegment(pathname)} className="fe2-app-fade" data-testid="fe2-app-fade">
+          <Outlet />
+        </div>
       </Suspense>
     </>
   );

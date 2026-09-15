@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p19-launchersheet",
+  "worker": "dub-demo-p19-launchersheet",
+  "url": "https://dub-demo-p19-launchersheet.developershub-site.workers.dev",
+  "deployedSha": "54c097b3",
+  "branch": "feat/p19-launcher-bottomsheet",
+  "actor": "kota",
+  "markers": ["dub-launcher-sheet-in","dub-launcher-drag-handle"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:50:39Z",
+  "updatedAt": "2026-09-13T16:50:39Z",
+  "note": "P19: mobile app-launcher bottom sheet"
+}

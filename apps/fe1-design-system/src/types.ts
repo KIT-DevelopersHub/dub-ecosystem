@@ -104,6 +104,17 @@ export interface ButtonProps extends TestableProps {
   size?: Size; // default "md"
   loading?: boolean; // shows spinner, disables click
   disabled?: boolean;
+  /**
+   * Opt-in success flash (P12 delight UX). Set `true` right after an async
+   * action succeeds (e.g. a save/submit request resolves). The button plays a
+   * ~0.6s checkmark + tinted-background flash on the RISING edge (false→true)
+   * and then reverts to its normal look automatically — even if this prop
+   * stays `true` — so callers don't need to time a reset back to `false`
+   * (though resetting it is harmless and lets the flash replay on the next
+   * rising edge). Ignored while `loading` is true. Lets a save/submit button
+   * communicate success in place, without a toast. Default `false`.
+   */
+  success?: boolean;
   iconLeft?: ReactNode;
   iconRight?: ReactNode;
   type?: "button" | "submit";
@@ -380,6 +391,11 @@ export interface DrawerProps extends TestableProps {
   title?: string;
   side?: "left" | "right";
   children: ReactNode;
+  // Skip the built-in title/close header entirely — for callers whose content
+  // already renders its own header + close affordance (avoids a duplicated
+  // header when the Drawer is only being used for its overlay mechanics:
+  // portal, focus trap, esc-to-close, scroll lock).
+  hideHeader?: boolean;
 }
 
 export interface PopoverProps extends TestableProps {

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "dialog-initial-focus",
+  "worker": "dub-demo-dialog-initial-focus",
+  "url": "https://dub-demo-dialog-initial-focus.developershub-site.workers.dev",
+  "deployedSha": "30812c34",
+  "branch": "feat/dialog-initial-focus",
+  "actor": "kota",
+  "markers": ["contenteditable=\"true\""],
+  "live": true,
+  "verifiedAt": "2026-09-10T11:36:50Z",
+  "updatedAt": "2026-09-10T11:36:50Z",
+  "note": ""
+}

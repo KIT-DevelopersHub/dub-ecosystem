@@ -712,6 +712,10 @@
 /* thin team-coloured cap at the left edge of each bar. */
 .barTeamCap { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-top-left-radius: inherit; border-bottom-left-radius: inherit; }
 .tlRowName { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Left-pane row title for a task whose DISPLAYED status is "cancelled" — a leaf's own
+   status OR (判断30/46) a WBS parent/grandparent whose aggregated leaf-status mix is
+   cancelled. Same declarations as .barCancelled's label below (reused, not a new look). */
+.tlRowNameCancelled { text-decoration: line-through; color: var(--dub-color-text-muted, var(--dub-color-text-secondary)); }
 .tlRowMeta {
   flex: 0 0 auto;
   max-width: 40%;
@@ -914,6 +918,45 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--dub-color-brand-500) 22%, transparent);
 }
 
+/* group-resize box (複数選択の一括リサイズ): a bounding outline over every selected
+   bar with a handle at each end. Dashed (vs. the marquee's solid border) so it
+   reads as "this is the current selection's extent", not a live drag rectangle.
+   pointer-events: none on the box itself — only the two handles are grabbable, so
+   the box never blocks clicking a bar or dragging out a fresh marquee underneath. */
+.tlGroupResizeBox {
+  position: absolute;
+  z-index: 6;
+  border: 1.5px dashed var(--dub-color-brand-600, var(--dub-color-brand-500));
+  border-radius: 8px;
+  pointer-events: none;
+}
+.tlGroupResizeHandle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 28px;
+  border-radius: 5px;
+  background: var(--dub-color-brand-600, var(--dub-color-brand-500));
+  border: 2px solid var(--dub-color-surface-base, #fff);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+.tlGroupResizeHandle::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 1px;
+}
+.tlGroupResizeHandleL { left: -7px; }
+.tlGroupResizeHandleR { right: -7px; }
+
 /* the marquee rectangle the user drags out over the empty canvas */
 .tlMarquee {
   position: absolute;
@@ -971,6 +1014,55 @@
   background: rgba(15, 23, 42, 0.14);
   pointer-events: none;
 }
+
+/* ---- parent (work-package) bar: descendant leaf-status mix as proportional slices ---- */
+/* Neutral track; the slices below carry all the colour. */
+.barParent { background: var(--dub-color-gray-100); }
+/* The status slices use the light *-300 pastels in BOTH themes (shared scales), so
+   the INSIDE label must stay dark in dark mode too — gray-900 is theme-independent.
+   The OUTSIDE label (.barLabelOut) sits on the page bg, so it keeps its theme colour. */
+.barParent .barLabel { color: var(--dub-color-gray-900); }
+/* A WBS parent (or grandparent) whose aggregated/recursive leaf-status mix is
+   cancelled (dominantStatus — see effectiveChildProgressById/effectiveStatusById in
+   GanttView) must show the SAME strikethrough a cancelled leaf gets, layered on top of
+   .barParent so the per-status segment track colouring underneath stays intact. Placed
+   AFTER .barParent .barLabel so its muted colour wins over that rule's gray-900 (same
+   specificity, source order decides). Reuses .barCancelled's declarations, not a new look. */
+.barCancelledLabel .barLabel, .barCancelledLabel .barLabelOut {
+  text-decoration: line-through;
+  color: var(--dub-color-text-muted, var(--dub-color-text-secondary));
+}
+
+.barSegTrack {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden; /* clip slice corners back to the bar's rounded ends */
+  pointer-events: none;
+}
+.barSeg { height: 100%; min-width: 0; }
+/* hairline separator so adjacent light pastels stay legible as distinct shares */
+.barSeg + .barSeg { box-shadow: inset 1px 0 0 rgba(15, 23, 42, 0.12); }
+
+/* Same pastel tokens as the leaf status bars (barDone/barInProgress/…) so a
+   parent whose descendants are all 完了 reads identically to a 完了 leaf bar. */
+.barSegDone { background: var(--dub-color-success-300, var(--dub-color-success-400)); }
+.barSegInProgress { background: var(--dub-color-brand-300, var(--dub-color-brand-400)); }
+.barSegBlocked { background: var(--dub-color-warning-300, var(--dub-color-warning-400)); }
+.barSegTodo { background: var(--dub-color-gray-200); }
+.barSegCancelled { background: var(--dub-color-gray-100); }
+
+/* "n/m 完了" count appended to the parent bar label. */
+.barCount {
+  margin-left: 6px;
+  font-weight: var(--dub-font-weight-bold, 700);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--dub-font-size-xs, 0.72rem);
+  opacity: 0.82;
+}
+
 .barLabel {
   position: relative;
   z-index: 1;
@@ -1499,6 +1591,89 @@
 .overdueTag { font-size: var(--dub-font-size-xs, 0.68rem); font-weight: 700; }
 .listFoot { display: flex; align-items: center; justify-content: space-between; gap: var(--dub-space-3); margin-top: var(--dub-space-3); flex-wrap: wrap; }
 .countHint { font-size: var(--dub-font-size-sm, 0.8rem); color: var(--dub-color-text-secondary); }
+
+/* ---- P11: quick-complete checkbox (MyTaskList) ----
+ * Checking draws the checkmark (stroke-dashoffset) and flashes the row green,
+ * fading back out — "完了操作に達成感・誤タップ視認" (the check itself is also the
+ * misclick affordance: a plain box vs. a filled green square with a check).
+ * 判断: 見当たらない/分かりにくい指摘の修正 — ヘッダーに可視ラベル「完了」を追加
+ * (旧: aria-labelのみで見た目は空欄)、ヒットエリア・視認性を拡大(常時ほんのり
+ * 塗りつぶし + hover/focusで背景を強調)して、行内で一目で見つかる操作にする。 */
+.colComplete { width: 52px; text-align: center; }
+.completeCheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  background: var(--dub-color-surface-sunken);
+  cursor: pointer;
+  border-radius: var(--dub-radius-md, 6px);
+  transition: background var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease),
+    transform var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+}
+.completeCheck:not(:disabled):hover {
+  background: var(--dub-color-brand-50, var(--dub-color-brand-100));
+  transform: scale(1.06);
+}
+.completeCheck:disabled { cursor: not-allowed; opacity: 0.5; }
+.completeCheck:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+.completeCheckBox {
+  fill: var(--dub-color-surface-raised);
+  stroke: var(--dub-color-text-secondary);
+  stroke-width: 1.75;
+  transition: fill var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease),
+    stroke var(--dub-motion-fast, 120ms) var(--dub-motion-easing, ease);
+}
+.completeCheck:not(:disabled):hover .completeCheckBox {
+  stroke: var(--dub-color-brand-600, var(--dub-color-brand-500));
+}
+.completeCheckOn .completeCheckBox {
+  fill: var(--dub-color-success-500);
+  stroke: var(--dub-color-success-500);
+}
+.completeCheckMark {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 12;
+  stroke-dashoffset: 12;
+}
+.completeCheckOn .completeCheckMark {
+  animation: dub-complete-draw var(--dub-motion-normal, 200ms) var(--dub-motion-easing, ease) forwards;
+}
+@keyframes dub-complete-draw {
+  to { stroke-dashoffset: 0; }
+}
+.completeCheckFlash {
+  animation: dub-complete-pop 220ms var(--dub-motion-easing, ease);
+}
+@keyframes dub-complete-pop {
+  0% { transform: scale(0.7); }
+  60% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+/* the row itself: a green flash that fades back to transparent (完了操作の達成感). */
+.rowJustCompleted {
+  animation: dub-row-complete-flash 900ms ease-out;
+}
+@keyframes dub-row-complete-flash {
+  0% { background-color: var(--dub-color-success-100); }
+  100% { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .completeCheckMark { animation: none; }
+  .completeCheckOn .completeCheckMark { stroke-dashoffset: 0; }
+  .completeCheckFlash { animation: none; }
+  .rowJustCompleted { animation: none; }
+}
 
 /* ---- from → to cell ---- */
 .fromTo { display: inline-flex; align-items: center; gap: var(--dub-space-2); min-width: 0; }

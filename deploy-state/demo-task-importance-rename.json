@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "task-importance-rename",
+  "worker": "dub-demo-task-importance-rename",
+  "url": "https://dub-demo-task-importance-rename.developershub-site.workers.dev",
+  "deployedSha": "676093d0",
+  "branch": "feat/task-importance-rename",
+  "actor": "kota",
+  "markers": ["重要度"],
+  "live": true,
+  "verifiedAt": "2026-09-15T16:42:46Z",
+  "updatedAt": "2026-09-15T16:42:46Z",
+  "note": ""
+}

@@ -19,7 +19,9 @@ import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
+import { childProgressByParent } from "../domain/child-progress";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
+import { planBulkResizeFromRows } from "../domain/bulk-resize";
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRowsMulti, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
@@ -71,7 +73,7 @@ const FIELD_LABEL: Record<string, string> = {
   startsAt: DATE_LABEL.start,
   endsAt: DATE_LABEL.end,
   status: "ステータス",
-  priority: "優先度",
+  priority: "重要度",
   assigneeId: "担当",
   teamId: "チーム",
   parentTaskId: "親タスク",
@@ -375,6 +377,17 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
   const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
+
+  // Every WBS parent's (any depth) leaf-status roll-up, computed ONCE here from the
+  // FULL (unfiltered) row set + the live/optimistic statusById, and shared by both the
+  // gantt bars/dots AND the detail panel's status field/badge — a single source so a
+  // parent's displayed status never disagrees between the two surfaces (症状#1). Recomputes
+  // whenever a task's status changes (statusById depends on `tasks`, so an optimistic
+  // child-status edit propagates to every ancestor's aggregate the same render, 症状#5).
+  const childProgressById = useMemo(
+    () => childProgressByParent(allRows, statusById),
+    [allRows, statusById],
+  );
   // Prefer the store's fresh title so the parent / 先行タスク pickers relabel the same
   // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
   // which the store list omits).
@@ -631,7 +644,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
     return true;
   };
 
-  // Re-issue a field-only patch (title/status/優先度/担当/チーム/開始日/期日) as a plain
+  // Re-issue a field-only patch (title/status/重要度/担当/チーム/開始日/期日) as a plain
   // "set" — the reversible primitive an undo/redo command re-runs. It reads a FRESH
   // version (getTask) first, so a DEFERRED undo/redo (run long after the edit, once the
   // task's version has moved on) can never 409 on a stale panel-cached version — the
@@ -837,7 +850,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit): Promise<boolean> => {
     if (!selectedTask) return Promise.resolve(false);
     const needsRelations = relations.parentChanged || relations.depsChanged;
-    // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
+    // Field-only edit (title/status/重要度/担当/チーム/開始日/期日): keep the optimistic
     // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
     // field from the current task so Ctrl/⌘-Z restores exactly those fields.
     const { parentTaskId: _p, ...fieldOnlyPatch } = patch;
@@ -1085,6 +1098,40 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
     });
   };
 
+  // Bulk RESIZE (複数選択の一括リサイズ): the selection bounding box's left/right handle
+  // stretches every selected task by the SAME whole-day delta — right edge shifts each
+  // task's END, left edge shifts each task's START (等量デルタ; see domain/bulk-resize.ts).
+  // A leaf persists its own row directly; a selected WBS parent instead SCALES its
+  // descendants — its own span is DERIVED from them (read model returns it null), so
+  // writing the parent's own row would be discarded on the next GET, same as the
+  // single-parent resize (onParentResize above). selectionRoots dedupes a selected
+  // descendant of another selected parent so it is never resized twice.
+  const onBulkResizeDays = (ids: readonly common.TaskId[], edge: "start" | "end", deltaDays: number) => {
+    if (deltaDays === 0 || ids.length === 0) return;
+    const rows = gantt.currentRows();
+    const roots = selectionRoots(rows, new Set(ids));
+    if (roots.length === 0) return;
+    const plan = planBulkResizeFromRows(rows, roots, edge, deltaDays);
+    if (plan.writes.length === 0) return; // the tightest task was already at the 1-day floor
+    const after = plan.writes.map((w) => ({
+      id: w.taskId as common.TaskId,
+      startsAt: w.startsAt as common.ISODateTime,
+      endsAt: w.endsAt as common.ISODateTime,
+    }));
+    // Snapshot the children's/leaves' CURRENT dates so undo restores them exactly
+    // (scaling has no clean day-aligned inverse — same discipline as onParentResize).
+    const before = after
+      .map(({ id }) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r && !!r.startsAt && !!r.endsAt)
+      .map((r) => ({ id: r.taskId, startsAt: r.startsAt!, endsAt: r.endsAt! }));
+    void applyChildScheduleSet(after);
+    history.push({
+      label: "選択タスクの一括リサイズ",
+      undo: () => applyChildScheduleSet(before),
+      redo: () => applyChildScheduleSet(after),
+    });
+  };
+
   // Bulk up/down reorder (手動 mode only): slide the selection one slot within each
   // sibling group, persist the manual order, and record undo/redo. Reuses the same
   // order machinery as the single-row drag reorder.
@@ -1259,6 +1306,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           onSelect={setSelected}
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
+          childProgressById={childProgressById}
           assigneeNameById={assigneeNameById}
           titleOverrides={titleById}
           teamColorById={teamColorById}
@@ -1267,6 +1315,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           {...(rowGroupById ? { rowGroupById } : {})}
           onBulkDelete={caps.canDelete ? onBulkDelete : undefined}
           onBulkShiftDays={caps.canWrite ? onBulkShiftDays : undefined}
+          onBulkResizeDays={caps.canWrite ? onBulkResizeDays : undefined}
           onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
           onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
@@ -1301,6 +1350,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           barStartsAt={selectedRow?.startsAt ?? null}
           barEndsAt={selectedRow?.endsAt ?? null}
           hasChildren={selectedRow?.hasChildren ?? false}
+          aggregatedStatus={selectedTask ? childProgressById.get(selectedTask.id)?.dominantStatus : undefined}
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}
