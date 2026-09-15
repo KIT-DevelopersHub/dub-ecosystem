@@ -226,13 +226,16 @@ export function HomeScreen({
   // render/mount, mirroring how the switcher itself reads it). Fetches just that one
   // event's detail (GET /events/:id) rather than the full catalog: the countdown only
   // ever needs the one selected event's startsAt. No selection yet → the query stays
-  // disabled and the tile shows its "pick an event" fallback below.
+  // disabled and the tile shows its "pick an event" fallback below. retry:1 mirrors
+  // fe3's useEventDetailsQuery (settle fast on a hard failure rather than holding
+  // "読み込み中…" across the default backoff — see the hint fallback below).
   const selectedEventId = loadSelectedEvent();
-  const { data: selectedEvent } = useQuery({
+  const { data: selectedEvent, isError: selectedEventIsError } = useQuery({
     queryKey: ["home", "selected-event", selectedEventId],
     queryFn: () => api.events.get<event.GetEventResponse>(`/${selectedEventId}`),
     enabled: selectedEventId !== null,
     staleTime: 60_000,
+    retry: 1,
   });
   // The gateway BFF (bff-home) reports the notification upstream as "notification-service"
   // (same "<svc>-service" convention as "event-service"). Matching it here restores the
@@ -275,13 +278,16 @@ export function HomeScreen({
   const days = selectedEvent?.startsAt ? daysUntil(selectedEvent.startsAt) : null;
   const cdStatus = days === null ? "info" : countdownStatus(days);
   // "イベントを選択してください" (no pick yet) → "読み込み中…" (fetching the pick) →
-  // "<title>・<日程未定 or the date>" once the selected event's detail has loaded.
+  // "取得できませんでした" (the fetch failed — same wording the other /bff/home-driven
+  // cards use, see errorFor() above) → "<title>・<日程未定 or the date>" once loaded.
   const countdownHint =
     selectedEventId === null
       ? "イベントを選択してください"
-      : selectedEvent
-        ? `${selectedEvent.title}・${eventDateLabel(selectedEvent.startsAt)}`
-        : "読み込み中…";
+      : selectedEventIsError
+        ? "取得できませんでした"
+        : selectedEvent
+          ? `${selectedEvent.title}・${eventDateLabel(selectedEvent.startsAt)}`
+          : "読み込み中…";
   const completion = taskCompletionPct(segments);
   const compStatus = completionStatus(completion);
   const worstStatus = worst ? usageStatusFromPct(worst.pct) : "info";

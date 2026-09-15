@@ -60,6 +60,24 @@ describe("createDemoFetch", () => {
     expect(after.title).toBe("編集済みイベント");
   });
 
+  it("serves GET /events/:id detail for every event the switcher lists, not just evt_1", async () => {
+    // Regression: evt_2/evt_3 were listed by GET /events (the header's global イベント
+    // switcher) and had gantt seed data, but had no EVENT_DETAIL entry — so anything
+    // reading a single event's detail (the dashboard's 開催まで countdown; GET /events/:id)
+    // 404'd for them while evt_1 worked, an easy-to-miss gap since most demo flows only
+    // exercise evt_1. List and detail must also agree on title/phase/startsAt.
+    const a = api();
+    const list = await a.events.get<{ items: Array<{ id: string; title: string; phase: string; startsAt: string | null }> }>("");
+    for (const summary of list.items) {
+      const detail = await a.events.get<{ id: string; title: string; phase: string; startsAt: string | null }>(`/${summary.id}`);
+      expect(detail.id).toBe(summary.id);
+      expect(detail.title).toBe(summary.title);
+      expect(detail.phase).toBe(summary.phase);
+      expect(detail.startsAt).toBe(summary.startsAt);
+    }
+    expect(list.items.map((e) => e.id)).toEqual(expect.arrayContaining(["evt_1", "evt_2", "evt_3"]));
+  });
+
   it("still surfaces NOT_FOUND for un-seeded routes (in-frame fallback)", async () => {
     let caught: unknown;
     try {

@@ -198,6 +198,19 @@ describe("HomeScreen", () => {
       const api = makeApi(OK_HOME, { evt_2: eventDetail({ id: "evt_2", title: "Meetup", startsAt: null }) });
       render(wrap(<HomeScreen api={api} />));
       await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("Meetup・日程未定"));
+    });
+
+    it("surfaces 取得できませんでした (not a stuck 読み込み中…) when the event fetch fails", async () => {
+      // Regression: a demo-seed gap (evt_2/evt_3 had no GET /events/:id detail — see
+      // demo-seed.test.tsx) left this branch untested and the tile stuck on "読み込み中…"
+      // forever on a real fetch failure, since the original code only branched on
+      // selectedEvent truthy/falsy and never looked at the query's error state.
+      saveSelectedEvent("evt_missing");
+      render(wrap(<HomeScreen api={makeApi(OK_HOME, {})} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("取得できませんでした"), {
+        timeout: 5000,
+      });
+      expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—");
       expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—");
     });
   });
