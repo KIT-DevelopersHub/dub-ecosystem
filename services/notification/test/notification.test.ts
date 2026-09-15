@@ -6,6 +6,7 @@ import { ingest, type IngestDeps } from "../src/ingest";
 import { consumeEventQueue } from "../src/queue";
 import { mappingToIngest } from "../src/queue";
 import { EVENT_MAPPINGS } from "../src/mapping";
+import { buildChatDmNotifyInput } from "../src/chat";
 import { resolveEnabled, defaultEnabled } from "../src/preferences";
 import { makeRecipientResolver } from "../src/recipients";
 import { resolveAuditQueue } from "../src/outbox";
@@ -162,6 +163,13 @@ describe("preferences", () => {
     expect(defaultEnabled("x.y", "email", "urgent")).toBe(true);
     expect(defaultEnabled("x.y", "chat", "urgent")).toBe(false);
     expect(defaultEnabled("x.y", "push", "normal")).toBe(true);
+  });
+
+  it("chat.mention / chat.dm are the deliberate chat.* in_app exception (default ON)", () => {
+    expect(defaultEnabled("chat.mention", "in_app", "normal")).toBe(true);
+    expect(defaultEnabled("chat.dm", "in_app", "normal")).toBe(true);
+    // any other chat.* type stays off by default (unchanged behavior).
+    expect(defaultEnabled("chat.channel.created", "in_app", "normal")).toBe(false);
   });
 
   it("#6 email override off -> email skipped, in_app still delivered", async () => {
@@ -324,6 +332,40 @@ describe("lane-A mapping", () => {
     expect(input.recipients).toEqual({});
   });
 
+  it("chat.message.created isDm -> buildChatDmNotifyInput notifies the other DM member(s)", () => {
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_1",
+      messageId: "msg_dm_1",
+      authorId: "u_author",
+      isDm: true,
+      dmRecipientIds: ["u_author", "u_other"], // author included on the wire; must be excluded
+    });
+    const input = buildChatDmNotifyInput(env as Parameters<typeof buildChatDmNotifyInput>[0]);
+    expect(input).not.toBeNull();
+    expect(input!.type).toBe("chat.dm");
+    expect(input!.recipients).toEqual({ userIds: ["u_other"] });
+    expect(input!.channels).toEqual(["in_app"]);
+    expect(input!.resourceType).toBe("channel");
+    expect(input!.resourceId).toBe("chan_dm_1");
+    expect(input!.dedupKey).toBe("chat.dm:msg_dm_1");
+  });
+
+  it("chat.message.created not a DM -> buildChatDmNotifyInput is a no-op (null)", () => {
+    const env = envelope("chat.message.created", { channelId: "chan_1", messageId: "msg_3", authorId: "u_author" });
+    expect(buildChatDmNotifyInput(env as Parameters<typeof buildChatDmNotifyInput>[0])).toBeNull();
+  });
+
+  it("chat.message.created isDm with no other member -> buildChatDmNotifyInput is a no-op (null)", () => {
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_2",
+      messageId: "msg_dm_2",
+      authorId: "u_author",
+      isDm: true,
+      dmRecipientIds: ["u_author"],
+    });
+    expect(buildChatDmNotifyInput(env as Parameters<typeof buildChatDmNotifyInput>[0])).toBeNull();
+  });
+
   it("public.inquiry.received propagates name/email/message into content body", () => {
     const rule = EVENT_MAPPINGS["public.inquiry.received"]!;
     const env = envelope("public.inquiry.received", { kind: "sponsor", name: "Bob", email: "bob@example.com", message: "We would like to sponsor." });
@@ -362,6 +404,46 @@ describe("queue consumer (lanes A/B + idempotency)", () => {
     await consumeEventQueue(fakeBatch([env]).batch, h.env);
     const row = await h.db.first<{ request_id: string }>(`SELECT request_id FROM notif_notifications LIMIT 1`);
     expect(row?.request_id).toBe("req_from_env");
+  });
+
+  it("chat.message.created isDm lands an in-app inbox notification for the other member (default-on)", async () => {
+    const h = makeTestEnv();
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_e2e",
+      messageId: "msg_dm_e2e",
+      authorId: "u_author",
+      isDm: true,
+      dmRecipientIds: ["u_author", "u_other"],
+    });
+    const { batch, messages } = fakeBatch([env]);
+    await consumeEventQueue(batch, h.env);
+    expect(messages[0]!.acked).toBe(true);
+    expect(await unreadCount(h.db, "u_other")).toBe(1);
+    expect(await unreadCount(h.db, "u_author")).toBe(0);
+  });
+
+  it("chat.message.created with BOTH mentions and isDm raises two independent notifications off one event", async () => {
+    const h = makeTestEnv();
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_both",
+      messageId: "msg_both",
+      authorId: "u_author",
+      mentions: ["u_mentioned"],
+      isDm: true,
+      dmRecipientIds: ["u_author", "u_dm_other"],
+    });
+    await consumeEventQueue(fakeBatch([env]).batch, h.env);
+    expect(await unreadCount(h.db, "u_mentioned")).toBe(1); // chat.mention
+    expect(await unreadCount(h.db, "u_dm_other")).toBe(1); // chat.dm
+  });
+
+  it("chat.message.created plain channel message (no mentions/dm) rings nobody's bell", async () => {
+    const h = makeTestEnv();
+    const env = envelope("chat.message.created", { channelId: "chan_plain", messageId: "msg_plain", authorId: "u_author" });
+    const { batch, messages } = fakeBatch([env]);
+    await consumeEventQueue(batch, h.env);
+    expect(messages[0]!.acked).toBe(true);
+    expect(await unreadCount(h.db, "u_author")).toBe(0);
   });
 });
 
