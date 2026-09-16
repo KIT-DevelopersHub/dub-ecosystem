@@ -5,8 +5,10 @@
 リアルタイムに Web へストリームする。進行管理（demo→staging→本番）はフェーズ状態機械で
 段飛ばし・自己承認を禁止する。Dub エコシステムの 1 アプリとして組み込む前提。
 
-> フェーズ2（本 PR）のスコープ = フェーズ状態機械の **D1 永続化** ＋ **フェーズゲート API/UI**。
-> Dub アプリランチャー統合・daemon 堅牢化（cancel/timeout/共有トークン認証）は次フェーズ。
+> フェーズ2 = フェーズ状態機械の **D1 永続化** ＋ **フェーズゲート API/UI**。
+> フェーズ3（本 PR）= **Dub アプリランチャー統合**（`/commander`・管理者限定/メンバー未公開）＋
+> **daemon 堅牢化**（run の cancel / timeout・共有トークン認証）＋ **run 永続化配線**
+> （daemon → commander-service → `commander_runs`/`commander_run_events`）。
 
 ## 構成
 
@@ -15,6 +17,9 @@ commander/
   daemon/   @dub/commander-daemon  ローカル exec ブリッジ (Node標準ライブラリのみ / SSE)
   web/      @dub/commander-web      Web フロント (Vite + React) — 実行コンソール ＋ フェーズ管理
   docs/     inception deck / ADR(0001-0004) / data-model / sequence
+apps/fe2-app-shell/
+  src/features/commander/  Dub アプリランチャー統合（/commander・管理者限定/メンバー未公開）。
+                           @dub/commander-web の CommanderConsole/FeatureBoard を再利用（ロジック非重複）
 packages/
   commander-phases/  @dub/commander-phases  フェーズ FSM の単一の真実（純粋・依存ゼロ）
 services/
@@ -55,6 +60,11 @@ node --experimental-strip-types commander/daemon/src/index.ts
 | `COMMANDER_CLAUDE_BIN` | `claude` | claude バイナリのパス |
 | `COMMANDER_CWD` | `process.cwd()` | spawn する claude の作業ディレクトリ |
 | `COMMANDER_CLAUDE_ARGS` | (空) | claude へ渡す追加引数（スペース区切り。例 `--model sonnet`） |
+| `COMMANDER_OPERATOR_TOKEN` | (空) | 共有トークン。設定すると `/health`・`/` 以外の全ルートで必須（`Authorization: Bearer <token>`、SSE は `?token=`）。未設定なら開放（単独ループバック） |
+| `COMMANDER_RUN_IDLE_TIMEOUT_MS` | `1800000` | 無音（stream-json の進捗が途切れた）が続いたら kill→failed する idle watchdog。進捗が来るたびリセットするので稼働中の run は殺さない。既定 30 分。`0` で無効 |
+| `COMMANDER_RUN_TIMEOUT_MS` | `7200000` | 1 run のハード上限（活動に関係なくこの時間で kill→failed する保険。リセットしない）。既定 2 時間。`0` で無効 |
+| `COMMANDER_SERVICE_URL` | (空) | 設定すると run と各イベントを commander-service に永続化（best-effort） |
+| `COMMANDER_SERVICE_TOKEN` | (空) | commander-service へ送る `x-commander-token` |
 
 ブラウザ不要の最短確認: `http://127.0.0.1:4319/` に**組み込みテスト UI**が出る。
 プロンプトを入れて Run するとログがストリーム表示される。
@@ -98,8 +108,13 @@ pnpm --filter @dub/commander-service exec wrangler dev
 | POST | `/runs` | `{ prompt, cwd? }` → `{ runId, status }`（1 実行 = 1 run） |
 | GET | `/runs` | run 履歴（新しい順） |
 | GET | `/runs/:id` | run 詳細（バッファ済みイベント込み） |
+| DELETE | `/runs/:id` | 実行中の run を cancel（child を SIGTERM → failed）。202 / 404 |
 | GET | `/runs/:id/events` | SSE。履歴を replay 後、ライブイベントを配信し、完了で close |
 | GET | `/` | 組み込みテスト UI（ゼロビルド疎通用） |
+
+`COMMANDER_OPERATOR_TOKEN` 設定時は `/health`・`/` 以外で共有トークン必須。cancel / timeout で
+killされた run は `failed`（理由を error イベントで先出し）。`COMMANDER_SERVICE_URL` 設定時は run と
+各イベントを commander-service に best-effort で永続化する（失敗しても run は止めない）。
 
 ## HTTP API（commander-service・フェーズゲート）
 
@@ -111,6 +126,9 @@ pnpm --filter @dub/commander-service exec wrangler dev
 | GET | `/features/:id` | `{ feature, allowedTransitions, transitions }`（次に進める辺＋監査履歴） |
 | POST | `/features/:id/transition` | `{ to, approvedByUser?, note? }`。段飛ばし=**409**・自己承認=**403** |
 | GET/POST | `/features/:id/tasks` | 機能配下タスクの一覧/作成（最小） |
+| GET/POST | `/runs` | run 一覧 / 作成（`{ id?, prompt, cwd, status? }`）。daemon が永続化に使う |
+| GET | `/runs/:id` | run 詳細（`{ run, events }`） |
+| GET/POST | `/runs/:id/events` | run イベントの一覧 / 追記（`{ type, payload?, at? }`）。status/exit は run 行に畳み込む |
 
 `COMMANDER_OPERATOR_TOKEN`（任意）を設定すると、POST 系は `x-commander-token` ヘッダ一致を要求
 （未設定なら開放。共有トークン認証の本実装は次フェーズ）。

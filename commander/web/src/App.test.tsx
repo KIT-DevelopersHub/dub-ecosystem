@@ -8,6 +8,7 @@ import type { CommanderApi } from "./lib/commanderApi.ts";
 function fakeClient(events: DaemonRunEvent[]): CommanderClient {
   return {
     startRun: vi.fn(async () => ({ runId: "run-1" })),
+    cancelRun: vi.fn(async () => {}),
     streamEvents: (_runId, onEvent, onClose) => {
       for (const ev of events) onEvent(ev);
       onClose();

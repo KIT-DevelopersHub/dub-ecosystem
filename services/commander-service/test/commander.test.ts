@@ -195,3 +195,76 @@ describe("commander-service operator token", () => {
     expect(list.status).toBe(200);
   });
 });
+
+describe("commander-service run persistence", () => {
+  let app: ReturnType<typeof createApp>;
+  let env: Env;
+
+  beforeEach(() => {
+    app = createApp();
+    env = makeEnv();
+  });
+
+  it("persists a run and re-fetches it (1 run round-trip)", async () => {
+    const create = await call(app, env, "POST", "/runs", {
+      id: "run_test_1",
+      prompt: "Reply with PONG",
+      cwd: "/tmp/repo",
+      status: "pending",
+    });
+    expect(create.status).toBe(201);
+    expect(create.json.run.id).toBe("run_test_1");
+    expect(create.json.run.status).toBe("pending");
+    expect(create.json.run.exitCode).toBe(null);
+
+    const got = await call(app, env, "GET", "/runs/run_test_1");
+    expect(got.status).toBe(200);
+    expect(got.json.run.prompt).toBe("Reply with PONG");
+    expect(got.json.events).toEqual([]);
+
+    const list = await call(app, env, "GET", "/runs");
+    expect(list.json.runs.map((r: { id: string }) => r.id)).toContain("run_test_1");
+  });
+
+  it("appends events and folds status/exit into the run row", async () => {
+    await call(app, env, "POST", "/runs", { id: "run_test_2", prompt: "p", cwd: "/tmp" });
+
+    const running = await call(app, env, "POST", "/runs/run_test_2/events", {
+      type: "status",
+      payload: { status: "running" },
+    });
+    expect(running.status).toBe(201);
+
+    await call(app, env, "POST", "/runs/run_test_2/events", {
+      type: "claude",
+      payload: { data: { type: "result", result: "PONG" } },
+    });
+    await call(app, env, "POST", "/runs/run_test_2/events", {
+      type: "exit",
+      payload: { code: 0 },
+    });
+    await call(app, env, "POST", "/runs/run_test_2/events", {
+      type: "status",
+      payload: { status: "succeeded" },
+    });
+
+    const got = await call(app, env, "GET", "/runs/run_test_2");
+    expect(got.json.run.status).toBe("succeeded"); // folded from the status event
+    expect(got.json.run.exitCode).toBe(0); // folded from the exit event
+    expect(got.json.events.length).toBe(4);
+    const claude = got.json.events.find((e: { type: string }) => e.type === "claude");
+    expect(claude.payload.data.result).toBe("PONG"); // payload JSON round-trips
+  });
+
+  it("rejects an event for an unknown run (404) and a bad type (400)", async () => {
+    const missing = await call(app, env, "POST", "/runs/nope/events", {
+      type: "status",
+      payload: { status: "running" },
+    });
+    expect(missing.status).toBe(404);
+
+    await call(app, env, "POST", "/runs", { id: "run_test_3", prompt: "p", cwd: "/tmp" });
+    const bad = await call(app, env, "POST", "/runs/run_test_3/events", { type: "bogus" });
+    expect(bad.status).toBe(400);
+  });
+});

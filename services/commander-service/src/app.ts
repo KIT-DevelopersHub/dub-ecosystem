@@ -21,6 +21,12 @@ import {
   transitionFeature,
   createTask,
   listTasks,
+  createRun,
+  getRun,
+  listRuns,
+  listRunEvents,
+  appendRunEvent,
+  isRunEventType,
 } from "./repo";
 
 export function createApp() {
@@ -120,6 +126,57 @@ export function createApp() {
     });
     if (!task) return c.json({ error: "feature_not_found" }, 404);
     return c.json({ task }, 201);
+  });
+
+  // ── Runs (persistence for the local daemon's executions) ─────────────────────
+  // The loopback daemon POSTs runs + events here (it cannot reach D1 itself, ADR 0004).
+  // POST routes are behind the operator-token guard above.
+  app.get("/runs", async (c) => {
+    return c.json({ runs: await listRuns(c.env.DB) });
+  });
+
+  app.post("/runs", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const prompt = typeof body?.prompt === "string" ? body.prompt : "";
+    const cwd = typeof body?.cwd === "string" ? body.cwd : "";
+    if (prompt.trim() === "" || cwd.trim() === "") {
+      return c.json({ error: "prompt_and_cwd_required" }, 400);
+    }
+    const run = await createRun(c.env.DB, {
+      id: typeof body?.id === "string" ? body.id : undefined,
+      prompt,
+      cwd,
+      status: body?.status,
+      taskId: typeof body?.taskId === "string" ? body.taskId : null,
+    });
+    return c.json({ run }, 201);
+  });
+
+  app.get("/runs/:id", async (c) => {
+    const run = await getRun(c.env.DB, c.req.param("id"));
+    if (!run) return c.json({ error: "run_not_found" }, 404);
+    return c.json({ run, events: await listRunEvents(c.env.DB, run.id) });
+  });
+
+  app.get("/runs/:id/events", async (c) => {
+    const run = await getRun(c.env.DB, c.req.param("id"));
+    if (!run) return c.json({ error: "run_not_found" }, 404);
+    return c.json({ events: await listRunEvents(c.env.DB, run.id) });
+  });
+
+  app.post("/runs/:id/events", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => null);
+    if (!isRunEventType(body?.type)) {
+      return c.json({ error: "invalid_event_type" }, 400);
+    }
+    const event = await appendRunEvent(c.env.DB, id, {
+      type: body.type,
+      payload: body?.payload,
+      at: typeof body?.at === "string" ? body.at : undefined,
+    });
+    if (!event) return c.json({ error: "run_not_found" }, 404);
+    return c.json({ event }, 201);
   });
 
   return app;

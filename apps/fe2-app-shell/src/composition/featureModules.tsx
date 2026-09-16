@@ -36,6 +36,7 @@ import { GlobalEventSwitcher } from "../features/gantt/GlobalEventSwitcher.tsx";
 import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { lpRoutes, lpNav } from "../features/lp/index.tsx";
+import { commanderRoutes, commanderNav } from "../features/commander/index.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
 import { participationRoutes } from "../features/participation/index.tsx";
@@ -341,6 +342,22 @@ function adaptLp(): FeatureModule {
   return { id: "lp", routes, nav };
 }
 
+// ── commander (FE2-local feature) ─────────────────────────────────────────────
+// Commander drives the operator's LOCAL Claude Code exec bridge and gates demo→staging→
+// prod phase moves. Admin/dev tooling: it can spawn arbitrary Claude Code locally, so the
+// route is gated on identity:admin (module-level) in addition to the per-app app:commander:view
+// key that withAppAccessGate ANDs on. It is intentionally NOT in releaseGate PUBLISHED_APPS,
+// so members see it greyed (member-hidden) until explicitly released. No runtime Provider —
+// the console/board carry their own loopback/commander-service HTTP clients (not the gateway).
+function adaptCommander(): FeatureModule {
+  const passthrough: ElementWrapper = (node) => createElement(Fragment, null, node);
+  const routes = (commanderRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, passthrough));
+  const nav: NavEntry[] = commanderNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 51 }));
+  const module: FeatureModule = { id: "commander", routes, nav };
+  module.requiredPermissions = ["identity:admin"]; // admin-only (dangerous: spawns local Claude Code)
+  return module;
+}
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const provider = providerWrapper(RosterProviders, api);
@@ -385,7 +402,7 @@ function withAppAccessGate(module: FeatureModule): FeatureModule {
 
 /**
  * The assembled shell FeatureModule array, ordered [events, tasks,
- * notifications, chat, mail, usage, members, participation, driveshare, admin]. Each module's routes are wrapped in its runtime
+ * notifications, chat, mail, usage, members, participation, driveshare, admin, commander]. Each module's routes are wrapped in its runtime
  * Provider fed by `api` (src/lib/api-client.tsx). Hand this to
  * registerFeatureModules() in main.tsx.
  */
@@ -403,7 +420,8 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptDriveShare(api),
     adaptLp(),
     adaptAdmin(api),
+    adaptCommander(),
   ].map(withNavAppId).map(withAppAccessGate);
 }
 
-export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptAdmin, adaptCommander, toIcon };

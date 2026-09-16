@@ -5,3 +5,4 @@ packages:
   - "infra/*"
   - "commander/web"
   - "commander/daemon"
+  - "commander/bdd"

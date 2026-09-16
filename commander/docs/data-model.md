@@ -87,5 +87,8 @@ erDiagram
   `commander_phase_transitions` は追記専用の監査ログ。
   - 遷移ゲート: 遷移表に無い辺 = 段飛ばし → **409**、承認必須辺で `approvedByUser` 無し =
     自己承認 → **403**（`@dub/commander-phases`）。
-- **現 PoC のまま**: `Run` / `RunEvent` は daemon 内メモリ（`RunStore`）。`commander_runs` /
-  `commander_run_events` のスキーマは先行して用意済み（daemon からの永続化配線は次フェーズ）。
+- **完了（フェーズ3）**: `Run` / `RunEvent` を `commander_runs` / `commander_run_events` に永続化。
+  daemon はローカル (loopback) から D1 に到達できないため、`COMMANDER_SERVICE_URL` を設定すると
+  daemon が run 作成と各イベントを commander-service に POST し、ワーカーが D1 へ書く（best-effort・
+  失敗しても run は止めない）。`status`/`exit` イベントは `commander_runs` 行に畳み込む（現在状態が
+  1 行 read で取れる）。daemon 内メモリ（`RunStore`）は SSE 用のライブバッファとして併存する。

@@ -44,4 +44,30 @@ export interface DaemonConfig {
   defaultCwd: string;
   /** Extra args appended to every `claude -p` invocation. */
   extraArgs: string[];
+  /**
+   * Shared operator token (ADR 0003). When set, every request except GET /health must
+   * present it (Authorization: Bearer <token>, or ?token= for the SSE stream); when
+   * empty the daemon is open (single-operator loopback dev). [[secrets-stay-local]].
+   */
+  operatorToken: string;
+  /**
+   * Idle watchdog (ms): a run is killed + marked failed only after it goes SILENT
+   * (no stream-json / stdout / stderr activity) for this long. The timer resets on
+   * every chunk, so a working agentic loop is never killed mid-progress — only a hung
+   * or wedged `claude` trips it. <= 0 disables the idle watchdog.
+   */
+  idleTimeoutMs: number;
+  /**
+   * Hard wall-clock cap per run (ms) — a safety net that is NEVER reset. A run still
+   * executing after this is killed and marked failed regardless of activity. Set long
+   * (real agentic dev can run 30-120+ min). <= 0 disables the hard cap.
+   */
+  runTimeoutMs: number;
+  /**
+   * Optional commander-service base URL. When set, each run + its events are persisted
+   * there (commander_runs / commander_run_events) best-effort (never fails the run).
+   */
+  serviceUrl?: string;
+  /** Token presented to commander-service (x-commander-token) when persisting. */
+  serviceToken?: string;
 }

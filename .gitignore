@@ -13,3 +13,7 @@ coverage/
 **/wrangler.staging.toml
 # Transient binding-free bootstrap config written by deploy-staging.sh (rm'd after use)
 **/wrangler.staging.bootstrap.toml
+
+# Commander local dev (secrets + local D1/logs — never commit)
+commander/.commander.env.local
+commander/.dev/
