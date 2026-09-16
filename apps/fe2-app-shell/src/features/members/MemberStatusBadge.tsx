@@ -9,6 +9,7 @@ const TONE: Record<MemberStatus, BadgeTone> = {
   invited: "warning",
   considering: "info",
   declined: "danger",
+  deleted: "neutral",
 };
 
 export const STATUS_LABEL: Record<MemberStatus, string> = {
@@ -16,6 +17,7 @@ export const STATUS_LABEL: Record<MemberStatus, string> = {
   invited: "招待中",
   considering: "検討中",
   declined: "辞退",
+  deleted: "削除済み",
 };
 
 export function MemberStatusBadge({ status, testId }: { status: MemberStatus; testId?: string }): JSX.Element {

@@ -83,6 +83,10 @@ export class InMemoryMemberRepo implements MemberRepo {
     if (cur) this.people.set(id, { ...cur, archivedAt: "archived" });
     this.links.delete(id);
   }
+  async hardDeletePerson(id: string): Promise<void> {
+    this.people.delete(id);
+    this.links.delete(id);
+  }
   async maxPersonSortOrder(orgId: common.OrgId): Promise<number> {
     let max = 0;
     for (const p of this.people.values()) if (p.orgId === orgId && p.sortOrder > max) max = p.sortOrder;

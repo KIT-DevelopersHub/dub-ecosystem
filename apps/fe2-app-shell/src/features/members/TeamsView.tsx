@@ -10,25 +10,35 @@ function MemberRow({
   m,
   onEdit,
   onDelete,
+  onRestore,
 }: {
   m: OrgMember;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
+  onRestore: (m: OrgMember) => void;
 }): JSX.Element {
+  const isDeleted = m.status === "deleted";
   return (
     <div className={styles.memberRow} data-testid={`members-teamrow-${m.id}`}>
       <div className={styles.memberMain}>
-        <span className={styles.memberName}>{m.name}</span>
+        <span className={isDeleted ? styles.memberNameMuted : styles.memberName}>{m.name}</span>
         {m.roleTitle ? <span className={styles.memberRole}>{m.roleTitle}</span> : null}
         {m.department || m.grade ? (
           <span className={styles.memberRole}>{[m.department, m.grade].filter(Boolean).join(" ")}</span>
         ) : null}
       </div>
-      <MemberStatusBadge status={m.status} />
+      <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} />
       <div className={styles.rowSpacer} />
       <div className={styles.rowActions}>
-        <IconButton name="edit" aria-label={`${m.name} を編集`} onClick={() => onEdit(m)} />
-        <IconButton name="trash" aria-label={`${m.name} を削除`} variant="danger" onClick={() => onDelete(m)} />
+        {isDeleted ? (
+          // 削除済みは「在籍に戻す」(復帰) のみ。
+          <IconButton name="refresh" aria-label={`${m.name} を在籍に戻す`} onClick={() => onRestore(m)} testId={`members-teamrow-restore-${m.id}`} />
+        ) : (
+          <>
+            <IconButton name="edit" aria-label={`${m.name} を編集`} onClick={() => onEdit(m)} />
+            <IconButton name="trash" aria-label={`${m.name} を削除`} variant="danger" onClick={() => onDelete(m)} testId={`members-teamrow-delete-${m.id}`} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -39,6 +49,7 @@ export function TeamsView({
   members,
   onEditMember,
   onDeleteMember,
+  onRestoreMember,
   onEditTeam,
   onDeleteTeam,
 }: {
@@ -46,6 +57,7 @@ export function TeamsView({
   members: OrgMember[];
   onEditMember: (m: OrgMember) => void;
   onDeleteMember: (m: OrgMember) => void;
+  onRestoreMember: (m: OrgMember) => void;
   onEditTeam: (t: MemberTeam) => void;
   onDeleteTeam: (t: MemberTeam) => void;
 }): JSX.Element {
@@ -78,7 +90,9 @@ export function TeamsView({
             {inTeam.length === 0 ? (
               <p className={styles.emptyTeamNote}>メンバー未割り当て</p>
             ) : (
-              inTeam.map((m) => <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} />)
+              inTeam.map((m) => (
+                <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} onRestore={onRestoreMember} />
+              ))
             )}
           </Card>
         );
@@ -93,7 +107,7 @@ export function TeamsView({
           </div>
           <div className={styles.unassignedBody}>
             {unassigned.map((m) => (
-              <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} />
+              <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} onRestore={onRestoreMember} />
             ))}
           </div>
         </section>

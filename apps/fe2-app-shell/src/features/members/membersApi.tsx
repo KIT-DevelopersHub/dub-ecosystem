@@ -26,6 +26,9 @@ export interface MembersApi {
   createMember(input: CreateMemberRequest): Promise<OrgMember>;
   updateMember(id: string, patch: UpdateMemberRequest): Promise<OrgMember>;
   deleteMember(id: string): Promise<void>;
+  /** 物理削除(完全削除・不可逆)。サーバは status="deleted"(論理削除済み) の行のみ許可
+   *  (それ以外は 409)。参加届の紐付けは外して名簿ごと消す。 */
+  hardDeleteMember(id: string): Promise<void>;
   /** Link (or unlink with identityUserId=null via updateMember) a member to a login
    *  account. Human-confirmed; the candidate list comes from listIdentityUsers. */
   linkIdentity(id: string, input: LinkIdentityRequest): Promise<OrgMember>;
@@ -52,6 +55,9 @@ export function createMembersApi(api: ApiClient): MembersApi {
       api.request<OrgMember, UpdateMemberRequest>({ method: "PATCH", path: `${BASE}/people/${encodeURIComponent(id)}`, body: patch }),
     deleteMember: async (id) => {
       await api.request<{ ok: true }>({ method: "DELETE", path: `${BASE}/people/${encodeURIComponent(id)}` });
+    },
+    hardDeleteMember: async (id) => {
+      await api.request<{ ok: true }>({ method: "DELETE", path: `${BASE}/people/${encodeURIComponent(id)}/purge` });
     },
     linkIdentity: (id, input) =>
       api.request<OrgMember, LinkIdentityRequest>({ method: "POST", path: `${BASE}/people/${encodeURIComponent(id)}/identity-link`, body: input }),

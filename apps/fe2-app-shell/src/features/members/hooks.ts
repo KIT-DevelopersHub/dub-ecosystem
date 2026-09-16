@@ -141,6 +141,48 @@ export function useDeleteMember() {
   });
 }
 
+/** メンバーを追放する = 論理削除(ソフトデリート)。物理削除せず status を "deleted"(削除済み)
+ *  にする。楽観的に即「削除済み」表示（組織図からは消える）→失敗でロールバック。
+ *  version で楽観ロック（サーバの updateMember を流用）。 */
+export function useSoftDeleteMember() {
+  const api = useMembersApi();
+  return useOverviewMutation<{ id: string; version: number }, OrgMember>({
+    mutationFn: ({ id, version }) => api.updateMember(id, { status: "deleted", version }),
+    optimistic: (prev, { id }) => ({
+      ...prev,
+      members: prev.members.map((m) => (m.id === id ? { ...m, status: "deleted", version: m.version + 1 } : m)),
+    }),
+    successMessage: "メンバーを削除しました（削除済み）",
+    errorFallback: "メンバーを削除できませんでした",
+  });
+}
+
+/** 物理削除(完全削除・不可逆)。名簿から行ごと消す。楽観的に即リストから除去し、失敗時は
+ *  ロールバック＋トースト。サーバは status="deleted"(論理削除済み) のみ許可(それ以外 409)。 */
+export function useHardDeleteMember() {
+  const api = useMembersApi();
+  return useOverviewMutation<{ id: string }, unknown>({
+    mutationFn: ({ id }) => api.hardDeleteMember(id),
+    optimistic: (prev, { id }) => ({ ...prev, members: prev.members.filter((m) => m.id !== id) }),
+    successMessage: "メンバーを完全に削除しました",
+    errorFallback: "完全に削除できませんでした",
+  });
+}
+
+/** 削除済みメンバーを在籍(added)へ戻して復帰させる。楽観的に即反映。 */
+export function useRestoreMember() {
+  const api = useMembersApi();
+  return useOverviewMutation<{ id: string; version: number }, OrgMember>({
+    mutationFn: ({ id, version }) => api.updateMember(id, { status: "added", version }),
+    optimistic: (prev, { id }) => ({
+      ...prev,
+      members: prev.members.map((m) => (m.id === id ? { ...m, status: "added", version: m.version + 1 } : m)),
+    }),
+    successMessage: "メンバーを在籍に戻しました",
+    errorFallback: "在籍に戻せませんでした",
+  });
+}
+
 /** Link (or unlink with identityUserId=null) a member to a login account (#1). Optimistic:
  *  the linked account shows immediately, rolling back on error (e.g. 409 already-linked). */
 export function useLinkIdentity() {

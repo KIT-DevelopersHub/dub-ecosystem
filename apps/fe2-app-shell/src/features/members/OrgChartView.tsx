@@ -112,8 +112,8 @@ function Connector({ n }: { n: number }): JSX.Element {
 }
 
 export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members: OrgMember[] }): JSX.Element {
-  // 辞退(declined)は体制図に出さない。
-  const active = members.filter((m) => m.status !== "declined");
+  // 辞退(declined)・削除済み(deleted)は体制図に出さない。
+  const active = members.filter((m) => m.status !== "declined" && m.status !== "deleted");
   const hq = teams.find(isHqTeam) ?? null;
   const columnTeams = teams.filter((t) => !isHqTeam(t));
   const inTeam = (teamId: string): OrgMember[] => active.filter((m) => m.teamIds.includes(teamId));
