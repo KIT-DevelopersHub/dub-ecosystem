@@ -103,8 +103,12 @@ export function createApp(deps: AppDeps): Hono {
     const preview = deps.unfurler ? await deps.unfurler(url) : null;
     const body: UnfurlResponse = { url, preview };
     const res = c.json(body);
-    res.headers.set("cache-control", `private, max-age=${UNFURL_CACHE_TTL_SECONDS}`);
+    // The Cache API refuses (413) to store a `private` response, which would silently
+    // turn the 1-day cache into a no-op. OGP data is public and the key excludes the
+    // user, so the stored copy is `public`; the client still gets `private`.
+    res.headers.set("cache-control", `public, max-age=${UNFURL_CACHE_TTL_SECONDS}`);
     if (cache) await cache.put(cacheKey, res.clone()).catch(() => undefined);
+    res.headers.set("cache-control", `private, max-age=${UNFURL_CACHE_TTL_SECONDS}`);
     return res;
   });
 

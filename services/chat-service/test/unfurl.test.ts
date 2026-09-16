@@ -73,8 +73,27 @@ describe("parseOgp", () => {
     expect(p?.imageUrl).toBeNull();
   });
 
+  it("runs og:image through the SSRF guard and requires https (viewers' browsers load it)", () => {
+    const img = (src: string) => parseOgp(`<meta property="og:title" content="t"><meta property="og:image" content="${src}">`, "https://e.com/")?.imageUrl;
+    expect(img("http://192.168.1.1/cgi?reboot")).toBeNull();
+    expect(img("https://169.254.169.254/x.png")).toBeNull();
+    expect(img("http://cdn.example/x.png")).toBeNull(); // mixed content -> blocked anyway
+    expect(img("https://cdn.example/x.png")).toBe("https://cdn.example/x.png");
+    expect(img("/rel.png")).toBe("https://e.com/rel.png");
+  });
+
+  it("keeps apostrophes / quotes inside content and ignores data-name=", () => {
+    expect(parseOgp(`<meta property="og:title" content="Don't miss this">`, "https://e.com/")?.title).toBe("Don't miss this");
+    expect(parseOgp(`<meta content='He said "hi"' property="og:title">`, "https://e.com/")?.title).toBe('He said "hi"');
+    expect(parseOgp(`<meta data-name="og:title" content="nope"><title>T</title>`, "https://e.com/")?.title).toBe("T");
+  });
+
   it("decodes numeric entities", () => {
     expect(decodeEntities("a&#39;b&#x41;")).toBe("a'bA");
+  });
+
+  it("leaves out-of-range / surrogate numeric refs literal instead of throwing", () => {
+    expect(decodeEntities("x&#99999999999;y&#x110000;z&#xD800;")).toBe("x&#99999999999;y&#x110000;z&#xD800;");
   });
 });
 
@@ -170,6 +189,44 @@ describe("GET /chat/unfurl", () => {
     expect(ok.json).toEqual({ url: "https://ok.example/p", preview: { url: "https://ok.example/p", siteName: "OK", title: "T", description: null, imageUrl: null } });
     const none = await call(app, "GET", "/chat/unfurl?url=https%3A%2F%2Fno.example%2F");
     expect(none.json).toEqual({ url: "https://no.example/", preview: null });
+  });
+
+  it("stores a public copy in caches.default and serves the second call from it", async () => {
+    const store = new Map<string, Response>();
+    let putCacheControl = "";
+    const fakeCache = {
+      match: async (req: Request) => store.get(req.url)?.clone(),
+      put: async (req: Request, res: Response) => {
+        putCacheControl = res.headers.get("cache-control") ?? "";
+        // The real Cache API rejects `private` with 413 — mirror that so the test is honest.
+        if (/private|no-store/.test(putCacheControl)) throw new Error("413");
+        store.set(req.url, res);
+      },
+    };
+    (globalThis as { caches?: unknown }).caches = { default: fakeCache };
+    try {
+      let called = 0;
+      const app = createApp(
+        makeDeps({
+          unfurler: async (url) => {
+            called++;
+            return { url, siteName: "OK", title: "T", description: null, imageUrl: null };
+          },
+        }),
+      );
+      const first = await app.request("http://svc/chat/unfurl?url=https%3A%2F%2Fok.example%2Fp", {
+        headers: { "x-dub-request-id": "req_test", "x-dub-user-id": "user_caller" },
+      });
+      expect(first.status).toBe(200);
+      expect(putCacheControl).toMatch(/^public, max-age=86400$/);
+      expect(first.headers.get("cache-control")).toMatch(/^private, max-age=86400$/);
+      const second = await call(app, "GET", "/chat/unfurl?url=https%3A%2F%2Fok.example%2Fp");
+      expect(second.status).toBe(200);
+      expect(second.json.preview?.title).toBe("T");
+      expect(called).toBe(1); // second call never hit the third party
+    } finally {
+      delete (globalThis as { caches?: unknown }).caches;
+    }
   });
 
   it("200 with null preview when no unfurler is wired", async () => {
