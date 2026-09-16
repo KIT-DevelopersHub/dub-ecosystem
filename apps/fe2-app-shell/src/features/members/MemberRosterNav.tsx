@@ -39,13 +39,15 @@ interface SectionTab {
 // 順序 = 表示順。active 判定は「pathname が path で始まる最長一致」なので、より深い
 // パス（例: /admin/users/:id, /participation/list）は親タブにハイライトが乗る。
 // 各タブの requiredPermissions は、対応ルートが registry.flatten で AND される実効権限と
-// 一致させる = ドメイン権限（identity:read）＋ per-app view キー（app:members:view /
-// app:admin:view / app:participation:view, withAppAccessGate 由来）。これでタブの表示可否が
-// ルートガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
-// 参加届(提出) は openToAll（ドメイン権限なし）なので app:participation:view のみでガードする。
+// 一致させる = per-app view キー（app:members:view / app:admin:view / app:participation:view,
+// withAppAccessGate 由来）が AUTHORITATIVE な 有効化ゲート。運営メンバー/運営名簿タブは
+// app:members:view のみでガードする（ドメイン identity:read は要求しない）ので、統括ロールが
+// app:members:view だけで名簿を開ける。メール名簿(/admin/users)・参加届の回答は対応ルートが
+// なお identity:read を AND するためタブ側もそれに合わせる。これでタブの表示可否がルート
+// ガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
 const SECTIONS: SectionTab[] = [
-  { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["identity:read", "app:members:view"] },
-  { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["identity:read", "app:members:view"] },
+  { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["app:members:view"] },
+  { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["app:members:view"] },
   { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
   // メールアドレス管理: ルート側(fe7 routes.tsx)は requiredPermissions: ["mail:admin"] のみを
   // 宣言しているが、registry.flatten() が admin モジュールの module.requiredPermissions

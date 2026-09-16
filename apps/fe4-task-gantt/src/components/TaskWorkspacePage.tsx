@@ -74,7 +74,7 @@ const FIELD_LABEL: Record<string, string> = {
   startsAt: DATE_LABEL.start,
   endsAt: DATE_LABEL.end,
   status: "ステータス",
-  priority: "優先度",
+  priority: "重要度",
   assigneeId: "担当",
   teamId: "チーム",
   parentTaskId: "親タスク",
@@ -655,7 +655,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
     return true;
   };
 
-  // Re-issue a field-only patch (title/status/優先度/担当/チーム/開始日/期日) as a plain
+  // Re-issue a field-only patch (title/status/重要度/担当/チーム/開始日/期日) as a plain
   // "set" — the reversible primitive an undo/redo command re-runs. It reads a FRESH
   // version (getTask) first, so a DEFERRED undo/redo (run long after the edit, once the
   // task's version has moved on) can never 409 on a stale panel-cached version — the
@@ -871,7 +871,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit): Promise<boolean> => {
     if (!selectedTask) return Promise.resolve(false);
     const needsRelations = relations.parentChanged || relations.depsChanged;
-    // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
+    // Field-only edit (title/status/重要度/担当/チーム/開始日/期日): keep the optimistic
     // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
     // field from the current task so Ctrl/⌘-Z restores exactly those fields.
     const { parentTaskId: _p, ...fieldOnlyPatch } = patch;

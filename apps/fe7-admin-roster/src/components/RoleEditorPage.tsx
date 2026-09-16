@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { identity } from "@dub/types";
+import { appRegistry } from "@dub/types";
 import { PageHeader, Breadcrumbs, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { PermissionMatrix } from "./PermissionMatrix";
@@ -74,7 +75,10 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
         onError: (err) => toast({ kind: "error", title: "保存に失敗しました", description: errorMessage(err) }),
       });
     } else {
-      create.mutate({ name, permissions: perms }, {
+      // Bundle the domain read key(s) each granted app needs so the new role's per-app
+      // toggles are EFFECTIVE 実効権限 (not front-end-only). Same normalization the update
+      // path applies via buildRoleUpdate.
+      create.mutate({ name, permissions: appRegistry.withRequiredAppDomainKeys(perms) }, {
         onSuccess: () => { draft.clear(); toast({ kind: "success", title: "ロールを作成しました" }); onDone?.(); },
         onError: (err) => toast({ kind: "error", title: "作成に失敗しました", description: errorMessage(err) }),
       });

@@ -96,3 +96,30 @@ describe("permissionMatrix — buildRoleUpdate (diff only)", () => {
     expect(patch).toEqual({ name: "lead", permissions: ["event:admin"] });
   });
 });
+
+describe("permissionMatrix — buildRoleUpdate bundles per-app domain keys", () => {
+  const original = { name: "統括", permissions: [] as identity.PermissionKey[] };
+
+  it("granting app:members:edit saves app:members:view + identity:read too (実効権限)", () => {
+    const patch = buildRoleUpdate(original, { name: "統括", permissions: ["app:members:edit"] });
+    expect(patch).not.toBeNull();
+    const perms = new Set(patch!.permissions);
+    expect(perms.has("app:members:edit")).toBe(true);
+    expect(perms.has("app:members:view")).toBe(true);
+    expect(perms.has("identity:read")).toBe(true);
+    expect(perms.has("identity:admin")).toBe(false); // no escalation to org-admin
+  });
+
+  it("a legacy under-normalized role is NOT reported dirty on open (both sides normalized)", () => {
+    // 既存の統括ロール: app:members:view/edit のみ(identity:read 無し)。開いてそのまま
+    // 保存しても差分ゼロ → null(誤検知の dirty を出さない)。
+    const legacy = { name: "統括", permissions: ["app:members:view", "app:members:edit"] as identity.PermissionKey[] };
+    expect(buildRoleUpdate(legacy, { name: "統括", permissions: ["app:members:view", "app:members:edit"] })).toBeNull();
+  });
+
+  it("cannot strip a domain key that a still-granted app depends on", () => {
+    // identity:read を外そうとしても、app:members:view が残る限り再付与される(依存関係)。
+    const withDomain = { name: "統括", permissions: ["app:members:view", "identity:read"] as identity.PermissionKey[] };
+    expect(buildRoleUpdate(withDomain, { name: "統括", permissions: ["app:members:view"] })).toBeNull();
+  });
+});
