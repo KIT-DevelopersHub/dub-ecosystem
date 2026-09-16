@@ -229,7 +229,7 @@ Per-`(type, channel)` opt-in/out over a **system-default baseline**. Defaults (f
 
 | Channel | Default | Rule |
 |---|---|---|
-| `in_app` | on for all types **except** `chat.*` | avoids double-count with the FE chat unread badge |
+| `in_app` | on for all types **except** `chat.*`, with `chat.mention` / `chat.dm` as the deliberate exception (default **on**) | avoids double-count with the FE chat unread badge for a plain message; @mention/DM must still surface even outside the chat tab |
 | `email` | on only for `urgent` notifications | ad-hoc `/notify` + `notification.requested` are `normal` ⇒ off by default |
 | `chat` | off | |
 | `push` | on | |
