@@ -73,8 +73,11 @@ export function defineSteps(): StepRegistry<World> {
   r.add(/^daemon が低速 claude で起動している$/, async (w) => {
     w.track((w.daemon = await startDaemon({ claudeBin: SLOW_CLAUDE })));
   });
-  r.add(/^daemon が短い timeout かつ低速 claude で起動している$/, async (w) => {
-    w.track((w.daemon = await startDaemon({ claudeBin: SLOW_CLAUDE, runTimeoutMs: 200 })));
+  r.add(/^daemon が短い idle timeout かつ低速 claude で起動している$/, async (w) => {
+    // slow-claude emits one init line then goes silent -> the idle watchdog trips.
+    w.track(
+      (w.daemon = await startDaemon({ claudeBin: SLOW_CLAUDE, idleTimeoutMs: 200, runTimeoutMs: 0 })),
+    );
   });
   r.add(/^daemon がトークン "([^"]+)" 付きで起動している$/, async (w, token) => {
     w.daemonToken = token;

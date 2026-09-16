@@ -86,6 +86,7 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
     defaultCwd: tmpdir(),
     extraArgs: [],
     operatorToken: "",
+    idleTimeoutMs: 0,
     runTimeoutMs: 0,
     ...overrides,
   };

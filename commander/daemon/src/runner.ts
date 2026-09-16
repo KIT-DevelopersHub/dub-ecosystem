@@ -14,9 +14,14 @@ type Listener = (event: RunEvent) => void;
 
 interface Active {
   child: ChildProcess;
-  timer?: ReturnType<typeof setTimeout>;
+  /** Idle watchdog (reset on every stream chunk). */
+  idleTimer?: ReturnType<typeof setTimeout>;
+  /** Hard wall-clock cap (never reset). */
+  hardTimer?: ReturnType<typeof setTimeout>;
   cancelled: boolean;
   timedOut: boolean;
+  /** Which timer fired (drives the failure reason). */
+  timeoutKind?: "idle" | "hard";
 }
 
 export class RunStore {
@@ -132,13 +137,27 @@ export class RunStore {
     const entry: Active = { child, cancelled: false, timedOut: false };
     this.active.set(run.id, entry);
 
-    // Wall-clock cap: kill a run that outlives runTimeoutMs (0/negative = disabled).
-    if (this.config.runTimeoutMs > 0) {
-      entry.timer = setTimeout(() => {
+    // Idle watchdog: kill a run only after it goes SILENT for idleTimeoutMs. Reset on
+    // every stream chunk (see armIdle() calls below) so a working agent is never killed
+    // mid-progress — only a hung `claude` trips it. (0/negative = disabled.)
+    const armIdle = (): void => {
+      if (this.config.idleTimeoutMs <= 0) return;
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
+      entry.idleTimer = setTimeout(() => {
         entry.timedOut = true;
+        entry.timeoutKind = "idle";
+        child.kill("SIGTERM");
+      }, this.config.idleTimeoutMs);
+    };
+    // Hard wall-clock cap (safety net): NEVER reset (0/negative = disabled).
+    if (this.config.runTimeoutMs > 0) {
+      entry.hardTimer = setTimeout(() => {
+        entry.timedOut = true;
+        entry.timeoutKind = "hard";
         child.kill("SIGTERM");
       }, this.config.runTimeoutMs);
     }
+    armIdle();
 
     this.setStatus(run, "running");
 
@@ -146,6 +165,7 @@ export class RunStore {
     let stdoutBuf = "";
     child.stdout!.setEncoding("utf8");
     child.stdout!.on("data", (chunk: string) => {
+      armIdle(); // progress: reset the idle watchdog
       stdoutBuf += chunk;
       let nl: number;
       while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
@@ -158,6 +178,7 @@ export class RunStore {
     let stderrBuf = "";
     child.stderr!.setEncoding("utf8");
     child.stderr!.on("data", (chunk: string) => {
+      armIdle(); // progress: reset the idle watchdog
       stderrBuf += chunk;
       let nl: number;
       while ((nl = stderrBuf.indexOf("\n")) !== -1) {
@@ -176,7 +197,8 @@ export class RunStore {
     });
 
     child.on("close", (code) => {
-      if (entry.timer) clearTimeout(entry.timer);
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
+      if (entry.hardTimer) clearTimeout(entry.hardTimer);
       this.active.delete(run.id);
       if (stdoutBuf.trim()) this.handleStdoutLine(run, stdoutBuf.trim());
       if (stderrBuf) {
@@ -188,10 +210,15 @@ export class RunStore {
       }
       // Surface WHY a killed run ended before the terminal status.
       if (entry.timedOut) {
+        const hard = entry.timeoutKind === "hard";
+        const ms = hard ? this.config.runTimeoutMs : this.config.idleTimeoutMs;
+        const mins = Math.round(ms / 60_000);
         this.emit(run, {
           type: "error",
           at: new Date().toISOString(),
-          message: `run timed out after ${this.config.runTimeoutMs}ms`,
+          message: hard
+            ? `run hard-timed out after ${mins}m`
+            : `run timed out after ${mins}m (idle)`,
         });
       } else if (entry.cancelled) {
         this.emit(run, {

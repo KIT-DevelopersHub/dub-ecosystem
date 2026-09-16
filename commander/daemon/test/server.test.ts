@@ -18,6 +18,7 @@ function config(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     defaultCwd: tmpdir(),
     extraArgs: [],
     operatorToken: "",
+    idleTimeoutMs: 0,
     runTimeoutMs: 0,
     ...overrides,
   };

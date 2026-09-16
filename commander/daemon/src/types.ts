@@ -51,8 +51,16 @@ export interface DaemonConfig {
    */
   operatorToken: string;
   /**
-   * Hard wall-clock cap per run (ms). A run still executing after this is killed and
-   * marked failed (guards against a hung `claude`). <= 0 disables the cap.
+   * Idle watchdog (ms): a run is killed + marked failed only after it goes SILENT
+   * (no stream-json / stdout / stderr activity) for this long. The timer resets on
+   * every chunk, so a working agentic loop is never killed mid-progress — only a hung
+   * or wedged `claude` trips it. <= 0 disables the idle watchdog.
+   */
+  idleTimeoutMs: number;
+  /**
+   * Hard wall-clock cap per run (ms) — a safety net that is NEVER reset. A run still
+   * executing after this is killed and marked failed regardless of activity. Set long
+   * (real agentic dev can run 30-120+ min). <= 0 disables the hard cap.
    */
   runTimeoutMs: number;
   /**

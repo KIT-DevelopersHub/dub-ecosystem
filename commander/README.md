@@ -61,7 +61,8 @@ node --experimental-strip-types commander/daemon/src/index.ts
 | `COMMANDER_CWD` | `process.cwd()` | spawn する claude の作業ディレクトリ |
 | `COMMANDER_CLAUDE_ARGS` | (空) | claude へ渡す追加引数（スペース区切り。例 `--model sonnet`） |
 | `COMMANDER_OPERATOR_TOKEN` | (空) | 共有トークン。設定すると `/health`・`/` 以外の全ルートで必須（`Authorization: Bearer <token>`、SSE は `?token=`）。未設定なら開放（単独ループバック） |
-| `COMMANDER_RUN_TIMEOUT_MS` | `600000` | 1 run のウォールクロック上限（超過で kill→failed）。`0` で無効 |
+| `COMMANDER_RUN_IDLE_TIMEOUT_MS` | `1800000` | 無音（stream-json の進捗が途切れた）が続いたら kill→failed する idle watchdog。進捗が来るたびリセットするので稼働中の run は殺さない。既定 30 分。`0` で無効 |
+| `COMMANDER_RUN_TIMEOUT_MS` | `7200000` | 1 run のハード上限（活動に関係なくこの時間で kill→failed する保険。リセットしない）。既定 2 時間。`0` で無効 |
 | `COMMANDER_SERVICE_URL` | (空) | 設定すると run と各イベントを commander-service に永続化（best-effort） |
 | `COMMANDER_SERVICE_TOKEN` | (空) | commander-service へ送る `x-commander-token` |
 
