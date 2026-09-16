@@ -91,8 +91,13 @@ const ENTITY_MAP: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '
 export function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, ent: string) => {
     const e = ent.toLowerCase();
-    if (e.startsWith("#x")) return String.fromCodePoint(parseInt(e.slice(2), 16));
-    if (e.startsWith("#")) return String.fromCodePoint(parseInt(e.slice(1), 10));
+    if (e.startsWith("#")) {
+      const cp = e.startsWith("#x") ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      // Out-of-range / surrogate code points would make fromCodePoint throw and kill
+      // the whole card — a hostile page must not be able to do that; keep it literal.
+      if (!Number.isFinite(cp) || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return all;
+      return String.fromCodePoint(cp);
+    }
     return ENTITY_MAP[e] ?? all;
   });
 }
@@ -101,10 +106,14 @@ function metaContent(html: string, keys: string[]): string | null {
   // <meta property="og:title" content="..."> in either attribute order.
   for (const key of keys) {
     const k = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re1 = new RegExp(`<meta[^>]*?(?:property|name)\\s*=\\s*["']${k}["'][^>]*?content\\s*=\\s*["']([^"']*)["']`, "i");
-    const re2 = new RegExp(`<meta[^>]*?content\\s*=\\s*["']([^"']*)["'][^>]*?(?:property|name)\\s*=\\s*["']${k}["']`, "i");
+    // Quotes must match (`"..."` or `'...'`), otherwise `content="Don't miss"` truncates at
+    // the apostrophe. The attribute name is anchored on whitespace so `data-name=` cannot match.
+    const attr = `\\s(?:property|name)\\s*=\\s*["']${k}["']`;
+    const content = `\\scontent\\s*=\\s*(?:"([^"]*)"|'([^']*)')`;
+    const re1 = new RegExp(`<meta[^>]*?${attr}[^>]*?${content}`, "i");
+    const re2 = new RegExp(`<meta[^>]*?${content}[^>]*?${attr}`, "i");
     const m = re1.exec(html) ?? re2.exec(html);
-    const v = m?.[1]?.trim();
+    const v = (m?.[1] ?? m?.[2])?.trim();
     if (v) return decodeEntities(v);
   }
   return null;
@@ -128,8 +137,10 @@ export function parseOgp(html: string, baseUrl: string): UnfurlPreview | null {
   let imageUrl: string | null = null;
   if (rawImage) {
     try {
-      const abs = new URL(rawImage, baseUrl);
-      if (abs.protocol === "https:" || abs.protocol === "http:") imageUrl = abs.toString();
+      // Every viewer's browser will load this: apply the same public-host guard as the
+      // page itself (no intranet <img> pings) and require https (mixed content otherwise).
+      const abs = validateUnfurlUrl(new URL(rawImage, baseUrl).toString());
+      if (abs && abs.protocol === "https:") imageUrl = abs.toString();
     } catch {
       imageUrl = null;
     }
