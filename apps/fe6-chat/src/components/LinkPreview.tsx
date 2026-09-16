@@ -8,12 +8,17 @@ import { useEffect, useState } from "react";
 import type { UnfurlPreview } from "../api/contract";
 import { useOptionalChatRuntime } from "../context";
 import { extractPreviewUrls } from "../lib/render-body";
+import { safeHref } from "./MessageBody";
 import styles from "../styles/chat.module.css";
 
 // Liveness marker: verify-live asserts this literal is in the served bundle.
 export const LINK_PREVIEW_MARKER = "chat-url-ogp-unfurl-v1";
 
 const cache = new Map<string, Promise<UnfurlPreview | null>>();
+
+// Thumbnails: https only (mixed content / intranet pings otherwise) plus inline
+// data:image/* (inert inside <img>; used by the backend-free demo table).
+const SAFE_IMG_RE = /^(?:https:\/\/|data:image\/)/i;
 
 /** Test/HMR hook: forget memoized previews. */
 export function resetLinkPreviewCache(): void {
@@ -54,7 +59,26 @@ function usePreviews(urls: string[]): UnfurlPreview[] {
 function PreviewImage({ src }: { src: string }): JSX.Element | null {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  return <img className={styles.linkPreviewImage} src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
+  return (
+    <img
+      className={styles.linkPreviewImage}
+      src={src}
+      alt=""
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/** Source line: og:site_name, else the hostname (provenance is the anti-phishing cue). */
+function siteOf(p: UnfurlPreview): string {
+  if (p.siteName) return p.siteName;
+  try {
+    return new URL(p.url).hostname.replace(/^www\./, "");
+  } catch {
+    return p.url;
+  }
 }
 
 export function LinkPreviews({ body }: { body: string }): JSX.Element | null {
@@ -67,18 +91,19 @@ export function LinkPreviews({ body }: { body: string }): JSX.Element | null {
         <a
           key={p.url}
           className={styles.linkPreview}
-          href={p.url}
+          // defense-in-depth: the server/mock guarantees http(s), re-check like MessageBody
+          href={safeHref(p.url) ?? undefined}
           target="_blank"
           rel="noopener noreferrer"
           data-testid="fe6-link-preview"
-          aria-label={`リンクプレビュー: ${p.title ?? p.url}`}
+          title="リンクプレビュー（新しいタブで開く）"
         >
           <span className={styles.linkPreviewText}>
-            {p.siteName && <span className={styles.linkPreviewSite}>{p.siteName}</span>}
+            <span className={styles.linkPreviewSite}>{siteOf(p)}</span>
             <span className={styles.linkPreviewTitle}>{p.title ?? p.url}</span>
             {p.description && <span className={styles.linkPreviewDesc}>{p.description}</span>}
           </span>
-          {p.imageUrl && <PreviewImage src={p.imageUrl} />}
+          {p.imageUrl && SAFE_IMG_RE.test(p.imageUrl) && <PreviewImage src={p.imageUrl} />}
         </a>
       ))}
     </div>
