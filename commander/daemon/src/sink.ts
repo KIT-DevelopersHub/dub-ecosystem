@@ -18,10 +18,15 @@ export const nullSink: RunSink = {
 };
 
 export class HttpRunSink implements RunSink {
-  constructor(
-    private baseUrl: string,
-    private token?: string,
-  ) {}
+  // NB: explicit fields (not TS "parameter properties"), so the daemon runs under
+  // `node --experimental-strip-types` — strip-only mode rejects parameter properties.
+  private baseUrl: string;
+  private token?: string;
+
+  constructor(baseUrl: string, token?: string) {
+    this.baseUrl = baseUrl;
+    this.token = token;
+  }
 
   private headers(): Record<string, string> {
     const h: Record<string, string> = { "content-type": "application/json" };
