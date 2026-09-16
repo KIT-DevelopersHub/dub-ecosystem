@@ -30,12 +30,24 @@
   max-width: 16rem;
 }
 .link {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--dub-space-1);
   color: var(--dub-color-text-secondary);
   text-decoration: none;
   border-radius: var(--dub-radius-sm);
+}
+/* P22: crumbs have no vertical padding (~17-20px tall); the first crumb is
+ * often icon-only (home). Expand the tappable area via ::after. */
+.link::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 a.link:hover,
 .linkButton:hover {

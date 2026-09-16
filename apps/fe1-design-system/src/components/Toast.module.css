@@ -90,4 +90,15 @@
   cursor: pointer;
   color: var(--dub-color-text-muted);
   padding: 0;
+  /* P22: icon-sized dismiss button — expand the tappable area via ::after. */
+  position: relative;
+}
+.close::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }

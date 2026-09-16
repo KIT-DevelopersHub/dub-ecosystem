@@ -113,6 +113,19 @@
    * squeezed into a sliver and the icon disappears. */
   flex-shrink: 0;
   line-height: 0;
+  /* P22: icon buttons (sm=32/md=36/lg=40px visual box) sit under the 44x44px
+   * minimum touch target. Expand the *tappable* area via an invisible ::after
+   * instead of padding, so the visual size (icon + existing padding) stays put. */
+  position: relative;
+}
+.button.iconButton::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 .label {
   line-height: var(--dub-font-line-height-tight);
