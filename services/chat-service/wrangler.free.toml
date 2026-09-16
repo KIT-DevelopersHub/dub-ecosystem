@@ -3,8 +3,10 @@
 # Queues: the chat.* fan-out + audit that used Queue producers (EVT_NOTIFICATION /
 # AUDIT_QUEUE) is now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB).
 # index.ts falls back to the outbox shim when the Queue bindings are absent, so no
-# event/audit record is dropped; a Cron drain forwards audit rows to audit-log and
-# defers domain events (durable/pending) until the notification consumer route lands.
+# event/audit record is dropped; the shared freeq-drain forwards audit rows to audit-log
+# and now DELIVERS domain events (evt.notification) to notification's
+# /internal/events-async route — so chat.message.created (incl. @mentions) becomes an
+# inbox notification on the free tier instead of sitting pending.
 #
 # The ChatRoom Durable Object (RT hub: WS fanout / presence / ws-ticket verify) is
 # PRESERVED here — SQLite-backed DOs run on the Workers FREE plan, so only the Queue
