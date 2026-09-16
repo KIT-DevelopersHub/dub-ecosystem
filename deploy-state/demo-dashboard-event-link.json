@@ -3,12 +3,12 @@
   "slug": "dashboard-event-link",
   "worker": "dub-demo-dashboard-event-link",
   "url": "https://dub-demo-dashboard-event-link.developershub-site.workers.dev",
-  "deployedSha": "676093d0",
+  "deployedSha": "0a9c183a",
   "branch": "feat/dashboard-event-link",
   "actor": "kota",
-  "markers": ["定例アジェンダ共有"],
-  "live": false,
-  "verifiedAt": "2026-09-15T17:00:38Z",
-  "updatedAt": "2026-09-15T17:00:38Z",
+  "markers": ["を選択してイベントアプリを開く"],
+  "live": true,
+  "verifiedAt": "2026-09-16T10:50:01Z",
+  "updatedAt": "2026-09-16T10:50:01Z",
   "note": ""
 }
