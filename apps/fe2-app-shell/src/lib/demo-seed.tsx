@@ -25,7 +25,7 @@ import type { auditLog, event, gantt, gateway, identity, mail, notification, tas
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { mockUnfurl } from "@dub/fe6-chat/src/lib/unfurl-mock";
+import { mockUnfurl } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -1200,7 +1200,7 @@ function createChatStore() {
       const created = msg({
         id: `msg_01ZDEMO${String(++postSeq).padStart(4, "0")}${Date.now().toString(36).toUpperCase()}`,
         channelId: req.channelId,
-        authorId: ME_ID,
+        authorId: currentAccount().id, // /me is account-scoped (account switcher)
         body: req.body,
         threadRootId: req.threadRootId ?? null,
         createdAt: new Date().toISOString(),
