@@ -44,6 +44,8 @@ export type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  UnfurlPreview,
+  UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
