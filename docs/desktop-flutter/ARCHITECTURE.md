@@ -1,112 +1,92 @@
-# DAV Desktop (Flutter) — architecture memo
+# Dub Desktop (Flutter) — architecture memo
 
-Minimal design note for the desktop client (`apps/de1-desktop`). The formal
-decision is ADR-0006. This is the "how it's built + where it's going" companion.
+Design note for the desktop client (`apps/de1-desktop`). The formal decisions are
+ADR-0006 (framework = Flutter) and **ADR-0007 (the app is a WebView 完コピ of the web app,
+grown native incrementally)**. This is the "how it's built + where it's going" companion.
 
 ## Goal
 
-A **macOS + Windows** desktop app that is **feature-equal to the web app**
-("機能差ゼロ"). Primary motivation: everyday chat + OS notifications. Desktop is
-"web-like" — same shared gateway contract, the only intended structural
-difference is an optional local DB (deferred).
+A **macOS + Windows** desktop app that is a **perfect copy (完コピ)** of the web app —
+identical down to button positions — because it renders the real Web SPA, not a
+re-implementation. It must stay in lockstep with the web app automatically, and it must
+leave room to replace individual screens with native Flutter widgets later.
 
-## Non-negotiables
-
-- **One contract, reused.** All traffic goes through `api-gateway` (`/api/v1`),
-  the single source of truth documented in `docs/openapi/*.yaml` and typed in
-  `@dub/types`. The desktop app never invents its own endpoints or duplicates the
-  contract by hand long-term (see "Contract reuse" below).
-- **Additive to the monorepo.** `apps/de1-desktop` has no `package.json`, so pnpm
-  and turbo ignore it — the web/service build and CI are untouched. A separate
-  Dart CI job runs `flutter analyze` + `flutter test`.
-- **No paid dependencies, local-first.** All Dart deps are pure-Dart (no native
-  plugins), so macOS/Windows builds need no extra CocoaPods.
-
-## Layers (as built for the vertical slice)
+## The shape (today)
 
 ```
 lib/
-  config.dart            GATEWAY_BASE_URL + dev auto-login defines
-  api/
-    models.dart          Dart mirrors of the wire contract (MeResponse, InboxItem, ...)
-    gateway_client.dart  dio + persistent cookie jar over /api/v1
-  state/
-    auth.dart            Riverpod: gatewayClientProvider + AuthController (phases)
-    notifications.dart   Riverpod: inboxProvider (FutureProvider)
-  ui/
-    theme.dart           Material3 seed (approximates @dub/tokens)
-    login_screen.dart    email + password
-    app_shell.dart       top bar + 9-dot app launcher (web-parity nav)
-    inbox_view.dart      the vertical-slice feature (notification inbox)
-tool/mock_gateway.dart   contract-faithful local stand-in for the gateway
-integration_test/        live-HTTP end-to-end slice + screenshot capture
+  config.dart            WEB_BASE_URL (the Web SPA origin to render)
+  feature_registry.dart  the single seam for progressive native-ization
+  main.dart              MaterialApp('Dub') -> one full-window InAppWebView
+macos/  windows/         native shells (window titled "Dub")
 ```
 
-- **State management: Riverpod.** `gatewayClientProvider` (async singleton),
-  `authControllerProvider` (StateNotifier with `unknown/unauthenticated/
-  authenticating/authenticated`), `inboxProvider` (FutureProvider).
-- **HTTP: dio + cookie_jar.** `PersistCookieJar` captures `Set-Cookie:
-  dub_session` on login and replays it on every call — browser-identical auth
-  (ADR-0004). Non-2xx bodies are decoded into `DubApiException` from the
-  `@dub/errors` envelope. Bearer tokens remain a fallback if ever needed.
-- **Auth flow:** on launch, probe `/api/v1/me` (persisted cookie → straight to
-  the shell; 401 → login). Login → `POST /api/v1/auth/password/login` → `/me` →
-  shell. Logout revokes + clears the jar.
-- **Shell:** a Chrome-style **9-dot app launcher** (matches the web launcher —
-  memory: dub-shell-app-launcher-nav) listing Notifications, Chat, Tasks, Gantt,
-  Mail, Events, Roster, Drive. Only the implemented app is enabled; the rest are
-  greyed with a lock (matches the web release-gating pattern).
+- **The whole window is one WebView** (`flutter_inappwebview`) pointed at
+  `AppConfig.webBaseUrl`. macOS renders it with WKWebView, Windows with WebView2 — the OS's
+  own browser engine, so there is no bundled Chromium and no second render path.
+- **No bespoke Flutter UI (yet).** Login, the 9-dot launcher, and every feature screen are
+  the exact web bundle the browser serves. Button positions, states, everything match
+  because it *is* the web app. Web deploys need no desktop release.
+- **Auth is browser-identical.** The `dub_session` cookie lives in the WebView's cookie
+  store exactly as in a browser; login is the web login form. The shell handles no
+  credentials (ADR-0004 preserved for free).
 
-## Contract reuse (the "機能差ゼロ" mechanism)
+## Connection
 
-The models in `api/models.dart` are hand-written **only for the slice**. The
-durable plan, in priority order:
+- Default `WEB_BASE_URL` = `https://dub-fe2-app-shell.developershub-site.workers.dev`
+  (the production fe2 worker — a real, reachable origin).
+- Override for demo or local dev:
+  `flutter run -d macos --dart-define=WEB_BASE_URL=https://<origin-or-localhost:5173>`.
+- `api.developershub.jp` is **not** DNS-configured and is never a default.
 
-1. **Generate Dart models from `docs/openapi/*.yaml`** (e.g.
-   `openapi-generator` `dart-dio` or `swagger_parser`) into `lib/api/generated/`,
-   so front/back share exactly one contract. Wire it as a codegen step, not
-   committed-by-hand types.
-2. **Add a contract-parity guard** mirroring `apps/mo1-ios/src` — a small TS
-   layer that imports `@dub/types` and asserts the Dart JSON shapes match, failing
-   CI on drift. This is how the native mobile apps lock their contract today.
+## 漸進的ネイティブ化 (progressive native-ization) — the whole point of keeping Flutter
 
-Until (1) lands, keep hand-written models minimal and reviewed against the specs.
+The desktop app starts as pure WebView 完コピ, but is built so screens can move off the web
+onto native Flutter widgets **one feature at a time**, with the web page always the default
+and fallback. The entire switch lives in one file: `lib/feature_registry.dart`.
+
+```
+enum DubFeature { notifications, chat, tasks, gantt, mail, events, roster, drive, settings }
+FeatureRegistry.registerNative(DubFeature.tasks, (ctx) => TasksView());  // port one screen
+FeatureRegistry.hasNative(feature)   // is this feature native yet?
+FeatureRegistry.entryUrl()           // where the WebView opens (web app root, today)
+```
+
+Porting procedure, per screen:
+
+1. Implement the screen as a Flutter widget (using the shared gateway contract).
+2. Register it: `FeatureRegistry.registerNative(DubFeature.<x>, (ctx) => <Widget>());`.
+3. The shell renders that widget instead of the WebView for that feature (by intercepting
+   web navigation to `feature.webPath` and swapping in the native builder). Every
+   feature **not** registered keeps rendering the web page untouched.
+
+Because unported features always fall back to the web page, parity can never regress for
+screens that have not been converted. Nothing outside `feature_registry.dart` needs to know
+which features are native — that map is the whole seam.
+
+Recommended porting order matches the web usage / ADR-0006 follow-ups: chat first (the main
+everyday driver, incl. Durable-Object realtime), then notifications (native OS push), then
+the rest.
 
 ## Platform / build
 
-- **macOS:** App Sandbox is on; the client needs
-  `com.apple.security.network.client` in **both** `DebugProfile.entitlements` and
-  `Release.entitlements` (added — the default template omits it, which silently
-  blocks all outbound HTTP). Build: `flutter build macos`.
-- **Windows:** `flutter build windows` (no sandbox entitlement needed). Not
-  verified on hardware here; CI should add a `windows-latest` build job. No
-  native plugins → no per-OS plugin setup.
-- **CI:** add a Flutter job (`flutter analyze`, `flutter test`, `flutter build
-  macos --debug`, `flutter build windows`). Keep it separate from the pnpm/turbo
-  pipeline.
+- **macOS:** App Sandbox on; `com.apple.security.network.client` is set in **both**
+  `DebugProfile.entitlements` and `Release.entitlements` (needed for the WebView's outbound
+  HTTPS). Min deployment target is **10.15** (raised from the Flutter template's 10.14) —
+  `flutter_inappwebview`'s WebAuthenticationSession conforms unconditionally to a protocol
+  whose method is `@available(macOS 10.15)`, which a 10.14 target rejects under the current
+  Xcode. Set in `macos/Podfile` (`platform :osx, '10.15'` + a `post_install` override) and
+  in `macos/Runner.xcodeproj` (`MACOSX_DEPLOYMENT_TARGET = 10.15`). Build: `flutter build
+  macos`. Run: `flutter run -d macos`.
+- **Windows:** `flutter build windows` (WebView2 runtime is present on modern Windows). Not
+  verified on hardware here; CI should add a `windows-latest` build job. Window titled "Dub"
+  in `windows/runner/main.cpp`.
+- **CI:** a Flutter job (`flutter analyze`, `flutter test`, `flutter build macos --debug`,
+  `flutter build windows`), separate from the pnpm/turbo pipeline. `apps/de1-desktop` has no
+  `package.json`, so pnpm/turbo ignore it and the web build/CI are untouched.
 
-## Vertical slice (done)
+## Verified
 
-Login → shell → **notification inbox**, over **real HTTP**. Proven by the
-integration test driving the real macOS app against `tool/mock_gateway.dart`
-(a contract-faithful stand-in used because the production gateway is not
-reachable and running the full Workers stack is out of scope for the scaffold).
-The mock log shows the real request sequence: `GET /me` (401) → `POST
-/auth/password/login` (Set-Cookie) → `GET /me` (authed) → `GET
-/notifications/inbox`. Screenshot: `~/DubVault/docs/dav-desktop-flutter/`.
-
-## Next steps (for feature parity)
-
-1. **Chat** (the main everyday-use driver): `GET /api/v1/chat/channels` +
-   messages; realtime is Durable-Object-direct (WebSocket) per ADR-0002 — the
-   gateway rejects WS upgrades, so chat realtime connects to the DO with a
-   `ws-ticket` from `/chat/channels/{id}/ws-ticket`.
-2. **Native push notifications** (the other motivation): local notifications
-   first; a device-registration + APNs/FCM-style transport later (possibly
-   reusing `mo3-mobile-bff`'s device registry). Needs a design step — not yet
-   decided.
-3. **OpenAPI→Dart codegen + parity test** (see "Contract reuse").
-4. **Real login UX** (domain hint, error states) and **window/state management**
-   (window_manager, tray icon, deep-link routing).
-5. **@dub/tokens** wiring so the desktop theme is the same source of truth as web.
-```
+`flutter analyze` clean, `flutter test` green, `flutter build macos --debug` succeeds, and
+the app launches showing the real web login page — pixel-identical to the browser (title bar
+reads "Dub"). Comparison screenshots: `~/DubVault/docs/dub-desktop-webclone/`.
