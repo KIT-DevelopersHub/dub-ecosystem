@@ -1,27 +1,24 @@
-/// Static app configuration.
+/// Static app configuration for the Dub desktop client.
 ///
-/// [gatewayBaseUrl] is the single external boundary (api-gateway). It defaults
-/// to the production origin but can be overridden at build/run time with
-/// `--dart-define=GATEWAY_BASE_URL=http://localhost:8787` (e.g. to point at a
-/// local wrangler dev gateway or the bundled mock in `tool/mock_gateway.dart`).
+/// Dub desktop is a **thin native shell around the real web app**: the window
+/// renders the production Web SPA (`fe2-app-shell`) verbatim, so the desktop UI
+/// is a pixel-for-pixel copy of the web UI and auto-follows every web deploy.
+///
+/// [webBaseUrl] is the single thing the shell needs to know — the origin of the
+/// Web SPA to load. It defaults to the production fe2 worker and can be
+/// overridden at build/run time with
+/// `--dart-define=WEB_BASE_URL=https://dub-fe2-app-shell.developershub-site.workers.dev`
+/// (e.g. to point at the demo environment or a local `vite dev` server).
 class AppConfig {
   const AppConfig._();
 
-  static const String gatewayBaseUrl = String.fromEnvironment(
-    'GATEWAY_BASE_URL',
-    defaultValue: 'https://api.developershub.jp',
+  /// Origin of the Web SPA the desktop window renders.
+  ///
+  /// Default = the production fe2-app-shell worker. NOT `api.developershub.jp`
+  /// (that custom domain is not DNS-configured); this is the real, reachable
+  /// workers.dev origin the browser build is served from.
+  static const String webBaseUrl = String.fromEnvironment(
+    'WEB_BASE_URL',
+    defaultValue: 'https://dub-fe2-app-shell.developershub-site.workers.dev',
   );
-
-  /// All public routes live under this prefix on the gateway.
-  static const String apiPrefix = '/api/v1';
-
-  // --- Dev-only affordances (never triggered in a release build unless the
-  // caller explicitly passes the dart-defines). Used by the vertical-slice
-  // screenshot harness to auto-drive the login screen. ---
-  static const bool autoLogin =
-      bool.fromEnvironment('AUTO_LOGIN', defaultValue: false);
-  static const String autoLoginEmail =
-      String.fromEnvironment('AUTO_LOGIN_EMAIL', defaultValue: '');
-  static const String autoLoginPassword =
-      String.fromEnvironment('AUTO_LOGIN_PASSWORD', defaultValue: '');
 }
