@@ -29,35 +29,29 @@ export type BodyBlock =
 
 // inline code + mention are tokenized first so their contents stay literal.
 const TOKEN_RE = /(`[^`\n]+`)|(<@[A-Za-z0-9_]+>)/g;
-// inline styles inside plain runs. Link first (so a URL isn't mis-split); then bold /
-// italic / underline (++) / strike. Non-nested, single level — matches the toolbar.
+// inline styles inside plain runs. Markdown link first, then a BARE URL (Slack parity:
+// https?:// up to whitespace / < > " ' ` / full-width brackets & punctuation that follow a
+// pasted link in Japanese text) — the URL alternative sits BEFORE bold/italic/strike so
+// "_" / "~" / "*" inside a URL (wikipedia Foo_bar) can never split it; leftmost match
+// wins, so "*see https://x*" is still bold and "[d](https://x_y)" still a markdown link.
+// Non-nested, single level — matches the toolbar.
 const INLINE_RE =
-  /(\[[^\]\n]+\]\((?:https?:\/\/|\/)[^)\s]+\))|(\*[^*\n]+\*)|(_[^_\n]+_)|(\+\+[^+\n]+\+\+)|(~[^~\n]+~)/g;
-
-// Bare URL autolink (Slack parity): https?://... up to whitespace / < > " ' ` and
-// full-width brackets/punctuation that commonly follow a pasted link in Japanese text.
-const BARE_URL_RE = /https?:\/\/[^\s<>"'`）」』】〕｝〉》、。，]+/g;
+  /(\[[^\]\n]+\]\((?:https?:\/\/|\/)[^)\s]+\))|(https?:\/\/[^\s<>"'`（）「」『』【】〔〕｛｝〈〉《》、。，！？：；…]+)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\+\+[^+\n]+\+\+)|(~[^~\n]+~)/g;
 // Trailing ASCII punctuation that is almost always sentence punctuation, not the URL.
 const URL_TRAIL_RE = /[.,;:!?)\]}]+$/;
 
-/** Split a plain-text run into text + autolinked bare-URL segments. */
-function autolink(text: string): BodySegment[] {
-  const out: BodySegment[] = [];
-  let last = 0;
-  for (const m of text.matchAll(BARE_URL_RE)) {
-    const idx = m.index ?? 0;
-    // Trailing punctuation is prose, not URL — except a ")" that balances an open
-    // "(" inside the URL (wiki-style paths): "(see https://x/y_(z))." -> ".../y_(z)".
-    let url = m[0].replace(URL_TRAIL_RE, "");
+/**
+ * Trim sentence punctuation off a matched bare URL — except ")" that balance an open
+ * "(" inside the URL (wiki-style paths): "(see https://x/y_(z))." -> ".../y_(z)".
+ */
+function trimBareUrl(match: string): string {
+  let url = match.replace(URL_TRAIL_RE, "");
+  for (;;) {
     const opens = (url.match(/\(/g) ?? []).length;
     const closes = (url.match(/\)/g) ?? []).length;
-    if (opens > closes && m[0][url.length] === ")") url += ")";
-    if (idx > last) out.push({ type: "text", value: text.slice(last, idx) });
-    out.push({ type: "link", href: url, label: url });
-    last = idx + url.length;
+    if (opens > closes && match[url.length] === ")") url += ")";
+    else return url;
   }
-  if (last < text.length) out.push({ type: "text", value: text.slice(last) });
-  return out;
 }
 
 /** Split a plain-text run into text + inline-style segments (no code/mention here). */
@@ -66,11 +60,14 @@ function inlineStyles(text: string): BodySegment[] {
   let last = 0;
   for (const m of text.matchAll(INLINE_RE)) {
     const idx = m.index ?? 0;
-    if (idx > last) out.push(...autolink(text.slice(last, idx)));
-    const token = m[0];
+    if (idx > last) out.push({ type: "text", value: text.slice(last, idx) });
+    let token = m[0];
     if (token.startsWith("[")) {
       const close = token.indexOf("](");
       out.push({ type: "link", label: token.slice(1, close), href: token.slice(close + 2, -1) });
+    } else if (token.startsWith("http")) {
+      token = trimBareUrl(token); // trimmed punctuation flows back into the text run
+      out.push({ type: "link", href: token, label: token });
     } else if (token.startsWith("++")) {
       out.push({ type: "underline", value: token.slice(2, -2) });
     } else if (token.startsWith("*")) {
@@ -82,7 +79,7 @@ function inlineStyles(text: string): BodySegment[] {
     }
     last = idx + token.length;
   }
-  if (last < text.length) out.push(...autolink(text.slice(last)));
+  if (last < text.length) out.push({ type: "text", value: text.slice(last) });
   return out;
 }
 

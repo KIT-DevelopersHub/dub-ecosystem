@@ -108,6 +108,35 @@ describe("bare URL autolink", () => {
       { type: "link", href: "https://ex.com", label: "https://ex.com" },
     ]);
   });
+
+  it("never splits a URL on _ ~ * inside it (wikipedia-style paths)", () => {
+    const wiki = "https://en.wikipedia.org/wiki/Foo_bar_baz";
+    expect(inlineSegments(`see ${wiki} now`)).toEqual([
+      { type: "text", value: "see " },
+      { type: "link", href: wiki, label: wiki },
+      { type: "text", value: " now" },
+    ]);
+    expect(inlineSegments("https://ex.com/a~b~c http://ex.com/x*y*z")).toEqual([
+      { type: "link", href: "https://ex.com/a~b~c", label: "https://ex.com/a~b~c" },
+      { type: "text", value: " " },
+      { type: "link", href: "http://ex.com/x*y*z", label: "http://ex.com/x*y*z" },
+    ]);
+    // styling still wins when it starts first (documented non-nesting)
+    expect(inlineSegments("*see https://x.dev*")).toEqual([{ type: "bold", value: "see https://x.dev" }]);
+  });
+
+  it("stops at full-width punctuation and handles nested parens", () => {
+    expect(inlineSegments("https://ex.com/a！https://ex.com/b（注）")).toEqual([
+      { type: "link", href: "https://ex.com/a", label: "https://ex.com/a" },
+      { type: "text", value: "！" },
+      { type: "link", href: "https://ex.com/b", label: "https://ex.com/b" },
+      { type: "text", value: "（注）" },
+    ]);
+    expect(inlineSegments("https://x/A_((b)).")).toEqual([
+      { type: "link", href: "https://x/A_((b))", label: "https://x/A_((b))" },
+      { type: "text", value: "." },
+    ]);
+  });
 });
 
 describe("extractPreviewUrls", () => {
@@ -116,5 +145,6 @@ describe("extractPreviewUrls", () => {
     expect(extractPreviewUrls(body)).toEqual(["https://one.dev", "https://two.dev"]);
     expect(extractPreviewUrls(body, 3)).toEqual(["https://one.dev", "https://two.dev", "https://four.dev"]);
     expect(extractPreviewUrls("[rel](/local) `https://c.dev`")).toEqual([]);
+    expect(extractPreviewUrls("> quoted https://q.dev\nhttp://plain.dev")).toEqual(["https://q.dev", "http://plain.dev"]);
   });
 });
