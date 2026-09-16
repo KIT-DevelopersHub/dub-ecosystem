@@ -35,6 +35,16 @@ export interface TaskDueSoonPayload extends TaskEventContext { dueAt: ISODateTim
 export interface TaskArchivedPayload extends TaskEventContext {}
 export interface TaskDependencyChangedPayload extends TaskEventContext { added: TaskId[]; removed: TaskId[] }
 
+// ---- send / receive: cross-team task requests + cross-links ----
+// The "送る・受け取る" feature (design: docs/design/send-receive-task-requests.md,
+// ADR-0007). All additive; frozen event names + payloads unchanged. eventId stays
+// optional (a request/link may be unlinked to any event), same as TaskEventContext.
+export interface TaskRequestCreatedPayload { requestId: string; fromUserId: UserId; toUserId: UserId; eventId?: EventId }
+export interface TaskRequestAcceptedPayload { requestId: string; createdTaskId: TaskId; sourceTaskId?: TaskId; eventId?: EventId }
+export interface TaskRequestDeclinedPayload { requestId: string; eventId?: EventId }
+export interface TaskRequestCancelledPayload { requestId: string; eventId?: EventId }
+export interface TaskCrossLinkCreatedPayload { crossLinkId: string; requesterTaskId: TaskId; requesteeTaskId: TaskId; eventId?: EventId }
+
 // ---- cross-cutting requested / inquiry ----
 export interface NotificationRequestedPayload {
   type: notification.NotificationType;
