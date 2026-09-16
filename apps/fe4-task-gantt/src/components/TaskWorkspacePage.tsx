@@ -50,6 +50,10 @@ export interface TaskWorkspacePageProps {
   eventId: common.EventId;
   /** effectivePermissions from GET /api/v1/me (null = still loading -> deny). */
   permissions: readonly identity.PermissionKey[] | null;
+  /** Deep-link target from `/events/:eventId/tasks/:taskId` (parseTaskIdFromPath in
+   *  taskRoutes.tsx). Auto-opens that task's detail panel once it appears in the
+   *  loaded list; applied at most once per mount (a later manual selection wins). */
+  initialSelectedTaskId?: common.TaskId | null;
 }
 
 // Solid fill colours for the sort-group brackets (@dub/tokens hex). Priorities map to
@@ -70,7 +74,7 @@ const FIELD_LABEL: Record<string, string> = {
   startsAt: DATE_LABEL.start,
   endsAt: DATE_LABEL.end,
   status: "ステータス",
-  priority: "優先度",
+  priority: "重要度",
   assigneeId: "担当",
   teamId: "チーム",
   parentTaskId: "親タスク",
@@ -84,7 +88,7 @@ const FIELD_LABEL: Record<string, string> = {
  * edit/delete) wired through the optimistic store. The former list/board view
  * switch was removed — the gantt is the one canvas.
  */
-export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePageProps) {
+export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId = null }: TaskWorkspacePageProps) {
   const client = useApiClient();
   const toast = useToast();
   const feedback = useWriteFeedback();
@@ -219,6 +223,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   }, [query]);
 
   const tasks = store.list();
+
+  // Deep-link open (⌘K search etc.): once the URL's :taskId appears in the loaded
+  // list, select it so the detail panel opens automatically. Applies at most once —
+  // a subsequent manual selection (or clearing it) is never overridden back.
+  const appliedInitialSelect = useRef(false);
+  useEffect(() => {
+    if (appliedInitialSelect.current || !initialSelectedTaskId) return;
+    if (tasks.some((t) => t.id === initialSelectedTaskId)) {
+      appliedInitialSelect.current = true;
+      setSelected(initialSelectedTaskId);
+    }
+  }, [tasks, initialSelectedTaskId]);
 
   // batch-resolve assignee display names (N+1 avoided — one request per new set)
   useEffect(() => {
@@ -635,7 +651,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return true;
   };
 
-  // Re-issue a field-only patch (title/status/優先度/担当/チーム/開始日/期日) as a plain
+  // Re-issue a field-only patch (title/status/重要度/担当/チーム/開始日/期日) as a plain
   // "set" — the reversible primitive an undo/redo command re-runs. It reads a FRESH
   // version (getTask) first, so a DEFERRED undo/redo (run long after the edit, once the
   // task's version has moved on) can never 409 on a stale panel-cached version — the
@@ -841,7 +857,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit): Promise<boolean> => {
     if (!selectedTask) return Promise.resolve(false);
     const needsRelations = relations.parentChanged || relations.depsChanged;
-    // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
+    // Field-only edit (title/status/重要度/担当/チーム/開始日/期日): keep the optimistic
     // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
     // field from the current task so Ctrl/⌘-Z restores exactly those fields.
     const { parentTaskId: _p, ...fieldOnlyPatch } = patch;

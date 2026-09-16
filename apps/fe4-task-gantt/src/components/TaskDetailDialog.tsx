@@ -167,7 +167,7 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
               </dd>
             </div>
             <div className={styles.detailRow}>
-              <dt className={styles.detailLabel}>優先度</dt>
+              <dt className={styles.detailLabel}>重要度</dt>
               <dd className={styles.detailValue}>
                 <Badge tone={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</Badge>
               </dd>

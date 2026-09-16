@@ -33,12 +33,21 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
+    id: "v2.0",
+    name: "v2.0 リニューアル版",
+    description:
+      "Next.js で作り直した磨き上げ版。Inter+Zen Kaku のタイポグラフィ、オリジナルのブランドグラデーション SVG、WCAG AA 準拠。本番ドメイン hokuriku-it-conf.com に反映済みの現行 LP。",
+    url: "https://hokuriku-it-conf.com",
+    updatedAt: "2026-09-16",
+    status: "current",
+  },
+  {
     id: "v1.0",
     name: "v1.0 テキスト版",
-    description: "北陸ITカンファレンスの現行 LP。テキスト中心の初版。",
-    url: "https://hokuriku-it-conf.com",
+    description: "北陸ITカンファレンスの初版 LP（テキスト中心）。v2.0 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-v1.developershub-site.workers.dev",
     updatedAt: "2026-09-07",
-    status: "current",
+    status: "archived",
   },
 ];
 

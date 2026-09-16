@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "cmdk-global-search",
+  "worker": "dub-demo-cmdk-global-search",
+  "url": "https://dub-demo-cmdk-global-search.developershub-site.workers.dev",
+  "deployedSha": "ca420be2",
+  "branch": "feat/global-command-palette",
+  "actor": "kota",
+  "markers": ["アプリ・タスク・イベントを検索","件見つかりました","fe2-cmdk-overlay"],
+  "live": true,
+  "verifiedAt": "2026-09-10T14:08:41Z",
+  "updatedAt": "2026-09-10T14:08:41Z",
+  "note": "①⌘Kグローバル検索(task/event横断)"
+}

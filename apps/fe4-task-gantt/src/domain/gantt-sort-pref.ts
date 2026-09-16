@@ -4,7 +4,7 @@
 // persists server-side in the gantt view state (orderedTaskIds); this only remembers
 // HOW the user wants the list ordered:
 //   - 手動（ドラッグ）              : manual = true (the drag overlay is applied)
-//   - 多段ソート（複数キー・優先度順）: manual = false + an ordered list of keys, each
+//   - 多段ソート（複数キー・重要度順）: manual = false + an ordered list of keys, each
 //     with its own asc/desc direction. keys[0] is primary, keys[1] breaks its ties, …
 //
 // A single-key list ({keys:[{key,dir:"asc"}]}) reproduces the old single-dropdown
