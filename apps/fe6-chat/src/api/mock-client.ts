@@ -343,6 +343,11 @@ export class MockChatClient implements ChatApiClient {
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {
-    return this.settle(mockUnfurl(url));
+    // Parity with HttpChatClient: best-effort, never rejects (a primed nextError -> no card).
+    try {
+      return await this.settle(mockUnfurl(url));
+    } catch {
+      return null;
+    }
   }
 }

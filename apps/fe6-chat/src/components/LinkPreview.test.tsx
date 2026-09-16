@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { ChatRuntimeProvider, type ChatRuntime } from "../context";
 import { MockChatClient } from "../api/mock-client";
 import { LinkPreviews, resetLinkPreviewCache, LINK_PREVIEW_MARKER } from "./LinkPreview";
@@ -35,14 +35,49 @@ describe("LinkPreviews", () => {
   });
 
   it("renders nothing for unknown hosts (no OGP) and without a runtime", async () => {
+    const rt = runtime();
+    const spy = vi.spyOn(rt.api, "unfurl");
     const { rerender } = render(
-      <ChatRuntimeProvider value={runtime()}>
+      <ChatRuntimeProvider value={rt}>
         <LinkPreviews body="https://no-ogp.invalid/x" />
       </ChatRuntimeProvider>,
     );
-    await waitFor(() => expect(screen.queryByTestId("fe6-link-previews")).toBeNull());
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("https://no-ogp.invalid/x"));
+    await expect(spy.mock.results[0]!.value).resolves.toBeNull(); // positive control: asked, got null
+    expect(screen.queryByTestId("fe6-link-previews")).toBeNull();
     rerender(<LinkPreviews body="https://github.com/x" />);
     await waitFor(() => expect(screen.queryByTestId("fe6-link-previews")).toBeNull());
+    expect(spy).toHaveBeenCalledTimes(1); // no runtime -> no fetch
+  });
+
+  it("memoizes per URL for the session: a second mount does not refetch", async () => {
+    const rt = runtime();
+    const spy = vi.spyOn(rt.api, "unfurl");
+    const ui = (
+      <ChatRuntimeProvider value={rt}>
+        <LinkPreviews body="https://zenn.dev/a https://zenn.dev/a" />
+      </ChatRuntimeProvider>
+    );
+    const first = render(ui);
+    expect(await screen.findAllByTestId("fe6-link-preview")).toHaveLength(1); // same URL twice -> one card
+    first.unmount();
+    render(ui);
+    expect(await screen.findAllByTestId("fe6-link-preview")).toHaveLength(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the thumbnail when the image fails to load", async () => {
+    render(
+      <ChatRuntimeProvider value={runtime()}>
+        <LinkPreviews body="https://github.com/x" />
+      </ChatRuntimeProvider>,
+    );
+    const card = await screen.findByTestId("fe6-link-preview");
+    const img = card.querySelector("img")!;
+    expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
+    fireEvent.error(img);
+    await waitFor(() => expect(card.querySelector("img")).toBeNull());
+    expect(card).toHaveTextContent("GitHub");
   });
 
   it("caps at two cards", async () => {

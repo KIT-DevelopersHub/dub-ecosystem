@@ -4,7 +4,7 @@
 // blocked URL, or a page without OGP simply renders NO card — the body's inline
 // link stays. Results are memoized per URL for the session (module cache) so a
 // re-render / re-mount of the timeline never refetches.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { UnfurlPreview } from "../api/contract";
 import { useOptionalChatRuntime } from "../context";
 import { extractPreviewUrls } from "../lib/render-body";
@@ -25,31 +25,36 @@ export function resetLinkPreviewCache(): void {
   cache.clear();
 }
 
+const NONE: UnfurlPreview[] = [];
+
 function usePreviews(urls: string[]): UnfurlPreview[] {
   const runtime = useOptionalChatRuntime();
-  const key = urls.join("\n");
-  const [previews, setPreviews] = useState<UnfurlPreview[]>([]);
+  // URLs cannot contain whitespace, so the join is a lossless key (derived back below).
+  const key = urls.join(" ");
+  const [previews, setPreviews] = useState<UnfurlPreview[]>(NONE);
   useEffect(() => {
-    if (!runtime || urls.length === 0) {
-      setPreviews([]);
-      return;
-    }
+    setPreviews(NONE); // a card for a URL that was just edited out must not linger
+    if (!runtime || key === "") return;
     let alive = true;
-    const jobs = urls.map((u) => {
+    const jobs = key.split(" ").map((u) => {
       let p = cache.get(u);
       if (!p) {
-        p = runtime.api.unfurl(u).catch(() => null);
+        // A rejected fetch (offline blip) is not memoized, so the next mount retries.
+        p = runtime.api.unfurl(u).catch(() => {
+          cache.delete(u);
+          return null;
+        });
         cache.set(u, p);
       }
       return p;
     });
     void Promise.all(jobs).then((res) => {
-      if (alive) setPreviews(res.filter((p): p is UnfurlPreview => p !== null));
+      const found = res.filter((p): p is UnfurlPreview => p !== null);
+      if (alive && found.length > 0) setPreviews(found);
     });
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtime, key]);
   return previews;
 }
@@ -82,7 +87,7 @@ function siteOf(p: UnfurlPreview): string {
 }
 
 export function LinkPreviews({ body }: { body: string }): JSX.Element | null {
-  const urls = extractPreviewUrls(body, 2);
+  const urls = useMemo(() => extractPreviewUrls(body, 2), [body]);
   const previews = usePreviews(urls);
   if (previews.length === 0) return null;
   return (
