@@ -34,13 +34,39 @@ const TOKEN_RE = /(`[^`\n]+`)|(<@[A-Za-z0-9_]+>)/g;
 const INLINE_RE =
   /(\[[^\]\n]+\]\((?:https?:\/\/|\/)[^)\s]+\))|(\*[^*\n]+\*)|(_[^_\n]+_)|(\+\+[^+\n]+\+\+)|(~[^~\n]+~)/g;
 
+// Bare URL autolink (Slack parity): https?://... up to whitespace / < > " ' ` and
+// full-width brackets/punctuation that commonly follow a pasted link in Japanese text.
+const BARE_URL_RE = /https?:\/\/[^\s<>"'`）」』】〕｝〉》、。，]+/g;
+// Trailing ASCII punctuation that is almost always sentence punctuation, not the URL.
+const URL_TRAIL_RE = /[.,;:!?)\]}]+$/;
+
+/** Split a plain-text run into text + autolinked bare-URL segments. */
+function autolink(text: string): BodySegment[] {
+  const out: BodySegment[] = [];
+  let last = 0;
+  for (const m of text.matchAll(BARE_URL_RE)) {
+    const idx = m.index ?? 0;
+    // Trailing punctuation is prose, not URL — except a ")" that balances an open
+    // "(" inside the URL (wiki-style paths): "(see https://x/y_(z))." -> ".../y_(z)".
+    let url = m[0].replace(URL_TRAIL_RE, "");
+    const opens = (url.match(/\(/g) ?? []).length;
+    const closes = (url.match(/\)/g) ?? []).length;
+    if (opens > closes && m[0][url.length] === ")") url += ")";
+    if (idx > last) out.push({ type: "text", value: text.slice(last, idx) });
+    out.push({ type: "link", href: url, label: url });
+    last = idx + url.length;
+  }
+  if (last < text.length) out.push({ type: "text", value: text.slice(last) });
+  return out;
+}
+
 /** Split a plain-text run into text + inline-style segments (no code/mention here). */
 function inlineStyles(text: string): BodySegment[] {
   const out: BodySegment[] = [];
   let last = 0;
   for (const m of text.matchAll(INLINE_RE)) {
     const idx = m.index ?? 0;
-    if (idx > last) out.push({ type: "text", value: text.slice(last, idx) });
+    if (idx > last) out.push(...autolink(text.slice(last, idx)));
     const token = m[0];
     if (token.startsWith("[")) {
       const close = token.indexOf("](");
@@ -56,7 +82,30 @@ function inlineStyles(text: string): BodySegment[] {
     }
     last = idx + token.length;
   }
-  if (last < text.length) out.push({ type: "text", value: text.slice(last) });
+  if (last < text.length) out.push(...autolink(text.slice(last)));
+  return out;
+}
+
+/**
+ * URLs eligible for a link-preview card, in body order, de-duplicated, capped at
+ * `max`. Skips code blocks / inline code (literal) and only counts http(s) links —
+ * both bare URLs and [label](url). Pure; the card component decides rendering.
+ */
+export function extractPreviewUrls(body: string, max = 2): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const block of parseBlocks(body)) {
+    if (block.type === "codeblock") continue;
+    const lines = block.type === "paragraph" || block.type === "blockquote" ? block.lines : block.items;
+    for (const segs of lines) {
+      for (const seg of segs) {
+        if (seg.type !== "link" || !/^https?:\/\//i.test(seg.href) || seen.has(seg.href)) continue;
+        seen.add(seg.href);
+        out.push(seg.href);
+        if (out.length >= max) return out;
+      }
+    }
+  }
   return out;
 }
 

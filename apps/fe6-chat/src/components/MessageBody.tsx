@@ -66,7 +66,7 @@ function Inlines({
           case "link": {
             const href = safeHref(seg.href);
             return href ? (
-              <a key={i} className={styles.mdLink} href={href} target="_blank" rel="noreferrer">
+              <a key={i} className={styles.mdLink} href={href} target="_blank" rel="noopener noreferrer">
                 {seg.label}
               </a>
             ) : (
