@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p18-linelength",
+  "worker": "dub-demo-p18-linelength",
+  "url": "https://dub-demo-p18-linelength.developershub-site.workers.dev",
+  "deployedSha": "d451df3c",
+  "branch": "feat/p18-line-length",
+  "actor": "kota",
+  "markers": ["dub-measure-body","mailBodyHtml"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:46:31Z",
+  "updatedAt": "2026-09-13T16:46:31Z",
+  "note": "P18: 本文の行長最適化(chat/mail)"
+}

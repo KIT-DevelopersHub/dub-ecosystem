@@ -106,7 +106,10 @@ export function MessageTimeline(props: MessageTimelineProps) {
             <Avatar name={props.resolveUser?.(p.authorId)?.displayName ?? "…"} size="md" />
           </div>
           <div className={styles.msgBody}>
-            <div className={styles.textBody} data-testid="fe6-timeline-body">
+            {/* Raw (unparsed) body while sending/retrying — same measure as the
+                confirmed MessageBody render (P18) so the row doesn't reflow once
+                the message lands and swaps to the parsed markdown. */}
+            <div className={`${styles.textBody} ${styles.pendingBody}`} data-testid="fe6-timeline-body">
               {p.request.body}
             </div>
             {p.state === "failed" && (
