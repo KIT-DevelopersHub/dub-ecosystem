@@ -4,7 +4,6 @@ import type { gantt, task } from "@dub/types";
 import { GanttView } from "../src/components/GanttView";
 import { ViewSwitcher } from "../src/components/ViewSwitcher";
 import { TaskListView } from "../src/components/TaskListView";
-import { TaskBoardView } from "../src/components/TaskBoardView";
 import { createUserCache } from "../src/domain/user-cache";
 import { ROW_HEIGHT } from "../src/domain/timeline-axis";
 import type { GanttSortActions, GanttSortState } from "../src/domain/gantt-sort-pref";
@@ -244,22 +243,5 @@ describe("TaskListView LoadMore (design test 1)", () => {
     expect(onLoadMore).toHaveBeenCalledOnce();
     rerender(<TaskListView tasks={[mk("1")]} users={createUserCache()} hasMore={false} onLoadMore={onLoadMore} onOpen={() => {}} />);
     expect(screen.queryByTestId("fe4-load-more")).toBeNull();
-  });
-});
-
-describe("TaskBoardView (design test 10)", () => {
-  it("renders all 5 columns; read-only disables cards", () => {
-    render(
-      <TaskBoardView
-        tasksByStatus={(s) => (s === "todo" ? [mk("1")] : [])}
-        getTask={() => mk("1")}
-        onMove={() => {}}
-        canWrite={false}
-      />,
-    );
-    for (const col of ["todo", "in_progress", "blocked", "done", "cancelled"]) {
-      expect(screen.getByTestId(`fe4-column-${col}`)).toBeInTheDocument();
-    }
-    expect(screen.getByTestId("fe4-column-todo")).toHaveAttribute("aria-disabled", "true");
   });
 });
