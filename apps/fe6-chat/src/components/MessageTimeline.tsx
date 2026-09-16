@@ -98,7 +98,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
       {pending.map((p) => (
         <div
           key={p.clientTempId}
-          className={`${styles.messageRow} ${p.state === "failed" ? styles.failed : styles.pending}`}
+          className={`${styles.messageRow} ${styles.justSent} ${p.state === "failed" ? styles.failed : styles.pending}`}
           data-testid="fe6-timeline-pending"
           data-pending-state={p.state}
         >
