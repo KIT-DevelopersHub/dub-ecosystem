@@ -1,8 +1,10 @@
+import { useState } from "react";
 import type { identity } from "@dub/types";
-import { Badge, Switch } from "@dub/ui";
+import { Badge, Icon, Switch } from "@dub/ui";
 import { groupByDomain, toggleDomain, togglePermission, domainSelectionState, type CatalogEntry } from "../lib/permissionMatrix";
 import { domainLabel, permissionLabel, permissionDescription } from "../lib/permissionLabels";
 import { AppAccessSection } from "./AppAccessSection";
+import { AccordionPanel } from "./AccordionPanel";
 
 // Design-system tokens (@dub/tokens) with literal fallbacks so the matrix still
 // reads correctly if a token is ever absent. Each permission is an on/off toggle
@@ -19,6 +21,25 @@ const cardStyle: React.CSSProperties = {
 const legendRowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", width: "100%" };
 const groupTitleStyle: React.CSSProperties = { fontWeight: 700, fontSize: 15 };
 const countStyle: React.CSSProperties = { marginLeft: "auto", color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 13 };
+// Collapse toggle: a plain button (not the "select all" checkbox beside it) so the
+// two controls never fight over the same click. Each domain group opens/closes
+// independently (P26) — long role matrices (many domains) stay scannable because
+// the reader can fold away groups they aren't touching right now.
+const toggleButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  background: "none",
+  border: "none",
+  padding: 0,
+  font: "inherit",
+  cursor: "pointer",
+  textAlign: "left",
+  color: "inherit",
+};
+const chevronStyle: React.CSSProperties = {
+  transition: "transform var(--dub-motion-fast, 120ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1))",
+};
 // Two-column grid for the permission rows: halves the vertical scroll length vs the
 // old single full-width column. The min track width (460px) is wide enough that only
 // two columns fit a normal admin panel, so it stays a true 2-column layout instead of
@@ -72,6 +93,18 @@ export function PermissionMatrix({
 }) {
   const groups = groupByDomain(catalog);
   const locked = new Set(lockedKeys);
+  // Every domain group starts open (unchanged default behavior); collapsing is an
+  // opt-in decluttering action, not something that hides data on first view.
+  const [openDomains, setOpenDomains] = useState<Set<string>>(
+    () => new Set(groups.filter((g) => g.domain !== "app").map((g) => g.domain)),
+  );
+  const toggleDomainOpen = (domain: string) =>
+    setOpenDomains((prev) => {
+      const next = new Set(prev);
+      if (next.has(domain)) next.delete(domain);
+      else next.add(domain);
+      return next;
+    });
 
   return (
     <div data-testid={`${idPrefix}-permission-matrix`}>
@@ -93,6 +126,8 @@ export function PermissionMatrix({
         }
         const state = domainSelectionState(selected, g.entries);
         const onCount = g.entries.reduce((n, e) => n + (selected.includes(e.key as identity.PermissionKey) ? 1 : 0), 0);
+        const isOpen = openDomains.has(g.domain);
+        const panelId = `${idPrefix}-matrix-panel-${g.domain}`;
         return (
           <fieldset key={g.domain} style={cardStyle}>
             <legend style={{ width: "100%" }}>
@@ -106,12 +141,25 @@ export function PermissionMatrix({
                   onChange={(e) => onChange(toggleDomain(selected, g.entries, e.target.checked, lockedKeys))}
                   data-testid={`${idPrefix}-matrix-domain-${g.domain}`}
                 />
-                <span style={groupTitleStyle}>{domainLabel(g.domain)}</span>
+                <button
+                  type="button"
+                  style={toggleButtonStyle}
+                  aria-expanded={isOpen}
+                  aria-controls={panelId}
+                  onClick={() => toggleDomainOpen(g.domain)}
+                  data-testid={`${idPrefix}-matrix-toggle-${g.domain}`}
+                >
+                  <span style={{ ...chevronStyle, display: "inline-flex", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>
+                    <Icon name="chevron-right" size="sm" />
+                  </span>
+                  <span style={groupTitleStyle}>{domainLabel(g.domain)}</span>
+                </button>
                 <span style={countStyle} data-testid={`${idPrefix}-matrix-count-${g.domain}`}>
                   {onCount} / {g.entries.length} 有効
                 </span>
               </span>
             </legend>
+            <AccordionPanel open={isOpen} id={panelId}>
             <div style={gridStyle} data-testid={`${idPrefix}-matrix-grid-${g.domain}`}>
             {g.entries.map((e) => {
               const key = e.key as identity.PermissionKey;
@@ -154,6 +202,7 @@ export function PermissionMatrix({
               );
             })}
             </div>
+            </AccordionPanel>
           </fieldset>
         );
       })}

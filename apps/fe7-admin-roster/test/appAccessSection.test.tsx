@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { identity } from "@dub/types";
 import { AppAccessSection } from "../src/components/AppAccessSection";
 
@@ -54,6 +54,20 @@ describe("AppAccessSection — per-app enable + nested level", () => {
     const { onChange } = setup(["app:gantt:edit", "app:gantt:view", "app:mail:view"]);
     fireEvent.click(screen.getByTestId("fe7-app-enable-gantt"));
     expect(onChange).toHaveBeenCalledWith(["app:mail:view"]);
+  });
+
+  it("turning an app OFF removes the nested level selector after the closing height transition (P26)", async () => {
+    const { rerender } = render(
+      <AppAccessSection selected={[]} onChange={() => {}} />,
+    );
+    expect(screen.queryByTestId("fe7-app-level-gantt")).toBeNull();
+
+    rerender(<AppAccessSection selected={["app:gantt:view"]} onChange={() => {}} />);
+    expect(screen.getByTestId("fe7-app-level-gantt")).toBeInTheDocument();
+
+    rerender(<AppAccessSection selected={[]} onChange={() => {}} />);
+    // aria state / visual close is immediate; DOM removal follows the transition.
+    await waitFor(() => expect(screen.queryByTestId("fe7-app-level-gantt")).not.toBeInTheDocument());
   });
 
   it("locked app (管理) keeps its enable toggle disabled ON (self-lockout guard)", () => {

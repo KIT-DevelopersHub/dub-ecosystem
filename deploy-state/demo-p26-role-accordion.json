@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p26-role-accordion",
+  "worker": "dub-demo-p26-role-accordion",
+  "url": "https://dub-demo-p26-role-accordion.developershub-site.workers.dev",
+  "deployedSha": "d451df3c",
+  "branch": "feat/p26-role-accordion",
+  "actor": "kota",
+  "markers": ["matrix-toggle-"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:50:20Z",
+  "updatedAt": "2026-09-13T16:50:20Z",
+  "note": "P26 fe7 permission-matrix per-domain accordion"
+}

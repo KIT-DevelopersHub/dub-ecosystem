@@ -9,6 +9,7 @@ import {
   type AppAccessLevel,
   type AppAccessRow,
 } from "../lib/appAccessMatrix";
+import { AccordionPanel } from "./AccordionPanel";
 
 // PER-APP access tier of the role matrix (catalog domain "app"). Instead of showing
 // the 22 flat app:<id>:view / app:<id>:edit toggles, this folds them into the product
@@ -147,7 +148,7 @@ export function AppAccessSection({
                   </Badge>
                 </span>
               </div>
-              {enabled ? (
+              <AccordionPanel open={enabled}>
                 <div style={nestStyle} data-testid={`${idPrefix}-app-level-${row.id}`}>
                   <span style={nestLabelStyle}>許可する範囲</span>
                   <SegmentedControl<AppAccessLevel>
@@ -164,7 +165,7 @@ export function AppAccessSection({
                     testId={`${idPrefix}-app-level-seg-${row.id}`}
                   />
                 </div>
-              ) : null}
+              </AccordionPanel>
             </div>
           );
         })}
