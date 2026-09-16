@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "widget-grid-layout",
+  "worker": "dub-demo-widget-grid-layout",
+  "url": "https://dub-demo-widget-grid-layout.developershub-site.workers.dev",
+  "deployedSha": "028021f5",
+  "branch": "feat/home-widget-grid-edit-mode",
+  "actor": "kota",
+  "markers": ["\"data-testid\":\"fe2-home-widget-grid-edit-toggle\"","fe2-widget-grid-wrap--editing"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:17:25Z",
+  "updatedAt": "2026-09-13T16:17:25Z",
+  "note": "編集/通常モード切替を追加(PR#492続き)"
+}

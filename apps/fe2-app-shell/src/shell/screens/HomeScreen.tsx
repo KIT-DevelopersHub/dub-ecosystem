@@ -2,10 +2,13 @@
 //
 // The screen opens with a KPI row so the whole operation reads at a glance: a live
 // countdown to 本戦, task-completion and free-tier gauges, and the live unread /
-// upcoming-event counts. Below it, two visualization cards (無料枠の使用状況・タスクの
-// 内訳) make the percentages tangible, then the full app launchpad (every app kept —
-// this is the daily workspace), and a right rail of live panels (直近のイベント・未読の
-// 通知) unchanged from the launchpad.
+// upcoming-event counts. Below it sits the customizable WIDGET GRID (無料枠の使用
+// 状況・タスクの内訳・最近開いた・直近のイベント・未読の通知, plus any FE3–FE7
+// contributed homeWidget) — a real cell grid (see dashboard/HomeWidgetGrid.tsx):
+// each panel occupies a small/medium/large footprint in CELLS and can be dragged
+// to any cell, pushing other panels out of the way. Below that, the full app
+// launchpad (every app kept — this is the daily workspace) stays fixed; it is
+// navigation, not a placeable panel.
 //
 // Data honesty: every figure is LIVE. The countdown comes from the wall clock; the
 // unread count, upcoming events, task-completion breakdown, free-tier usage and
@@ -14,14 +17,17 @@
 // per-frame via useBffHome().errorFor — the affected tile/card shows "取得できませんでした"
 // while the rest stay live; no global toast. FE3–FE7 may still contribute a
 // homeWidget; each renders in its own boundary.
-import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
 import { useRecentVisits } from "../useVisitTracker.tsx";
+import type { RecentVisit } from "../../lib/recentVisits.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
+import { HomeWidgetGrid } from "./dashboard/HomeWidgetGrid.tsx";
+import type { GridWidgetMeta } from "./dashboard/homeGrid.ts";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
@@ -148,13 +154,17 @@ function useViewportFit<T extends HTMLElement>(): RefObject<T> {
 // the freshest handful so the rail stays compact within the one-viewport dashboard).
 const RECENT_VISIBLE = 5;
 
-/** "最近開いた" — one-click jump back to recently visited pages (P3-1). Reads the
- *  client-side visit history and navigates via the shell router. Hidden until the
- *  viewer has opened at least one trackable page. */
-function RecentOpenedCard({ onNavigate }: { onNavigate?: (path: string) => void }): JSX.Element | null {
-  const visits = useRecentVisits();
-  if (visits.length === 0) return null;
-  const rows = visits.slice(0, RECENT_VISIBLE);
+/** "最近開いた" — one-click jump back to recently visited pages (P3-1). Renders
+ *  the client-side visit history handed down by HomeScreen (which also uses the
+ *  same rows to decide whether this widget takes part in the grid at all — see
+ *  `hasRecent` below) and navigates via the shell router. */
+function RecentOpenedCard({
+  rows,
+  onNavigate,
+}: {
+  rows: RecentVisit[];
+  onNavigate?: (path: string) => void;
+}): JSX.Element {
   return (
     <Card
       testId="fe2-home-recent"
@@ -260,6 +270,225 @@ export function HomeScreen({
 
   const rootRef = useViewportFit<HTMLElement>();
 
+  // "最近開いた" only takes part in the grid once there is something to show —
+  // computed here (not inside RecentOpenedCard) so HomeWidgetGrid's catalog can
+  // decide membership BEFORE render, the same way any other empty/absent widget
+  // (e.g. no FE3-7 homeWidgets registered) simply does not reserve a grid cell.
+  const recentRows = useRecentVisits().slice(0, RECENT_VISIBLE);
+  const hasRecent = recentRows.length > 0;
+
+  const WIDGET_CATALOG: GridWidgetMeta[] = [
+    { id: "usage", label: "無料枠の使用状況", defaultSize: "medium" },
+    { id: "tasks", label: "タスクの内訳", defaultSize: "medium" },
+    ...(hasRecent ? [{ id: "recent", label: "最近開いた", defaultSize: "small" as const }] : []),
+    { id: "events", label: "直近のイベント", defaultSize: "medium" },
+    { id: "notifications", label: "未読の通知", defaultSize: "small" },
+    ...homeWidgets.map((w) => ({ id: `fw-${w.id}`, label: w.title, defaultSize: "small" as const })),
+  ];
+
+  const widgetNodes: Record<string, ReactNode> = {
+    usage: (
+      <Card
+        testId="fe2-home-usage"
+        header={
+          <div className="fe2-home-card-head">
+            <span className="fe2-stat-label">
+              <Icon name="shield" />
+              無料枠の使用状況
+            </span>
+            <a href="/usage" className="fe2-home-cardlink" data-testid="fe2-home-usage-all" onClick={go("/usage")}>
+              詳細
+              <Icon name="chevron-right" />
+            </a>
+          </div>
+        }
+      >
+        {isPending ? (
+          <SkeletonLoader lines={4} />
+        ) : usageError ? (
+          <div role="alert" data-testid="fe2-home-usage-error" className="fe2-inline-error">
+            <p>使用状況を取得できませんでした。</p>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              再試行
+            </Button>
+          </div>
+        ) : freeTier.length === 0 ? (
+          <p className="fe2-stat-hint">使用状況のデータがありません。</p>
+        ) : (
+          <ul className="fe2-usage-list">
+            {freeTier.map((m) => {
+              const st = usageStatusFromPct(m.pct);
+              const meta = statusMeta(st);
+              return (
+                <li key={m.key} className="fe2-usage-row" data-testid={`fe2-usage-${m.key}`}>
+                  <div className="fe2-usage-top">
+                    <span className="fe2-usage-label">{m.label}</span>
+                    <span className="fe2-usage-pct" style={{ color: toCssVarName(meta.colorPath) }}>
+                      {m.pct.toFixed(1)}%
+                    </span>
+                  </div>
+                  <Meter pct={m.pct} status={st} ariaLabel={m.label} />
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+    ),
+    tasks: (
+      <Card
+        testId="fe2-home-tasks"
+        header={
+          <div className="fe2-home-card-head">
+            <span className="fe2-stat-label">
+              <Icon name="check-square" />
+              タスクの内訳
+            </span>
+            <a href="/me/tasks" className="fe2-home-cardlink" data-testid="fe2-home-tasks-all" onClick={go("/me/tasks")}>
+              詳細
+              <Icon name="chevron-right" />
+            </a>
+          </div>
+        }
+      >
+        {isPending ? (
+          <SkeletonLoader lines={3} />
+        ) : taskError ? (
+          <div role="alert" data-testid="fe2-home-tasks-error" className="fe2-inline-error">
+            <p>タスクを取得できませんでした。</p>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              再試行
+            </Button>
+          </div>
+        ) : !hasTasks || taskTotal(segments) === 0 ? (
+          <p className="fe2-stat-hint">担当しているタスクはありません。</p>
+        ) : (
+          <SegmentBar segments={segments} testId="fe2-home-task-segbar" />
+        )}
+      </Card>
+    ),
+    ...(hasRecent ? { recent: <RecentOpenedCard rows={recentRows} {...(onNavigate ? { onNavigate } : {})} /> } : {}),
+    events: (
+      <Card
+        testId="fe2-home-events"
+        header={
+          <div className="fe2-home-card-head">
+            <span className="fe2-stat-label">
+              <Icon name="calendar" />
+              直近のイベント
+            </span>
+            <a href="/events" className="fe2-home-cardlink" data-testid="fe2-home-events-all" onClick={go("/events")}>
+              すべて見る
+              <Icon name="chevron-right" />
+            </a>
+          </div>
+        }
+      >
+        {isPending ? (
+          <SkeletonLoader lines={3} />
+        ) : eventsError ? (
+          <div role="alert" data-testid="fe2-home-events-error" className="fe2-inline-error">
+            <p>イベントを取得できませんでした。</p>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              再試行
+            </Button>
+          </div>
+        ) : events.length === 0 ? (
+          <p className="fe2-stat-hint">予定されているイベントはありません。</p>
+        ) : (
+          <ul className="fe2-list fe2-home-events-scroll">
+            {events.map((ev) => (
+              <li key={ev.id} className="fe2-list-row">
+                <a
+                  href={`/events/${ev.id}`}
+                  className="fe2-list-link"
+                  data-testid={`fe2-home-event-${ev.id}`}
+                  onClick={go(`/events/${ev.id}`)}
+                >
+                  <span className="fe2-list-dot" />
+                  <span className="fe2-list-main">
+                    <span className="fe2-list-title">{ev.title}</span>
+                  </span>
+                  <Icon name="chevron-right" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    ),
+    notifications: (
+      <Card
+        testId="fe2-home-notifications"
+        header={
+          <span className="fe2-stat-label">
+            <Icon name="bell" />
+            未読の通知
+          </span>
+        }
+      >
+        {isPending ? (
+          <SkeletonLoader lines={2} />
+        ) : onOpenNotifications ? (
+          // Clickable "通知部分": ALWAYS opens the shared notification dialog —
+          // the same modal the header bell opens. A /bff/home *partial* error on
+          // the notification aggregate must NOT remove this entry point: it used
+          // to fall through to an inline error card, leaving the dialog
+          // unreachable from Home (bug: "未読の通知カードを押しても開かない").
+          // The dialog fetches the inbox itself via useInbox, so opening it also
+          // serves as the retry when the home aggregate is degraded.
+          <button
+            type="button"
+            className="fe2-notif-open"
+            data-testid="fe2-home-open-notifications"
+            onClick={onOpenNotifications}
+            aria-label={
+              notificationsError
+                ? "通知を開く（一部の通知情報を取得できませんでした）"
+                : unread > 0
+                  ? `通知を開く（未読 ${unread} 件）`
+                  : "通知を開く"
+            }
+          >
+            {notificationsError ? (
+              <span data-testid="fe2-home-notifications-error" className="fe2-stat-hint">
+                通知情報の一部を取得できませんでした。開いて再読み込みできます。
+              </span>
+            ) : unread > 0 ? (
+              <span className="fe2-notice-row">
+                <Badge tone="info">未読</Badge>
+                <span data-testid="fe2-home-unread-count">未読 {unread} 件</span>
+              </span>
+            ) : (
+              <span data-testid="fe2-home-unread-empty" className="fe2-stat-hint">
+                未読の通知はありません。
+              </span>
+            )}
+          </button>
+        ) : notificationsError ? (
+          // Fallback only when there is NO dialog entry point wired (e.g. a
+          // context that does not pass onOpenNotifications): inline retry card.
+          <div role="alert" data-testid="fe2-home-notifications-error" className="fe2-inline-error">
+            <p>通知を取得できませんでした。</p>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              再試行
+            </Button>
+          </div>
+        ) : unread > 0 ? (
+          <div className="fe2-notice-row">
+            <Badge tone="info">未読</Badge>
+            <span data-testid="fe2-home-unread-count">未読 {unread} 件</span>
+          </div>
+        ) : (
+          <p data-testid="fe2-home-unread-empty" className="fe2-stat-hint">
+            未読の通知はありません。
+          </p>
+        )}
+      </Card>
+    ),
+    ...Object.fromEntries(homeWidgets.map((w) => [`fw-${w.id}`, renderHomeWidget(w.id, w.title, w.Body)])),
+  };
+
   return (
     <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">
       <PageHeader
@@ -339,232 +568,23 @@ export function HomeScreen({
       </section>
 
       <div className="fe2-dash-body">
-        {/* ── left: visualizations + app launchpad ─────────────────────────────── */}
-        <div className="fe2-dash-main">
-          <div className="fe2-dash-cards">
-          <Card
-            testId="fe2-home-usage"
-            header={
-              <div className="fe2-home-card-head">
-                <span className="fe2-stat-label">
-                  <Icon name="shield" />
-                  無料枠の使用状況
-                </span>
-                <a href="/usage" className="fe2-home-cardlink" data-testid="fe2-home-usage-all" onClick={go("/usage")}>
-                  詳細
-                  <Icon name="chevron-right" />
-                </a>
-              </div>
-            }
-          >
-            {isPending ? (
-              <SkeletonLoader lines={4} />
-            ) : usageError ? (
-              <div role="alert" data-testid="fe2-home-usage-error" className="fe2-inline-error">
-                <p>使用状況を取得できませんでした。</p>
-                <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                  再試行
-                </Button>
-              </div>
-            ) : freeTier.length === 0 ? (
-              <p className="fe2-stat-hint">使用状況のデータがありません。</p>
-            ) : (
-              <ul className="fe2-usage-list">
-                {freeTier.map((m) => {
-                  const st = usageStatusFromPct(m.pct);
-                  const meta = statusMeta(st);
-                  return (
-                    <li key={m.key} className="fe2-usage-row" data-testid={`fe2-usage-${m.key}`}>
-                      <div className="fe2-usage-top">
-                        <span className="fe2-usage-label">{m.label}</span>
-                        <span className="fe2-usage-pct" style={{ color: toCssVarName(meta.colorPath) }}>
-                          {m.pct.toFixed(1)}%
-                        </span>
-                      </div>
-                      <Meter pct={m.pct} status={st} ariaLabel={m.label} />
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+        {/* ── customizable widget grid (real cell grid; drag reflows others) ────── */}
+        <HomeWidgetGrid catalog={WIDGET_CATALOG} nodes={widgetNodes} />
 
-          <Card
-            testId="fe2-home-tasks"
-            header={
-              <div className="fe2-home-card-head">
-                <span className="fe2-stat-label">
-                  <Icon name="check-square" />
-                  タスクの内訳
-                </span>
-                <a href="/me/tasks" className="fe2-home-cardlink" data-testid="fe2-home-tasks-all" onClick={go("/me/tasks")}>
-                  詳細
-                  <Icon name="chevron-right" />
-                </a>
-              </div>
-            }
-          >
-            {isPending ? (
-              <SkeletonLoader lines={3} />
-            ) : taskError ? (
-              <div role="alert" data-testid="fe2-home-tasks-error" className="fe2-inline-error">
-                <p>タスクを取得できませんでした。</p>
-                <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                  再試行
-                </Button>
-              </div>
-            ) : !hasTasks || taskTotal(segments) === 0 ? (
-              <p className="fe2-stat-hint">担当しているタスクはありません。</p>
-            ) : (
-              <SegmentBar segments={segments} testId="fe2-home-task-segbar" />
-            )}
-          </Card>
+        {/* ── app launchpad: fixed navigation, not a placeable panel ───────────── */}
+        <section className="fe2-home-apps" aria-label="機能へ移動">
+          <h2 className="fe2-dash-section-title">アプリ</h2>
+          <div className="fe2-home-apps-grid" data-testid="fe2-home-apps-grid">
+            {APP_TILES.map((tile) => (
+              <NavTile
+                key={tile.id}
+                tile={tile}
+                {...(badgeFor(tile.id) !== undefined ? { badge: badgeFor(tile.id) } : {})}
+                {...(onNavigate ? { onNavigate } : {})}
+              />
+            ))}
           </div>
-
-          <section className="fe2-home-apps" aria-label="機能へ移動">
-            <h2 className="fe2-dash-section-title">アプリ</h2>
-            <div className="fe2-home-apps-grid" data-testid="fe2-home-apps-grid">
-              {APP_TILES.map((tile) => (
-                <NavTile
-                  key={tile.id}
-                  tile={tile}
-                  {...(badgeFor(tile.id) !== undefined ? { badge: badgeFor(tile.id) } : {})}
-                  {...(onNavigate ? { onNavigate } : {})}
-                />
-              ))}
-            </div>
-          </section>
-        </div>
-
-        {/* ── right: live BFF panels (unchanged testIds/behavior) ───────────────── */}
-        <aside className="fe2-home-side">
-          {/* 最近開いた (P3-1): client-side jump-back, above the live panels. */}
-          <RecentOpenedCard {...(onNavigate ? { onNavigate } : {})} />
-          <Card
-            testId="fe2-home-events"
-            header={
-              <div className="fe2-home-card-head">
-                <span className="fe2-stat-label">
-                  <Icon name="calendar" />
-                  直近のイベント
-                </span>
-                <a
-                  href="/events"
-                  className="fe2-home-cardlink"
-                  data-testid="fe2-home-events-all"
-                  onClick={go("/events")}
-                >
-                  すべて見る
-                  <Icon name="chevron-right" />
-                </a>
-              </div>
-            }
-          >
-            {isPending ? (
-              <SkeletonLoader lines={3} />
-            ) : eventsError ? (
-              <div role="alert" data-testid="fe2-home-events-error" className="fe2-inline-error">
-                <p>イベントを取得できませんでした。</p>
-                <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                  再試行
-                </Button>
-              </div>
-            ) : events.length === 0 ? (
-              <p className="fe2-stat-hint">予定されているイベントはありません。</p>
-            ) : (
-              <ul className="fe2-list fe2-home-events-scroll">
-                {events.map((ev) => (
-                  <li key={ev.id} className="fe2-list-row">
-                    <a
-                      href={`/events/${ev.id}`}
-                      className="fe2-list-link"
-                      data-testid={`fe2-home-event-${ev.id}`}
-                      onClick={go(`/events/${ev.id}`)}
-                    >
-                      <span className="fe2-list-dot" />
-                      <span className="fe2-list-main">
-                        <span className="fe2-list-title">{ev.title}</span>
-                      </span>
-                      <Icon name="chevron-right" />
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card
-            testId="fe2-home-notifications"
-            header={
-              <span className="fe2-stat-label">
-                <Icon name="bell" />
-                未読の通知
-              </span>
-            }
-          >
-            {isPending ? (
-              <SkeletonLoader lines={2} />
-            ) : onOpenNotifications ? (
-              // Clickable "通知部分": ALWAYS opens the shared notification dialog —
-              // the same modal the header bell opens. A /bff/home *partial* error on
-              // the notification aggregate must NOT remove this entry point: it used
-              // to fall through to an inline error card, leaving the dialog
-              // unreachable from Home (bug: "未読の通知カードを押しても開かない").
-              // The dialog fetches the inbox itself via useInbox, so opening it also
-              // serves as the retry when the home aggregate is degraded.
-              <button
-                type="button"
-                className="fe2-notif-open"
-                data-testid="fe2-home-open-notifications"
-                onClick={onOpenNotifications}
-                aria-label={
-                  notificationsError
-                    ? "通知を開く（一部の通知情報を取得できませんでした）"
-                    : unread > 0
-                      ? `通知を開く（未読 ${unread} 件）`
-                      : "通知を開く"
-                }
-              >
-                {notificationsError ? (
-                  <span data-testid="fe2-home-notifications-error" className="fe2-stat-hint">
-                    通知情報の一部を取得できませんでした。開いて再読み込みできます。
-                  </span>
-                ) : unread > 0 ? (
-                  <span className="fe2-notice-row">
-                    <Badge tone="info">未読</Badge>
-                    <span data-testid="fe2-home-unread-count">未読 {unread} 件</span>
-                  </span>
-                ) : (
-                  <span data-testid="fe2-home-unread-empty" className="fe2-stat-hint">
-                    未読の通知はありません。
-                  </span>
-                )}
-              </button>
-            ) : notificationsError ? (
-              // Fallback only when there is NO dialog entry point wired (e.g. a
-              // context that does not pass onOpenNotifications): inline retry card.
-              <div role="alert" data-testid="fe2-home-notifications-error" className="fe2-inline-error">
-                <p>通知を取得できませんでした。</p>
-                <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                  再試行
-                </Button>
-              </div>
-            ) : unread > 0 ? (
-              <div className="fe2-notice-row">
-                <Badge tone="info">未読</Badge>
-                <span data-testid="fe2-home-unread-count">未読 {unread} 件</span>
-              </div>
-            ) : (
-              <p data-testid="fe2-home-unread-empty" className="fe2-stat-hint">
-                未読の通知はありません。
-              </p>
-            )}
-          </Card>
-
-          {homeWidgets.length > 0
-            ? homeWidgets.map((w) => renderHomeWidget(w.id, w.title, w.Body))
-            : null}
-        </aside>
+        </section>
       </div>
     </main>
   );
