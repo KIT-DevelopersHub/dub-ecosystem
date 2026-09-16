@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../state/app_lock.dart';
 import '../state/auth.dart';
 import 'inbox_view.dart';
 
@@ -84,9 +85,12 @@ class AppShell extends ConsumerWidget {
             onSelected: (v) {
               if (v == 'logout') {
                 ref.read(authControllerProvider.notifier).logout();
+              } else if (v == 'settings') {
+                _openSettings(context);
               }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'settings', child: Text('設定')),
               PopupMenuItem(value: 'logout', child: Text('ログアウト')),
             ],
           ),
@@ -100,6 +104,60 @@ class AppShell extends ConsumerWidget {
   static String _initial(String? name) {
     if (name == null || name.isEmpty) return '?';
     return name.characters.first.toUpperCase();
+  }
+}
+
+void _openSettings(BuildContext context) {
+  showDialog<void>(
+    context: context,
+    builder: (_) => const _SettingsDialog(),
+  );
+}
+
+/// App settings. Currently hosts the device-level biometric launch gate toggle
+/// (Touch ID on macOS, Windows Hello on Windows).
+class _SettingsDialog extends ConsumerWidget {
+  const _SettingsDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lock = ref.watch(appLockControllerProvider);
+    final theme = Theme.of(context);
+
+    return AlertDialog(
+      title: const Text('設定'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: lock.enabled,
+              onChanged: lock.supported
+                  ? (v) => ref
+                      .read(appLockControllerProvider.notifier)
+                      .setEnabled(v)
+                  : null,
+              title: const Text('起動時に生体認証でロック'),
+              subtitle: Text(
+                lock.supported
+                    ? '次回の起動から、Touch ID / Windows Hello（またはパスコード）で本人確認します。'
+                    : 'この端末では生体認証・パスコードが利用できないため無効です。',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('閉じる'),
+        ),
+      ],
+    );
   }
 }
 
