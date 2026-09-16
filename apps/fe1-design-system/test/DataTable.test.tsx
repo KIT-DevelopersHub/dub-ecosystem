@@ -149,6 +149,90 @@ describe("DataTable", () => {
     });
   });
 
+  describe("virtualize (row windowing)", () => {
+    const many: Row[] = Array.from({ length: 300 }, (_, i) => ({ id: String(i), name: `User ${i}` }));
+
+    it("wraps long lists in a scrolling viewport and keeps rows selectable/sortable", async () => {
+      const onSortChange = vi.fn();
+      const onChange = vi.fn();
+      render(
+        <DataTable
+          columns={columns}
+          rows={many}
+          rowKey={(r) => r.id}
+          testId="vt"
+          sort={{ key: "name", direction: "asc" }}
+          onSortChange={onSortChange}
+          selection={{ selectedKeys: [], onChange }}
+          virtualize={{ threshold: 50, estimateRowHeight: 40, maxHeight: 400 }}
+        />,
+      );
+      // scroll container present with the configured maxHeight
+      const wrap = screen.getByTestId("vt");
+      expect(wrap).toHaveStyle({ maxHeight: "400px" });
+      // sort still fires
+      await userEvent.click(screen.getByRole("button", { name: /名前/ }));
+      expect(onSortChange).toHaveBeenCalledWith({ key: "name", direction: "desc" });
+      // select-all still spans the FULL list, not just the visible window
+      await userEvent.click(screen.getByTestId("vt-select-all"));
+      expect(onChange).toHaveBeenCalledWith(many.map((r) => r.id));
+    });
+
+    it("renders every row when the viewport can't be measured (jsdom fallback — a11y/testability)", () => {
+      render(
+        <DataTable
+          columns={columns}
+          rows={many}
+          rowKey={(r) => r.id}
+          virtualize={{ threshold: 50, estimateRowHeight: 40, maxHeight: 400 }}
+        />,
+      );
+      // no ResizeObserver in jsdom → windowing self-disables → all rows present
+      expect(screen.getByText("User 0")).toBeInTheDocument();
+      expect(screen.getByText("User 299")).toBeInTheDocument();
+    });
+
+    it("does not add a scroll viewport for short lists (below threshold)", () => {
+      render(
+        <DataTable columns={columns} rows={rows} rowKey={(r) => r.id} testId="vt" virtualize={{ threshold: 50 }} />,
+      );
+      const wrap = screen.getByTestId("vt");
+      expect(wrap.style.maxHeight).toBe("");
+    });
+
+    // Off-by-one guard: the roster's first page is exactly DEFAULT_LIMIT (50) rows, so
+    // windowing MUST engage AT the threshold, not only strictly past it. A `>` at
+    // threshold:50 left a full 50-row page un-windowed forever (50 > 50 is false).
+    it("engages the scroll viewport AT exactly the threshold row count (>= boundary)", () => {
+      const fifty: Row[] = Array.from({ length: 50 }, (_, i) => ({ id: String(i), name: `User ${i}` }));
+      render(
+        <DataTable
+          columns={columns}
+          rows={fifty}
+          rowKey={(r) => r.id}
+          testId="vt"
+          virtualize={{ threshold: 50, estimateRowHeight: 40, maxHeight: 400 }}
+        />,
+      );
+      // exactly 50 rows → viewport wrapper appears (was broken under the strict `>`).
+      expect(screen.getByTestId("vt")).toHaveStyle({ maxHeight: "400px" });
+    });
+
+    it("does NOT engage one row below the threshold (49 rows, threshold 50)", () => {
+      const fortyNine: Row[] = Array.from({ length: 49 }, (_, i) => ({ id: String(i), name: `User ${i}` }));
+      render(
+        <DataTable
+          columns={columns}
+          rows={fortyNine}
+          rowKey={(r) => r.id}
+          testId="vt"
+          virtualize={{ threshold: 50, estimateRowHeight: 40, maxHeight: 400 }}
+        />,
+      );
+      expect(screen.getByTestId("vt").style.maxHeight).toBe("");
+    });
+  });
+
   it("applies minWidth + noWrap to header and body cells (wide-table horizontal scroll)", () => {
     const wideColumns: ColumnDef<Row>[] = [
       { key: "name", header: "名前", cell: (r) => r.name, minWidth: "12rem", noWrap: true },
