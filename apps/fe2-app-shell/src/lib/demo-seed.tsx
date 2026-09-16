@@ -1174,13 +1174,13 @@ function createChatStore() {
     msg({
       id: "msg_01SEEDGEN0000000000000URL",
       authorId: "usr_bob",
-      body: "LP の最新版はこちら https://developershub.jp/conf/2026 。実装は https://github.com/KIT-DevelopersHub/dub-ecosystem にあります",
+      body: "LP の最新版はこちらです https://developershub.jp/conf/2026 実装は https://github.com/KIT-DevelopersHub/dub-ecosystem にあります。",
       createdAt: "2026-08-01T00:10:00.000Z",
     }),
     msg({
       id: "msg_01SEEDGEN0000000000000UR2",
       authorId: ME_ID,
-      body: "OGP の無いページはリンクだけ残ります: https://no-ogp.invalid/page",
+      body: "こっちは画像なしのサイトです https://example.com/ このページは OGP ないみたいですね https://no-ogp.invalid/page",
       createdAt: "2026-08-01T00:12:00.000Z",
     }),
   ];
