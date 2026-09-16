@@ -603,3 +603,77 @@ describe("HTTP app", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// The free-tier transport landing route: freeq-drain POSTs each due evt.notification
+// outbox row here. It runs the SAME lane-A mapping / lane-B request handlers +
+// envelope.id idempotency as the Queue path, so a domain event becomes an inbox
+// notification with no Cloudflare Queue. This is the piece that connects producers'
+// evt.notification outbox rows to the notification inbox (chat @mention, etc.).
+describe("POST /internal/events-async (free-tier domain-event landing route)", () => {
+  const app = createApp();
+  const req = (path: string, init: RequestInit, env: TestEnvHandle) =>
+    app.request(path, init, env.env as unknown as Record<string, unknown>);
+  const internalPost = (body: unknown) => ({
+    method: "POST",
+    headers: { "content-type": "application/json", "x-dub-internal": "1" },
+    body: JSON.stringify(body),
+  });
+  const countNotifications = (h: TestEnvHandle) =>
+    h.db.first<{ c: number }>(`SELECT COUNT(*) AS c FROM notif_notifications`).then((r) => r?.c ?? 0);
+
+  it("delivers a mapped event end-to-end -> notif_notifications row + in_app inbox item", async () => {
+    const h = makeTestEnv();
+    // task.assigned maps to recipients { userIds: [assigneeId] } (no external resolver call).
+    const env = envelope("task.assigned", { taskId: "task_1", eventId: "ev_1", assigneeId: "u9" }, { id: "evt_ea_1" });
+    const res = await req("/internal/events-async", internalPost(env), h);
+    expect(res.status).toBe(202);
+    expect((await res.json()) as { ok: boolean }).toEqual({ ok: true });
+
+    expect(await countNotifications(h)).toBe(1);
+    const del = await h.db.all<{ user_id: string; channel: string }>(
+      `SELECT user_id, channel FROM notif_deliveries WHERE channel = 'in_app'`,
+    );
+    expect(del).toEqual([{ user_id: "u9", channel: "in_app" }]);
+
+    const inbox = await req("/inbox", { headers: { "x-dub-user-id": "u9" } }, h);
+    const page = (await inbox.json()) as { items: { type: string }[] };
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.type).toBe("task.assigned");
+  });
+
+  it("is idempotent by envelope.id: re-delivering the same envelope creates no duplicate", async () => {
+    const h = makeTestEnv();
+    const env = envelope("task.assigned", { taskId: "t2", eventId: "e2", assigneeId: "u1" }, { id: "evt_ea_dup" });
+    const first = await req("/internal/events-async", internalPost(env), h);
+    expect(first.status).toBe(202);
+    const second = await req("/internal/events-async", internalPost(env), h);
+    expect(second.status).toBe(202);
+    expect(await countNotifications(h)).toBe(1); // second delivery deduped on envelope.id
+  });
+
+  it("acks an unknown event name as a 202 no-op (forward-compat, no notification)", async () => {
+    const h = makeTestEnv();
+    const env = envelope("task.dependency_changed", { taskId: "t3" }, { id: "evt_ea_unknown" });
+    const res = await req("/internal/events-async", internalPost(env), h);
+    expect(res.status).toBe(202);
+    expect(await countNotifications(h)).toBe(0); // no mapping/handler -> no-op
+  });
+
+  it("without x-dub-internal -> 403 FORBIDDEN", async () => {
+    const h = makeTestEnv();
+    const env = envelope("task.assigned", { taskId: "t4", eventId: "e4", assigneeId: "u1" }, { id: "evt_ea_403" });
+    const res = await req(
+      "/internal/events-async",
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(env) },
+      h,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("a malformed envelope (no name/id) -> validation error, no notification", async () => {
+    const h = makeTestEnv();
+    const res = await req("/internal/events-async", internalPost({ payload: {} }), h);
+    expect(res.status).toBe(400);
+    expect(await countNotifications(h)).toBe(0);
+  });
+});

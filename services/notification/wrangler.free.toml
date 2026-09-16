@@ -10,11 +10,15 @@
 #     Cron drain (scheduled handler) forwards them to audit-log over SVC_AUDIT
 #     (/internal/audit-async). This closes the free-tier audit degrade.
 #   * domain-event consumer (dub-q-evt-notification): the notification-delivery trigger,
-#     NOT an audit path. It stays dormant on the free tier — free-ifying it would need
-#     producer-side outbox writes in the services that publish domain events plus a
-#     notification-side /internal/events-async drain (cross-service), which is out of
-#     scope for this audit-focused change. The HTTP surface the live app uses (POST /notify
-#     ingest, inbox reads, the feedback widget) is unaffected.
+#     NOT an audit path. On the free tier this is now served over HTTP: producers write
+#     their domain events to the @dub/freeq outbox (topic evt.notification) and the shared
+#     freeq-drain forwards each due row to POST /internal/events-async here (routing.ts:
+#     evt.notification -> SVC_NOTIFICATION). That route runs the SAME lane-A mapping /
+#     lane-B request handlers + envelope.id idempotency as the paid Queue consumer
+#     (src/queue.ts dispatchEvent), so a chat @mention, notification.requested, public
+#     inquiry, etc. become inbox notifications with no Cloudflare Queue. The other HTTP
+#     surface the live app uses (POST /notify ingest, inbox reads, the feedback widget) is
+#     unaffected.
 #
 # Deploy:
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
