@@ -21,7 +21,7 @@ const KNOWN_ROUTE_PREFIXES = ["/notifications", "/settings/notifications"];
 // Additional in-app segment owners a notification may deep-link into. FE5 does
 // not own these routes but they exist in the SPA route table; a linkUrl into
 // one is honoured. (Kept conservative; extend as the SPA route table grows.)
-const CROSS_UNIT_PREFIXES = ["/tasks", "/events", "/gantt", "/files"];
+const CROSS_UNIT_PREFIXES = ["/tasks", "/events", "/gantt", "/files", "/chat"];
 
 export interface LinkResolution {
   path: string; // where to navigate

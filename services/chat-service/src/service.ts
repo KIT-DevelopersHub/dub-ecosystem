@@ -354,9 +354,24 @@ export class ChatService {
     // notification can turn a chat @mention into an in-app notification WITHOUT ever
     // seeing the message text (it never reads chat D1). A self-mention never notifies.
     const mentions = extractMentions(text).filter((uid) => uid !== ctx.userId);
+    // A DM message notifies its other member(s) the same way (author excluded). Only
+    // resolve membership for "dm"-type channels — the common case (event/topic channels)
+    // skips the extra repo round-trip entirely.
+    let dmFields: { isDm: true; dmRecipientIds: common.UserId[] } | Record<string, never> = {};
+    if (channel.type === "dm") {
+      const members = await this.deps.repo.listMembers(channel.id);
+      const dmRecipientIds = members.map((m) => m.userId).filter((uid) => uid !== ctx.userId);
+      if (dmRecipientIds.length > 0) dmFields = { isDm: true, dmRecipientIds };
+    }
     await this.deps.publisher.publish(
       "chat.message.created",
-      { channelId: channel.id, messageId: row.id, authorId: ctx.userId, ...(mentions.length > 0 ? { mentions } : {}) },
+      {
+        channelId: channel.id,
+        messageId: row.id,
+        authorId: ctx.userId,
+        ...(mentions.length > 0 ? { mentions } : {}),
+        ...dmFields,
+      },
       this.actor(ctx),
     );
     await this.deps.realtime.publishToChannel(channel.id, {

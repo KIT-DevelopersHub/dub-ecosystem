@@ -44,6 +44,8 @@ export function itemLinkUrl(item: InboxItem): string | null {
       return `/events/${item.resourceId}`;
     case "file":
       return `/files/${item.resourceId}`;
+    case "channel": // chat.mention / chat.dm (resourceId = channelId, fe6-chat's own segment name)
+      return `/chat/channels/${item.resourceId}`;
     default:
       return null;
   }
