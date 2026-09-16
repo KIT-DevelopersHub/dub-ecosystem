@@ -61,23 +61,28 @@ export function statusMeta(status: MetricStatus): StatusMeta {
   }
 }
 
-/** Whole days from `now` until `targetISO` (rounded up; never negative). Used for
- *  the conference countdown — a genuinely live figure. Returns null on a bad date. */
+/** Whole days from `now` until `targetISO`, rounded up (a target 3h away is still
+ *  "1日"). SIGNED: 0 on the target's own day, NEGATIVE once it has passed (e.g. -2 =
+ *  2 days ago) — callers that want "開催まで" semantics must check for negative and
+ *  render an "開催済み" state themselves rather than silently clamping to 0, which
+ *  previously made a past event look identical to "happening today" (bug: a stale
+ *  hardcoded date read as permanently stuck at "0日" instead of "already happened").
+ *  Returns null on a bad date. */
 export function daysUntil(targetISO: string, now: Date = new Date()): number | null {
   const target = new Date(targetISO);
   if (Number.isNaN(target.getTime())) return null;
   const ms = target.getTime() - now.getTime();
-  if (ms <= 0) return 0;
   return Math.ceil(ms / 86_400_000);
 }
 
-// ── the headline event the countdown tracks (本戦) ──────────────────────────────
-export const CONFERENCE = {
-  name: "北陸ITカンファレンス",
-  /** 本戦 開催日 (JST). Live countdown target. */
-  dateISO: "2026-08-22T01:00:00+09:00",
-  dateLabel: "2026/08/22",
-} as const;
+/** Format an event's 開催日時 (startsAt) for the countdown hint; "日程未定" when unset
+ *  or unparsable (mirrors fe3's EventCard fallback wording so it reads the same
+ *  app-wide). Locale-formatted (ja-JP), no time-of-day — this is a headline date. */
+export function eventDateLabel(startsAt: string | null): string {
+  if (!startsAt) return "日程未定";
+  const d = new Date(startsAt);
+  return Number.isNaN(d.getTime()) ? "日程未定" : d.toLocaleDateString("ja-JP");
+}
 
 // ── free-tier usage (Cloudflare / Resend), live from usage-meter via /bff/home ──
 export interface FreeTierMetric {

@@ -1,32 +1,39 @@
 // Home / dashboard (design 2-1, revamp → "ダッシュボード"). FE2 owns the frame.
 //
 // The screen opens with a KPI row so the whole operation reads at a glance: a live
-// countdown to 本戦, task-completion and free-tier gauges, and the live unread /
-// upcoming-event counts. Below it, two visualization cards (無料枠の使用状況・タスクの
-// 内訳) make the percentages tangible, then the full app launchpad (every app kept —
-// this is the daily workspace), and a right rail of live panels (直近のイベント・未読の
-// 通知) unchanged from the launchpad.
+// 開催まで countdown to the header's selected working event, task-completion and
+// free-tier gauges, and the live unread / upcoming-event counts. Below it, two
+// visualization cards (無料枠の使用状況・タスクの内訳) make the percentages tangible,
+// then the full app launchpad (every app kept — this is the daily workspace), and a
+// right rail of live panels (直近のイベント・未読の通知) unchanged from the launchpad.
 //
-// Data honesty: every figure is LIVE. The countdown comes from the wall clock; the
-// unread count, upcoming events, task-completion breakdown, free-tier usage and
-// member/team counts are all aggregated by /bff/home (from notification / event /
-// task-service / usage-meter / member-service). Partial upstream failure is surfaced
-// per-frame via useBffHome().errorFor — the affected tile/card shows "取得できませんでした"
-// while the rest stay live; no global toast. FE3–FE7 may still contribute a
-// homeWidget; each renders in its own boundary.
+// Data honesty: every figure is LIVE. The countdown reads the SAME "working event"
+// the header's global イベント switcher shows (GlobalEventSwitcher / selectedEventStore —
+// a GCP-project-selector-style localStorage pick) and fetches that one event's
+// startsAt via GET /events/:id, so it always agrees with what the switcher displays;
+// no event selected yet, or that event has no startsAt, degrades to "日程未定" rather
+// than a fake number. The unread count, upcoming events, task-completion breakdown,
+// free-tier usage and member/team counts are all aggregated by /bff/home (from
+// notification / event / task-service / usage-meter / member-service). Partial
+// upstream failure is surfaced per-frame via useBffHome().errorFor — the affected
+// tile/card shows "取得できませんでした" while the rest stay live; no global toast.
+// FE3–FE7 may still contribute a homeWidget; each renders in its own boundary.
 import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
+import type { event } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
 import { useRecentVisits } from "../useVisitTracker.tsx";
+import { loadSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
-  CONFERENCE,
   daysUntil,
+  eventDateLabel,
   freeTierFromMetrics,
   statusMeta,
   taskCompletionPct,
@@ -213,6 +220,23 @@ export function HomeScreen({
 }): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
   const eventsError = errorFor("event-service");
+
+  // "開催まで" tracks whichever event the header's global イベント switcher currently has
+  // selected (same localStorage pick — see selectedEventStore.ts — read fresh on every
+  // render/mount, mirroring how the switcher itself reads it). Fetches just that one
+  // event's detail (GET /events/:id) rather than the full catalog: the countdown only
+  // ever needs the one selected event's startsAt. No selection yet → the query stays
+  // disabled and the tile shows its "pick an event" fallback below. retry:1 mirrors
+  // fe3's useEventDetailsQuery (settle fast on a hard failure rather than holding
+  // "読み込み中…" across the default backoff — see the hint fallback below).
+  const selectedEventId = loadSelectedEvent();
+  const { data: selectedEvent, isError: selectedEventIsError } = useQuery({
+    queryKey: ["home", "selected-event", selectedEventId],
+    queryFn: () => api.events.get<event.GetEventResponse>(`/${selectedEventId}`),
+    enabled: selectedEventId !== null,
+    staleTime: 60_000,
+    retry: 1,
+  });
   // The gateway BFF (bff-home) reports the notification upstream as "notification-service"
   // (same "<svc>-service" convention as "event-service"). Matching it here restores the
   // "取得できませんでした" card when notification-service degrades — previously the mismatched
@@ -251,8 +275,25 @@ export function HomeScreen({
   };
 
   // ── derived KPI values ────────────────────────────────────────────────────────
-  const days = daysUntil(CONFERENCE.dateISO);
-  const cdStatus = days === null ? "info" : countdownStatus(days);
+  // daysUntil is SIGNED (0 on the day itself, negative once it has passed — see its
+  // doc comment). isPast catches that so a stale/past startsAt reads as "開催済み"
+  // instead of a misleading "0日" (bugfix: a hardcoded past date used to look
+  // permanently "stuck at 0", which read as broken math rather than "already happened").
+  const days = selectedEvent?.startsAt ? daysUntil(selectedEvent.startsAt) : null;
+  const isPast = days !== null && days < 0;
+  const cdStatus = days === null || isPast ? "info" : countdownStatus(days);
+  // "イベントを選択してください" (no pick yet) → "読み込み中…" (fetching the pick) →
+  // "取得できませんでした" (the fetch failed — same wording the other /bff/home-driven
+  // cards use, see errorFor() above) → "<title>・<日程未定 or the date>[・開催済み]"
+  // once loaded (開催済み appended once the event's startsAt is in the past).
+  const countdownHint =
+    selectedEventId === null
+      ? "イベントを選択してください"
+      : selectedEventIsError
+        ? "取得できませんでした"
+        : selectedEvent
+          ? `${selectedEvent.title}・${eventDateLabel(selectedEvent.startsAt)}${isPast ? "・開催済み" : ""}`
+          : "読み込み中…";
   const completion = taskCompletionPct(segments);
   const compStatus = completionStatus(completion);
   const worstStatus = worst ? usageStatusFromPct(worst.pct) : "info";
@@ -283,11 +324,11 @@ export function HomeScreen({
             <KpiTile
               testId="fe2-kpi-countdown"
               icon="clock"
-              label="本戦まで"
-              value={days === null ? "—" : String(days)}
+              label="開催まで"
+              value={days === null || isPast ? "—" : String(days)}
               unit="日"
               status={cdStatus}
-              hint={`${CONFERENCE.name}・${CONFERENCE.dateLabel}`}
+              hint={countdownHint}
             />
             <KpiTile
               testId="fe2-kpi-tasks"
