@@ -55,6 +55,9 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: A11y — icon-only button aria-label (P15)
+        run: pnpm run lint:a11y
+
       - name: Test
         run: pnpm run test
 
