@@ -3,7 +3,9 @@
 // Source of truth: the real 北陸ITカンファレンス (DevelopersHub) roadmap that lives
 // in leaders-meetup-bot (LMB). LMB's gantt is data-driven from Cloudflare D1 and the
 // authoritative structure is the `summaryGroups` config (41 work-package sections /
-// 129 WBS leaves) across 7 teams and 6 phases (F1,F3–F7). See:
+// 129 WBS leaves) across 7 teams and 6 phases (F1,F3–F7). The demo adds one 法人-team
+// work-package (3.8, no LMB leaves) so the new 法人 team surfaces in the legend/board.
+// See:
 //   leaders-meetup-bot/scripts/data/2026-07-22-gantt-team-reassign.sql   (config + real deps)
 //   leaders-meetup-bot/scripts/data/2026-07-22-gantt-honbu-process-labels.sql (real 本部 titles)
 //   leaders-meetup-bot/migrations/0077_gantt_tracker.sql                 (team/phase/wbs schema)
@@ -31,14 +33,20 @@ export const DEMO_CURRENT_USER = "usr_takaoka";
 const MS_DAY = 86_400_000;
 const iso = (d: string): common.ISODateTime => `${d}T00:00:00.000Z`;
 
-// ---- teams (LMB's 7 real conference teams; colours mirror the member-service roster) ----
+// ---- teams (LMB's 8 real conference teams; colours mirror the member-service roster) ----
+// NOTE: `id`/`key` are the stable identity — task teamId references point here. Renaming a
+// team changes only `name` (the display label); the id/key stay put so existing task
+// assignments survive (e.g. 会計→法務会計 keeps team_kaikei/kaikei).
 const teams: team.Team[] = [
   { id: "team_honbu", key: "honbu", name: "本部", color: "#1e3a5f", description: "全体統括・意思決定・進行統制" },
   { id: "team_shinko", key: "shinko", name: "全体進行", color: "#2563eb", description: "進行管理・当日運営・定例運営" },
   { id: "team_dev", key: "dev", name: "開発", color: "#0d9488", description: "運営アプリ内製" },
   { id: "team_sponsor", key: "sponsor", name: "スポンサー", color: "#ea580c", description: "協賛打診・契約" },
   { id: "team_venue", key: "venue", name: "会場", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
-  { id: "team_kaikei", key: "kaikei", name: "会計", color: "#7c3aed", description: "法人設立・予算・会計運用" },
+  { id: "team_kaikei", key: "kaikei", name: "法務会計", color: "#7c3aed", description: "法人設立・予算・会計・法務運用" },
+  // 法人チーム: @dub/tokens danger.700 (#b42318) — a deep, distinct red not used by any
+  // other team (fills the palette's red gap without clashing with sponsor orange).
+  { id: "team_houjin", key: "houjin", name: "法人", color: "#b42318", description: "法人運営・契約・規約・コンプライアンス" },
   { id: "team_pr", key: "pr", name: "集客告知", color: "#db2777", description: "LP・SNS・広報／集客" },
 ];
 const TEAM_ID: Record<string, common.TeamId> = Object.fromEntries(teams.map((t) => [t.name, t.id]));
@@ -59,7 +67,7 @@ const OWNER: Record<string, common.UserId | null> = {
   開発: "usr_araki",
   スポンサー: "usr_yoshioka",
   会場: "usr_shimizu",
-  会計: "usr_kurokawa",
+  法務会計: "usr_kurokawa",
   集客告知: "usr_shiraki",
 };
 
@@ -87,10 +95,10 @@ interface Sec {
 // The 41 real section work-packages (verbatim from LMB's summaryGroups config).
 const SECTIONS: Sec[] = [
   // F1 法人設立
-  { wbs: "1.1", title: "会計: 法人設立（発起人〜定款〜登記〜証明取得）", team: "会計", phase: "F1" },
-  { wbs: "1.2", title: "会計: 設立後の届出（税務署/自治体/社保/インボイス）", team: "会計", phase: "F1" },
-  { wbs: "1.3", title: "会計: 銀行・会計基盤（口座/会計ソフト）", team: "会計", phase: "F1" },
-  { wbs: "1.4", title: "会計: 会計規程・経費ルール", team: "会計", phase: "F1" },
+  { wbs: "1.1", title: "法務会計: 法人設立（発起人〜定款〜登記〜証明取得）", team: "法務会計", phase: "F1" },
+  { wbs: "1.2", title: "法務会計: 設立後の届出（税務署/自治体/社保/インボイス）", team: "法務会計", phase: "F1" },
+  { wbs: "1.3", title: "法務会計: 銀行・会計基盤（口座/会計ソフト）", team: "法務会計", phase: "F1" },
+  { wbs: "1.4", title: "法務会計: 会計規程・経費ルール", team: "法務会計", phase: "F1" },
   // F3 Phase1 立ち上げ
   { wbs: "3.1", title: "本部: リーダー打診・キックオフ", team: "本部", phase: "F3", status: "done", priority: "high" },
   { wbs: "3.2", title: "全体進行: 進行管理立ち上げ・定例運営", team: "全体進行", phase: "F3", status: "in_progress" },
@@ -99,6 +107,9 @@ const SECTIONS: Sec[] = [
   { wbs: "3.5", title: "本部: 組織設計・役割分担(RACI)", team: "本部", phase: "F3" },
   { wbs: "3.6", title: "本部: ドキュメント/ナレッジ基盤", team: "本部", phase: "F3" },
   { wbs: "3.7", title: "本部: 運営規約・行動規範（ドラフト）", team: "本部", phase: "F3" },
+  // 法人チーム demo work-package (not in LMB's config; added so the 法人 team appears on the
+  // board/legend). Childless like 3.3 — one bar, no WBS drill-down.
+  { wbs: "3.8", title: "法人: 法務・契約・規約整備", team: "法人", phase: "F3" },
   // F4 Phase2 6チーム稼働
   { wbs: "4.1", title: "スポンサー: 打診・契約", team: "スポンサー", phase: "F4" },
   { wbs: "4.2", title: "集客告知: 公式LP 開設・運用", team: "集客告知", phase: "F4" },
@@ -106,8 +117,8 @@ const SECTIONS: Sec[] = [
   { wbs: "4.6", title: "集客告知: 学内告知", team: "集客告知", phase: "F4" },
   { wbs: "4.7", title: "集客告知: 各団体周知", team: "集客告知", phase: "F4" },
   { wbs: "4.8", title: "集客告知: 地方団体交流", team: "集客告知", phase: "F4" },
-  { wbs: "4.9", title: "会計: カンファ会計運用（予算/協賛金/支出/精算）", team: "会計", phase: "F4" },
-  { wbs: "4.10", title: "会計: 全体予算計画（テンプレ〜集約〜承認）", team: "会計", phase: "F4" },
+  { wbs: "4.9", title: "法務会計: カンファ会計運用（予算/協賛金/支出/精算）", team: "法務会計", phase: "F4" },
+  { wbs: "4.10", title: "法務会計: 全体予算計画（テンプレ〜集約〜承認）", team: "法務会計", phase: "F4" },
   { wbs: "4.3", title: "会場: 会場KIT 仮予約", team: "会場", phase: "F4" },
   { wbs: "4.4", title: "本部: コア30体制確立", team: "本部", phase: "F4", priority: "high" },
   { wbs: "4.11", title: "本部: マスタースケジュール・進捗統括", team: "本部", phase: "F4" },
@@ -120,7 +131,7 @@ const SECTIONS: Sec[] = [
   // F6 Phase3 コア完成
   { wbs: "6.1", title: "本部: コア50・班長任命", team: "本部", phase: "F6", priority: "high" },
   { wbs: "6.2", title: "本部: 新入生勧誘・当日ボランティア募集", team: "本部", phase: "F6" },
-  { wbs: "6.3", title: "会計: チケット設計・早割", team: "会計", phase: "F6" },
+  { wbs: "6.3", title: "法務会計: チケット設計・早割", team: "法務会計", phase: "F6" },
   { wbs: "6.4", title: "集客告知: イベントページ（Connpass等 複数PF）", team: "集客告知", phase: "F6" },
   { wbs: "6.5", title: "全体進行: 参加者向けドキュメント（CoC/FAQ/当日ガイド）", team: "全体進行", phase: "F6" },
   { wbs: "6.6", title: "本部: 各種規約 確定（CoC/個人情報/肖像権）", team: "本部", phase: "F6" },
@@ -131,7 +142,7 @@ const SECTIONS: Sec[] = [
   { wbs: "7.1", title: "全体進行: 研修・シフト・合流", team: "全体進行", phase: "F7" },
   { wbs: "7.2", title: "会場: 前日設営", team: "会場", phase: "F7" },
   { wbs: "7.3", title: "全体進行: カンファ本番（当日統括）", team: "全体進行", phase: "F7", priority: "urgent" },
-  { wbs: "7.4", title: "会計: 当日会計・決算・税務申告", team: "会計", phase: "F7" },
+  { wbs: "7.4", title: "法務会計: 当日会計・決算・税務申告", team: "法務会計", phase: "F7" },
   { wbs: "7.5", title: "本部: 事後処理・振り返り・引き継ぎ", team: "本部", phase: "F7" },
 ];
 
