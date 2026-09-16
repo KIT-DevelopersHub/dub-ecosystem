@@ -200,6 +200,25 @@ describe("HomeScreen", () => {
       await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("Meetup・日程未定"));
     });
 
+    it("reads 開催済み (not a misleading 0日) once the selected event's startsAt has passed", async () => {
+      // Regression: daysUntil used to clamp a past date to 0, so a stale/past startsAt
+      // looked IDENTICAL to "happening today" — reported as "the subtraction isn't
+      // working" (it always read 0, never counted down further). daysUntil is now
+      // signed (negative once passed); the tile must react to that sign, not just
+      // print it as a negative day count either.
+      saveSelectedEvent("evt_1");
+      const yesterday = new Date(Date.now() - 2 * 86_400_000).toISOString(); // 2 days ago
+      const api = makeApi(OK_HOME, { evt_1: eventDetail({ title: "終わったイベント", startsAt: yesterday }) });
+      render(wrap(<HomeScreen api={api} />));
+      await waitFor(() =>
+        expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent(
+          `終わったイベント・${new Date(yesterday).toLocaleDateString("ja-JP")}・開催済み`,
+        ),
+      );
+      // No negative/zero number — a passed event shows the same "—" as "no data".
+      expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—");
+    });
+
     it("surfaces 取得できませんでした (not a stuck 読み込み中…) when the event fetch fails", async () => {
       // Regression: a demo-seed gap (evt_2/evt_3 had no GET /events/:id detail — see
       // demo-seed.test.tsx) left this branch untested and the tile stuck on "読み込み中…"

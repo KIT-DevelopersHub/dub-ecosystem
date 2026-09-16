@@ -67,7 +67,11 @@ const DEMO_ME: gateway.MeResponse = {
 const EVENTS: event.EventSummary[] = [
   { id: "evt_1", title: "北陸ITカンファレンス 2026", phase: "preparing", startsAt: "2026-08-05T01:00:00Z" },
   { id: "evt_2", title: "運営定例ミーティング", phase: "planning", startsAt: "2026-08-12T09:00:00Z" },
-  { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-09-01T00:00:00Z" },
+  // Kept clearly in the FUTURE (unlike evt_1/evt_2, which are intentionally already-past
+  // seed dates) so the ダッシュボード「開催まで」countdown always has at least one
+  // switchable event demonstrating a real positive day count, not just the 開催済み
+  // fallback — see HomeScreen.tsx's isPast handling.
+  { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-11-14T00:00:00Z" },
 ];
 
 const EVENT_DETAIL: Record<string, event.EventDetail> = {
@@ -114,8 +118,8 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
     title: "学生ハッカソン Hackit 秋",
     description: "学生向けハッカソン。協賛調整・募集LP・当日運営を並行で進行中。",
     phase: "open",
-    startsAt: "2026-09-01T00:00:00Z",
-    endsAt: "2026-09-02T00:00:00Z",
+    startsAt: "2026-11-14T00:00:00Z",
+    endsAt: "2026-11-15T00:00:00Z",
     archivedAt: null,
     createdAt: "2026-07-15T00:00:00Z",
     updatedAt: "2026-08-20T00:00:00Z",

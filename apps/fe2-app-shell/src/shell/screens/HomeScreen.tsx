@@ -275,18 +275,24 @@ export function HomeScreen({
   };
 
   // ── derived KPI values ────────────────────────────────────────────────────────
+  // daysUntil is SIGNED (0 on the day itself, negative once it has passed — see its
+  // doc comment). isPast catches that so a stale/past startsAt reads as "開催済み"
+  // instead of a misleading "0日" (bugfix: a hardcoded past date used to look
+  // permanently "stuck at 0", which read as broken math rather than "already happened").
   const days = selectedEvent?.startsAt ? daysUntil(selectedEvent.startsAt) : null;
-  const cdStatus = days === null ? "info" : countdownStatus(days);
+  const isPast = days !== null && days < 0;
+  const cdStatus = days === null || isPast ? "info" : countdownStatus(days);
   // "イベントを選択してください" (no pick yet) → "読み込み中…" (fetching the pick) →
   // "取得できませんでした" (the fetch failed — same wording the other /bff/home-driven
-  // cards use, see errorFor() above) → "<title>・<日程未定 or the date>" once loaded.
+  // cards use, see errorFor() above) → "<title>・<日程未定 or the date>[・開催済み]"
+  // once loaded (開催済み appended once the event's startsAt is in the past).
   const countdownHint =
     selectedEventId === null
       ? "イベントを選択してください"
       : selectedEventIsError
         ? "取得できませんでした"
         : selectedEvent
-          ? `${selectedEvent.title}・${eventDateLabel(selectedEvent.startsAt)}`
+          ? `${selectedEvent.title}・${eventDateLabel(selectedEvent.startsAt)}${isPast ? "・開催済み" : ""}`
           : "読み込み中…";
   const completion = taskCompletionPct(segments);
   const compStatus = completionStatus(completion);
@@ -319,7 +325,7 @@ export function HomeScreen({
               testId="fe2-kpi-countdown"
               icon="clock"
               label="開催まで"
-              value={days === null ? "—" : String(days)}
+              value={days === null || isPast ? "—" : String(days)}
               unit="日"
               status={cdStatus}
               hint={countdownHint}

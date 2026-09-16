@@ -50,11 +50,20 @@ describe("statusMeta", () => {
 });
 
 describe("daysUntil", () => {
-  it("rounds up whole days to the target and never goes negative", () => {
+  it("rounds up whole days remaining to a future target", () => {
     const now = new Date("2026-08-16T00:00:00Z");
     expect(daysUntil("2026-08-22T00:00:00Z", now)).toBe(6);
     expect(daysUntil("2026-08-16T05:00:00Z", now)).toBe(1);
-    expect(daysUntil("2026-08-10T00:00:00Z", now)).toBe(0); // past → 0
+  });
+  it("is 0 exactly on the target and NEGATIVE once it has passed (never clamps to 0)", () => {
+    // Regression: clamping a past date to 0 made an event that already happened look
+    // identical to "happening today" — the dashboard's 開催まで tile got permanently
+    // stuck at "0日" for a stale hardcoded date instead of ever reading "開催済み".
+    // Callers now do their own subtraction-is-correct check on the sign.
+    const now = new Date("2026-08-16T00:00:00Z");
+    expect(daysUntil("2026-08-16T00:00:00Z", now)).toBe(0);
+    expect(daysUntil("2026-08-10T00:00:00Z", now)).toBe(-6); // 6 days ago
+    expect(daysUntil("2026-08-15T00:00:00Z", now)).toBe(-1); // yesterday
   });
   it("returns null on an invalid date", () => {
     expect(daysUntil("not-a-date")).toBeNull();
