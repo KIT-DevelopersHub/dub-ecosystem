@@ -91,21 +91,22 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
   // evt_2 / evt_3 keep the SAME title/phase/startsAt as their EVENTS summary row above
   // (list and detail must never drift). Added so every event the header's global イベント
   // switcher lists is also openable via GET /events/:id — not just evt_1 — which the
-  // ダッシュボード「開催まで」 countdown now depends on (it fetches the switcher's
-  // selected event's detail directly rather than the curated /bff/home subset).
+  // ダッシュボード「開催まで」 countdown and the "直近のイベント" card click-through both
+  // depend on (both fetch a single event's detail directly rather than the curated
+  // /bff/home subset).
   evt_2: {
     version: 1,
     id: "evt_2",
     orgId: ORG,
     title: "運営定例ミーティング",
-    description: "週次の運営定例。進捗確認とブロッカーの棚卸し。",
+    description: "毎週の運営定例。進捗共有と次アクションの確認を行う。",
     phase: "planning",
     startsAt: "2026-08-12T09:00:00Z",
     endsAt: "2026-08-12T10:00:00Z",
     archivedAt: null,
-    createdAt: "2026-07-01T00:00:00Z",
+    createdAt: "2026-06-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
-    actions: [],
+    actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
   },
   evt_3: {
     version: 1,
@@ -143,6 +144,19 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
       kind: "announcement",
       title: "参加者への案内メール",
       sortOrder: 1,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+  ],
+  evt_2: [
+    {
+      version: 1,
+      id: "act_3",
+      eventId: "evt_2",
+      kind: "announcement",
+      title: "定例アジェンダ共有",
+      sortOrder: 0,
       archivedAt: null,
       createdAt: "2026-06-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",

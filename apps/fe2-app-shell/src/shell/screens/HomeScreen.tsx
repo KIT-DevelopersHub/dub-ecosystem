@@ -23,11 +23,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
 import type { event } from "@dub/types";
+import { useSetCurrentEventId } from "@dub/fe3-event-action";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
 import { useRecentVisits } from "../useVisitTracker.tsx";
-import { loadSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
+import {
+  loadSelectedEvent,
+  saveSelectedEvent,
+} from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
@@ -219,6 +223,10 @@ export function HomeScreen({
   onNavigate?: (path: string) => void;
 }): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
+  // Drives the same "current event" selection the header's イベント switcher
+  // (GlobalEventSwitcher) and the Event app hub (/events → EventHubPage) read —
+  // see openEvent() below.
+  const setCurrentEvent = useSetCurrentEventId();
   const eventsError = errorFor("event-service");
 
   // "開催まで" tracks whichever event the header's global イベント switcher currently has
@@ -271,6 +279,22 @@ export function HomeScreen({
     if (onNavigate) {
       e.preventDefault();
       onNavigate(path);
+    }
+  };
+
+  // Open an event from the "直近のイベント" row: select it in the SAME store the
+  // header's イベント switcher and the Event app hub read (useCurrentEventId), then
+  // land on the hub itself (/events) — the normal Event app home, already showing
+  // that event — rather than the standalone :eventId detail route (a separate
+  // screen reachable only from here; ユーザー指摘 = "遷移先が本来のイベント画面と
+  // 別物になる"). Mirrors GlobalEventSwitcher's select() (saveSelectedEvent +
+  // setCurrentEvent) minus its gantt-specific destination.
+  const openEvent = (eventId: string) => (e: { preventDefault(): void }) => {
+    saveSelectedEvent(eventId);
+    setCurrentEvent(eventId);
+    if (onNavigate) {
+      e.preventDefault();
+      onNavigate("/events");
     }
   };
 
@@ -511,10 +535,11 @@ export function HomeScreen({
                 {events.map((ev) => (
                   <li key={ev.id} className="fe2-list-row">
                     <a
-                      href={`/events/${ev.id}`}
+                      href="/events"
                       className="fe2-list-link"
                       data-testid={`fe2-home-event-${ev.id}`}
-                      onClick={go(`/events/${ev.id}`)}
+                      title={`${ev.title}を選択してイベントアプリを開く`}
+                      onClick={openEvent(ev.id)}
                     >
                       <span className="fe2-list-dot" />
                       <span className="fe2-list-main">
