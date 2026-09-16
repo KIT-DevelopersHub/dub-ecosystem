@@ -33,6 +33,15 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
+    id: "v2.0",
+    name: "v2.0 リニューアル版",
+    description:
+      "Next.js で作り直した磨き上げ版。Inter+Zen Kaku のタイポグラフィ、オリジナルのブランドグラデーション SVG、WCAG AA 準拠。承認後に現行 LP へ差し替え予定。",
+    url: "https://lp-conference-next-v2.developershub-site.workers.dev",
+    updatedAt: "2026-09-16",
+    status: "draft",
+  },
+  {
     id: "v1.0",
     name: "v1.0 テキスト版",
     description: "北陸ITカンファレンスの現行 LP。テキスト中心の初版。",
