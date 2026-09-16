@@ -55,7 +55,7 @@ PIDS=()
 cleanup() {
   echo ""
   echo "[dev-up] stopping..."
-  for pid in "${PIDS[@]:-}"; do
+  for pid in ${PIDS[@]+"${PIDS[@]}"}; do
     if [[ -n "${pid:-}" ]]; then
       pkill -P "$pid" 2>/dev/null || true   # kill grandchildren (e.g. vite under pnpm)
       kill "$pid" 2>/dev/null || true
@@ -107,7 +107,7 @@ echo "[dev-up] starting daemon on port ${DAEMON_PORT} ..."
       COMMANDER_CWD="$REPO_ROOT" \
       COMMANDER_SERVICE_URL="http://127.0.0.1:$SERVICE_PORT" \
       COMMANDER_SERVICE_TOKEN="$TOKEN" \
-      "${DAEMON_CLAUDE_ENV[@]}" \
+      ${DAEMON_CLAUDE_ENV[@]+"${DAEMON_CLAUDE_ENV[@]}"} \
       node --experimental-strip-types commander/daemon/src/index.ts ) >"$LOG_DIR/daemon.log" 2>&1 &
 PIDS+=("$!")
 
