@@ -9,10 +9,19 @@
 // (user,type,channel,enabled) grain; we map between the two at the API boundary.
 import type { PreferenceRow } from "./repo";
 import type { NotificationChannel, NotificationPriority, NotificationType } from "./types";
-import { CHANNELS } from "./config";
+import { CHANNELS, CHAT_DM_NOTIFY_TYPE, CHAT_MENTION_NOTIFY_TYPE } from "./config";
+
+// chat.* is off by default for in_app — a plain new-message ping would double-ring
+// against FE6's own unread badge for every message in every channel you're in. An
+// @mention and a DM are the deliberate exception: unlike a same-channel message, they
+// need to surface even when you aren't looking at that channel/the chat tab at all
+// (Slack-parity), so these two specific types default in_app ON despite the chat.*
+// exclusion below.
+const CHAT_IN_APP_DEFAULT_ON: ReadonlySet<string> = new Set([CHAT_MENTION_NOTIFY_TYPE, CHAT_DM_NOTIFY_TYPE]);
 
 // System defaults (theme4 1-5, frozen):
-//   in_app = on for all types EXCEPT chat.* (avoid double-count with FE6 unread)
+//   in_app = on for all types EXCEPT chat.* (avoid double-count with FE6 unread),
+//            except chat.mention / chat.dm which default ON (see above)
 //   email  = on only for urgent notifications
 //   chat   = off
 //   push   = on
@@ -23,6 +32,7 @@ export function defaultEnabled(
 ): boolean {
   switch (channel) {
     case "in_app":
+      if (CHAT_IN_APP_DEFAULT_ON.has(type)) return true;
       return !type.startsWith("chat.");
     case "email":
       return priority === "urgent";
