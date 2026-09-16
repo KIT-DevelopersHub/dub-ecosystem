@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p25-mail-delete-anim",
+  "worker": "dub-demo-p25-mail-delete-anim",
+  "url": "https://dub-demo-p25-mail-delete-anim.developershub-site.workers.dev",
+  "deployedSha": "4f3017fb",
+  "branch": "feat/p25-mail-delete-anim",
+  "actor": "kota",
+  "markers": ["fe2-mail-thread-row"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:56:36Z",
+  "updatedAt": "2026-09-13T16:56:36Z",
+  "note": ""
+}
