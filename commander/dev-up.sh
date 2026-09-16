@@ -52,14 +52,21 @@ fi
 MIGRATION="$REPO_ROOT/infra/d1/migrations/commander/0001_commander_init.sql"
 
 PIDS=()
+# Recursively kill a process and ALL its descendants (children first). Needed because
+# our children spawn grandchildren that outlive a plain kill: wrangler -> workerd,
+# pnpm -> vite. Leaving those orphaned would hold the ports and block the next run.
+kill_tree() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_tree "$child"
+  done
+  kill "$pid" 2>/dev/null || true
+}
 cleanup() {
   echo ""
   echo "[dev-up] stopping..."
   for pid in ${PIDS[@]+"${PIDS[@]}"}; do
-    if [[ -n "${pid:-}" ]]; then
-      pkill -P "$pid" 2>/dev/null || true   # kill grandchildren (e.g. vite under pnpm)
-      kill "$pid" 2>/dev/null || true
-    fi
+    [[ -n "${pid:-}" ]] && kill_tree "$pid"
   done
   wait 2>/dev/null || true
 }
