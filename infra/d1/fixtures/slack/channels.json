@@ -1,0 +1,20 @@
+[
+  {
+    "id": "C_CONF_PUBLIC",
+    "name": "conference-general",
+    "is_channel": true,
+    "is_private": false,
+    "is_archived": false,
+    "topic": { "value": "北陸ITカンファレンス 全体連絡" },
+    "creator": "U_ALICE"
+  },
+  {
+    "id": "C_CONF_CORE",
+    "name": "conference-core-private",
+    "is_group": true,
+    "is_private": true,
+    "is_archived": false,
+    "topic": { "value": "運営コア (非公開)" },
+    "creator": "U_BOB"
+  }
+]

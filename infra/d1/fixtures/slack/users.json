@@ -1,0 +1,23 @@
+[
+  {
+    "id": "U_ALICE",
+    "name": "alice",
+    "profile": { "email": "alice@developershub.jp", "real_name": "Alice Yamada", "display_name": "alice" }
+  },
+  {
+    "id": "U_BOB",
+    "name": "bob",
+    "profile": { "email": "bob@developershub.jp", "real_name": "Bob Tanaka", "display_name": "bob" }
+  },
+  {
+    "id": "U_GUEST",
+    "name": "guest.carol",
+    "profile": { "email": "carol@example-guest.com", "real_name": "Carol Guest", "display_name": "carol" }
+  },
+  {
+    "id": "U_BOT",
+    "name": "conference-bot",
+    "is_bot": true,
+    "profile": { "real_name": "Conference Bot", "display_name": "conference-bot" }
+  }
+]
