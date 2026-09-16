@@ -1,7 +1,25 @@
 import type { Metadata } from "next";
+import { Inter, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
 import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
+
+// Typography — Inter for latin/numerals (clean, high x-height) layered over
+// Zen Kaku Gothic New for Japanese (modern, highly readable geometric gothic).
+// Both are self-hosted at build time via next/font (works with output: export)
+// so the SSG page ships no render-blocking third-party font request.
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-inter",
+  display: "swap",
+});
+const zenKaku = Zen_Kaku_Gothic_New({
+  subsets: ["latin"],
+  weight: ["400", "500", "700", "900"],
+  variable: "--font-jp",
+  display: "swap",
+});
 
 const config = snapshot as LpConfig;
 const { seo } = config;
@@ -40,7 +58,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ja">
+    <html lang="ja" className={`${inter.variable} ${zenKaku.variable}`}>
       <body>
         <a className="skip-link" href="#main">
           本文へスキップ

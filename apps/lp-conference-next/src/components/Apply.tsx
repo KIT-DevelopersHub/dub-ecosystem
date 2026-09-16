@@ -1,11 +1,24 @@
 import Image from "next/image";
+import { Fragment } from "react";
 import { Reveal } from "@/components/Reveal";
 import type { ApplyConfig } from "@/config/types";
 
-// Apply (応募フォーム) — 対角 2×2: [参加者テキスト][参加者画像] / [登壇画像][登壇テキスト]。
-// 画像には色オーバーレイと「〜こちら！」ラベルがモックアップ時点で焼き込まれているため、
-// リンクの可視ラベルは画像側に任せ、a11y 用に aria-label を付ける。
-// 画像=ボタンのホバー浮き上がり/ズームは pure CSS（globals.css）。
+// Apply (応募フォーム) — 対角 2×2: [参加者テキスト][参加者ボタン] / [登壇ボタン][登壇テキスト]。
+// ★ ボタンは画像ではなく「文字を含まない写真（純グラフィック）＋色スクリム＋実テキスト」。
+//   ラベル (参加登録はこちら！/ 登壇への応募はこちら！) は HTML の実テキストで描画し、
+//   選択・コピー・翻訳・SEO を可能にする。ホバーの浮き上がり/ズームは pure CSS。
+
+// 改行入りラベルを実テキスト（<br/>）で描画。
+function multiline(text: string) {
+  const lines = text.split("\n");
+  return lines.map((ln, i) => (
+    <Fragment key={i}>
+      {i > 0 && <br />}
+      {ln}
+    </Fragment>
+  ));
+}
+
 export function Apply({ data }: { data: ApplyConfig }) {
   const plabel = data.participant.cta.label.replace(/\n/g, "");
   const slabel = data.speaker.cta.label.replace(/\n/g, "");
@@ -25,31 +38,47 @@ export function Apply({ data }: { data: ApplyConfig }) {
             <p className="apply-body">{data.participant.body}</p>
           </Reveal>
 
-          <Reveal
-            as="span"
-            className="apply-cell--pimg"
-            delay={0.08}
-          >
-            <a className="apply-card" href={data.participant.cta.href} aria-label={plabel}>
+          <Reveal as="span" className="apply-cell--pimg" delay={0.08}>
+            <a
+              className="apply-card apply-card--participant"
+              href={data.participant.cta.href}
+              aria-label={plabel}
+            >
               <Image
+                className="apply-card-img"
                 src="/img/apply-participant.png"
-                alt={plabel}
+                alt=""
+                aria-hidden="true"
                 width={727}
                 height={370}
                 loading="lazy"
               />
+              <span className="apply-card-scrim" aria-hidden="true" />
+              <span className="apply-card-label">
+                {multiline(data.participant.cta.label)}
+              </span>
             </a>
           </Reveal>
 
           <Reveal as="span" className="apply-cell--simg" delay={0.16}>
-            <a className="apply-card" href={data.speaker.cta.href} aria-label={slabel}>
+            <a
+              className="apply-card apply-card--speaker"
+              href={data.speaker.cta.href}
+              aria-label={slabel}
+            >
               <Image
+                className="apply-card-img"
                 src="/img/apply-speaker.png"
-                alt={slabel}
+                alt=""
+                aria-hidden="true"
                 width={740}
                 height={374}
                 loading="lazy"
               />
+              <span className="apply-card-scrim" aria-hidden="true" />
+              <span className="apply-card-label">
+                {multiline(data.speaker.cta.label)}
+              </span>
             </a>
           </Reveal>
 

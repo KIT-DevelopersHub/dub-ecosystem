@@ -22,19 +22,14 @@ export default function Page() {
   return (
     <>
       <Hero data={config.hero} nav={config.nav} />
-      <div className="band-sep" aria-hidden="true" />
       <Catch data={config.catch} />
-      <div className="band-sep" aria-hidden="true" />
       <About data={config.about} />
-      <div className="band-sep" aria-hidden="true" />
       <Program data={config.program} />
-      <div className="band-sep" aria-hidden="true" />
       <Crowdfunding data={config.crowdfunding} />
-      <div className="band-sep" aria-hidden="true" />
       <Apply data={config.apply} />
-      <div className="band-sep" aria-hidden="true" />
       <Contact data={config.contact} />
       <Footer data={config.footer} />
     </>
   );
 }
+
