@@ -2,6 +2,7 @@
 // a big value (with an optional unit), an optional sub-hint, and an optional trailing
 // ring gauge or footer meter. A `demo` flag surfaces a small "デモ" tag so illustrative
 // numbers are never mistaken for live figures. Colors resolve from @dub/tokens.
+import type { CSSProperties } from "react";
 import { Icon } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
 import { statusMeta, type MetricStatus } from "./dashboardData.ts";
@@ -20,6 +21,10 @@ export interface KpiTileProps {
   demo?: boolean;
   ring?: { pct: number; status: MetricStatus; centerLabel?: string; ariaLabel?: string };
   meter?: { pct: number; status: MetricStatus; ariaLabel?: string };
+  /** Extra inline style on the tile's root — a CSS Grid span from the Home
+   *  dashboard's small/medium/large widget size (P3-4). Inert unless the tile is
+   *  actually a direct child of a grid container. */
+  style?: CSSProperties;
   testId?: string;
 }
 
@@ -33,11 +38,12 @@ export function KpiTile({
   demo = false,
   ring,
   meter,
+  style,
   testId,
 }: KpiTileProps): JSX.Element {
   const meta = statusMeta(status);
   return (
-    <div className="fe2-kpi" data-status={status} data-testid={testId}>
+    <div className="fe2-kpi" data-status={status} style={style} data-testid={testId}>
       <div className="fe2-kpi-top">
         <span
           className="fe2-kpi-icon"

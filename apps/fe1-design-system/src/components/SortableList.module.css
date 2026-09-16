@@ -1,8 +1,24 @@
+/* dnd-kit portals DragOverlay to document.body as the LAST element there, so by
+   normal paint order it already sits above the page — this class is a defensive
+   backstop (paired with the `zIndex` prop passed to DragOverlay) so a stray
+   `z-index`/stacking-context elsewhere (a sticky header, a modal layer, …) can never
+   paint over the lifted tile — the single most visible symptom of "the dragged
+   widget looks like it fell behind everything". */
+.overlayLayer {
+  z-index: 1000;
+  pointer-events: none;
+}
+
 /* The floating clone shown under the cursor while a row is dragged. This is the
    design-system's "picked-up" elevation — a soft two-layer shadow plus a hair of
    scale so the row reads as lifted off the list. The consumer's item markup renders
-   inside; this wrapper only adds the lift. */
+   inside; this wrapper only adds the lift. Sized to the SOURCE row's own measured
+   box (SortableList sets `width`/`height` inline from the pickup measurement) so a
+   grid tile clones at its real size instead of shrink/growing to its content's
+   intrinsic size once it's outside the grid — box-sizing: border-box keeps that
+   measured size including this wrapper's own border-radius/shadow, not on top of it. */
 .overlay {
+  box-sizing: border-box;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.26), 0 2px 6px rgba(15, 23, 42, 0.16);
   border-radius: var(--dub-radius-md, 8px);
   transform: scale(1.03);
