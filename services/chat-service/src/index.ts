@@ -16,6 +16,7 @@ import { createApp } from "./app";
 import { createD1ChatRepo } from "./d1-repo";
 import { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
 import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
+import { createUnfurler } from "./unfurl";
 import type { Env } from "./env";
 import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, RealtimePublisher } from "./types";
 
@@ -115,6 +116,8 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     now: nowIso,
     newChannelId: () => newId("chan"),
     newMessageId: () => newId("msg"),
+    // Link previews: outbound fetch from the Worker (SSRF-guarded in unfurl.ts).
+    unfurler: createUnfurler({ fetchImpl: fetch.bind(globalThis) }),
   };
 }
 
