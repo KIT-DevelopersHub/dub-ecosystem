@@ -39,6 +39,8 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  UnfurlPreview,
+  UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -248,5 +250,12 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
         })
         .then((r) => unwrapItems<identity.UserSummary>(r));
     },
+    // Link preview is best-effort: a blocked URL (400) or a network error simply
+    // means "no card" — never surface it as a chat error.
+    unfurl: (url: string): Promise<UnfurlPreview | null> =>
+      api
+        .request<UnfurlResponse>({ method: "GET", path: `${CHAT}/unfurl`, query: { url } })
+        .then((r) => r?.preview ?? null)
+        .catch(() => null),
   };
 }

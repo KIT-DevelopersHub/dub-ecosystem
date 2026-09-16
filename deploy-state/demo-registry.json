@@ -23,6 +23,13 @@
       "pr": 411,
       "markers": "タスクの背景・手順・補足などを書けます",
       "note": "task detail dialog (memo + file/URL attachments, scrollable body, fixed footer) in fe4"
+    },
+    {
+      "slug": "chat-url-ogp",
+      "ref": "feat/chat-url-ogp-unfurl",
+      "pr": 524,
+      "markers": "chat-url-ogp-unfurl-v1,fe6-link-preview",
+      "note": "chat: bare URL autolink + Slack-style OGP link preview card (mock unfurl in demo) in fe6"
     }
   ]
 }

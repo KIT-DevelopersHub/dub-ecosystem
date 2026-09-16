@@ -28,3 +28,9 @@ export function useChatRuntime(): ChatRuntime {
   if (!ctx) throw new Error("useChatRuntime must be used within ChatRuntimeProvider");
   return ctx;
 }
+
+/** Runtime or null — for best-effort leaf components (link previews) that must also
+ *  render inside bare unit tests without a provider. */
+export function useOptionalChatRuntime(): ChatRuntime | null {
+  return useContext(ChatRuntimeContext);
+}

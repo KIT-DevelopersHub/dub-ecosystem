@@ -21,7 +21,8 @@
 name = "dub-chat-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
-compatibility_flags = ["nodejs_compat"]
+# global_fetch_strictly_public: same-zone unfurl fetches go through WAF/Access (see wrangler.toml).
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 # Enabled so browsers can open the DO-direct realtime WebSocket (wss://<this
 # worker>/ws/:id). The public surface is WS-only: src/index.ts rejects every non-/ws
 # (and non-/health) request that did NOT arrive over the api-gateway service binding
