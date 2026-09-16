@@ -14,6 +14,25 @@ describe("useUndoRedo — command stack", () => {
     expect(result.current.undoLabel).toBe("move");
   });
 
+  it("peekUndo exposes the next command (with its confirm descriptor) without running it", async () => {
+    const log: string[] = [];
+    const { result } = renderHook(() => useUndoRedo());
+    expect(result.current.peekUndo()).toBeUndefined(); // boundary
+    act(() =>
+      result.current.push({
+        label: "削除",
+        confirm: { message: "戻しますか？", confirmLabel: "戻す" },
+        undo: () => { log.push("undo"); },
+        redo: () => { log.push("redo"); },
+      }),
+    );
+    // peek must NOT run the inverse — it only reveals what the next undo would reverse.
+    expect(log).toEqual([]);
+    expect(result.current.peekUndo()?.label).toBe("削除");
+    expect(result.current.peekUndo()?.confirm?.confirmLabel).toBe("戻す");
+    expect(result.current.canUndo).toBe(true);
+  });
+
   it("undo runs the inverse and moves the entry onto the redo stack", async () => {
     const log: string[] = [];
     const { result } = renderHook(() => useUndoRedo());
