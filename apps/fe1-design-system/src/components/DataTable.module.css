@@ -30,7 +30,29 @@
 .tr.clickable {
   cursor: pointer;
 }
-.tr.clickable:hover {
+/* P02 可読性: every row highlights on hover (not only clickable ones). A
+ * theme-aware translucent accent so it stays distinct from the zebra stripe in
+ * both light and dark. */
+.tr:hover td {
+  background: color-mix(in srgb, var(--dub-color-border-focus) 14%, transparent);
+}
+
+/* ── P02 可読性: sticky header + zebra striping ──────────────────────────────
+ * Opt-in via DataTableProps.stickyHeader / .zebra. */
+.wrap.scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.stickyTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* Solid fill so scrolling rows do not show through the pinned header. */
+  background: var(--dub-color-surface-base);
+}
+/* Zebra: tint even data rows. Applied on the cell so the sticky header and the
+ * hover accent (also on td) layer predictably above it. */
+.zebra tbody tr:nth-child(even) td {
   background: var(--dub-color-surface-sunken);
 }
 .checkCell {

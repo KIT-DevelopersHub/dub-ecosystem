@@ -325,6 +325,8 @@ export function UserListPage() {
               onSortChange={setSort}
               selection={canBulk ? { selectedKeys: selectedIds, onChange: setSelectedIds } : undefined}
               onRowClick={(u) => setSelectedId(u.id)}
+              stickyHeader
+              zebra
               testId="fe7-users-table"
             />
             <LoadMore
