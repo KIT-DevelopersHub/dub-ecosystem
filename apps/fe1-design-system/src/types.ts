@@ -391,6 +391,11 @@ export interface DrawerProps extends TestableProps {
   title?: string;
   side?: "left" | "right";
   children: ReactNode;
+  // Skip the built-in title/close header entirely — for callers whose content
+  // already renders its own header + close affordance (avoids a duplicated
+  // header when the Drawer is only being used for its overlay mechanics:
+  // portal, focus trap, esc-to-close, scroll lock).
+  hideHeader?: boolean;
 }
 
 export interface PopoverProps extends TestableProps {
