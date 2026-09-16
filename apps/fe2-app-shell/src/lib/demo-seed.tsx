@@ -260,22 +260,27 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      // teamId mirrors each row's TASKS entry above so the gantt's チーム順 grouping
+      // AND the task-number prefix (team-code.ts) both reflect the row's real team —
+      // this DTO used to omit teamId entirely, which silently showed every task
+      // number with NO team prefix in this demo (a gap in the fixture, independent
+      // of the task-number-team-prefix fix itself).
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, teamId: "team_hq", hasChildren: true },
       // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
       // contiguous; used to prove the team rail stays straight across an indented child.
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
-      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
-      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_1", depth: 1 },
+      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_ops" },
       // 階層集計デモ: tsk_10(祖父) -> tsk_11(親) -> tsk_12/13/14(葉、2完了+1ブロック)。
       // tsk_10 の直接の子は tsk_11 だけ — バー/ドロップダウンが正しければ、2階層下の
       // 3枚の葉から再帰集計された「完了寄り」が出る(祖父の直下だけを見ていたら出ない)。
-      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, hasChildren: true },
-      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_10", depth: 1, hasChildren: true },
-      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
-      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
-      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", hasChildren: true },
+      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_10", depth: 1, hasChildren: true },
+      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
@@ -284,10 +289,10 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_3: {
     eventId: "evt_3",
     rows: [
-      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
-      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
-      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_ops" },
+      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_hq" },
     ],
     dependencies: [
       { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },

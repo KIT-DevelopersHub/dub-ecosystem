@@ -28,7 +28,8 @@ import type { RowGroup } from "../domain/row-groups";
 import { PRIORITY_LABEL, DATE_LABEL } from "../domain/task-form";
 import { useGanttSort } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
-import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
+import { useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
+import { teamCodeById } from "../domain/team-code";
 import {
   clearViewPref,
   filterFromPref,
@@ -159,12 +160,13 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   // The primary sort key (keys[0]) drives the group-bracket rail below when it's a
   // groupable key (チーム/重要度) and we're not in manual mode.
   const primarySortKey = sortState.manual ? null : (sortState.keys[0]?.key ?? null);
-  // Task-number prefix (e.g. "AA") + zero-pad width (e.g. 4 -> "AA-0001") — personal
-  // view settings, persisted per event.
-  const [numberPrefix, setNumberPrefix] = useTaskNumberPrefix(eventId);
+  // Task-number zero-pad width (e.g. 4 -> "TK-0001") — personal view setting,
+  // persisted per event. The prefix itself is NOT a free-text preference any more:
+  // it's derived per row from the task's owning team (teamCodeById below), so every
+  // team shows its own code instead of one shared value.
   const [numberPadWidth, setNumberPadWidth] = useTaskNumberPadWidth(eventId);
   // Show/hide the task-number badge (default ON). OFF hides the badges and the
-  // prefix/桁数 inputs, but keeps their saved values for when it's turned back on.
+  // 桁数 input, but keeps its saved value for when it's turned back on.
   const [numberVisible, setNumberVisible] = useTaskNumberVisible(eventId);
   const teams = useTeams().data ?? [];
   // Org member roster — the source for the assignee dropdown. Without it the only
@@ -355,13 +357,18 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gantt.data, tasks, orderedTaskIds, sortState, sortContext]);
 
-  // WBS task numbers (e.g. "AA-1-1"), derived from the CURRENT display order + the
+  // WBS task numbers (e.g. "TK-1-1"), derived from the CURRENT display order + the
   // WBS tree on each row, so re-ordering / re-parenting re-numbers automatically. It
   // is computed over the exact rows the gantt renders (filtered + sorted), so the
-  // badges match what's on screen. View-time only — nothing persisted.
+  // badges match what's on screen. View-time only — nothing persisted. The prefix is
+  // resolved PER ROW from that row's own team (teamCodeById) — not one shared value
+  // — so every team gets its own correct code instead of every task showing "AA".
   const numberById = useMemo<ReadonlyMap<common.TaskId, string>>(
-    () => (filteredDto && numberVisible ? computeTaskNumbers(filteredDto.rows, numberPrefix, numberPadWidth) : new Map()),
-    [filteredDto, numberVisible, numberPrefix, numberPadWidth],
+    () =>
+      filteredDto && numberVisible
+        ? computeTaskNumbers(filteredDto.rows, (r) => teamCodeById(r.teamId, teamById), numberPadWidth)
+        : new Map(),
+    [filteredDto, numberVisible, teamById, numberPadWidth],
   );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
@@ -1251,35 +1258,20 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           <span className={styles.numPrefixLabel}>タスク番号を表示</span>
         </label>
         {numberVisible && (
-          <>
-            <label className={styles.numPrefix}>
-              <span className={styles.numPrefixLabel}>番号プレフィックス</span>
-              <input
-                type="text"
-                className={styles.numPrefixInput}
-                value={numberPrefix}
-                onChange={(e) => setNumberPrefix(e.target.value)}
-                maxLength={8}
-                placeholder="AA"
-                aria-label="タスク番号のプレフィックス"
-                data-testid="fe4-number-prefix"
-              />
-            </label>
-            <label className={styles.numPrefix}>
-              <span className={styles.numPrefixLabel}>桁数</span>
-              <input
-                type="number"
-                className={styles.numPadInput}
-                value={numberPadWidth}
-                onChange={(e) => setNumberPadWidth(Number(e.target.value))}
-                min={0}
-                max={MAX_PAD_WIDTH}
-                step={1}
-                aria-label="タスク番号の桁数（ゼロ埋め）"
-                data-testid="fe4-number-pad"
-              />
-            </label>
-          </>
+          <label className={styles.numPrefix}>
+            <span className={styles.numPrefixLabel}>桁数</span>
+            <input
+              type="number"
+              className={styles.numPadInput}
+              value={numberPadWidth}
+              onChange={(e) => setNumberPadWidth(Number(e.target.value))}
+              min={0}
+              max={MAX_PAD_WIDTH}
+              step={1}
+              aria-label="タスク番号の桁数（ゼロ埋め）"
+              data-testid="fe4-number-pad"
+            />
+          </label>
         )}
         <button
           type="button"
