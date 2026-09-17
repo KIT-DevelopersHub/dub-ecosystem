@@ -4,6 +4,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { buildSpawnEnv } from "./env.ts";
 import type { DaemonConfig, Run, RunEvent, StartRunInput } from "./types.ts";
 
 type Listener = (event: RunEvent) => void;
@@ -80,9 +81,15 @@ export class RunStore {
 
     let child;
     try {
+      // Never inherit the operator's full env: build a scoped env whose
+      // CLAUDE_CONFIG_DIR points at Commander's own config home, so the spawned
+      // claude does NOT read the personal ~/.claude (CLAUDE.md/rules/hooks/lessons).
       child = spawn(this.config.claudeBin, args, {
         cwd: run.cwd,
-        env: process.env,
+        env: buildSpawnEnv({
+          isolateEnv: this.config.isolateEnv,
+          claudeConfigDir: this.config.claudeConfigDir || undefined,
+        }),
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (err) {

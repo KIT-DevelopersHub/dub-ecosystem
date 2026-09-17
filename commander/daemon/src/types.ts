@@ -44,4 +44,15 @@ export interface DaemonConfig {
   defaultCwd: string;
   /** Extra args appended to every `claude -p` invocation. */
   extraArgs: string[];
+  /**
+   * When true (default), spawned claude gets a minimal allow-listed env instead of a
+   * full copy of process.env — severing the operator's personal `~/.claude`.
+   */
+  isolateEnv: boolean;
+  /**
+   * Absolute path to Commander's own Claude config home, passed as CLAUDE_CONFIG_DIR
+   * to the spawned claude so it reads Commander's CLAUDE.md/settings.json (no personal
+   * rules/hooks). Empty string disables the redirect.
+   */
+  claudeConfigDir: string;
 }
