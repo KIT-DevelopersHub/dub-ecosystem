@@ -18,6 +18,8 @@ import {
   type AdapterRegistry,
 } from "../src/adapters";
 import { unreadCount, upsertPreference, listPreferenceOverrides } from "../src/repo";
+import { verifyWsTicket, DEV_WS_SECRET } from "../src/wsticket";
+import type { InboxRealtimePublisher } from "../src/realtime";
 import type { ChannelAdapter, DeliveryJob, IngestInput, NotifyRecipients } from "../src/types";
 import {
   makeTestEnv,
@@ -757,5 +759,69 @@ describe("POST /internal/events-async (free-tier domain-event landing route)", (
     const res = await req("/internal/events-async", internalPost({ payload: {} }), h);
     expect(res.status).toBe(400);
     expect(await countNotifications(h)).toBe(0);
+  });
+
+  it("GET /inbox/ws-ticket returns a user-scoped, verifiable ticket + doUrl", async () => {
+    const h = makeTestEnv({
+      NOTIF_RT_DO_URL_BASE: "wss://dub-notification-service-staging.example.workers.dev/ws/:id",
+    } as Partial<import("../src/env").Env>);
+    const res = await req("/inbox/ws-ticket", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ticket: string; doUrl: string; expEpochMs: number };
+    expect(body.doUrl).toBe("wss://dub-notification-service-staging.example.workers.dev/ws/u1");
+    expect(body.expEpochMs).toBeGreaterThan(Date.now());
+    // The DO would verify with the same secret; claims bind to the authenticated user.
+    const claims = await verifyWsTicket(DEV_WS_SECRET, body.ticket);
+    expect(claims?.userId).toBe("u1");
+  });
+
+  it("GET /inbox/ws-ticket requires auth (no x-dub-user-id -> 401)", async () => {
+    const h = makeTestEnv();
+    const res = await req("/inbox/ws-ticket", {}, h);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("ingest realtime push", () => {
+  function recordingRealtime(): { rt: InboxRealtimePublisher; pushed: string[] } {
+    const pushed: string[] = [];
+    return {
+      pushed,
+      rt: {
+        async pushInboxChanged(userId: string) {
+          pushed.push(userId);
+        },
+      },
+    };
+  }
+
+  it("signals each recipient that received an in_app row", async () => {
+    const h = makeTestEnv();
+    const { rt, pushed } = recordingRealtime();
+    await ingest(
+      { ...coreDeps(h), realtime: rt },
+      baseInput({ type: "system.announcement", recipients: { userIds: ["u1", "u2"] }, channels: ["in_app"] }),
+    );
+    expect(pushed.sort()).toEqual(["u1", "u2"]);
+  });
+
+  it("does not signal when there are no recipients", async () => {
+    const h = makeTestEnv();
+    const { rt, pushed } = recordingRealtime();
+    await ingest(
+      { ...coreDeps(h), realtime: rt },
+      baseInput({ type: "system.announcement", recipients: { userIds: [] }, channels: ["in_app"] }),
+    );
+    expect(pushed).toEqual([]);
+  });
+
+  it("does not signal for an email-only notification (no in_app row)", async () => {
+    const h = makeTestEnv();
+    const { rt, pushed } = recordingRealtime();
+    await ingest(
+      { ...coreDeps(h), realtime: rt },
+      baseInput({ type: "x.y", recipients: { userIds: ["u1"] }, channels: ["email"] }),
+    );
+    expect(pushed).toEqual([]);
   });
 });

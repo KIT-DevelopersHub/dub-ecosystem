@@ -13,8 +13,16 @@ import { consoleSink } from "@dub/observability";
 import { drainAll } from "./drain-all";
 import type { Env } from "./env";
 
-// 5 minutes — matches the retired `crons = ["*/5 * * * *"]` cadence exactly.
-export const DRAIN_INTERVAL_MS = 5 * 60 * 1000;
+// 60 seconds — the drain safety-net cadence. A DO alarm does NOT count against the
+// Workers Free plan's 5-cron ACCOUNT cap, so this can run far more often than the
+// retired `crons = ["*/5 * * * *"]` without displacing any business cron. It was
+// lowered from 5min to 60s so any freeq outbox row (audit, deferred consumers, and any
+// evt.notification whose producer-side immediate direct-deliver was best-effort-dropped)
+// is delivered within a minute worst-case instead of up to five. The primary latency fix
+// for chat DM/@mention notifications is the producer-side immediate direct delivery
+// (chat-service -> notification POST /internal/events-async, idempotent on envelope.id);
+// this alarm is the durable fallback that guarantees eventual delivery.
+export const DRAIN_INTERVAL_MS = 60 * 1000;
 
 export class FreeqDrainDO {
   constructor(

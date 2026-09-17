@@ -19,6 +19,7 @@ export interface Env {
   SVC_EVENT?: Fetcher; // event-service (read-only eventExists check)
   SVC_FILE_META?: Fetcher; // file-meta (best-effort message<->file link registration)
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain defers audit
+  SVC_NOTIFICATION?: Fetcher; // notification (immediate direct delivery of DM/@mention evt.notification to POST /internal/events-async; absent => outbox+drain fallback only)
 
   // chat.* fan-out queue + audit channel (PAID plan only; absent => @dub/freeq outbox fallback).
   EVT_NOTIFICATION?: Queue; // sole subscriber of chat.* is notification
