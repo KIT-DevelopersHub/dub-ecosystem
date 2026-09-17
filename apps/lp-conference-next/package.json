@@ -1,6 +1,6 @@
 {
   "name": "@dub/lp-conference-next",
-  "version": "0.1.0",
+  "version": "2.2.0",
   "private": true,
   "description": "Public conference LP (北陸ITカンファレンス) — Next.js (App Router) rebuild. SSG (output: export), light-fixed marketing page. Renders a read-only publish snapshot; never calls internal services live. Delivered as a separate assets-only Cloudflare Worker.",
   "scripts": {
