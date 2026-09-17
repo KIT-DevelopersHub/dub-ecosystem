@@ -12,6 +12,8 @@ function config(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     claudeBin: FAKE_CLAUDE,
     defaultCwd: tmpdir(),
     extraArgs: [],
+    isolateEnv: true,
+    claudeConfigDir: "",
     ...overrides,
   };
 }

@@ -8,6 +8,7 @@ import {
   type FeatureDetail,
   type FeaturePhase,
 } from "./lib/commanderApi.ts";
+import { StatusBoard } from "./StatusBoard.tsx";
 
 interface FeatureBoardProps {
   api?: CommanderApi;
@@ -136,6 +137,8 @@ export function FeatureBoard({ api = defaultApi }: FeatureBoardProps) {
           機能を追加
         </button>
       </div>
+
+      <StatusBoard features={features} onSelect={openFeature} selectedId={selectedId} />
 
       {error && (
         <div

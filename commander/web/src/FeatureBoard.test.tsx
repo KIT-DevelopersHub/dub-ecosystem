@@ -67,8 +67,9 @@ describe("<FeatureBoard>", () => {
     ]);
     render(<FeatureBoard api={api} />);
 
-    await waitFor(() => expect(screen.getByText("使用量ダッシュボード")).toBeInTheDocument());
-    await userEvent.click(screen.getByText("使用量ダッシュボード"));
+    const list = within(await screen.findByTestId("feature-list"));
+    await waitFor(() => expect(list.getByText("使用量ダッシュボード")).toBeInTheDocument());
+    await userEvent.click(list.getByText("使用量ダッシュボード"));
 
     const detailEl = await screen.findByTestId("feature-detail");
     expect(within(detailEl).getAllByTestId("phase-badge")[0]).toHaveTextContent("demo確認待ち");
@@ -82,7 +83,9 @@ describe("<FeatureBoard>", () => {
       { to: "demo_rejected", requiresApproval: false, label: "demo却下(要修正)" },
     ]);
     render(<FeatureBoard api={api} />);
-    await userEvent.click(await screen.findByText("使用量ダッシュボード"));
+    await userEvent.click(
+      within(await screen.findByTestId("feature-list")).getByText("使用量ダッシュボード"),
+    );
     await userEvent.click(await screen.findByTestId("transition-demo_rejected"));
 
     expect(transition).toHaveBeenCalledWith("feat_1", "demo_rejected", {
@@ -95,7 +98,9 @@ describe("<FeatureBoard>", () => {
       { to: "staging_deployed", requiresApproval: true, label: "demo承認→staging反映" },
     ]);
     render(<FeatureBoard api={api} />);
-    await userEvent.click(await screen.findByText("使用量ダッシュボード"));
+    await userEvent.click(
+      within(await screen.findByTestId("feature-list")).getByText("使用量ダッシュボード"),
+    );
 
     // clicking the approval edge does NOT transition yet — it asks for confirmation
     await userEvent.click(await screen.findByTestId("transition-staging_deployed"));
@@ -116,7 +121,9 @@ describe("<FeatureBoard>", () => {
       { transitionError: { status: 409, error: "illegal_transition" } },
     );
     render(<FeatureBoard api={api} />);
-    await userEvent.click(await screen.findByText("使用量ダッシュボード"));
+    await userEvent.click(
+      within(await screen.findByTestId("feature-list")).getByText("使用量ダッシュボード"),
+    );
     await userEvent.click(await screen.findByTestId("transition-demo_rejected"));
 
     const banner = await screen.findByTestId("error-banner");
@@ -131,7 +138,9 @@ describe("<FeatureBoard>", () => {
       { transitionError: { status: 403, error: "approval_required" } },
     );
     render(<FeatureBoard api={api} />);
-    await userEvent.click(await screen.findByText("使用量ダッシュボード"));
+    await userEvent.click(
+      within(await screen.findByTestId("feature-list")).getByText("使用量ダッシュボード"),
+    );
     await userEvent.click(await screen.findByTestId("transition-staging_deployed"));
     await userEvent.click(await screen.findByTestId("approve-and-run"));
 
