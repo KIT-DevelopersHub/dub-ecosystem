@@ -96,3 +96,40 @@ describe("APP_MANIFEST — canonical app ↔ RBAC coverage", () => {
     expect(appRegistry.appAccessKeys("mail")).toEqual({ view: "app:mail:view", edit: "app:mail:edit" });
   });
 });
+
+describe("withRequiredAppDomainKeys — per-app grant carries its domain read key(s)", () => {
+  it("granting app:members:edit bundles app:members:view + identity:read (edit ⇒ view)", () => {
+    const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:members:edit"]));
+    expect(out.has("app:members:edit")).toBe(true);
+    expect(out.has("app:members:view")).toBe(true); // edit ⇒ view
+    expect(out.has("identity:read")).toBe(true); // domain read key so the toggle is EFFECTIVE
+  });
+
+  it("does NOT escalate to a domain write/admin key (minimal escalation)", () => {
+    const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:members:edit"]));
+    expect(out.has("identity:admin")).toBe(false); // never grants org-admin
+  });
+
+  it("granting app:members:view bundles identity:read but not edit", () => {
+    const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:members:view"]));
+    expect(out.has("identity:read")).toBe(true);
+    expect(out.has("app:members:edit")).toBe(false);
+  });
+
+  it("bundles the correct domain key per app (events → event:read)", () => {
+    const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:events:view"]));
+    expect(out.has("event:read")).toBe(true);
+    expect(out.has("identity:read")).toBe(false);
+  });
+
+  it("is idempotent and leaves non-app keys untouched", () => {
+    const once = appRegistry.withRequiredAppDomainKeys(["app:members:edit", "task:read"]);
+    const twice = appRegistry.withRequiredAppDomainKeys(once);
+    expect(twice).toEqual(once);
+    expect(once).toContain("task:read");
+  });
+
+  it("a set with no per-app keys is returned unchanged (sorted)", () => {
+    expect(appRegistry.withRequiredAppDomainKeys(["event:read", "event:write"])).toEqual(["event:read", "event:write"]);
+  });
+});

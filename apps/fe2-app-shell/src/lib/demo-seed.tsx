@@ -88,6 +88,24 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
       { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
     ],
   },
+  // evt_2 is one of the two events the Home dashboard's "直近のイベント" card
+  // links to (see /bff/home's upcomingEvents = EVENTS.slice(0, 2) below), so it
+  // needs a detail entry too — otherwise clicking that row 404s ("イベントが見つ
+  // かりません") even though the SPA navigation itself is correct.
+  evt_2: {
+    version: 1,
+    id: "evt_2",
+    orgId: ORG,
+    title: "運営定例ミーティング",
+    description: "毎週の運営定例。進捗共有と次アクションの確認を行う。",
+    phase: "planning",
+    startsAt: "2026-08-12T09:00:00Z",
+    endsAt: "2026-08-12T10:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
+  },
 };
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
@@ -110,6 +128,19 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
       kind: "announcement",
       title: "参加者への案内メール",
       sortOrder: 1,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+  ],
+  evt_2: [
+    {
+      version: 1,
+      id: "act_3",
+      eventId: "evt_2",
+      kind: "announcement",
+      title: "定例アジェンダ共有",
+      sortOrder: 0,
       archivedAt: null,
       createdAt: "2026-06-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
@@ -213,22 +244,27 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      // teamId mirrors each row's TASKS entry above so the gantt's チーム順 grouping
+      // AND the task-number prefix (team-code.ts) both reflect the row's real team —
+      // this DTO used to omit teamId entirely, which silently showed every task
+      // number with NO team prefix in this demo (a gap in the fixture, independent
+      // of the task-number-team-prefix fix itself).
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, teamId: "team_hq", hasChildren: true },
       // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
       // contiguous; used to prove the team rail stays straight across an indented child.
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
-      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
-      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_1", depth: 1 },
+      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_ops" },
       // 階層集計デモ: tsk_10(祖父) -> tsk_11(親) -> tsk_12/13/14(葉、2完了+1ブロック)。
       // tsk_10 の直接の子は tsk_11 だけ — バー/ドロップダウンが正しければ、2階層下の
       // 3枚の葉から再帰集計された「完了寄り」が出る(祖父の直下だけを見ていたら出ない)。
-      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, hasChildren: true },
-      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_10", depth: 1, hasChildren: true },
-      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
-      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
-      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", hasChildren: true },
+      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_10", depth: 1, hasChildren: true },
+      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
@@ -237,10 +273,10 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_3: {
     eventId: "evt_3",
     rows: [
-      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
-      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
-      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_ops" },
+      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_hq" },
     ],
     dependencies: [
       { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },
@@ -948,7 +984,14 @@ function createRosterStore() {
       if (pathname === "/api/v1/mail/status") {
         return json({ service: "mail-gateway", provider: "resend", rateLimit: { active: false, cooldownSec: 60 } });
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") return json(page(emails));
+      // 発行済み受信アドレス一覧（メール名簿の「発行済みアドレス」ダイアログ）。バックエンドの
+      // /issued-addresses（zone ルール由来）に合わせる。旧 /addresses（アカウント送信先）はもう
+      // フロントから呼ばれない。
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
+      // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
+      if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
+        return json({ items: emails.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })) });
+      }
       return null;
     }
 
@@ -989,7 +1032,7 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         return json(user);
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") {
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
         const localPart = req?.localPart?.trim().toLowerCase() ?? "";
         if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
@@ -1028,7 +1071,7 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const addr = emails.find((a) => a.id === id);
           if (!addr) return problem("NOT_FOUND", "address not found", 404);
@@ -1075,7 +1118,7 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const idx = emails.findIndex((a) => a.id === id);
           if (idx >= 0) emails.splice(idx, 1);

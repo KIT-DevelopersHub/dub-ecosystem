@@ -6,10 +6,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { gateway } from "@dub/types";
+import { useCurrentEventStore } from "@dub/fe3-event-action";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
+import { SELECTED_EVENT_STORAGE_KEY } from "../../features/gantt/selectedEventStore.ts";
 import { HomeScreen } from "./HomeScreen.tsx";
 
 function makeApi(home: gateway.BffHomeResponse): ApiClient {
@@ -43,6 +45,11 @@ const OK_HOME: gateway.BffHomeResponse = {
 };
 
 describe("HomeScreen", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useCurrentEventStore.setState({ eventId: null });
+  });
+
   it("renders the events and unread-notifications cards from /bff/home", async () => {
     render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
     await waitFor(() => expect(screen.getByText("Conf")).toBeInTheDocument());
@@ -122,6 +129,23 @@ describe("HomeScreen", () => {
     render(wrap(<HomeScreen api={makeApi(OK_HOME)} homeWidgets={widgets} />));
     await waitFor(() => expect(screen.getByTestId("tasks-body")).toBeInTheDocument());
     expect(screen.getByText("自分のタスク")).toBeInTheDocument();
+  });
+
+  it("clicking a 直近のイベント row selects it as the current event and navigates to /events (the Event app hub), not the standalone :eventId detail route", async () => {
+    const navigated: string[] = [];
+    render(wrap(<HomeScreen api={makeApi(OK_HOME)} onNavigate={(p) => navigated.push(p)} />));
+    const row = await screen.findByTestId("fe2-home-event-evt_2");
+    // Real <a href> for accessibility / hover-URL / cmd-click — but it points at the
+    // Event app home, not a per-event detail route (that route is a separate screen
+    // reachable only from Home, not the normal Event app the header switcher opens).
+    expect(row).toHaveAttribute("href", "/events");
+    row.click();
+    expect(navigated).toEqual(["/events"]);
+    // The click must select evt_2 in the SAME "current event" store the header's
+    // イベント switcher and the Event hub (/events → EventHubPage) read, so the hub
+    // opens already showing the clicked event — not "イベントを選択してください".
+    expect(useCurrentEventStore.getState().eventId).toBe("evt_2");
+    expect(localStorage.getItem(SELECTED_EVENT_STORAGE_KEY)).toBe("evt_2");
   });
 
   it("isolates a throwing widget so the rest of the dashboard survives", async () => {

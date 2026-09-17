@@ -4,7 +4,7 @@
 // (they change only what's on screen, not stored data), so they live in localStorage
 // keyed by event — no server round-trip, no contract change, $0. localStorage is
 // already per-browser (≈ per-user), so per-event keying matches the existing
-// useGanttSort / useTaskNumberPrefix convention.
+// useGanttSort / useTaskNumberPadWidth convention.
 import type { common, gantt, task } from "@dub/types";
 import { emptyFilter, type TaskFilterState } from "./task-query";
 
