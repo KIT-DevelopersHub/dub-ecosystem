@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { UnfurlPreview } from "../api/contract";
 import { useOptionalChatRuntime } from "../context";
 import { extractPreviewUrls } from "../lib/render-body";
+import { UNFURL_GENERIC_MARKER } from "../lib/unfurl-mock";
 import { safeHref } from "./MessageBody";
 import styles from "../styles/chat.module.css";
 
@@ -91,7 +92,12 @@ export function LinkPreviews({ body }: { body: string }): JSX.Element | null {
   const previews = usePreviews(urls);
   if (previews.length === 0) return null;
   return (
-    <div className={styles.linkPreviews} data-testid="fe6-link-previews" data-marker={LINK_PREVIEW_MARKER}>
+    <div
+      className={styles.linkPreviews}
+      data-testid="fe6-link-previews"
+      data-marker={LINK_PREVIEW_MARKER}
+      data-unfurl-mode={UNFURL_GENERIC_MARKER}
+    >
       {previews.map((p) => (
         <a
           key={p.url}

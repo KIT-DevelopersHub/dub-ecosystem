@@ -34,20 +34,24 @@ describe("LinkPreviews", () => {
     expect(screen.getByTestId("fe6-link-previews")).toHaveAttribute("data-marker", LINK_PREVIEW_MARKER);
   });
 
-  it("renders nothing for unknown hosts (no OGP) and without a runtime", async () => {
-    const rt = runtime();
-    const spy = vi.spyOn(rt.api, "unfurl");
-    const { rerender } = render(
-      <ChatRuntimeProvider value={rt}>
-        <LinkPreviews body="https://no-ogp.invalid/x" />
+  it("renders a generic card (site from hostname + thumbnail) for an unknown host", async () => {
+    render(
+      <ChatRuntimeProvider value={runtime()}>
+        <LinkPreviews body="watch https://www.youtube.com/watch?v=dQw4w9WgXcQ now" />
       </ChatRuntimeProvider>,
     );
-    await waitFor(() => expect(spy).toHaveBeenCalledWith("https://no-ogp.invalid/x"));
-    await expect(spy.mock.results[0]!.value).resolves.toBeNull(); // positive control: asked, got null
-    expect(screen.queryByTestId("fe6-link-previews")).toBeNull();
-    rerender(<LinkPreviews body="https://github.com/x" />);
+    const card = await screen.findByTestId("fe6-link-preview");
+    expect(card).toHaveAttribute("href", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(card).toHaveTextContent("youtube.com"); // siteName from hostname (www. stripped)
+    expect(card.querySelector("img")).not.toBeNull(); // deterministic inline SVG thumbnail
+  });
+
+  it("renders nothing without a runtime (best-effort leaf)", async () => {
+    const rt = runtime();
+    const spy = vi.spyOn(rt.api, "unfurl");
+    render(<LinkPreviews body="https://github.com/x" />); // no provider -> useOptionalChatRuntime() is null
     await waitFor(() => expect(screen.queryByTestId("fe6-link-previews")).toBeNull());
-    expect(spy).toHaveBeenCalledTimes(1); // no runtime -> no fetch
+    expect(spy).toHaveBeenCalledTimes(0); // no runtime -> no fetch
   });
 
   it("memoizes per URL for the session: a second mount does not refetch", async () => {

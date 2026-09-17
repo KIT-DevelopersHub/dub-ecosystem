@@ -1202,8 +1202,10 @@ function createChatStore() {
     version: 1,
     ...over,
   });
-  // Seed a couple of URL-bearing posts so the autolink + OGP preview card (mock
-  // unfurl for known hosts; none for unknown) is visible without typing anything.
+  // Seed a couple of URL-bearing posts so the autolink + OGP preview card is
+  // visible without typing anything — a hand-tuned card for known hosts AND a
+  // generic card for an arbitrary host (proving any pasted URL unfurls, not just
+  // the 5 well-known ones).
   const generalMessages = [
     msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
     msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
@@ -1216,7 +1218,7 @@ function createChatStore() {
     msg({
       id: "msg_01SEEDGEN0000000000000UR2",
       authorId: ME_ID,
-      body: "こっちは画像なしのサイトです https://example.com/ このページは OGP ないみたいですね https://no-ogp.invalid/page",
+      body: "登壇のイメージ動画はこちら https://www.youtube.com/watch?v=dQw4w9WgXcQ こういう小規模サイトも出ます https://example.com/",
       createdAt: "2026-08-01T00:12:00.000Z",
     }),
   ];
