@@ -50,7 +50,19 @@ export interface PublicInquiryReceivedPayload { kind: string; name: string; emai
 // omit it (notification then resolves to no recipients = a legitimate no-op). This is
 // how a chat @mention becomes an in-app notification without the consumer re-parsing
 // the body (it never sees the message text).
-export interface ChatMessageCreatedPayload { channelId: ChannelId; messageId: MessageId; authorId: UserId; mentions?: readonly UserId[] }
+// `isDm` / `dmRecipientIds` — same additive shape, for the DM notification: chat-service
+// sets both only when the message was posted into a `type: "dm"` channel, with
+// `dmRecipientIds` = the channel's other member(s) (author excluded). Older publishers
+// omit both (no-op), same backward-compat contract as `mentions` (ADR-0003 §2 — additive
+// fields never bump `version`).
+export interface ChatMessageCreatedPayload {
+  channelId: ChannelId;
+  messageId: MessageId;
+  authorId: UserId;
+  mentions?: readonly UserId[];
+  isDm?: boolean;
+  dmRecipientIds?: readonly UserId[];
+}
 export interface ChatMessageDeletedPayload { channelId: ChannelId; messageId: MessageId }
 export interface ChatChannelCreatedPayload { channelId: ChannelId; name: string }
 export interface ChatMemberChangedPayload { channelId: ChannelId; userId: UserId; change: "added" | "removed" }

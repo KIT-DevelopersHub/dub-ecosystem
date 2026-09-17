@@ -3,6 +3,7 @@
 // and the one-shot POST /internal/drain/kick that arms the DO alarm after a deploy.
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import { Hono } from "hono";
+import { drainAll } from "./drain-all";
 import type { Env } from "./env";
 
 export function createApp() {
@@ -21,6 +22,15 @@ export function createApp() {
     const res = await stub.fetch("https://freeq-drain-do/internal/ensure-alarm", { method: "POST" });
     const body = (await res.json().catch(() => ({}))) as unknown;
     return c.json({ ok: true, kicked: true, do: body });
+  });
+
+  // One-shot synchronous drain pass (internal-only). Same body the DO alarm runs, but
+  // triggerable immediately for ops / staging verification without waiting for the 5-min
+  // alarm tick. Returns the per-DB drain result so callers can assert what was delivered.
+  app.post("/internal/drain/run", async (c) => {
+    if (c.req.header(HDR_INTERNAL) !== INTERNAL_HEADER_VALUE) return c.json({ error: "forbidden" }, 403);
+    const results = await drainAll(c.env);
+    return c.json({ ok: true, results });
   });
 
   return app;

@@ -61,6 +61,14 @@ export const MEMBER_BROADCAST_TYPE = "system.announcement";
 // the "already published" state via a self-join.
 export const BROADCAST_FROM_PREFIX = "broadcast:from:";
 
+// ---- chat @mention / DM in-app notifications ----
+// Two chat-originated notification `type`s, both driven off the single
+// `chat.message.created` domain event (see mapping.ts for @mention, chat.ts for DM).
+// Named constants so the literal is shared (not re-typed) between mapping.ts, chat.ts,
+// and the preferences.ts default-enabled exception below.
+export const CHAT_MENTION_NOTIFY_TYPE = "chat.mention";
+export const CHAT_DM_NOTIFY_TYPE = "chat.dm";
+
 // ---- in-app feedback (widget -> admin) ----
 // Closed category vocabulary (mirrors notification.FeedbackCategory).
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "question", "other"] as const;
