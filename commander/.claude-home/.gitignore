@@ -1,0 +1,12 @@
+# Commander's isolated Claude config home.
+# The spawned claude writes runtime state here (login/account in .claude.json,
+# sessions, projects, caches). That state is per-machine and may carry account
+# identifiers / secrets — it MUST stay local and never be committed.
+# Strategy: ignore everything, then allow-list only the committed config files.
+/*
+!/.gitignore
+!/CLAUDE.md
+!/README.md
+!/settings.json
+!/rules/
+!/lessons/

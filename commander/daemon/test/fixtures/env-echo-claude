@@ -1,0 +1,16 @@
+#!/usr/bin/env node
+// Test fixture standing in for the `claude` CLI. Instead of doing work, it reports
+// the environment it was spawned with, so tests can PROVE the daemon isolates env
+// (CLAUDE_CONFIG_DIR redirected, personal vars stripped). Emits one stream-json
+// `result` line whose `result` is a JSON string of the observed env, then exits 0.
+const observed = {
+  CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? null,
+  // A marker a personal ~/.claude setup would export; must be absent under isolation.
+  PERSONAL_SECRET: process.env.PERSONAL_SECRET ?? null,
+  COMMANDER_PASSTHROUGH: process.env.COMMANDER_PASSTHROUGH ?? null,
+  HAS_PATH: Boolean(process.env.PATH),
+};
+process.stdout.write(
+  JSON.stringify({ type: "result", subtype: "success", result: JSON.stringify(observed) }) + "\n",
+);
+process.exit(0);

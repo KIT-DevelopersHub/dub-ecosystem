@@ -65,6 +65,19 @@ node --experimental-strip-types commander/daemon/src/index.ts
 | `COMMANDER_RUN_TIMEOUT_MS` | `7200000` | 1 run のハード上限（活動に関係なくこの時間で kill→failed する保険。リセットしない）。既定 2 時間。`0` で無効 |
 | `COMMANDER_SERVICE_URL` | (空) | 設定すると run と各イベントを commander-service に永続化（best-effort） |
 | `COMMANDER_SERVICE_TOKEN` | (空) | commander-service へ送る `x-commander-token` |
+| `COMMANDER_ISOLATE_ENV` | `1`（有効） | env 分離。`0`/`false` で無効化（親 env を丸ごと継承） |
+| `COMMANDER_CLAUDE_CONFIG_DIR` | `commander/.claude-home` | spawn する claude の `CLAUDE_CONFIG_DIR` |
+
+### env 分離（個人 `~/.claude` を読ませない）
+
+daemon は `claude -p` を spawn するとき、`env: process.env` を丸コピーせず **最小 allow-list な
+env** を作り、`CLAUDE_CONFIG_DIR` を **Commander 専用の設定ホーム `commander/.claude-home`** に
+向ける（`daemon/src/env.ts` の `buildSpawnEnv`）。これにより spawn された Claude Code は個人の
+`~/.claude`（CLAUDE.md/rules/hooks/lessons = 判断キュー運用 constitution 等）を**読まない**。
+`commander/.claude-home/` には dev に必要なノウハウだけを複製した CLAUDE.md/rules/lessons と
+**hooks 空**の settings.json を置く（詳細は `commander/.claude-home/README.md`）。
+`COMMANDER_ISOLATE_ENV=0` で従来挙動（親 env 継承）に戻せるが、その場合も CLAUDE_CONFIG_DIR は
+リダイレクトされる。
 
 ブラウザ不要の最短確認: `http://127.0.0.1:4319/` に**組み込みテスト UI**が出る。
 プロンプトを入れて Run するとログがストリーム表示される。
