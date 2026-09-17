@@ -367,7 +367,10 @@ Caller must be a member; the channel must not be archived. Request (`PostMessage
 
 Response `201` — the created `Message`. Post-commit, emits `chat.message.created` (domain)
 and a `message.created` realtime event fanned out to the channel's WS subscribers. Mentions
-(`<@userId>`) are extracted server-side for notification fan-out.
+(`<@userId>`) are extracted server-side for notification fan-out (`mentions`, author excluded).
+For a `type: "dm"` channel the event additionally carries `isDm: true` and `dmRecipientIds`
+(the channel's other member(s), author excluded) so notification raises a DM in-app
+notification the same way — neither field's absence is an error (additive, ADR-0003 §2).
 
 ### `PATCH /messages/:id`
 
@@ -502,7 +505,7 @@ Published **after** the DB write (a failed write never emits). `actorId` is the 
 | `chat.channel.created` | `{ channelId, name }` | `POST /channels` |
 | `chat.member.added` | `{ channelId, userId, change: "added" }` | `POST /channels` (per added member), `POST /channels/:id/members` |
 | `chat.member.removed` | `{ channelId, userId, change: "removed" }` | `DELETE /channels/:id/members/:userId` |
-| `chat.message.created` | `{ channelId, messageId, authorId }` | `POST /messages` |
+| `chat.message.created` | `{ channelId, messageId, authorId, mentions?, isDm?, dmRecipientIds? }` | `POST /messages` |
 | `chat.message.deleted` | `{ channelId, messageId }` | `DELETE /messages/:id` |
 
 Edits and reactions emit **no** domain event (not in the frozen catalog). System posts

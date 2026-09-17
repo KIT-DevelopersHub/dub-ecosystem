@@ -60,6 +60,24 @@ describe("createDemoFetch", () => {
     expect(after.title).toBe("編集済みイベント");
   });
 
+  it("serves GET /events/:id detail for every event the switcher lists, not just evt_1", async () => {
+    // Regression: evt_2/evt_3 were listed by GET /events (the header's global イベント
+    // switcher) and had gantt seed data, but had no EVENT_DETAIL entry — so anything
+    // reading a single event's detail (the dashboard's 開催まで countdown; GET /events/:id)
+    // 404'd for them while evt_1 worked, an easy-to-miss gap since most demo flows only
+    // exercise evt_1. List and detail must also agree on title/phase/startsAt.
+    const a = api();
+    const list = await a.events.get<{ items: Array<{ id: string; title: string; phase: string; startsAt: string | null }> }>("");
+    for (const summary of list.items) {
+      const detail = await a.events.get<{ id: string; title: string; phase: string; startsAt: string | null }>(`/${summary.id}`);
+      expect(detail.id).toBe(summary.id);
+      expect(detail.title).toBe(summary.title);
+      expect(detail.phase).toBe(summary.phase);
+      expect(detail.startsAt).toBe(summary.startsAt);
+    }
+    expect(list.items.map((e) => e.id)).toEqual(expect.arrayContaining(["evt_1", "evt_2", "evt_3"]));
+  });
+
   it("still surfaces NOT_FOUND for un-seeded routes (in-frame fallback)", async () => {
     let caught: unknown;
     try {
@@ -222,7 +240,10 @@ describe("admin RBAC console (interactive roster surface)", () => {
 describe("admin email routing (@developershub.jp address management)", () => {
   interface Addr { id: string; localPart: string; address: string; destination: string; enabled: boolean }
   interface Page<T> { items: T[] }
-  const BASE = "/api/v1/mail/admin/email-routing/addresses";
+  // Frontend calls the ISSUED (zone-rule) surface since #468 — the demo mock must serve
+  // it, not the removed account-scoped /addresses path (regression: the 発行済みアドレス
+  // dialog listed via /issued-addresses and 404'd against the stale mock).
+  const BASE = "/api/v1/mail/admin/email-routing/issued-addresses";
   const list = (a: ReturnType<typeof api>) => a.request<Page<Addr>>({ method: "GET", path: BASE });
 
   it("the demo admin holds mail:admin (so the tab is reachable) and lists @developershub.jp addresses", async () => {
@@ -261,5 +282,15 @@ describe("admin email routing (@developershub.jp address management)", () => {
 
     await a.request({ method: "DELETE", path: `${BASE}/${target.id}` });
     expect((await list(a)).items.some((x) => x.id === target.id)).toBe(false);
+  });
+
+  it("roster-addresses (sync source) lists the receiving addresses for Email Routing 同期", async () => {
+    const a = api();
+    const res = await a.request<{ items: Array<{ address: string; destination: string; enabled: boolean }> }>({
+      method: "GET",
+      path: "/api/v1/mail/admin/email-routing/roster-addresses",
+    });
+    expect(res.items.length).toBeGreaterThan(0);
+    expect(res.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
   });
 });

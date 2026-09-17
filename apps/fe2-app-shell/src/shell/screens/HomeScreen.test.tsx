@@ -1,19 +1,49 @@
 // HomeScreen (design 2-1): FE2 owns the dashboard frame. Verifies the two
 // BFF-data-driven cards (upcoming events, unread notifications), per-frame
-// partial-error surfacing (no global toast), and that feature-contributed
+// partial-error surfacing (no global toast), the 開催まで countdown against the
+// header-selected event (GET /events/:id), and that feature-contributed
 // homeWidgets render inside isolated error boundaries — one throwing widget
 // never blanks the dashboard. All run against a faked ApiClient (no network).
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
-import type { gateway } from "@dub/types";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { event, gateway } from "@dub/types";
+import { useCurrentEventStore } from "@dub/fe3-event-action";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
+import { SELECTED_EVENT_STORAGE_KEY, saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { HomeScreen } from "./HomeScreen.tsx";
 
-function makeApi(home: gateway.BffHomeResponse): ApiClient {
-  return { bff: { home: () => Promise.resolve(home) } } as unknown as ApiClient;
+function makeApi(home: gateway.BffHomeResponse, events: Record<string, event.GetEventResponse> = {}): ApiClient {
+  return {
+    bff: { home: () => Promise.resolve(home) },
+    events: {
+      get: (path: string) => {
+        const id = path.replace(/^\//, "");
+        const found = events[id];
+        return found ? Promise.resolve(found) : Promise.reject(new Error(`no mock event for ${path}`));
+      },
+    },
+  } as unknown as ApiClient;
+}
+
+function eventDetail(overrides: Partial<event.GetEventResponse> = {}): event.GetEventResponse {
+  return {
+    version: 1,
+    id: "evt_1",
+    orgId: "org_1",
+    title: "Conf",
+    description: null,
+    phase: "preparing",
+    startsAt: null,
+    endsAt: null,
+    archivedAt: null,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    actions: [],
+    ...overrides,
+  };
 }
 
 function wrap(ui: ReactNode): JSX.Element {
@@ -43,6 +73,14 @@ const OK_HOME: gateway.BffHomeResponse = {
 };
 
 describe("HomeScreen", () => {
+  // The 開催まで countdown and the "直近のイベント" click-through both read/write the
+  // header switcher's localStorage pick (+ fe3's useCurrentEventStore) — reset both
+  // before every test so one test's selection never leaks into the next.
+  beforeEach(() => {
+    localStorage.clear();
+    useCurrentEventStore.setState({ eventId: null });
+  });
+
   it("renders the events and unread-notifications cards from /bff/home", async () => {
     render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
     await waitFor(() => expect(screen.getByText("Conf")).toBeInTheDocument());
@@ -124,6 +162,23 @@ describe("HomeScreen", () => {
     expect(screen.getByText("自分のタスク")).toBeInTheDocument();
   });
 
+  it("clicking a 直近のイベント row selects it as the current event and navigates to /events (the Event app hub), not the standalone :eventId detail route", async () => {
+    const navigated: string[] = [];
+    render(wrap(<HomeScreen api={makeApi(OK_HOME)} onNavigate={(p) => navigated.push(p)} />));
+    const row = await screen.findByTestId("fe2-home-event-evt_2");
+    // Real <a href> for accessibility / hover-URL / cmd-click — but it points at the
+    // Event app home, not a per-event detail route (that route is a separate screen
+    // reachable only from Home, not the normal Event app the header switcher opens).
+    expect(row).toHaveAttribute("href", "/events");
+    row.click();
+    expect(navigated).toEqual(["/events"]);
+    // The click must select evt_2 in the SAME "current event" store the header's
+    // イベント switcher and the Event hub (/events → EventHubPage) read, so the hub
+    // opens already showing the clicked event — not "イベントを選択してください".
+    expect(useCurrentEventStore.getState().eventId).toBe("evt_2");
+    expect(localStorage.getItem(SELECTED_EVENT_STORAGE_KEY)).toBe("evt_2");
+  });
+
   it("isolates a throwing widget so the rest of the dashboard survives", async () => {
     const Boom = (): JSX.Element => {
       throw new Error("widget exploded");
@@ -135,5 +190,48 @@ describe("HomeScreen", () => {
     // ...while the dashboard-owned cards still resolve and render normally.
     expect(await screen.findByText("Conf")).toBeInTheDocument();
     expect(await screen.findByTestId("fe2-home-unread-count")).toBeInTheDocument();
+  });
+
+  describe("開催まで countdown (selected event)", () => {
+    it("prompts to pick an event when the header switcher has no selection yet", async () => {
+      render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—"));
+      expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("イベントを選択してください");
+    });
+
+    it("counts down to the selected event's startsAt (fetched via GET /events/:id)", async () => {
+      saveSelectedEvent("evt_1");
+      const farFuture = "2999-01-01T00:00:00Z";
+      const api = makeApi(OK_HOME, { evt_1: eventDetail({ title: "北陸ITカンファレンス 2026", startsAt: farFuture }) });
+      render(wrap(<HomeScreen api={api} />));
+      await waitFor(() =>
+        expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent(
+          `北陸ITカンファレンス 2026・${new Date(farFuture).toLocaleDateString("ja-JP")}`,
+        ),
+      );
+      // A real day count, not the "no data" dash.
+      expect(screen.getByTestId("fe2-kpi-countdown-value")).not.toHaveTextContent("—");
+    });
+
+    it("falls back to 日程未定 when the selected event's startsAt is unset", async () => {
+      saveSelectedEvent("evt_2");
+      const api = makeApi(OK_HOME, { evt_2: eventDetail({ id: "evt_2", title: "Meetup", startsAt: null }) });
+      render(wrap(<HomeScreen api={api} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("Meetup・日程未定"));
+    });
+
+    it("surfaces 取得できませんでした (not a stuck 読み込み中…) when the event fetch fails", async () => {
+      // Regression: a demo-seed gap (evt_2/evt_3 had no GET /events/:id detail — see
+      // demo-seed.test.tsx) left this branch untested and the tile stuck on "読み込み中…"
+      // forever on a real fetch failure, since the original code only branched on
+      // selectedEvent truthy/falsy and never looked at the query's error state.
+      saveSelectedEvent("evt_missing");
+      render(wrap(<HomeScreen api={makeApi(OK_HOME, {})} />));
+      await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("取得できませんでした"), {
+        timeout: 5000,
+      });
+      expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—");
+      expect(screen.getByTestId("fe2-kpi-countdown-value")).toHaveTextContent("—");
+    });
   });
 });

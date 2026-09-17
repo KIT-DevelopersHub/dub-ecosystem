@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "dashboard-event-link",
+  "worker": "dub-demo-dashboard-event-link",
+  "url": "https://dub-demo-dashboard-event-link.developershub-site.workers.dev",
+  "deployedSha": "0a9c183a",
+  "branch": "feat/dashboard-event-link",
+  "actor": "kota",
+  "markers": ["を選択してイベントアプリを開く"],
+  "live": true,
+  "verifiedAt": "2026-09-16T10:50:01Z",
+  "updatedAt": "2026-09-16T10:50:01Z",
+  "note": ""
+}

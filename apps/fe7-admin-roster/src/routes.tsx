@@ -57,10 +57,21 @@ function roleNewRoute(): Promise<{ Component: ComponentType }> {
   }));
 }
 
-// メールアドレス管理 (/admin/email-routing) のみユーザー明示承認で launcher/ナビ/route から
-// 完全撤去。EmailRoutingPage コンポーネントと専用フック/API/型も削除済み。名簿のアドレス発行
-// (NewEmailAddressDialog) と退任フロー(offboard)が使う createEmailAddress / list / delete は
-// 名簿機能なので残置している。
+function emailRoutingRoute(): Promise<{ Component: ComponentType }> {
+  return import("./components/EmailAddressManagementPage").then(({ EmailAddressManagementPage }) => ({
+    Component: EmailAddressManagementPage,
+  }));
+}
+
+// メールアドレス管理 (/admin/email-routing) はPR#245でユーザー明示承認のうえ一度完全撤去された
+// (EmailRoutingPage/専用hook/型/route/nav)。backendのadmin API(addresses/rules)は撤去時から
+// 残置されており継続使用されているため、今回はユーザー明示決定で再実装した(復活)。現行の
+// issued-addresses API・型・デザインシステムに合わせて再構築している(旧コードの単純コピーではない)。
+// 今回は独立ランチャータイルではなく「運営メンバー・名簿」の共有サブナビ(FE2側
+// MemberRosterNav)に新タブとして統合する配置にした(ユーザー明示指定)。そのため routes には
+// 追加するが、この下の `nav` 配列(=独立ランチャータイル用)には追加しない — fe2 の
+// adaptAdmin() はこの `nav` を素通しせず手書きの NavEntry を返すので、ここに足しても
+// ランチャーには何も効果が無い(死んだコードになる)。
 // 変更履歴 (/admin/history) の UI アプリ（AuditHistoryPage・ルート・タイル・サブナビ項目）は
 // ユーザー明示指示で完全撤去した。監査ログの取得基盤（rosterApi.auditLogs / useAuditLogs /
 // buildAuditQuery とバックエンドの収集）は壊さず残置している（他機能/将来の再利用のため）。
@@ -70,6 +81,7 @@ export const routes: FeatureRoute[] = [
   { path: "/admin/users/:userId", lazy: userDetailRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles", lazy: rolesRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles/new", lazy: roleNewRoute, auth: "required", requiredPermissions: ["identity:admin"] },
+  { path: "/admin/email-routing", lazy: emailRoutingRoute, auth: "required", requiredPermissions: ["mail:admin"] },
 ];
 
 export const nav: NavEntry[] = [

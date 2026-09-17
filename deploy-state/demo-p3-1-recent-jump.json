@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p3-1-recent-jump",
+  "worker": "dub-demo-p3-1-recent-jump",
+  "url": "https://dub-demo-p3-1-recent-jump.developershub-site.workers.dev",
+  "deployedSha": "a2cd6eff",
+  "branch": "feat/p3-1-recent-jump",
+  "actor": "kota",
+  "markers": ["fe2-home-recent","最近開いた"],
+  "live": true,
+  "verifiedAt": "2026-09-09T11:11:47Z",
+  "updatedAt": "2026-09-09T11:11:47Z",
+  "note": "P3-1 最近開いたジャンプ"
+}

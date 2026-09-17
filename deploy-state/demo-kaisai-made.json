@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "kaisai-made",
+  "worker": "dub-demo-kaisai-made",
+  "url": "https://dub-demo-kaisai-made.developershub-site.workers.dev",
+  "deployedSha": "36c142bd",
+  "branch": "fix/dashboard-kaisai-made-label",
+  "actor": "kota",
+  "markers": ["開催まで","イベントを選択してください","取得できませんでした"],
+  "live": true,
+  "verifiedAt": "2026-09-15T17:20:36Z",
+  "updatedAt": "2026-09-15T17:20:36Z",
+  "note": ""
+}

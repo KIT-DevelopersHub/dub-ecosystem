@@ -88,6 +88,40 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
       { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
     ],
   },
+  // evt_2 / evt_3 keep the SAME title/phase/startsAt as their EVENTS summary row above
+  // (list and detail must never drift). Added so every event the header's global イベント
+  // switcher lists is also openable via GET /events/:id — not just evt_1 — which the
+  // ダッシュボード「開催まで」 countdown and the "直近のイベント" card click-through both
+  // depend on (both fetch a single event's detail directly rather than the curated
+  // /bff/home subset).
+  evt_2: {
+    version: 1,
+    id: "evt_2",
+    orgId: ORG,
+    title: "運営定例ミーティング",
+    description: "毎週の運営定例。進捗共有と次アクションの確認を行う。",
+    phase: "planning",
+    startsAt: "2026-08-12T09:00:00Z",
+    endsAt: "2026-08-12T10:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
+  },
+  evt_3: {
+    version: 1,
+    id: "evt_3",
+    orgId: ORG,
+    title: "学生ハッカソン Hackit 秋",
+    description: "学生向けハッカソン。協賛調整・募集LP・当日運営を並行で進行中。",
+    phase: "open",
+    startsAt: "2026-09-01T00:00:00Z",
+    endsAt: "2026-09-02T00:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-07-15T00:00:00Z",
+    updatedAt: "2026-08-20T00:00:00Z",
+    actions: [],
+  },
 };
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
@@ -110,6 +144,19 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
       kind: "announcement",
       title: "参加者への案内メール",
       sortOrder: 1,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+  ],
+  evt_2: [
+    {
+      version: 1,
+      id: "act_3",
+      eventId: "evt_2",
+      kind: "announcement",
+      title: "定例アジェンダ共有",
+      sortOrder: 0,
       archivedAt: null,
       createdAt: "2026-06-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
@@ -348,6 +395,11 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
   { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
+  // チャット (chat.mention / chat.dm, via chat.message.created -> notification, in_app
+  // default-ON exception). resourceType "channel" deep-links into fe6-chat's own route
+  // (NotificationCard.itemLinkUrl -> /chat/channels/:id).
+  { id: "ntf_4", type: "chat.mention", title: "メンションされました", body: "#project-alpha でメンションされました。", readAt: null, createdAt: "2026-08-02T03:00:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
+  { id: "ntf_5", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんからダイレクトメッセージが届きました。", readAt: null, createdAt: "2026-08-02T02:45:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
 ];
 
 // audience='admin' notifications powering the Notification管理 screen
@@ -948,7 +1000,14 @@ function createRosterStore() {
       if (pathname === "/api/v1/mail/status") {
         return json({ service: "mail-gateway", provider: "resend", rateLimit: { active: false, cooldownSec: 60 } });
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") return json(page(emails));
+      // 発行済み受信アドレス一覧（メール名簿の「発行済みアドレス」ダイアログ／メールアドレス管理
+      // 画面が共有）。バックエンドの /issued-addresses（zone ルール由来）に合わせる。旧
+      // /addresses（アカウント送信先）はもうフロントから呼ばれない。
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
+      // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
+      if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
+        return json({ items: emails.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })) });
+      }
       return null;
     }
 
@@ -989,7 +1048,7 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         return json(user);
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") {
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
         const localPart = req?.localPart?.trim().toLowerCase() ?? "";
         if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
@@ -997,7 +1056,7 @@ function createRosterStore() {
         // Forward target is fixed to the mail Worker — the caller no longer supplies one.
         const addr: DemoEmailAddress = { id: rid("eml"), localPart, address: `${localPart}@${EMAIL_DOMAIN}`, destination: MAIL_WORKER_DESTINATION, enabled: true, createdAt: new Date().toISOString() };
         emails.push(addr);
-        return json(addr);
+        return json({ ...addr, confirmationEmailSent: true });
       }
       return null;
     }
@@ -1028,10 +1087,13 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const addr = emails.find((a) => a.id === id);
           if (!addr) return problem("NOT_FOUND", "address not found", 404);
+          // issued-addresses only supports the enable/disable toggle server-side
+          // (destination is fixed to the mail Worker); /addresses (legacy) still
+          // accepts a destination re-point for back-compat with existing callers.
           const req = body as { enabled?: boolean; destination?: string };
           if (req?.destination !== undefined) {
             if (!EMAIL_RE.test(req.destination)) return problem("VALIDATION_FAILED", "転送先のメール形式が不正です", 400, [{ field: "destination", reason: "format" }]);
@@ -1075,7 +1137,7 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const idx = emails.findIndex((a) => a.id === id);
           if (idx >= 0) emails.splice(idx, 1);

@@ -25,6 +25,7 @@ import type {
   TaskStatusChangedPayload,
 } from "@dub/events";
 import type { EventMappingRule, NotifyRecipients } from "./types";
+import { CHAT_MENTION_NOTIFY_TYPE } from "./config";
 
 // Role keys used for operational / admin fan-out (identity GET /users?roleKey=).
 const ROLE_ADMIN = "admin";
@@ -158,7 +159,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
   // ring the bell (the in-app unread badge covers that), only mentions do. in_app only
   // (no email/push storm for every mention).
   "chat.message.created": {
-    type: "chat.mention",
+    type: CHAT_MENTION_NOTIFY_TYPE,
     channels: ["in_app"],
     priority: "normal",
     buildRecipients: (p) => {

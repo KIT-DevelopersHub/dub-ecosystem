@@ -6,6 +6,7 @@ import {
   WARN_PCT,
   clampPct,
   daysUntil,
+  eventDateLabel,
   freeTierFromMetrics,
   statusMeta,
   taskCompletionPct,
@@ -57,6 +58,16 @@ describe("daysUntil", () => {
   });
   it("returns null on an invalid date", () => {
     expect(daysUntil("not-a-date")).toBeNull();
+  });
+});
+
+describe("eventDateLabel", () => {
+  it("formats a valid startsAt with the ja-JP locale", () => {
+    expect(eventDateLabel("2026-08-22T01:00:00+09:00")).toBe(new Date("2026-08-22T01:00:00+09:00").toLocaleDateString("ja-JP"));
+  });
+  it("falls back to 日程未定 for null or an unparsable date", () => {
+    expect(eventDateLabel(null)).toBe("日程未定");
+    expect(eventDateLabel("not-a-date")).toBe("日程未定");
   });
 });
 

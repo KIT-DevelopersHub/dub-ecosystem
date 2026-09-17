@@ -66,13 +66,17 @@ export interface TaskCreateModalProps {
   initialParentId?: common.TaskId | null;
   /** predecessor ids preset when opened with a dependency already in mind. */
   initialDependsOn?: readonly common.TaskId[];
+  /** 担当 preset when opened via "タスク詳細から子タスクを作成" (= 親タスクの担当).
+   *  Initial value only — the user can still change it before submitting. Null/未設定
+   *  when the parent has no assignee, or when opened without a parent preset. */
+  initialAssigneeId?: common.UserId | null;
 }
 
 // A newly-created task starts in "todo"; only todo-reachable states are offered.
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn, initialAssigneeId }: TaskCreateModalProps) {
   // Seed once from any draft left by an accidental reload; otherwise the usual blank form.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialDraft = useMemo(() => peekDraft<TaskCreateDraft>(DRAFT_KEY), []);
@@ -106,27 +110,30 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     dirty,
   });
 
-  // seed the due date + parent + predecessors when (re)opened (timeline cell /
-  // "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
-  // チームも親のチームで固定する。
+  // seed the due date + parent + predecessors + assignee when (re)opened (timeline
+  // cell / "ここから子タスクを作成" preset the parent, etc.). 親をプリセットで開いたときは
+  // チームも親のチームで固定する。担当は親タスクの担当をプリセット（未設定なら未割当のまま）
+  // — 初期値のみで、送信前にユーザーが変更できる。
   //
   // A restored draft (peeked at mount, above) wins over a preset-less open — without
   // this guard, simply opening the modal via the plain "＋タスク作成" button (no
-  // preset) would silently blank out a due/parent/predecessors restored after an
-  // accidental reload, same as RoleEditorPage not letting `existing` clobber a
+  // preset) would silently blank out a due/parent/predecessors/assignee restored after
+  // an accidental reload, same as RoleEditorPage not letting `existing` clobber a
   // restored draft. An EXPLICIT preset (a timeline cell / "ここから子タスクを作成")
   // still always wins — that's a fresh, deliberate context the user just picked.
   useEffect(() => {
     if (!open) return;
-    const hasExplicitPreset = initialDue != null || initialParentId != null || (initialDependsOn?.length ?? 0) > 0;
+    const hasExplicitPreset =
+      initialDue != null || initialParentId != null || (initialDependsOn?.length ?? 0) > 0 || initialAssigneeId != null;
     if (draft.restoredVisible && !hasExplicitPreset) return;
     setDue(initialDue ?? null);
     const nextParent = initialParentId ?? null;
     setParentId(nextParent);
     if (nextParent) setTeamId(teamOf(scopeTasks, nextParent));
     setDeps(initialDependsOn ? [...initialDependsOn] : []);
+    setAssigneeId(initialAssigneeId ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialDue, initialParentId, initialDependsOn]);
+  }, [open, initialDue, initialParentId, initialDependsOn, initialAssigneeId]);
 
   const reset = () => {
     draft.clear(); // deliberate cancel/success — don't resurrect this as a "restored" draft later
