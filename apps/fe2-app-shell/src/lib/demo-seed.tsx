@@ -25,6 +25,7 @@ import type { auditLog, event, gantt, gateway, identity, mail, notification, tas
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
+import { mockUnfurl } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -1201,12 +1202,53 @@ function createChatStore() {
     version: 1,
     ...over,
   });
+  // Seed a couple of URL-bearing posts so the autolink + OGP preview card (mock
+  // unfurl for known hosts; none for unknown) is visible without typing anything.
   const generalMessages = [
     msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
     msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000URL",
+      authorId: "usr_bob",
+      body: "LP の最新版はこちらです https://developershub.jp/conf/2026 実装は https://github.com/KIT-DevelopersHub/dub-ecosystem にあります。",
+      createdAt: "2026-08-01T00:10:00.000Z",
+    }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000UR2",
+      authorId: ME_ID,
+      body: "こっちは画像なしのサイトです https://example.com/ このページは OGP ないみたいですね https://no-ogp.invalid/page",
+      createdAt: "2026-08-01T00:12:00.000Z",
+    }),
+  ];
+  // Posted messages persist for the session (per channel) so a sent URL renders
+  // its card in place; ids are minted ascending so they sort after the seed.
+  const posted = new Map<string, ReturnType<typeof msg>[]>();
+  let postSeq = 0;
+  const messagesOf = (channelId: string | null) => [
+    ...(channelId === "chn_general" ? generalMessages : []),
+    ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
-  function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (method === "POST" && pathname === "/api/v1/chat/messages") {
+      const req = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string | null };
+      if (!req.channelId || typeof req.body !== "string") return notFound(`POST ${pathname}`);
+      const created = msg({
+        id: `msg_01ZDEMO${String(++postSeq).padStart(4, "0")}${Date.now().toString(36).toUpperCase()}`,
+        channelId: req.channelId,
+        authorId: currentAccount().id, // /me is account-scoped (account switcher)
+        body: req.body,
+        threadRootId: req.threadRootId ?? null,
+        createdAt: new Date().toISOString(),
+      });
+      posted.set(req.channelId, [...(posted.get(req.channelId) ?? []), created]);
+      return json(created, 201);
+    }
+    if (method === "GET" && pathname === "/api/v1/chat/unfurl") {
+      // Backend-free: fixed OGP for well-known hosts, null (= no card) otherwise.
+      const target = url.searchParams.get("url") ?? "";
+      return json({ url: target, preview: mockUnfurl(target) });
+    }
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");
@@ -1230,8 +1272,9 @@ function createChatStore() {
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
       const channelId = url.searchParams.get("channelId");
-      // #general opens to a seeded timeline (incl. a system post); others stay empty.
-      return json(page(channelId === "chn_general" ? generalMessages : []));
+      // #general opens to a seeded timeline (incl. a system post); others start empty
+      // and grow with posts made during the session.
+      return json(page(messagesOf(channelId)));
     }
     {
       // Members / pins: demo returns a small roster and no pins (bare arrays per the

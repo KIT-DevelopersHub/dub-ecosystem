@@ -146,6 +146,15 @@ const messages: Message[] = [
     editedAt: t(9, 11, 9),
   }),
   m("msg_00130000000000000000000x", C_DEV, MISAKI, "レビュー投げました 🙏", t(9, 11, 40), { reactions: [react("✅", DAISUKE)] }),
+  // bare URLs autolink + a Slack-style OGP preview card (mock unfurl for known hosts)
+  m("msg_00135000000000000000000x", C_DEV, DAISUKE, "参考にした記事です https://zenn.dev/devhub/articles/chat-ogp-unfurl", t(9, 11, 45)),
+  m(
+    "msg_00136000000000000000000x",
+    C_DEV,
+    ME,
+    "リポジトリはこちら（https://github.com/KIT-DevelopersHub/dub-ecosystem）。OGP が無いサイトはカード無しです: https://no-ogp.invalid/page",
+    t(9, 11, 47),
+  ),
 
   // ── #random ─────────────────────────────────────────────────────────────
   m("msg_00140000000000000000000x", C_RANDOM, KENICHI, "近くにいい感じのカフェ見つけた ☕️ 今度みんなで行きましょう", t(9, 12, 15), {
