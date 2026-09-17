@@ -17,9 +17,12 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Badge, Button, Card, Icon, PageHeader, SkeletonLoader } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
+import { useSetCurrentEventId } from "@dub/fe3-event-action";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
+import { useRecentVisits } from "../useVisitTracker.tsx";
+import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
@@ -143,6 +146,58 @@ function useViewportFit<T extends HTMLElement>(): RefObject<T> {
   return ref;
 }
 
+// Max rows shown in the "最近開いた" card (the store keeps up to 8; the card shows
+// the freshest handful so the rail stays compact within the one-viewport dashboard).
+const RECENT_VISIBLE = 5;
+
+/** "最近開いた" — one-click jump back to recently visited pages (P3-1). Reads the
+ *  client-side visit history and navigates via the shell router. Hidden until the
+ *  viewer has opened at least one trackable page. */
+function RecentOpenedCard({ onNavigate }: { onNavigate?: (path: string) => void }): JSX.Element | null {
+  const visits = useRecentVisits();
+  if (visits.length === 0) return null;
+  const rows = visits.slice(0, RECENT_VISIBLE);
+  return (
+    <Card
+      testId="fe2-home-recent"
+      header={
+        <span className="fe2-stat-label">
+          <Icon name="clock" />
+          最近開いた
+        </span>
+      }
+    >
+      <ul className="fe2-list fe2-home-recent-scroll">
+        {rows.map((v) => (
+          <li key={v.path} className="fe2-list-row">
+            <a
+              href={v.path}
+              className="fe2-list-link"
+              data-testid={`fe2-home-recent-item-${v.path}`}
+              title={`${v.label}（${v.app}）へ移動`}
+              onClick={(e) => {
+                if (onNavigate) {
+                  e.preventDefault();
+                  onNavigate(v.path);
+                }
+              }}
+            >
+              <span className="fe2-recent-icon" aria-hidden="true">
+                <Icon name={v.icon} />
+              </span>
+              <span className="fe2-list-main">
+                <span className="fe2-list-title">{v.label}</span>
+                {v.app !== v.label ? <span className="fe2-list-meta">{v.app}</span> : null}
+              </span>
+              <Icon name="chevron-right" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export function HomeScreen({
   api,
   homeWidgets = [],
@@ -159,6 +214,10 @@ export function HomeScreen({
   onNavigate?: (path: string) => void;
 }): JSX.Element {
   const { data, isPending, errorFor, refetch } = useBffHome(api);
+  // Drives the same "current event" selection the header's イベント switcher
+  // (GlobalEventSwitcher) and the Event app hub (/events → EventHubPage) read —
+  // see openEvent() below.
+  const setCurrentEvent = useSetCurrentEventId();
   const eventsError = errorFor("event-service");
   // The gateway BFF (bff-home) reports the notification upstream as "notification-service"
   // (same "<svc>-service" convention as "event-service"). Matching it here restores the
@@ -194,6 +253,22 @@ export function HomeScreen({
     if (onNavigate) {
       e.preventDefault();
       onNavigate(path);
+    }
+  };
+
+  // Open an event from the "直近のイベント" row: select it in the SAME store the
+  // header's イベント switcher and the Event app hub read (useCurrentEventId), then
+  // land on the hub itself (/events) — the normal Event app home, already showing
+  // that event — rather than the standalone :eventId detail route (a separate
+  // screen reachable only from here; ユーザー指摘 = "遷移先が本来のイベント画面と
+  // 別物になる"). Mirrors GlobalEventSwitcher's select() (saveSelectedEvent +
+  // setCurrentEvent) minus its gantt-specific destination.
+  const openEvent = (eventId: string) => (e: { preventDefault(): void }) => {
+    saveSelectedEvent(eventId);
+    setCurrentEvent(eventId);
+    if (onNavigate) {
+      e.preventDefault();
+      onNavigate("/events");
     }
   };
 
@@ -385,6 +460,8 @@ export function HomeScreen({
 
         {/* ── right: live BFF panels (unchanged testIds/behavior) ───────────────── */}
         <aside className="fe2-home-side">
+          {/* 最近開いた (P3-1): client-side jump-back, above the live panels. */}
+          <RecentOpenedCard {...(onNavigate ? { onNavigate } : {})} />
           <Card
             testId="fe2-home-events"
             header={
@@ -421,10 +498,11 @@ export function HomeScreen({
                 {events.map((ev) => (
                   <li key={ev.id} className="fe2-list-row">
                     <a
-                      href={`/events/${ev.id}`}
+                      href="/events"
                       className="fe2-list-link"
                       data-testid={`fe2-home-event-${ev.id}`}
-                      onClick={go(`/events/${ev.id}`)}
+                      title={`${ev.title}を選択してイベントアプリを開く`}
+                      onClick={openEvent(ev.id)}
                     >
                       <span className="fe2-list-dot" />
                       <span className="fe2-list-main">

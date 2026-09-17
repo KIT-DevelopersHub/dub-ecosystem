@@ -12,6 +12,10 @@
 // expected parent-before-child (the gantt always renders a parent immediately above
 // its children); an orphaned row whose parent isn't present is numbered as a
 // top-level entry so it never loses a label.
+//
+// `prefix` may be a single string (applied to every row — the original behaviour)
+// or a per-row resolver `(row) => string` so each task can carry its OWNING TEAM's
+// code (see domain/team-code.ts) instead of one shared prefix for the whole event.
 import type { common, gantt } from "@dub/types";
 
 const ROOT_KEY = " root"; // sentinel sibling-group key for top-level rows
@@ -19,13 +23,13 @@ const ROOT_KEY = " root"; // sentinel sibling-group key for top-level rows
 /** taskId -> hierarchical number string for the given ordered rows. */
 export function computeTaskNumbers(
   rows: readonly gantt.GanttRow[],
-  prefix = "",
+  prefix: string | ((row: gantt.GanttRow) => string) = "",
   padWidth = 0,
 ): Map<common.TaskId, string> {
   const pathById = new Map<common.TaskId, number[]>();
   const siblingCounter = new Map<string, number>(); // parent group key -> last index used
   const out = new Map<common.TaskId, string>();
-  const label = sanitizePrefix(prefix);
+  const prefixOf = typeof prefix === "function" ? prefix : (): string => prefix;
   const width = clampPadWidth(padWidth);
 
   for (const r of rows) {
@@ -41,6 +45,7 @@ export function computeTaskNumbers(
     const myPath = [...parentPath, index];
     pathById.set(r.taskId, myPath);
     const code = myPath.map((n) => String(n).padStart(width, "0")).join("-");
+    const label = sanitizePrefix(prefixOf(r));
     out.set(r.taskId, label ? `${label}-${code}` : code);
   }
   return out;

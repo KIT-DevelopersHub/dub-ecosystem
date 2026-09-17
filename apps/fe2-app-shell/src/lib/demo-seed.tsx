@@ -88,6 +88,24 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
       { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
     ],
   },
+  // evt_2 is one of the two events the Home dashboard's "直近のイベント" card
+  // links to (see /bff/home's upcomingEvents = EVENTS.slice(0, 2) below), so it
+  // needs a detail entry too — otherwise clicking that row 404s ("イベントが見つ
+  // かりません") even though the SPA navigation itself is correct.
+  evt_2: {
+    version: 1,
+    id: "evt_2",
+    orgId: ORG,
+    title: "運営定例ミーティング",
+    description: "毎週の運営定例。進捗共有と次アクションの確認を行う。",
+    phase: "planning",
+    startsAt: "2026-08-12T09:00:00Z",
+    endsAt: "2026-08-12T10:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
+  },
 };
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
@@ -110,6 +128,19 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
       kind: "announcement",
       title: "参加者への案内メール",
       sortOrder: 1,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+  ],
+  evt_2: [
+    {
+      version: 1,
+      id: "act_3",
+      eventId: "evt_2",
+      kind: "announcement",
+      title: "定例アジェンダ共有",
+      sortOrder: 0,
       archivedAt: null,
       createdAt: "2026-06-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
@@ -153,6 +184,38 @@ const TASKS: task.Task[] = [
     status: "todo", priority: "low", assigneeId: "usr_bob", teamId: "team_ops", dueAt: "2026-08-08T09:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-14T00:00:00Z", updatedAt: "2026-07-31T00:00:00Z",
   },
+  // ── 階層集計デモ (3-level WBS: 祖父tsk_10 → 親tsk_11 → 葉tsk_12/13/14) ──────────
+  // Regression fixture for the recursive parent-status roll-up (症状#1〜#3): tsk_10
+  // has only ONE direct child (tsk_11), so its displayed status/bar can only be
+  // correct if the aggregation walks all the way down to the THREE leaves under
+  // tsk_11 — 2 levels below tsk_10. Leaves are 2x done + 1x blocked (mixed, majority
+  // = done) so both the proportional bar colouring AND the dropdown's plurality
+  // pick are visible/checkable at a glance.
+  {
+    version: 1, id: "tsk_10", eventId: "evt_1", title: "階層集計デモ：全体進行（3階層サンプル）", description: "子孫タスクの完了状況から自動集計される表示専用ステータスの確認用",
+    status: "todo", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: "2026-08-15T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_11", eventId: "evt_1", title: "階層集計デモ：中間フェーズ", description: null,
+    status: "todo", priority: "medium", assigneeId: null, teamId: "team_hq", dueAt: "2026-08-14T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_12", eventId: "evt_1", title: "階層集計デモ：作業A", description: null,
+    status: "done", priority: "medium", assigneeId: ME_ID, teamId: "team_hq", dueAt: "2026-08-10T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_13", eventId: "evt_1", title: "階層集計デモ：作業B", description: null,
+    status: "done", priority: "medium", assigneeId: ME_ID, teamId: "team_hq", dueAt: "2026-08-12T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    version: 1, id: "tsk_14", eventId: "evt_1", title: "階層集計デモ：作業C", description: null,
+    status: "blocked", priority: "medium", assigneeId: "usr_bob", teamId: "team_hq", dueAt: "2026-08-13T09:00:00Z", origin: "internal",
+    archivedAt: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+  },
   // ── evt_3 (学生ハッカソン Hackit 秋) — a 2nd event WITH a gantt so the global
   //    header イベント switcher demonstrably reloads the timeline on switch. ──
   {
@@ -181,14 +244,27 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      // teamId mirrors each row's TASKS entry above so the gantt's チーム順 grouping
+      // AND the task-number prefix (team-code.ts) both reflect the row's real team —
+      // this DTO used to omit teamId entirely, which silently showed every task
+      // number with NO team prefix in this demo (a gap in the fixture, independent
+      // of the task-number-team-prefix fix itself).
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, teamId: "team_hq", hasChildren: true },
       // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
       // contiguous; used to prove the team rail stays straight across an indented child.
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
-      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
-      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_1", depth: 1 },
+      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_ops" },
+      // 階層集計デモ: tsk_10(祖父) -> tsk_11(親) -> tsk_12/13/14(葉、2完了+1ブロック)。
+      // tsk_10 の直接の子は tsk_11 だけ — バー/ドロップダウンが正しければ、2階層下の
+      // 3枚の葉から再帰集計された「完了寄り」が出る(祖父の直下だけを見ていたら出ない)。
+      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", hasChildren: true },
+      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_10", depth: 1, hasChildren: true },
+      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
@@ -197,10 +273,10 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_3: {
     eventId: "evt_3",
     rows: [
-      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
-      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
-      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_ops" },
+      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_hq" },
     ],
     dependencies: [
       { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },
@@ -249,6 +325,53 @@ function ganttViewFor(eventId: string): gantt.GanttViewState {
   const ev = eventId as gantt.GanttViewState["eventId"];
   if (!GANTT_VIEWS[eventId]) GANTT_VIEWS[eventId] = { eventId: ev, zoom: "week", collapsedTaskIds: [], orderedTaskIds: [] };
   return GANTT_VIEWS[eventId]!;
+}
+
+// Shared event-detail-page section layout (D&D order/visibility of 重要リンク/連絡先/
+// 概要/... — see @dub/fe3-event-action's EventDetailsPanel). UNLIKE GANTT_VIEWS above
+// (in-memory, per-session only), this is localStorage-backed like the mail Sent/
+// thread-flags stores below — a demo reviewer reloading mid-review must still see
+// their reorder/hide hold. Version-locked with the SAME error code the real
+// event-service returns (EVENT_VERSION_CONFLICT) so the optimistic-mutation rollback
+// path is exercised identically to staging/prod.
+interface DemoSectionLayoutData {
+  order: string[];
+  hidden: string[];
+}
+interface DemoSectionLayout {
+  eventId: string;
+  data: DemoSectionLayoutData;
+  version: number;
+  updatedAt: string | null;
+}
+function sectionLayoutKey(eventId: string): string {
+  return `dub_demo_section_layout:${eventId}`;
+}
+function loadDemoSectionLayout(eventId: string): DemoSectionLayout {
+  try {
+    const raw = globalThis.localStorage?.getItem(sectionLayoutKey(eventId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DemoSectionLayout> & { data?: Partial<DemoSectionLayoutData> };
+      const order = Array.isArray(parsed.data?.order) ? parsed.data!.order.filter((x): x is string => typeof x === "string") : [];
+      const hidden = Array.isArray(parsed.data?.hidden) ? parsed.data!.hidden.filter((x): x is string => typeof x === "string") : [];
+      return {
+        eventId,
+        version: typeof parsed.version === "number" ? parsed.version : 0,
+        updatedAt: parsed.updatedAt ?? null,
+        data: { order, hidden },
+      };
+    }
+  } catch {
+    /* private mode / quota — fall through to the default layout */
+  }
+  return { eventId, data: { order: [], hidden: [] }, version: 0, updatedAt: null };
+}
+function saveDemoSectionLayout(next: DemoSectionLayout): void {
+  try {
+    globalThis.localStorage?.setItem(sectionLayoutKey(next.eventId), JSON.stringify(next));
+  } catch {
+    /* private mode / quota — non-fatal for the demo */
+  }
 }
 
 // ── notifications ─────────────────────────────────────────────────────────────
@@ -1168,12 +1291,75 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // Shared section layout save — version-locked (see DemoSectionLayout above).
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
+    if (id && method === "PUT") {
+      const b = (body ?? {}) as { data?: Partial<DemoSectionLayoutData>; version?: number };
+      const current = loadDemoSectionLayout(id);
+      if (typeof b.version !== "number" || b.version !== current.version) {
+        const err: ErrorResponse = { error: { code: "EVENT_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      const order = Array.isArray(b.data?.order) ? b.data!.order.filter((x): x is string => typeof x === "string") : [];
+      const hidden = Array.isArray(b.data?.hidden) ? b.data!.hidden.filter((x): x is string => typeof x === "string") : [];
+      const next: DemoSectionLayout = { eventId: id, data: { order, hidden }, version: current.version + 1, updatedAt: isoNow() };
+      saveDemoSectionLayout(next);
+      return json(next);
+    }
+  }
+
+  // events — edit (PATCH) + archive (DELETE). Mutates the in-memory seed so the demo
+  // shows optimistic save → persisted reflection for name / schedule / description.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)$/);
+    if (id && (method === "PATCH" || method === "DELETE")) {
+      const cur = EVENT_DETAIL[id];
+      if (!cur) return notFound(`${method} ${pathname}`);
+      if (method === "DELETE") {
+        EVENT_DETAIL[id] = { ...cur, archivedAt: isoNow(), version: cur.version + 1, updatedAt: isoNow() };
+        const li = EVENTS.findIndex((e) => e.id === id);
+        if (li >= 0) EVENTS.splice(li, 1); // drop from the list summary
+        return new Response(null, { status: 204 });
+      }
+      const b = (body ?? {}) as Partial<event.UpdateEventRequest>;
+      const next: event.EventDetail = {
+        ...cur,
+        title: b.title ?? cur.title,
+        description: b.description !== undefined ? b.description : cur.description,
+        phase: b.phase ?? cur.phase,
+        startsAt: b.startsAt !== undefined ? b.startsAt : cur.startsAt,
+        endsAt: b.endsAt !== undefined ? b.endsAt : cur.endsAt,
+        version: cur.version + 1,
+        updatedAt: isoNow(),
+      };
+      EVENT_DETAIL[id] = next;
+      const li = EVENTS.findIndex((e) => e.id === id); // keep the list summary in sync
+      if (li >= 0) EVENTS[li] = { id: next.id, title: next.title, phase: next.phase, startsAt: next.startsAt };
+      const { actions: _actions, ...dubEvent } = next;
+      return json(dubEvent);
+    }
+  }
+
   if (method === "GET") {
     // events
     if (pathname === "/api/v1/events") return json(page(EVENTS));
     {
       const id = seg(/^\/api\/v1\/events\/([^/]+)\/actions$/);
       if (id) return json(page(EVENT_ACTIONS[id] ?? []));
+    }
+    {
+      // single action (FE3 ActionDetailPage → getAction /api/v1/actions/:id). Seeded so
+      // the deep イベント>アクション詳細 screen (and its P2-1 breadcrumb) is reachable in demo.
+      const aid = seg(/^\/api\/v1\/actions\/([^/]+)$/);
+      if (aid) {
+        const found = Object.values(EVENT_ACTIONS).flat().find((a) => a.id === aid);
+        return found ? json(found) : notFound(`GET ${pathname}`);
+      }
+    }
+    {
+      const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
+      if (id) return json(loadDemoSectionLayout(id));
     }
     {
       const id = seg(/^\/api\/v1\/events\/([^/]+)$/);

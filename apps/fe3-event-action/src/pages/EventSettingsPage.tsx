@@ -23,6 +23,7 @@ function EventSettingsInner({ eventId }: { eventId: string }) {
         </Button>
       </div>
 
+      <h2 className={styles.sectionTitle}>基本情報</h2>
       <EventEditForm event={ev} canWrite={permissions.write} />
 
       <h2 className={styles.sectionTitle}>危険な操作</h2>

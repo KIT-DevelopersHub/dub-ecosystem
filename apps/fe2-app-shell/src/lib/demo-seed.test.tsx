@@ -43,6 +43,23 @@ describe("createDemoFetch", () => {
     expect(gantt.rows.length).toBeGreaterThan(0);
   });
 
+  it("persists an event edit (PATCH) so the save reflects on re-read", async () => {
+    const a = api();
+    const before = await a.request<{ version: number; title: string }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    const updated = await a.request<{ version: number; title: string; startsAt: string | null; description: string | null }>({
+      method: "PATCH",
+      path: "/api/v1/events/evt_1",
+      body: { version: before.version, title: "編集済みイベント", startsAt: "2026-10-01T00:30:00.000Z", description: "更新後の説明" },
+    });
+    expect(updated.title).toBe("編集済みイベント");
+    expect(updated.startsAt).toBe("2026-10-01T00:30:00.000Z");
+    expect(updated.description).toBe("更新後の説明");
+    expect(updated.version).toBe(before.version + 1);
+    // re-read reflects the change (persisted in-memory), and the list summary is in sync
+    const after = await a.request<{ title: string }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    expect(after.title).toBe("編集済みイベント");
+  });
+
   it("still surfaces NOT_FOUND for un-seeded routes (in-frame fallback)", async () => {
     let caught: unknown;
     try {
@@ -52,6 +69,59 @@ describe("createDemoFetch", () => {
     }
     expect(ApiError.isApiError(caught)).toBe(true);
     expect((caught as ApiError).status).toBe(404);
+  });
+});
+
+describe("event section layout (shared D&D order/visibility)", () => {
+  it("GET returns the default empty layout for an event never saved to", async () => {
+    const layout = await api().request<{ eventId: string; data: { order: string[]; hidden: string[] }; version: number }>(
+      { method: "GET", path: "/api/v1/events/evt_layout_get/section-layout" },
+    );
+    expect(layout.data).toEqual({ order: [], hidden: [] });
+    expect(layout.version).toBe(0);
+  });
+
+  it("PUT saves (v0 -> v1) and persists across a fresh api() instance (localStorage-backed)", async () => {
+    const eventId = "evt_layout_persist";
+    const saved = await api().request<{ data: { order: string[] }; version: number }>({
+      method: "PUT",
+      path: `/api/v1/events/${eventId}/section-layout`,
+      body: { version: 0, data: { order: ["links", "contacts"], hidden: ["memo"] } },
+    });
+    expect(saved.version).toBe(1);
+    expect(saved.data.order).toEqual(["links", "contacts"]);
+
+    // A fresh api()/createDemoFetch() call simulates a reload: the in-memory session
+    // resets, but the localStorage-backed layout must still read back.
+    const reread = await api().request<{ data: { order: string[]; hidden: string[] }; version: number }>({
+      method: "GET",
+      path: `/api/v1/events/${eventId}/section-layout`,
+    });
+    expect(reread.version).toBe(1);
+    expect(reread.data.order).toEqual(["links", "contacts"]);
+    expect(reread.data.hidden).toEqual(["memo"]);
+  });
+
+  it("stale version PUT -> 409 EVENT_VERSION_CONFLICT", async () => {
+    const eventId = "evt_layout_conflict";
+    await api().request({
+      method: "PUT",
+      path: `/api/v1/events/${eventId}/section-layout`,
+      body: { version: 0, data: { order: ["a"], hidden: [] } },
+    });
+    // second save must use version 1; sending 0 again conflicts (mirrors event-service).
+    let caught: unknown;
+    try {
+      await api().request({
+        method: "PUT",
+        path: `/api/v1/events/${eventId}/section-layout`,
+        body: { version: 0, data: { order: ["b"], hidden: [] } },
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(ApiError.isApiError(caught)).toBe(true);
+    expect((caught as ApiError).status).toBe(409);
   });
 });
 
@@ -72,13 +142,13 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 57-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 59-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
     expect(list.items.every((r) => r.isSystem)).toBe(true);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(57);
+    expect(catalog).toHaveLength(59);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {

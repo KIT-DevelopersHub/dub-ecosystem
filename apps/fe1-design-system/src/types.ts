@@ -104,6 +104,17 @@ export interface ButtonProps extends TestableProps {
   size?: Size; // default "md"
   loading?: boolean; // shows spinner, disables click
   disabled?: boolean;
+  /**
+   * Opt-in success flash (P12 delight UX). Set `true` right after an async
+   * action succeeds (e.g. a save/submit request resolves). The button plays a
+   * ~0.6s checkmark + tinted-background flash on the RISING edge (false→true)
+   * and then reverts to its normal look automatically — even if this prop
+   * stays `true` — so callers don't need to time a reset back to `false`
+   * (though resetting it is harmless and lets the flash replay on the next
+   * rising edge). Ignored while `loading` is true. Lets a save/submit button
+   * communicate success in place, without a toast. Default `false`.
+   */
+  success?: boolean;
   iconLeft?: ReactNode;
   iconRight?: ReactNode;
   type?: "button" | "submit";
@@ -380,6 +391,11 @@ export interface DrawerProps extends TestableProps {
   title?: string;
   side?: "left" | "right";
   children: ReactNode;
+  // Skip the built-in title/close header entirely — for callers whose content
+  // already renders its own header + close affordance (avoids a duplicated
+  // header when the Drawer is only being used for its overlay mechanics:
+  // portal, focus trap, esc-to-close, scroll lock).
+  hideHeader?: boolean;
 }
 
 export interface PopoverProps extends TestableProps {
@@ -491,6 +507,23 @@ export interface PageHeaderProps extends TestableProps {
   description?: string;
   actions?: ReactNode;
   breadcrumbs?: ReactNode;
+}
+
+/**
+ * One hop in a breadcrumb trail (P2-1). The LAST item in `BreadcrumbsProps.items`
+ * is the current page (rendered as text, never a link); every earlier item is an
+ * ancestor the user can click to walk back up.
+ */
+export interface BreadcrumbItem {
+  label: ReactNode;
+  onClick?: () => void; // plain handler (FE1 stays router-free)
+  href?: string; // renderLink maps this to a router Link when provided
+  icon?: IconName; // optional leading icon, e.g. the app icon on the root crumb
+}
+export interface BreadcrumbsProps extends TestableProps {
+  items: BreadcrumbItem[];
+  // Inject a router Link around each ancestor (parity with SidebarProps.renderLink).
+  renderLink?: (item: BreadcrumbItem, node: ReactNode) => ReactNode;
 }
 
 export interface StackProps extends TestableProps {

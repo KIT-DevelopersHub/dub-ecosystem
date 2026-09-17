@@ -1,0 +1,71 @@
+.breadcrumbs {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  min-width: 0;
+}
+.crumbInner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  min-width: 0;
+}
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16rem;
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  color: var(--dub-color-text-secondary);
+  text-decoration: none;
+  border-radius: var(--dub-radius-sm);
+}
+a.link:hover,
+.linkButton:hover {
+  color: var(--dub-color-text-primary);
+  text-decoration: underline;
+}
+.link:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+/* onClick ancestors render as a bare <button>; strip the native chrome so it reads
+   as a link, not a form control. */
+.linkButton {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.current {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-medium);
+  min-width: 0;
+}
+.separator {
+  color: var(--dub-color-text-muted);
+  flex-shrink: 0;
+}

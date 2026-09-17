@@ -13,7 +13,7 @@
 //   4. carry each feature's module-level requiredPermissions so registry
 //      flatten() ANDs them onto every route (fail-closed authz).
 // The result is the array FE2's registerFeatureModules() consumes (main.tsx).
-import { createElement, useMemo, type ComponentType, type ReactNode } from "react";
+import { createElement, Fragment, useMemo, type ComponentType, type ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import { appRegistry, type identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
@@ -35,6 +35,7 @@ import { GanttProvider } from "../features/gantt/GanttProvider.tsx";
 import { GlobalEventSwitcher } from "../features/gantt/GlobalEventSwitcher.tsx";
 import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
+import { lpRoutes, lpNav } from "../features/lp/index.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
 import { participationRoutes } from "../features/participation/index.tsx";
@@ -328,6 +329,18 @@ function adaptDriveShare(api: ApiClient): FeatureModule {
   return { id: "driveshare", routes, nav };
 }
 
+// ── lp (FE2-local feature module) ─────────────────────────────────────────────
+// LP管理: 北陸ITカンファレンス LP のバージョンを一覧・閲覧する管理ツール。mail/usage と同じく
+// シェル内(features/lp)に住み、バックエンド依存がない（静的なバージョンカタログを読むだけ）ので
+// Provider は不要。nav は driveshare の後・admin の前(order 49)。実際の per-app ゲートは
+// withAppAccessGate が app:lp:view を各ルート/タイルに AND する（APP_MANIFEST 由来）。
+function adaptLp(): FeatureModule {
+  const passthrough: ElementWrapper = (node) => createElement(Fragment, null, node);
+  const routes = (lpRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, passthrough));
+  const nav: NavEntry[] = lpNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 49 }));
+  return { id: "lp", routes, nav };
+}
+
 // ── admin (FE7) ───────────────────────────────────────────────────────────────
 function adaptAdmin(api: ApiClient): FeatureModule {
   const provider = providerWrapper(RosterProviders, api);
@@ -388,8 +401,9 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptMembers(api),
     adaptParticipation(api),
     adaptDriveShare(api),
+    adaptLp(),
     adaptAdmin(api),
   ].map(withNavAppId).map(withAppAccessGate);
 }
 
-export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptAdmin, toIcon };

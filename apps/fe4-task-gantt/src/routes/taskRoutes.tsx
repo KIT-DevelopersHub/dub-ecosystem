@@ -10,10 +10,9 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTeams, listEvents, toDomainTeams } from "../api/endpoints";
+import { listTeams, toDomainTeams } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
-import type { EventOption } from "../components/MyTaskCreateModal";
 import styles from "../styles/app.module.css";
 
 export interface TaskRouteContextValue {
@@ -49,6 +48,20 @@ export function parseEventIdFromPath(pathname: string): common.EventId | null {
   return m ? m[1]! : null;
 }
 
+// The legacy sub-segments that `/events/:eventId/tasks/<seg>` can carry alongside a
+// real `:taskId` — matched so a stale `.../board` or `.../gantt` link never gets
+// mistaken for a task id and force-opens a non-existent task's detail panel.
+const LEGACY_TASK_SUBSEGMENTS = new Set(["board", "gantt"]);
+
+/** Derive a deep-linked `:taskId` from `/events/:eventId/tasks/:taskId` (e.g. the
+ *  ⌘K global search's task results), else null. */
+export function parseTaskIdFromPath(pathname: string): common.TaskId | null {
+  const m = pathname.match(/\/events\/[^/]+\/tasks\/([^/]+)\/?$/);
+  if (!m) return null;
+  const seg = m[1]!;
+  return LEGACY_TASK_SUBSEGMENTS.has(seg) ? null : (seg as common.TaskId);
+}
+
 /**
  * Event-scoped workspace route: serves `/events/:eventId/tasks` (and the legacy
  * `.../board`, `.../gantt`, `.../:taskId` sub-segments, all now the single gantt
@@ -62,8 +75,11 @@ export function TaskWorkspaceRoute() {
   // window.location parse for standalone mounts / shells that don't feed it.
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
   const eventId = ctxEventId ?? parseEventIdFromPath(pathname);
+  const initialSelectedTaskId = parseTaskIdFromPath(pathname);
   if (!eventId) return <p className={styles.banner}>イベントが指定されていません。</p>;
-  return <TaskWorkspacePage eventId={eventId} permissions={permissions} />;
+  return (
+    <TaskWorkspacePage eventId={eventId} permissions={permissions} initialSelectedTaskId={initialSelectedTaskId} />
+  );
 }
 
 /**
@@ -78,7 +94,6 @@ export function MeTasksRoute() {
   const client = useApiClient();
   const { currentUserId } = useTaskRoute();
   const [teams, setTeams] = useState<readonly team.Team[]>([]);
-  const [events, setEvents] = useState<readonly EventOption[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -89,16 +104,6 @@ export function MeTasksRoute() {
       .catch(() => {
         /* teams are optional; the hub degrades gracefully without them */
       });
-    // Supply the real event list so 「タスクを発行」 is enabled and can target a
-    // live event. Without this the button stayed disabled for admins who had no
-    // existing tasks to derive an event from (issue: 発行ボタンが押せない).
-    void listEvents(client)
-      .then((res) => {
-        if (live) setEvents(res.items.map((e) => ({ id: e.id, name: e.title })));
-      })
-      .catch(() => {
-        /* events are optional; the hub falls back to task-derived events */
-      });
     return () => {
       live = false;
     };
@@ -108,7 +113,7 @@ export function MeTasksRoute() {
 
   return (
     <ToastProvider>
-      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} events={events} />
+      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} />
     </ToastProvider>
   );
 }

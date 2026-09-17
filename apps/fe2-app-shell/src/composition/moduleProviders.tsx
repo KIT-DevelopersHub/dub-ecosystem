@@ -7,9 +7,15 @@
 // live shell state via hooks (auth, toast, router) rather than props, so a
 // single wrapper instance stays correct as the session/route changes.
 import { useMemo, type ReactNode } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import type { gateway } from "@dub/types";
-import { EventApiProvider, RegistryProvider, actionTypeRegistry } from "@dub/fe3-event-action";
+import {
+  EventApiProvider,
+  EventAuthBridge,
+  NavigationProvider as EventNavigationProvider,
+  RegistryProvider,
+  actionTypeRegistry,
+} from "@dub/fe3-event-action";
 import { NotificationProvider, type NotificationDeps } from "@dub/fe5-notification-inbox";
 import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
@@ -34,9 +40,39 @@ function useMe(): gateway.MeResponse | null {
 /** FE3 events: EventApi injection + the app-global ActionTypeRegistry. */
 export function EventProviders({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const eventApi = useMemo(() => createEventApi(api), [api]);
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const params = useParams({ strict: false }) as Record<string, string>;
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchStr = useRouterState({ select: (s) => (s.location.searchStr ?? "").replace(/^\?/, "") });
+  // FE3 pages navigate + read route params/search via its own NavigationApi; feed it
+  // from the shell router so hub→編集/設定, detail, action and list-filter routes resolve
+  // (without this, FE3's useNavigation falls back to a no-op and every in-app link is dead).
+  const navigation = useMemo(
+    () => ({
+      navigate: (to: string) => {
+        void navigate({ to });
+      },
+      params,
+      search: searchStr,
+      setSearch: (query: string) => {
+        const search = Object.fromEntries(new URLSearchParams(query));
+        void navigate({ to: pathname, search });
+      },
+    }),
+    [navigate, params, searchStr, pathname],
+  );
   return (
     <EventApiProvider api={eventApi}>
-      <RegistryProvider registry={actionTypeRegistry}>{children}</RegistryProvider>
+      {/* Sync the shell session into FE3's auth store so event write controls
+          (編集/設定/phase/action add) gate on the real permissions, not fail-closed. */}
+      <EventAuthBridge
+        me={auth.status === "authenticated" ? auth.me : null}
+        loading={auth.status === "loading"}
+      />
+      <EventNavigationProvider value={navigation}>
+        <RegistryProvider registry={actionTypeRegistry}>{children}</RegistryProvider>
+      </EventNavigationProvider>
     </EventApiProvider>
   );
 }

@@ -77,6 +77,31 @@
   background: var(--dub-color-danger-600);
 }
 
+/* P12: opt-in success flash (ButtonProps.success). `[data-success]` (0,2,0) ties
+ * every `[data-variant="x"]` background rule by specificity and, placed later in
+ * source, wins (same trick as the iconButton compound below) — so the flash shows
+ * regardless of variant. Removing the attribute lets the button fall back through
+ * to its normal variant background, animated by the `.button` transition already
+ * declared above (no separate reverse keyframe needed). */
+.button[data-success] {
+  background: var(--dub-color-success-500);
+  border-color: var(--dub-color-success-500);
+  color: var(--dub-color-text-inverse);
+}
+.successIcon {
+  animation: dub-button-success-pop var(--dub-motion-normal) var(--dub-motion-easing);
+}
+@keyframes dub-button-success-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .successIcon {
+    animation: none;
+  }
+}
+
 /* Compound `.button.iconButton` (0,2,0) so it ties — and, being later in source,
  * wins — against `.button[data-size="md"]` (0,2,0), whose horizontal padding would
  * otherwise widen the icon button into a non-square rectangle. */
