@@ -1,9 +1,12 @@
 "use client";
 
 import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 
 // Reveal — 「下から立ち上がる」演出を SSG-safe かつ「既定 visible・足すだけ」で足す。
+//
+// ★ framer-motion を廃し、素の要素＋IntersectionObserver＋CSS transition で実装。
+//   これで framer-motion ランタイム(~124KB チャンク)をクライアントバンドルから外し、
+//   演出(opacity/transform の 0.6s トランジション)は従来と同一に保つ(GPU 合成)。
 //
 // ★ 既知バグ回避（最重要 / Astro 版で About・クラファン・応募・お問い合わせが
 //   opacity:0 のまま真っ白になった事故の再発防止）:
@@ -35,6 +38,21 @@ const BELOW_FOLD_RATIO = 0.92;
 // 安全網: この時間を過ぎたら reveal の発火有無に関わらず必ず可視化。
 const SAFETY_MS = 4000;
 
+// prefers-reduced-motion を JS で検出（framer-motion の useReducedMotion 代替）。
+// SSR/初回は false（＝素描画は下の !mounted 分岐が担保）、マウント後に実値を反映。
+function usePrefersReducedMotion(): boolean {
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduce(mq.matches);
+    const onChange = () => setReduce(mq.matches);
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
+  return reduce;
+}
+
 export function Reveal({
   children,
   className,
@@ -42,7 +60,7 @@ export function Reveal({
   as = "div",
   ...rest
 }: RevealProps) {
-  const reduce = useReducedMotion();
+  const reduce = usePrefersReducedMotion();
   const ref = useRef<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<Phase>("static");
@@ -90,18 +108,21 @@ export function Reveal({
     return createElement(as, { className, ...rest }, children);
   }
 
-  const MotionTag = motion[as];
-  return (
-    <MotionTag
-      ref={ref as never}
-      className={className}
-      // initial={false}: マウント時は現在値（可視）から始めてチラつきを防ぐ。
-      initial={false}
-      animate={phase === "hidden" ? { opacity: 0, y: 18 } : { opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay }}
-      {...rest}
-    >
-      {children}
-    </MotionTag>
+  // client（通常モーション）→ .reveal に CSS transition を持たせ、
+  // 下端より下の要素だけ hidden(opacity:0, y18) → shown へ遷移させる。
+  const cls = [className, "reveal", phase === "hidden" ? "reveal--hidden" : "reveal--shown"]
+    .filter(Boolean)
+    .join(" ");
+
+  return createElement(
+    as,
+    {
+      ref,
+      className: cls,
+      // delay はグループ内のずらし（framer の transition.delay 相当）。
+      style: delay ? { transitionDelay: `${delay}s` } : undefined,
+      ...rest,
+    },
+    children,
   );
 }

@@ -8,17 +8,29 @@ import type { LpConfig } from "@/config/types";
 // Zen Kaku Gothic New for Japanese (modern, highly readable geometric gothic).
 // Both are self-hosted at build time via next/font (works with output: export)
 // so the SSG page ships no render-blocking third-party font request.
+// Inter covers latin/numerals (the page is JP-primary). It is a single ~48 KB
+// latin subset and — crucially — the LCP element is the latin hero eyebrow
+// ("HOKURIKU IT CONFERENCE 2027"), so Inter stays PRELOADED (next/font default)
+// to keep the LCP font on the fast path. Only the huge Japanese face below is
+// dropped from preload.
 const inter = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
   variable: "--font-inter",
   display: "swap",
 });
+// Zen Kaku Gothic New covers the full JIS glyph set, so next/font splits it into
+// ~490 unicode-range woff2 subset chunks. Auto-preload would inject a <link
+// rel="preload"> for EVERY chunk (~360 files / ~5.8 MB), stalling LCP to ~30 s on
+// throttled mobile. `preload: false` drops those preloads: with `display: swap`
+// the system-JP fallback paints immediately and the browser lazily fetches only
+// the few subset chunks whose glyphs actually appear on the page.
 const zenKaku = Zen_Kaku_Gothic_New({
   subsets: ["latin"],
   weight: ["400", "500", "700", "900"],
   variable: "--font-jp",
   display: "swap",
+  preload: false,
 });
 
 const config = snapshot as LpConfig;
