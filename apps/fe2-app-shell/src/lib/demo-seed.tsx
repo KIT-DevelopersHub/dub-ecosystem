@@ -379,6 +379,11 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
   { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
+  // チャット (chat.mention / chat.dm, via chat.message.created -> notification, in_app
+  // default-ON exception). resourceType "channel" deep-links into fe6-chat's own route
+  // (NotificationCard.itemLinkUrl -> /chat/channels/:id).
+  { id: "ntf_4", type: "chat.mention", title: "メンションされました", body: "#project-alpha でメンションされました。", readAt: null, createdAt: "2026-08-02T03:00:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
+  { id: "ntf_5", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんからダイレクトメッセージが届きました。", readAt: null, createdAt: "2026-08-02T02:45:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
 ];
 
 // audience='admin' notifications powering the Notification管理 screen

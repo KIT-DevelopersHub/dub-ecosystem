@@ -17,6 +17,7 @@ import { SERVICE_NAME } from "./config";
 import { buildDb, buildIngestDeps } from "./deps";
 import { makeIdempotencyStore } from "./idempotency";
 import { EVENT_MAPPINGS } from "./mapping";
+import { buildChatDmNotifyInput } from "./chat";
 import { ingest } from "./ingest";
 import type { EventMappingRule, IngestInput } from "./types";
 
@@ -76,6 +77,19 @@ export function buildHandlers(env: Env): DubEventHandlerMap {
   handlers["notification.requested"] = async (e, c) => {
     const deps = buildIngestDeps(env, queueCtx(c.requestId));
     await ingest(deps, requestedToIngest(e as DubEventEnvelope<"notification.requested">));
+  };
+
+  // chat.message.created carries two independent notification concerns (see chat.ts):
+  // the @mention fan-out generated above from EVENT_MAPPINGS, and a DM fan-out that a
+  // single-type mapping rule can't express. Wrap the generated handler so both run.
+  const chatMentionHandler = handlers["chat.message.created"];
+  handlers["chat.message.created"] = async (e, c) => {
+    if (chatMentionHandler) await chatMentionHandler(e, c);
+    const dmInput = buildChatDmNotifyInput(e as DubEventEnvelope<"chat.message.created">);
+    if (dmInput) {
+      const deps = buildIngestDeps(env, queueCtx(c.requestId));
+      await ingest(deps, dmInput);
+    }
   };
 
   return handlers as DubEventHandlerMap;
