@@ -75,6 +75,14 @@ body {
   font-feature-settings: "palt" 1; /* proportional JP kerning */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Japanese line-breaking: prefer breaking between phrases/words rather than
+     mid-word (e.g. 技術|イベント, 循環, ワークショップ). `auto-phrase` is a
+     progressive enhancement (Chromium; no-op — falls back to normal breaking —
+     on browsers that don't recognize it), and `line-break: strict` applies the
+     strictest kinsoku rules everywhere (no orphaned small kana/prolonged-sound
+     marks starting a line) regardless of auto-phrase support. */
+  word-break: auto-phrase;
+  line-break: strict;
 }
 
 a { color: var(--lp-link); }
@@ -146,6 +154,65 @@ img { max-width: 100%; height: auto; display: block; }
   opacity: 0.9;
 }
 
+/* scroll progress — thin brand bar pinned to the very top, filled by scaleX
+   (transform-only). Sits above the sticky nav; decorative (aria-hidden). */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  z-index: 100;
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
+  box-shadow: 0 1px 10px rgba(47, 97, 214, 0.55);
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* ============================================================
+   Entrance curtain — first-paint "ドワー" loading→burst overlay
+   ============================================================ */
+.lp-entrance {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 100% at 50% 40%, rgba(23, 184, 146, 0.35) 0%, transparent 55%),
+    linear-gradient(158deg, #0f2f8f 0%, #1e3fa8 46%, #0e6f8f 100%);
+  pointer-events: none;
+  will-change: opacity, transform, filter;
+}
+/* expanding shockwave ring — the visual pulse of the burst */
+.lp-entrance-wave {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  width: 40vmax;
+  height: 40vmax;
+  margin: -20vmax 0 0 -20vmax;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 0 60px rgba(255, 255, 255, 0.35),
+    inset 0 0 60px rgba(23, 184, 146, 0.4);
+  will-change: transform, opacity;
+}
+.lp-entrance-mark {
+  position: relative;
+  font-family: var(--font-inter), sans-serif;
+  font-size: clamp(0.72rem, 2.4vw, 1.05rem);
+  font-weight: 800;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.25);
+  will-change: transform, opacity;
+}
+
 /* ============================================================
    Hero (TOP)
    ============================================================ */
@@ -169,20 +236,20 @@ img { max-width: 100%; height: auto; display: block; }
   z-index: 0;
 }
 .hero::before {
-  width: 340px; height: 340px;
+  width: 380px; height: 380px;
   left: -90px; top: 120px;
-  background: radial-gradient(circle, rgba(47, 97, 214, 0.28), transparent 70%);
-  animation: blob-float 18s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(47, 97, 214, 0.34), transparent 70%);
+  animation: blob-float 9s ease-in-out infinite alternate;
 }
 .hero::after {
-  width: 300px; height: 300px;
+  width: 340px; height: 340px;
   right: 8%; bottom: -70px;
-  background: radial-gradient(circle, rgba(23, 184, 146, 0.26), transparent 70%);
-  animation: blob-float 22s ease-in-out 1.5s infinite alternate-reverse;
+  background: radial-gradient(circle, rgba(23, 184, 146, 0.3), transparent 70%);
+  animation: blob-float 11s ease-in-out 1s infinite alternate-reverse;
 }
 @keyframes blob-float {
   from { transform: translate3d(0, 0, 0) scale(1); }
-  to { transform: translate3d(24px, -26px, 0) scale(1.12); }
+  to { transform: translate3d(80px, -70px, 0) scale(1.3); }
 }
 
 /* nav — sticky, glassy */
@@ -259,25 +326,29 @@ img { max-width: 100%; height: auto; display: block; }
   pointer-events: none;
   user-select: none;
 }
+/* parallax wrappers: outer .hero-visual keeps CSS centering; these inner layers
+   carry the scroll + pointer transforms (Framer Motion) without fighting it. */
+.hero-visual-scroll { width: 100%; will-change: transform, opacity; }
+.hero-visual-inner { width: 100%; will-change: transform; }
 .hero-net {
   width: 100%;
   height: auto;
   overflow: visible;
   filter: drop-shadow(0 18px 40px rgba(16, 42, 100, 0.16));
-  animation: hero-visual-float 12s ease-in-out infinite alternate;
+  animation: hero-visual-float 6s ease-in-out infinite alternate;
 }
 @keyframes hero-visual-float {
-  from { transform: translateY(-6px); }
-  to { transform: translateY(6px); }
+  from { transform: translateY(-20px) rotate(-1.2deg); }
+  to { transform: translateY(20px) rotate(1.2deg); }
 }
 .hero-net-node circle:nth-child(2) {
   transform-box: fill-box;
   transform-origin: center;
-  animation: node-pulse 3.2s ease-in-out infinite;
+  animation: node-pulse 2.2s ease-in-out infinite;
 }
 @keyframes node-pulse {
   0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.18); }
+  50% { transform: scale(1.42); }
 }
 
 .hero-copy {
@@ -321,7 +392,14 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .hero-title-line {
   display: block;
-  font-size: clamp(2.7rem, 8.2vw, 5.7rem);
+  /* Each line is a hard-coded phrase (北陸IT / カンファレンス) with no other
+     break point to fall back on, so it must never wrap on its own — tuned so
+     the 7-glyph "カンファレンス" line never exceeds .hero-copy's width at any
+     viewport (was overflowing ~860-1250px, forcing a mid-word 3rd line).
+     Unchanged from the original 8.2vw/5.7rem at >=1250px (desktop), where the
+     design was already correct. */
+  font-size: clamp(2.45rem, 7.25vw, 5.7rem);
+  white-space: nowrap;
 }
 .hero-title-line--2 { margin-top: 0.06em; }
 .hero-title-jp { color: var(--lp-heading); }
@@ -361,6 +439,7 @@ img { max-width: 100%; height: auto; display: block; }
   font-weight: 700;
   color: var(--lp-blue-deep);
   padding-left: 1.35rem;
+  white-space: nowrap; /* short fixed label (開催日時/会場) — never split mid-word */
 }
 .hero-meta-label::before {
   content: "";
@@ -441,6 +520,33 @@ img { max-width: 100%; height: auto; display: block; }
   box-shadow: 0 16px 30px -6px rgba(14, 138, 104, 0.44);
 }
 
+/* disabled CTA (受付未開始) — grayed out, not clickable, quiet "準備中" badge */
+.hero-cta.is-disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+  color: var(--lp-ink-soft);
+  background: var(--lp-surface-muted, #eef0f3);
+  border: 1.5px solid var(--lp-border-soft);
+  box-shadow: none;
+  filter: grayscale(0.6);
+  opacity: 0.7;
+}
+.hero-cta.is-disabled:hover,
+.hero-cta.is-disabled:focus-visible {
+  transform: none;
+  box-shadow: none;
+}
+.hero-cta-badge {
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--lp-ink-soft);
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 999px;
+  padding: 0.2em 0.65em;
+  white-space: nowrap;
+}
+
 @media (max-width: 860px) {
   .hero-nav-list { justify-content: center; }
   .hero-body {
@@ -514,6 +620,40 @@ img { max-width: 100%; height: auto; display: block; }
   padding-block: clamp(2.75rem, 6vw, 4rem);
   overflow: hidden;
 }
+/* slow-drifting aurora blobs behind the catch copy (decorative, "背景が動く").
+   transform/opacity keyframes only; paused under reduced-motion. */
+.catch::before,
+.catch::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+  z-index: 0;
+}
+.catch::before {
+  width: 50vw; height: 50vw;
+  max-width: 500px; max-height: 500px;
+  left: -6vw; top: -30%;
+  background: radial-gradient(circle, rgba(47, 97, 214, 0.38), transparent 70%);
+  animation: aurora-a 10s ease-in-out infinite alternate;
+}
+.catch::after {
+  width: 46vw; height: 46vw;
+  max-width: 460px; max-height: 460px;
+  right: -8vw; bottom: -34%;
+  background: radial-gradient(circle, rgba(23, 184, 146, 0.34), transparent 70%);
+  animation: aurora-b 13s ease-in-out infinite alternate;
+}
+@keyframes aurora-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(18vw, 22%, 0) scale(1.35); }
+}
+@keyframes aurora-b {
+  from { transform: translate3d(0, 0, 0) scale(1.05); }
+  to { transform: translate3d(-16vw, -18%, 0) scale(0.82); }
+}
+.catch > .container { position: relative; z-index: 1; }
 .catch-lead {
   display: inline-block;
   margin: 0 auto 1rem;
@@ -536,6 +676,71 @@ img { max-width: 100%; height: auto; display: block; }
   line-height: 1.45;
   font-size: clamp(1.5rem, 3.8vw, 2.4rem);
   text-wrap: balance;
+}
+
+/* ============================================================
+   Stats — compact "by the numbers" band (figures count up on scroll-in)
+   ============================================================ */
+.stats {
+  background: var(--lp-surface);
+  padding-block: clamp(1.75rem, 4vw, 2.75rem);
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(1rem, 3vw, 2.25rem);
+  max-width: 860px;
+  margin-inline: auto;
+}
+.stat {
+  position: relative;
+  text-align: center;
+  padding: clamp(1.1rem, 2.6vw, 1.6rem) 0.75rem;
+}
+/* thin gradient divider between figures (not after the last) */
+.stat:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  right: calc(clamp(1rem, 3vw, 2.25rem) / -2);
+  top: 18%;
+  bottom: 18%;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--lp-border), transparent);
+}
+.stat-figure {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.12em;
+  font-family: var(--font-inter), sans-serif;
+  line-height: 1;
+  font-weight: 800;
+}
+.stat-num {
+  font-size: clamp(2.4rem, 6.5vw, 3.9rem);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  background: linear-gradient(120deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.stat-affix {
+  font-size: clamp(0.95rem, 2.2vw, 1.25rem);
+  font-weight: 800;
+  color: var(--lp-blue-deep);
+}
+.stat-label {
+  margin-top: 0.55rem;
+  font-size: clamp(0.85rem, 1.8vw, 0.98rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--lp-ink-soft);
+}
+@media (max-width: 560px) {
+  .stats-grid { gap: 0.75rem; }
+  .stat { padding-inline: 0.25rem; }
+  .stat:not(:last-child)::after { right: calc(0.75rem / -2); }
 }
 
 /* ============================================================
@@ -632,9 +837,16 @@ img { max-width: 100%; height: auto; display: block; }
   scroll-snap-type: none;
   user-select: none;
 }
-.program-card {
+/* wraps .program-card for the scroll-in stagger animation (Framer Motion) —
+   kept separate from .program-card itself so the finished inline transform
+   Framer leaves behind never fights the :hover transform below. */
+.program-card-io {
   scroll-snap-align: start;
   flex: 0 0 clamp(244px, 26vw, 300px);
+}
+.program-card {
+  width: 100%;
+  height: 100%;
   background: var(--lp-surface);
   border: 1px solid var(--lp-border-soft);
   border-radius: var(--radius-lg);
@@ -647,7 +859,7 @@ img { max-width: 100%; height: auto; display: block; }
     box-shadow 0.3s ease, border-color 0.3s ease;
 }
 .program-card:hover {
-  transform: translateY(-6px);
+  transform: translateY(-9px) scale(1.025) rotate(-0.6deg);
   box-shadow: var(--shadow-xl);
   border-color: var(--lp-border);
 }
@@ -794,12 +1006,14 @@ img { max-width: 100%; height: auto; display: block; }
   transition: transform 0.6s ease;
 }
 .btn-crowd::after { content: "≫"; font-weight: 700; transition: transform 0.2s ease; }
+.btn-crowd--external::after { content: "↗"; }
 .btn-crowd:hover {
   transform: translateY(-3px);
   box-shadow: 0 18px 32px -6px rgba(42, 95, 208, 0.5);
 }
 .btn-crowd:hover::before { transform: translateX(120%); }
 .btn-crowd:hover::after { transform: translateX(3px); }
+.btn-crowd--external:hover::after { transform: translateX(2px) translateY(-2px); }
 
 /* ============================================================
    Apply — diagonal 2x2
@@ -901,6 +1115,38 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .apply-card:hover .apply-card-img,
 .apply-card:focus-visible .apply-card-img { transform: scale(1.06); filter: brightness(1.08); }
+
+/* disabled apply card (受付未開始) — grayed out, not clickable, quiet "準備中" badge */
+.apply-card.is-disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.apply-card.is-disabled .apply-card-img {
+  filter: grayscale(0.85) brightness(0.9);
+}
+.apply-card.is-disabled .apply-card-scrim {
+  background: linear-gradient(140deg, #6b7280 0%, #3f4650 100%) !important;
+  opacity: 0.85;
+}
+.apply-card.is-disabled .apply-card-label { opacity: 0.75; }
+.apply-card.is-disabled:hover,
+.apply-card.is-disabled:focus-visible { transform: none; box-shadow: var(--shadow-md); }
+.apply-card.is-disabled:hover .apply-card-img,
+.apply-card.is-disabled:focus-visible .apply-card-img { transform: none; filter: grayscale(0.85) brightness(0.9); }
+.apply-card-badge {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  z-index: 3;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  padding: 0.3em 0.85em;
+}
 .apply-grid:has(.apply-cell--pimg:hover) .apply-title--participant,
 .apply-grid:has(.apply-cell--pimg:focus-visible) .apply-title--participant,
 .apply-grid:has(.apply-cell--ptext:hover) .apply-title--participant { color: var(--lp-blue); }
@@ -1004,7 +1250,12 @@ img { max-width: 100%; height: auto; display: block; }
   .hero-net,
   .hero-net-node circle:nth-child(2) { animation: none !important; }
   .hero-visual { opacity: 1 !important; }
+  .hero-visual-scroll,
+  .hero-visual-inner { transform: none !important; opacity: 1 !important; }
   .hero::before, .hero::after { animation: none !important; }
+  .catch::before, .catch::after { animation: none !important; }
+  .scroll-progress { display: none !important; }
+  .lp-entrance { display: none !important; }
   .apply-grid .apply-card,
   .apply-grid .apply-card:hover,
   .apply-grid .apply-card:focus-visible { transform: none; box-shadow: var(--shadow-md); }
