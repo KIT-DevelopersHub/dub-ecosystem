@@ -52,6 +52,11 @@ export function MessageComposer({
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // P13: brief scale-pulse on the send button right after a message goes out
+  // (paired with the pending-row slide-in below). Purely presentational — reset
+  // on a timer so re-sends replay it.
+  const [justSent, setJustSent] = useState(false);
+  const justSentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Tracks IME composition so the 変換確定 Enter never triggers submit / mention pick /
@@ -180,8 +185,18 @@ export function MessageComposer({
     setAttachError(null);
     setEmojiOpen(false);
     clearDraft(channelId);
+    // P13: pulse the send button (paired with the pending message's slide-in).
+    if (justSentTimer.current) clearTimeout(justSentTimer.current);
+    setJustSent(true);
+    justSentTimer.current = setTimeout(() => setJustSent(false), 260);
     await onSend(body, files.length > 0 ? files : undefined);
   }, [canSend, text, attachments, channelId, onSend]);
+
+  useEffect(() => {
+    return () => {
+      if (justSentTimer.current) clearTimeout(justSentTimer.current);
+    };
+  }, []);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 変換確定 Enter (and any keydown mid-composition) must never submit, pick a
@@ -382,7 +397,14 @@ export function MessageComposer({
 
         <div className={styles.composerBottom}>
           <div className={styles.composerHints} aria-hidden />
-          <button type="button" className={styles.sendButton} disabled={!canSend} data-testid="fe6-composer-send" onClick={() => void submit()}>
+          <button
+            type="button"
+            className={`${styles.sendButton} ${justSent ? styles.sendButtonSent : ""}`}
+            disabled={!canSend}
+            data-testid="fe6-composer-send"
+            data-sent={justSent || undefined}
+            onClick={() => void submit()}
+          >
             <Icon name="send" size="sm" /> 送信
           </button>
         </div>
