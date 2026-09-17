@@ -56,6 +56,10 @@ binding = "SVC_AUDIT_LOG"
 service = "dub-audit-log"          # POST /internal/audit-async (audit.record)
 
 [[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"  # POST /internal/events-async (evt.notification)
+
+[[services]]
 binding = "SVC_TASK"
 service = "dub-task-service"       # POST /internal/events-async (evt.task)
 

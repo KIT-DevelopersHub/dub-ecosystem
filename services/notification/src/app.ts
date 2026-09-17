@@ -56,6 +56,8 @@ import {
   ADMIN_VIEWER_PERMISSION,
 } from "./config";
 import type { IngestInput } from "./types";
+import { dispatchEvent } from "./queue";
+import type { DubEventEnvelope } from "@dub/events";
 
 interface GetPreferencesResponse {
   userId: string;
@@ -105,6 +107,27 @@ export function createApp(options: CreateAppOptions = {}) {
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
+
+  // ---- POST /internal/events-async: free-tier domain-event landing route. The Workers
+  // Free plan has no dub-q-evt-notification Queue consumer, so freeq-drain forwards each
+  // due evt.notification outbox row here (routing.ts: evt.notification -> SVC_NOTIFICATION
+  // /internal/events-async). It runs the SAME lane-A mapping / lane-B request handlers +
+  // envelope.id idempotency as the Queue path (dispatchEvent), so a chat @mention, a
+  // notification.requested, a public inquiry, etc. become inbox notifications regardless
+  // of transport. A non-2xx tells the caller's drain to retry (row stays pending) so no
+  // event is ever lost; an unknown event name is a 202 no-op (forward-compat, matching the
+  // Queue's onUnknownEvent: "ack"). Internal-only (x-dub-internal), like POST /notify —
+  // registered ONCE at the bare path (the drain addresses it via the SVC_NOTIFICATION
+  // binding), not under the "/notifications" gateway segment.
+  app.post("/internal/events-async", async (c) => {
+    if (!c.req.header(HEADERS.internal)) throw errors.forbidden("POST /internal/events-async is internal-only");
+    const body = (await c.req.json().catch(() => null)) as Partial<DubEventEnvelope> | null;
+    if (!body || typeof body.name !== "string" || typeof body.id !== "string") {
+      throw errors.validationFailed([{ field: "body", reason: "invalid_envelope" }]);
+    }
+    await dispatchEvent(c.env, body as DubEventEnvelope);
+    return c.json({ ok: true }, 202);
+  });
 
   // ---- notification-domain routes (notify / release / inbox / preferences).
   // Mounted under BOTH the bare root ("" -> /notify, /inbox, /preferences, /release) AND

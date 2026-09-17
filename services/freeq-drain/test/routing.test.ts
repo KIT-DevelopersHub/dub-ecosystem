@@ -22,9 +22,10 @@ describe("routeFor (single source of truth; default = defer)", () => {
     expect(routeFor("evt.mobile-bff")).toMatchObject({ kind: "deliver", binding: "SVC_MOBILE_BFF" });
     // 改善#5: mail-automation now has a live /internal/events-async landing route.
     expect(routeFor("evt.mail-automation")).toMatchObject({ kind: "deliver", binding: "SVC_MAIL_AUTOMATION" });
+    // notification now exposes /internal/events-async — evt.notification DELIVERS (was DEFER).
+    expect(routeFor("evt.notification")).toMatchObject({ kind: "deliver", binding: "SVC_NOTIFICATION" });
   });
   it("defers topics with no live route and ANY unknown topic (never ack)", () => {
-    expect(routeFor("evt.notification").kind).toBe("defer");
     expect(routeFor("deploy.job").kind).toBe("defer");
     expect(routeFor("foo.bar").kind).toBe("defer"); // default
     expect(routeFor("").kind).toBe("defer");
@@ -102,16 +103,40 @@ describe("deliver (audit.record + live evt.*)", () => {
     expect(res).toMatchObject({ delivered: 0, retried: 1, failed: 0 });
     expect(readRow(raw, "r5")).toMatchObject({ status: "pending" });
   });
+
+  it("POSTs evt.notification to SVC_NOTIFICATION /internal/events-async verbatim; row -> done", async () => {
+    const { d1, raw } = makeD1();
+    const notif = fakeSvc(200);
+    const env = { SVC_NOTIFICATION: notif.svc } as unknown as Env;
+    const envelope = { id: "evt_n1", name: "chat.message.created", payload: { channelId: "c1", messageId: "m1", authorId: "u1", mentions: ["u2"] } };
+    seed(raw, "r6", "evt.notification", envelope);
+
+    const res = await drain(d1, makeDeliver(env), OPTS);
+
+    expect(res.delivered).toBe(1);
+    expect(notif.calls[0]!.url).toBe("https://notification/internal/events-async");
+    expect(notif.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
+    expect(notif.calls[0]!.body).toEqual(envelope); // forwarded verbatim
+    expect(readRow(raw, "r6")).toMatchObject({ status: "done" });
+  });
+
+  it("keeps evt.notification PENDING (retries) when SVC_NOTIFICATION is absent — never acked", async () => {
+    const { d1, raw } = makeD1();
+    seed(raw, "r7", "evt.notification", { id: "evt_n2", name: "chat.message.created", payload: {} });
+    const res = await drain(d1, makeDeliver({} as unknown as Env), OPTS);
+    expect(res).toMatchObject({ delivered: 0, retried: 1, failed: 0 });
+    expect(readRow(raw, "r7")).toMatchObject({ status: "pending" });
+  });
 });
 
 describe("MIS-ACK REGRESSION: foreign / unknown topics are DEFERRED, never acked", () => {
-  it("evt.notification, deploy.job and an unknown foo.bar stay pending (attempts++), never done", async () => {
+  it("deploy.job, an unmapped evt.* and an unknown foo.bar stay pending (attempts++), never done", async () => {
     const { d1, raw } = makeD1();
     // Only an audit binding is present — the drain must NOT ack the foreign rows just
     // because it cannot deliver them (that was the data-loss bug).
     const audit = fakeSvc(200);
     const env = { SVC_AUDIT_LOG: audit.svc } as unknown as Env;
-    seed(raw, "n1", "evt.notification", { id: "e1" });
+    seed(raw, "n1", "evt.mail-gateway", { id: "e1" }); // no route in the map -> default DEFER
     seed(raw, "d1row", "deploy.job", { tag: "deploy-job/v1" });
     seed(raw, "u1", "foo.bar", { anything: true });
 
