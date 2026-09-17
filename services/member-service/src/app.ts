@@ -1,12 +1,14 @@
 // Hono app — a thin HTTP adapter over MemberService. The gateway strips API_PREFIX
-// and forwards /members/* to this Worker. Read = identity:read; write = identity:admin
-// (運営メンバー管理 is an org-people administration surface — it reuses the identity
-// permission gates rather than introducing new catalog keys).
+// and forwards /members/* to this Worker. Roster gates are per-app-AUTHORITATIVE:
+// read = identity:read OR app:members:view; write = identity:admin OR app:members:edit
+// (so 名簿管理 can be delegated to a 統括 role via the per-app toggle in ロール管理,
+// without granting full identity:admin). 参加届 (participation) keeps identity:read /
+// identity:admin — it is a distinct app surface, not covered by app:members:*.
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { dubContext, DUB_HEADERS, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
-import type { member } from "@dub/types";
+import type { identity, member } from "@dub/types";
 import type { AppDeps } from "./types";
 import { MemberService, type ReqCtx } from "./service";
 
@@ -53,6 +55,32 @@ export function createApp(deps: AppDeps): Hono {
   const READ = "identity:read" as const;
   const WRITE = "identity:admin" as const;
 
+  // Per-app access keys are the AUTHORITATIVE gate for the 運営メンバー・名簿 app: a role
+  // granted the app in ロール管理 can open/edit the roster WITHOUT full org-admin. So the
+  // roster gates accept the DOMAIN key OR the per-app key (any-of), rather than the single
+  // requirePermission check. This is what makes a per-app toggle real 実効権限:
+  //   read  = identity:read  OR app:members:view
+  //   write = identity:admin OR app:members:edit   (名簿編集 delegatable without identity:admin)
+  // Existing 統括 roles that hold only app:members:view/edit (no domain key) work immediately
+  // via this any-of — no data backfill needed. NOTE: participation resolve stays identity:admin
+  // (a separate app surface), so a members-editor is not silently escalated into 参加届 review.
+  const ROSTER_VIEW = "app:members:view" as const;
+  const ROSTER_EDIT = "app:members:edit" as const;
+
+  /** Middleware allowing the request iff the caller holds ANY of `keys` (org-wide).
+   *  requireAuth has already run, so x-dub-user-id is present. Fail-closed on 401/403. */
+  function requireAny(keys: readonly identity.PermissionKey[]): MiddlewareHandler {
+    return async (c, next) => {
+      const { userId } = reqCtx(c);
+      for (const permission of keys) {
+        if (await authz.hasPermission(userId, deps.orgId, { permission })) return next();
+      }
+      throw errors.forbidden(`permission denied: ${keys.join(" | ")}`);
+    };
+  }
+  const rosterRead = requireAny([READ, ROSTER_VIEW]);
+  const rosterWrite = requireAny([WRITE, ROSTER_EDIT]);
+
   // ---- internal-only guard: /members/internal/* requires the x-dub-internal marker.
   // The gateway strips all x-dub-* off external requests (spoof-defense), so only genuine
   // service-to-service calls carry it; external callers get a 404 (route never exposed).
@@ -93,50 +121,50 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // ---- overview (all three views) ----
-  app.get("/members/overview", authz.requirePermission(READ), async (c) => {
+  app.get("/members/overview", rosterRead, async (c) => {
     return c.json(await svc.getOverview(reqCtx(c)));
   });
 
   // ---- teams ----
   // GET /members/teams is the CANONICAL team list other apps (e.g. gantt) read to
   // source their own team switchers ({ teams: Team[] }).
-  app.get("/members/teams", authz.requirePermission(READ), async (c) => {
+  app.get("/members/teams", rosterRead, async (c) => {
     return c.json(await svc.listTeams(reqCtx(c)));
   });
-  app.post("/members/teams", authz.requirePermission(WRITE), async (c) => {
+  app.post("/members/teams", rosterWrite, async (c) => {
     const body = await readJson<member.CreateTeamRequest>(c);
     return c.json(await svc.createTeam(reqCtx(c), body), 201);
   });
-  app.patch("/members/teams/:id", authz.requirePermission(WRITE), async (c) => {
+  app.patch("/members/teams/:id", rosterWrite, async (c) => {
     const body = await readJson<member.UpdateTeamRequest>(c);
     return c.json(await svc.updateTeam(reqCtx(c), c.req.param("id"), body));
   });
-  app.delete("/members/teams/:id", authz.requirePermission(WRITE), async (c) => {
+  app.delete("/members/teams/:id", rosterWrite, async (c) => {
     await svc.deleteTeam(reqCtx(c), c.req.param("id"));
     return c.json({ ok: true });
   });
 
   // ---- people ----
-  app.post("/members/people", authz.requirePermission(WRITE), async (c) => {
+  app.post("/members/people", rosterWrite, async (c) => {
     const body = await readJson<member.CreateMemberRequest>(c);
     return c.json(await svc.createMember(reqCtx(c), body), 201);
   });
 
   // ---- identity linking (#1) ----
   // Reverse lookup FIRST so the literal segment isn't shadowed by /people/:id/... routes.
-  app.get("/members/people/by-identity/:identityUserId", authz.requirePermission(READ), async (c) => {
+  app.get("/members/people/by-identity/:identityUserId", rosterRead, async (c) => {
     const member = await svc.getByIdentityUserId(reqCtx(c), c.req.param("identityUserId"));
     return c.json({ member });
   });
-  app.post("/members/people/:id/identity-link", authz.requirePermission(WRITE), async (c) => {
+  app.post("/members/people/:id/identity-link", rosterWrite, async (c) => {
     const body = await readJson<member.LinkIdentityRequest>(c);
     return c.json(await svc.linkIdentity(reqCtx(c), c.req.param("id"), body));
   });
-  app.patch("/members/people/:id", authz.requirePermission(WRITE), async (c) => {
+  app.patch("/members/people/:id", rosterWrite, async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));
   });
-  app.delete("/members/people/:id", authz.requirePermission(WRITE), async (c) => {
+  app.delete("/members/people/:id", rosterWrite, async (c) => {
     await svc.deleteMember(reqCtx(c), c.req.param("id"));
     return c.json({ ok: true });
   });
