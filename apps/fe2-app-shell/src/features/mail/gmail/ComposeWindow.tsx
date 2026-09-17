@@ -279,7 +279,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             value={compose.body}
             onChange={(e) => patch({ body: e.target.value })}
             placeholder="本文を入力…"
-            style={{ flex: 1, padding: 12, border: "none", outline: "none", resize: "none", background: "transparent", color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-sm)", lineHeight: 1.6, fontFamily: "inherit" }}
+            style={{ flex: 1, padding: 12, border: "none", outline: "none", resize: "none", background: "transparent", color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-md)", lineHeight: 1.6, fontFamily: "inherit" }}
           />
           {att.errors.length > 0 || att.items.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 12px", borderTop: "1px solid var(--dub-color-border-default)", maxHeight: 160, overflowY: "auto", flexShrink: 0 }}>

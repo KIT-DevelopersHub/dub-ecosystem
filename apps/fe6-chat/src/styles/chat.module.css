@@ -881,6 +881,12 @@
 .composer textarea:disabled {
   opacity: 0.5;
 }
+/* Touch: 16px so focusing the composer never triggers iOS auto-zoom. */
+@media (pointer: coarse) {
+  .composer textarea {
+    font-size: var(--dub-font-size-md);
+  }
+}
 .composerBottom {
   display: flex;
   align-items: center;
