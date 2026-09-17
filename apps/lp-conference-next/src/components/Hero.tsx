@@ -1,7 +1,3 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import type { HeroConfig, NavLink } from "@/config/types";
 
 // Hero (TOP). All copy is real text (h1 / p / a) for select/copy/translate/SEO.
@@ -9,59 +5,19 @@ import type { HeroConfig, NavLink } from "@/config/types";
 // (nodes = engineers meeting) drawn as inline SVG with the brand gradient — no
 // stock photography / people, no third-party IP.
 //
-// Entrance motion (Framer Motion, reduced-motion aware):
-//   eyebrow → title wipe → date/venue chips → CTA buttons → visual fade.
-// SSG / JS-off / reduced-motion render every element visible from the start
-// (no opacity:0 lock).
+// Entrance motion is now PURE CSS (see globals.css `hero-rise` / `hero-wipe` /
+// `hero-pop` keyframes on .hero-eyebrow/.hero-title/.hero-meta/.hero-ctas/
+// .hero-visual): eyebrow → title wipe → date/venue chips → CTA buttons → visual
+// fade. This drops the framer-motion runtime (~124 KB chunk) from the client
+// bundle so the hero ships zero animation JS, yet the sequence is identical and
+// GPU-composited (opacity/transform/clip-path only). Because it is CSS:
+//   • SSG / JS-off — the animation still plays and ends fully visible.
+//   • prefers-reduced-motion — the global reduce block collapses it to instant
+//     visible (no opacity:0 lock), matching the old reduced-motion behavior.
+// With no hooks left, Hero is a server component (no "use client").
 
 export function Hero({ data, nav }: { data: HeroConfig; nav: NavLink[] }) {
-  const reduce = useReducedMotion();
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    if (reduce) return;
-    const id = requestAnimationFrame(() => setReady(true));
-    return () => cancelAnimationFrame(id);
-  }, [reduce]);
-
   const oneLine = (s: string) => s.replace(/\n/g, "");
-  const animate = !reduce && ready;
-
-  const titleMotion = animate
-    ? {
-        initial: { opacity: 0, clipPath: "inset(0 100% 0 0)" },
-        animate: { opacity: 1, clipPath: "inset(0 0% 0 0)" },
-        transition: { duration: 0.8, delay: 0.15, ease: [0.22, 1, 0.36, 1] as const },
-      }
-    : {};
-  const dateMotion = animate
-    ? {
-        initial: { opacity: 0, y: 16 },
-        animate: { opacity: 1, y: 0 },
-        transition: { duration: 0.55, delay: 0.7, ease: "easeOut" as const },
-      }
-    : {};
-  const ctaMotion = animate
-    ? {
-        initial: { opacity: 0, y: 18 },
-        animate: { opacity: 1, y: 0 },
-        transition: { duration: 0.6, delay: 1.0, ease: [0.22, 1, 0.36, 1] as const },
-      }
-    : {};
-  const visualMotion = animate
-    ? {
-        initial: { opacity: 0, scale: 0.96 },
-        animate: { opacity: 1, scale: 1 },
-        transition: { duration: 0.9, ease: "easeOut" as const },
-      }
-    : {};
-  const eyebrowMotion = animate
-    ? {
-        initial: { opacity: 0, y: 12 },
-        animate: { opacity: 1, y: 0 },
-        transition: { duration: 0.5, delay: 0.05, ease: "easeOut" as const },
-      }
-    : {};
 
   return (
     <section id="top" className="hero">
@@ -78,25 +34,23 @@ export function Hero({ data, nav }: { data: HeroConfig; nav: NavLink[] }) {
 
       <div className="hero-body">
         {/* right: original abstract connection graphic (decorative) */}
-        <motion.div className="hero-visual" aria-hidden="true" {...visualMotion}>
+        <div className="hero-visual" aria-hidden="true">
           <HeroNetwork />
-        </motion.div>
+        </div>
 
         {/* left: real-text copy */}
         <div className="hero-copy">
-          <motion.span className="hero-eyebrow" {...eyebrowMotion}>
-            HOKURIKU IT CONFERENCE 2027
-          </motion.span>
+          <span className="hero-eyebrow">HOKURIKU IT CONFERENCE 2027</span>
 
-          <motion.h1 className="hero-title" {...titleMotion}>
+          <h1 className="hero-title">
             <span className="hero-title-line">
               <span className="hero-title-jp">北陸</span>
               <span className="hero-title-it">IT</span>
             </span>
             <span className="hero-title-line hero-title-line--2">カンファレンス</span>
-          </motion.h1>
+          </h1>
 
-          <motion.div className="hero-meta" {...dateMotion}>
+          <div className="hero-meta">
             <p className="hero-meta-row">
               <span className="hero-meta-label">開催日時</span>
               <span className="hero-meta-value">{data.dateLabel}</span>
@@ -105,9 +59,9 @@ export function Hero({ data, nav }: { data: HeroConfig; nav: NavLink[] }) {
               <span className="hero-meta-label">会場</span>
               <span className="hero-meta-value">{data.venueLabel}</span>
             </p>
-          </motion.div>
+          </div>
 
-          <motion.div className="hero-ctas" {...ctaMotion}>
+          <div className="hero-ctas">
             {data.primaryCta && (
               <a
                 className="hero-cta hero-cta--participant"
@@ -128,7 +82,7 @@ export function Hero({ data, nav }: { data: HeroConfig; nav: NavLink[] }) {
                 <span className="hero-cta-arrow" aria-hidden="true">→</span>
               </a>
             )}
-          </motion.div>
+          </div>
         </div>
       </div>
     </section>
