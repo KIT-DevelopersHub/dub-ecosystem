@@ -30,7 +30,7 @@ export function App({ client, api }: AppProps) {
         ローカル Claude Code を Web から駆動する司令コンソール（基盤 PoC）
       </p>
 
-      <CommanderConsole {...(client ? { client } : {})} />
+      <CommanderConsole {...(client ? { client } : {})} {...(api ? { history: api } : {})} />
       <FeatureBoard {...(api ? { api } : {})} />
     </div>
   );

@@ -55,6 +55,8 @@ function fakeApi(f: Feature, allowed: FeatureDetail["allowedTransitions"], opts:
     createFeature: vi.fn(async () => ({ ok: true as const, value: f })),
     getFeature: vi.fn(async () => detail(f, allowed)),
     transition,
+    listRuns: vi.fn(async () => []),
+    getRun: vi.fn(async () => null),
   };
   return { api, transition };
 }

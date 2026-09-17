@@ -44,6 +44,35 @@ export interface FeatureDetail {
   transitions: PhaseTransition[];
 }
 
+export type RunStatus = "pending" | "running" | "succeeded" | "failed";
+
+/** A persisted run row (commander_runs), as returned by the phase-gate service. */
+export interface RunSummary {
+  id: string;
+  taskId: string | null;
+  prompt: string;
+  cwd: string;
+  status: RunStatus;
+  exitCode: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One persisted run event (commander_run_events). `payload` holds the non-column
+ *  fields the daemon streamed (line/status/data/code/message …). */
+export interface RunEventRecord {
+  id: string;
+  runId: string;
+  type: "status" | "claude" | "stdout" | "stderr" | "exit" | "error";
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface RunDetail {
+  run: RunSummary;
+  events: RunEventRecord[];
+}
+
 export type ApiError = {
   status: number;
   error: string;
@@ -61,7 +90,14 @@ export interface CommanderApi {
     to: FeaturePhase,
     opts?: { approvedByUser?: boolean; note?: string },
   ): Promise<Result<{ feature: Feature; transition: PhaseTransition }>>;
+  /** Persisted run history (newest first). Survives daemon/web/service restarts. */
+  listRuns(): Promise<RunSummary[]>;
+  /** One persisted run with its full event log, for restoring the console after a reset. */
+  getRun(id: string): Promise<RunDetail | null>;
 }
+
+/** Narrow slice of the API the run console needs to restore history after a reset. */
+export type RunHistoryApi = Pick<CommanderApi, "listRuns" | "getRun">;
 
 const DEFAULT_BASE =
   (import.meta.env?.VITE_COMMANDER_API as string | undefined) ?? "http://127.0.0.1:8787";
@@ -142,5 +178,18 @@ export class HttpCommanderApi implements CommanderApi {
         transition: body.transition as PhaseTransition,
       },
     };
+  }
+
+  async listRuns(): Promise<RunSummary[]> {
+    const res = await fetch(`${this.baseUrl}/runs`);
+    if (!res.ok) throw new Error(`GET /runs -> ${res.status}`);
+    return ((await res.json()) as { runs: RunSummary[] }).runs;
+  }
+
+  async getRun(id: string): Promise<RunDetail | null> {
+    const res = await fetch(`${this.baseUrl}/runs/${id}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`GET /runs/${id} -> ${res.status}`);
+    return (await res.json()) as RunDetail;
   }
 }
