@@ -55,6 +55,8 @@ export {
   createSseUnreadConnector,
   parseUnreadCount,
 } from "./lib/unread-live";
+export { createWsUnreadConnector } from "./lib/ws-unread";
+export type { WsTicket, WsUnreadConnectorConfig } from "./lib/ws-unread";
 export type {
   LiveConnection,
   LiveConnector,

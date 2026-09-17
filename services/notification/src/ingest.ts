@@ -9,6 +9,7 @@ import type { DbClient } from "@dub/db";
 import type { AdapterRegistry } from "./adapters";
 import { runDelivery, recordSkipped } from "./adapters";
 import { findByDedupKey, insertNotification, listPreferenceOverrides } from "./repo";
+import type { InboxRealtimePublisher } from "./realtime";
 import { resolveEnabled } from "./preferences";
 import type { RecipientResolver } from "./recipients";
 import type { RequestContext } from "@dub/http";
@@ -31,6 +32,9 @@ export interface IngestDeps {
   orgId: string;
   ctx: RequestContext;
   maxAttempts?: number;
+  // Optional realtime push: after an in_app row is committed, signal the recipient's live
+  // WS sockets so the fe5 badge refetches instantly. Absent -> no push (poller reconciles).
+  realtime?: InboxRealtimePublisher;
 }
 
 export async function ingest(deps: IngestDeps, input: IngestInput): Promise<IngestResult> {
@@ -52,6 +56,8 @@ export async function ingest(deps: IngestDeps, input: IngestInput): Promise<Inge
   const candidateChannels: NotificationChannel[] =
     input.channels && input.channels.length > 0 ? input.channels : [...CHANNELS];
   const forceInApp = FORCE_IN_APP_TYPES.has(input.type);
+  // Users who received an in_app row this ingest — signalled over realtime after the loop.
+  const inAppDelivered = new Set<string>();
 
   // 4. per-user preference application + fan-out.
   for (const userId of userIds) {
@@ -85,7 +91,15 @@ export async function ingest(deps: IngestDeps, input: IngestInput): Promise<Inge
         },
         job,
       );
+      if (channel === "in_app") inAppDelivered.add(userId);
     }
+  }
+
+  // 5. realtime: signal each recipient whose inbox gained an in_app row so the fe5 badge
+  // updates instantly (the client refetches the authoritative count). Best-effort and
+  // AFTER the D1 commits — the poller reconciles if a push is lost.
+  if (deps.realtime && inAppDelivered.size > 0) {
+    await Promise.all([...inAppDelivered].map((uid) => deps.realtime!.pushInboxChanged(uid)));
   }
 
   return { notificationId, deduplicated: false };

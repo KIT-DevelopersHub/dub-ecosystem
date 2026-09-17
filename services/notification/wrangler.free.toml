@@ -32,10 +32,28 @@ name = "dub-notification-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
-workers_dev = false
+# Enabled so browsers can open the DO-direct realtime inbox WebSocket
+# (wss://<this worker>/ws/:userId). The public surface is WS-only: src/index.ts rejects
+# every non-/ws (and non-/internal/health) request that did NOT arrive over the api-gateway
+# service binding (host "svc"), so the header-trusting HTTP API (incl. /internal/events-async
+# and /notify) stays gateway/binding-only and x-dub-user-id / x-dub-internal cannot be
+# spoofed from the public workers.dev URL. See index.ts.
+workers_dev = true
 
 [observability]
 enabled = true
+
+# Realtime: the notification-owned per-user InboxRoom Durable Object (one instance per
+# user). Free-tier compatible (SQLite-backed DO). ingest signals a recipient's live sockets
+# after an in_app row commits so the fe5 badge updates instantly.
+[[durable_objects.bindings]]
+name = "INBOX_ROOM"
+class_name = "InboxRoom"
+
+# SQLite-backed DO class registration (required to create the DO).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["InboxRoom"]
 
 # Shared dub-core D1 (notif_ namespace only). REAL dub-core id (verified via
 # `wrangler d1 list`): d663f9c6-… . (60a9b8ab-… is the separate `auth-outbox` DB.)
@@ -78,5 +96,19 @@ service = "dub-audit-log"
 # The Workers FREE plan caps the account at 5 cron triggers, so this stays a single
 # low-rate schedule (delivery-failed audit volume is small; rows stay durable between
 # ticks and are never dropped).
+[vars]
+# Absolute base for the ws-ticket doUrl (gateway-bypassing / DO-direct). ":id" is replaced
+# with the url-encoded user id. Points at THIS worker's workers.dev subdomain (the InboxRoom
+# DO is co-hosted here). gen-staging-configs.sh rewrites the host to the -staging worker.
+NOTIF_RT_DO_URL_BASE = "wss://dub-notification-service.developershub-site.workers.dev/ws/:id"
+# Origin allow-list enforced by the InboxRoom DO (comma-separated). Browser clients must
+# match; native/mobile clients send no Origin and are allowed. Includes the fe2 app-shell
+# origin AND the future custom domain. gen-staging-configs.sh swaps in the staging fe2 origin.
+NOTIF_RT_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
+
+# NOTE: WS_TICKET_SECRET is a Worker Secret (never in this toml). Set via
+# `wrangler secret put WS_TICKET_SECRET --config services/notification/wrangler.free.toml`.
+# The InboxRoom DO verifies with the same secret.
+
 [triggers]
 crons = ["0 3 * * *"]

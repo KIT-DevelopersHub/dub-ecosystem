@@ -59,7 +59,11 @@ export const ROUTES: Readonly<Record<string, Route>> = {
   // notification now exposes /internal/events-async, so evt.notification (chat @mention,
   // notification.requested, public inquiry, mail.*, ops alerts, ...) is DELIVERED and
   // becomes inbox notifications instead of sitting pending forever on the free tier.
-  "evt.notification": { kind: "deliver", binding: "SVC_NOTIFICATION", path: EVENTS_ASYNC_PATH, origin: "https://notification" },
+  // origin MUST be "https://svc": notification enables workers.dev (realtime WS) and gates
+  // its header-trusting HTTP API (incl. /internal/events-async) to service-binding callers
+  // (host "svc"). A non-svc host is rejected as a spoofable public request. Service
+  // bindings ignore the host for routing, so "svc" delivers correctly over the binding.
+  "evt.notification": { kind: "deliver", binding: "SVC_NOTIFICATION", path: EVENTS_ASYNC_PATH, origin: "https://svc" },
   "evt.task": { kind: "deliver", binding: "SVC_TASK", path: EVENTS_ASYNC_PATH, origin: "https://task-service" },
   "evt.gantt": { kind: "deliver", binding: "SVC_GANTT", path: EVENTS_ASYNC_PATH, origin: "https://gantt-service" },
   "evt.file-meta": { kind: "deliver", binding: "SVC_FILE_META", path: EVENTS_ASYNC_PATH, origin: "https://file-meta" },
