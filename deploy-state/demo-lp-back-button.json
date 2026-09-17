@@ -1,0 +1,17 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-back-button",
+  "worker": "dub-demo-lp-back-button",
+  "url": "https://dub-demo-lp-back-button.developershub-site.workers.dev",
+  "deployedSha": "0fdea30d",
+  "branch": "feat/lp-back-button",
+  "actor": "ko-tarou",
+  "markers": [
+    "fe2-lp-back-button",
+    "fe2-lp-viewer"
+  ],
+  "live": true,
+  "verifiedAt": "2026-09-17T13:07:30Z",
+  "updatedAt": "2026-09-17T13:07:30Z",
+  "note": "LP閲覧をアプリ内フルスクリーン化+『アプリに戻る』導線(タブ非表示) | verify:live PASS (propagation後に200/markers present)"
+}
