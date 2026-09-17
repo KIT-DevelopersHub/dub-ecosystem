@@ -447,6 +447,9 @@
 .timeline {
   flex: 1;
   overflow-y: auto;
+  /* Keep a fling past the top/bottom scrolling only the timeline — never chain
+     the bounce to the shell behind it (modern WebViews give momentum by default). */
+  overscroll-behavior: contain;
   padding: var(--dub-space-4) 0 var(--dub-space-2);
   display: flex;
   flex-direction: column;
@@ -801,7 +804,11 @@
 
 /* ─────────────────────────────── Composer ──────────────────────────────── */
 .composer {
-  padding: 0 var(--dub-space-4) var(--dub-space-4);
+  /* Chat is full-bleed ([data-app-bleed] → the shell drops its safe-area padding),
+     so the composer must clear the home indicator itself: pad the bottom past the
+     inset while keeping the 16px base gutter. When the keyboard is up the inset
+     collapses to 0 (indicator hidden), so this only adds space when it's needed. */
+  padding: 0 var(--dub-space-4) max(var(--dub-space-4), env(safe-area-inset-bottom));
   position: relative;
 }
 .composerBox {
@@ -920,6 +927,14 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-muted);
   cursor: not-allowed;
+}
+/* Touch: the send button is the composer's primary action — guarantee a full
+   44px tap target on coarse pointers (Apple HIG / WCAG 2.5.5). It's a bespoke
+   button, not the @dub/ui Button, so it needs its own floor. */
+@media (pointer: coarse) {
+  .sendButton {
+    min-height: 44px;
+  }
 }
 /* P13: press-and-away pulse the instant a message is sent — pairs with the
  * pending row's slide-in below so the whole send reads as one motion. */

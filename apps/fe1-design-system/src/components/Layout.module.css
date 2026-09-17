@@ -132,6 +132,9 @@
      container (native-app pattern): the header stays fixed, tall pages scroll here,
      and full-bleed apps fill exactly. */
   overflow-y: auto;
+  /* Keep flings from bouncing the body behind the fixed header — the boxed apps
+     (mail/inbox/roster) scroll here (modern WebViews give momentum by default). */
+  overscroll-behavior: contain;
   /* Content gutter + safe-area on the sides/bottom (home indicator) for edge-to-edge. */
   padding: var(--dub-space-6) max(var(--dub-space-6), env(safe-area-inset-right))
     max(var(--dub-space-6), env(safe-area-inset-bottom)) max(var(--dub-space-6), env(safe-area-inset-left));

@@ -7,6 +7,13 @@
  * light/dark and future token retuning flow through automatically.
  */
 
+/* Build stamp for the mobile-WebView spacing/scroll polish pass. Custom-property
+   values survive CSS minification, so this is a reliable liveness marker to grep
+   for in the served bundle (verify:live). Bump the suffix on future polish passes. */
+:root {
+  --dub-mobile-polish: "mob-polish-v2-spacing";
+}
+
 /* ---- reset ---------------------------------------------------------------- */
 *,
 *::before,
@@ -151,6 +158,20 @@ svg {
 *::-webkit-scrollbar-thumb:hover {
   background: var(--dub-color-gray-400);
   background-clip: content-box;
+}
+
+/* Touch: the 10px desktop scrollbars read as chunky, always-on furniture in a
+   mobile WebView (native apps use overlay bars that fade in only while scrolling).
+   On coarse pointers hide them entirely and let the platform's overlay bar show —
+   the scroll regions above keep their momentum. */
+@media (pointer: coarse) {
+  * {
+    scrollbar-width: none;
+  }
+  *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
 }
 
 /* ---- shell chrome (FE2 wiring around @dub/ui AppShell) --------------------- */
