@@ -88,6 +88,24 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
       { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
     ],
   },
+  // evt_2 is one of the two events the Home dashboard's "直近のイベント" card
+  // links to (see /bff/home's upcomingEvents = EVENTS.slice(0, 2) below), so it
+  // needs a detail entry too — otherwise clicking that row 404s ("イベントが見つ
+  // かりません") even though the SPA navigation itself is correct.
+  evt_2: {
+    version: 1,
+    id: "evt_2",
+    orgId: ORG,
+    title: "運営定例ミーティング",
+    description: "毎週の運営定例。進捗共有と次アクションの確認を行う。",
+    phase: "planning",
+    startsAt: "2026-08-12T09:00:00Z",
+    endsAt: "2026-08-12T10:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
+  },
 };
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
@@ -110,6 +128,19 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
       kind: "announcement",
       title: "参加者への案内メール",
       sortOrder: 1,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+  ],
+  evt_2: [
+    {
+      version: 1,
+      id: "act_3",
+      eventId: "evt_2",
+      kind: "announcement",
+      title: "定例アジェンダ共有",
+      sortOrder: 0,
       archivedAt: null,
       createdAt: "2026-06-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
