@@ -106,3 +106,32 @@ export async function consumeEventQueue(batch: MessageBatch<DubEventEnvelope>, e
   });
   await handler(batch, env);
 }
+
+/**
+ * Deliver a SINGLE event envelope through the same lane-A mapping / lane-B request
+ * handlers + envelope.id idempotency the Queue consumer uses. This is the free-tier
+ * landing path behind POST /internal/events-async (app.ts): the Workers Free plan has
+ * no dub-q-evt-notification Queue consumer, so freeq-drain forwards each due
+ * evt.notification outbox row here instead. Because the handler set is
+ * `buildHandlers(env)` — identical to the Queue path — a chat @mention,
+ * notification.requested, public inquiry, etc. become inbox notifications regardless of
+ * transport, with the mapping logic living in exactly one place.
+ *
+ * Idempotency mirrors createQueueHandler: dedup on envelope.id (return early if already
+ * processed), run the handler, then mark processed only AFTER it succeeds — so a failed
+ * delivery (handler throws) leaves the event un-marked and the thrown error propagates
+ * to the route (non-2xx), telling the caller's drain to keep the row pending and retry.
+ * An unknown event name is a no-op (no handler) exactly like the Queue's
+ * onUnknownEvent: "ack".
+ */
+export async function dispatchEvent(env: Env, envelope: DubEventEnvelope): Promise<void> {
+  const idempotency = makeIdempotencyStore(buildDb(env, envelope.requestId || SERVICE_NAME));
+  if (await idempotency.wasProcessed(envelope.id)) return;
+  const handlers = buildHandlers(env) as Record<
+    string,
+    ((e: DubEventEnvelope, c: { requestId: string }) => Promise<void>) | undefined
+  >;
+  const handler = handlers[envelope.name];
+  if (handler) await handler(envelope, { requestId: envelope.requestId });
+  await idempotency.markProcessed(envelope.id);
+}
