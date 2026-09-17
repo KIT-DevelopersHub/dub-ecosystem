@@ -73,6 +73,29 @@ export interface RunDetail {
   events: RunEventRecord[];
 }
 
+export type TaskStatus = "todo" | "doing" | "done";
+
+/** A task row plus its feature phase and latest run — one card on the board. */
+export interface BoardItem {
+  taskId: string;
+  featureId: string;
+  title: string;
+  featurePhase: FeaturePhase;
+  taskStatus: TaskStatus;
+  latestRun: { id: string; status: RunStatus; cwd: string; createdAt: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Task {
+  id: string;
+  featureId: string;
+  title: string;
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ApiError = {
   status: number;
   error: string;
@@ -94,6 +117,14 @@ export interface CommanderApi {
   listRuns(): Promise<RunSummary[]>;
   /** One persisted run with its full event log, for restoring the console after a reset. */
   getRun(id: string): Promise<RunDetail | null>;
+  /** The whole task board: every task + its feature phase + latest run status. */
+  listBoard(): Promise<BoardItem[]>;
+  /** Create a new work unit: a feature + its single task (1 task = 1 feature). */
+  createTask(input: { title: string; ledgerRef?: string }): Promise<Result<{ feature: Feature; task: Task }>>;
+  /** Advance a task's lifecycle status (done = archived / Done lane). */
+  updateTaskStatus(id: string, status: TaskStatus): Promise<Result<Task>>;
+  /** Liveness probe (GET /health). False when the service is unreachable. */
+  health(): Promise<boolean>;
 }
 
 /** Narrow slice of the API the run console needs to restore history after a reset. */
@@ -101,6 +132,11 @@ export type RunHistoryApi = Pick<CommanderApi, "listRuns" | "getRun">;
 
 const DEFAULT_BASE =
   (import.meta.env?.VITE_COMMANDER_API as string | undefined) ?? "http://127.0.0.1:8787";
+
+// Shared operator token (same one the daemon client uses). Reads on the service are
+// open, but writes (createTask / transition = approve·reject) require it — without this
+// default the whole judgment loop 401s in the browser (reads worked, writes didn't).
+const DEFAULT_TOKEN = import.meta.env?.VITE_COMMANDER_TOKEN as string | undefined;
 
 /** Human label for a phase, for badges. */
 export const PHASE_LABELS: Record<FeaturePhase, string> = {
@@ -116,13 +152,22 @@ export const PHASE_LABELS: Record<FeaturePhase, string> = {
 export class HttpCommanderApi implements CommanderApi {
   constructor(
     private baseUrl: string = DEFAULT_BASE,
-    private token?: string,
+    private token: string | undefined = DEFAULT_TOKEN,
   ) {}
 
   private headers(): Record<string, string> {
     const h: Record<string, string> = { "content-type": "application/json" };
     if (this.token) h["x-commander-token"] = this.token;
     return h;
+  }
+
+  async health(): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`);
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   async listFeatures(): Promise<Feature[]> {
@@ -191,5 +236,39 @@ export class HttpCommanderApi implements CommanderApi {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`GET /runs/${id} -> ${res.status}`);
     return (await res.json()) as RunDetail;
+  }
+
+  async listBoard(): Promise<BoardItem[]> {
+    const res = await fetch(`${this.baseUrl}/tasks`);
+    if (!res.ok) throw new Error(`GET /tasks -> ${res.status}`);
+    return ((await res.json()) as { items: BoardItem[] }).items;
+  }
+
+  async createTask(
+    input: { title: string; ledgerRef?: string },
+  ): Promise<Result<{ feature: Feature; task: Task }>> {
+    const res = await fetch(`${this.baseUrl}/tasks`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(input),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, error: { status: res.status, error: String(body.error ?? "error") } };
+    }
+    return { ok: true, value: { feature: body.feature as Feature, task: body.task as Task } };
+  }
+
+  async updateTaskStatus(id: string, status: TaskStatus): Promise<Result<Task>> {
+    const res = await fetch(`${this.baseUrl}/tasks/${id}`, {
+      method: "PATCH",
+      headers: this.headers(),
+      body: JSON.stringify({ status }),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, error: { status: res.status, error: String(body.error ?? "error") } };
+    }
+    return { ok: true, value: body.task as Task };
   }
 }

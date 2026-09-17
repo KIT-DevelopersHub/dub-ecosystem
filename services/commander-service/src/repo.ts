@@ -251,6 +251,128 @@ export async function listTasks(db: D1Database, featureId: string): Promise<Task
   return (res.results ?? []).map(toTask);
 }
 
+/** Advance a task's lifecycle status (todo/doing/done). `done` = archived (Done lane). */
+export async function updateTaskStatus(
+  db: D1Database,
+  taskId: string,
+  status: TaskRow["status"],
+): Promise<TaskRow | null> {
+  const at = nowIso();
+  const res = await db
+    .prepare("UPDATE commander_tasks SET status = ?, updated_at = ? WHERE id = ?")
+    .bind(status, at, taskId)
+    .run();
+  if ((res.meta?.changes ?? 0) === 0) return null;
+  const row = await db
+    .prepare("SELECT * FROM commander_tasks WHERE id = ?")
+    .bind(taskId)
+    .first<TaskDb>();
+  return row ? toTask(row) : null;
+}
+
+// --- Task board aggregate (cross-feature) ---------------------------------
+// The Commander board's single read: every task joined to its feature (phase/title)
+// and its latest run (status/cwd). 1 task = 1 feature = 1 worktree, so this is the
+// operator's whole workboard in one query — lanes are derived from these fields web-side.
+
+export interface BoardItem {
+  taskId: string;
+  featureId: string;
+  title: string;
+  featurePhase: FeaturePhase;
+  taskStatus: TaskRow["status"];
+  latestRun: { id: string; status: RunStatus; cwd: string; createdAt: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface BoardItemDb {
+  id: string;
+  feature_id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  feature_phase: string;
+  run_id: string | null;
+  run_status: string | null;
+  run_cwd: string | null;
+  run_created_at: string | null;
+}
+
+export async function listBoard(db: D1Database): Promise<BoardItem[]> {
+  const res = await db
+    .prepare(
+      `SELECT t.id, t.feature_id, t.title, t.status, t.created_at, t.updated_at,
+              f.phase AS feature_phase,
+              r.id AS run_id, r.status AS run_status, r.cwd AS run_cwd, r.created_at AS run_created_at
+         FROM commander_tasks t
+         JOIN commander_features f ON f.id = t.feature_id
+         LEFT JOIN commander_runs r ON r.id = (
+           SELECT id FROM commander_runs
+            WHERE task_id = t.id
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+         )
+        ORDER BY t.created_at DESC`,
+    )
+    .all<BoardItemDb>();
+  return (res.results ?? []).map((r) => ({
+    taskId: r.id,
+    featureId: r.feature_id,
+    title: r.title,
+    featurePhase: r.feature_phase as FeaturePhase,
+    taskStatus: r.status as TaskRow["status"],
+    latestRun: r.run_id
+      ? {
+          id: r.run_id,
+          status: (r.run_status ?? "pending") as RunStatus,
+          cwd: r.run_cwd ?? "",
+          createdAt: r.run_created_at ?? "",
+        }
+      : null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+}
+
+/**
+ * Create a feature (INITIAL_PHASE) and its single task together (1 task = 1 feature).
+ * This is the Commander board's "new task" primitive: the composer creates the work
+ * unit here, then starts a run against it (runs.task_id). Atomic (D1 batch).
+ */
+export async function createFeatureTask(
+  db: D1Database,
+  input: { title: string; ledgerRef?: string | null },
+): Promise<{ feature: FeatureRow; task: TaskRow }> {
+  const featureId = newId("feat");
+  const taskId = newId("ctask");
+  const at = nowIso();
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO commander_features (id, title, phase, ledger_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .bind(featureId, input.title, INITIAL_PHASE, input.ledgerRef ?? null, at, at),
+    db
+      .prepare(
+        "INSERT INTO commander_tasks (id, feature_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .bind(taskId, featureId, input.title, "todo", at, at),
+  ]);
+  return {
+    feature: {
+      id: featureId,
+      title: input.title,
+      phase: INITIAL_PHASE,
+      ledgerRef: input.ledgerRef ?? null,
+      createdAt: at,
+      updatedAt: at,
+    },
+    task: { id: taskId, featureId, title: input.title, status: "todo", createdAt: at, updatedAt: at },
+  };
+}
+
 // --- Runs + run events (persistence for the local daemon's executions) ----
 // The loopback daemon cannot reach D1 (ADR 0004), so it POSTs each run + event here
 // and this worker persists them. commander_run_events is append-only; a status/exit

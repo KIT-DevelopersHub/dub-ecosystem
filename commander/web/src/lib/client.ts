@@ -11,10 +11,20 @@ export interface DaemonRunEvent {
   message?: string;
 }
 
+/** Options for starting a run: which worktree to run in, and which task it belongs to. */
+export interface StartRunOptions {
+  /** Working directory (target worktree) for the spawned claude. Daemon default if omitted. */
+  cwd?: string;
+  /** Task this run belongs to (commander_tasks.id); persisted on the run row. */
+  taskId?: string;
+}
+
 export interface CommanderClient {
-  startRun(prompt: string): Promise<{ runId: string }>;
+  startRun(prompt: string, opts?: StartRunOptions): Promise<{ runId: string }>;
   /** Cancel a running run (best-effort). Resolves once the daemon acknowledges. */
   cancelRun(runId: string): Promise<void>;
+  /** Liveness probe (GET /health). False when the daemon is unreachable. */
+  health(): Promise<boolean>;
   /** Stream a run's events. Returns an unsubscribe fn. */
   streamEvents(
     runId: string,
@@ -39,14 +49,26 @@ export class HttpCommanderClient implements CommanderClient {
     return this.token ? { ...base, authorization: `Bearer ${this.token}` } : base;
   }
 
-  async startRun(prompt: string): Promise<{ runId: string }> {
+  async startRun(prompt: string, opts: StartRunOptions = {}): Promise<{ runId: string }> {
+    const body: Record<string, unknown> = { prompt };
+    if (opts.cwd) body.cwd = opts.cwd;
+    if (opts.taskId) body.taskId = opts.taskId;
     const res = await fetch(`${this.baseUrl}/runs`, {
       method: "POST",
       headers: this.headers({ "content-type": "application/json" }),
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`daemon returned ${res.status}`);
     return (await res.json()) as { runId: string };
+  }
+
+  async health(): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`);
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   async cancelRun(runId: string): Promise<void> {

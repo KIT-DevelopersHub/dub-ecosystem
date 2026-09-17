@@ -80,6 +80,7 @@ export class RunStore {
       id,
       prompt: input.prompt,
       cwd: input.cwd ?? this.config.defaultCwd,
+      ...(input.taskId ? { taskId: input.taskId } : {}),
       status: "pending",
       startedAt: now,
       events: [],

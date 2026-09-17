@@ -57,6 +57,10 @@ function fakeApi(f: Feature, allowed: FeatureDetail["allowedTransitions"], opts:
     transition,
     listRuns: vi.fn(async () => []),
     getRun: vi.fn(async () => null),
+    listBoard: vi.fn(async () => []),
+    createTask: vi.fn(async () => ({ ok: false as const, error: { status: 0, error: "unused" } })),
+    updateTaskStatus: vi.fn(async () => ({ ok: false as const, error: { status: 0, error: "unused" } })),
+    health: vi.fn(async () => true),
   };
   return { api, transition };
 }

@@ -22,6 +22,8 @@ export interface Run {
   id: string;
   prompt: string;
   cwd: string;
+  /** Optional task this run belongs to (commander_tasks.id), for the board. */
+  taskId?: string;
   status: RunStatus;
   startedAt: string;
   endedAt?: string;
@@ -34,6 +36,8 @@ export interface StartRunInput {
   prompt: string;
   /** Working directory for the spawned claude process. Defaults to the daemon's. */
   cwd?: string;
+  /** Task this run belongs to (commander_tasks.id); persisted on the run row. */
+  taskId?: string;
 }
 
 export interface DaemonConfig {

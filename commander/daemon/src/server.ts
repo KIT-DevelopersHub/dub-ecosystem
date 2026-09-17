@@ -97,7 +97,7 @@ export function createDaemonServer(config: DaemonConfig) {
     }
 
     if (method === "POST" && pathname === "/runs") {
-      let parsed: { prompt?: unknown; cwd?: unknown };
+      let parsed: { prompt?: unknown; cwd?: unknown; taskId?: unknown };
       try {
         parsed = JSON.parse((await readBody(req)) || "{}");
       } catch {
@@ -107,7 +107,8 @@ export function createDaemonServer(config: DaemonConfig) {
         return json(res, 400, { error: "prompt_required" });
       }
       const cwd = typeof parsed.cwd === "string" ? parsed.cwd : undefined;
-      const run = store.start({ prompt: parsed.prompt, cwd });
+      const taskId = typeof parsed.taskId === "string" ? parsed.taskId : undefined;
+      const run = store.start({ prompt: parsed.prompt, cwd, taskId });
       return json(res, 201, { runId: run.id, status: run.status });
     }
 

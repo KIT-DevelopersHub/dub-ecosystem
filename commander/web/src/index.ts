@@ -3,9 +3,24 @@
 // SoT: the run console, phase board and their HTTP clients live here; the shell
 // feature only composes them into shell chrome (no logic duplication).
 export { App } from "./App.tsx";
+export { Board } from "./Board.tsx";
+export { TaskComposer } from "./TaskComposer.tsx";
+export { TaskDrawer } from "./TaskDrawer.tsx";
+export { TaskCard } from "./TaskCard.tsx";
+export { Drawer } from "./Drawer.tsx";
+// Legacy single-run console + phase board (still consumed by the fe2 shell until its
+// P2 refresh). The board (above) is the current home.
 export { CommanderConsole } from "./CommanderConsole.tsx";
 export type { CommanderConsoleProps } from "./CommanderConsole.tsx";
 export { FeatureBoard } from "./FeatureBoard.tsx";
+export {
+  deriveLane,
+  groupByLane,
+  LANES,
+  LANE_LABELS,
+  type Lane,
+} from "./lib/lanes.ts";
+export { useRunStream } from "./lib/useRunStream.ts";
 
 export {
   HttpCommanderClient,
@@ -24,4 +39,10 @@ export {
   type TransitionSpec,
   type ApiError,
   type Result,
+  type BoardItem,
+  type Task,
+  type TaskStatus,
+  type RunStatus,
+  type RunSummary,
+  type RunDetail,
 } from "./lib/commanderApi.ts";

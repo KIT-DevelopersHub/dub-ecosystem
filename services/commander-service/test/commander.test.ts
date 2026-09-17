@@ -267,4 +267,61 @@ describe("commander-service run persistence", () => {
     const bad = await call(app, env, "POST", "/runs/run_test_3/events", { type: "bogus" });
     expect(bad.status).toBe(400);
   });
+
+  // ── Task board (Commander home) ────────────────────────────────────────────
+  it("POST /tasks creates a feature + task together at demo_building", async () => {
+    const r = await call(app, env, "POST", "/tasks", { title: "名簿にロール絞り込み" });
+    expect(r.status).toBe(201);
+    expect(r.json.feature.phase).toBe("demo_building");
+    expect(r.json.task.featureId).toBe(r.json.feature.id);
+    expect(r.json.task.status).toBe("todo");
+  });
+
+  it("GET /tasks returns each task with its feature phase and latest run", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "ボード用タスク" });
+    const taskId = created.json.task.id;
+    // start a run against the task, then drive it to succeeded
+    await call(app, env, "POST", "/runs", { id: "run_b1", prompt: "p", cwd: "/wt", taskId });
+    await call(app, env, "POST", "/runs/run_b1/events", { type: "status", payload: { status: "succeeded" } });
+
+    const board = await call(app, env, "GET", "/tasks");
+    expect(board.status).toBe(200);
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.featurePhase).toBe("demo_building");
+    expect(item.latestRun.id).toBe("run_b1");
+    expect(item.latestRun.status).toBe("succeeded");
+    expect(item.latestRun.cwd).toBe("/wt");
+  });
+
+  it("GET /tasks picks the NEWEST run per task", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "再実行タスク" });
+    const taskId = created.json.task.id;
+    // ids are monotonic like the ULIDs used in prod: the later insert has the greater id.
+    await call(app, env, "POST", "/runs", { id: "run_a", prompt: "p1", cwd: "/wt", taskId, status: "failed" });
+    await call(app, env, "POST", "/runs", { id: "run_b", prompt: "p2", cwd: "/wt", taskId, status: "running" });
+    const board = await call(app, env, "GET", "/tasks");
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.latestRun.id).toBe("run_b");
+  });
+
+  it("PATCH /tasks/:id archives a task (status done) and 404s an unknown task", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "アーカイブ対象" });
+    const taskId = created.json.task.id;
+    const ok = await call(app, env, "PATCH", `/tasks/${taskId}`, { status: "done" });
+    expect(ok.status).toBe(200);
+    expect(ok.json.task.status).toBe("done");
+
+    const board = await call(app, env, "GET", "/tasks");
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.taskStatus).toBe("done");
+
+    const missing = await call(app, env, "PATCH", "/tasks/nope", { status: "done" });
+    expect(missing.status).toBe(404);
+  });
+
+  it("PATCH /tasks/:id rejects an invalid status (400)", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "T" });
+    const bad = await call(app, env, "PATCH", `/tasks/${created.json.task.id}`, { status: "bogus" });
+    expect(bad.status).toBe(400);
+  });
 });

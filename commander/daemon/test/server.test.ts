@@ -20,6 +20,8 @@ function config(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     operatorToken: "",
     idleTimeoutMs: 0,
     runTimeoutMs: 0,
+    isolateEnv: false,
+    claudeConfigDir: "",
     ...overrides,
   };
 }

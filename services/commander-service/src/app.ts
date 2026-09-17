@@ -21,6 +21,9 @@ import {
   transitionFeature,
   createTask,
   listTasks,
+  listBoard,
+  createFeatureTask,
+  updateTaskStatus,
   createRun,
   getRun,
   listRuns,
@@ -33,11 +36,11 @@ export function createApp() {
   const app = new Hono<AppBindings>();
 
   // The Dub-hosted / local commander web SPA calls this API cross-origin.
-  app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"] }));
+  app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "OPTIONS"] }));
 
   // Optional operator-token guard on mutations (see env.ts). Off when unset.
   app.use("*", async (c, next) => {
-    if (c.req.method === "POST") {
+    if (c.req.method === "POST" || c.req.method === "PATCH") {
       const expected = c.env.COMMANDER_OPERATOR_TOKEN;
       if (expected && c.req.header("x-commander-token") !== expected) {
         return c.json({ error: "unauthorized" }, 401);
@@ -126,6 +129,40 @@ export function createApp() {
     });
     if (!task) return c.json({ error: "feature_not_found" }, 404);
     return c.json({ task }, 201);
+  });
+
+  // ── Task board (cross-feature) ───────────────────────────────────────────────
+  // The Commander home reads the whole workboard here: every task + its feature phase
+  // + its latest run status. Lanes (投入待ち/走行中/確認待ち/要修正/完了) are derived web-side.
+  app.get("/tasks", async (c) => {
+    return c.json({ items: await listBoard(c.env.DB) });
+  });
+
+  // "New task" primitive: create a feature + its single task together (1 task = 1
+  // feature = 1 worktree). The web then starts a run against the returned taskId.
+  app.post("/tasks", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const title = typeof body?.title === "string" ? body.title.trim() : "";
+    if (title === "" || title.length > 200) {
+      return c.json({ error: "title_required" }, 400);
+    }
+    const ledgerRef = typeof body?.ledgerRef === "string" && body.ledgerRef.trim() !== ""
+      ? body.ledgerRef.trim()
+      : null;
+    const created = await createFeatureTask(c.env.DB, { title, ledgerRef });
+    return c.json(created, 201);
+  });
+
+  app.patch("/tasks/:id", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => null);
+    const status = body?.status;
+    if (status !== "todo" && status !== "doing" && status !== "done") {
+      return c.json({ error: "invalid_status" }, 400);
+    }
+    const task = await updateTaskStatus(c.env.DB, id, status);
+    if (!task) return c.json({ error: "task_not_found" }, 404);
+    return c.json({ task });
   });
 
   // ── Runs (persistence for the local daemon's executions) ─────────────────────
