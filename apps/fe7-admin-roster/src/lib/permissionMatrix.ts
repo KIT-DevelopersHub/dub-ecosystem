@@ -1,6 +1,7 @@
 // Pure logic for the PermissionMatrix editor and role permission-bundle diffing.
 // No React here so it is exhaustively unit-testable (design §7 "matrix editor logic").
 import type { identity } from "@dub/types";
+import { appRegistry } from "@dub/types";
 import type { UpdateRoleRequest } from "../contracts/pending";
 
 export type CatalogEntry = identity.PermissionCatalogEntry;
@@ -102,6 +103,15 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 /**
  * Build the PATCH body carrying ONLY changed fields (design §2-4 "差分のみ" and
  * test "差分のみ UpdateRoleRequest に載る"). Returns null when nothing changed.
+ *
+ * Both sides are first run through withRequiredAppDomainKeys so a per-app toggle is
+ * saved as EFFECTIVE 実効権限: granting an app (app:<id>:view|edit) auto-bundles the
+ * domain read key(s) that app needs (identity:read 等) — the fix for the 抜け where the
+ * per-app toggle was front-end-only and the domain API still 403'd. Normalizing BOTH
+ * sides means (a) a legacy under-normalized role is not spuriously reported dirty on
+ * open, and (b) the domain key required by an app-grant cannot be toggled off while the
+ * grant remains (it is a dependency of the grant). Adds READ keys only — never
+ * domain write/admin — so this never escalates a role to org-admin.
  */
 export function buildRoleUpdate(
   original: { name: string; permissions: readonly identity.PermissionKey[] },
@@ -109,8 +119,10 @@ export function buildRoleUpdate(
 ): UpdateRoleRequest | null {
   const patch: UpdateRoleRequest = {};
   if (next.name !== original.name) patch.name = next.name;
-  if (!sameSet(original.permissions, next.permissions)) {
-    patch.permissions = [...next.permissions].sort();
+  const originalPerms = appRegistry.withRequiredAppDomainKeys(original.permissions);
+  const nextPerms = appRegistry.withRequiredAppDomainKeys(next.permissions);
+  if (!sameSet(originalPerms, nextPerms)) {
+    patch.permissions = nextPerms; // already sorted, domain-key-bundled
   }
   return Object.keys(patch).length === 0 ? null : patch;
 }

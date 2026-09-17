@@ -77,6 +77,43 @@ describe("computeTaskNumbers", () => {
   });
 });
 
+describe("computeTaskNumbers — per-row prefix (function)", () => {
+  const teamRow = (id: string, teamId: string | null, parentTaskId: string | null = null): gantt.GanttRow => ({
+    taskId: id,
+    title: id,
+    startsAt: null,
+    endsAt: null,
+    progressPercent: 0,
+    assigneeId: null,
+    ...(teamId ? { teamId } : {}),
+    ...(parentTaskId ? { parentTaskId } : {}),
+  });
+
+  it("resolves each row's prefix independently — this is the fix for every team showing AA", () => {
+    const rows = [teamRow("a", "team_tk"), teamRow("b", "team_hk"), teamRow("c", "team_se")];
+    const codeByTeamId: Record<string, string> = { team_tk: "TK", team_hk: "HK", team_se: "SE" };
+    const n = computeTaskNumbers(rows, (r) => codeByTeamId[r.teamId as string] ?? "", 0);
+    // Same global sibling sequence as before (1, 2, 3 in display order) — only the
+    // PREFIX now varies per row's own team instead of being one shared value.
+    expect(n.get("a")).toBe("TK-1");
+    expect(n.get("b")).toBe("HK-2");
+    expect(n.get("c")).toBe("SE-3");
+  });
+
+  it("a team-less row falls back to the bare number when the resolver returns \"\"", () => {
+    const n = computeTaskNumbers([teamRow("a", null)], () => "", 0);
+    expect(n.get("a")).toBe("1");
+  });
+
+  it("keeps per-row prefixes with WBS nesting and zero-padding", () => {
+    const rows = [teamRow("p1", "team_tk"), teamRow("c1", "team_hk", "p1")];
+    const codeByTeamId: Record<string, string> = { team_tk: "TK", team_hk: "HK" };
+    const n = computeTaskNumbers(rows, (r) => codeByTeamId[r.teamId as string] ?? "", 3);
+    expect(n.get("p1")).toBe("TK-001");
+    expect(n.get("c1")).toBe("HK-001-001");
+  });
+});
+
 describe("computeTaskNumbers — zero padding", () => {
   it("zero-pads each segment to a fixed width (4 -> AA-0001, AA-0001-0001)", () => {
     const rows = [row("p1"), row("c1", "p1"), row("c2", "p1"), row("p2")];
