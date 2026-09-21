@@ -43,7 +43,7 @@ export function MemberFormDialog({
     setError(null);
     setName(editing?.name ?? "");
     setRoleTitle(editing?.roleTitle ?? "");
-    // 在籍系(added/invited/considering)は書き込み正準値 "added"(在籍中)へ寄せる。
+    // 通常→"added"、打診系(invited/considering)→"invited" へ書き込み正準値を寄せる。
     setStatus(editing ? toWriteStatus(editing.status) : "added");
     setLeaderId(editing?.leaderId ?? NO_LEADER);
     setTeamIds(editing?.teamIds ?? []);
@@ -128,7 +128,7 @@ export function MemberFormDialog({
           <FormField label="学年" htmlFor="member-grade" help="任意 (例: 3年 / M1)">
             <TextField id="member-grade" value={grade} onChange={setGrade} testId="members-form-grade" />
           </FormField>
-          <FormField label="ステータス" htmlFor="member-status" required help="在籍中 / 休み中（一時離脱）/ 辞退。辞退にすると名簿一覧からは隠れます（データは残ります）。">
+          <FormField label="ステータス" htmlFor="member-status" required help="通常メンバー（バッジなし）/ 打診中 / 休み中（一時離脱）/ 辞退。辞退にすると名簿一覧からは隠れます（データは残ります）。">
             <Select<MemberStatus>
               id="member-status"
               value={status}

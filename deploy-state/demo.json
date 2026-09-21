@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "bc874ba6",
-  "branch": "feat/fe7-roster-org",
-  "actor": "ko-tarou",
-  "markers": ["member-roster-status-filter", "members-form-leader"],
+  "deployedSha": "18741af2",
+  "branch": "staging/furigana-roster-integ",
+  "actor": "Kota",
+  "markers": ["フリガナ", "打診中", "たかおか"],
   "live": true,
-  "verifiedAt": "2026-09-21T16:47:34Z",
-  "updatedAt": "2026-09-21T16:47:34Z",
-  "note": "運営メンバー名簿の整理: ステータス2本化・辞退非表示&辞退者ビュー・リーダー組織図順"
+  "verifiedAt": "2026-09-21T19:39:57Z",
+  "updatedAt": "2026-09-21T19:39:57Z",
+  "note": "furigana+roster整理 FB反映(status3分類/furigana表示/leader組織図)"
 }

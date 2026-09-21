@@ -28,8 +28,9 @@ function tierOf(m: OrgMember): Tier {
 function isTentative(s: MemberStatus): boolean {
   return s === "invited" || s === "considering";
 }
-function tentBadge(s: MemberStatus): string {
-  return s === "invited" ? "打診中" : "検討中";
+function tentBadge(_s: MemberStatus): string {
+  // 招待中/検討中はどちらも「打診中」に統一表示する。
+  return "打診中";
 }
 
 function Chip({ m, kind }: { m: OrgMember; kind: "top" | "leader" | "sub" }): JSX.Element {
