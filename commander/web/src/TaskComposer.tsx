@@ -43,15 +43,22 @@ export function TaskComposer({
   const [ledgerRef, setLedgerRef] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
 
-  // Reset fields each time the drawer opens (focus is handled by Drawer via initialFocusRef).
+  // Latest suggestions kept in a ref so the reset effect can seed the cwd default without
+  // depending on the array's identity — the board rebuilds cwdSuggestions on every poll
+  // (new array each tick), and depending on it would wipe in-progress input mid-typing.
+  const cwdSuggestionsRef = useRef(cwdSuggestions);
+  cwdSuggestionsRef.current = cwdSuggestions;
+
+  // Reset fields only when the drawer transitions open (not on every poll-driven
+  // re-render). Focus is handled by Drawer via initialFocusRef.
   useEffect(() => {
     if (open) {
       setTitle("");
-      setCwd(cwdSuggestions[0] ?? "");
+      setCwd(cwdSuggestionsRef.current[0] ?? "");
       setPrompt("");
       setLedgerRef("");
     }
-  }, [open, cwdSuggestions]);
+  }, [open]);
 
   const canSubmit = title.trim() !== "" && prompt.trim() !== "" && !submitting;
 
