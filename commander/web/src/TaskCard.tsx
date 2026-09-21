@@ -14,6 +14,8 @@ interface TaskCardProps {
   history: RunHistoryApi;
   onOpen: (taskId: string) => void;
   onCancel: (runId: string) => void;
+  /** Start the run for a registered-but-unrequested (未依頼) task. */
+  onRequestRun?: (item: BoardItem) => void;
   /** True for an optimistic card whose run hasn't been confirmed by the server yet. */
   pending?: boolean;
 }
@@ -34,9 +36,11 @@ function relTime(iso: string): string {
   return `${Math.round(m / 60)}時間前`;
 }
 
-export function TaskCard({ item, client, history, onOpen, onCancel, pending }: TaskCardProps) {
+export function TaskCard({ item, client, history, onOpen, onCancel, onRequestRun, pending }: TaskCardProps) {
   const lane = deriveLane(item);
   const isRunning = lane === "running" && !!item.latestRun;
+  // A queued card with no run yet = 未依頼 (registered, awaiting the AI依頼 press).
+  const isUnrequested = lane === "queued" && !item.latestRun && !pending;
   // Only running cards subscribe live; others pass null (no socket).
   const stream = useRunStream(isRunning ? item.latestRun!.id : null, { client, history });
   const accent = LANE_COLORS[lane];
@@ -110,6 +114,33 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
           }}
         >
           {stream.lastLine}
+        </div>
+      )}
+
+      {/* 未依頼: register done, run not started — offer the AI依頼 action here too */}
+      {isUnrequested && (
+        <div style={{ marginTop: t.space3 }}>
+          <button
+            type="button"
+            data-testid={`task-request-run-${item.taskId}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequestRun?.(item);
+            }}
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#fff",
+              background: t.primary,
+              border: 0,
+              borderRadius: "var(--dub-radius-sm, 8px)",
+              padding: `2px ${t.space3}`,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            🤖 AIに依頼する
+          </button>
         </div>
       )}
 

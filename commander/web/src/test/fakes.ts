@@ -58,8 +58,9 @@ export function makeFakeApi(initial: BoardItem[] = []): FakeApi {
       };
       phases[feature.id] = "demo_building";
       const task = { id: `task-${api._items.length + 1}`, featureId: feature.id, title, status: "todo" as const, createdAt: "t", updatedAt: "t" };
+      // A freshly created task has no run yet → it lands in the 投入待ち(未依頼) lane.
       api._items.unshift(
-        makeBoardItem({ taskId: task.id, featureId: feature.id, title, runStatus: "running" }),
+        makeBoardItem({ taskId: task.id, featureId: feature.id, title, runStatus: null }),
       );
       return { ok: true as const, value: { feature, task } };
     }),

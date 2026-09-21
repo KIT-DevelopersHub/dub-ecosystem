@@ -27,7 +27,7 @@ describe("<Board>", () => {
     expect(within(screen.getByTestId("lane-done")).getByText("完了カード")).toBeInTheDocument();
   });
 
-  it("composer creates a task then starts a run with its taskId + cwd", async () => {
+  it("composer registers a task WITHOUT running it (propose-first)", async () => {
     const api = makeFakeApi([]);
     const client = makeFakeClient();
     render(<Board client={client} api={api} pollMs={0} />);
@@ -41,11 +41,51 @@ describe("<Board>", () => {
     await userEvent.click(screen.getByTestId("composer-submit"));
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ title: "ログイン画面を作る", ledgerRef: undefined }));
+    // The task lands in 投入待ち — no run started until 「AIに依頼する」 is pressed.
+    expect(await within(screen.getByTestId("lane-queued")).findByText("ログイン画面を作る")).toBeInTheDocument();
+    expect(client.startRun).not.toHaveBeenCalled();
+
+    // Now request the run from the card button → it starts with the captured prompt/cwd.
+    await userEvent.click(within(screen.getByTestId("lane-queued")).getByTestId(/^task-request-run-/));
     await waitFor(() => expect(client.startRun).toHaveBeenCalled());
     const [prompt, opts] = client.startRun.mock.calls[0]!;
     expect(prompt).toBe("作って");
     expect(opts).toMatchObject({ cwd: "/repo/login" });
     expect(opts.taskId).toMatch(/^task-/);
+  });
+
+  it("chat: a work request is registered as 未依頼 and runs only after 「AIに依頼する」", async () => {
+    const api = makeFakeApi([]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+    await screen.findByTestId("board-empty");
+
+    await userEvent.type(screen.getByTestId("chat-input"), "俺の自己紹介ページを作って");
+    await userEvent.click(screen.getByTestId("chat-send"));
+
+    // Task registered, assistant asks — but NO run yet.
+    await waitFor(() => expect(api.createTask).toHaveBeenCalled());
+    expect(client.startRun).not.toHaveBeenCalled();
+    const runBtn = await screen.findByTestId(/^chat-request-run-/);
+
+    await userEvent.click(runBtn);
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    const [prompt] = client.startRun.mock.calls[0]!;
+    expect(prompt).toBe("俺の自己紹介ページを作って");
+  });
+
+  it("chat: pure chit-chat neither registers a task nor runs anything", async () => {
+    const api = makeFakeApi([]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+    await screen.findByTestId("board-empty");
+
+    await userEvent.type(screen.getByTestId("chat-input"), "ありがとう！");
+    await userEvent.click(screen.getByTestId("chat-send"));
+
+    expect(await screen.findByTestId("chat-msg-assistant")).toBeInTheDocument();
+    expect(api.createTask).not.toHaveBeenCalled();
+    expect(client.startRun).not.toHaveBeenCalled();
   });
 
   it("auto-advances a succeeded build to demo_review (deploy-complete marker)", async () => {
