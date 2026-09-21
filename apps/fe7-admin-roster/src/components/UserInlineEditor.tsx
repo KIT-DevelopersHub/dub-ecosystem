@@ -45,6 +45,7 @@ export function UserInlineEditor({
   const canAdmin = can("identity:admin");
 
   const [displayName, setDisplayName] = useState(user.displayName);
+  const [furigana, setFurigana] = useState(user.furigana ?? "");
   const [githubLogin, setGithubLogin] = useState(user.githubLogin ?? "");
   const [statusConfirm, setStatusConfirm] = useState<identity.UserStatus | null>(null);
   const [offboardConfirm, setOffboardConfirm] = useState(false);
@@ -56,7 +57,7 @@ export function UserInlineEditor({
 
   function saveProfile() {
     patch.mutate(
-      { displayName: displayName.trim(), githubLogin: githubLogin.trim() || null },
+      { displayName: displayName.trim(), furigana: furigana.trim() || null, githubLogin: githubLogin.trim() || null },
       { onSuccess: () => toast({ kind: "success", title: "プロフィールを更新しました" }) },
     );
   }
@@ -99,6 +100,16 @@ export function UserInlineEditor({
           onChange={setDisplayName}
           disabled={!canAdmin}
           testId="fe7-user-displayName"
+        />
+      </FormField>
+      <FormField label="フリガナ（読み仮名）" htmlFor={`fe7-user-furigana-${user.id}`}>
+        <TextField
+          id={`fe7-user-furigana-${user.id}`}
+          value={furigana}
+          onChange={setFurigana}
+          disabled={!canAdmin}
+          placeholder="例: ヤマダ ハナコ"
+          testId="fe7-user-furigana"
         />
       </FormField>
       <FormField label="GitHub Login" htmlFor={`fe7-user-github-${user.id}`}>

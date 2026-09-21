@@ -181,6 +181,19 @@ export function UserListPage() {
         </span>
       ),
     },
+    {
+      key: "furigana",
+      header: "フリガナ",
+      sortable: true,
+      cell: (u) =>
+        u.furigana?.trim() ? (
+          <span data-testid={`fe7-users-furigana-${u.id}`}>{u.furigana}</span>
+        ) : (
+          <span style={{ color: "var(--dub-color-fg-muted, #57606a)" }} data-testid={`fe7-users-furigana-${u.id}`}>
+            未設定
+          </span>
+        ),
+    },
     { key: "email", header: "メール", sortable: true, cell: (u) => u.email },
     { key: "source", header: "種別", sortable: true, cell: (u) => <SourceBadge source={u.source} testId={`fe7-users-source-${u.id}`} /> },
     {
@@ -261,7 +274,7 @@ export function UserListPage() {
       />
 
       <p style={noticeTextStyle}>
-        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。「運営メンバー」列から各アドレスを運営メンバーと紐付け・解除できます。ロール列をクリックすると、各メンバーのロールをその場で追加・削除できます。表示名や在籍状態の変更は、名前をクリックすると右側でその場で編集できます。
+        名簿は Cloudflare Email Routing の @developershub.jp アドレスと同期します。「運営メンバー」列から各アドレスを運営メンバーと紐付け・解除できます。ロール列をクリックすると、各メンバーのロールをその場で追加・削除できます。表示名・フリガナ（読み仮名）や在籍状態の変更は、名前をクリックすると右側でその場で編集できます。フリガナ列の見出しをクリックすると五十音順で並び替えでき、検索はフリガナにも一致します。
       </p>
 
       {notConnected ? (
