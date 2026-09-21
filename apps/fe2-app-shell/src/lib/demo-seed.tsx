@@ -1890,11 +1890,12 @@ interface DemoMember {
   orgId: string;
   name: string;
   roleTitle: string | null;
-  status: "added" | "invited" | "considering" | "declined";
+  status: "added" | "invited" | "considering" | "on_leave" | "declined";
   teamIds: string[];
   department: string | null;
   grade: string | null;
   identityUserId: string | null;
+  leaderId: string | null;
   contact: string | null;
   schoolEmail: string | null;
   gmail: string | null;
@@ -1935,35 +1936,41 @@ function createMembersStore() {
     department: string | null = null,
     grade: string | null = null,
     identityUserId: string | null = null,
+    leaderId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, leaderId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
+  // leaderId で「配下」を明示し、組織図順ソートと「リーダー」列/フォームのリーダー選択を
+  // 実データで確認できるようにする。ステータスは在籍中(added/招待中/検討中)＝「在籍中」統合表示、
+  // on_leave＝「休み中」、declined＝「辞退」(名簿一覧では既定非表示・辞退者フィルタで参照)。
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
     mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
-    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1, null, "情報工学科", "3年"),
-    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年"),
+    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1, null, "情報工学科", "3年", null, "member_1"),
+    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null, "member_1"),
     // 開発
     mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
-    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年"),
-    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年"),
-    // 当日進行
+    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年", null, "member_d1"),
+    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年", null, "member_d2"),
+    // 当日進行 — 大野 は「休み中」(一時離脱) の確認用。
     mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6, null, "機械工学科", "3年"),
-    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7, null, "経営情報学科", "2年"),
+    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7, null, "経営情報学科", "2年", null, "member_o1"),
+    mk("member_o3", "大野", "メンバー", "on_leave", ["team_ops"], 8, null, "機械工学科", "2年", null, "member_o2"),
     // スポンサー
-    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8, null, "経営情報学科", "3年"),
-    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9, null, "情報工学科", "2年"),
-    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10, null, "電気電子工学科", "1年"),
+    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 9, null, "経営情報学科", "3年"),
+    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 10, null, "情報工学科", "2年", null, "member_s1"),
+    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 11, null, "電気電子工学科", "1年", null, "member_s2"),
     // 会場
-    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11, null, "建築学科", "3年"),
-    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12, null, "建築学科", "2年"),
+    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 12, null, "建築学科", "3年"),
+    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 13, null, "建築学科", "2年", null, "member_v1"),
     // 集客広報
-    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13, null, "メディア情報学科", "3年"),
-    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
-    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 14, null, "メディア情報学科", "3年"),
+    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 15, null, "メディア情報学科", "2年", null, "member_e1"),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 16, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
+    // 辞退 — 名簿一覧では既定で隠れ、辞退者フィルタでのみ表示される確認用。
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 17),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 17, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 18, null, "情報工学科", "1年"),
   ];
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
@@ -2050,9 +2057,10 @@ function createMembersStore() {
     if (method === "POST" && pathname === "/api/v1/members/people") {
       const mem: DemoMember = {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
-        status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        status: body?.status ?? "added", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
+        leaderId: body?.leaderId ?? null,
         contact: body?.contact ?? null, schoolEmail: null, gmail: null,
         lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: body?.note ?? null,
         sortOrder: (members.length + 1) * 1024, version: 1,
@@ -2102,6 +2110,7 @@ function createMembersStore() {
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
         if (body?.department !== undefined) mem.department = body.department ?? null;
         if (body?.grade !== undefined) mem.grade = body.grade ?? null;
+        if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
         if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
         if (body?.note !== undefined) mem.note = body.note ?? null;
@@ -2228,7 +2237,7 @@ function createMembersStore() {
       }
       if (action === "create") {
         const created: DemoMember = {
-          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null,
+          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null, leaderId: null,
           department: p.department, grade: p.grade, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
           contact: p.contact ?? p.schoolEmail, schoolEmail: p.schoolEmail || null, gmail: p.gmail || null,
           lastName: p.lastName, firstName: p.firstName, lastNameKana: p.lastNameKana, firstNameKana: p.firstNameKana,
