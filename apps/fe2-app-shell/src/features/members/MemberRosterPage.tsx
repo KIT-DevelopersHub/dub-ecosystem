@@ -72,6 +72,8 @@ export function MemberRosterPage(): JSX.Element {
     return ordered.filter(
       (m) =>
         m.name.toLowerCase().includes(q) ||
+        `${m.lastNameKana ?? ""}${m.firstNameKana ?? ""}`.toLowerCase().includes(q) ||
+        `${m.lastNameKana ?? ""} ${m.firstNameKana ?? ""}`.toLowerCase().includes(q) ||
         (m.roleTitle ?? "").toLowerCase().includes(q) ||
         (m.department ?? "").toLowerCase().includes(q) ||
         (m.grade ?? "").toLowerCase().includes(q),
@@ -115,7 +117,7 @@ export function MemberRosterPage(): JSX.Element {
             id="member-roster-search"
             value={search}
             onChange={setSearch}
-            placeholder="氏名・役割・学科・学年で検索"
+            placeholder="氏名・フリガナ・役割・学科・学年で検索"
             testId="member-roster-search"
           />
         </div>

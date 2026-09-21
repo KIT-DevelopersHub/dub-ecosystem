@@ -15,10 +15,17 @@ import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
+import { hasStatusBadge } from "./memberStatus.ts";
 
 /** 氏名ローマ字を "Last First" で合成 (アルファベットのメール発行の確認用). */
 function romajiName(m: OrgMember): string {
   const parts = [m.lastNameRomaji, m.firstNameRomaji].filter((x): x is string => !!x && x.trim().length > 0);
+  return parts.length > 0 ? parts.join(" ") : "—";
+}
+
+/** フリガナ(読み仮名)を "せい めい" で合成. 未入力なら "—"。 */
+function kanaName(m: OrgMember): string {
+  const parts = [m.lastNameKana, m.firstNameKana].filter((x): x is string => !!x && x.trim().length > 0);
   return parts.length > 0 ? parts.join(" ") : "—";
 }
 
@@ -65,6 +72,7 @@ export function ListView({
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
+    { key: "nameKana", header: "フリガナ", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={kanaName(m)} max="12rem" /> },
     { key: "nameRomaji", header: "氏名（ローマ字）", minWidth: "11rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={romajiName(m)} max="14rem" /> },
     { key: "department", header: "学科", minWidth: "7rem", noWrap: true, defaultHidden: true, cell: (m) => m.department ?? "—" },
     { key: "grade", header: "学年", minWidth: "5rem", noWrap: true, defaultHidden: true, cell: (m) => m.grade ?? "—" },
@@ -82,7 +90,7 @@ export function ListView({
           } as ColumnDef<OrgMember>,
         ]
       : []),
-    { key: "status", header: "ステータス", minWidth: "7rem", noWrap: true, cell: (m) => <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> },
+    { key: "status", header: "ステータス", minWidth: "7rem", noWrap: true, cell: (m) => (hasStatusBadge(m.status) ? <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> : <span data-testid={`members-status-${m.id}`}>—</span>) },
     {
       key: "account",
       header: "developershub.jpメール",
