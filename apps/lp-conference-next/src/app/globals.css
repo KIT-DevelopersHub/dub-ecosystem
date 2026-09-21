@@ -389,16 +389,24 @@ img { max-width: 100%; height: auto; display: block; }
   animation: hero-pop 0.9s cubic-bezier(0, 0, 0.58, 1) both;
 }
 
-/* Reveal — scroll-in（Reveal.tsx が下端より下の要素だけ hidden を付与）。
-   既定は素の可視。JS が付ける reveal--hidden → reveal--shown の遷移だけ担う。 */
+/* Reveal — scroll-in +「蜃気楼(haze)」演出（v3 から移植）。
+   既定は素の可視。JS(Reveal.tsx)が下端より下の要素にだけ .reveal--haze を付け、
+   要素の“ビューポート内での位置”を連続値 --p(0=画面下端 → 1=画面上端) として書き込む。
+   下の方にある間は薄くかすみ(opacity↓ + 少し下), せり上がるほど鮮明になる=蜃気楼。
+   一度でも見えている要素(上端寄り)は絶対に隠さない(白画面事故の再発防止)。 */
 .reveal {
-  transition:
-    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: opacity, transform;
 }
-.reveal--hidden { opacity: 0; transform: translateY(18px); }
-.reveal--shown { opacity: 1; transform: none; }
+/* haze: 位置連動の連続フェード。transition なし(毎フレーム --p を直接反映)。
+   --reveal-delay でグループ内のずらし(従来 delay 相当)を表現。 */
+.reveal--haze {
+  --p: 0;
+  transition: none;
+  opacity: clamp(0, calc((var(--p) - var(--reveal-delay, 0)) * 2.1), 1);
+  transform: translateY(
+    calc((1 - clamp(0, calc((var(--p) - var(--reveal-delay, 0)) * 2), 1)) * 18px)
+  );
+}
 
 .hero-copy {
   position: relative;
@@ -1321,8 +1329,7 @@ img { max-width: 100%; height: auto; display: block; }
   .hero-ctas,
   .hero-visual,
   .reveal,
-  .reveal--hidden,
-  .reveal--shown {
+  .reveal--haze {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

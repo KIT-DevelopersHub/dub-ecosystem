@@ -2,24 +2,30 @@
 
 import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
 
-// Reveal — 「下から立ち上がる」演出を SSG-safe かつ「既定 visible・足すだけ」で足す。
+// Reveal — 「下から立ち上がる」＋「蜃気楼(haze)」演出を SSG-safe かつ
+//   「既定 visible・足すだけ」で足す。
 //
-// ★ framer-motion を廃し、素の要素＋IntersectionObserver＋CSS transition で実装。
-//   これで framer-motion ランタイム(~124KB チャンク)をクライアントバンドルから外し、
-//   演出(opacity/transform の 0.6s トランジション)は従来と同一に保つ(GPU 合成)。
+// ★ framer-motion は使わず、素の要素＋IntersectionObserver＋rAF で実装（軽量・GPU 合成）。
+//
+// ★ 蜃気楼(v3 から移植): 一度切りのフェードではなく、要素の“ビューポート内位置”を
+//   連続値 --p(0=画面下端 → 1=画面上端) として毎フレーム書き込む。CSS 側(.reveal--haze)が
+//   --p に応じて opacity/translateY を連続変化させる。→ 画面下の方にある間は薄くかすみ、
+//   せり上がるほど鮮明になる。動きは transform/opacity のみ。
 //
 // ★ 既知バグ回避（最重要 / Astro 版で About・クラファン・応募・お問い合わせが
 //   opacity:0 のまま真っ白になった事故の再発防止）:
 //   1) サーバー(SSG)・hydrate 前・reduced-motion では素の要素をそのまま描画（常に可視）。
 //   2) client でも「既定は可視」。マウント時にビューポート下端より下にある要素だけを
-//      いったん隠して、スクロールで入ってきたら立ち上げる（＝見えている物は隠さない）。
-//   3) IntersectionObserver 非対応なら隠さない（可視のまま）。
-//   4) 安全タイマー: 何があっても一定時間後に必ず可視化する（永久に opacity:0 で
-//      固定されることが構造上あり得ない）。
+//      haze 対象にして下からせり上げる（＝すでに見えている物は絶対に触らない）。
+//   3) IntersectionObserver / rAF 非対応なら隠さない（可視のまま）。
+//   4) 安全タイマー: 何があっても一定時間後に必ず可視化する（--p=1 に固定・永久に
+//      opacity:0 で固定されることが構造上あり得ない）。
 //   これにより「reveal 未発火でも必ず見える」を満たす。
 
 type RevealTag = "div" | "section" | "p" | "li" | "ul" | "h2" | "h3" | "span";
-type Phase = "static" | "hidden" | "shown";
+// static = 素描画（すでに見えている / 非対応 / reduced-motion）。
+// haze  = 位置連動の蜃気楼フェード対象（--p を毎フレーム更新）。
+type Phase = "static" | "haze";
 
 export interface RevealProps {
   children: ReactNode;
@@ -72,33 +78,82 @@ export function Reveal({
   useEffect(() => {
     if (reduce) return;
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return; // 非対応 → 可視のまま
+    if (
+      !el ||
+      typeof IntersectionObserver === "undefined" ||
+      typeof window.requestAnimationFrame !== "function"
+    ) {
+      return; // 非対応 → 可視のまま
+    }
 
     const rect = el.getBoundingClientRect();
     const belowFold = rect.top > window.innerHeight * BELOW_FOLD_RATIO;
-    if (!belowFold) return; // 既に見えている / 画面内 → 隠さない（チラつき無し）
+    if (!belowFold) return; // 既に見えている / 画面内 → 触らない（チラつき無し）
 
-    setPhase("hidden");
+    // haze 化。まず現在位置の --p を即時反映してから class を付ける（下端付近なら --p≈0）。
+    const writeP = () => {
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const center = r.top + r.height / 2;
+      // center: vh(下端)→0, 0(上端)→1
+      let p = 1 - center / vh;
+      if (p < 0) p = 0;
+      else if (p > 1) p = 1;
+      el.style.setProperty("--p", p.toFixed(4));
+    };
+    writeP();
+    setPhase("haze");
+
+    let active = false;
+    let raf = 0;
+    let done = false;
+    const compute = () => {
+      raf = 0;
+      writeP();
+    };
+    const onScroll = () => {
+      if (raf || done) return;
+      raf = window.requestAnimationFrame(compute);
+    };
+
     const io = new IntersectionObserver(
       (entries) => {
-        entries.forEach((e) => {
+        for (const e of entries) {
+          if (done) return;
           if (e.isIntersecting) {
-            setPhase("shown");
-            io.disconnect();
+            if (!active) {
+              active = true;
+              window.addEventListener("scroll", onScroll, { passive: true });
+              window.addEventListener("resize", onScroll, { passive: true });
+            }
+            compute();
+          } else if (active) {
+            active = false;
+            window.removeEventListener("scroll", onScroll);
+            window.removeEventListener("resize", onScroll);
           }
-        });
+        }
       },
-      { threshold: 0.15, rootMargin: "0px 0px -8% 0px" },
+      { threshold: 0, rootMargin: "0px 0px 0px 0px" },
     );
     io.observe(el);
 
+    // 安全網: 一定時間後は必ず可視化して以後 --p を固定（隠しっぱなし構造を排除）。
     const timer = window.setTimeout(() => {
-      setPhase("shown"); // 安全網: 絶対に隠しっぱなしにしない
+      done = true;
+      el.style.setProperty("--p", "1");
+      if (raf) window.cancelAnimationFrame(raf);
       io.disconnect();
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
     }, SAFETY_MS);
 
     return () => {
+      done = true;
       io.disconnect();
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
       window.clearTimeout(timer);
     };
   }, [reduce]);
@@ -108,9 +163,9 @@ export function Reveal({
     return createElement(as, { className, ...rest }, children);
   }
 
-  // client（通常モーション）→ .reveal に CSS transition を持たせ、
-  // 下端より下の要素だけ hidden(opacity:0, y18) → shown へ遷移させる。
-  const cls = [className, "reveal", phase === "hidden" ? "reveal--hidden" : "reveal--shown"]
+  // client（通常モーション）→ 下端より下の要素だけ .reveal--haze を付け、
+  // --p(位置) 連動で下からかすみ上がらせる。静止(既視)要素は素のまま可視。
+  const cls = [className, "reveal", phase === "haze" ? "reveal--haze" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -119,8 +174,11 @@ export function Reveal({
     {
       ref,
       className: cls,
-      // delay はグループ内のずらし（framer の transition.delay 相当）。
-      style: delay ? { transitionDelay: `${delay}s` } : undefined,
+      // delay はグループ内のずらし（--p のしきい値を少しずらす）。
+      style:
+        phase === "haze" && delay
+          ? ({ ["--reveal-delay" as string]: delay } as Record<string, string | number>)
+          : undefined,
       ...rest,
     },
     children,
