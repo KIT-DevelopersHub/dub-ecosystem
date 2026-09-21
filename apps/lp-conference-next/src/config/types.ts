@@ -27,6 +27,45 @@ export interface HeroConfig {
   secondaryCta?: CtaLink;
 }
 
+// --- v3 narrative (握手モチーフの物語) ---
+
+export interface OpeningConfig {
+  eyebrow: string;
+  titleJp: string;
+  titleIt: string;
+  titleTail: string;
+  subtitle: string;
+  /** 改行可（\n）。 */
+  tagline: string;
+  body: string;
+  dateLabel: string;
+  venueLabel: string;
+  primaryCta?: CtaLink;
+  secondaryCta?: CtaLink;
+}
+
+export type SceneVariant = "create" | "protect" | "lead";
+
+export interface StoryScene {
+  id: string;
+  variant: SceneVariant;
+  /** 例: "01 — 作る" */
+  kicker: string;
+  title: string;
+  lead: string;
+  points: string[];
+  /** さりげない地元要素の一言。 */
+  local?: string;
+}
+
+export interface ClosingConfig {
+  kicker: string;
+  title: string;
+  lead: string;
+  primaryCta?: CtaLink;
+  secondaryCta?: CtaLink;
+}
+
 export interface CatchConfig {
   lead: string;
   heading: string;
@@ -85,6 +124,9 @@ export interface LpConfig {
   publishedAt: string;
   seo: SeoConfig;
   nav: NavLink[];
+  opening: OpeningConfig;
+  story: StoryScene[];
+  closing: ClosingConfig;
   hero: HeroConfig;
   catch: CatchConfig;
   about: AboutConfig;

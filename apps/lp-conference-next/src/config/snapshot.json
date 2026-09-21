@@ -9,12 +9,62 @@
   },
   "nav": [
     { "label": "TOP", "href": "#top" },
-    { "label": "北陸ITカンファレンスとは？", "href": "#about" },
-    { "label": "プログラム内容", "href": "#program" },
-    { "label": "クラファン情報", "href": "#crowdfunding" },
+    { "label": "作る", "href": "#create" },
+    { "label": "守る", "href": "#protect" },
+    { "label": "導く", "href": "#lead" },
+    { "label": "プログラム", "href": "#program" },
     { "label": "応募", "href": "#apply" },
     { "label": "お問い合わせ", "href": "#contact" }
   ],
+  "opening": {
+    "eyebrow": "HOKURIKU IT CONFERENCE 2027",
+    "titleJp": "北陸",
+    "titleIt": "IT",
+    "titleTail": "カンファレンス",
+    "subtitle": "創る、守る、導く。北陸から見据える、技術と組織の最前線。",
+    "tagline": "北陸は、静かじゃない。\nここに、熱い技術者たちの繋がりがある。",
+    "body": "北陸のIT技術者・企業・学生が一堂に集まり、技術を語り、繋がり、地域を盛り上げる2日間。この熱量が、北陸から全国へ波及していく。",
+    "dateLabel": "2027年9月14日(火)・15日(水)",
+    "venueLabel": "金沢工業大学",
+    "primaryCta": { "label": "参加登録はこちら", "href": "#apply" },
+    "secondaryCta": { "label": "登壇に応募する", "href": "#apply" }
+  },
+  "story": [
+    {
+      "id": "create",
+      "variant": "create",
+      "kicker": "01 — 作る",
+      "title": "北陸から、生まれる。",
+      "lead": "新しい技術、新しいアイデア。北陸から生まれた創造的な挑戦が、全国の技術シーンを動かす。",
+      "points": ["AIとイノベーション", "スタートアップの実例", "新技術の実装"],
+      "local": "金箔のように、静かに輝きを放つ挑戦を。"
+    },
+    {
+      "id": "protect",
+      "variant": "protect",
+      "kicker": "02 — 守る",
+      "title": "技術を、受け継ぐ。",
+      "lead": "技術を守ることの価値。既存のシステムを育て、次の世代へ手渡す。地域の技術基盤を支える仕事がある。",
+      "points": ["保守運用のベストプラクティス", "レガシーとの向き合い方", "技術の持続性"],
+      "local": "受け継がれる伝統のように、確かなものを次代へ。"
+    },
+    {
+      "id": "lead",
+      "variant": "lead",
+      "kicker": "03 — 導く",
+      "title": "組織を、導く。",
+      "lead": "チームを成長させ、組織を前へ進める。一人では成し遂げられないことを、皆で。導く喜びが、ここにある。",
+      "points": ["マネジメントの実践", "リーダーシップと組織文化", "多様なチームづくり"],
+      "local": "北陸の企業が育んできた、チームのかたち。"
+    }
+  ],
+  "closing": {
+    "kicker": "北陸から、全国へ",
+    "title": "この熱が、全国を動かす。",
+    "lead": "北陸で生まれた繋がりが、波紋のように全国へ広がっていく。あなたも、この熱の一部になろう。",
+    "primaryCta": { "label": "参加登録はこちら", "href": "#apply" },
+    "secondaryCta": { "label": "登壇に応募する", "href": "#apply" }
+  },
   "hero": {
     "heading": "北陸ITカンファレンス",
     "dateLabel": "2027年9月14日(火)・15日(水)",
