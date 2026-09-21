@@ -25,8 +25,6 @@ export interface TaskDrawerHandlers {
   onReject: (to: FeaturePhase, feedback: string) => Promise<void>;
   /** Additional instruction / fix re-run: a new run in the same task. */
   onRerun: (prompt: string) => Promise<void>;
-  /** Start the first run for a registered-but-unrequested (未依頼) task. */
-  onRequestRun?: (prompt: string) => Promise<void>;
   onArchive: () => Promise<void>;
   onCancelRun: (runId: string) => void;
 }
@@ -37,8 +35,6 @@ interface TaskDrawerProps extends TaskDrawerHandlers {
   client: CommanderClient;
   history: RunHistoryApi;
   onClose: () => void;
-  /** Prefill for the 未依頼 task's AI依頼 prompt (the text captured at registration). */
-  requestPromptDefault?: string;
   /** Bumped by the board after an action to force a detail reload. */
   version: number;
 }
@@ -57,7 +53,7 @@ function errorMessage(e: ApiError): string {
 }
 
 export function TaskDrawer(props: TaskDrawerProps) {
-  const { item, api, client, history, onClose, version, requestPromptDefault } = props;
+  const { item, api, client, history, onClose, version } = props;
   const [tab, setTab] = useState<Tab>("log");
   const [detail, setDetail] = useState<FeatureDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -66,8 +62,6 @@ export function TaskDrawer(props: TaskDrawerProps) {
   const [feedback, setFeedback] = useState("");
   const [rerunOpen, setRerunOpen] = useState(false);
   const [rerunPrompt, setRerunPrompt] = useState("");
-  const [requestOpen, setRequestOpen] = useState(false);
-  const [requestPrompt, setRequestPrompt] = useState("");
   const [busy, setBusy] = useState(false);
 
   const stream = useRunStream(item?.latestRun ? item.latestRun.id : null, { client, history });
@@ -92,10 +86,8 @@ export function TaskDrawer(props: TaskDrawerProps) {
     setFeedback("");
     setRerunOpen(false);
     setRerunPrompt("");
-    setRequestOpen(false);
-    setRequestPrompt(requestPromptDefault ?? "");
     void loadDetail();
-  }, [loadDetail, version, requestPromptDefault]);
+  }, [loadDetail, version]);
 
   if (!item) return null;
   const lane = deriveLane(item);
@@ -245,18 +237,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               却下（要修正・再投げ）
             </button>
           )}
-          {lane === "queued" && props.onRequestRun && (
-            <button
-              type="button"
-              data-testid="action-request-run"
-              disabled={busy}
-              onClick={() => setRequestOpen((v) => !v)}
-              style={btnPrimary}
-            >
-              🤖 AIに依頼する
-            </button>
-          )}
-          {(lane === "review" || lane === "needs_fix") && (
+          {lane !== "running" && lane !== "done" && (
             <button
               type="button"
               data-testid="action-rerun"
@@ -351,38 +332,6 @@ export function TaskDrawer(props: TaskDrawerProps) {
                 却下して再投げ
               </button>
               <button type="button" onClick={() => setRejectTo(null)} style={btnGhost}>
-                やめる
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 未依頼 → AIに依頼する: start the first run with the (editable) captured prompt */}
-        {requestOpen && props.onRequestRun && (
-          <div data-testid="request-run-form" style={{ display: "flex", flexDirection: "column", gap: t.space2 }}>
-            <textarea
-              aria-label="request-prompt"
-              placeholder="AI に渡す指示（登録時の文章。ここで調整できます）"
-              value={requestPrompt}
-              onChange={(e) => setRequestPrompt(e.target.value)}
-              style={{ ...input, minHeight: 80, resize: "vertical" }}
-            />
-            <div style={{ display: "flex", gap: t.space2 }}>
-              <button
-                type="button"
-                data-testid="request-run-submit"
-                disabled={busy || requestPrompt.trim() === ""}
-                onClick={() =>
-                  void wrap(async () => {
-                    await props.onRequestRun!(requestPrompt.trim());
-                    setRequestOpen(false);
-                  })
-                }
-                style={{ ...btnPrimary, opacity: requestPrompt.trim() === "" ? 0.5 : 1 }}
-              >
-                この指示で実行する
-              </button>
-              <button type="button" onClick={() => setRequestOpen(false)} style={btnGhost}>
                 やめる
               </button>
             </div>

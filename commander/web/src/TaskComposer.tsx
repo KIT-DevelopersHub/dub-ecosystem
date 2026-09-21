@@ -137,9 +137,6 @@ export function TaskComposer({
           />
         </div>
 
-        <p style={{ margin: 0, fontSize: 12, color: t.textMuted }}>
-          登録するだけで、まだ実行はしません。カード（または詳細）の「AIに依頼する」を押すと走ります。
-        </p>
         <div style={{ display: "flex", gap: t.space3, marginTop: t.space2 }}>
           <button
             type="button"
@@ -148,7 +145,7 @@ export function TaskComposer({
             disabled={!canSubmit}
             style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "default" }}
           >
-            {submitting ? "登録中…" : "タスクとして登録"}
+            {submitting ? "投入中…" : "投入して走らせる"}
           </button>
           <button type="button" onClick={onClose} style={btnGhost}>
             キャンセル

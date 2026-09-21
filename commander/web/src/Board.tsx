@@ -15,7 +15,6 @@ import {
 import { groupByLane, LANES, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
 import { TaskCard } from "./TaskCard.tsx";
 import { TaskComposer, type ComposerSubmit } from "./TaskComposer.tsx";
-import { ChatComposer } from "./ChatComposer.tsx";
 import { TaskDrawer } from "./TaskDrawer.tsx";
 import { btnGhost, btnPrimary, t } from "./lib/theme.ts";
 
@@ -57,9 +56,6 @@ export function Board({
   const [submitting, setSubmitting] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [drawerVersion, setDrawerVersion] = useState(0);
-  // Prompts/cwd for tasks registered but NOT yet run (未依頼). Kept client-side (no DB
-  // field): the run only starts when the operator presses 「AIに依頼する」.
-  const [proposals, setProposals] = useState<Record<string, { prompt: string; cwd: string }>>({});
   const reconcilingRef = useRef(false);
 
   // Auto-advance deploy-complete markers (non-approval system edges) so a succeeded run
@@ -140,77 +136,40 @@ export function Board({
     setDrawerVersion((v) => v + 1);
   }, [load]);
 
-  // ── Capture: register the work unit as an UNREQUESTED task (未依頼) ──────────
-  // Two deliberate steps replace the old "typing runs it immediately": propose here
-  // (create-only, lands in 投入待ち), then 「AIに依頼する」 starts the run (below).
-  const proposeTask = useCallback(
-    async (v: { title: string; prompt: string; cwd: string; ledgerRef?: string }) => {
+  // ── Composer: create the work unit, then start its first run ──────────────
+  const handleSubmit = useCallback(
+    async (v: ComposerSubmit) => {
+      setSubmitting(true);
       const placeholder: BoardItem = {
         taskId: `optimistic-${Date.now()}`,
         featureId: "",
         title: v.title,
         featurePhase: "demo_building",
         taskStatus: "todo",
-        latestRun: null, // no run yet → 投入待ち(未依頼) lane
+        latestRun: { id: "", status: "pending", cwd: v.cwd, createdAt: new Date().toISOString() },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       setOptimistic((prev) => [placeholder, ...prev]);
+      setComposerOpen(false);
       try {
         const res = await api.createTask({ title: v.title, ledgerRef: v.ledgerRef || undefined });
         if (!res.ok) {
           setOptimistic((prev) => prev.filter((o) => o.taskId !== placeholder.taskId));
-          return null;
+          return;
         }
-        const taskId = res.value.task.id;
-        setProposals((prev) => ({ ...prev, [taskId]: { prompt: v.prompt, cwd: v.cwd } }));
+        await client.startRun(v.prompt, {
+          taskId: res.value.task.id,
+          ...(v.cwd ? { cwd: v.cwd } : {}),
+        });
         await load();
-        return { taskId };
       } catch {
         setOptimistic((prev) => prev.filter((o) => o.taskId !== placeholder.taskId));
-        return null;
-      }
-    },
-    [api, load],
-  );
-
-  // ── 「AIに依頼する」: start the run for an already-registered task ────────────
-  const requestRun = useCallback(
-    async (taskId: string, prompt: string, cwd: string) => {
-      if (!prompt.trim()) return;
-      await client.startRun(prompt, { taskId, ...(cwd ? { cwd } : {}) });
-      setProposals((prev) => {
-        const next = { ...prev };
-        delete next[taskId];
-        return next;
-      });
-      await load();
-    },
-    [client, load],
-  );
-
-  // Detailed composer submit = propose (create-only). Never auto-runs.
-  const handleSubmit = useCallback(
-    async (v: ComposerSubmit) => {
-      setSubmitting(true);
-      setComposerOpen(false);
-      try {
-        await proposeTask({ title: v.title, prompt: v.prompt, cwd: v.cwd, ledgerRef: v.ledgerRef });
       } finally {
         setSubmitting(false);
       }
     },
-    [proposeTask],
-  );
-
-  // Card 「AIに依頼する」: run with the remembered prompt, else open the drawer to supply one.
-  const handleCardRequestRun = useCallback(
-    (item: BoardItem) => {
-      const prop = proposals[item.taskId];
-      if (prop) void requestRun(item.taskId, prop.prompt, prop.cwd);
-      else setSelectedTaskId(item.taskId);
-    },
-    [proposals, requestRun],
+    [api, client, load],
   );
 
   // ── Next-action orchestration (P0-6) ──────────────────────────────────────
@@ -274,18 +233,6 @@ export function Board({
       await refreshAfterAction();
     },
     [api, selected, startFollowUpRun, refreshAfterAction],
-  );
-
-  // Drawer 「AIに依頼する」: run a queued(未依頼) task with the prompt typed in the drawer.
-  const handleDrawerRequestRun = useCallback(
-    async (prompt: string) => {
-      if (!selected) return;
-      const prop = proposals[selected.taskId];
-      const cwd = prop?.cwd ?? selected.latestRun?.cwd ?? "";
-      await requestRun(selected.taskId, prompt, cwd);
-      await refreshAfterAction();
-    },
-    [selected, proposals, requestRun, refreshAfterAction],
   );
 
   const handleArchive = useCallback(async () => {
@@ -352,13 +299,6 @@ export function Board({
         </div>
       )}
 
-      {/* chat capture — the headline entry: type → classify → register(未依頼) → 依頼 */}
-      <ChatComposer
-        onPropose={proposeTask}
-        onRequestRun={requestRun}
-        defaultCwd={cwdSuggestions[0] ?? ""}
-      />
-
       {/* lanes */}
       <div
         data-testid="board-lanes"
@@ -399,7 +339,6 @@ export function Board({
                     history={api}
                     onOpen={setSelectedTaskId}
                     onCancel={handleCancelRun}
-                    onRequestRun={handleCardRequestRun}
                     pending={item.taskId.startsWith("optimistic-")}
                   />
                 ))
@@ -433,8 +372,6 @@ export function Board({
         onApprove={handleApprove}
         onReject={handleReject}
         onRerun={handleRerun}
-        onRequestRun={handleDrawerRequestRun}
-        requestPromptDefault={selected ? (proposals[selected.taskId]?.prompt ?? "") : ""}
         onArchive={handleArchive}
         onCancelRun={handleCancelRun}
       />

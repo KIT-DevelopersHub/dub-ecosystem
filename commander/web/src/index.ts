@@ -5,8 +5,6 @@
 export { App } from "./App.tsx";
 export { Board } from "./Board.tsx";
 export { TaskComposer } from "./TaskComposer.tsx";
-export { ChatComposer } from "./ChatComposer.tsx";
-export { classifyIntent, deriveTaskTitle, type Intent } from "./lib/intent.ts";
 export { TaskDrawer } from "./TaskDrawer.tsx";
 export { TaskCard } from "./TaskCard.tsx";
 export { Drawer } from "./Drawer.tsx";
