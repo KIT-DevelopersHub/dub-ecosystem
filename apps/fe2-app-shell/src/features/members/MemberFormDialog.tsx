@@ -1,30 +1,36 @@
 // Create / edit dialog for an 運営メンバー. Optimistic submit via the members hooks.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, Button, Form, FormField, TextField, Textarea, Select, Checkbox } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
-import { MEMBER_STATUSES, type MemberStatus, type MemberTeam, type OrgMember } from "./contracts.ts";
-import { STATUS_LABEL } from "./MemberStatusBadge.tsx";
+import { type MemberStatus, type MemberTeam, type OrgMember } from "./contracts.ts";
+import { WRITE_STATUS_OPTIONS, toWriteStatus } from "./memberStatus.ts";
+import { orgChartOrder, tierOf } from "./orgChartOrder.ts";
 import { useCreateMember, useUpdateMember } from "./hooks.ts";
 import styles from "./members.module.css";
 
-const STATUS_OPTIONS: SelectOption<MemberStatus>[] = MEMBER_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }));
+const STATUS_OPTIONS: SelectOption<MemberStatus>[] = WRITE_STATUS_OPTIONS;
+const NO_LEADER = "";
 
 export function MemberFormDialog({
   open,
   onClose,
   teams,
   editing,
+  members = [],
 }: {
   open: boolean;
   onClose: () => void;
   teams: MemberTeam[];
   editing: OrgMember | null;
+  /** 全メンバー(リーダー選択の候補に使う)。省略時はリーダー選択を出さない。 */
+  members?: OrgMember[];
 }): JSX.Element {
   const create = useCreateMember();
   const update = useUpdateMember();
   const [name, setName] = useState("");
   const [roleTitle, setRoleTitle] = useState("");
-  const [status, setStatus] = useState<MemberStatus>("considering");
+  const [status, setStatus] = useState<MemberStatus>("added");
+  const [leaderId, setLeaderId] = useState<string>(NO_LEADER);
   const [teamIds, setTeamIds] = useState<string[]>([]);
   const [department, setDepartment] = useState("");
   const [grade, setGrade] = useState("");
@@ -37,7 +43,9 @@ export function MemberFormDialog({
     setError(null);
     setName(editing?.name ?? "");
     setRoleTitle(editing?.roleTitle ?? "");
-    setStatus(editing?.status ?? "considering");
+    // 在籍系(added/invited/considering)は書き込み正準値 "added"(在籍中)へ寄せる。
+    setStatus(editing ? toWriteStatus(editing.status) : "added");
+    setLeaderId(editing?.leaderId ?? NO_LEADER);
     setTeamIds(editing?.teamIds ?? []);
     setDepartment(editing?.department ?? "");
     setGrade(editing?.grade ?? "");
@@ -46,6 +54,21 @@ export function MemberFormDialog({
   }, [open, editing]);
 
   const pending = create.isPending || update.isPending;
+
+  // リーダー候補: 自分自身と辞退者を除外し、組織図順で並べる。役割段(tier)をラベルに添える。
+  const leaderOptions: SelectOption<string>[] = useMemo(() => {
+    const candidates = orgChartOrder(
+      members.filter((m) => m.status !== "declined" && m.id !== editing?.id),
+    );
+    const tierLabel: Record<string, string> = { organizer: "オーガナイザー", leader: "リーダー", member: "メンバー" };
+    return [
+      { value: NO_LEADER, label: "なし（直属リーダーなし）" },
+      ...candidates.map((m) => ({
+        value: m.id,
+        label: `${m.name}（${m.roleTitle ?? tierLabel[tierOf(m)]}）`,
+      })),
+    ];
+  }, [members, editing?.id]);
 
   const toggleTeam = (id: string, checked: boolean) =>
     setTeamIds((prev) => (checked ? [...new Set([...prev, id])] : prev.filter((t) => t !== id)));
@@ -59,6 +82,7 @@ export function MemberFormDialog({
       name: name.trim(),
       roleTitle: roleTitle.trim() || null,
       status,
+      leaderId: leaderId || null,
       teamIds,
       department: department.trim() || null,
       grade: grade.trim() || null,
@@ -104,7 +128,7 @@ export function MemberFormDialog({
           <FormField label="学年" htmlFor="member-grade" help="任意 (例: 3年 / M1)">
             <TextField id="member-grade" value={grade} onChange={setGrade} testId="members-form-grade" />
           </FormField>
-          <FormField label="ステータス" htmlFor="member-status" required>
+          <FormField label="ステータス" htmlFor="member-status" required help="在籍中 / 休み中（一時離脱）/ 辞退。辞退にすると名簿一覧からは隠れます（データは残ります）。">
             <Select<MemberStatus>
               id="member-status"
               value={status}
@@ -113,6 +137,17 @@ export function MemberFormDialog({
               testId="members-form-status"
             />
           </FormField>
+          {members.length > 0 ? (
+            <FormField label="リーダー（上長）" htmlFor="member-leader" help="この人が配下につくリーダーを選びます（任意）。組織図と名簿の並びに使われます。">
+              <Select<string>
+                id="member-leader"
+                value={leaderId}
+                onChange={setLeaderId}
+                options={leaderOptions}
+                testId="members-form-leader"
+              />
+            </FormField>
+          ) : null}
           <FormField label="所属チーム" htmlFor="member-teams" help="複数選択できます">
             {teams.length === 0 ? (
               <p className={styles.emptyTeamNote}>先にチームを追加してください</p>

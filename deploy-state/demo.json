@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "3cb2410",
-  "branch": "feat/lp-management",
-  "actor": "Claude Code",
-  "markers": ["fe2-lp-screen", "LP管理"],
+  "deployedSha": "bc874ba6",
+  "branch": "feat/fe7-roster-org",
+  "actor": "ko-tarou",
+  "markers": ["member-roster-status-filter", "members-form-leader"],
   "live": true,
-  "verifiedAt": "2026-09-07T14:16:05Z",
-  "updatedAt": "2026-09-07T14:16:05Z",
-  "note": "LP管理アプリ追加（バージョン一覧・閲覧 v1.0）"
+  "verifiedAt": "2026-09-21T16:47:34Z",
+  "updatedAt": "2026-09-21T16:47:34Z",
+  "note": "運営メンバー名簿の整理: ステータス2本化・辞退非表示&辞退者ビュー・リーダー組織図順"
 }

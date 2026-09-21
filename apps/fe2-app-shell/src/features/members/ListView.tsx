@@ -46,6 +46,7 @@ export function ListView({
   members,
   teamsById,
   accountLabels,
+  leaderNames,
   onEdit,
   onDelete,
   onLink,
@@ -55,6 +56,8 @@ export function ListView({
   teamsById: Map<string, MemberTeam>;
   /** identity userId -> display label (email/name) for the linked-account column. */
   accountLabels: Map<string, string>;
+  /** member id -> 氏名: リーダー列で leaderId を氏名表示する。省略時は列を出さない。 */
+  leaderNames?: Map<string, string>;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
   onLink: (m: OrgMember) => void;
@@ -66,6 +69,19 @@ export function ListView({
     { key: "department", header: "学科", minWidth: "7rem", noWrap: true, defaultHidden: true, cell: (m) => m.department ?? "—" },
     { key: "grade", header: "学年", minWidth: "5rem", noWrap: true, defaultHidden: true, cell: (m) => m.grade ?? "—" },
     { key: "role", header: "担当・役割", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.roleTitle ?? "—"} max="12rem" /> },
+    ...(leaderNames
+      ? [
+          {
+            key: "leader",
+            header: "リーダー",
+            minWidth: "8rem",
+            noWrap: true,
+            cell: (m: OrgMember) => (
+              <Truncate text={m.leaderId ? leaderNames.get(m.leaderId) ?? "—" : "—"} max="10rem" />
+            ),
+          } as ColumnDef<OrgMember>,
+        ]
+      : []),
     { key: "status", header: "ステータス", minWidth: "7rem", noWrap: true, cell: (m) => <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> },
     {
       key: "account",

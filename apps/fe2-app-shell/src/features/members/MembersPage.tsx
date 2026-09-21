@@ -40,6 +40,10 @@ export function MembersPage(): JSX.Element {
 
   const teams = overview.data?.teams ?? [];
   const members = overview.data?.members ?? [];
+  // 辞退(declined)はチーム別/組織図には出さない(データは保持・辞退者は運営名簿の
+  // 「辞退者」フィルタで参照)。OrgChartView も内部で declined を除外しているが、
+  // チーム別ビューと母集団を揃えるためここで先に落とす。
+  const rosterMembers = members.filter((m) => m.status !== "declined");
 
   const openAddMember = () => setMemberDialog({ open: true, editing: null });
   const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: m });
@@ -101,20 +105,21 @@ export function MembersPage(): JSX.Element {
       {tab === "teams" ? (
         <TeamsView
           teams={teams}
-          members={members}
+          members={rosterMembers}
           onEditMember={openEditMember}
           onDeleteMember={(m) => setConfirm({ kind: "member", target: m })}
           onEditTeam={openEditTeam}
           onDeleteTeam={(t) => setConfirm({ kind: "team", target: t })}
         />
       ) : null}
-      {tab === "org" ? <OrgChartView teams={teams} members={members} /> : null}
+      {tab === "org" ? <OrgChartView teams={teams} members={rosterMembers} /> : null}
 
       <MemberFormDialog
         open={memberDialog.open}
         onClose={() => setMemberDialog({ open: false, editing: null })}
         teams={teams}
         editing={memberDialog.editing}
+        members={members}
       />
       <TeamFormDialog
         open={teamDialog.open}
