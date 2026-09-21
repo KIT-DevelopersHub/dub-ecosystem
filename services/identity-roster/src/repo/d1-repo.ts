@@ -18,6 +18,7 @@ interface UserDb {
   org_id: string;
   email: string;
   display_name: string;
+  furigana: string | null;
   github_login: string | null;
   avatar_url: string | null;
   status: string;
@@ -50,6 +51,7 @@ function toUser(r: UserDb): UserRow {
     orgId: r.org_id,
     email: r.email,
     displayName: r.display_name,
+    furigana: r.furigana ?? null,
     githubLogin: r.github_login,
     avatarUrl: r.avatar_url,
     status: r.status as identity.UserStatus,
@@ -148,9 +150,9 @@ export class D1IdentityRepo implements IdentityRepo {
       binds.push(filter.roleId);
     }
     if (filter.q) {
-      clauses.push("(lower(display_name) LIKE ? OR lower(email) LIKE ?)");
+      clauses.push("(lower(display_name) LIKE ? OR lower(furigana) LIKE ? OR lower(email) LIKE ?)");
       const like = `%${filter.q.toLowerCase()}%`;
-      binds.push(like, like);
+      binds.push(like, like, like);
     }
     const rows = await this.db.all<UserDb>(
       `SELECT * FROM identity_users WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`,
@@ -162,12 +164,13 @@ export class D1IdentityRepo implements IdentityRepo {
   }
   async createUser(row: UserRow): Promise<void> {
     await this.db.run(
-      `INSERT INTO identity_users (id, org_id, email, display_name, github_login, avatar_url, status, source, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO identity_users (id, org_id, email, display_name, furigana, github_login, avatar_url, status, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.id,
       row.orgId,
       row.email,
       row.displayName,
+      row.furigana,
       row.githubLogin,
       row.avatarUrl,
       row.status,
@@ -178,7 +181,7 @@ export class D1IdentityRepo implements IdentityRepo {
   }
   async updateUser(
     userId: string,
-    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source" | "avatarUrl">>,
+    patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>,
     updatedAt: string,
   ): Promise<void> {
     const sets: string[] = [];
@@ -186,6 +189,10 @@ export class D1IdentityRepo implements IdentityRepo {
     if (patch.displayName !== undefined) {
       sets.push("display_name = ?");
       binds.push(patch.displayName);
+    }
+    if (patch.furigana !== undefined) {
+      sets.push("furigana = ?");
+      binds.push(patch.furigana);
     }
     if (patch.avatarUrl !== undefined) {
       sets.push("avatar_url = ?");

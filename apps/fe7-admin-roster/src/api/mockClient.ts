@@ -47,9 +47,9 @@ function seedState(seed?: MockSeed): MockState {
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
   ]);
   const users = new Map<string, MockUser>([
-    ["user_alice", { id: "user_alice", orgId: ORG, displayName: "Alice Admin", email: "alice@developershub.jp", githubLogin: "alice", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], permissions: ["identity:read", "identity:admin", "audit:read", "event:read"], createdAt: now(), updatedAt: now() }],
-    ["user_bob", { id: "user_bob", orgId: ORG, displayName: "Bob Member", email: "bob@developershub.jp", githubLogin: "bob", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_member"], permissions: ["identity:read", "event:read"], createdAt: now(), updatedAt: now() }],
-    ["user_carol", { id: "user_carol", orgId: ORG, displayName: "Carol Invited", email: "carol@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "manual", roleIds: [], permissions: [], createdAt: now(), updatedAt: now() }],
+    ["user_alice", { id: "user_alice", orgId: ORG, displayName: "Alice Admin", furigana: "アリス アドミン", email: "alice@developershub.jp", githubLogin: "alice", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], permissions: ["identity:read", "identity:admin", "audit:read", "event:read"], createdAt: now(), updatedAt: now() }],
+    ["user_bob", { id: "user_bob", orgId: ORG, displayName: "Bob Member", furigana: "ボブ メンバー", email: "bob@developershub.jp", githubLogin: "bob", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_member"], permissions: ["identity:read", "event:read"], createdAt: now(), updatedAt: now() }],
+    ["user_carol", { id: "user_carol", orgId: ORG, displayName: "Carol Invited", furigana: null, email: "carol@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "manual", roleIds: [], permissions: [], createdAt: now(), updatedAt: now() }],
   ]);
   const assignments = new Map<string, RoleAssignment[]>([
     ["user_alice", [{ id: "asg_1", userId: "user_alice", roleId: "role_admin", roleName: "admin", resourceType: null, resourceId: null, grantedBy: "user_alice", grantedAt: now() }]],
@@ -113,7 +113,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       const status = query?.status as string | undefined;
       if (status) list = list.filter((u) => u.status === status);
       const q = query?.q as string | undefined;
-      if (q) list = list.filter((u) => u.displayName.includes(q) || u.email.includes(q));
+      if (q) list = list.filter((u) => u.displayName.includes(q) || (u.furigana ?? "").includes(q) || u.email.includes(q));
       return paginate(list) as unknown as T;
     }
     const rolesMatch = path.match(/\/identity\/users\/([^/]+)\/roles$/);
@@ -174,7 +174,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       }
       const id = `user_${Math.random().toString(36).slice(2, 8)}`;
       const user: MockUser = {
-        id, orgId: ORG, displayName: req.displayName ?? req.email, email: req.email,
+        id, orgId: ORG, displayName: req.displayName ?? req.email, furigana: req.furigana ?? null, email: req.email,
         githubLogin: null, avatarUrl: null, status: "invited", source: "manual", roleIds: req.roleIds ?? [],
         permissions: [], createdAt: now(), updatedAt: now(),
       };
