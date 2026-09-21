@@ -10,6 +10,8 @@ import { type Authenticator, DubAuthenticator } from "./authn";
 import { D1DeviceStore, type DeviceStore } from "./devices";
 import { D1DeliveryStore, type DeliveryStore } from "./deliveries";
 import { ApnsAdapter, FcmAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
+import type { ApnsCredentials } from "./apns";
+import type { FcmServiceAccount } from "./fcm";
 import { D1ChangeLogReader, D1ChangeLogStore, type ChangeLogReader, type ChangeLogStore } from "./change-log";
 import { D1MutationStore, type MutationStore } from "./mutation-store";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
@@ -59,10 +61,7 @@ export function buildDeps(env: Env): Deps {
     changeLog: new D1ChangeLogReader(db),
     changeLogStore: new D1ChangeLogStore(db),
     mutations: new D1MutationStore(db),
-    pushAdapters: {
-      ios: new ApnsAdapter(config.pushConfigured),
-      android: new FcmAdapter(config.pushConfigured),
-    },
+    pushAdapters: buildPushAdapters(env),
     pushRetry: { maxAttempts: 3 },
     // Prefer the real (paid) Queue binding; else fall back to the free-tier @dub/freeq D1
     // outbox shim so push delivery-failure audit records are durably persisted, never
@@ -70,4 +69,45 @@ export function buildDeps(env: Env): Deps {
     audit: (input) => publishAudit({ AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue(env.DB_MOBILE, AUDIT_TOPIC) }, input),
     newRequestId,
   };
+}
+
+/**
+ * Construct the per-platform push adapters from Worker Secrets. Previously the
+ * adapters were built with a bare boolean (`config.pushConfigured`), which per
+ * push.ts carries NO credentials — so send() always returned "failed" even when the
+ * secrets were set, and no push ever went out. Here we parse the real credentials and
+ * hand them to the adapters. A missing/malformed secret degrades to a credential-less
+ * adapter (send() -> "failed", audited upstream) instead of throwing at worker boot.
+ */
+export function buildPushAdapters(env: Env): Record<mobile.MobilePlatform, PushAdapter> {
+  const apns = apnsCredentials(env);
+  return {
+    // ApnsAdapterOptions nests the credentials under `credentials` — passing the bare
+    // ApnsCredentials object would leave opts.credentials undefined (send() -> "failed").
+    ios: new ApnsAdapter(apns ? { credentials: apns } : false),
+    android: new FcmAdapter(fcmOptions(env)),
+  };
+}
+
+/** APNs p8 credentials from secrets; null unless the full set is present. */
+export function apnsCredentials(env: Env): ApnsCredentials | null {
+  const { APNS_KEY_P8, APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID } = env;
+  if (!APNS_KEY_P8 || !APNS_KEY_ID || !APNS_TEAM_ID || !APNS_BUNDLE_ID) return null;
+  return { keyP8: APNS_KEY_P8, keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID, bundleId: APNS_BUNDLE_ID };
+}
+
+/** FCM (Android, $0) HTTP v1 options from the service-account JSON secret. A parse
+ *  failure yields a credential-less adapter rather than crashing the worker. */
+export function fcmOptions(env: Env): { serviceAccount: FcmServiceAccount | null; projectId?: string } {
+  if (!env.FCM_SERVICE_ACCOUNT_JSON) return { serviceAccount: null };
+  let serviceAccount: FcmServiceAccount | null = null;
+  try {
+    const parsed = JSON.parse(env.FCM_SERVICE_ACCOUNT_JSON) as FcmServiceAccount;
+    if (parsed && typeof parsed.client_email === "string" && typeof parsed.private_key === "string") {
+      serviceAccount = parsed;
+    }
+  } catch {
+    serviceAccount = null; // malformed secret -> send() returns "failed" (audited)
+  }
+  return { serviceAccount, ...(env.FCM_PROJECT_ID ? { projectId: env.FCM_PROJECT_ID } : {}) };
 }

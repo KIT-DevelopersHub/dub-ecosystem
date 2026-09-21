@@ -235,16 +235,45 @@ describe("chat adapter (stub swap)", () => {
 });
 
 describe("push adapter (stub swap)", () => {
-  it("#14 wired push port receives dispatch {userId,type,title,body}; delivery sent", async () => {
+  it("#14 wired push port receives nested payload with notificationId + deepLink; delivery sent", async () => {
     const h = makeTestEnv();
     const push = fakePush(); // push default is on
     const res = await ingest(
       coreDeps(h, { push }),
-      baseInput({ type: "task.assigned", recipients: { userIds: ["u1"] }, channels: ["push"], title: "Assigned", body: "to you" }),
+      baseInput({
+        type: "task.assigned",
+        recipients: { userIds: ["u1"] },
+        channels: ["push"],
+        title: "Assigned",
+        body: "to you",
+        resourceType: "task",
+        resourceId: "tsk_9",
+      }),
     );
-    expect(push.calls).toEqual([{ userId: "u1", type: "task.assigned", title: "Assigned", body: "to you" }]);
+    // mo3 /internal/push/dispatch requires the nested payload; data carries the inbox id
+    // (for tap-correlation) and the deep link derived from (resourceType, resourceId).
+    expect(push.calls).toEqual([
+      {
+        userId: "u1",
+        type: "task.assigned",
+        notificationId: res.notificationId,
+        title: "Assigned",
+        body: "to you",
+        data: { notificationId: res.notificationId, deepLink: "dub://tasks/tsk_9" },
+      },
+    ]);
     const rows = await deliveries(h.db, res.notificationId);
     expect(rows).toEqual([{ channel: "push", status: "sent", attempts: 1 }]);
+  });
+
+  it("push deepLink falls back to inbox when the notification has no typed resource", async () => {
+    const h = makeTestEnv();
+    const push = fakePush();
+    const res = await ingest(
+      coreDeps(h, { push }),
+      baseInput({ type: "system.announcement", recipients: { userIds: ["u1"] }, channels: ["push"], title: "Hi" }),
+    );
+    expect(push.calls[0]!.data).toEqual({ notificationId: res.notificationId, deepLink: "dub://inbox" });
   });
 
   it("push channel with no wired push port is skipped (P0 default)", async () => {

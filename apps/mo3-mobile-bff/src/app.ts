@@ -45,6 +45,22 @@ function bearer(c: { req: { header: (n: string) => string | undefined } }): stri
   return m ? m[1]!.trim() : null;
 }
 
+// The de1 Flutter WebView track authenticates with the web `dub_session` cookie only
+// (no Bearer). The auth-service /verify path is source-agnostic — it verifies the
+// session token value regardless of where it was carried — so a cookie token verifies
+// identically to a Bearer one. Native mo1/mo2 keep using Bearer; this only ADDS a
+// cookie source for the WebView. Mirrors @dub/auth-client's own cookie extraction.
+function cookieSession(c: { req: { header: (n: string) => string | undefined } }): string | null {
+  const cookie = c.req.header("cookie");
+  if (!cookie) return null;
+  const m = /(?:^|;\s*)dub_session=([^;]+)/.exec(cookie);
+  return m && m[1] ? decodeURIComponent(m[1]) : null;
+}
+
+function sessionToken(c: { req: { header: (n: string) => string | undefined } }): string | null {
+  return bearer(c) ?? cookieSession(c);
+}
+
 async function readJson<T>(c: { req: { json: () => Promise<unknown> } }): Promise<T> {
   try {
     return (await c.req.json()) as T;
@@ -99,6 +115,19 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
   const requireAuth: MiddlewareHandler<{ Variables: Variables }> = async (c, next) => {
     const token = bearer(c);
     if (!token) throw errors.unauthenticated("missing bearer token");
+    const res = await deps.authenticator.verify(publicCtx(c), token);
+    if (!res.valid || !res.userId) throw errors.unauthenticated(`token ${res.reason ?? "invalid"}`);
+    c.set("userId", res.userId);
+    await next();
+  };
+
+  // Accepts a Bearer token (native mo1/mo2) OR the `dub_session` cookie (de1 WebView),
+  // verified through the same auth-service path. Used only for device registration so
+  // the WebView — which holds a cookie session, not a Bearer — can register/unregister
+  // its FCM/APNs token. All other mobile routes stay Bearer-only via requireAuth.
+  const requireAuthCookieOrBearer: MiddlewareHandler<{ Variables: Variables }> = async (c, next) => {
+    const token = sessionToken(c);
+    if (!token) throw errors.unauthenticated("missing bearer/cookie token");
     const res = await deps.authenticator.verify(publicCtx(c), token);
     if (!res.valid || !res.userId) throw errors.unauthenticated(`token ${res.reason ?? "invalid"}`);
     c.set("userId", res.userId);
@@ -163,7 +192,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
   });
 
   // ================= devices (MO3-owned) =================
-  app.post("/m/v1/devices", requireAuth, async (c) => {
+  // requireAuthCookieOrBearer: native (Bearer) AND de1 WebView (dub_session cookie) both
+  // register/list/unregister their push token here.
+  app.post("/m/v1/devices", requireAuthCookieOrBearer, async (c) => {
     const ctx = authedCtx(c);
     const body = await readJson<Partial<mobile.RegisterDeviceRequest>>(c);
     const platform = requirePlatform(body.platform);
@@ -173,14 +204,14 @@ export function buildApp(deps: Deps): Hono<{ Variables: Variables }> {
     return c.json(res, 201);
   });
 
-  app.get("/m/v1/devices", requireAuth, async (c) => {
+  app.get("/m/v1/devices", requireAuthCookieOrBearer, async (c) => {
     const ctx = authedCtx(c);
     const recs = await deps.devices.listActiveByUser(ctx.userId!);
     const res: ListDevicesResponse = { devices: recs.map(toDeviceDto) };
     return c.json(res);
   });
 
-  app.delete("/m/v1/devices/:deviceId", requireAuth, async (c) => {
+  app.delete("/m/v1/devices/:deviceId", requireAuthCookieOrBearer, async (c) => {
     const ctx = authedCtx(c);
     const deviceId = c.req.param("deviceId");
     const ok = await deps.devices.disableOwned(ctx.userId!, deviceId);
