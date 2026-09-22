@@ -647,7 +647,242 @@ export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCu
   return { sendLog, inbound, attachments };
 }
 
+// ---- scheduled send (予約送信) ----
+export interface ScheduledRow {
+  id: string;
+  owner_user_id: string | null;
+  to_json: string;
+  cc_json: string | null;
+  subject: string;
+  text_body: string;
+  html_body: string | null;
+  in_reply_to: string | null;
+  from_address: string | null;
+  scheduled_at: string;
+  status: mail.ScheduledSendStatus;
+  sent_message_id: string | null;
+  error_code: string | null;
+  attempts: number;
+  snippet: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function scheduledRowToListItem(r: ScheduledRow): mail.ScheduledSendListItem {
+  const item: mail.ScheduledSendListItem = {
+    id: r.id,
+    to: parseAddresses(r.to_json),
+    subject: r.subject,
+    snippet: r.snippet ?? "",
+    scheduledAt: r.scheduled_at,
+    createdAt: r.created_at,
+    status: r.status,
+  };
+  const cc = parseAddresses(r.cc_json);
+  if (cc.length > 0) item.cc = cc;
+  if (r.from_address) item.from = { email: r.from_address };
+  if (r.in_reply_to) item.inReplyTo = r.in_reply_to;
+  if (r.sent_message_id) item.sentMessageId = r.sent_message_id;
+  if (r.error_code) item.errorCode = r.error_code;
+  return item;
+}
+
+function scheduledRowToDetail(r: ScheduledRow): mail.ScheduledSendDetail {
+  const detail: mail.ScheduledSendDetail = { ...scheduledRowToListItem(r), textBody: r.text_body };
+  if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
+  return detail;
+}
+
+/** Park a compose for future delivery. status='scheduled'. */
+export async function insertScheduled(
+  db: DbClient,
+  row: {
+    id: string;
+    ownerUserId: string | null;
+    toJson: string;
+    ccJson: string | null;
+    subject: string;
+    textBody: string;
+    htmlBody: string | null;
+    inReplyTo: string | null;
+    fromAddress: string | null;
+    scheduledAt: string;
+  },
+): Promise<void> {
+  const now = nowIso();
+  await db.run(
+    `INSERT INTO mail_scheduled
+       (id, owner_user_id, to_json, cc_json, subject, text_body, html_body, in_reply_to,
+        from_address, scheduled_at, status, sent_message_id, error_code, attempts, snippet,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', NULL, NULL, 0, ?, ?, ?)`,
+    row.id,
+    row.ownerUserId,
+    row.toJson,
+    row.ccJson,
+    row.subject,
+    row.textBody,
+    row.htmlBody,
+    row.inReplyTo,
+    row.fromAddress,
+    row.scheduledAt,
+    snippetOf(row.textBody),
+    now,
+    now,
+  );
+}
+
+/** List a user's still-'scheduled' sends, soonest due first. Oversight (mail:read_all)
+ *  drops the owner filter. id-based opaque cursor (schedule ids are ULIDs). */
+export async function listScheduled(
+  db: DbClient,
+  q: { ownerUserId: MailScope; cursor?: string; limit: number },
+): Promise<common.Paginated<mail.ScheduledSendListItem>> {
+  const where: string[] = ["status = 'scheduled'"];
+  const binds: unknown[] = [];
+  if (!isReadAll(q.ownerUserId)) {
+    where.push("owner_user_id = ?");
+    binds.push(q.ownerUserId);
+  }
+  if (q.cursor !== undefined) {
+    where.push("id > ?");
+    binds.push(decodeCursor(q.cursor));
+  }
+  const rows = await db.all<ScheduledRow>(
+    `SELECT * FROM mail_scheduled WHERE ${where.join(" AND ")} ORDER BY scheduled_at ASC, id ASC LIMIT ?`,
+    ...binds,
+    q.limit + 1,
+  );
+  const hasMore = rows.length > q.limit;
+  const page = hasMore ? rows.slice(0, q.limit) : rows;
+  const last = page[page.length - 1];
+  return {
+    items: page.map(scheduledRowToListItem),
+    nextCursor: hasMore && last ? encodeCursor(last.id) : null,
+  };
+}
+
+/** Read one scheduled send (any status) scoped to its owner (fail-closed 404). */
+export async function getScheduledDetail(db: DbClient, id: string, scope: MailScope): Promise<mail.ScheduledSendDetail | null> {
+  const binds: unknown[] = [id];
+  let sql = `SELECT * FROM mail_scheduled WHERE id = ?`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  const row = await db.first<ScheduledRow>(sql, ...binds);
+  return row ? scheduledRowToDetail(row) : null;
+}
+
+/** Raw scheduled row (owner-scoped) — used by edit/cancel to check current status. */
+export async function findScheduledRow(db: DbClient, id: string, scope: MailScope): Promise<ScheduledRow | null> {
+  const binds: unknown[] = [id];
+  let sql = `SELECT * FROM mail_scheduled WHERE id = ?`;
+  if (!isReadAll(scope)) {
+    sql += ` AND owner_user_id = ?`;
+    binds.push(scope);
+  }
+  return db.first<ScheduledRow>(sql, ...binds);
+}
+
+/** Apply an edit/reschedule to a still-'scheduled' row. Returns rows changed (0 = the row
+ *  is no longer 'scheduled' — already sent/canceled — so the edit is rejected upstream). */
+export async function updateScheduled(
+  db: DbClient,
+  id: string,
+  scope: MailScope,
+  patch: {
+    toJson?: string;
+    ccJson?: string | null;
+    subject?: string;
+    textBody?: string;
+    htmlBody?: string | null;
+    scheduledAt?: string;
+  },
+): Promise<number> {
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  if (patch.toJson !== undefined) { sets.push("to_json = ?"); binds.push(patch.toJson); }
+  if (patch.ccJson !== undefined) { sets.push("cc_json = ?"); binds.push(patch.ccJson); }
+  if (patch.subject !== undefined) { sets.push("subject = ?"); binds.push(patch.subject); }
+  if (patch.textBody !== undefined) {
+    sets.push("text_body = ?"); binds.push(patch.textBody);
+    sets.push("snippet = ?"); binds.push(snippetOf(patch.textBody));
+  }
+  if (patch.htmlBody !== undefined) { sets.push("html_body = ?"); binds.push(patch.htmlBody); }
+  if (patch.scheduledAt !== undefined) { sets.push("scheduled_at = ?"); binds.push(patch.scheduledAt); }
+  sets.push("updated_at = ?"); binds.push(nowIso());
+
+  const where: string[] = ["id = ?", "status = 'scheduled'"];
+  binds.push(id);
+  if (!isReadAll(scope)) { where.push("owner_user_id = ?"); binds.push(scope); }
+
+  const res = await db.run(`UPDATE mail_scheduled SET ${sets.join(", ")} WHERE ${where.join(" AND ")}`, ...binds);
+  return res.meta.changes;
+}
+
+/** Cancel a still-'scheduled' send. Returns rows changed (0 = not cancelable anymore). */
+export async function cancelScheduled(db: DbClient, id: string, scope: MailScope): Promise<number> {
+  const binds: unknown[] = [nowIso(), id];
+  let sql = `UPDATE mail_scheduled SET status = 'canceled', updated_at = ? WHERE id = ? AND status = 'scheduled'`;
+  if (!isReadAll(scope)) { sql += ` AND owner_user_id = ?`; binds.push(scope); }
+  const res = await db.run(sql, ...binds);
+  return res.meta.changes;
+}
+
+/** Claim due scheduled rows for the drain (status='scheduled' AND scheduled_at <= now),
+ *  soonest first, bounded. Read-only claim; the drain marks each row sent/failed after it
+ *  attempts delivery, so a re-run before that write simply re-attempts (send core is
+ *  idempotency-keyed by row id, so no double send). */
+export async function claimDueScheduled(db: DbClient, nowIsoStr: string, limit: number): Promise<ScheduledRow[]> {
+  const rows = await db.all<ScheduledRow>(
+    `SELECT * FROM mail_scheduled WHERE status = 'scheduled' AND scheduled_at <= ? ORDER BY scheduled_at ASC LIMIT ?`,
+    nowIsoStr,
+    limit,
+  );
+  return rows;
+}
+
+/** Mark a scheduled row delivered (records the RFC Message-Id the send produced). */
+export async function markScheduledSent(db: DbClient, id: string, sentMessageId: string, attempts: number): Promise<void> {
+  await db.run(
+    `UPDATE mail_scheduled SET status = 'sent', sent_message_id = ?, error_code = NULL, attempts = ?, updated_at = ?
+       WHERE id = ? AND status = 'scheduled'`,
+    sentMessageId,
+    attempts,
+    nowIso(),
+    id,
+  );
+}
+
+/** Record a failed drain attempt. Below maxAttempts the row stays 'scheduled' (retried on
+ *  the next drain); at/over it the row goes terminal 'failed' so it stops churning. */
+export async function markScheduledAttemptFailed(db: DbClient, id: string, errorCode: string, attempts: number, maxAttempts: number): Promise<void> {
+  const terminal = attempts >= maxAttempts;
+  await db.run(
+    `UPDATE mail_scheduled SET status = ?, error_code = ?, attempts = ?, updated_at = ?
+       WHERE id = ? AND status = 'scheduled'`,
+    terminal ? "failed" : "scheduled",
+    errorCode,
+    attempts,
+    nowIso(),
+    id,
+  );
+}
+
+/** Retention purge for terminal scheduled rows (sent/canceled/failed) older than cutoff.
+ *  'scheduled' rows are never purged (a far-future schedule must survive). */
+export async function purgeScheduledOlderThan(db: DbClient, cutoff: string): Promise<number> {
+  return (
+    await db.run(
+      `DELETE FROM mail_scheduled WHERE status IN ('sent','canceled','failed') AND updated_at < ?`,
+      cutoff,
+    )
+  ).meta.changes;
+}
+
 // ---- id mints ----
 export const newSendLogId = (): string => newId("maillog");
 export const newInboundId = (): string => newId("mailin");
 export const newAttachmentId = (): string => newId("mailatt");
+export const newScheduledId = (): string => newId("mailsch");

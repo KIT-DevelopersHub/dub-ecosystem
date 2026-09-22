@@ -644,6 +644,55 @@ function createMailStore() {
     }
   }
 
+  // Scheduled sends (予約送信): persisted per account (localStorage), like Sent. The demo has
+  // no cron, so `sweepDue` SIMULATES the gateway drain — any parked row whose scheduledAt has
+  // passed is moved into Sent and dropped from the scheduled list. That lets a reviewer pick a
+  // near time and watch the mail move 予約済み → 送信済み on the next refresh.
+  const schedKey = (id: string): string => `dub_demo_scheduled_${id}`;
+  function scheduledOf(id: string): mail.ScheduledSendDetail[] {
+    try {
+      const raw = globalThis.localStorage?.getItem(schedKey(id));
+      return raw ? (JSON.parse(raw) as mail.ScheduledSendDetail[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveScheduled(id: string, list: mail.ScheduledSendDetail[]): void {
+    try {
+      globalThis.localStorage?.setItem(schedKey(id), JSON.stringify(list));
+    } catch {
+      /* storage unavailable — Scheduled is best-effort in the demo */
+    }
+  }
+  function sweepDue(accountId: string): void {
+    const list = scheduledOf(accountId);
+    if (list.length === 0) return;
+    const now = Date.now();
+    const due = list.filter((s) => s.status === "scheduled" && Date.parse(s.scheduledAt) <= now);
+    if (due.length === 0) return;
+    const acct = DEMO_ACCOUNTS.find((a) => a.id === accountId);
+    const sent = sentOf(accountId);
+    for (const s of due) {
+      const pmid = `<demo-${Date.now()}@developershub.jp>`;
+      sent.unshift({
+        id: `sent_demo_${Date.now().toString(36)}_${seq++}`,
+        from: s.from ?? (acct ? { email: acct.email, name: acct.displayName } : undefined),
+        to: s.to,
+        ...(s.cc && s.cc.length > 0 ? { cc: s.cc } : {}),
+        subject: s.subject,
+        snippet: s.snippet ?? firstLine(s.textBody),
+        sentAt: new Date().toISOString(),
+        provider: "resend",
+        providerMessageId: pmid,
+        status: "sent",
+        textBody: s.textBody,
+        ...(s.htmlBody ? { htmlBody: s.htmlBody } : {}),
+      } as mail.MailSentDetail);
+    }
+    saveSent(accountId, sent);
+    saveScheduled(accountId, list.filter((s) => !due.includes(s)));
+  }
+
   function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
@@ -658,6 +707,8 @@ function createMailStore() {
       }
     }
     const me = currentAccount();
+    // Simulate the gateway drain: promote any now-due parked sends into Sent before we read.
+    sweepDue(me.id);
     const outbox = sentOf(me.id);
     // Oversight (mail:read_all): the read views aggregate EVERY account's mail; personal
     // accounts stay scoped to their own. `readInbox` / `readSent` are the visible sets for
@@ -752,6 +803,83 @@ function createMailStore() {
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
+
+    // ---- scheduled send (予約送信): park a future send + list/detail/edit/cancel. Scoped to
+    // the account (every account under oversight). Delivery is SIMULATED by sweepDue above.
+    if (method === "POST" && pathname === "/api/v1/mail/scheduled") {
+      const req = (body ?? {}) as Partial<mail.ScheduleMailRequest>;
+      const at = typeof req.scheduledAt === "string" ? Date.parse(req.scheduledAt) : NaN;
+      if (Number.isNaN(at) || at <= Date.now()) {
+        return json({ error: { code: "MAIL_INVALID_REQUEST", message: "scheduledAt must be in the future" } }, 400);
+      }
+      if (Array.isArray(req.attachments) && req.attachments.length > 0) {
+        return json({ error: { code: "MAIL_INVALID_REQUEST", message: "attachments are not supported on a scheduled send" } }, 400);
+      }
+      const id = `mailsch_demo_${Date.now().toString(36)}_${seq++}`;
+      const nowIso = new Date().toISOString();
+      const detail: mail.ScheduledSendDetail = {
+        id,
+        from: { email: me.email, name: me.displayName },
+        to: req.to ?? [],
+        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        subject: req.subject ?? "(件名なし)",
+        snippet: firstLine(req.textBody ?? ""),
+        scheduledAt: new Date(at).toISOString(),
+        createdAt: nowIso,
+        status: "scheduled",
+        ...(req.inReplyTo ? { inReplyTo: req.inReplyTo } : {}),
+        textBody: req.textBody ?? "",
+        ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+      };
+      const list = scheduledOf(me.id);
+      list.unshift(detail);
+      saveScheduled(me.id, list);
+      return json({ id, scheduledAt: detail.scheduledAt, status: "scheduled" } satisfies mail.ScheduleMailResponse, 202);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/scheduled") {
+      const all = oversight ? DEMO_ACCOUNTS.flatMap((a) => { sweepDue(a.id); return scheduledOf(a.id); }) : scheduledOf(me.id);
+      const items: mail.ScheduledSendListItem[] = all
+        .filter((s) => s.status === "scheduled")
+        .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+        .map(({ textBody, htmlBody, ...li }) => {
+          void textBody;
+          void htmlBody;
+          return li;
+        });
+      return json(page(items));
+    }
+    {
+      const m = /^\/api\/v1\/mail\/scheduled\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const id = decodeURIComponent(m[1]!);
+        const list = scheduledOf(me.id);
+        const idx = list.findIndex((s) => s.id === id);
+        if (method === "GET") {
+          return idx >= 0 ? json(list[idx]!) : notFound(`GET ${pathname}`);
+        }
+        if (method === "PATCH") {
+          if (idx < 0) return notFound(`PATCH ${pathname}`);
+          if (list[idx]!.status !== "scheduled") return json({ error: { code: "MAIL_INVALID_REQUEST", message: "no longer editable" } }, 409);
+          const p = (body ?? {}) as Partial<mail.ScheduleMailPatch>;
+          const cur = list[idx]!;
+          if (p.to !== undefined) cur.to = p.to;
+          if (p.cc !== undefined) cur.cc = p.cc;
+          if (p.subject !== undefined) cur.subject = p.subject;
+          if (p.textBody !== undefined) { cur.textBody = p.textBody; cur.snippet = firstLine(p.textBody); }
+          if (p.htmlBody !== undefined) cur.htmlBody = p.htmlBody;
+          if (p.scheduledAt !== undefined) cur.scheduledAt = p.scheduledAt;
+          saveScheduled(me.id, list);
+          return json(cur);
+        }
+        if (method === "DELETE") {
+          if (idx < 0) return notFound(`DELETE ${pathname}`);
+          if (list[idx]!.status !== "scheduled") return json({ error: { code: "MAIL_INVALID_REQUEST", message: "no longer cancelable" } }, 409);
+          saveScheduled(me.id, list.filter((s) => s.id !== id));
+          return json({ id, status: "canceled" });
+        }
+      }
+    }
+
     // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
     // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
     if (method === "GET" && pathname === "/api/v1/mail/flags") {
