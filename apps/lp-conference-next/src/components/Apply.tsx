@@ -1,103 +1,95 @@
-import Image from "next/image";
-import { Fragment } from "react";
 import { Reveal } from "@/components/Reveal";
+import { SectionHead } from "@/components/SectionHead";
 import type { ApplyConfig } from "@/config/types";
 
-// Apply (応募フォーム) — 対角 2×2: [参加者テキスト][参加者ボタン] / [登壇ボタン][登壇テキスト]。
-// ★ ボタンは画像ではなく「文字を含まない写真（純グラフィック）＋色スクリム＋実テキスト」。
-//   ラベル (参加登録はこちら！/ 登壇への応募はこちら！) は HTML の実テキストで描画し、
-//   選択・コピー・翻訳・SEO を可能にする。ホバーの浮き上がり/ズームは pure CSS。
-
-// 改行入りラベルを実テキスト（<br/>）で描画。
-function multiline(text: string) {
-  const lines = text.split("\n");
-  return lines.map((ln, i) => (
-    <Fragment key={i}>
-      {i > 0 && <br />}
-      {ln}
-    </Fragment>
-  ));
-}
-
+// Apply — reproduces goodpatch's "dual service cards" skeleton: two equal-width
+// cards side-by-side, each with an icon (top), a heading, description, and a
+// "View Details"-style arrow CTA. Filled with the conference's participant /
+// speaker copy and original inline-SVG icons (no goodpatch assets).
 export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
-  const plabel = data.participant.cta.label.replace(/\n/g, "");
-  const slabel = data.speaker.cta.label.replace(/\n/g, "");
-
   return (
-    <section id="apply" className="section apply">
+    <section id="apply" className="section svc">
       <div className="container">
-        <div className="section-head section-head--center">
-          {index && (
-            <Reveal as="span" className="section-index" variant="fade">
-              {index}
-            </Reveal>
-          )}
-          <Reveal as="h2" className="section-title" variant="up" delay={80}>
-            {data.heading}
-          </Reveal>
-        </div>
-        <div className="apply-grid">
-          <Reveal className="apply-text apply-cell--ptext" variant="up">
-            <p className="apply-title apply-title--participant">
-              {data.participant.title}
-              <span className="chev">≫</span>
-            </p>
-            <p className="apply-body">{data.participant.body}</p>
-          </Reveal>
-
-          <Reveal as="span" className="apply-cell--pimg" variant="up" delay={90}>
-            <a
-              className="apply-card apply-card--participant"
-              href={data.participant.cta.href}
-              aria-label={plabel}
-            >
-              <Image
-                className="apply-card-img"
-                src="/img/apply-participant.png"
-                alt=""
-                aria-hidden="true"
-                width={727}
-                height={370}
-                loading="lazy"
-              />
-              <span className="apply-card-scrim" aria-hidden="true" />
-              <span className="apply-card-label">
-                {multiline(data.participant.cta.label)}
-              </span>
-            </a>
-          </Reveal>
-
-          <Reveal as="span" className="apply-cell--simg" variant="up" delay={180}>
-            <a
-              className="apply-card apply-card--speaker"
-              href={data.speaker.cta.href}
-              aria-label={slabel}
-            >
-              <Image
-                className="apply-card-img"
-                src="/img/apply-speaker.png"
-                alt=""
-                aria-hidden="true"
-                width={740}
-                height={374}
-                loading="lazy"
-              />
-              <span className="apply-card-scrim" aria-hidden="true" />
-              <span className="apply-card-label">
-                {multiline(data.speaker.cta.label)}
-              </span>
-            </a>
-          </Reveal>
-
-          <Reveal className="apply-text apply-cell--stext" variant="up" delay={270}>
-            <p className="apply-title apply-title--speaker">
-              <span className="chev">≪</span>
-              {data.speaker.title}
-            </p>
-            <p className="apply-body">{data.speaker.body}</p>
-          </Reveal>
+        <SectionHead eyebrow="JOIN" index={index} title={data.heading} />
+        <div className="svc-grid">
+          <ServiceCard
+            variant="participant"
+            icon={<IconTicket />}
+            title={data.participant.title}
+            body={data.participant.body}
+            cta={{ label: data.participant.cta.label, href: data.participant.cta.href }}
+            delay={0}
+          />
+          <ServiceCard
+            variant="speaker"
+            icon={<IconMic />}
+            title={data.speaker.title}
+            body={data.speaker.body}
+            cta={{ label: data.speaker.cta.label, href: data.speaker.cta.href }}
+            delay={120}
+          />
         </div>
       </div>
     </section>
+  );
+}
+
+function ServiceCard({
+  variant,
+  icon,
+  title,
+  body,
+  cta,
+  delay,
+}: {
+  variant: "participant" | "speaker";
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  cta: { label: string; href: string };
+  delay: number;
+}) {
+  const label = cta.label.replace(/\n/g, "");
+  return (
+    <Reveal className={`svc-card svc-card--${variant}`} variant="up" delay={delay}>
+      <a className="svc-card-link" href={cta.href} aria-label={label}>
+        <span className={`svc-icon svc-icon--${variant}`} aria-hidden="true">
+          {icon}
+        </span>
+        <h3 className="svc-card-title">{title}</h3>
+        <p className="svc-card-body">{body}</p>
+        <span className="svc-card-cta">
+          {label}
+          <span className="arrow" aria-hidden="true">→</span>
+        </span>
+      </a>
+    </Reveal>
+  );
+}
+
+const svgCommon = {
+  width: 26,
+  height: 26,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.7,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+};
+function IconTicket() {
+  return (
+    <svg {...svgCommon}>
+      <path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h15A1.5 1.5 0 0 1 21 8.5v2a2 2 0 0 0 0 4v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 16.5v-2a2 2 0 0 0 0-4v-2Z" />
+      <path d="M14 7v10" strokeDasharray="1.5 2.4" />
+    </svg>
+  );
+}
+function IconMic() {
+  return (
+    <svg {...svgCommon}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
+    </svg>
   );
 }

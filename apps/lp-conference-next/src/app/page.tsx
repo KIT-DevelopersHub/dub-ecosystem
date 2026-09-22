@@ -4,22 +4,33 @@ import { Entrance } from "@/components/Entrance";
 import { ScrollProgress } from "@/components/ScrollProgress";
 import { Header } from "@/components/Header";
 import { Hero } from "@/components/Hero";
-import { Catch } from "@/components/Catch";
-import { About } from "@/components/About";
-import { Program } from "@/components/Program";
-import { Crowdfunding } from "@/components/Crowdfunding";
 import { Apply } from "@/components/Apply";
+import { Program } from "@/components/Program";
+import { About } from "@/components/About";
+import { Crowdfunding } from "@/components/Crowdfunding";
+import { Vision } from "@/components/Vision";
 import { Contact } from "@/components/Contact";
 import { Footer } from "@/components/Footer";
 
-// Public conference LP — single page composed from the published snapshot.
-// The page reads the snapshot READ-ONLY at build time; it never calls internal
-// services / admin APIs live (承認済み設計の核).
+// Public conference LP — single page composed from the published snapshot
+// (read-only at build time; never calls internal services live).
 //
-// goodpatch-style rebuild — same content, elevated editorial composition:
-//   sticky header → full-height hero → キャッチ → 01 とは？ → 02 プログラム(横)
-//   → 03 クラウドファンディング → 04 応募 → 05 お問い合わせ → フッター。
+// This build reproduces goodpatch.com/ja's page SKELETON (section sequence,
+// layout grammar, type scale, scroll choreography) with the conference's own
+// text flowed in and entirely original brand visuals. goodpatch section →
+// conference section mapping:
+//   hero (centered statement + sub)         → Hero
+//   dual service cards                       → Apply (参加者 / 登壇)
+//   Featured Work (filter tabs + grid)       → Program (聴く/体験する/出会う)
+//   3-col interview/activity cards           → About (とは？ 3点)
+//   full-width special/callout band          → Crowdfunding (SUPPORT band)
+//   Company Vision (big statement)           → Vision (キャッチ)
+//   Get In Touch CTA band                    → Contact
+//   multi-part footer                        → Footer
+// (goodpatch's Design-Platforms carousel, Latest-Activities grid and Careers
+//  are omitted — the conference has no matching content to flow in.)
 const config = snapshot as LpConfig;
+const siteUrl = config.footer.links[0]?.href;
 
 export default function Page() {
   return (
@@ -27,14 +38,14 @@ export default function Page() {
       <Entrance />
       <ScrollProgress />
       <Header nav={config.nav} cta={config.hero.primaryCta} />
-      <Hero data={config.hero} />
-      <Catch data={config.catch} />
-      <About data={config.about} index="01" />
-      <Program data={config.program} index="02" />
-      <Crowdfunding data={config.crowdfunding} index="03" />
-      <Apply data={config.apply} index="04" />
-      <Contact data={config.contact} index="05" />
-      <Footer data={config.footer} />
+      <Hero data={config.hero} subheading={config.catch.lead} />
+      <Apply data={config.apply} />
+      <Program data={config.program} />
+      <About data={config.about} />
+      <Crowdfunding data={config.crowdfunding} />
+      <Vision eyebrow="VISION" statement={config.catch.heading} />
+      <Contact data={config.contact} siteUrl={siteUrl} />
+      <Footer data={config.footer} nav={config.nav} />
     </>
   );
 }

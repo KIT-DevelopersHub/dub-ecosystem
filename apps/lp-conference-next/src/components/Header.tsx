@@ -3,15 +3,21 @@
 import { useEffect, useState } from "react";
 import type { NavLink } from "@/config/types";
 
-// Sticky site header (goodpatch-style): brand wordmark left, anchor nav +
-// primary CTA right. Gains a solid glassy background + tighter padding once the
-// page is scrolled past the hero fold (transform/opacity/bg only). On mobile the
-// nav collapses behind a menu button that toggles a full-width dropdown.
+// Sticky site header — reproduces goodpatch's header skeleton (functional layout
+// only, no copied assets): brand wordmark left · centered anchor nav · right-side
+// text link + primary CTA. Thin & transparent over the hero, gains a solid white
+// glassy background on scroll. Mobile collapses the nav behind a hamburger.
 //
-// All links are real anchors into the existing sections — no copy changes.
-// SSG/no-JS: renders as a plain visible header (the `is-scrolled` polish and the
-// mobile toggle are progressive enhancements).
-export function Header({ nav, cta }: { nav: NavLink[]; cta?: { label: string; href: string } }) {
+// All labels are the conference's own nav text; the wordmark is an original mark.
+export function Header({
+  nav,
+  cta,
+  contactHref = "#contact",
+}: {
+  nav: NavLink[];
+  cta?: { label: string; href: string };
+  contactHref?: string;
+}) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -33,6 +39,8 @@ export function Header({ nav, cta }: { nav: NavLink[]; cta?: { label: string; hr
     };
   }, []);
 
+  const centerNav = nav.filter((l) => l.href !== "#top" && l.href !== contactHref);
+
   return (
     <header className={`site-head${scrolled ? " is-scrolled" : ""}${open ? " is-open" : ""}`}>
       <div className="site-head-inner">
@@ -46,22 +54,25 @@ export function Header({ nav, cta }: { nav: NavLink[]; cta?: { label: string; hr
 
         <nav className="site-nav" aria-label="グローバルナビ">
           <ul className="site-nav-list">
-            {nav
-              .filter((l) => l.href !== "#top")
-              .map((l) => (
-                <li key={l.href}>
-                  <a href={l.href} onClick={() => setOpen(false)}>
-                    {l.label}
-                  </a>
-                </li>
-              ))}
+            {centerNav.map((l) => (
+              <li key={l.href}>
+                <a href={l.href} onClick={() => setOpen(false)}>
+                  {l.label}
+                </a>
+              </li>
+            ))}
           </ul>
-          {cta && (
-            <a className="site-head-cta" href={cta.href} onClick={() => setOpen(false)}>
-              {cta.label}
-              <span className="arrow" aria-hidden="true">→</span>
+          <div className="site-head-actions">
+            <a className="site-head-link" href={contactHref} onClick={() => setOpen(false)}>
+              お問い合わせ
             </a>
-          )}
+            {cta && (
+              <a className="site-head-cta" href={cta.href} onClick={() => setOpen(false)}>
+                {cta.label}
+                <span className="arrow" aria-hidden="true">→</span>
+              </a>
+            )}
+          </div>
         </nav>
 
         <button

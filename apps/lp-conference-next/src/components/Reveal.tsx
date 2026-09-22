@@ -25,7 +25,7 @@ import { createElement, useEffect, useRef, useState, type ReactNode } from "reac
 
 type RevealTag =
   | "div" | "section" | "p" | "li" | "ul" | "h2" | "h3" | "span" | "a";
-type Variant = "up" | "fade" | "wipe" | "rise-lg" | "haze";
+type Variant = "up" | "fade" | "wipe" | "rise-lg" | "zoom" | "haze";
 
 export interface RevealProps {
   children: ReactNode;

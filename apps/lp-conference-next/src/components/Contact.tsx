@@ -1,39 +1,52 @@
-import Image from "next/image";
 import { Reveal } from "@/components/Reveal";
+import { SectionHead } from "@/components/SectionHead";
 import type { ContactConfig } from "@/config/types";
 
-// Contact — closing section: numbered eyebrow + logo/org card + a warm note.
-export function Contact({ data, index }: { data: ContactConfig; index?: string }) {
+// Contact — reproduces goodpatch's "Get In Touch" CTA-band skeleton: a centered
+// eyebrow + large heading over a light band, then a horizontal row of equal
+// button CTAs, with a closing note. Filled with the conference's contact copy;
+// buttons route to the conference's own mail / apply / official site.
+export function Contact({
+  data,
+  index,
+  applyHref = "#apply",
+  siteUrl,
+}: {
+  data: ContactConfig;
+  index?: string;
+  applyHref?: string;
+  siteUrl?: string;
+}) {
   return (
-    <section id="contact" className="section contact">
+    <section id="contact" className="section getintouch">
       <div className="container">
-        <div className="section-head section-head--center">
-          {index && (
-            <Reveal as="span" className="section-index" variant="fade">
-              {index}
-            </Reveal>
-          )}
-          <Reveal as="h2" className="section-title" variant="up" delay={80}>
-            {data.heading}
-          </Reveal>
-        </div>
-        <Reveal className="contact-row" variant="up" delay={120}>
-          <Image
-            className="contact-logo"
-            src="/img/contact-logo.png"
-            alt="DevelopersHub ロゴ"
-            width={262}
-            height={228}
-            loading="lazy"
-          />
-          <div className="contact-text">
-            <p className="contact-org">{data.org}</p>
-            <p className="contact-email">
-              お問い合わせ：<a href={`mailto:${data.email}`}>{data.email}</a>
-            </p>
-          </div>
+        <SectionHead eyebrow="CONTACT" index={index} title={data.heading} center />
+
+        <Reveal as="p" className="git-org" variant="fade" delay={60}>
+          {data.org}
         </Reveal>
-        <Reveal as="p" className="contact-note" variant="fade" delay={200}>
+
+        <Reveal className="git-actions" variant="up" delay={120}>
+          <a className="git-btn git-btn--primary" href={applyHref}>
+            <span className="git-btn-en">JOIN</span>
+            <span className="git-btn-jp">参加登録はこちら</span>
+            <span className="arrow" aria-hidden="true">→</span>
+          </a>
+          <a className="git-btn" href={`mailto:${data.email}`}>
+            <span className="git-btn-en">MAIL</span>
+            <span className="git-btn-jp">{data.email}</span>
+            <span className="arrow" aria-hidden="true">→</span>
+          </a>
+          {siteUrl && (
+            <a className="git-btn" href={siteUrl}>
+              <span className="git-btn-en">SITE</span>
+              <span className="git-btn-jp">公式サイト</span>
+              <span className="arrow" aria-hidden="true">↗</span>
+            </a>
+          )}
+        </Reveal>
+
+        <Reveal as="p" className="git-note" variant="fade" delay={200}>
           {data.note}
         </Reveal>
       </div>

@@ -1,24 +1,27 @@
 import type { HeroConfig } from "@/config/types";
 
-// Hero (TOP) — full-height editorial opener. All copy is real text (h1 / p / a)
-// for select/copy/translate/SEO. The ambient right/back visual is an original,
-// on-brand abstract "connection network" (nodes = engineers meeting) drawn as
-// inline SVG with the brand gradient — no stock photography / people, no
-// third-party IP.
+// Hero — reproduces goodpatch's hero skeleton (centered massive headline + a
+// medium centered subheading over a full-bleed motion background), filled with
+// the conference's own text and an ORIGINAL animated background (brand-gradient
+// aurora + abstract connection network drawn as inline SVG). No goodpatch
+// asset/copy/video is used.
 //
-// Entrance motion is PURE CSS (see globals.css `hero-rise` / `hero-wipe` /
-// `hero-pop` keyframes): eyebrow → title wipe → date/venue chips → CTA buttons →
-// visual fade → scroll cue. No animation JS ships. Under prefers-reduced-motion
-// the global reduce block collapses it to instant-visible (no opacity:0 lock).
-// With no hooks, Hero is a server component.
-export function Hero({ data }: { data: HeroConfig }) {
+// All copy is real text (h1 / p / a) for select/copy/translate/SEO. Entrance
+// motion is pure CSS (see globals.css hero-* keyframes); under
+// prefers-reduced-motion it collapses to instant-visible. Server component.
+export function Hero({ data, subheading }: { data: HeroConfig; subheading?: string }) {
   const oneLine = (s: string) => s.replace(/\n/g, "");
 
   return (
     <section id="top" className="hero">
-      {/* ambient original connection graphic (decorative, sits behind copy) */}
-      <div className="hero-visual" aria-hidden="true">
-        <HeroNetwork />
+      {/* original full-bleed motion background (decorative) */}
+      <div className="hero-bg" aria-hidden="true">
+        <span className="hero-bg-blob hero-bg-blob--a" />
+        <span className="hero-bg-blob hero-bg-blob--b" />
+        <span className="hero-bg-blob hero-bg-blob--c" />
+        <div className="hero-net-wrap">
+          <HeroNetwork />
+        </div>
       </div>
 
       <div className="hero-body">
@@ -32,6 +35,8 @@ export function Hero({ data }: { data: HeroConfig }) {
             </span>
             <span className="hero-title-line hero-title-line--2">カンファレンス</span>
           </h1>
+
+          {subheading && <p className="hero-sub">{subheading}</p>}
 
           <div className="hero-meta">
             <p className="hero-meta-row">
@@ -70,7 +75,7 @@ export function Hero({ data }: { data: HeroConfig }) {
       </div>
 
       {/* scroll cue */}
-      <a className="hero-scroll" href="#about" aria-label="下へスクロール">
+      <a className="hero-scroll" href="#apply" aria-label="下へスクロール">
         <span className="hero-scroll-label">SCROLL</span>
         <span className="hero-scroll-line" aria-hidden="true" />
       </a>
@@ -79,7 +84,7 @@ export function Hero({ data }: { data: HeroConfig }) {
 }
 
 // Abstract "engineers connecting" network — pure SVG, brand gradient, gentle
-// pulse on the nodes (paused under prefers-reduced-motion via CSS).
+// pulse on the nodes (paused under prefers-reduced-motion via CSS). Original art.
 function HeroNetwork() {
   const nodes = [
     { cx: 60, cy: 70, r: 9 },
