@@ -1,6 +1,5 @@
 import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
-import { Entrance } from "@/components/Entrance";
 import { MotionRoot } from "@/components/MotionRoot";
 import { ScrollProgress } from "@/components/ScrollProgress";
 import { Header } from "@/components/Header";
@@ -37,7 +36,6 @@ const siteUrl = config.footer.links[0]?.href;
 export default function Page() {
   return (
     <>
-      <Entrance />
       <MotionRoot />
       <ScrollProgress />
       <Header nav={config.nav} cta={config.hero.primaryCta} />

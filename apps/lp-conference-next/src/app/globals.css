@@ -185,67 +185,6 @@ img { max-width: 100%; height: auto; display: block; }
 }
 
 /* ============================================================
-   Entrance curtain — first-paint "ドワー" loading→burst overlay
-   ============================================================ */
-.lp-entrance {
-  position: fixed;
-  inset: 0;
-  z-index: 999;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  background:
-    radial-gradient(120% 100% at 50% 40%, rgba(23, 184, 146, 0.35) 0%, transparent 55%),
-    linear-gradient(158deg, #0f2f8f 0%, #1e3fa8 46%, #0e6f8f 100%);
-  pointer-events: none;
-  will-change: opacity, transform, filter;
-  /* pure-CSS recede (framer-motion removed) — holds, then fades+scales+blurs out */
-  animation: entrance-recede 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-@keyframes entrance-recede {
-  0%, 40% { opacity: 1; transform: scale(1); filter: blur(0); }
-  100% { opacity: 0; transform: scale(1.12); filter: blur(8px); }
-}
-/* expanding shockwave ring — the visual pulse of the burst */
-.lp-entrance-wave {
-  position: absolute;
-  top: 40%;
-  left: 50%;
-  width: 40vmax;
-  height: 40vmax;
-  margin: -20vmax 0 0 -20vmax;
-  border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.55);
-  box-shadow:
-    0 0 60px rgba(255, 255, 255, 0.35),
-    inset 0 0 60px rgba(23, 184, 146, 0.4);
-  will-change: transform, opacity;
-  transform: scale(0);
-  animation: entrance-wave 1.25s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
-}
-@keyframes entrance-wave {
-  0% { transform: scale(0); opacity: 0.55; }
-  100% { transform: scale(1); opacity: 0; }
-}
-.lp-entrance-mark {
-  position: relative;
-  font-family: var(--font-inter), sans-serif;
-  font-size: clamp(0.72rem, 2.4vw, 1.05rem);
-  font-weight: 800;
-  letter-spacing: 0.4em;
-  text-indent: 0.4em;
-  color: rgba(255, 255, 255, 0.92);
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.25);
-  will-change: transform, opacity;
-  animation: entrance-mark 1.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-@keyframes entrance-mark {
-  0% { opacity: 0; transform: scale(0.72); }
-  22%, 42% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.06); }
-}
-
-/* ============================================================
    Hero (TOP)
    ============================================================ */
 .hero {
@@ -2265,7 +2204,6 @@ img { max-width: 100%; height: auto; display: block; }
   .hero::before, .hero::after { animation: none !important; }
   .catch::before, .catch::after { animation: none !important; }
   .scroll-progress { display: none !important; }
-  .lp-entrance { display: none !important; }
   .apply-grid .apply-card,
   .apply-grid .apply-card:hover,
   .apply-grid .apply-card:focus-visible { transform: none; box-shadow: var(--shadow-md); }
@@ -2277,7 +2215,6 @@ img { max-width: 100%; height: auto; display: block; }
   .program-card:hover,
   .site-head-cta:hover { transform: none; }
   .hero-scroll-line::after { animation: none !important; }
-  .lp-entrance-wave, .lp-entrance-mark { animation: none !important; }
   .hero-bg-blob, .support-shape { animation: none !important; }
   .svc-card-link:hover, .info-card:hover, .git-btn:hover, .btn-support:hover,
   .work-card-io:hover .work-card { transform: none; }
