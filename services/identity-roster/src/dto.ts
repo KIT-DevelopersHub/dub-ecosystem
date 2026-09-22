@@ -48,6 +48,7 @@ export interface EmailRoutingSyncPreview {
 
 export interface UpdateUserRequest {
   displayName?: string;
+  furigana?: string | null; // 読み仮名（フリガナ）。空/空白は null（未設定に戻す）
   githubLogin?: string | null;
   status?: identity.UserStatus; // "disabled"/"rejected" => sync session revoke
 }

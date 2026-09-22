@@ -9,6 +9,7 @@ import { presentError, fieldErrorMap } from "../lib/errorDisplay";
 export function InviteUserDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [furigana, setFurigana] = useState("");
   const [roleId, setRoleId] = useState<string>("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -19,6 +20,7 @@ export function InviteUserDialog({ open, onClose }: { open: boolean; onClose: ()
   function reset() {
     setEmail("");
     setDisplayName("");
+    setFurigana("");
     setRoleId("");
     setFieldErrors({});
     setFormError(null);
@@ -30,6 +32,7 @@ export function InviteUserDialog({ open, onClose }: { open: boolean; onClose: ()
     const req: identity.InviteUserRequest = {
       email: email.trim(),
       ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
+      ...(furigana.trim() ? { furigana: furigana.trim() } : {}),
       ...(roleId ? { roleIds: [roleId] } : {}),
     };
     invite.mutate(req, {
@@ -59,6 +62,9 @@ export function InviteUserDialog({ open, onClose }: { open: boolean; onClose: ()
       </FormField>
       <FormField label="表示名（任意）" htmlFor="fe7-invite-name">
         <TextField id="fe7-invite-name" value={displayName} onChange={(v) => setDisplayName(v)} testId="fe7-invite-name" />
+      </FormField>
+      <FormField label="フリガナ（任意）" htmlFor="fe7-invite-furigana">
+        <TextField id="fe7-invite-furigana" value={furigana} onChange={(v) => setFurigana(v)} placeholder="例: ヤマダ ハナコ" testId="fe7-invite-furigana" />
       </FormField>
       <RolePicker
         label="事前ロール（任意）"

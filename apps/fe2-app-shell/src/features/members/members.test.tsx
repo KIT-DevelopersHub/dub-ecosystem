@@ -161,4 +161,33 @@ describe("MembersPage", () => {
     expect(within(note).getByTestId("members-orgchip-p_none")).toBeInTheDocument();
     expect(within(note).getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
   });
+
+  // FBの主眼: 同じチームに複数リーダーが居ても、各メンバーが「自分の leaderId が指す
+  // リーダーの配下」としてネスト描画されること。DOM上、配下チップはそのリーダーの
+  // nodeItem(li) の中に入り、別リーダーの li には入らない = 上下関係が構造で伝わる。
+  it("組織図 nests each member under the leader their leaderId points to", async () => {
+    const overview: MembersOverview = {
+      teams: [{ id: "t1", key: "dev", name: "開発", color: "#0d9488", description: null }],
+      members: [
+        { id: "L1", orgId: "o", name: "リーダー甲", roleTitle: "開発リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "L2", orgId: "o", name: "リーダー乙", roleTitle: "開発リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "R1", orgId: "o", name: "配下A", roleTitle: "メンバー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: "L1", contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
+        { id: "R2", orgId: "o", name: "配下B", roleTitle: "メンバー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: "L2", contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
+      ],
+    };
+    render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByText("リーダー甲");
+    await userEvent.click(screen.getByRole("tab", { name: "組織図" }));
+    await screen.findByTestId("members-orgchart");
+
+    const l1Item = screen.getByTestId("members-orgchip-L1").closest("li");
+    const l2Item = screen.getByTestId("members-orgchip-L2").closest("li");
+    expect(l1Item).not.toBeNull();
+    expect(l2Item).not.toBeNull();
+    // R1 は L1 の配下としてネスト、L2 の配下には入らない。R2 はその逆。
+    expect(within(l1Item as HTMLElement).getByTestId("members-orgchip-R1")).toBeInTheDocument();
+    expect(within(l1Item as HTMLElement).queryByTestId("members-orgchip-R2")).not.toBeInTheDocument();
+    expect(within(l2Item as HTMLElement).getByTestId("members-orgchip-R2")).toBeInTheDocument();
+    expect(within(l2Item as HTMLElement).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
+  });
 });
