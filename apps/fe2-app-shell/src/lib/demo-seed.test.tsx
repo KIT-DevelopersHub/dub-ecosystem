@@ -72,6 +72,59 @@ describe("createDemoFetch", () => {
   });
 });
 
+describe("event section layout (shared D&D order/visibility)", () => {
+  it("GET returns the default empty layout for an event never saved to", async () => {
+    const layout = await api().request<{ eventId: string; data: { order: string[]; hidden: string[] }; version: number }>(
+      { method: "GET", path: "/api/v1/events/evt_layout_get/section-layout" },
+    );
+    expect(layout.data).toEqual({ order: [], hidden: [] });
+    expect(layout.version).toBe(0);
+  });
+
+  it("PUT saves (v0 -> v1) and persists across a fresh api() instance (localStorage-backed)", async () => {
+    const eventId = "evt_layout_persist";
+    const saved = await api().request<{ data: { order: string[] }; version: number }>({
+      method: "PUT",
+      path: `/api/v1/events/${eventId}/section-layout`,
+      body: { version: 0, data: { order: ["links", "contacts"], hidden: ["memo"] } },
+    });
+    expect(saved.version).toBe(1);
+    expect(saved.data.order).toEqual(["links", "contacts"]);
+
+    // A fresh api()/createDemoFetch() call simulates a reload: the in-memory session
+    // resets, but the localStorage-backed layout must still read back.
+    const reread = await api().request<{ data: { order: string[]; hidden: string[] }; version: number }>({
+      method: "GET",
+      path: `/api/v1/events/${eventId}/section-layout`,
+    });
+    expect(reread.version).toBe(1);
+    expect(reread.data.order).toEqual(["links", "contacts"]);
+    expect(reread.data.hidden).toEqual(["memo"]);
+  });
+
+  it("stale version PUT -> 409 EVENT_VERSION_CONFLICT", async () => {
+    const eventId = "evt_layout_conflict";
+    await api().request({
+      method: "PUT",
+      path: `/api/v1/events/${eventId}/section-layout`,
+      body: { version: 0, data: { order: ["a"], hidden: [] } },
+    });
+    // second save must use version 1; sending 0 again conflicts (mirrors event-service).
+    let caught: unknown;
+    try {
+      await api().request({
+        method: "PUT",
+        path: `/api/v1/events/${eventId}/section-layout`,
+        body: { version: 0, data: { order: ["b"], hidden: [] } },
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(ApiError.isApiError(caught)).toBe(true);
+    expect((caught as ApiError).status).toBe(409);
+  });
+});
+
 describe("isDemoEnabled", () => {
   it("is true only for explicit opt-in flags", () => {
     expect(isDemoEnabled({ VITE_DEMO: "1" })).toBe(true);
@@ -169,7 +222,10 @@ describe("admin RBAC console (interactive roster surface)", () => {
 describe("admin email routing (@developershub.jp address management)", () => {
   interface Addr { id: string; localPart: string; address: string; destination: string; enabled: boolean }
   interface Page<T> { items: T[] }
-  const BASE = "/api/v1/mail/admin/email-routing/addresses";
+  // Frontend calls the ISSUED (zone-rule) surface since #468 — the demo mock must serve
+  // it, not the removed account-scoped /addresses path (regression: the 発行済みアドレス
+  // dialog listed via /issued-addresses and 404'd against the stale mock).
+  const BASE = "/api/v1/mail/admin/email-routing/issued-addresses";
   const list = (a: ReturnType<typeof api>) => a.request<Page<Addr>>({ method: "GET", path: BASE });
 
   it("the demo admin holds mail:admin (so the tab is reachable) and lists @developershub.jp addresses", async () => {
@@ -208,5 +264,15 @@ describe("admin email routing (@developershub.jp address management)", () => {
 
     await a.request({ method: "DELETE", path: `${BASE}/${target.id}` });
     expect((await list(a)).items.some((x) => x.id === target.id)).toBe(false);
+  });
+
+  it("roster-addresses (sync source) lists the receiving addresses for Email Routing 同期", async () => {
+    const a = api();
+    const res = await a.request<{ items: Array<{ address: string; destination: string; enabled: boolean }> }>({
+      method: "GET",
+      path: "/api/v1/mail/admin/email-routing/roster-addresses",
+    });
+    expect(res.items.length).toBeGreaterThan(0);
+    expect(res.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
   });
 });

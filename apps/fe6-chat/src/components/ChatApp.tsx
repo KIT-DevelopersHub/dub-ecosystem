@@ -3,10 +3,11 @@
 // feature.tsx drive channel selection via TanStack Router params; standalone we
 // keep selection in local state and persist the last channel (design §3).
 import { useCallback, useEffect, useState } from "react";
-import { ToastProvider } from "@dub/ui";
+import { Drawer, Icon, ToastProvider } from "@dub/ui";
 import type { common } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
+import { useIsMobile } from "../hooks/useIsMobile";
 import type { Channel } from "../api/contract";
 import { getLastChannel, setLastChannel } from "../store/draft";
 import type { CreateChannelRequest } from "../api/contract";
@@ -23,6 +24,15 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const [active, setActive] = useState<common.ChannelId | null>(initialChannelId ?? null);
   const [threadOpen, setThreadOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  // P21: below the mobile breakpoint the rail+channel-list column becomes a
+  // slide-in drawer instead of always-visible grid columns, so the message
+  // timeline can use the full width. Desktop is unaffected (isMobile stays
+  // false and the drawer branch below never renders).
+  const isMobile = useIsMobile();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  useEffect(() => {
+    if (!isMobile) setMobileNavOpen(false);
+  }, [isMobile]);
 
   const reloadChannels = useCallback(async () => {
     // allSettled (not all): the channel sidebar must render whenever listChannels
@@ -61,6 +71,9 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const onSelect = useCallback((channelId: common.ChannelId) => {
     setActive(channelId);
     setLastChannel(channelId);
+    // Picking a channel from the mobile drawer should dismiss it immediately —
+    // otherwise the user has to also tap the backdrop/close button afterwards.
+    setMobileNavOpen(false);
   }, []);
 
   const onCreateChannel = useCallback(
@@ -72,10 +85,10 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
     [api, reloadChannels, onSelect],
   );
 
-  return (
-    <ToastProvider>
-    <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-app-bleed data-testid="fe6-chat-app">
-      {/* leftmost workspace / team rail */}
+  // Shared rail + channel list markup, reused inline on desktop and inside the
+  // mobile drawer — keeping one definition avoids the two surfaces drifting.
+  const nav = (
+    <>
       <div className={styles.rail} aria-label="ワークスペース">
         <button type="button" className={`${styles.railTile} ${styles.active}`} aria-label="DevHub ワークスペース" title="DevHub">
           D
@@ -96,7 +109,28 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
         canCreate={can("chat:create")}
         onSelect={onSelect}
         onCreate={() => setCreateOpen(true)}
+        onCloseMobile={isMobile ? () => setMobileNavOpen(false) : undefined}
       />
+    </>
+  );
+
+  return (
+    <ToastProvider>
+    <div className={`${styles.app} ${threadOpen ? styles.withThread : ""}`} data-app-bleed data-testid="fe6-chat-app">
+      {isMobile ? (
+        <Drawer
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          side="left"
+          hideHeader
+          title="チャネル一覧"
+          testId="fe6-mobile-nav-drawer"
+        >
+          {nav}
+        </Drawer>
+      ) : (
+        nav
+      )}
 
       {active ? (
         <ChannelPage
@@ -105,9 +139,22 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
           onThreadOpenChange={setThreadOpen}
           onSelectChannel={onSelect}
           onChannelsChanged={() => void reloadChannels()}
+          onOpenMobileNav={isMobile ? () => setMobileNavOpen(true) : undefined}
         />
       ) : (
         <section className={styles.main}>
+          {isMobile && (
+            <button
+              type="button"
+              className={styles.mobileMenuBtn}
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="チャネル一覧を開く"
+              title="チャネル一覧"
+              data-testid="fe6-mobile-nav-open"
+            >
+              <Icon name="menu" size="sm" />
+            </button>
+          )}
           <div className={styles.emptyState}>チャネルを選択してください</div>
         </section>
       )}

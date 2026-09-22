@@ -33,12 +33,39 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
+    id: "v3.0",
+    name: "v3.0 ダイナミック刷新版",
+    description:
+      "参考サイト goodpatch.com の見た目・動きに寄せて全面刷新した現行 LP。GSAP + ScrollTrigger + Lenis による滑らかなスクロール演出、流れる大型英字マーキー、色ブロックのヒーロー、セクションのリビール表示を追加。本番ドメイン hokuriku-it-conf.com に反映済み。",
+    url: "https://hokuriku-it-conf.com",
+    updatedAt: "2026-09-22",
+    status: "current",
+  },
+  {
+    id: "v2.1",
+    name: "v2.1 磨き上げ版",
+    description:
+      "v2.0 をさらに磨いた版。クラウドファンディングを CAMPFIRE の支援ページへ直接リンク、受付前の「参加登録」「登壇応募」を準備中表示に、本文の改行を整え、スクロール連動アニメーションを追加。v3.0 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-next-v2-1.developershub-site.workers.dev",
+    updatedAt: "2026-09-17",
+    status: "archived",
+  },
+  {
+    id: "v2.0",
+    name: "v2.0 リニューアル版",
+    description:
+      "Next.js で作り直した磨き上げ版。Inter+Zen Kaku のタイポグラフィ、オリジナルのブランドグラデーション SVG、WCAG AA 準拠。v2.1 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-next-v2.developershub-site.workers.dev",
+    updatedAt: "2026-09-16",
+    status: "archived",
+  },
+  {
     id: "v1.0",
     name: "v1.0 テキスト版",
-    description: "北陸ITカンファレンスの現行 LP。テキスト中心の初版。",
-    url: "https://hokuriku-it-conf.com",
+    description: "北陸ITカンファレンスの初版 LP（テキスト中心）。v2.0 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-v1.developershub-site.workers.dev",
     updatedAt: "2026-09-07",
-    status: "current",
+    status: "archived",
   },
 ];
 

@@ -56,6 +56,14 @@ export const ROUTES: Readonly<Record<string, Route>> = {
 
   // domain events -> the consumer's /internal/events-async landing route (DubEventEnvelope,
   // forwarded verbatim). LIVE consumers only (route grepped-confirmed present):
+  // notification now exposes /internal/events-async, so evt.notification (chat @mention,
+  // notification.requested, public inquiry, mail.*, ops alerts, ...) is DELIVERED and
+  // becomes inbox notifications instead of sitting pending forever on the free tier.
+  // origin MUST be "https://svc": notification enables workers.dev (realtime WS) and gates
+  // its header-trusting HTTP API (incl. /internal/events-async) to service-binding callers
+  // (host "svc"). A non-svc host is rejected as a spoofable public request. Service
+  // bindings ignore the host for routing, so "svc" delivers correctly over the binding.
+  "evt.notification": { kind: "deliver", binding: "SVC_NOTIFICATION", path: EVENTS_ASYNC_PATH, origin: "https://svc" },
   "evt.task": { kind: "deliver", binding: "SVC_TASK", path: EVENTS_ASYNC_PATH, origin: "https://task-service" },
   "evt.gantt": { kind: "deliver", binding: "SVC_GANTT", path: EVENTS_ASYNC_PATH, origin: "https://gantt-service" },
   "evt.file-meta": { kind: "deliver", binding: "SVC_FILE_META", path: EVENTS_ASYNC_PATH, origin: "https://file-meta" },
@@ -66,7 +74,6 @@ export const ROUTES: Readonly<Record<string, Route>> = {
   "evt.mail-automation": { kind: "deliver", binding: "SVC_MAIL_AUTOMATION", path: EVENTS_ASYNC_PATH, origin: "https://mail-automation" },
 
   // No live consumer route yet -> DEFER (durable/pending; follow-ups when routes land):
-  "evt.notification": DEFER, // notification has no /internal/events-async route
   "deploy.job": DEFER, // processed in-process inside deploy-service only; no HTTP route
 };
 

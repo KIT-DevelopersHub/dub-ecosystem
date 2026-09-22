@@ -88,6 +88,24 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
       { id: "act_2", eventId: "evt_1", kind: "announcement", title: "参加者への案内メール" },
     ],
   },
+  // evt_2 is one of the two events the Home dashboard's "直近のイベント" card
+  // links to (see /bff/home's upcomingEvents = EVENTS.slice(0, 2) below), so it
+  // needs a detail entry too — otherwise clicking that row 404s ("イベントが見つ
+  // かりません") even though the SPA navigation itself is correct.
+  evt_2: {
+    version: 1,
+    id: "evt_2",
+    orgId: ORG,
+    title: "運営定例ミーティング",
+    description: "毎週の運営定例。進捗共有と次アクションの確認を行う。",
+    phase: "planning",
+    startsAt: "2026-08-12T09:00:00Z",
+    endsAt: "2026-08-12T10:00:00Z",
+    archivedAt: null,
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
+  },
 };
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
@@ -110,6 +128,19 @@ const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
       kind: "announcement",
       title: "参加者への案内メール",
       sortOrder: 1,
+      archivedAt: null,
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    },
+  ],
+  evt_2: [
+    {
+      version: 1,
+      id: "act_3",
+      eventId: "evt_2",
+      kind: "announcement",
+      title: "定例アジェンダ共有",
+      sortOrder: 0,
       archivedAt: null,
       createdAt: "2026-06-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
@@ -213,22 +244,27 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
     eventId: "evt_1",
     rows: [
-      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, hasChildren: true },
+      // teamId mirrors each row's TASKS entry above so the gantt's チーム順 grouping
+      // AND the task-number prefix (team-code.ts) both reflect the row's real team —
+      // this DTO used to omit teamId entirely, which silently showed every task
+      // number with NO team prefix in this demo (a gap in the fixture, independent
+      // of the task-number-team-prefix fix itself).
+      { taskId: "tsk_1", title: "登壇者スケジュール確定", startsAt: "2026-07-28T00:00:00Z", endsAt: "2026-08-03T00:00:00Z", progressPercent: 40, assigneeId: ME_ID, teamId: "team_hq", hasChildren: true },
       // child of tsk_1 (same 統括チーム) — placed right after its parent so the WBS is
       // contiguous; used to prove the team rail stays straight across an indented child.
-      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_1", depth: 1 },
-      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
-      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob" },
-      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob" },
+      { taskId: "tsk_4", title: "受付システム連携確認", startsAt: "2026-07-25T00:00:00Z", endsAt: "2026-08-02T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_1", depth: 1 },
+      { taskId: "tsk_2", title: "会場レイアウト図作成", startsAt: "2026-07-30T00:00:00Z", endsAt: "2026-08-04T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_3", title: "スポンサー請求書送付", startsAt: "2026-07-20T00:00:00Z", endsAt: "2026-07-25T00:00:00Z", progressPercent: 100, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "tsk_5", title: "運営ツール名簿連携", startsAt: "2026-07-29T00:00:00Z", endsAt: "2026-08-06T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "tsk_6", title: "当日タイムテーブル作成", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-08T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_ops" },
       // 階層集計デモ: tsk_10(祖父) -> tsk_11(親) -> tsk_12/13/14(葉、2完了+1ブロック)。
       // tsk_10 の直接の子は tsk_11 だけ — バー/ドロップダウンが正しければ、2階層下の
       // 3枚の葉から再帰集計された「完了寄り」が出る(祖父の直下だけを見ていたら出ない)。
-      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, hasChildren: true },
-      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, parentTaskId: "tsk_10", depth: 1, hasChildren: true },
-      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
-      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, parentTaskId: "tsk_11", depth: 2 },
-      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_10", title: "階層集計デモ：全体進行（3階層サンプル）", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-15T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", hasChildren: true },
+      { taskId: "tsk_11", title: "階層集計デモ：中間フェーズ", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-14T00:00:00Z", progressPercent: 0, assigneeId: null, teamId: "team_hq", parentTaskId: "tsk_10", depth: 1, hasChildren: true },
+      { taskId: "tsk_12", title: "階層集計デモ：作業A", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-10T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_13", title: "階層集計デモ：作業B", startsAt: "2026-08-05T00:00:00Z", endsAt: "2026-08-12T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
+      { taskId: "tsk_14", title: "階層集計デモ：作業C", startsAt: "2026-08-07T00:00:00Z", endsAt: "2026-08-13T00:00:00Z", progressPercent: 0, assigneeId: "usr_bob", teamId: "team_hq", parentTaskId: "tsk_11", depth: 2 },
     ],
     dependencies: [
       { id: "tsk_2->tsk_1", fromTaskId: "tsk_1", toTaskId: "tsk_2", type: "FS", lagDays: 0 },
@@ -237,10 +273,10 @@ const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_3: {
     eventId: "evt_3",
     rows: [
-      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID },
-      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob" },
-      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID },
-      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID },
+      { taskId: "hk_1", title: "Hackit: 会場・日程確定", startsAt: "2026-08-01T00:00:00Z", endsAt: "2026-08-20T00:00:00Z", progressPercent: 100, assigneeId: ME_ID, teamId: "team_ops" },
+      { taskId: "hk_2", title: "Hackit: 協賛・賞品調整", startsAt: "2026-08-10T00:00:00Z", endsAt: "2026-09-05T00:00:00Z", progressPercent: 50, assigneeId: "usr_bob", teamId: "team_ops" },
+      { taskId: "hk_3", title: "Hackit: 募集LP・告知", startsAt: "2026-08-15T00:00:00Z", endsAt: "2026-09-10T00:00:00Z", progressPercent: 30, assigneeId: ME_ID, teamId: "team_dev" },
+      { taskId: "hk_4", title: "Hackit: 当日運営・審査", startsAt: "2026-09-20T00:00:00Z", endsAt: "2026-09-21T00:00:00Z", progressPercent: 0, assigneeId: ME_ID, teamId: "team_hq" },
     ],
     dependencies: [
       { id: "hk_1->hk_4", fromTaskId: "hk_1", toTaskId: "hk_4", type: "FS", lagDays: 0 },
@@ -291,11 +327,63 @@ function ganttViewFor(eventId: string): gantt.GanttViewState {
   return GANTT_VIEWS[eventId]!;
 }
 
+// Shared event-detail-page section layout (D&D order/visibility of 重要リンク/連絡先/
+// 概要/... — see @dub/fe3-event-action's EventDetailsPanel). UNLIKE GANTT_VIEWS above
+// (in-memory, per-session only), this is localStorage-backed like the mail Sent/
+// thread-flags stores below — a demo reviewer reloading mid-review must still see
+// their reorder/hide hold. Version-locked with the SAME error code the real
+// event-service returns (EVENT_VERSION_CONFLICT) so the optimistic-mutation rollback
+// path is exercised identically to staging/prod.
+interface DemoSectionLayoutData {
+  order: string[];
+  hidden: string[];
+}
+interface DemoSectionLayout {
+  eventId: string;
+  data: DemoSectionLayoutData;
+  version: number;
+  updatedAt: string | null;
+}
+function sectionLayoutKey(eventId: string): string {
+  return `dub_demo_section_layout:${eventId}`;
+}
+function loadDemoSectionLayout(eventId: string): DemoSectionLayout {
+  try {
+    const raw = globalThis.localStorage?.getItem(sectionLayoutKey(eventId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DemoSectionLayout> & { data?: Partial<DemoSectionLayoutData> };
+      const order = Array.isArray(parsed.data?.order) ? parsed.data!.order.filter((x): x is string => typeof x === "string") : [];
+      const hidden = Array.isArray(parsed.data?.hidden) ? parsed.data!.hidden.filter((x): x is string => typeof x === "string") : [];
+      return {
+        eventId,
+        version: typeof parsed.version === "number" ? parsed.version : 0,
+        updatedAt: parsed.updatedAt ?? null,
+        data: { order, hidden },
+      };
+    }
+  } catch {
+    /* private mode / quota — fall through to the default layout */
+  }
+  return { eventId, data: { order: [], hidden: [] }, version: 0, updatedAt: null };
+}
+function saveDemoSectionLayout(next: DemoSectionLayout): void {
+  try {
+    globalThis.localStorage?.setItem(sectionLayoutKey(next.eventId), JSON.stringify(next));
+  } catch {
+    /* private mode / quota — non-fatal for the demo */
+  }
+}
+
 // ── notifications ─────────────────────────────────────────────────────────────
 const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
   { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
+  // チャット (chat.mention / chat.dm, via chat.message.created -> notification, in_app
+  // default-ON exception). resourceType "channel" deep-links into fe6-chat's own route
+  // (NotificationCard.itemLinkUrl -> /chat/channels/:id).
+  { id: "ntf_4", type: "chat.mention", title: "メンションされました", body: "#project-alpha でメンションされました。", readAt: null, createdAt: "2026-08-02T03:00:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
+  { id: "ntf_5", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんからダイレクトメッセージが届きました。", readAt: null, createdAt: "2026-08-02T02:45:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
 ];
 
 // audience='admin' notifications powering the Notification管理 screen
@@ -556,6 +644,55 @@ function createMailStore() {
     }
   }
 
+  // Scheduled sends (予約送信): persisted per account (localStorage), like Sent. The demo has
+  // no cron, so `sweepDue` SIMULATES the gateway drain — any parked row whose scheduledAt has
+  // passed is moved into Sent and dropped from the scheduled list. That lets a reviewer pick a
+  // near time and watch the mail move 予約済み → 送信済み on the next refresh.
+  const schedKey = (id: string): string => `dub_demo_scheduled_${id}`;
+  function scheduledOf(id: string): mail.ScheduledSendDetail[] {
+    try {
+      const raw = globalThis.localStorage?.getItem(schedKey(id));
+      return raw ? (JSON.parse(raw) as mail.ScheduledSendDetail[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveScheduled(id: string, list: mail.ScheduledSendDetail[]): void {
+    try {
+      globalThis.localStorage?.setItem(schedKey(id), JSON.stringify(list));
+    } catch {
+      /* storage unavailable — Scheduled is best-effort in the demo */
+    }
+  }
+  function sweepDue(accountId: string): void {
+    const list = scheduledOf(accountId);
+    if (list.length === 0) return;
+    const now = Date.now();
+    const due = list.filter((s) => s.status === "scheduled" && Date.parse(s.scheduledAt) <= now);
+    if (due.length === 0) return;
+    const acct = DEMO_ACCOUNTS.find((a) => a.id === accountId);
+    const sent = sentOf(accountId);
+    for (const s of due) {
+      const pmid = `<demo-${Date.now()}@developershub.jp>`;
+      sent.unshift({
+        id: `sent_demo_${Date.now().toString(36)}_${seq++}`,
+        from: s.from ?? (acct ? { email: acct.email, name: acct.displayName } : undefined),
+        to: s.to,
+        ...(s.cc && s.cc.length > 0 ? { cc: s.cc } : {}),
+        subject: s.subject,
+        snippet: s.snippet ?? firstLine(s.textBody),
+        sentAt: new Date().toISOString(),
+        provider: "resend",
+        providerMessageId: pmid,
+        status: "sent",
+        textBody: s.textBody,
+        ...(s.htmlBody ? { htmlBody: s.htmlBody } : {}),
+      } as mail.MailSentDetail);
+    }
+    saveSent(accountId, sent);
+    saveScheduled(accountId, list.filter((s) => !due.includes(s)));
+  }
+
   function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
@@ -570,6 +707,8 @@ function createMailStore() {
       }
     }
     const me = currentAccount();
+    // Simulate the gateway drain: promote any now-due parked sends into Sent before we read.
+    sweepDue(me.id);
     const outbox = sentOf(me.id);
     // Oversight (mail:read_all): the read views aggregate EVERY account's mail; personal
     // accounts stay scoped to their own. `readInbox` / `readSent` are the visible sets for
@@ -664,6 +803,83 @@ function createMailStore() {
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
     }
+
+    // ---- scheduled send (予約送信): park a future send + list/detail/edit/cancel. Scoped to
+    // the account (every account under oversight). Delivery is SIMULATED by sweepDue above.
+    if (method === "POST" && pathname === "/api/v1/mail/scheduled") {
+      const req = (body ?? {}) as Partial<mail.ScheduleMailRequest>;
+      const at = typeof req.scheduledAt === "string" ? Date.parse(req.scheduledAt) : NaN;
+      if (Number.isNaN(at) || at <= Date.now()) {
+        return json({ error: { code: "MAIL_INVALID_REQUEST", message: "scheduledAt must be in the future" } }, 400);
+      }
+      if (Array.isArray(req.attachments) && req.attachments.length > 0) {
+        return json({ error: { code: "MAIL_INVALID_REQUEST", message: "attachments are not supported on a scheduled send" } }, 400);
+      }
+      const id = `mailsch_demo_${Date.now().toString(36)}_${seq++}`;
+      const nowIso = new Date().toISOString();
+      const detail: mail.ScheduledSendDetail = {
+        id,
+        from: { email: me.email, name: me.displayName },
+        to: req.to ?? [],
+        ...(req.cc && req.cc.length > 0 ? { cc: req.cc } : {}),
+        subject: req.subject ?? "(件名なし)",
+        snippet: firstLine(req.textBody ?? ""),
+        scheduledAt: new Date(at).toISOString(),
+        createdAt: nowIso,
+        status: "scheduled",
+        ...(req.inReplyTo ? { inReplyTo: req.inReplyTo } : {}),
+        textBody: req.textBody ?? "",
+        ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
+      };
+      const list = scheduledOf(me.id);
+      list.unshift(detail);
+      saveScheduled(me.id, list);
+      return json({ id, scheduledAt: detail.scheduledAt, status: "scheduled" } satisfies mail.ScheduleMailResponse, 202);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/scheduled") {
+      const all = oversight ? DEMO_ACCOUNTS.flatMap((a) => { sweepDue(a.id); return scheduledOf(a.id); }) : scheduledOf(me.id);
+      const items: mail.ScheduledSendListItem[] = all
+        .filter((s) => s.status === "scheduled")
+        .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+        .map(({ textBody, htmlBody, ...li }) => {
+          void textBody;
+          void htmlBody;
+          return li;
+        });
+      return json(page(items));
+    }
+    {
+      const m = /^\/api\/v1\/mail\/scheduled\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const id = decodeURIComponent(m[1]!);
+        const list = scheduledOf(me.id);
+        const idx = list.findIndex((s) => s.id === id);
+        if (method === "GET") {
+          return idx >= 0 ? json(list[idx]!) : notFound(`GET ${pathname}`);
+        }
+        if (method === "PATCH") {
+          if (idx < 0) return notFound(`PATCH ${pathname}`);
+          if (list[idx]!.status !== "scheduled") return json({ error: { code: "MAIL_INVALID_REQUEST", message: "no longer editable" } }, 409);
+          const p = (body ?? {}) as Partial<mail.ScheduleMailPatch>;
+          const cur = list[idx]!;
+          if (p.to !== undefined) cur.to = p.to;
+          if (p.cc !== undefined) cur.cc = p.cc;
+          if (p.subject !== undefined) cur.subject = p.subject;
+          if (p.textBody !== undefined) { cur.textBody = p.textBody; cur.snippet = firstLine(p.textBody); }
+          if (p.htmlBody !== undefined) cur.htmlBody = p.htmlBody;
+          if (p.scheduledAt !== undefined) cur.scheduledAt = p.scheduledAt;
+          saveScheduled(me.id, list);
+          return json(cur);
+        }
+        if (method === "DELETE") {
+          if (idx < 0) return notFound(`DELETE ${pathname}`);
+          if (list[idx]!.status !== "scheduled") return json({ error: { code: "MAIL_INVALID_REQUEST", message: "no longer cancelable" } }, 409);
+          saveScheduled(me.id, list.filter((s) => s.id !== id));
+          return json({ id, status: "canceled" });
+        }
+      }
+    }
+
     // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
     // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
     if (method === "GET" && pathname === "/api/v1/mail/flags") {
@@ -896,7 +1112,14 @@ function createRosterStore() {
       if (pathname === "/api/v1/mail/status") {
         return json({ service: "mail-gateway", provider: "resend", rateLimit: { active: false, cooldownSec: 60 } });
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") return json(page(emails));
+      // 発行済み受信アドレス一覧（メール名簿の「発行済みアドレス」ダイアログ）。バックエンドの
+      // /issued-addresses（zone ルール由来）に合わせる。旧 /addresses（アカウント送信先）はもう
+      // フロントから呼ばれない。
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
+      // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
+      if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
+        return json({ items: emails.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })) });
+      }
       return null;
     }
 
@@ -937,7 +1160,7 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         return json(user);
       }
-      if (pathname === "/api/v1/mail/admin/email-routing/addresses") {
+      if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
         const localPart = req?.localPart?.trim().toLowerCase() ?? "";
         if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
@@ -976,7 +1199,7 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const addr = emails.find((a) => a.id === id);
           if (!addr) return problem("NOT_FOUND", "address not found", 404);
@@ -1023,7 +1246,7 @@ function createRosterStore() {
         }
       }
       {
-        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/addresses\/([^/]+)$/);
+        const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const idx = emails.findIndex((a) => a.id === id);
           if (idx >= 0) emails.splice(idx, 1);
@@ -1201,6 +1424,24 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // Shared section layout save — version-locked (see DemoSectionLayout above).
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
+    if (id && method === "PUT") {
+      const b = (body ?? {}) as { data?: Partial<DemoSectionLayoutData>; version?: number };
+      const current = loadDemoSectionLayout(id);
+      if (typeof b.version !== "number" || b.version !== current.version) {
+        const err: ErrorResponse = { error: { code: "EVENT_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      const order = Array.isArray(b.data?.order) ? b.data!.order.filter((x): x is string => typeof x === "string") : [];
+      const hidden = Array.isArray(b.data?.hidden) ? b.data!.hidden.filter((x): x is string => typeof x === "string") : [];
+      const next: DemoSectionLayout = { eventId: id, data: { order, hidden }, version: current.version + 1, updatedAt: isoNow() };
+      saveDemoSectionLayout(next);
+      return json(next);
+    }
+  }
+
   // events — edit (PATCH) + archive (DELETE). Mutates the in-memory seed so the demo
   // shows optimistic save → persisted reflection for name / schedule / description.
   {
@@ -1248,6 +1489,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         const found = Object.values(EVENT_ACTIONS).flat().find((a) => a.id === aid);
         return found ? json(found) : notFound(`GET ${pathname}`);
       }
+    }
+    {
+      const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
+      if (id) return json(loadDemoSectionLayout(id));
     }
     {
       const id = seg(/^\/api\/v1\/events\/([^/]+)$/);

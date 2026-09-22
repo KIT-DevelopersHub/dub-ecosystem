@@ -8,8 +8,8 @@ import { useState } from "react";
 import { Button, Icon, SkeletonLoader, Badge } from "@dub/ui";
 import type { IconName } from "@dub/ui";
 import type { common } from "@dub/types";
-import { useEventDetailsQuery } from "../hooks/useEventQueries";
-import { useSaveEventDetails } from "../hooks/useEventMutations";
+import { useEventDetailsQuery, useSectionLayoutQuery } from "../hooks/useEventQueries";
+import { useSaveEventDetails, useSaveSectionLayout } from "../hooks/useEventMutations";
 import {
   EMPTY_EVENT_DETAILS_DATA,
   emptyEventDetails,
@@ -21,7 +21,31 @@ import {
   type EventChecklistItem,
   type EventSponsor,
 } from "../api/detailsContracts";
+import { emptyEventSectionLayout } from "../api/sectionLayoutContracts";
+import { EventSectionEditableGroup } from "./EventSectionEditableGroup";
+import type { SectionMeta } from "../lib/sectionLayout";
 import styles from "./components.module.css";
+
+// Layout catalog for the 編集 (D&D) toggle — this panel owns it (mirrors HomeScreen
+// owning FE2's widget catalog); lib/sectionLayout.ts only holds the pure order/hide
+// rules. Groups are a width-uniform split of the visual headings below (see that
+// module's header comment for why 運営管理 / 記録・連絡 each host two groups).
+const SECTION_CATALOG: SectionMeta[] = [
+  { id: "overview", label: "概要", group: "overview" },
+  { id: "venue", label: "会場", group: "venueInfo" },
+  { id: "access", label: "アクセス", group: "venueInfo" },
+  { id: "capacity", label: "定員・参加予定", group: "venueInfo" },
+  { id: "belongings", label: "持ち物・服装", group: "venueInfo" },
+  { id: "schedule", label: "タイムテーブル", group: "dayOps" },
+  { id: "speakers", label: "登壇者・ゲスト", group: "dayOps" },
+  { id: "operations", label: "当日運営フロー", group: "dayOps" },
+  { id: "budget", label: "予算・収支メモ", group: "opsBudget" },
+  { id: "sponsors", label: "協賛・スポンサー", group: "opsWide" },
+  { id: "checklist", label: "準備チェックリスト", group: "opsWide" },
+  { id: "memo", label: "メモ", group: "recordMemo" },
+  { id: "links", label: "重要リンク", group: "recordNarrow" },
+  { id: "contacts", label: "連絡先", group: "recordNarrow" },
+];
 
 function Section({
   icon,
@@ -73,6 +97,26 @@ export function EventDetailsPanel({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EventDetailsData>(EMPTY_EVENT_DETAILS_DATA);
 
+  // Shared (event-scoped) section layout — order + hidden set of the sections below,
+  // editable only when canWrite (event:write role). A fetch failure or first-ever
+  // load both fall back to the default layout (catalog order, nothing hidden) so the
+  // sections themselves are never blocked by this independent query (mirrors the
+  // ⑤ 無限「読み込み中」 guard on the details query above).
+  const layoutQuery = useSectionLayoutQuery(eventId);
+  const saveLayout = useSaveSectionLayout(eventId);
+  const [layoutEditing, setLayoutEditing] = useState(false);
+  const layout = layoutQuery.data ?? emptyEventSectionLayout(eventId);
+
+  const commitOrder = (nextOrder: string[]) => {
+    saveLayout.mutate({ data: { order: nextOrder, hidden: layout.data.hidden }, version: layout.version });
+  };
+  const commitHidden = (id: string, hide: boolean) => {
+    const has = layout.data.hidden.includes(id);
+    if (hide === has) return;
+    const nextHidden = hide ? [...layout.data.hidden, id] : layout.data.hidden.filter((x) => x !== id);
+    saveLayout.mutate({ data: { order: layout.data.order, hidden: nextHidden }, version: layout.version });
+  };
+
   // Skeleton ONLY on the first, still-pending fetch. Never gate on `!data`: if the
   // details request fails (e.g. store not yet provisioned), react-query settles to
   // isError with data=undefined — the old `!data` guard then held the skeleton
@@ -114,8 +158,203 @@ export function EventDetailsPanel({
 
   // ---- read (view) mode ----
   if (!editing) {
+    // Every section rendered ONCE here, keyed by its SECTION_CATALOG id, so both the
+    // resting view and the layout 編集モード (EventSectionEditableGroup) share the
+    // exact same node — no duplicated JSX to drift.
+    const nodes: Record<string, React.ReactNode> = {
+      overview: (
+        <Section icon="info" title="概要" wide>
+          <TextBlock value={d.overview} placeholder="概要は未記入です。" />
+        </Section>
+      ),
+      venue: (
+        <Section icon="home" title="会場">
+          <TextBlock value={d.venue} placeholder="会場は未記入です。" />
+        </Section>
+      ),
+      access: (
+        <Section icon="pin" title="アクセス">
+          <TextBlock value={d.access} placeholder="アクセス（交通・最寄り駅・駐車場）は未記入です。" />
+        </Section>
+      ),
+      capacity: (
+        <Section icon="users" title="定員・参加予定">
+          <TextBlock value={d.capacity} placeholder="定員・参加予定人数は未記入です。" />
+        </Section>
+      ),
+      belongings: (
+        <Section icon="archive" title="持ち物・服装">
+          <TextBlock value={d.belongings} placeholder="持ち物・服装は未記入です。" />
+        </Section>
+      ),
+      schedule: (
+        <Section
+          icon="clock"
+          title="タイムテーブル"
+          count={d.schedule.length ? `${d.schedule.length}件` : undefined}
+          wide
+        >
+          {d.schedule.length === 0 ? (
+            <div className={styles.sectionEmpty}>タイムテーブルは未登録です。</div>
+          ) : (
+            <div data-testid="fe3-details-schedule">
+              {d.schedule.map((s, i) => (
+                <div className={styles.timeRow} key={i}>
+                  <div className={styles.timeSlot}>{s.time || "—"}</div>
+                  <div className={styles.timeMain}>
+                    <span className={styles.timeTitle}>{s.title || "（無題）"}</span>
+                    {s.note ? <span className={styles.timeNote}>{s.note}</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      ),
+      speakers: (
+        <Section
+          icon="megaphone"
+          title="登壇者・ゲスト"
+          count={d.speakers.length ? `${d.speakers.length}名` : undefined}
+          wide
+        >
+          {d.speakers.length === 0 ? (
+            <div className={styles.sectionEmpty}>登壇者は未登録です。</div>
+          ) : (
+            <div className={styles.recordList} data-testid="fe3-details-speakers">
+              {d.speakers.map((s, i) => (
+                <div className={styles.recordItem} key={i}>
+                  <div className={styles.recordTop}>
+                    <span className={styles.recordName}>{s.name || "（氏名未記入）"}</span>
+                    {s.role ? <Badge>{s.role}</Badge> : null}
+                  </div>
+                  {s.topic ? <span className={styles.recordSub}>{s.topic}</span> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      ),
+      operations: (
+        <Section icon="flag" title="当日運営フロー" wide>
+          <TextBlock value={d.operations} placeholder="当日運営フロー・担当は未記入です。" />
+        </Section>
+      ),
+      budget: (
+        <Section icon="file" title="予算・収支メモ">
+          <TextBlock value={d.budget} placeholder="予算・収支メモは未記入です。" />
+        </Section>
+      ),
+      sponsors: (
+        <Section
+          icon="shield"
+          title="協賛・スポンサー"
+          count={d.sponsors.length ? `${d.sponsors.length}社` : undefined}
+          wide
+        >
+          {d.sponsors.length === 0 ? (
+            <div className={styles.sectionEmpty}>協賛・スポンサーは未登録です。</div>
+          ) : (
+            <div className={styles.recordList} data-testid="fe3-details-sponsors">
+              {d.sponsors.map((s, i) => (
+                <div className={styles.recordItem} key={i}>
+                  <div className={styles.recordTop}>
+                    <span className={styles.recordName}>{s.name || "（社名未記入）"}</span>
+                    {s.tier ? <Badge>{s.tier}</Badge> : null}
+                    {s.status ? <span className={styles.recordSub}>{s.status}</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      ),
+      checklist: (
+        <Section
+          icon="check-square"
+          title="準備チェックリスト"
+          count={d.checklist.length ? `${doneCount}/${d.checklist.length}` : undefined}
+          wide
+        >
+          {d.checklist.length === 0 ? (
+            <div className={styles.sectionEmpty}>チェックリストは未登録です。</div>
+          ) : (
+            <div className={styles.checkList} data-testid="fe3-details-checklist">
+              {d.checklist.map((c, i) => (
+                <div
+                  className={c.done ? `${styles.checkItem} ${styles.checkItemDone}` : styles.checkItem}
+                  key={i}
+                >
+                  {c.done ? (
+                    <Icon name="check" className={`${styles.checkIcon} ${styles.checkIconDone}`} />
+                  ) : (
+                    <span className={styles.checkToggle} aria-hidden />
+                  )}
+                  <span>{c.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      ),
+      memo: (
+        <Section icon="edit" title="メモ" wide>
+          <TextBlock value={d.memo} placeholder="メモは未記入です。" />
+        </Section>
+      ),
+      links: (
+        <Section icon="external-link" title="重要リンク">
+          {d.links.length === 0 ? (
+            <div className={styles.sectionEmpty}>リンクは未登録です。</div>
+          ) : (
+            <div className={styles.linkList} data-testid="fe3-details-links">
+              {d.links.map((l, i) => (
+                <div className={styles.linkItem} key={i}>
+                  <Icon name="external-link" />
+                  <a href={l.url} target="_blank" rel="noreferrer noopener">
+                    {l.label || l.url}
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      ),
+      contacts: (
+        <Section icon="user" title="連絡先">
+          {d.contacts.length === 0 ? (
+            <div className={styles.sectionEmpty}>連絡先は未登録です。</div>
+          ) : (
+            <div className={styles.linkList} data-testid="fe3-details-contacts">
+              {d.contacts.map((c, i) => (
+                <div className={styles.kv} key={i}>
+                  <span className={styles.kvLabel}>{c.label || "—"}</span>
+                  <span>{c.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      ),
+    };
+
+    const editableGroup = (group: SectionMeta["group"], className: string | undefined, groupLabel: string) => (
+      <EventSectionEditableGroup
+        group={group}
+        catalog={SECTION_CATALOG}
+        order={layout.data.order}
+        hidden={layout.data.hidden}
+        nodes={nodes}
+        isEditing={layoutEditing}
+        className={className}
+        groupLabel={groupLabel}
+        onReorderGroup={commitOrder}
+        onSetHidden={commitHidden}
+      />
+    );
+
     return (
-      <div data-testid="fe3-details">
+      <div data-testid="fe3-details" data-layout-editing={layoutEditing || undefined}>
         <div className={styles.pageHeader}>
           <h2 className={styles.pageTitle}>イベント詳細</h2>
           <div className={styles.heroMeta}>
@@ -130,7 +369,7 @@ export function EventDetailsPanel({
             ) : (
               <Badge>未記入</Badge>
             )}
-            {canWrite ? (
+            {canWrite && !layoutEditing ? (
               <Button
                 iconLeft={<Icon name="edit" />}
                 variant="secondary"
@@ -140,166 +379,41 @@ export function EventDetailsPanel({
                 編集
               </Button>
             ) : null}
+            {canWrite ? (
+              <Button
+                iconLeft={<Icon name={layoutEditing ? "check" : "list"} />}
+                variant={layoutEditing ? "primary" : "secondary"}
+                onClick={() => setLayoutEditing((v) => !v)}
+                testId="fe3-layout-edit-toggle"
+              >
+                {layoutEditing ? "完了" : "並べ替え"}
+              </Button>
+            ) : null}
           </div>
         </div>
 
+        {layoutEditing ? (
+          <p className={styles.layoutEditHint} data-testid="fe3-layout-edit-hint">
+            セクションをドラッグ（またはハンドルを選んで矢印キー）で並べ替えられます。この並び順・表示設定は全員に共有されます。
+          </p>
+        ) : null}
+
         <div className={styles.detailGrid}>
-          <Section icon="info" title="概要" wide>
-            <TextBlock value={d.overview} placeholder="概要は未記入です。" />
-          </Section>
+          {editableGroup("overview", styles.sectionGroupColumn, "概要")}
 
           <GroupHeading>開催情報</GroupHeading>
-          <Section icon="home" title="会場">
-            <TextBlock value={d.venue} placeholder="会場は未記入です。" />
-          </Section>
-          <Section icon="pin" title="アクセス">
-            <TextBlock value={d.access} placeholder="アクセス（交通・最寄り駅・駐車場）は未記入です。" />
-          </Section>
-          <Section icon="users" title="定員・参加予定">
-            <TextBlock value={d.capacity} placeholder="定員・参加予定人数は未記入です。" />
-          </Section>
-          <Section icon="archive" title="持ち物・服装">
-            <TextBlock value={d.belongings} placeholder="持ち物・服装は未記入です。" />
-          </Section>
+          {editableGroup("venueInfo", styles.sectionGroupGrid, "開催情報")}
 
           <GroupHeading>当日運営</GroupHeading>
-          <Section
-            icon="clock"
-            title="タイムテーブル"
-            count={d.schedule.length ? `${d.schedule.length}件` : undefined}
-            wide
-          >
-            {d.schedule.length === 0 ? (
-              <div className={styles.sectionEmpty}>タイムテーブルは未登録です。</div>
-            ) : (
-              <div data-testid="fe3-details-schedule">
-                {d.schedule.map((s, i) => (
-                  <div className={styles.timeRow} key={i}>
-                    <div className={styles.timeSlot}>{s.time || "—"}</div>
-                    <div className={styles.timeMain}>
-                      <span className={styles.timeTitle}>{s.title || "（無題）"}</span>
-                      {s.note ? <span className={styles.timeNote}>{s.note}</span> : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
-
-          <Section
-            icon="megaphone"
-            title="登壇者・ゲスト"
-            count={d.speakers.length ? `${d.speakers.length}名` : undefined}
-            wide
-          >
-            {d.speakers.length === 0 ? (
-              <div className={styles.sectionEmpty}>登壇者は未登録です。</div>
-            ) : (
-              <div className={styles.recordList} data-testid="fe3-details-speakers">
-                {d.speakers.map((s, i) => (
-                  <div className={styles.recordItem} key={i}>
-                    <div className={styles.recordTop}>
-                      <span className={styles.recordName}>{s.name || "（氏名未記入）"}</span>
-                      {s.role ? <Badge>{s.role}</Badge> : null}
-                    </div>
-                    {s.topic ? <span className={styles.recordSub}>{s.topic}</span> : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
-
-          <Section icon="flag" title="当日運営フロー" wide>
-            <TextBlock value={d.operations} placeholder="当日運営フロー・担当は未記入です。" />
-          </Section>
+          {editableGroup("dayOps", styles.sectionGroupColumn, "当日運営")}
 
           <GroupHeading>運営管理</GroupHeading>
-          <Section icon="file" title="予算・収支メモ">
-            <TextBlock value={d.budget} placeholder="予算・収支メモは未記入です。" />
-          </Section>
-          <Section
-            icon="shield"
-            title="協賛・スポンサー"
-            count={d.sponsors.length ? `${d.sponsors.length}社` : undefined}
-            wide
-          >
-            {d.sponsors.length === 0 ? (
-              <div className={styles.sectionEmpty}>協賛・スポンサーは未登録です。</div>
-            ) : (
-              <div className={styles.recordList} data-testid="fe3-details-sponsors">
-                {d.sponsors.map((s, i) => (
-                  <div className={styles.recordItem} key={i}>
-                    <div className={styles.recordTop}>
-                      <span className={styles.recordName}>{s.name || "（社名未記入）"}</span>
-                      {s.tier ? <Badge>{s.tier}</Badge> : null}
-                      {s.status ? <span className={styles.recordSub}>{s.status}</span> : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
-          <Section
-            icon="check-square"
-            title="準備チェックリスト"
-            count={d.checklist.length ? `${doneCount}/${d.checklist.length}` : undefined}
-            wide
-          >
-            {d.checklist.length === 0 ? (
-              <div className={styles.sectionEmpty}>チェックリストは未登録です。</div>
-            ) : (
-              <div className={styles.checkList} data-testid="fe3-details-checklist">
-                {d.checklist.map((c, i) => (
-                  <div
-                    className={c.done ? `${styles.checkItem} ${styles.checkItemDone}` : styles.checkItem}
-                    key={i}
-                  >
-                    {c.done ? (
-                      <Icon name="check" className={`${styles.checkIcon} ${styles.checkIconDone}`} />
-                    ) : (
-                      <span className={styles.checkToggle} aria-hidden />
-                    )}
-                    <span>{c.label}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
+          {editableGroup("opsBudget", styles.sectionGroupGrid, "運営管理（予算）")}
+          {editableGroup("opsWide", styles.sectionGroupColumn, "運営管理（協賛・チェックリスト）")}
 
           <GroupHeading>記録・連絡</GroupHeading>
-          <Section icon="edit" title="メモ" wide>
-            <TextBlock value={d.memo} placeholder="メモは未記入です。" />
-          </Section>
-          <Section icon="external-link" title="重要リンク">
-            {d.links.length === 0 ? (
-              <div className={styles.sectionEmpty}>リンクは未登録です。</div>
-            ) : (
-              <div className={styles.linkList} data-testid="fe3-details-links">
-                {d.links.map((l, i) => (
-                  <div className={styles.linkItem} key={i}>
-                    <Icon name="external-link" />
-                    <a href={l.url} target="_blank" rel="noreferrer noopener">
-                      {l.label || l.url}
-                    </a>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
-          <Section icon="user" title="連絡先">
-            {d.contacts.length === 0 ? (
-              <div className={styles.sectionEmpty}>連絡先は未登録です。</div>
-            ) : (
-              <div className={styles.linkList} data-testid="fe3-details-contacts">
-                {d.contacts.map((c, i) => (
-                  <div className={styles.kv} key={i}>
-                    <span className={styles.kvLabel}>{c.label || "—"}</span>
-                    <span>{c.value}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
+          {editableGroup("recordMemo", styles.sectionGroupColumn, "記録・連絡（メモ）")}
+          {editableGroup("recordNarrow", styles.sectionGroupGrid, "記録・連絡（リンク・連絡先）")}
         </div>
       </div>
     );

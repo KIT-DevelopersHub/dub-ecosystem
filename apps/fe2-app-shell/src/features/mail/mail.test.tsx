@@ -222,6 +222,11 @@ function fullApi(over: Partial<MailApi> = {}): MailApi {
     downloadAttachment: vi.fn().mockResolvedValue(new Blob(["x"])),
     listFlags: vi.fn().mockResolvedValue([]),
     setFlags: vi.fn().mockResolvedValue({ threadId: "t", starred: false, archived: false, trashed: false, purged: false }),
+    schedule: vi.fn().mockResolvedValue({ id: "sch", scheduledAt: "2099-01-01T00:00:00.000Z", status: "scheduled" }),
+    listScheduled: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    getScheduled: vi.fn(),
+    updateScheduled: vi.fn(),
+    cancelScheduled: vi.fn().mockResolvedValue({ id: "sch", status: "canceled" }),
     ...over,
   };
 }

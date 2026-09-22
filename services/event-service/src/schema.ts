@@ -59,3 +59,23 @@ CREATE TABLE event_event_details (
 );
 `.trim(),
 };
+
+// Additive follow-up migration: the shared (org/event-scoped, not per-user) section
+// layout for the event detail page — which sections are shown/hidden and their
+// order. Kept in lockstep with infra/d1/migrations/event/0003_event_section_layout.sql
+// (guarded by schema-lockstep.test.ts, same as 0001/0002). A separate table (not a
+// field folded into event_event_details) so a layout reorder's optimistic version
+// lock never races a content edit's.
+export const EVENT_SECTION_LAYOUT_SCHEMA_MIGRATION: Migration = {
+  namespace: "event",
+  id: "0003_event_section_layout",
+  up: `
+CREATE TABLE event_event_section_layout (
+  event_id   TEXT PRIMARY KEY REFERENCES event_events(id),
+  data       TEXT NOT NULL,
+  version    INTEGER NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`.trim(),
+};

@@ -35,7 +35,12 @@ export const DEFAULT_PREFERENCES: PreferenceEntry[] = [
   { type: "event.*", channels: ["in_app", "push"] },
   { type: "system.announcement", channels: ["in_app"] }, // in_app forced, no push
   { type: "release", channels: ["in_app"] }, // release notes: in_app forced (new-feature 🎉)
-  // chat.* is intentionally absent -> chat inbox transcription off (test 18).
+  // chat.* stays absent (off) EXCEPT the two notification-worthy chat types below —
+  // @mention and DM default in_app ON (server-side exception, preferences.ts
+  // CHAT_IN_APP_DEFAULT_ON) so they surface even though the FE6 unread badge already
+  // covers plain channel messages (test 18 still holds: no entry enables the "chat" channel).
+  { type: "chat.mention", channels: ["in_app"] },
+  { type: "chat.dm", channels: ["in_app"] },
 ];
 
 export class MockApiError extends Error implements ApiError {
@@ -159,6 +164,17 @@ function seedItems(): InboxItem[] {
     mk(10, "member.participation.submitted", "新しい参加届: 山田 太郎", true, {
       type: "participation",
       id: "part_0001",
+    }),
+    // チャット (chat) category — fe6-chat @mention / DM, via chat.message.created.
+    // Seeded read so the default unread count is unchanged; resourceType "channel"
+    // deep-links into fe6-chat's own channel route (NotificationCard.itemLinkUrl).
+    mk(11, "chat.mention", "#project-alpha でメンションされました", true, {
+      type: "channel",
+      id: "chan_demo_alpha",
+    }),
+    mk(12, "chat.dm", "山田さんからダイレクトメッセージが届きました", true, {
+      type: "channel",
+      id: "chan_demo_dm_yamada",
     }),
   ];
 }

@@ -1,9 +1,10 @@
 // Worker bindings (wrangler.toml) + Hono per-request variables.
 // Deploy is out of scope for this unit; every Service Binding is contract-only.
-import type { D1Database, Fetcher, Queue } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, Fetcher, Queue } from "@cloudflare/workers-types";
 import type { AuthClient, AuthnContext } from "@dub/auth-client";
 import type { AuditRecordEnvelopeV1 } from "@dub/events";
 import type { RequestContext } from "@dub/http";
+import type { InboxRoom } from "./inbox-room-do";
 
 export interface Env {
   // --- data ---
@@ -30,6 +31,21 @@ export interface Env {
   SVC_MAIL_GATEWAY?: Fetcher; // POST /send (absent = EmailAdapter -> skipped)
   SVC_CHAT?: Fetcher; // POST /internal/system-messages (absent = ChatAdapter -> skipped)
   SVC_MOBILE_BFF?: Fetcher; // POST /internal/push/dispatch (absent = PushAdapter -> skipped)
+
+  // --- realtime (inbox WS push) ---
+  // Per-user InboxRoom Durable Object (SQLite-backed, free-tier). ingest signals a
+  // recipient's live sockets after an in_app row commits; absent -> realtime is a noop and
+  // the fe5 60s poller is the only path. DO-direct WS (gateway-bypassing) needs this
+  // worker's workers.dev subdomain enabled (see wrangler.free.toml).
+  INBOX_ROOM?: DurableObjectNamespace<InboxRoom>;
+  // HMAC secret the InboxRoom DO verifies ws-tickets with (Worker Secret in prod). Absent
+  // -> a dev-only fallback (must match the DO's) so `wrangler dev` works.
+  WS_TICKET_SECRET?: string;
+  // Absolute wss:// base for the ws-ticket doUrl; ":id" is replaced with the user id.
+  // Points at THIS worker's workers.dev subdomain (the DO is co-hosted here).
+  NOTIF_RT_DO_URL_BASE?: string;
+  // Comma-separated Origin allow-list enforced by the InboxRoom DO (browser clients).
+  NOTIF_RT_ALLOWED_ORIGINS?: string;
 }
 
 // Hono per-request variables.

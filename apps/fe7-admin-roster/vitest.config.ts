@@ -25,5 +25,13 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./test/setup.ts"],
     css: true,
+    // Real-timer component tests (userEvent typing + a 400ms debounced autosave
+    // asserted via waitFor) finish in <1s locally, but CI runs all ~48 packages'
+    // suites through `turbo run test` (default concurrency 10) on a 4-vCPU runner,
+    // so real-time waits can balloon past Vitest's 5000ms default and flake with
+    // "Test timed out in 5000ms". A wider budget keeps full coverage while still
+    // catching a genuine hang.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 });
