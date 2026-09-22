@@ -19,18 +19,25 @@ function multiline(text: string) {
   ));
 }
 
-export function Apply({ data }: { data: ApplyConfig }) {
+export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
   const plabel = data.participant.cta.label.replace(/\n/g, "");
   const slabel = data.speaker.cta.label.replace(/\n/g, "");
 
   return (
     <section id="apply" className="section apply">
       <div className="container">
-        <Reveal as="h2" className="section-title">
-          {data.heading}
-        </Reveal>
+        <div className="section-head section-head--center">
+          {index && (
+            <Reveal as="span" className="section-index" variant="fade">
+              {index}
+            </Reveal>
+          )}
+          <Reveal as="h2" className="section-title" variant="up" delay={80}>
+            {data.heading}
+          </Reveal>
+        </div>
         <div className="apply-grid">
-          <Reveal className="apply-text apply-cell--ptext">
+          <Reveal className="apply-text apply-cell--ptext" variant="up">
             <p className="apply-title apply-title--participant">
               {data.participant.title}
               <span className="chev">≫</span>
@@ -38,7 +45,7 @@ export function Apply({ data }: { data: ApplyConfig }) {
             <p className="apply-body">{data.participant.body}</p>
           </Reveal>
 
-          <Reveal as="span" className="apply-cell--pimg" delay={0.08}>
+          <Reveal as="span" className="apply-cell--pimg" variant="up" delay={90}>
             <a
               className="apply-card apply-card--participant"
               href={data.participant.cta.href}
@@ -60,7 +67,7 @@ export function Apply({ data }: { data: ApplyConfig }) {
             </a>
           </Reveal>
 
-          <Reveal as="span" className="apply-cell--simg" delay={0.16}>
+          <Reveal as="span" className="apply-cell--simg" variant="up" delay={180}>
             <a
               className="apply-card apply-card--speaker"
               href={data.speaker.cta.href}
@@ -82,7 +89,7 @@ export function Apply({ data }: { data: ApplyConfig }) {
             </a>
           </Reveal>
 
-          <Reveal className="apply-text apply-cell--stext" delay={0.24}>
+          <Reveal className="apply-text apply-cell--stext" variant="up" delay={270}>
             <p className="apply-title apply-title--speaker">
               <span className="chev">≪</span>
               {data.speaker.title}

@@ -164,6 +164,7 @@ img { max-width: 100%; height: auto; display: block; }
   height: 5px;
   z-index: 100;
   transform-origin: 0 50%;
+  transform: scaleX(0);
   background: linear-gradient(90deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
   box-shadow: 0 1px 10px rgba(47, 97, 214, 0.55);
   will-change: transform;
@@ -185,6 +186,12 @@ img { max-width: 100%; height: auto; display: block; }
     linear-gradient(158deg, #0f2f8f 0%, #1e3fa8 46%, #0e6f8f 100%);
   pointer-events: none;
   will-change: opacity, transform, filter;
+  /* pure-CSS recede (framer-motion removed) — holds, then fades+scales+blurs out */
+  animation: entrance-recede 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes entrance-recede {
+  0%, 40% { opacity: 1; transform: scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: scale(1.12); filter: blur(8px); }
 }
 /* expanding shockwave ring — the visual pulse of the burst */
 .lp-entrance-wave {
@@ -200,6 +207,12 @@ img { max-width: 100%; height: auto; display: block; }
     0 0 60px rgba(255, 255, 255, 0.35),
     inset 0 0 60px rgba(23, 184, 146, 0.4);
   will-change: transform, opacity;
+  transform: scale(0);
+  animation: entrance-wave 1.25s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+}
+@keyframes entrance-wave {
+  0% { transform: scale(0); opacity: 0.55; }
+  100% { transform: scale(1); opacity: 0; }
 }
 .lp-entrance-mark {
   position: relative;
@@ -211,6 +224,12 @@ img { max-width: 100%; height: auto; display: block; }
   color: rgba(255, 255, 255, 0.92);
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.25);
   will-change: transform, opacity;
+  animation: entrance-mark 1.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes entrance-mark {
+  0% { opacity: 0; transform: scale(0.72); }
+  22%, 42% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.06); }
 }
 
 /* ============================================================
@@ -404,11 +423,35 @@ img { max-width: 100%; height: auto; display: block; }
 .reveal--haze {
   --p: 0;
   transition: none;
-  opacity: clamp(0.66, calc(0.66 + (var(--p) - var(--reveal-delay, 0)) * 1.7), 1);
-  transform: translateY(
-    calc((1 - clamp(0, calc((var(--p) - var(--reveal-delay, 0)) * 2.4), 1)) * 6px)
-  );
+  opacity: clamp(0.6, calc(0.6 + var(--p) * 1.7), 1);
+  transform: translateY(calc((1 - clamp(0, calc(var(--p) * 2.4), 1)) * 10px));
 }
+
+/* One-shot reveals (up / fade / wipe / rise-lg) — the primary editorial motion.
+   Default (no .is-armed) = fully visible: SSG / no-JS / reduced-motion / already
+   in view never hide. JS adds .is-armed (hidden initial) only to below-fold
+   elements, then .is-in when they scroll in → a confident fade + lift/wipe.
+   GPU-composited (opacity/transform/clip-path only). --reveal-delay staggers
+   groups. */
+.reveal--up.is-armed,
+.reveal--fade.is-armed,
+.reveal--wipe.is-armed,
+.reveal--rise-lg.is-armed {
+  will-change: opacity, transform;
+  transition:
+    opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+    clip-path 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+.reveal--up.is-armed { opacity: 0; transform: translateY(34px); }
+.reveal--up.is-in { opacity: 1; transform: none; }
+.reveal--fade.is-armed { opacity: 0; }
+.reveal--fade.is-in { opacity: 1; }
+.reveal--rise-lg.is-armed { opacity: 0; transform: translateY(64px); }
+.reveal--rise-lg.is-in { opacity: 1; transform: none; }
+.reveal--wipe.is-armed { opacity: 0; clip-path: inset(0 100% 0 0); }
+.reveal--wipe.is-in { opacity: 1; clip-path: inset(0 0 0 0); }
 
 .hero-copy {
   position: relative;
@@ -1297,6 +1340,342 @@ img { max-width: 100%; height: auto; display: block; }
 .footer-links a:hover { color: var(--lp-blue-deep); text-decoration: underline; }
 
 /* ============================================================
+   goodpatch-style rebuild layer
+   Sticky header · numbered section heads · full-height editorial
+   hero · larger rhythm & type. Same brand palette & content.
+   ============================================================ */
+
+/* ---- Sticky site header ---- */
+.site-head {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  transition: background-color 0.35s ease, box-shadow 0.35s ease,
+    backdrop-filter 0.35s ease, border-color 0.35s ease;
+  border-bottom: 1px solid transparent;
+}
+.site-head.is-scrolled {
+  background: rgba(247, 250, 255, 0.82);
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border-bottom-color: var(--lp-border-soft);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, var(--shadow-sm);
+}
+.site-head-inner {
+  max-width: 1440px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: clamp(0.85rem, 1.8vw, 1.25rem) clamp(1.15rem, 4vw, 2.5rem);
+  transition: padding 0.35s ease;
+}
+.site-head.is-scrolled .site-head-inner {
+  padding-block: clamp(0.6rem, 1.2vw, 0.85rem);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-decoration: none;
+  color: var(--lp-heading);
+}
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  flex: 0 0 auto;
+  background: linear-gradient(135deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
+  box-shadow: 0 6px 16px -6px rgba(47, 97, 214, 0.6);
+  position: relative;
+}
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+}
+.brand-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  line-height: 1;
+}
+.brand-name-en {
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-size: clamp(0.74rem, 1.1vw, 0.9rem);
+  color: var(--lp-heading);
+}
+.brand-name-yr {
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 700;
+  font-size: 0.72rem;
+  color: var(--lp-teal);
+}
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.5rem, 1.6vw, 1.4rem);
+}
+.site-nav-list {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.3rem, 1.2vw, 1rem);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.site-nav-list a {
+  position: relative;
+  display: inline-block;
+  color: var(--lp-heading);
+  text-decoration: none;
+  font-size: clamp(0.78rem, 1vw, 0.9rem);
+  font-weight: 600;
+  padding: 0.35rem 0.35rem;
+  white-space: nowrap;
+}
+.site-nav-list a::after {
+  content: "";
+  position: absolute;
+  left: 0.35rem;
+  right: 0.35rem;
+  bottom: -0.1rem;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--lp-blue), var(--lp-teal));
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.site-nav-list a:hover::after,
+.site-nav-list a:focus-visible::after { transform: scaleX(1); }
+.site-head-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.15rem;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: clamp(0.8rem, 1vw, 0.9rem);
+  text-decoration: none;
+  color: #fff;
+  background: linear-gradient(120deg, #2f61d6 0%, #2b78bd 100%);
+  box-shadow: 0 10px 22px -8px rgba(47, 97, 214, 0.5);
+  white-space: nowrap;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease;
+}
+.site-head-cta .arrow { transition: transform 0.22s ease; }
+.site-head-cta:hover { transform: translateY(-2px); box-shadow: 0 16px 28px -8px rgba(47, 97, 214, 0.55); }
+.site-head-cta:hover .arrow { transform: translateX(3px); }
+.site-nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--lp-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+.site-nav-toggle span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  margin-inline: auto;
+  border-radius: 2px;
+  background: var(--lp-heading);
+  transition: transform 0.28s ease, opacity 0.2s ease;
+}
+.site-head.is-open .site-nav-toggle span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.site-head.is-open .site-nav-toggle span:nth-child(2) { opacity: 0; }
+.site-head.is-open .site-nav-toggle span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+@media (max-width: 860px) {
+  .site-nav-toggle { display: flex; }
+  .site-head { background: rgba(247, 250, 255, 0.9); backdrop-filter: saturate(160%) blur(14px); -webkit-backdrop-filter: saturate(160%) blur(14px); border-bottom-color: var(--lp-border-soft); }
+  .site-nav {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+    padding: 0.75rem clamp(1.15rem, 4vw, 2.5rem) 1.25rem;
+    background: rgba(247, 250, 255, 0.97);
+    backdrop-filter: saturate(160%) blur(14px);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    border-bottom: 1px solid var(--lp-border-soft);
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-8px);
+    transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+  }
+  .site-head.is-open .site-nav { opacity: 1; visibility: visible; transform: translateY(0); }
+  .site-nav-list { flex-direction: column; align-items: stretch; gap: 0; }
+  .site-nav-list a { padding: 0.7rem 0.35rem; border-bottom: 1px solid var(--lp-border-soft); }
+  .site-nav-list a::after { display: none; }
+  .site-head-cta { justify-content: center; margin-top: 0.6rem; }
+}
+
+/* ---- Section heads with numbered eyebrow ---- */
+.section-head {
+  margin: 0 0 clamp(2rem, 4.5vw, 3.25rem);
+}
+.section-head--center { text-align: center; }
+.section-index {
+  display: inline-block;
+  font-family: var(--font-inter), sans-serif;
+  font-size: clamp(0.85rem, 1.6vw, 1.05rem);
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  margin: 0 0 0.85rem;
+  color: transparent;
+  background: linear-gradient(120deg, var(--lp-blue), var(--lp-teal));
+  -webkit-background-clip: text;
+  background-clip: text;
+  position: relative;
+  padding-left: 3.2rem;
+}
+.section-index::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2.4rem;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--lp-blue), var(--lp-teal));
+}
+.section-head--center .section-index { padding-left: 0; }
+.section-head--center .section-index::before { display: none; }
+
+/* left-aligned, larger editorial section titles */
+.section .section-title {
+  text-align: left;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.18;
+  margin: 0;
+}
+.section-head--center .section-title { text-align: center; }
+.section-head--center .section-title::after {
+  content: "";
+  display: block;
+  width: 60px;
+  height: 4px;
+  margin: 1.1rem auto 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--lp-blue), var(--lp-teal));
+}
+.section-head .section-lead {
+  text-align: left;
+  margin: 1.1rem 0 0;
+  max-width: 56ch;
+}
+.section-head--center .section-lead { text-align: center; margin-inline: auto; }
+
+/* larger section rhythm (more negative space) */
+.section { padding-block: clamp(4.5rem, 10vw, 8.5rem); }
+
+/* ---- Full-height editorial hero ---- */
+.hero {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  padding-top: clamp(5rem, 10vh, 8rem);
+}
+.hero-body {
+  width: 100%;
+  min-height: 0;
+  padding-block: clamp(2rem, 6vh, 5rem);
+}
+.hero-copy { max-width: min(64rem, 82%); }
+.hero-visual {
+  right: clamp(-4rem, -2vw, 2rem);
+  top: 42%;
+  width: clamp(340px, 46%, 620px);
+  opacity: 0.9;
+}
+.hero-title { margin-bottom: clamp(1.4rem, 3vw, 2.2rem); }
+.hero-title-line { font-size: clamp(2.8rem, 9vw, 7.5rem); }
+/* scroll cue */
+.hero-scroll {
+  position: absolute;
+  left: clamp(1.15rem, 5vw, 3.25rem);
+  bottom: clamp(1.5rem, 4vh, 2.75rem);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  z-index: 2;
+}
+.hero-scroll-label {
+  font-family: var(--font-inter), sans-serif;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  color: var(--lp-blue-deep);
+  writing-mode: vertical-rl;
+}
+.hero-scroll-line {
+  width: 1px;
+  height: 56px;
+  background: linear-gradient(180deg, var(--lp-blue), transparent);
+  position: relative;
+  overflow: hidden;
+}
+.hero-scroll-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 40%;
+  background: var(--lp-teal);
+  animation: scroll-cue 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes scroll-cue {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(250%); }
+}
+@media (max-width: 860px) {
+  .hero-copy { max-width: 100%; }
+  .hero-scroll { display: none; }
+}
+
+/* ---- Catch band — oversized bridging statement ---- */
+.catch { padding-block: clamp(4rem, 9vw, 7rem); }
+.catch-heading { font-size: clamp(1.9rem, 5vw, 3.4rem); line-height: 1.35; }
+
+/* ---- Crowdfunding — focused panel ---- */
+.crowd-panel {
+  max-width: 860px;
+  margin-inline: auto;
+  text-align: center;
+  padding: clamp(2.5rem, 6vw, 4.5rem) clamp(1.5rem, 5vw, 3.5rem);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(47, 97, 214, 0.08), transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, var(--lp-surface-alt) 100%);
+  border: 1px solid var(--lp-border-soft);
+  box-shadow: var(--shadow-lg);
+}
+.crowd-panel .section-head { margin-bottom: 0; }
+
+/* ============================================================
    Reduced motion
    ============================================================ */
 @media (prefers-reduced-motion: reduce) {
@@ -1323,7 +1702,10 @@ img { max-width: 100%; height: auto; display: block; }
   .hero-cta:hover,
   .hero-cta:focus-visible,
   .about-line:hover,
-  .program-card:hover { transform: none; }
+  .program-card:hover,
+  .site-head-cta:hover { transform: none; }
+  .hero-scroll-line::after { animation: none !important; }
+  .lp-entrance-wave, .lp-entrance-mark { animation: none !important; }
   /* Entrance / reveal: never leave anything hidden under reduced motion. */
   .hero-eyebrow,
   .hero-title,
@@ -1331,7 +1713,11 @@ img { max-width: 100%; height: auto; display: block; }
   .hero-ctas,
   .hero-visual,
   .reveal,
-  .reveal--haze {
+  .reveal--haze,
+  .reveal--up.is-armed,
+  .reveal--fade.is-armed,
+  .reveal--wipe.is-armed,
+  .reveal--rise-lg.is-armed {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

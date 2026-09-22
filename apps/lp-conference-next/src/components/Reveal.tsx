@@ -2,50 +2,50 @@
 
 import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
 
-// Reveal — 「下から立ち上がる」＋「蜃気楼(haze)」演出を SSG-safe かつ
-//   「既定 visible・足すだけ」で足す。
+// Reveal — scroll-in reveal engine for the goodpatch-style rebuild.
 //
-// ★ framer-motion は使わず、素の要素＋IntersectionObserver＋rAF で実装（軽量・GPU 合成）。
+// Two families of motion, both SSG-safe and "default-visible / add-only":
+//   • variant "up" | "fade" | "wipe" | "rise-lg"  — a clean ONE-SHOT reveal
+//       (fade + lift, or a left→right clip wipe) fired once when the element
+//       scrolls into view. This is the primary, editorial goodpatch feel:
+//       generous, confident, staggered.
+//   • variant "haze"  — the v3/v2.2 "蜃気楼" position-linked fade kept alive:
+//       the element's live viewport position is written to --p every frame and
+//       CSS softens opacity/translateY continuously so lower content stays
+//       gently hazed and sharpens as it rises. Used sparingly where the drifting
+//       quality suits the new layout.
 //
-// ★ 蜃気楼(v3 から移植): 一度切りのフェードではなく、要素の“ビューポート内位置”を
-//   連続値 --p(0=画面下端 → 1=画面上端) として毎フレーム書き込む。CSS 側(.reveal--haze)が
-//   --p に応じて opacity/translateY を連続変化させる。→ 画面下の方にある間は薄くかすみ、
-//   せり上がるほど鮮明になる。動きは transform/opacity のみ。
+// ★ 白画面事故の再発防止（最重要）:
+//   1) SSG / hydrate 前 / prefers-reduced-motion / IO 非対応 → 素の要素（常に可視）。
+//   2) client でも既定は可視。マウント時に「ビューポート下端より下（まだ見えていない）」
+//      要素にだけ初期の隠し状態(.is-armed)を付ける。既に見えている物は絶対に触らない。
+//   3) 安全網: 一定時間後は必ず可視化する（opacity:0 に固定され続ける構造を排除）。
 //
-// ★ 既知バグ回避（最重要 / Astro 版で About・クラファン・応募・お問い合わせが
-//   opacity:0 のまま真っ白になった事故の再発防止）:
-//   1) サーバー(SSG)・hydrate 前・reduced-motion では素の要素をそのまま描画（常に可視）。
-//   2) client でも「既定は可視」。マウント時にビューポート下端より下にある要素だけを
-//      haze 対象にして下からせり上げる（＝すでに見えている物は絶対に触らない）。
-//   3) IntersectionObserver / rAF 非対応なら隠さない（可視のまま）。
-//   4) 安全タイマー: 何があっても一定時間後に必ず可視化する（--p=1 に固定・永久に
-//      opacity:0 で固定されることが構造上あり得ない）。
-//   これにより「reveal 未発火でも必ず見える」を満たす。
+// framer-motion は一切使わない（軽量・GPU 合成 = opacity/transform/clip-path のみ）。
 
-type RevealTag = "div" | "section" | "p" | "li" | "ul" | "h2" | "h3" | "span";
-// static = 素描画（すでに見えている / 非対応 / reduced-motion）。
-// haze  = 位置連動の蜃気楼フェード対象（--p を毎フレーム更新）。
-type Phase = "static" | "haze";
+type RevealTag =
+  | "div" | "section" | "p" | "li" | "ul" | "h2" | "h3" | "span" | "a";
+type Variant = "up" | "fade" | "wipe" | "rise-lg" | "haze";
 
 export interface RevealProps {
   children: ReactNode;
   className?: string;
-  /** 立ち上がりの遅延（グループ内で少しずつずらす）。 */
+  /** 立ち上がりの遅延（グループ内で少しずつずらす）。ms。 */
   delay?: number;
-  /** レンダリングする要素タグ（意味づけ・CSS セレクタ維持のため）。 */
+  /** モーションの種類。既定は "up"（下からのクリーンなリフト）。 */
+  variant?: Variant;
   as?: RevealTag;
   id?: string;
   role?: string;
+  href?: string;
   "aria-label"?: string;
 }
 
 // これ以上「下」にある要素だけを最初に隠す（見えている物は隠さない）。
-const BELOW_FOLD_RATIO = 0.92;
+const BELOW_FOLD_RATIO = 0.86;
 // 安全網: この時間を過ぎたら reveal の発火有無に関わらず必ず可視化。
-const SAFETY_MS = 4000;
+const SAFETY_MS = 4200;
 
-// prefers-reduced-motion を JS で検出（framer-motion の useReducedMotion 代替）。
-// SSR/初回は false（＝素描画は下の !mounted 分岐が担保）、マウント後に実値を反映。
 function usePrefersReducedMotion(): boolean {
   const [reduce, setReduce] = useState(false);
   useEffect(() => {
@@ -63,13 +63,13 @@ export function Reveal({
   children,
   className,
   delay = 0,
+  variant = "up",
   as = "div",
   ...rest
 }: RevealProps) {
   const reduce = usePrefersReducedMotion();
   const ref = useRef<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [phase, setPhase] = useState<Phase>("static");
 
   useEffect(() => {
     setMounted(true);
@@ -88,84 +88,111 @@ export function Reveal({
 
     const rect = el.getBoundingClientRect();
     const belowFold = rect.top > window.innerHeight * BELOW_FOLD_RATIO;
-    if (!belowFold) return; // 既に見えている / 画面内 → 触らない（チラつき無し）
+    if (!belowFold) return; // すでに見えている / 画面内 → 触らない（チラつき無し）
 
-    // haze 化。まず現在位置の --p を即時反映してから class を付ける（下端付近なら --p≈0）。
-    const writeP = () => {
-      const r = el.getBoundingClientRect();
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      const center = r.top + r.height / 2;
-      // center: vh(下端)→0, 0(上端)→1
-      let p = 1 - center / vh;
-      if (p < 0) p = 0;
-      else if (p > 1) p = 1;
-      el.style.setProperty("--p", p.toFixed(4));
-    };
-    writeP();
-    setPhase("haze");
-
-    let active = false;
-    let raf = 0;
-    let done = false;
-    const compute = () => {
-      raf = 0;
+    // ---- haze: 位置連動フェード ----
+    if (variant === "haze") {
+      const writeP = () => {
+        const r = el.getBoundingClientRect();
+        const vh = window.innerHeight || document.documentElement.clientHeight;
+        const center = r.top + r.height / 2;
+        let p = 1 - center / vh; // vh(下端)→0, 0(上端)→1
+        if (p < 0) p = 0;
+        else if (p > 1) p = 1;
+        el.style.setProperty("--p", p.toFixed(4));
+      };
       writeP();
-    };
-    const onScroll = () => {
-      if (raf || done) return;
-      raf = window.requestAnimationFrame(compute);
-    };
+      el.classList.add("reveal--haze");
 
+      let active = false;
+      let raf = 0;
+      let done = false;
+      const compute = () => {
+        raf = 0;
+        writeP();
+      };
+      const onScroll = () => {
+        if (raf || done) return;
+        raf = window.requestAnimationFrame(compute);
+      };
+      const io = new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) {
+            if (done) return;
+            if (e.isIntersecting) {
+              if (!active) {
+                active = true;
+                window.addEventListener("scroll", onScroll, { passive: true });
+                window.addEventListener("resize", onScroll, { passive: true });
+              }
+              compute();
+            } else if (active) {
+              active = false;
+              window.removeEventListener("scroll", onScroll);
+              window.removeEventListener("resize", onScroll);
+            }
+          }
+        },
+        { threshold: 0 },
+      );
+      io.observe(el);
+      const timer = window.setTimeout(() => {
+        done = true;
+        el.style.setProperty("--p", "1");
+        if (raf) window.cancelAnimationFrame(raf);
+        io.disconnect();
+        window.removeEventListener("scroll", onScroll);
+        window.removeEventListener("resize", onScroll);
+      }, SAFETY_MS);
+      return () => {
+        done = true;
+        io.disconnect();
+        window.removeEventListener("scroll", onScroll);
+        window.removeEventListener("resize", onScroll);
+        if (raf) window.cancelAnimationFrame(raf);
+        window.clearTimeout(timer);
+      };
+    }
+
+    // ---- one-shot reveal (up / fade / wipe / rise-lg) ----
+    // まず隠し初期状態を付与し、交差したら .is-in で最終状態へトランジション。
+    el.classList.add("is-armed");
+    let done = false;
+    const reveal = () => {
+      if (done) return;
+      done = true;
+      el.classList.add("is-in");
+    };
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
-          if (done) return;
           if (e.isIntersecting) {
-            if (!active) {
-              active = true;
-              window.addEventListener("scroll", onScroll, { passive: true });
-              window.addEventListener("resize", onScroll, { passive: true });
-            }
-            compute();
-          } else if (active) {
-            active = false;
-            window.removeEventListener("scroll", onScroll);
-            window.removeEventListener("resize", onScroll);
+            reveal();
+            io.disconnect();
           }
         }
       },
-      { threshold: 0, rootMargin: "0px 0px 0px 0px" },
+      { threshold: 0.12, rootMargin: "0px 0px -8% 0px" },
     );
     io.observe(el);
-
-    // 安全網: 一定時間後は必ず可視化して以後 --p を固定（隠しっぱなし構造を排除）。
+    // 安全網: 一定時間後は必ず可視化。
     const timer = window.setTimeout(() => {
-      done = true;
-      el.style.setProperty("--p", "1");
-      if (raf) window.cancelAnimationFrame(raf);
+      reveal();
       io.disconnect();
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
     }, SAFETY_MS);
-
     return () => {
       done = true;
       io.disconnect();
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      if (raf) window.cancelAnimationFrame(raf);
       window.clearTimeout(timer);
     };
-  }, [reduce]);
+  }, [reduce, variant]);
 
   // SSG / hydrate 前 / reduced-motion → 素の要素（常に可視）。
   if (!mounted || reduce) {
     return createElement(as, { className, ...rest }, children);
   }
 
-  // client（通常モーション）→ 下端より下の要素だけ .reveal--haze を付け、
-  // --p(位置) 連動で下からかすみ上がらせる。静止(既視)要素は素のまま可視。
-  const cls = [className, "reveal", phase === "haze" ? "reveal--haze" : ""]
+  const cls = [className, "reveal", `reveal--${variant}`]
     .filter(Boolean)
     .join(" ");
 
@@ -174,11 +201,9 @@ export function Reveal({
     {
       ref,
       className: cls,
-      // delay はグループ内のずらし（--p のしきい値を少しずらす）。
-      style:
-        phase === "haze" && delay
-          ? ({ ["--reveal-delay" as string]: delay } as Record<string, string | number>)
-          : undefined,
+      style: delay
+        ? ({ ["--reveal-delay" as string]: `${delay}ms` } as Record<string, string>)
+        : undefined,
       ...rest,
     },
     children,

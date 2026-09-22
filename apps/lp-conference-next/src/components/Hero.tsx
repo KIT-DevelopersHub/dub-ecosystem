@@ -1,44 +1,27 @@
-import type { HeroConfig, NavLink } from "@/config/types";
+import type { HeroConfig } from "@/config/types";
 
-// Hero (TOP). All copy is real text (h1 / p / a) for select/copy/translate/SEO.
-// The right-side visual is an original, on-brand abstract "connection network"
-// (nodes = engineers meeting) drawn as inline SVG with the brand gradient — no
-// stock photography / people, no third-party IP.
+// Hero (TOP) — full-height editorial opener. All copy is real text (h1 / p / a)
+// for select/copy/translate/SEO. The ambient right/back visual is an original,
+// on-brand abstract "connection network" (nodes = engineers meeting) drawn as
+// inline SVG with the brand gradient — no stock photography / people, no
+// third-party IP.
 //
-// Entrance motion is now PURE CSS (see globals.css `hero-rise` / `hero-wipe` /
-// `hero-pop` keyframes on .hero-eyebrow/.hero-title/.hero-meta/.hero-ctas/
-// .hero-visual): eyebrow → title wipe → date/venue chips → CTA buttons → visual
-// fade. This drops the framer-motion runtime (~124 KB chunk) from the client
-// bundle so the hero ships zero animation JS, yet the sequence is identical and
-// GPU-composited (opacity/transform/clip-path only). Because it is CSS:
-//   • SSG / JS-off — the animation still plays and ends fully visible.
-//   • prefers-reduced-motion — the global reduce block collapses it to instant
-//     visible (no opacity:0 lock), matching the old reduced-motion behavior.
-// With no hooks left, Hero is a server component (no "use client").
-
-export function Hero({ data, nav }: { data: HeroConfig; nav: NavLink[] }) {
+// Entrance motion is PURE CSS (see globals.css `hero-rise` / `hero-wipe` /
+// `hero-pop` keyframes): eyebrow → title wipe → date/venue chips → CTA buttons →
+// visual fade → scroll cue. No animation JS ships. Under prefers-reduced-motion
+// the global reduce block collapses it to instant-visible (no opacity:0 lock).
+// With no hooks, Hero is a server component.
+export function Hero({ data }: { data: HeroConfig }) {
   const oneLine = (s: string) => s.replace(/\n/g, "");
 
   return (
     <section id="top" className="hero">
-      {/* nav (real text links) */}
-      <nav className="hero-nav" aria-label="グローバルナビ">
-        <ul className="hero-nav-list">
-          {nav.map((l) => (
-            <li key={l.href}>
-              <a href={l.href}>{l.label}</a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      {/* ambient original connection graphic (decorative, sits behind copy) */}
+      <div className="hero-visual" aria-hidden="true">
+        <HeroNetwork />
+      </div>
 
       <div className="hero-body">
-        {/* right: original abstract connection graphic (decorative) */}
-        <div className="hero-visual" aria-hidden="true">
-          <HeroNetwork />
-        </div>
-
-        {/* left: real-text copy */}
         <div className="hero-copy">
           <span className="hero-eyebrow">HOKURIKU IT CONFERENCE 2027</span>
 
@@ -85,6 +68,12 @@ export function Hero({ data, nav }: { data: HeroConfig; nav: NavLink[] }) {
           </div>
         </div>
       </div>
+
+      {/* scroll cue */}
+      <a className="hero-scroll" href="#about" aria-label="下へスクロール">
+        <span className="hero-scroll-label">SCROLL</span>
+        <span className="hero-scroll-line" aria-hidden="true" />
+      </a>
     </section>
   );
 }
@@ -107,12 +96,7 @@ function HeroNetwork() {
     [3, 5], [4, 6], [4, 7], [5, 7], [7, 6],
   ];
   return (
-    <svg
-      className="hero-net"
-      viewBox="0 0 420 360"
-      role="presentation"
-      focusable="false"
-    >
+    <svg className="hero-net" viewBox="0 0 420 360" role="presentation" focusable="false">
       <defs>
         <linearGradient id="netGrad" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#2f61d6" />
@@ -125,13 +109,7 @@ function HeroNetwork() {
       </defs>
       <g stroke="url(#netGrad)" strokeWidth="1.6" strokeOpacity="0.5">
         {edges.map(([a, b], i) => (
-          <line
-            key={i}
-            x1={nodes[a].cx}
-            y1={nodes[a].cy}
-            x2={nodes[b].cx}
-            y2={nodes[b].cy}
-          />
+          <line key={i} x1={nodes[a].cx} y1={nodes[a].cy} x2={nodes[b].cx} y2={nodes[b].cy} />
         ))}
       </g>
       <g>

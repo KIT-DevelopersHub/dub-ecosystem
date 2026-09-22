@@ -9,7 +9,7 @@ import type { ProgramConfig } from "@/config/types";
 // Program — 横スクロールのカード列。先頭のみ写真＋社名、以降は空白カード。
 // マウスホイール（縦→横に変換）／ポインタ ドラッグで横スクロールできる（正典と同挙動）。
 // 端では通常のページスクロールへ委譲。ドラッグ直後の誤クリックは抑止。
-export function Program({ data }: { data: ProgramConfig }) {
+export function Program({ data, index }: { data: ProgramConfig; index?: string }) {
   const railRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export function Program({ data }: { data: ProgramConfig }) {
   }, []);
 
   return (
-    <ProgramInner data={data} railRef={railRef} />
+    <ProgramInner data={data} railRef={railRef} index={index} />
   );
 }
 
@@ -123,19 +123,28 @@ function pillarIcon(i: number) {
 function ProgramInner({
   data,
   railRef,
+  index,
 }: {
   data: ProgramConfig;
   railRef: React.RefObject<HTMLDivElement>;
+  index?: string;
 }) {
   return (
-    <section id="program" className="section program section-center">
+    <section id="program" className="section program">
       <div className="container">
-        <Reveal as="h2" className="section-title">
-          {data.heading}
-        </Reveal>
-        <Reveal as="p" className="section-lead" delay={0.08}>
-          {renderEmphasis(data.note)}
-        </Reveal>
+        <div className="section-head">
+          {index && (
+            <Reveal as="span" className="section-index" variant="fade">
+              {index}
+            </Reveal>
+          )}
+          <Reveal as="h2" className="section-title" variant="up" delay={80}>
+            {data.heading}
+          </Reveal>
+          <Reveal as="p" className="section-lead" variant="up" delay={160}>
+            {renderEmphasis(data.note)}
+          </Reveal>
+        </div>
       </div>
       <div
         className="program-rail"
@@ -144,7 +153,8 @@ function ProgramInner({
         aria-label="プログラム枠"
       >
         {data.items.map((item, i) => (
-          <article className="program-card" role="listitem" key={i}>
+          <Reveal className="program-card-io" variant="up" delay={110 * i} key={i} role="listitem">
+          <article className="program-card">
             {item.photo ? (
               <Image
                 className="program-card-photo"
@@ -166,6 +176,7 @@ function ProgramInner({
               </div>
             )}
           </article>
+          </Reveal>
         ))}
       </div>
     </section>

@@ -1,6 +1,8 @@
 import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
 import { Entrance } from "@/components/Entrance";
+import { ScrollProgress } from "@/components/ScrollProgress";
+import { Header } from "@/components/Header";
 import { Hero } from "@/components/Hero";
 import { Catch } from "@/components/Catch";
 import { About } from "@/components/About";
@@ -14,22 +16,24 @@ import { Footer } from "@/components/Footer";
 // The page reads the snapshot READ-ONLY at build time; it never calls internal
 // services / admin APIs live (承認済み設計の核).
 //
-// セクション順は構成案（全体モックアップ）に準拠:
-//   TOP(hero) → キャッチ帯 → とは？ → プログラム内容(横スクロール)
-//   → クラウドファンディング → 応募フォーム → お問い合わせ → フッター。
+// goodpatch-style rebuild — same content, elevated editorial composition:
+//   sticky header → full-height hero → キャッチ → 01 とは？ → 02 プログラム(横)
+//   → 03 クラウドファンディング → 04 応募 → 05 お問い合わせ → フッター。
 const config = snapshot as LpConfig;
 
 export default function Page() {
   return (
     <>
       <Entrance />
-      <Hero data={config.hero} nav={config.nav} />
+      <ScrollProgress />
+      <Header nav={config.nav} cta={config.hero.primaryCta} />
+      <Hero data={config.hero} />
       <Catch data={config.catch} />
-      <About data={config.about} />
-      <Program data={config.program} />
-      <Crowdfunding data={config.crowdfunding} />
-      <Apply data={config.apply} />
-      <Contact data={config.contact} />
+      <About data={config.about} index="01" />
+      <Program data={config.program} index="02" />
+      <Crowdfunding data={config.crowdfunding} index="03" />
+      <Apply data={config.apply} index="04" />
+      <Contact data={config.contact} index="05" />
       <Footer data={config.footer} />
     </>
   );
