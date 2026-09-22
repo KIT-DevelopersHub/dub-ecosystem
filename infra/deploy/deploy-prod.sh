@@ -104,14 +104,15 @@ deploy drive-proxy     services/drive-proxy/wrangler.free.toml
 # drive-share-service binds only SVC_IDENTITY (step 1); api-gateway binds it (SVC_DRIVE_SHARE,
 # step 4), so it lands before the gateway. Owns a driveshare_* namespace on shared dub-core D1.
 deploy drive-share-service services/drive-share-service/wrangler.free.toml
+# member-service (運営メンバー管理) binds only SVC_IDENTITY (step 1), but chat-service now binds
+# IT (SVC_MEMBER = チーム単位メンションの展開) and api-gateway binds it too (step 4) — so it must
+# land BEFORE chat-service: binding a Worker that does not exist yet fails the deploy (CF 10143).
+deploy member-service  services/member-service/wrangler.free.toml
 deploy chat-service    services/chat-service/wrangler.free.toml
 deploy mail-gateway    services/mail-gateway/wrangler.free.toml
 deploy deploy-service  services/deploy-service/wrangler.free.toml
 deploy github-sync     services/github-sync/wrangler.free.toml
 deploy audit-log       services/audit-log/wrangler.free.toml
-# member-service (運営メンバー管理) binds only SVC_IDENTITY (step 1); no cross-binding with the
-# rest of this tier. api-gateway binds it (SVC_MEMBER, step 4), so it lands before the gateway.
-deploy member-service  services/member-service/wrangler.free.toml
 # usage-meter binds SVC_IDENTITY (step 1) + SVC_NOTIFICATION/SVC_MAIL_GATEWAY (above), and is
 # itself bound by api-gateway (SVC_USAGE_METER, step 4) — so it lands last in this tier, after
 # its own upstreams exist and before the gateway that binds it. SQLite-DO alarm, no cron slot.
