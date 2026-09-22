@@ -17,7 +17,7 @@ export function Contact({
   siteUrl?: string;
 }) {
   const instagramUrl = "https://www.instagram.com/developershub.conference/";
-  const xUrl = "https://x.com/cda_kit";
+  const xUrl = "https://x.com/DevelopersHubPR";
   return (
     <section id="contact" className="section getintouch">
       <div className="container">
