@@ -2879,3 +2879,246 @@ img { max-width: 100%; height: auto; display: block; }
   color: #cfe0ff;
   text-shadow: 0 1px 18px rgba(10, 20, 60, 0.6);
 }
+
+/* ============================================================
+   v3.2 — 受付未開始の disabled 表示 / SNS ボタン / プログラムのダイアログ
+   ============================================================ */
+
+/* --- <button> として描画される CTA の素リセット（a と同じ見た目に揃える） --- */
+button.hero-cta,
+button.site-head-cta,
+.prow--btn {
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* --- Hero CTA disabled（既存の .hero-cta.is-disabled を button 用に補強） --- */
+.hero-cta.is-disabled {
+  gap: 0.6rem;
+}
+.hero-cta.is-disabled .hero-cta-badge {
+  color: var(--lp-ink);
+}
+
+/* --- Header CTA disabled --- */
+.site-head-cta.is-disabled {
+  cursor: not-allowed;
+  color: var(--lp-ink-soft);
+  background: var(--lp-surface-muted, #eef0f3);
+  border: 1px solid var(--lp-border);
+  box-shadow: none;
+}
+.site-head-cta.is-disabled:hover { transform: none; box-shadow: none; }
+.site-head-cta-badge {
+  font-size: 0.72em;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--lp-ink-soft);
+  background: rgba(16, 28, 168, 0.08);
+  border-radius: 999px;
+  padding: 0.14em 0.6em;
+}
+
+/* --- Apply service card disabled --- */
+.svc-card-link.is-disabled {
+  cursor: not-allowed;
+  background: linear-gradient(180deg, #fbfcfe 0%, #eef1f6 100%);
+  filter: grayscale(0.25);
+}
+.svc-card-link.is-disabled:hover,
+.svc-card-link.is-disabled:focus-visible {
+  transform: none;
+  box-shadow: var(--shadow-md);
+  border-color: var(--lp-border-soft);
+}
+.svc-card-link.is-disabled .svc-icon { filter: grayscale(0.55); opacity: 0.85; }
+.svc-card-link.is-disabled:hover .svc-icon { transform: none; }
+.svc-card-cta--disabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  color: var(--lp-ink-soft) !important;
+}
+.svc-card-badge {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 800;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: linear-gradient(120deg, #7c8698 0%, #59616f 100%);
+  border-radius: 999px;
+  padding: 0.4em 1em;
+}
+.svc-card-soon {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--lp-ink-mute);
+}
+
+/* --- Contact: JOIN disabled + SNS ボタン --- */
+.git-btn.is-disabled {
+  cursor: not-allowed;
+  background: var(--lp-surface-muted, #eef0f3) !important;
+  border-color: var(--lp-border) !important;
+  box-shadow: none;
+}
+.git-btn.is-disabled .git-btn-en { color: var(--lp-ink-mute); }
+.git-btn.is-disabled .git-btn-jp { color: var(--lp-ink-soft); }
+.git-btn-badge {
+  position: absolute;
+  right: 1.1rem; top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--lp-ink-soft);
+  background: rgba(16, 28, 168, 0.08);
+  border-radius: 999px;
+  padding: 0.24em 0.7em;
+}
+.git-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lp-blue-deep);
+  margin-bottom: 0.1rem;
+}
+
+/* --- Program の行を button 化（見た目は .prow のまま・全幅クリック可） --- */
+.prow--btn {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  color: inherit;
+  cursor: pointer;
+}
+.prow--btn:focus-visible { outline-offset: -3px; }
+
+/* ---- Program ダイアログ（native <dialog>） ---- */
+.prog-dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  max-width: min(92vw, 520px);
+  width: 100%;
+  color: var(--lp-ink);
+  overflow: visible;
+}
+.prog-dialog::backdrop {
+  background: rgba(9, 16, 44, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.prog-dialog[open] { animation: prog-dialog-in 0.34s cubic-bezier(0.22, 1, 0.36, 1); }
+.prog-dialog[open]::backdrop { animation: prog-backdrop-in 0.3s ease; }
+@keyframes prog-dialog-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes prog-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+.prog-dialog-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: clamp(1.75rem, 5vw, 2.5rem);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, #ffffff 0%, var(--lp-surface-alt) 100%);
+  border: 1px solid var(--lp-border-soft);
+  box-shadow: var(--shadow-xl);
+}
+.prog-dialog-close {
+  position: absolute;
+  top: 0.9rem; right: 0.9rem;
+  display: grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--lp-border);
+  background: #fff;
+  color: var(--lp-ink-soft);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+.prog-dialog-close:hover { background: var(--lp-surface-alt); color: var(--lp-ink); transform: rotate(90deg); }
+.prog-dialog-icon {
+  display: grid;
+  place-items: center;
+  width: 62px; height: 62px;
+  border-radius: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
+  box-shadow: 0 12px 24px -8px rgba(47, 97, 214, 0.5);
+}
+.prog-dialog-eyebrow {
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  font-size: 0.72rem;
+  color: var(--lp-teal);
+}
+.prog-dialog-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.6rem, 5vw, 2.2rem);
+  color: var(--lp-heading);
+  line-height: 1.1;
+}
+.prog-dialog-note {
+  margin: 0;
+  color: var(--lp-ink-soft);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+.prog-dialog-status {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 1.1rem 1.2rem;
+  border-radius: var(--radius-lg);
+  border: 1px dashed rgba(47, 97, 214, 0.3);
+  background: linear-gradient(135deg, rgba(47, 97, 214, 0.06), rgba(23, 184, 146, 0.06));
+}
+.prog-dialog-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 800;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+  color: var(--lp-blue-deep);
+  background: #fff;
+  border: 1px solid var(--lp-border);
+  border-radius: 999px;
+  padding: 0.3em 0.9em;
+}
+.prog-dialog-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--lp-teal);
+  box-shadow: 0 0 0 0 rgba(23, 184, 146, 0.5);
+  animation: prog-dot-pulse 1.8s ease-out infinite;
+}
+@keyframes prog-dot-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(23, 184, 146, 0.5); }
+  70%  { box-shadow: 0 0 0 7px rgba(23, 184, 146, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(23, 184, 146, 0); }
+}
+.prog-dialog-status-text {
+  margin: 0.7rem 0 0;
+  color: var(--lp-ink-soft);
+  font-size: 0.95rem;
+  line-height: 1.75;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prog-dialog[open],
+  .prog-dialog[open]::backdrop { animation: none; }
+  .prog-dialog-dot { animation: none; }
+  .prog-dialog-close:hover { transform: none; }
+}
