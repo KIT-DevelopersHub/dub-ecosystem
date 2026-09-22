@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "f4bb53b0",
-  "branch": "feat/calendar-app",
+  "deployedSha": "3034bbd3",
+  "branch": "staging/furigana-roster-integ",
   "actor": "Kota",
-  "markers": ["fe2-calendar", "calendar-view-toggle"],
+  "markers": ["各リーダーの下に配下メンバーをぶら下げて", "members-orgchart"],
   "live": true,
-  "verifiedAt": "2026-09-22T06:21:49Z",
-  "updatedAt": "2026-09-22T06:21:49Z",
-  "note": "カレンダーアプリ(共有タスクを月/週表示)"
+  "verifiedAt": "2026-09-22T05:14:19Z",
+  "updatedAt": "2026-09-22T05:14:19Z",
+  "note": "組織図: leaderId親子ツリーで配下を明示"
 }
