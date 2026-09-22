@@ -6,7 +6,7 @@ import type { common, identity, member } from "@dub/types";
 import type { MiddlewareHandler, Context } from "hono";
 
 export type MemberStatus = member.MemberStatus;
-export const MEMBER_STATUSES = ["added", "invited", "considering", "declined"] as const;
+export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
 
 // ---- internal persistence rows (superset of the wire types) ----
 export interface TeamRow {
@@ -30,6 +30,9 @@ export interface PersonRow {
   grade: string | null;
   /** Linked identity-roster account (identity userId), or null when unlinked. */
   identityUserId: string | null;
+  /** 配下につくリーダーの member id（＝上長）。null は直属リーダー無し。組織図の親子関係
+   *  と名簿の組織図順ソートに使う（0010 additive column）。 */
+  leaderId: string | null;
   contact: string | null;
   schoolEmail: string | null;
   gmail: string | null;

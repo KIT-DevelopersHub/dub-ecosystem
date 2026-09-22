@@ -15,10 +15,17 @@ import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
+import { hasStatusBadge } from "./memberStatus.ts";
 
 /** 氏名ローマ字を "Last First" で合成 (アルファベットのメール発行の確認用). */
 function romajiName(m: OrgMember): string {
   const parts = [m.lastNameRomaji, m.firstNameRomaji].filter((x): x is string => !!x && x.trim().length > 0);
+  return parts.length > 0 ? parts.join(" ") : "—";
+}
+
+/** フリガナ(読み仮名)を "せい めい" で合成. 未入力なら "—"。 */
+function kanaName(m: OrgMember): string {
+  const parts = [m.lastNameKana, m.firstNameKana].filter((x): x is string => !!x && x.trim().length > 0);
   return parts.length > 0 ? parts.join(" ") : "—";
 }
 
@@ -46,6 +53,7 @@ export function ListView({
   members,
   teamsById,
   accountLabels,
+  leaderNames,
   onEdit,
   onDelete,
   onLink,
@@ -55,6 +63,8 @@ export function ListView({
   teamsById: Map<string, MemberTeam>;
   /** identity userId -> display label (email/name) for the linked-account column. */
   accountLabels: Map<string, string>;
+  /** member id -> 氏名: リーダー列で leaderId を氏名表示する。省略時は列を出さない。 */
+  leaderNames?: Map<string, string>;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
   onLink: (m: OrgMember) => void;
@@ -62,11 +72,25 @@ export function ListView({
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
+    { key: "nameKana", header: "フリガナ", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={kanaName(m)} max="12rem" /> },
     { key: "nameRomaji", header: "氏名（ローマ字）", minWidth: "11rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={romajiName(m)} max="14rem" /> },
     { key: "department", header: "学科", minWidth: "7rem", noWrap: true, defaultHidden: true, cell: (m) => m.department ?? "—" },
     { key: "grade", header: "学年", minWidth: "5rem", noWrap: true, defaultHidden: true, cell: (m) => m.grade ?? "—" },
     { key: "role", header: "担当・役割", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.roleTitle ?? "—"} max="12rem" /> },
-    { key: "status", header: "ステータス", minWidth: "7rem", noWrap: true, cell: (m) => <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> },
+    ...(leaderNames
+      ? [
+          {
+            key: "leader",
+            header: "リーダー",
+            minWidth: "8rem",
+            noWrap: true,
+            cell: (m: OrgMember) => (
+              <Truncate text={m.leaderId ? leaderNames.get(m.leaderId) ?? "—" : "—"} max="10rem" />
+            ),
+          } as ColumnDef<OrgMember>,
+        ]
+      : []),
+    { key: "status", header: "ステータス", minWidth: "7rem", noWrap: true, cell: (m) => (hasStatusBadge(m.status) ? <MemberStatusBadge status={m.status} testId={`members-status-${m.id}`} /> : <span data-testid={`members-status-${m.id}`}>—</span>) },
     {
       key: "account",
       header: "developershub.jpメール",

@@ -1,27 +1,17 @@
-// Status pill for 運営メンバー. Maps each invite/participation status to a JP label +
-// a colored @dub/ui Badge tone (token-driven, dark-mode-safe). Mirrors fe7's
-// UserStatusBadge pattern.
-import { Badge, type BadgeTone } from "@dub/ui";
+// Status pill for 運営メンバー. 表示ラベル/トーンは memberStatus.ts(単一の真実)に集約し、
+// raw な MemberStatus を「打診中 / 休み中 / 辞退」に畳んで見せる。通常メンバー(added)は
+// バッジを出さない(「在籍中」バッジは廃止)。ラベル文言を変えるときは memberStatus.ts の
+// MEMBER_STATUS_LABEL だけを直せば全画面へ反映される。
+import { Badge } from "@dub/ui";
 import type { MemberStatus } from "./contracts.ts";
+import { hasStatusBadge, statusLabel, statusTone } from "./memberStatus.ts";
 
-const TONE: Record<MemberStatus, BadgeTone> = {
-  added: "success",
-  invited: "warning",
-  considering: "info",
-  declined: "danger",
-};
-
-export const STATUS_LABEL: Record<MemberStatus, string> = {
-  added: "追加済",
-  invited: "招待中",
-  considering: "検討中",
-  declined: "辞退",
-};
-
-export function MemberStatusBadge({ status, testId }: { status: MemberStatus; testId?: string }): JSX.Element {
+export function MemberStatusBadge({ status, testId }: { status: MemberStatus; testId?: string }): JSX.Element | null {
+  // 通常メンバー(added)はバッジ無し。打診中/休み中/辞退のみバッジで区別する。
+  if (!hasStatusBadge(status)) return null;
   return (
-    <Badge tone={TONE[status]} testId={testId}>
-      {STATUS_LABEL[status]}
+    <Badge tone={statusTone(status)} testId={testId}>
+      {statusLabel(status)}
     </Badge>
   );
 }
