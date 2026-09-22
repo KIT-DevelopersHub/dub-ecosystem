@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-team-mention",
+  "worker": "dub-demo-chat-team-mention",
+  "url": "https://dub-demo-chat-team-mention.developershub-site.workers.dev",
+  "deployedSha": "671436ac",
+  "branch": "feat/chat-team-mention",
+  "actor": "kota",
+  "markers": ["fe6-team-mention","チーム全員に通知"],
+  "live": true,
+  "verifiedAt": "2026-09-22T13:05:44Z",
+  "updatedAt": "2026-09-22T13:05:44Z",
+  "note": "チーム単位メンション (統括チーム/法人チーム)"
+}
