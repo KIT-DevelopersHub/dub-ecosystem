@@ -23,6 +23,7 @@ import type {
   SearchHit,
   SearchMessagesRequest,
   TeamSummary,
+  UnfurlPreview,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -30,6 +31,7 @@ import type {
 import type { ChatApiClient, MentionTeams } from "./client";
 import { ChatApiError } from "./client";
 import { toggleReactionLocal } from "../store/timeline";
+import { mockUnfurl } from "../lib/unfurl-mock";
 
 const now = (): common.ISODateTime => new Date().toISOString();
 
@@ -352,5 +354,14 @@ export class MockChatClient implements ChatApiClient {
 
   async listMentionTeams(): Promise<MentionTeams> {
     return this.settle({ teams: this.teams.map((t) => ({ ...t })), myTeamIds: [...this.myTeamIds] });
+  }
+
+  async unfurl(url: string): Promise<UnfurlPreview | null> {
+    // Parity with HttpChatClient: best-effort, never rejects (a primed nextError -> no card).
+    try {
+      return await this.settle(mockUnfurl(url));
+    } catch {
+      return null;
+    }
   }
 }

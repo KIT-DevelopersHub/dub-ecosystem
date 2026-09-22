@@ -313,4 +313,52 @@ const enter = useEnterToSubmit(send);        // Enter=送信 / Shift+Enter=改�
 - [ ] `aria-label` / `label`+`htmlFor` / フォーカスリングを満たすか
 - [ ] Enter で送信/確定する自作テキスト入力は `useEnterToSubmit` / `isImeComposing` を通したか（§6.1・変換確定 Enter で誤送信しない）
 - [ ] `testId` を既存から変えていないか
+- [ ] **モバイル/WebView 対応**（§9）を満たすか — 横スクロールを起こさない・入力欄が
+      キーボードに隠れない・タップ領域 44px・フォーム 16px（iOS ズーム回避）
 - [ ] `typecheck` 緑 / 単体テスト緑（重い実ブラウザ E2E は別工程）
+
+## 9. モバイル / WebView 対応（必読）
+
+Dub は管理 SPA（fe2 シェル）を **モバイルの WebView でも綺麗に使える**ことを前提にする。
+基盤の対策は共有層（`@dub/ui` = fe1・fe2 `global.css`）に入っているので、**新規画面は原則
+それに乗るだけでよい**。以下は「壊さないための規約」＋「基盤が何をしているか」。
+
+### 9.1 やってはいけない / 必ずやる
+
+- **横スクロールを絶対に起こさない。** `body` は `overflow-x: hidden` で保険を張ってあるが、
+  幅の広い中身（表・ガント・コードブロック・固定 px 幅の箱）は**その要素自身を
+  `overflow-x: auto` のラッパで包む**。ページ本体を横に流さない。表は `DataTable`
+  （既に `overflow-x:auto`）を使えば自動で満たす。
+- **固定 px 幅を置かない。** `width: 620px` のような固定幅は 390px 画面を割る。`max-width` +
+  `width:100%` か、`overflow-x:auto` ラッパの中だけに閉じ込める。
+- **フォーム系コントロールは 16px 未満にしない**（iOS は 16px 未満の入力にフォーカスすると
+  自動ズームする）。`@dub/ui` の入力・ボタン・`AppLauncher` 検索・チャット composer は
+  `@media (pointer: coarse)` で 16px に引き上げ済み。**自作の `input/textarea/select`
+  （特に inline `style` の `fontSize`）を 14px で置かない** — 置くなら coarse で 16px に上げる。
+- **タップ領域は 44px 以上**（Apple HIG / WCAG 2.5.5）。`@dub/ui Button` は coarse で
+  `min-height:44px`（アイコンボタンは 44×44）を満たす。自作の当たり判定もこれに合わせる。
+- **hover だけで出す UI を作らない**（タッチには hover が無い）。ホバーで初めて現れる操作は
+  `@media (pointer: coarse)` で常時表示にするか、常に見える affordance にする。
+- **フルハイトは `100vh` を使わない。** モバイルの URL バー/キーボードで破綻する。
+  `min-height: var(--dub-app-height, 100dvh)`（`100vh` はフォールバックとして併記）を使う。
+
+### 9.2 基盤が提供しているもの（新規実装で再発明しない）
+
+- **ビューポート meta**: 各 `index.html` に `viewport-fit=cover`（セーフエリア有効化）と
+  `interactive-widget=resizes-content`（Android でキーボード表示時にレイアウトを縮める）。
+- **セーフエリア**: シェルのヘッダ/コンテンツ・ログイン・FAB・モーダル/ランチャーのシート下端が
+  `env(safe-area-inset-*)` を尊重（ノッチ/ホームインジケータを避ける）。edge-to-edge 前提。
+- **キーボード追従**: `useVisualViewportHeight`（fe2 `AppRoot` で常時マウント）が
+  `--dub-app-height` に visualViewport の高さを流し込む → シェル/チャットがキーボードの
+  **上**に収まる（iOS で composer がキーボードに隠れない）。フルハイト面はこの変数を使う。
+- **モーダル/ランチャー**: `@media (max-width: 640px)` で Modal は下からのフルスクリーン
+  シート、AppLauncher は下からのボトムシート（`dvh` + safe-area + ドラッグハンドル）になる。
+- **タッチ base**: `body` に `-webkit-tap-highlight-color: transparent`、`html` に
+  `overscroll-behavior-y: none`（プルリフレッシュ暴発防止）、操作要素に
+  `touch-action: manipulation`（300ms タップ遅延/ダブルタップズーム除去）。
+
+### 9.3 実測（確認前に必ず）
+
+- モバイル幅（例 **390×844**）の実ブラウザで、主要画面が**横スクロールしない**ことを見る。
+- **キーボードを出した状態**で、入力欄と送信ボタンが**隠れない**ことを見る（チャット/メール/フォーム）。
+- demo は `pnpm deploy:demo:feature` → `pnpm verify:live demo "<marker>"` PASS を経てから URL を渡す。

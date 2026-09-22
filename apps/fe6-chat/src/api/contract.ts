@@ -187,3 +187,18 @@ export interface SearchMessagesRequest {
   channelId?: common.ChannelId; // scope to one channel; omit = workspace-wide
   limit?: number;
 }
+
+// GET /unfurl?url= — Slack-style link preview (OGP) resolved server-side
+// (chat-service unfurl.ts: SSRF-guarded fetch + 1-day cache). `preview: null` means
+// "nothing presentable" (no OGP/title, fetch failed, host blocked) — render no card.
+export interface UnfurlPreview {
+  url: string; // final (post-redirect) URL
+  siteName: string | null;
+  title: string | null;
+  description: string | null;
+  imageUrl: string | null;
+}
+export interface UnfurlResponse {
+  url: string;
+  preview: UnfurlPreview | null;
+}

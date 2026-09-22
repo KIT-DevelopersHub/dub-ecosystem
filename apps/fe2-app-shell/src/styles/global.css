@@ -7,6 +7,13 @@
  * light/dark and future token retuning flow through automatically.
  */
 
+/* Build stamp for the mobile-WebView spacing/scroll polish pass. Custom-property
+   values survive CSS minification, so this is a reliable liveness marker to grep
+   for in the served bundle (verify:live). Bump the suffix on future polish passes. */
+:root {
+  --dub-mobile-polish: "mob-polish-v2-spacing";
+}
+
 /* ---- reset ---------------------------------------------------------------- */
 *,
 *::before,
@@ -25,6 +32,47 @@ html {
   text-size-adjust: 100%;
 }
 
+/* ---- mobile / touch base (WebView-friendly) ------------------------------ */
+html,
+body {
+  height: 100%;
+}
+html {
+  /* Stop WebView pull-to-refresh / overscroll chaining from bouncing the SPA. */
+  overscroll-behavior-y: none;
+}
+body {
+  /* A stray wide child must never scroll the whole page sideways on a phone.
+     `clip` (not `hidden`) clips without making body a scroll container, so the
+     sticky shell header keeps working. */
+  overflow-x: clip;
+  /* Drop the grey tap flash on iOS/Android; components own their :active feedback. */
+  -webkit-tap-highlight-color: transparent;
+}
+/* Kill the 300ms tap delay + double-tap zoom on interactive controls only (text
+   stays selectable and content pinch-zoom still works). */
+button,
+a,
+[role="button"],
+label,
+summary,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+/* iOS auto-zooms when a focused control's font-size < 16px. On touch pointers force
+   every form control to >=16px so focus never triggers a zoom; fine pointers (desktop)
+   keep the design system's compact sizes. Safety net — component modules also carry
+   this so higher-specificity control classes are covered. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1rem);
+  }
+}
+
 body {
   font-family: var(--dub-font-family-sans);
   font-size: var(--dub-font-size-md);
@@ -37,7 +85,8 @@ body {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback for browsers without dvh */
+  min-height: var(--dub-app-height, 100dvh); /* dvh tracks the URL bar; the var tracks the on-screen keyboard */
   isolation: isolate;
 }
 
@@ -45,7 +94,8 @@ body {
  * theme's custom properties inline; stretch it to fill the viewport so the
  * themed surface (not the raw <body>) is what the user sees, in both themes. */
 [data-dub-theme-root] {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback */
+  min-height: var(--dub-app-height, 100dvh);
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-primary);
 }
@@ -110,6 +160,20 @@ svg {
   background-clip: content-box;
 }
 
+/* Touch: the 10px desktop scrollbars read as chunky, always-on furniture in a
+   mobile WebView (native apps use overlay bars that fade in only while scrolling).
+   On coarse pointers hide them entirely and let the platform's overlay bar show —
+   the scroll regions above keep their momentum. */
+@media (pointer: coarse) {
+  * {
+    scrollbar-width: none;
+  }
+  *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
+
 /* ---- shell chrome (FE2 wiring around @dub/ui AppShell) --------------------- */
 
 /* P14 delight UX: crossfade when the launcher switches TOP-LEVEL app (see
@@ -127,6 +191,12 @@ svg {
   --fe2-app-fade-duration: 360ms;
   --fe2-app-fade-easing: cubic-bezier(0.16, 1, 0.3, 1);
   animation: fe2-app-fade-in var(--fe2-app-fade-duration) var(--fe2-app-fade-easing);
+  /* Pass the shell's definite height down to the routed app so full-bleed apps
+     (chat/mail) that fill via height:100% resolve to the viewport and pin their
+     composer to the bottom. Taller scrolling pages overflow this box and scroll
+     inside .shellContent (overflow-y:auto), so nothing is clipped. */
+  height: 100%;
+  min-height: 0;
 }
 @keyframes fe2-app-fade-in {
   from {
@@ -409,10 +479,12 @@ svg {
 
 /* ---- login ---------------------------------------------------------------- */
 .fe2-login {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback */
+  min-height: var(--dub-app-height, 100dvh);
   display: grid;
   place-items: center;
-  padding: var(--dub-space-6);
+  padding: max(var(--dub-space-6), env(safe-area-inset-top)) max(var(--dub-space-6), env(safe-area-inset-right))
+    max(var(--dub-space-6), env(safe-area-inset-bottom)) max(var(--dub-space-6), env(safe-area-inset-left));
   background:
     radial-gradient(1200px 600px at 100% -10%, var(--dub-color-brand-100), transparent 60%),
     radial-gradient(900px 500px at -10% 110%, var(--dub-color-info-100), transparent 55%),
@@ -1052,7 +1124,8 @@ svg {
 
 /* ---- centered status screens (404 / auth callback) ------------------------ */
 .fe2-center {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback */
+  min-height: var(--dub-app-height, 100dvh);
   display: grid;
   place-items: center;
   padding: var(--dub-space-6);

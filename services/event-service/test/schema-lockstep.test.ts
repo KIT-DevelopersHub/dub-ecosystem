@@ -5,7 +5,12 @@
 // comments and whitespace so cosmetic edits don't trip the guard — only DDL changes do.
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { EVENT_SCHEMA_MIGRATION, EVENT_DETAILS_SCHEMA_MIGRATION, EVENT_SECTION_LAYOUT_SCHEMA_MIGRATION } from "../src/schema";
+import {
+  EVENT_SCHEMA_MIGRATION,
+  EVENT_DETAILS_SCHEMA_MIGRATION,
+  EVENT_SECTION_LAYOUT_SCHEMA_MIGRATION,
+  EVENT_PAGE_LAYOUT_SCHEMA_MIGRATION,
+} from "../src/schema";
 
 // From services/event-service/ up to the repo root, then into infra.
 const PHYSICAL_SQL_PATH = new URL(
@@ -18,6 +23,10 @@ const PHYSICAL_DETAILS_SQL_PATH = new URL(
 );
 const PHYSICAL_SECTION_LAYOUT_SQL_PATH = new URL(
   "../../../infra/d1/migrations/event/0003_event_section_layout.sql",
+  import.meta.url,
+);
+const PHYSICAL_PAGE_LAYOUT_SQL_PATH = new URL(
+  "../../../infra/d1/migrations/event/0004_event_page_layout.sql",
   import.meta.url,
 );
 
@@ -47,5 +56,10 @@ describe("schema.ts <-> physical migration lockstep", () => {
   it("event-section-layout schema const equals infra/d1/migrations/event/0003_event_section_layout.sql", () => {
     const physical = readFileSync(PHYSICAL_SECTION_LAYOUT_SQL_PATH, "utf8");
     expect(normalizeDdl(EVENT_SECTION_LAYOUT_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
+  });
+
+  it("event-page-layout schema const equals infra/d1/migrations/event/0004_event_page_layout.sql", () => {
+    const physical = readFileSync(PHYSICAL_PAGE_LAYOUT_SQL_PATH, "utf8");
+    expect(normalizeDdl(EVENT_PAGE_LAYOUT_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
   });
 });

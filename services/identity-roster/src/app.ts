@@ -106,7 +106,7 @@ export function createApp(opts: AppOptions): App {
   });
 
   ext.post("/users/invite", requirePermission("identity:admin"), async (c) => {
-    const body = await readJson<{ email: string; displayName?: string; roleIds?: string[] }>(c);
+    const body = await readJson<{ email: string; displayName?: string; furigana?: string; roleIds?: string[] }>(c);
     return c.json(await svc.invite(orgId, body, ctxOf(c)), 201);
   });
 

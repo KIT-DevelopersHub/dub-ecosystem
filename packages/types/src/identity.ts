@@ -69,6 +69,8 @@ export const PERMISSION_CATALOG = [
   { key: "app:tasks:edit", name: "Edit in マイタスク app", description: "Create/edit inside the マイタスク app (implies view)", domain: "app", dangerous: false },
   { key: "app:gantt:view", name: "Open ガントチャート app", description: "Open and view the ガントチャート app", domain: "app", dangerous: false },
   { key: "app:gantt:edit", name: "Edit in ガントチャート app", description: "Create/edit inside the ガントチャート app (implies view)", domain: "app", dangerous: false },
+  { key: "app:calendar:view", name: "Open カレンダー app", description: "Open and view the カレンダー app", domain: "app", dangerous: false },
+  { key: "app:calendar:edit", name: "Edit in カレンダー app", description: "Create/edit inside the カレンダー app (implies view)", domain: "app", dangerous: false },
   { key: "app:notifications:view", name: "Open 通知 app", description: "Open and view the 通知 app", domain: "app", dangerous: false },
   { key: "app:notifications:edit", name: "Edit in 通知 app", description: "Manage/act inside the 通知 app (implies view)", domain: "app", dangerous: false },
   { key: "app:chat:view", name: "Open チャット app", description: "Open and view the チャット app", domain: "app", dangerous: false },
@@ -98,6 +100,9 @@ export interface IdentityUser {
   id: UserId;
   orgId: OrgId;
   displayName: string;
+  // 読み仮名（フリガナ）。任意・後方互換の加算フィールド（省略時は未設定）。
+  // 五十音ソート / フリガナ検索に使う。表示名に振り仮名を添えるための表示専用属性。
+  furigana?: string | null;
   email: string;
   githubLogin: string | null;
   avatarUrl: string | null;
@@ -162,6 +167,7 @@ export interface AuthzCheckResponse {
 export interface InviteUserRequest {
   email: string;
   displayName?: string;
+  furigana?: string; // 読み仮名（任意）
   roleIds?: RoleId[];
 }
 export interface ProvisionUserRequest {

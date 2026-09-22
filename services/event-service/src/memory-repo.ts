@@ -1,7 +1,7 @@
 // In-memory EventRepo: backs unit tests and local `--test` runs. Same keyset
 // semantics as the D1 repo so pagination tests are representative.
 import type { common, event } from "@dub/types";
-import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventSectionLayoutRow, Keyset } from "./types";
+import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventSectionLayoutRow, EventPageLayoutRow, Keyset } from "./types";
 
 function afterKeysetById(id: string) {
   return (row: { id: string }) => row.id > id;
@@ -12,6 +12,7 @@ export class InMemoryEventRepo implements EventRepo {
   private actions = new Map<common.ActionId, ActionRow>();
   private details = new Map<common.EventId, EventDetailsRow>();
   private sectionLayouts = new Map<common.EventId, EventSectionLayoutRow>();
+  private pageLayouts = new Map<common.EventId, EventPageLayoutRow>();
 
   // test/seed helper — bypasses service invariants (e.g. cross-org rows).
   seedEvent(row: EventRow): void {
@@ -133,6 +134,18 @@ export class InMemoryEventRepo implements EventRepo {
     this.sectionLayouts.set(next.eventId, cloneSectionLayout(next));
     return true;
   }
+
+  async getEventPageLayout(eventId: common.EventId): Promise<EventPageLayoutRow | null> {
+    const r = this.pageLayouts.get(eventId);
+    return r ? clonePageLayout(r) : null;
+  }
+  async upsertEventPageLayout(next: EventPageLayoutRow, expectedVersion: number): Promise<boolean> {
+    const cur = this.pageLayouts.get(next.eventId);
+    const curVersion = cur?.version ?? 0;
+    if (curVersion !== expectedVersion) return false;
+    this.pageLayouts.set(next.eventId, clonePageLayout(next));
+    return true;
+  }
 }
 
 function cloneDetails(r: EventDetailsRow): EventDetailsRow {
@@ -152,6 +165,19 @@ function cloneDetails(r: EventDetailsRow): EventDetailsRow {
 
 function cloneSectionLayout(r: EventSectionLayoutRow): EventSectionLayoutRow {
   return { ...r, data: { order: [...r.data.order], hidden: [...r.data.hidden] } };
+}
+
+function clonePageLayout(r: EventPageLayoutRow): EventPageLayoutRow {
+  // Blocks are opaque; a structured clone keeps the in-memory row isolated from the
+  // caller's object (matches the D1 repo's JSON round-trip isolation).
+  return {
+    ...r,
+    data: {
+      version: r.data.version,
+      updatedAt: r.data.updatedAt,
+      blocks: JSON.parse(JSON.stringify(r.data.blocks)) as unknown[],
+    },
+  };
 }
 
 function cmpStr(a: string, b: string): number {

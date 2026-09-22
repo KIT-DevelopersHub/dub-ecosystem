@@ -14,7 +14,11 @@
 name = "chat-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
-compatibility_flags = ["nodejs_compat"]
+# global_fetch_strictly_public: /chat/unfurl fetches user-supplied URLs. Without this
+# flag a same-zone URL is routed straight to the zone's origin, bypassing WAF/Access
+# and any Worker on that route; with it the fetch goes through the front door like a
+# public client (SSRF guard in src/unfurl.ts covers the rest).
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
 # Shared core D1 (single DB, namespace = chat_*). DDL is draft until 9-C freeze;
 # physical migration lives in infra/d1/migrations/chat/0001_init.sql (owned by

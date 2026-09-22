@@ -26,6 +26,8 @@ import type {
   SearchHit,
   SearchMessagesRequest,
   TeamSummary,
+  UnfurlPreview,
+  UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -58,6 +60,8 @@ export interface ChatApiClient {
    * 候補 + チップの表示名に使う `teams` と、自分宛メンション判定に使う `myTeamIds`。
    */
   listMentionTeams(): Promise<MentionTeams>;
+  /** Link preview (OGP) for one URL; null = no card. Best-effort: never rejects. */
+  unfurl(url: string): Promise<UnfurlPreview | null>;
 }
 
 /** GET /api/v1/members/me/mention-teams のレスポンス。 */
@@ -250,5 +254,14 @@ export class HttpChatClient implements ChatApiClient {
     // read the chip by name. The caller is taken from the session (no userId in the path).
     const res = await this.request<Partial<MentionTeams>>("GET", `${MEMBERS}/me/mention-teams`);
     return { teams: res?.teams ?? [], myTeamIds: res?.myTeamIds ?? [] };
+  }
+
+  async unfurl(url: string): Promise<UnfurlPreview | null> {
+    try {
+      const res = await this.request<UnfurlResponse>("GET", `${CHAT}/unfurl${qs({ url })}`);
+      return res?.preview ?? null;
+    } catch {
+      return null; // 400 (blocked url) / network — the card is optional
+    }
   }
 }

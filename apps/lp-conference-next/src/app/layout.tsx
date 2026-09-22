@@ -55,7 +55,26 @@ export default function RootLayout({
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
+        {/* Load Google Fonts WITHOUT blocking first paint. The stylesheet is a
+            render-blocking resource that delayed FCP/LCP by ~1.5s on throttled
+            mobile (the LCP hero title waited on it). We preload it, attach it as
+            media="print" (non-blocking), then flip to media="all" on load so it
+            applies. display=swap already paints the system fallback immediately,
+            so the swap is seamless and the look is preserved. <noscript> keeps it
+            working with JS disabled. */}
+        <link rel="preload" as="style" href={GOOGLE_FONTS_HREF} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){var l=document.createElement('link');l.rel='stylesheet';l.href=" +
+              JSON.stringify(GOOGLE_FONTS_HREF) +
+              ";l.media='print';l.onload=function(){this.media='all'};document.head.appendChild(l);})();",
+          }}
+        />
+        <noscript>
+          {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+          <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
+        </noscript>
       </head>
       <body>
         <a className="skip-link" href="#main">

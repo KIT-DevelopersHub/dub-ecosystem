@@ -19,6 +19,7 @@ export interface UserRow {
   orgId: string;
   email: string;
   displayName: string;
+  furigana: string | null; // 読み仮名（フリガナ）。任意 — 五十音ソート/検索用。
   githubLogin: string | null;
   avatarUrl: string | null;
   status: identity.UserStatus;
@@ -54,7 +55,7 @@ export interface ListUsersFilter {
   ids?: string[];
   status?: identity.UserStatus;
   roleId?: string; // filter to users holding this role (any scope) — GET /users?role=
-  q?: string; // free-text over displayName/email (case-insensitive) — GET /users?q=
+  q?: string; // free-text over displayName/furigana/email (case-insensitive) — GET /users?q=
   limit: number;
   cursor?: string;
 }
@@ -75,7 +76,7 @@ export interface IdentityRepo {
   getUserByEmail(orgId: string, email: string): Promise<UserRow | null>;
   listUsers(filter: ListUsersFilter): Promise<UserPage>;
   createUser(row: UserRow): Promise<void>;
-  updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source" | "avatarUrl">>, updatedAt: string): Promise<void>;
+  updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>, updatedAt: string): Promise<void>;
   /** All users in the org with a given provenance (used by the Email Routing sync to
    *  find rows it owns and logically deactivate the ones no longer present). */
   listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]>;

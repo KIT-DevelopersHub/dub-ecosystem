@@ -22,6 +22,7 @@ import type {
   UpdateDeletionPolicyRequest,
 } from "./types";
 import { ChatService, type ReqCtx } from "./service";
+import { validateUnfurlUrl, UNFURL_CACHE_TTL_SECONDS, type UnfurlResponse } from "./unfurl";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getDubCtx(c: Context): RequestContext | undefined {
@@ -83,6 +84,33 @@ export function createApp(deps: AppDeps): Hono {
   app.use("/chat/search", authz.requireAuth());
   app.use("/chat/settings", authz.requireAuth());
   app.use("/chat/settings/*", authz.requireAuth());
+  app.use("/chat/unfurl", authz.requireAuth());
+
+  // ---- link preview (OGP unfurl) ----
+  // Auth-gated (never an anonymous fetch proxy). The URL is validated fail-close
+  // (http(s), public hosts only) BEFORE any outbound request; the resolver itself
+  // re-validates every redirect hop. Results are cached 1 day (Cache API, keyed by
+  // the normalized URL) so a channel re-rendering the same link does not refetch.
+  app.get("/chat/unfurl", async (c) => {
+    reqCtx(c); // 401 without a subject
+    const target = validateUnfurlUrl(c.req.query("url") ?? "");
+    if (!target) throw errors.validationFailed([{ field: "url", reason: "invalid_or_blocked" }]);
+    const url = target.toString();
+    const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
+    const cacheKey = new Request(`https://chat-service.internal/unfurl?url=${encodeURIComponent(url)}`);
+    const hit = await cache?.match(cacheKey).catch(() => undefined);
+    if (hit) return hit;
+    const preview = deps.unfurler ? await deps.unfurler(url) : null;
+    const body: UnfurlResponse = { url, preview };
+    const res = c.json(body);
+    // The Cache API refuses (413) to store a `private` response, which would silently
+    // turn the 1-day cache into a no-op. OGP data is public and the key excludes the
+    // user, so the stored copy is `public`; the client still gets `private`.
+    res.headers.set("cache-control", `public, max-age=${UNFURL_CACHE_TTL_SECONDS}`);
+    if (cache) await cache.put(cacheKey, res.clone()).catch(() => undefined);
+    res.headers.set("cache-control", `private, max-age=${UNFURL_CACHE_TTL_SECONDS}`);
+    return res;
+  });
 
   // ---- channels ----
   app.get("/chat/channels", async (c) => {

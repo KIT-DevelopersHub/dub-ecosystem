@@ -31,8 +31,10 @@ function teamColorOf(team: TeamSummary | undefined): string | null {
 
 // Only allow safe link targets (defense-in-depth; the parser already requires
 // http(s)/relative, but re-check so a crafted body can never yield javascript: etc.)
-function safeHref(href: string): string | null {
-  if (/^https?:\/\//i.test(href) || href.startsWith("/")) return href;
+// Protocol-relative "//evil.example" is rejected too: it looks local but leaves the site.
+export function safeHref(href: string): string | null {
+  if (/^https?:\/\//i.test(href)) return href;
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
   return null;
 }
 
@@ -95,7 +97,7 @@ function Inlines({ segs, resolveUser, resolveTeam }: { segs: BodySegment[] } & M
           case "link": {
             const href = safeHref(seg.href);
             return href ? (
-              <a key={i} className={styles.mdLink} href={href} target="_blank" rel="noreferrer">
+              <a key={i} className={styles.mdLink} href={href} target="_blank" rel="noopener noreferrer">
                 {seg.label}
               </a>
             ) : (

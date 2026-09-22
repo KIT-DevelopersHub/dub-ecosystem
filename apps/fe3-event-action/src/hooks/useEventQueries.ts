@@ -6,6 +6,7 @@ import { eventKeys } from "../lib/queryKeys";
 import type { ListActionsQuery, ListActionsResponse } from "../api/actionContracts";
 import type { EventDetails } from "../api/detailsContracts";
 import type { EventSectionLayout } from "../api/sectionLayoutContracts";
+import type { EventPageLayout } from "../api/pageLayoutContracts";
 
 export function useEventsQuery(query: event.ListEventsQuery) {
   const api = useEventApi();
@@ -45,6 +46,19 @@ export function useSectionLayoutQuery(eventId: common.EventId | null) {
     // Settle fast (same rationale as useEventDetailsQuery ⑤): a layout fetch failure
     // must not block the sections themselves — the panel falls back to catalog
     // default order / nothing hidden.
+    retry: 1,
+  });
+}
+
+export function useEventPageLayoutQuery(eventId: common.EventId | null) {
+  const api = useEventApi();
+  return useQuery<EventPageLayout>({
+    queryKey: eventId ? eventKeys.pageLayout(eventId) : eventKeys.details(),
+    queryFn: () => api.getEventPageLayout(eventId as common.EventId),
+    enabled: eventId !== null,
+    // Settle fast on a hard failure so the editor degrades to its local/seed doc
+    // instead of holding the skeleton across long default back-off (same ⑤ rationale
+    // as useEventDetailsQuery / useSectionLayoutQuery).
     retry: 1,
   });
 }

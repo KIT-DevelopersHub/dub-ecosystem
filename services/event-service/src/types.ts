@@ -182,6 +182,46 @@ export interface SaveEventSectionLayoutRequest {
   version: number;
 }
 
+// ---- event page layout (free block-editor doc for the event hub page) ----
+// The "イベント編集" block canvas (しおり UI) lets an organiser lay out the event
+// page freely (text / heading / checklist / image / calendar / timetable / map
+// blocks on a 4-column grid). ONE doc per event, shared by every viewer — editable
+// only by event:write roles, viewed read-only by everyone else. Stored as one row
+// (event_id PK) holding the doc JSON + an optimistic `version`, mirroring
+// event_event_section_layout. The backend treats the block list as OPAQUE (the block
+// schema lives in the frontend, like the section catalog): it only bounds `blocks`
+// to an array + carries `version`/`updatedAt`, so a frontend block-type change never
+// needs a migration here.
+export interface EventPageLayoutData {
+  /** Doc schema version (frontend BlockDoc.version); stored as-is. */
+  version: number;
+  /** The ordered block list — opaque to the backend (frontend owns the shape). */
+  blocks: unknown[];
+  /** Frontend-supplied last-edit timestamp (ISO); informational. */
+  updatedAt: string;
+}
+
+export interface EventPageLayoutRow {
+  eventId: common.EventId;
+  data: EventPageLayoutData;
+  version: number;
+  updatedBy: common.UserId;
+  updatedAt: common.ISODateTime;
+}
+
+// Wire response. version 0 + updatedAt null => never saved yet (empty doc).
+export interface EventPageLayoutResponse {
+  eventId: common.EventId;
+  data: EventPageLayoutData;
+  version: number;
+  updatedAt: common.ISODateTime | null;
+}
+
+export interface SaveEventPageLayoutRequest {
+  data: EventPageLayoutData;
+  version: number;
+}
+
 // ---- pagination keyset ----
 export interface Keyset {
   // For events sort=startsAt, `s` is the last starts_at (null sorts last).
@@ -265,6 +305,11 @@ export interface EventRepo {
   getEventSectionLayout(eventId: common.EventId): Promise<EventSectionLayoutRow | null>;
   // Same optimistic upsert contract as upsertEventDetails.
   upsertEventSectionLayout(next: EventSectionLayoutRow, expectedVersion: number): Promise<boolean>;
+
+  // Free block-editor doc for the event hub page ("イベント編集"). null => no row yet
+  // (caller returns an empty doc). Same optimistic upsert contract as the two above.
+  getEventPageLayout(eventId: common.EventId): Promise<EventPageLayoutRow | null>;
+  upsertEventPageLayout(next: EventPageLayoutRow, expectedVersion: number): Promise<boolean>;
 }
 
 export interface AppDeps {

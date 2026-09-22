@@ -175,6 +175,12 @@
 .searchInput::placeholder {
   color: var(--dub-color-text-muted);
 }
+/* Touch: 16px so focusing the filter never triggers iOS auto-zoom. */
+@media (pointer: coarse) {
+  .searchInput {
+    font-size: var(--dub-font-size-md);
+  }
+}
 .searchInput:focus-visible {
   border-color: var(--dub-color-border-focus, var(--dub-color-accent, #2563eb));
   box-shadow: 0 0 0 2px

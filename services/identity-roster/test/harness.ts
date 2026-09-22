@@ -64,6 +64,7 @@ export async function makeHarness(): Promise<Harness> {
     orgId: ORG_ID,
     email,
     displayName,
+    furigana: null,
     githubLogin: null,
     avatarUrl: null,
     status: "active",

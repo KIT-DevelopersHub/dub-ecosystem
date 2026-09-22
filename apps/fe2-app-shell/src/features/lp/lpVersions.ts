@@ -33,13 +33,22 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
-    id: "v3.0",
-    name: "v3.0 ダイナミック刷新版",
+    id: "v3.1",
+    name: "v3.1 ヒーロー立体強化版",
     description:
-      "参考サイト goodpatch.com の見た目・動きに寄せて全面刷新した現行 LP。GSAP + ScrollTrigger + Lenis による滑らかなスクロール演出、流れる大型英字マーキー、色ブロックのヒーロー、セクションのリビール表示を追加。本番ドメイン hokuriku-it-conf.com に反映済み。",
+      "v3.0 のダイナミック刷新をベースに、ファーストビュー(ヒーロー)を全画面の WebGL 3D ブロブ場＋巨大発光タイポに強化。スクロールに合わせてカメラが立体的に潜り込む非線形の奥行き演出を追加し、フォント読み込みを非同期化して表示速度(Lighthouse)を改善、ヒーロー背景は見た目そのままに描画コストを大幅軽量化。本番ドメイン hokuriku-it-conf.com に反映済み。",
     url: "https://hokuriku-it-conf.com",
     updatedAt: "2026-09-22",
     status: "current",
+  },
+  {
+    id: "v3.0",
+    name: "v3.0 ダイナミック刷新版",
+    description:
+      "参考サイト goodpatch.com の見た目・動きに寄せて全面刷新した LP。GSAP + ScrollTrigger + Lenis による滑らかなスクロール演出、流れる大型英字マーキー、色ブロックのヒーロー、セクションのリビール表示を追加。v3.1 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-next-v3-0.developershub-site.workers.dev",
+    updatedAt: "2026-09-22",
+    status: "archived",
   },
   {
     id: "v2.1",
