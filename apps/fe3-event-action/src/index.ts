@@ -4,6 +4,10 @@
 // FeatureModule + registry singleton
 export { eventFeatureModule, actionTypeRegistry } from "./module";
 
+// Shiori (イベントのしおり) block-editor action plugin — registered by fe3's own
+// module at load; re-exported so FE2 / other units can reference it explicitly.
+export { shioriActionPlugin, ShioriPanel } from "./shiori/ShioriPanel";
+
 // ActionTypeRegistry contract (FE4 exports taskActionPlugin: ActionTypePlugin)
 export {
   createActionTypeRegistry,

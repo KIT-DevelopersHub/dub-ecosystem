@@ -7,10 +7,15 @@
 import type { FeatureModule } from "./contracts/fe2";
 import { createActionTypeRegistry } from "./registry/ActionTypeRegistry";
 import { genericActionPlugin } from "./components/GenericActionPanel";
+import { shioriActionPlugin } from "./shiori/ShioriPanel";
 import { routePaths } from "./lib/routes";
 
 /** App-global registry; GenericActionPanel is the mandatory fallback. */
 export const actionTypeRegistry = createActionTypeRegistry(genericActionPlugin);
+
+// First-party fe3 action types registered at module load. (External FE units —
+// FE4 taskActionPlugin, etc. — still register themselves at FE2 app init.)
+actionTypeRegistry.register(shioriActionPlugin);
 
 export const eventFeatureModule: FeatureModule = {
   id: "events",

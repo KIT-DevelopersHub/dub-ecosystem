@@ -156,6 +156,20 @@ export function createStore(seed: MockSeed = {}): Store {
       updatedAt: now(),
     };
     store.events.set(eid, e);
+    // Every event opens with a "しおり" (booklet) action so the block editor is
+    // discoverable from the action list.
+    const sid = id("act");
+    store.actions.set(sid, {
+      id: sid,
+      eventId: eid,
+      kind: "shiori",
+      title: "イベントのしおり",
+      sortOrder: 512,
+      archivedAt: null,
+      version: 1,
+      createdAt: now(),
+      updatedAt: now(),
+    });
     const perEvent = seed.actionsPerEvent ?? 3;
     for (let j = 0; j < perEvent; j++) {
       const aid = id("act");
