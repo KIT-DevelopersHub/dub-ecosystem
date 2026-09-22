@@ -100,6 +100,9 @@ export interface IdentityUser {
   id: UserId;
   orgId: OrgId;
   displayName: string;
+  // 読み仮名（フリガナ）。任意・後方互換の加算フィールド（省略時は未設定）。
+  // 五十音ソート / フリガナ検索に使う。表示名に振り仮名を添えるための表示専用属性。
+  furigana?: string | null;
   email: string;
   githubLogin: string | null;
   avatarUrl: string | null;
@@ -164,6 +167,7 @@ export interface AuthzCheckResponse {
 export interface InviteUserRequest {
   email: string;
   displayName?: string;
+  furigana?: string; // 読み仮名（任意）
   roleIds?: RoleId[];
 }
 export interface ProvisionUserRequest {

@@ -173,6 +173,21 @@
   border-color: #cbd5e1;
   border-style: dashed;
 }
+.legendSw.leave {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+/* legend の役割スウォッチ（tier 別の見た目に合わせた小さな見本）。 */
+.legendSw.swOrg {
+  background: #94a3b8;
+  border-color: #64748b;
+  border-left: 4px solid #475569;
+}
+.legendSw.swLead {
+  background: #cbd5e1;
+  border-color: #94a3b8;
+  border-left: 4px solid #64748b;
+}
 /* horizontal scroll for many teams; page body never scrolls sideways */
 .orgScroll {
   overflow-x: auto;
@@ -225,6 +240,13 @@
 }
 .namechip.lead {
   border-left: 7px solid var(--hq, #1e3a5f);
+}
+.namechip .namechipRole {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5b6b82;
+  margin-top: 2px;
 }
 .namechip .miniBadge {
   position: absolute;
@@ -304,79 +326,132 @@
 }
 .colBody {
   flex: 1;
-  padding: 7px 8px 8px;
+  padding: 8px 8px 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.tierLabel {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  color: #64748b;
-  text-align: center;
-  margin: 2px 0 0;
+
+/* ── leaderId 親子ツリー ─────────────────────────────────────────────
+   ネスト(子=リーダーの配下)を左レール＋エルボー線で結び、「誰がどのリーダーの下か」を
+   構造で示す。tier(役割段)はノードの色/枠の強さで補助表現する。 */
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.tierLabel.dim {
-  color: #94a3b8;
-}
-.chip {
-  border-radius: 7px;
-  padding: 5px 8px;
-  font-size: 13px;
-  font-weight: 700;
-  text-align: center;
+.nodeItem {
   position: relative;
-  background: color-mix(in srgb, var(--team, #64748b) 12%, #fff);
-  border: 1.4px solid color-mix(in srgb, var(--team, #64748b) 32%, #fff);
-  color: color-mix(in srgb, var(--team, #64748b) 78%, #000);
+  list-style: none;
 }
-/* オーガナイザー = 濃いめ + 太い左アクセント */
-.chip.top {
+/* 子グループ = 親の直下にインデントしてぶら下げる。 */
+.nodeChildren {
+  list-style: none;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* 各子ノードの接続線: 縦(レール)＋横(エルボー)。最後の子はレールをエルボーで止める。 */
+.nodeChildren > .nodeItem::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: -6px;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+}
+.nodeChildren > .nodeItem:last-child::before {
+  bottom: auto;
+  height: 21px;
+}
+.nodeChildren > .nodeItem::after {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: 15px;
+  width: 11px;
+  height: 2px;
+  background: color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+}
+
+/* ノード(1人分のチップ) */
+.node {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  border-radius: 7px;
+  padding: 5px 9px;
+  position: relative;
+  background: color-mix(in srgb, var(--team, #64748b) 10%, #fff);
+  border: 1.4px solid color-mix(in srgb, var(--team, #64748b) 30%, #fff);
+  color: color-mix(in srgb, var(--team, #64748b) 80%, #000);
+}
+/* オーガナイザー = 最も濃く + 太い左アクセント */
+.node.nOrg {
   font-weight: 800;
   border-width: 2px;
   border-left-width: 7px;
   border-color: var(--team, #64748b);
-  background: color-mix(in srgb, var(--team, #64748b) 48%, #fff);
-  color: color-mix(in srgb, var(--team, #64748b) 82%, #000);
+  background: color-mix(in srgb, var(--team, #64748b) 46%, #fff);
+  color: color-mix(in srgb, var(--team, #64748b) 84%, #000);
 }
-/* メンバー = ↳ インデント破線 */
-.chip.sub {
-  border-style: dashed;
-  margin-left: 16px;
-  text-align: left;
+/* リーダー = 中間の濃さ + 左アクセント（配下を持つ親であることを強調） */
+.node.nLead {
+  font-weight: 800;
+  border-left: 6px solid color-mix(in srgb, var(--team, #64748b) 72%, #000);
+  background: color-mix(in srgb, var(--team, #64748b) 22%, #fff);
 }
-.chip.sub .subrole {
+/* メンバー = 淡色・通常ウェイト */
+.node.nMember {
+  font-weight: 600;
+}
+.nodeName {
+  font-weight: inherit;
+}
+.nodeRole {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.72;
+}
+.nodeGrade {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.55;
+}
+.nodeBadge {
   font-size: 8px;
   font-weight: 800;
-  letter-spacing: 0.5px;
-  margin-left: 6px;
-  opacity: 0.7;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #fff;
 }
-/* 打診中 = 淡いグレー破線 + バッジ (status !== added) */
-.chip.tent {
+/* 打診中 = 淡いグレー破線 */
+.node.tent {
   background: #f1f5f9 !important;
   border-color: #cbd5e1 !important;
   color: #94a3b8 !important;
   border-style: dashed !important;
 }
-.chipBadge {
-  position: absolute;
-  top: -6px;
-  right: -5px;
-  background: #94a3b8;
-  color: #fff;
-  font-size: 7.5px;
-  font-weight: 800;
-  padding: 1px 5px;
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+.node.tent .nodeBadge {
+  background: #f59e0b;
 }
-.tierConn {
-  width: 2px;
-  height: 8px;
-  background: #cbd5e1;
-  margin: 2px auto 0;
+/* 休み中 = 落ち着いたグレー（辞退とは別・在籍扱い） */
+.node.leave {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #64748b;
+}
+.node.leave .nodeBadge {
+  background: #64748b;
 }
 .colCount {
   font-size: 10px;
