@@ -162,12 +162,13 @@ export async function backfillAppAccessKeys(d: SeedDeps, orgId: string): Promise
 export interface DemoUserSpec {
   email: string;
   displayName: string;
+  furigana?: string; // 読み仮名（任意）
   roleName: "admin" | "maintainer" | "member";
 }
 export const DEMO_USERS: readonly DemoUserSpec[] = [
-  { email: "admin@developershub.jp", displayName: "Demo Admin", roleName: "admin" },
-  { email: "maintainer@developershub.jp", displayName: "Demo Maintainer", roleName: "maintainer" },
-  { email: "member@developershub.jp", displayName: "Demo Member", roleName: "member" },
+  { email: "admin@developershub.jp", displayName: "Demo Admin", furigana: "デモ アドミン", roleName: "admin" },
+  { email: "maintainer@developershub.jp", displayName: "Demo Maintainer", furigana: "デモ メンテナー", roleName: "maintainer" },
+  { email: "member@developershub.jp", displayName: "Demo Member", furigana: "デモ メンバー", roleName: "member" },
 ] as const;
 
 export interface SeededDemoUser {
@@ -192,6 +193,7 @@ async function seedUsersWithRole(d: SeedDeps, orgId: string, specs: readonly Dem
         orgId,
         email,
         displayName: spec.displayName,
+        furigana: spec.furigana ?? null,
         githubLogin: null,
         avatarUrl: null,
         status: "active",

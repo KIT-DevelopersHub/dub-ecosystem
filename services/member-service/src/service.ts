@@ -156,8 +156,10 @@ export class MemberService {
     const teamIds = await this.validateTeamIds(body.teamIds);
     const orgId = this.deps.orgId;
     const now = this.deps.now();
+    const memberId = this.deps.newMemberId();
+    const leaderId = body.leaderId !== undefined ? await this.resolveLeaderId(body.leaderId, memberId) : null;
     const row: PersonRow = {
-      id: this.deps.newMemberId(),
+      id: memberId,
       orgId,
       name: name(body.name),
       roleTitle: optText(body.roleTitle, "roleTitle"),
@@ -165,6 +167,7 @@ export class MemberService {
       department: optText(body.department, "department"),
       grade: optText(body.grade, "grade"),
       identityUserId: null,
+      leaderId,
       contact: optText(body.contact, "contact"),
       schoolEmail: null,
       gmail: null,
@@ -200,6 +203,8 @@ export class MemberService {
       body.identityUserId !== undefined
         ? await this.resolveIdentityLink(body.identityUserId, cur.id)
         : cur.identityUserId;
+    const leaderId =
+      body.leaderId !== undefined ? await this.resolveLeaderId(body.leaderId, cur.id) : cur.leaderId;
     const next: PersonRow = {
       ...cur,
       name: body.name !== undefined ? name(body.name) : cur.name,
@@ -208,6 +213,7 @@ export class MemberService {
       department: body.department !== undefined ? optText(body.department, "department") : cur.department,
       grade: body.grade !== undefined ? optText(body.grade, "grade") : cur.grade,
       identityUserId,
+      leaderId,
       contact: body.contact !== undefined ? optText(body.contact, "contact") : cur.contact,
       note: body.note !== undefined ? optText(body.note, "note") : cur.note,
       sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : cur.sortOrder,
@@ -244,6 +250,26 @@ export class MemberService {
         status: 409,
         details: [{ field: "identityUserId", reason: "already_linked", message: other.id }],
       });
+    }
+    return id;
+  }
+
+  /**
+   * Validate a leaderId assignment for `personId`. `null`/empty clears it. A non-empty
+   * string must reference an existing, non-archived 運営メンバー in the same org and may
+   * not be the person themselves (no self-parenting). Returns the normalized id or null.
+   * Note: a full cycle guard (A→B→A) is intentionally out of scope here — the 組織図 order
+   * helper is cycle-safe (placed-set), and leaders are shallow in practice.
+   */
+  private async resolveLeaderId(value: unknown, personId: string): Promise<string | null> {
+    if (value === null || value === undefined || value === "") return null;
+    if (typeof value !== "string") throw errors.validationFailed([{ field: "leaderId", reason: "invalid" }]);
+    const id = value.trim();
+    if (id.length === 0) return null;
+    if (id === personId) throw errors.validationFailed([{ field: "leaderId", reason: "self_reference" }]);
+    const leader = await this.deps.repo.getPerson(id);
+    if (!leader || leader.orgId !== this.deps.orgId) {
+      throw errors.validationFailed([{ field: "leaderId", reason: "unknown_member", message: id }]);
     }
     return id;
   }
@@ -565,6 +591,7 @@ export class MemberService {
       department: p.department,
       grade: p.grade,
       identityUserId: null,
+      leaderId: null,
       contact: p.contact ?? p.schoolEmail,
       schoolEmail: p.schoolEmail,
       gmail: p.gmail,
@@ -721,6 +748,7 @@ export class MemberService {
       department: null,
       grade: null,
       identityUserId,
+      leaderId: null,
       contact: null,
       schoolEmail: null,
       gmail: null,

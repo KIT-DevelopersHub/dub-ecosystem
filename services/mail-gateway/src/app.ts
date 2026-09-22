@@ -23,8 +23,8 @@ import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, type MailScope } from "./repo";
-import { parseListMessagesQuery, parseSendMailRequest } from "./validation";
+import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type MailScope } from "./repo";
+import { parseListMessagesQuery, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
 
 export function createApp() {
   const app = new Hono<AppBindings>();
@@ -187,6 +187,85 @@ export function createApp() {
     const attachments = await attachmentsFor(db, "sent", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
     return c.json(msg satisfies mail.MailSentDetail);
+  });
+
+  // ---- Scheduled send (予約送信 / 予約投稿). ADDITIVE resource: create/list/edit/cancel a
+  // compose parked for a future time. Delivery is done by the cron drain (scheduled-send.ts)
+  // via the SAME send core, so 二重送信ゼロ / Sent folder / archive-CC all hold. Create/edit/
+  // cancel need mail:send (they queue/alter an outbound); list/read need mail:read.
+  ext.post("/scheduled", withAuth("mail:send"), async (c) => {
+    const ctx = ctxOf(c);
+    const userId = ownerOf(c);
+    const req = parseScheduleMailRequest(await c.req.json().catch(() => null));
+    // Resolve the envelope From now (same rules as /outbox) so the Scheduled list shows the
+    // real From and the drain need not resolve later.
+    const fromAddress = req.inReplyTo
+      ? await resolveReplyFromAddress(c.env, ctx, dbOf(c), req.inReplyTo, userId)
+      : await resolveUserFromAddress(c.env, ctx, userId);
+    const id = newScheduledId();
+    await insertScheduled(dbOf(c), {
+      id,
+      ownerUserId: userId,
+      toJson: JSON.stringify(req.to),
+      ccJson: JSON.stringify(req.cc ?? []),
+      subject: req.subject,
+      textBody: req.textBody,
+      htmlBody: req.htmlBody ?? null,
+      inReplyTo: req.inReplyTo ?? null,
+      fromAddress,
+      scheduledAt: req.scheduledAt,
+    });
+    return c.json({ id, scheduledAt: req.scheduledAt, status: "scheduled" } satisfies mail.ScheduleMailResponse, 202);
+  });
+
+  ext.get("/scheduled", withAuth("mail:read"), async (c) => {
+    const q = parseListMessagesQuery(c.req.query());
+    const page = await listScheduled(dbOf(c), { ownerUserId: await scopeOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    return c.json(page satisfies common.Paginated<mail.ScheduledSendListItem>);
+  });
+
+  ext.get("/scheduled/:id", withAuth("mail:read"), async (c) => {
+    const detail = await getScheduledDetail(dbOf(c), c.req.param("id"), await scopeOf(c));
+    if (!detail) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `scheduled send not found: ${c.req.param("id")}`, { status: 404 });
+    return c.json(detail satisfies mail.ScheduledSendDetail);
+  });
+
+  // Edit / reschedule — only while still 'scheduled'. A row already sent/canceled 404s
+  // (fail-closed) rather than silently no-op'ing.
+  ext.patch("/scheduled/:id", withAuth("mail:send"), async (c) => {
+    const id = c.req.param("id");
+    const owner = ownerOf(c);
+    const patch = parseScheduleMailPatch(await c.req.json().catch(() => null));
+    const changed = await updateScheduled(dbOf(c), id, owner, {
+      ...(patch.to !== undefined ? { toJson: JSON.stringify(patch.to) } : {}),
+      ...(patch.cc !== undefined ? { ccJson: JSON.stringify(patch.cc) } : {}),
+      ...(patch.subject !== undefined ? { subject: patch.subject } : {}),
+      ...(patch.textBody !== undefined ? { textBody: patch.textBody } : {}),
+      ...(patch.htmlBody !== undefined ? { htmlBody: patch.htmlBody } : {}),
+      ...(patch.scheduledAt !== undefined ? { scheduledAt: patch.scheduledAt } : {}),
+    });
+    if (changed === 0) {
+      // Distinguish "not yours / gone" from "no longer editable" for a clearer message.
+      const existing = await findScheduledRow(dbOf(c), id, owner);
+      if (!existing) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `scheduled send not found: ${id}`, { status: 404 });
+      throw new DubError("MAIL_INVALID_REQUEST", `scheduled send is no longer editable (status=${existing.status})`, { status: 409 });
+    }
+    const detail = await getScheduledDetail(dbOf(c), id, owner);
+    if (!detail) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `scheduled send not found: ${id}`, { status: 404 });
+    return c.json(detail satisfies mail.ScheduledSendDetail);
+  });
+
+  // Cancel (取消) — flips status to 'canceled' while still 'scheduled'.
+  ext.delete("/scheduled/:id", withAuth("mail:send"), async (c) => {
+    const id = c.req.param("id");
+    const owner = ownerOf(c);
+    const changed = await cancelScheduled(dbOf(c), id, owner);
+    if (changed === 0) {
+      const existing = await findScheduledRow(dbOf(c), id, owner);
+      if (!existing) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `scheduled send not found: ${id}`, { status: 404 });
+      throw new DubError("MAIL_INVALID_REQUEST", `scheduled send is no longer cancelable (status=${existing.status})`, { status: 409 });
+    }
+    return c.json({ id, status: "canceled" });
   });
 
   ext.get("/threads/:id", async (c) => {

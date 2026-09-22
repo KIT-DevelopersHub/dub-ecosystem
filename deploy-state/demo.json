@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "3cb2410",
-  "branch": "feat/lp-management",
-  "actor": "Claude Code",
-  "markers": ["fe2-lp-screen", "LP管理"],
+  "deployedSha": "f4bb53b0",
+  "branch": "feat/calendar-app",
+  "actor": "Kota",
+  "markers": ["fe2-calendar", "calendar-view-toggle"],
   "live": true,
-  "verifiedAt": "2026-09-07T14:16:05Z",
-  "updatedAt": "2026-09-07T14:16:05Z",
-  "note": "LP管理アプリ追加（バージョン一覧・閲覧 v1.0）"
+  "verifiedAt": "2026-09-22T06:21:49Z",
+  "updatedAt": "2026-09-22T06:21:49Z",
+  "note": "カレンダーアプリ(共有タスクを月/週表示)"
 }

@@ -33,6 +33,8 @@ import { UsageProvider } from "../features/usage/UsageProvider.tsx";
 import { ganttRoutes, ganttNav } from "../features/gantt/index.tsx";
 import { GanttProvider } from "../features/gantt/GanttProvider.tsx";
 import { GlobalEventSwitcher } from "../features/gantt/GlobalEventSwitcher.tsx";
+import { calendarRoutes, calendarNav } from "../features/calendar/index.tsx";
+import { CalendarProvider } from "../features/calendar/CalendarProvider.tsx";
 import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { lpRoutes, lpNav } from "../features/lp/index.tsx";
@@ -281,6 +283,25 @@ function adaptGantt(api: ApiClient): FeatureModule {
   return module;
 }
 
+// ── calendar (FE2-local feature module) ───────────────────────────────────────
+// カレンダー is a NEW launcher app that renders the SAME task data as マイタスク (FE4
+// list) and the ガントチャート — it reads the canonical task-service list
+// (GET /api/v1/tasks, @dub/types task) via the one shell api-client and plots tasks
+// by 期限(dueAt) / 期間(startAt〜dueAt) on a month/week grid. No new backend, no schema
+// change (additive read-only view). Nav sits right after gantt (order 22) so the three
+// task views (マイタスク・ガント・カレンダー) cluster together; carries task:read so the
+// tile shows only for users who can read tasks (matching マイタスク/ガント).
+function adaptCalendar(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(CalendarProvider, api);
+  const routes = (calendarRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = calendarNav.map((n) => {
+    const e: NavEntry = { label: n.label, path: n.path, icon: n.icon, order: 22 };
+    if (n.requiredPermissions) e.requiredPermissions = [...n.requiredPermissions] as PermissionKey[];
+    return e;
+  });
+  return { id: "calendar", routes, nav };
+}
+
 // ── members (FE2-local feature module) ────────────────────────────────────────
 // 運営メンバー管理 (invite status + team membership; the GUI replacement for the
 // hand-maintained 組織図 PDF). Like mail/usage it lives in the shell (features/members)
@@ -394,6 +415,7 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptEvents(api),
     adaptTasks(api),
     adaptGantt(api),
+    adaptCalendar(api),
     adaptNotifications(api),
     adaptChat(api),
     adaptMail(api),
@@ -406,4 +428,4 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
   ].map(withNavAppId).map(withAppAccessGate);
 }
 
-export { adaptEvents, adaptTasks, adaptGantt, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptAdmin, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptCalendar, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptAdmin, toIcon };

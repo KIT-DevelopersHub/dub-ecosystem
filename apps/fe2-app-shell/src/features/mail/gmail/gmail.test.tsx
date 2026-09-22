@@ -3,10 +3,10 @@
 // TEST-ONLY demo fixtures (mailModel.fixtures.ts) — the shipped store starts empty. The
 // render tests drive the assembled 3-pane UI through a fake MailApi, proving the UI now
 // shows LIVE gateway data (inbox + Sent) rather than any bundled demo threads.
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
@@ -36,6 +36,11 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     setFlags: vi.fn().mockImplementation((threadId: string, patch: Record<string, boolean>) =>
       Promise.resolve({ threadId, starred: false, archived: false, trashed: false, purged: false, ...patch }),
     ),
+    schedule: vi.fn().mockResolvedValue({ id: "sch", scheduledAt: "2099-01-01T00:00:00.000Z", status: "scheduled" }),
+    listScheduled: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    getScheduled: vi.fn().mockResolvedValue({ id: "sch", to: [], subject: "s", snippet: "", scheduledAt: "2099-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z", status: "scheduled", textBody: "b" }),
+    updateScheduled: vi.fn().mockResolvedValue({ id: "sch", to: [], subject: "s", snippet: "", scheduledAt: "2099-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z", status: "scheduled", textBody: "b" }),
+    cancelScheduled: vi.fn().mockResolvedValue({ id: "sch", status: "canceled" }),
     ...over,
   };
 }
@@ -445,5 +450,91 @@ describe("GmailApp (hydrates from the gateway)", () => {
     expect(dropped).toHaveTextContent(/サイズ超過/);
     await userEvent.click(dropped).catch(() => undefined);
     expect(api.downloadAttachment).not.toHaveBeenCalled();
+  });
+
+  // P25: fe2 Gmail ThreadList archive/delete exit animation. Row must slide out
+  // (translateX + opacity) and collapse (height/border) for EXIT_MS before the
+  // underlying ARCHIVE/TRASH dispatch actually removes it from the visible list.
+  describe("archive/delete exit animation (P25)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("keeps the archived row mounted (marked leaving) until EXIT_MS elapses, then removes it", async () => {
+      const api = fakeApi();
+      render(wrap(<GmailApp />, api));
+      const rows = await screen.findAllByTestId("fe2-mail-inbox-item");
+      const initialCount = rows.length;
+      const firstRow = rows[0]!;
+      fireEvent.mouseEnter(firstRow);
+      const archiveBtn = screen.getByTestId("fe2-mail-archive");
+
+      vi.useFakeTimers();
+      fireEvent.click(archiveBtn);
+
+      // Not removed yet — still mounted, just marked leaving so it can animate out.
+      expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(initialCount);
+      expect(firstRow).toHaveAttribute("data-leaving", "true");
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // EXIT_MS elapsed: the real ARCHIVE dispatch has landed, dropping it from the inbox view.
+      expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(initialCount - 1);
+    });
+
+    it("keeps the trashed row mounted (marked leaving) until EXIT_MS elapses, then removes it", async () => {
+      const api = fakeApi();
+      render(wrap(<GmailApp />, api));
+      const rows = await screen.findAllByTestId("fe2-mail-inbox-item");
+      const initialCount = rows.length;
+      const firstRow = rows[0]!;
+      fireEvent.mouseEnter(firstRow);
+      const trashBtn = screen.getByTestId("fe2-mail-trash");
+
+      vi.useFakeTimers();
+      fireEvent.click(trashBtn);
+
+      expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(initialCount);
+      expect(firstRow).toHaveAttribute("data-leaving", "true");
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(initialCount - 1);
+    });
+
+    it("removes the row immediately with no leaving window under prefers-reduced-motion", async () => {
+      const originalMatchMedia = window.matchMedia;
+      window.matchMedia = ((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      })) as typeof window.matchMedia;
+
+      try {
+        const api = fakeApi();
+        render(wrap(<GmailApp />, api));
+        const rows = await screen.findAllByTestId("fe2-mail-inbox-item");
+        const initialCount = rows.length;
+        const firstRow = rows[0]!;
+        fireEvent.mouseEnter(firstRow);
+        const archiveBtn = screen.getByTestId("fe2-mail-archive");
+
+        fireEvent.click(archiveBtn);
+
+        // No leaving window at all — removed synchronously, matching today's instant behavior.
+        expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(initialCount - 1);
+      } finally {
+        window.matchMedia = originalMatchMedia;
+      }
+    });
   });
 });

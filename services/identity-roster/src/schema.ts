@@ -114,10 +114,18 @@ ALTER TABLE identity_users ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'
   CHECK (source IN ('manual','email-routing'));
 `;
 
+// 読み仮名（フリガナ）を任意の表示属性として追加。五十音ソート/フリガナ検索に使う。
+// Forward-only, additive, nullable（DEFAULT 不要・既存行は NULL のまま）。datetime でない
+// ので theme-3 D2 の DEFAULT 制約には該当しない。
+const FURIGANA_UP = `
+ALTER TABLE identity_users ADD COLUMN furigana TEXT;
+`;
+
 export const IDENTITY_MIGRATIONS: Migration[] = [
   { id: "0001_init", namespace: "identity", up: SCHEMA_UP },
   { id: "0002_system_roles", namespace: "identity", up: SEED_UP },
   { id: "0003_user_source", namespace: "identity", up: SOURCE_UP },
+  { id: "0004_user_furigana", namespace: "identity", up: FURIGANA_UP },
 ];
 
 export const IDENTITY_SCHEMA_SQL = SCHEMA_UP;

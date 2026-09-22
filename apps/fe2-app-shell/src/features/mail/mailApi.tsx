@@ -14,6 +14,11 @@ type MailMessageState = mail.MailMessageState;
 type MailThread = mail.MailThread;
 type MailSentListItem = mail.MailSentListItem;
 type MailSentDetail = mail.MailSentDetail;
+type ScheduleMailRequest = mail.ScheduleMailRequest;
+type ScheduleMailResponse = mail.ScheduleMailResponse;
+type ScheduleMailPatch = mail.ScheduleMailPatch;
+type ScheduledSendListItem = mail.ScheduledSendListItem;
+type ScheduledSendDetail = mail.ScheduledSendDetail;
 type Paginated<T> = common.Paginated<T>;
 
 export interface InboxQuery {
@@ -23,6 +28,11 @@ export interface InboxQuery {
 }
 
 export interface SentQuery {
+  limit?: number;
+  cursor?: string;
+}
+
+export interface ScheduledQuery {
   limit?: number;
   cursor?: string;
 }
@@ -48,6 +58,16 @@ export interface MailApi {
   listFlags(): Promise<mail.MailThreadFlags[]>;
   /** Persist a thread's flags (PATCH: only provided flags change). Returns the new state. */
   setFlags(threadId: string, patch: mail.MailThreadFlagsPatch): Promise<mail.MailThreadFlags>;
+  /** Schedule a compose for a future time (予約送信; mail:send). */
+  schedule(req: ScheduleMailRequest): Promise<ScheduleMailResponse>;
+  /** List still-scheduled sends, soonest due first (mail:read). */
+  listScheduled(query?: ScheduledQuery): Promise<Paginated<ScheduledSendListItem>>;
+  /** Fetch one scheduled send's full detail — body + recipients (mail:read). */
+  getScheduled(id: string): Promise<ScheduledSendDetail>;
+  /** Edit / reschedule a still-scheduled send (mail:send). */
+  updateScheduled(id: string, patch: ScheduleMailPatch): Promise<ScheduledSendDetail>;
+  /** Cancel (取消) a still-scheduled send (mail:send). */
+  cancelScheduled(id: string): Promise<{ id: string; status: "canceled" }>;
 }
 
 const MAIL = "/api/v1/mail";
@@ -82,6 +102,17 @@ export function createMailApi(api: ApiClient): MailApi {
         .then((r) => r.items),
     setFlags: (threadId, patch) =>
       api.request<mail.MailThreadFlags, mail.MailThreadFlagsPatch>({ method: "POST", path: `${MAIL}/flags/${encodeURIComponent(threadId)}`, body: patch }),
+    schedule: (req) => api.request<ScheduleMailResponse, ScheduleMailRequest>({ method: "POST", path: `${MAIL}/scheduled`, body: req }),
+    listScheduled: (query) => {
+      const q: Record<string, string | number | boolean | undefined> = {};
+      if (query?.limit !== undefined) q.limit = query.limit;
+      if (query?.cursor !== undefined) q.cursor = query.cursor;
+      const hasQuery = Object.keys(q).length > 0;
+      return api.request<Paginated<ScheduledSendListItem>>({ method: "GET", path: `${MAIL}/scheduled`, ...(hasQuery ? { query: q } : {}) });
+    },
+    getScheduled: (id) => api.request<ScheduledSendDetail>({ method: "GET", path: `${MAIL}/scheduled/${encodeURIComponent(id)}` }),
+    updateScheduled: (id, patch) => api.request<ScheduledSendDetail, ScheduleMailPatch>({ method: "PATCH", path: `${MAIL}/scheduled/${encodeURIComponent(id)}`, body: patch }),
+    cancelScheduled: (id) => api.request<{ id: string; status: "canceled" }>({ method: "DELETE", path: `${MAIL}/scheduled/${encodeURIComponent(id)}` }),
   };
 }
 
