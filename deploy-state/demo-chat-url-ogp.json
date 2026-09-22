@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-url-ogp",
+  "worker": "dub-demo-chat-url-ogp",
+  "url": "https://dub-demo-chat-url-ogp.developershub-site.workers.dev",
+  "deployedSha": "f0a32292",
+  "branch": "feat/chat-url-ogp-unfurl",
+  "actor": "Kota Takaoka",
+  "markers": ["chat-url-ogp-unfurl-v1","fe6-link-preview"],
+  "live": true,
+  "verifiedAt": "2026-09-16T14:12:58Z",
+  "updatedAt": "2026-09-16T14:12:58Z",
+  "note": "PR#524 chat URL OGP unfurl (Slack-style link preview). First post-deploy probe hit a 404 (new workers.dev hostname still propagating); re-ran verify-live 43s later: both markers present."
+}

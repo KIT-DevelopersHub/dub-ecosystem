@@ -25,6 +25,7 @@ import type { auditLog, event, gantt, gateway, identity, mail, notification, tas
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
+import { mockUnfurl } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -1213,12 +1214,53 @@ function createChatStore() {
     version: 1,
     ...over,
   });
+  // Seed a couple of URL-bearing posts so the autolink + OGP preview card (mock
+  // unfurl for known hosts; none for unknown) is visible without typing anything.
   const generalMessages = [
     msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
     msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000URL",
+      authorId: "usr_bob",
+      body: "LP の最新版はこちらです https://developershub.jp/conf/2026 実装は https://github.com/KIT-DevelopersHub/dub-ecosystem にあります。",
+      createdAt: "2026-08-01T00:10:00.000Z",
+    }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000UR2",
+      authorId: ME_ID,
+      body: "こっちは画像なしのサイトです https://example.com/ このページは OGP ないみたいですね https://no-ogp.invalid/page",
+      createdAt: "2026-08-01T00:12:00.000Z",
+    }),
+  ];
+  // Posted messages persist for the session (per channel) so a sent URL renders
+  // its card in place; ids are minted ascending so they sort after the seed.
+  const posted = new Map<string, ReturnType<typeof msg>[]>();
+  let postSeq = 0;
+  const messagesOf = (channelId: string | null) => [
+    ...(channelId === "chn_general" ? generalMessages : []),
+    ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
-  function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (method === "POST" && pathname === "/api/v1/chat/messages") {
+      const req = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string | null };
+      if (!req.channelId || typeof req.body !== "string") return notFound(`POST ${pathname}`);
+      const created = msg({
+        id: `msg_01ZDEMO${String(++postSeq).padStart(4, "0")}${Date.now().toString(36).toUpperCase()}`,
+        channelId: req.channelId,
+        authorId: currentAccount().id, // /me is account-scoped (account switcher)
+        body: req.body,
+        threadRootId: req.threadRootId ?? null,
+        createdAt: new Date().toISOString(),
+      });
+      posted.set(req.channelId, [...(posted.get(req.channelId) ?? []), created]);
+      return json(created, 201);
+    }
+    if (method === "GET" && pathname === "/api/v1/chat/unfurl") {
+      // Backend-free: fixed OGP for well-known hosts, null (= no card) otherwise.
+      const target = url.searchParams.get("url") ?? "";
+      return json({ url: target, preview: mockUnfurl(target) });
+    }
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");
@@ -1242,8 +1284,9 @@ function createChatStore() {
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
       const channelId = url.searchParams.get("channelId");
-      // #general opens to a seeded timeline (incl. a system post); others stay empty.
-      return json(page(channelId === "chn_general" ? generalMessages : []));
+      // #general opens to a seeded timeline (incl. a system post); others start empty
+      // and grow with posts made during the session.
+      return json(page(messagesOf(channelId)));
     }
     {
       // Members / pins: demo returns a small roster and no pins (bare arrays per the
@@ -1890,11 +1933,12 @@ interface DemoMember {
   orgId: string;
   name: string;
   roleTitle: string | null;
-  status: "added" | "invited" | "considering" | "declined";
+  status: "added" | "invited" | "considering" | "on_leave" | "declined";
   teamIds: string[];
   department: string | null;
   grade: string | null;
   identityUserId: string | null;
+  leaderId: string | null;
   contact: string | null;
   schoolEmail: string | null;
   gmail: string | null;
@@ -1935,36 +1979,101 @@ function createMembersStore() {
     department: string | null = null,
     grade: string | null = null,
     identityUserId: string | null = null,
+    leaderId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, leaderId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
+  // leaderId で「配下」を明示し、組織図順ソートと「リーダー」列/フォームのリーダー選択を
+  // 実データで確認できるようにする。各チームは オーガナイザー → 複数リーダー → 各リーダー
+  // 配下の複数メンバー、という階層にして「リーダー配下が一目で分かる」サンプルにしている。
+  // ステータス表示は added＝通常(バッジなし)、invited/considering＝「打診中」、on_leave＝
+  // 「休み中」、declined＝「辞退」(名簿一覧では既定非表示・辞退者フィルタで参照)。
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
     mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
-    mk("member_h2", "黒川", "統括メンバー", "added", ["team_hq"], 1, null, "情報工学科", "3年"),
-    mk("member_h3", "金井", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年"),
-    // 開発
-    mk("member_d1", "荒木", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
-    mk("member_d2", "阿閉", "リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年"),
-    mk("member_d3", "池田", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年"),
-    // 当日進行
-    mk("member_o1", "久米", "オーガナイザー", "added", ["team_ops"], 6, null, "機械工学科", "3年"),
-    mk("member_o2", "中村", "リーダー", "added", ["team_ops"], 7, null, "経営情報学科", "2年"),
-    // スポンサー
-    mk("member_s1", "吉岡", "オーガナイザー", "added", ["team_sponsor"], 8, null, "経営情報学科", "3年"),
-    mk("member_s2", "前", "リーダー", "added", ["team_sponsor"], 9, null, "情報工学科", "2年"),
-    mk("member_s3", "松島", "メンバー", "invited", ["team_sponsor"], 10, null, "電気電子工学科", "1年"),
-    // 会場
-    mk("member_v1", "清水", "オーガナイザー", "added", ["team_venue"], 11, null, "建築学科", "3年"),
-    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 12, null, "建築学科", "2年"),
-    // 集客広報
-    mk("member_e1", "白木", "オーガナイザー", "added", ["team_pr"], 13, null, "メディア情報学科", "3年"),
-    mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
-    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+    mk("member_h2", "黒川 誠", "統括リーダー", "added", ["team_hq"], 1, null, "情報工学科", "3年", null, "member_1"),
+    mk("member_h3", "金井 涼", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null, "member_h2"),
+    // 開発 — リーダー2人、各リーダーに配下2人。
+    mk("member_d1", "荒木 大地", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
+    mk("member_d2", "阿閉 健", "開発リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年", null, "member_d1"),
+    mk("member_d3", "池田 学", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年", null, "member_d2"),
+    mk("member_d4", "上田 拓真", "メンバー", "added", ["team_dev"], 6, null, "情報工学科", "2年", null, "member_d2"),
+    mk("member_d5", "遠藤 涼子", "開発リーダー", "added", ["team_dev"], 7, null, "情報工学科", "M1", null, "member_d1"),
+    mk("member_d6", "岡本 亮", "メンバー", "added", ["team_dev"], 8, null, "情報工学科", "2年", null, "member_d5"),
+    mk("member_d7", "加藤 千夏", "メンバー", "invited", ["team_dev"], 9, null, "情報工学科", "1年", null, "member_d5"),
+    // 当日進行 — リーダー2人。大野 は「休み中」(一時離脱) の確認用。
+    mk("member_o1", "久米 宏", "オーガナイザー", "added", ["team_ops"], 10, null, "機械工学科", "3年"),
+    mk("member_o2", "中村 蓮", "進行リーダー", "added", ["team_ops"], 11, null, "経営情報学科", "2年", null, "member_o1"),
+    mk("member_o3", "大野 翼", "メンバー", "on_leave", ["team_ops"], 12, null, "機械工学科", "2年", null, "member_o2"),
+    mk("member_o4", "木下 悠", "メンバー", "added", ["team_ops"], 13, null, "機械工学科", "1年", null, "member_o2"),
+    mk("member_o5", "佐々木 誠", "進行リーダー", "added", ["team_ops"], 14, null, "経営情報学科", "3年", null, "member_o1"),
+    mk("member_o6", "島田 拓", "メンバー", "added", ["team_ops"], 15, null, "機械工学科", "2年", null, "member_o5"),
+    // スポンサー — リーダー配下2人。
+    mk("member_s1", "吉岡 誠一", "オーガナイザー", "added", ["team_sponsor"], 16, null, "経営情報学科", "3年"),
+    mk("member_s2", "前田 直樹", "渉外リーダー", "added", ["team_sponsor"], 17, null, "情報工学科", "2年", null, "member_s1"),
+    mk("member_s3", "松島 花", "メンバー", "invited", ["team_sponsor"], 18, null, "電気電子工学科", "1年", null, "member_s2"),
+    mk("member_s4", "森 健太", "メンバー", "added", ["team_sponsor"], 19, null, "経営情報学科", "2年", null, "member_s2"),
+    // 会場 — リーダー配下2人。
+    mk("member_v1", "清水 洋介", "オーガナイザー", "added", ["team_venue"], 20, null, "建築学科", "3年"),
+    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 21, null, "建築学科", "2年", null, "member_v1"),
+    mk("member_v3", "田口 涼太", "メンバー", "added", ["team_venue"], 22, null, "建築学科", "1年", null, "member_2"),
+    mk("member_v4", "谷 真央", "メンバー", "added", ["team_venue"], 23, null, "建築学科", "2年", null, "member_2"),
+    // 集客広報 — リーダー2人、各リーダーに配下2人。
+    mk("member_e1", "白木 彩", "オーガナイザー", "added", ["team_pr"], 24, null, "メディア情報学科", "3年"),
+    mk("member_e2", "石井 里奈", "広報リーダー", "added", ["team_pr"], 25, null, "メディア情報学科", "2年", null, "member_e1"),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 26, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
+    mk("member_e4", "藤田 直人", "メンバー", "added", ["team_pr"], 27, null, "メディア情報学科", "1年", null, "member_e2"),
+    mk("member_e5", "中田 桜", "デザインリーダー", "added", ["team_pr"], 28, null, "メディア情報学科", "3年", null, "member_e1"),
+    mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 29, null, "メディア情報学科", "2年", null, "member_e5"),
+    // 辞退 — 名簿一覧では既定で隠れ、辞退者フィルタでのみ表示される確認用。
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 30),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 17, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 31, null, "情報工学科", "1年"),
   ];
+
+  // フリガナ(読み仮名)の seed。参加届からの流入を模して 姓/名 の分割カナを各メンバーへ付与し、
+  // 名簿一覧の「フリガナ」列・カナ検索・(fe7 側の)五十音ソートを実データで確認できるようにする。
+  const KANA: Record<string, [string, string]> = {
+    member_1: ["たかおか", "こたろう"],
+    member_h2: ["くろかわ", "まこと"],
+    member_h3: ["かない", "りょう"],
+    member_d1: ["あらき", "だいち"],
+    member_d2: ["あとじ", "けん"],
+    member_d3: ["いけだ", "まなぶ"],
+    member_d4: ["うえだ", "たくま"],
+    member_d5: ["えんどう", "りょうこ"],
+    member_d6: ["おかもと", "りょう"],
+    member_d7: ["かとう", "ちなつ"],
+    member_o1: ["くめ", "ひろし"],
+    member_o2: ["なかむら", "れん"],
+    member_o3: ["おおの", "つばさ"],
+    member_o4: ["きのした", "ゆう"],
+    member_o5: ["ささき", "まこと"],
+    member_o6: ["しまだ", "たく"],
+    member_s1: ["よしおか", "せいいち"],
+    member_s2: ["まえだ", "なおき"],
+    member_s3: ["まつしま", "はな"],
+    member_s4: ["もり", "けんた"],
+    member_v1: ["しみず", "ようすけ"],
+    member_2: ["さとう", "はなこ"],
+    member_v3: ["たぐち", "りょうた"],
+    member_v4: ["たに", "まお"],
+    member_e1: ["しらき", "あや"],
+    member_e2: ["いしい", "りな"],
+    member_3: ["すずき", "いちろう"],
+    member_e4: ["ふじた", "なおと"],
+    member_e5: ["なかた", "さくら"],
+    member_e6: ["にしむら", "たく"],
+    member_5: ["やまだ", "さぶろう"],
+    member_6: ["たむら", "み"],
+  };
+  for (const mem of members) {
+    const kana = KANA[mem.id];
+    if (kana) {
+      mem.lastNameKana = kana[0];
+      mem.firstNameKana = kana[1];
+    }
+  }
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
   // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
@@ -2050,9 +2159,10 @@ function createMembersStore() {
     if (method === "POST" && pathname === "/api/v1/members/people") {
       const mem: DemoMember = {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
-        status: body?.status ?? "considering", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
+        status: body?.status ?? "added", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
+        leaderId: body?.leaderId ?? null,
         contact: body?.contact ?? null, schoolEmail: null, gmail: null,
         lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: body?.note ?? null,
         sortOrder: (members.length + 1) * 1024, version: 1,
@@ -2102,6 +2212,7 @@ function createMembersStore() {
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
         if (body?.department !== undefined) mem.department = body.department ?? null;
         if (body?.grade !== undefined) mem.grade = body.grade ?? null;
+        if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
         if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
         if (body?.note !== undefined) mem.note = body.note ?? null;
@@ -2228,7 +2339,7 @@ function createMembersStore() {
       }
       if (action === "create") {
         const created: DemoMember = {
-          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null,
+          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null, leaderId: null,
           department: p.department, grade: p.grade, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
           contact: p.contact ?? p.schoolEmail, schoolEmail: p.schoolEmail || null, gmail: p.gmail || null,
           lastName: p.lastName, firstName: p.firstName, lastNameKana: p.lastNameKana, firstNameKana: p.firstNameKana,

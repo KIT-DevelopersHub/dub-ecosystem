@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mobile-webview",
+  "worker": "dub-demo-mobile-webview",
+  "url": "https://dub-demo-mobile-webview.developershub-site.workers.dev",
+  "deployedSha": "624a68de",
+  "branch": "feat/mobile-webview",
+  "actor": "ko-tarou",
+  "markers": ["viewport-fit=cover","dub-app-height"],
+  "live": true,
+  "verifiedAt": "2026-09-17T15:28:04Z",
+  "updatedAt": "2026-09-17T15:28:04Z",
+  "note": "Mobile WebView pass v2: +definite-height shell so chat/mail fill and pin composer above keyboard"
+}
