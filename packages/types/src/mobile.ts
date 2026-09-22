@@ -6,9 +6,9 @@ import type { TaskSummary } from "./task";
 import type { PermissionKey } from "./identity";
 import type { NotificationType } from "./notification";
 
-// Push-capable client platforms. iOS/macOS → APNs, android → FCM, windows → WNS.
-// macOS and windows are additive (de1-desktop WebView shell background push); adding
-// them never invalidates an existing ios/android device row.
+// Push-capable client platforms. iOS/macOS/android → FCM (Apple tokens are forwarded
+// to APNs inside Firebase), windows → WNS. macOS and windows are additive (de1-desktop
+// WebView shell background push); adding them never invalidates an existing device row.
 export type MobilePlatform = "ios" | "android" | "macos" | "windows";
 
 export interface MobileHomeResponse {
