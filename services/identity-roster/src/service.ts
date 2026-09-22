@@ -53,6 +53,7 @@ export class IdentityService {
       id: u.id,
       orgId: u.orgId,
       displayName: u.displayName,
+      furigana: u.furigana,
       email: u.email,
       githubLogin: u.githubLogin,
       avatarUrl: u.avatarUrl,
@@ -157,7 +158,7 @@ export class IdentityService {
   }
 
   // ---------- invite / provision ----------
-  async invite(orgId: string, req: { email: string; displayName?: string; roleIds?: string[] }, ctx: RequestCtx): Promise<InviteUserResponse> {
+  async invite(orgId: string, req: { email: string; displayName?: string; furigana?: string; roleIds?: string[] }, ctx: RequestCtx): Promise<InviteUserResponse> {
     const email = requireEmail(req.email);
     const org = await this.d.repo.getOrg(orgId);
     if (!org) throw errors.notFound("org", orgId);
@@ -176,6 +177,7 @@ export class IdentityService {
       orgId,
       email,
       displayName: req.displayName ?? email.split("@")[0]!,
+      furigana: req.furigana?.trim() ? req.furigana.trim() : null,
       githubLogin: null,
       avatarUrl: null,
       status: "invited",
@@ -248,8 +250,10 @@ export class IdentityService {
       await this.d.revoker.revokeUser(userId, ctx);
     }
 
-    const patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status">> = {};
+    const patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status">> = {};
     if (req.displayName !== undefined) patch.displayName = req.displayName;
+    // 読み仮名: 空/空白は「クリア」の意で null にする（未設定に戻せる）。
+    if (req.furigana !== undefined) patch.furigana = req.furigana && req.furigana.trim() ? req.furigana.trim() : null;
     if (req.githubLogin !== undefined) patch.githubLogin = req.githubLogin;
     if (req.status !== undefined) patch.status = req.status;
 
@@ -483,6 +487,7 @@ export class IdentityService {
           orgId,
           email,
           displayName: email.split("@")[0]!,
+          furigana: null,
           githubLogin: null,
           avatarUrl: null,
           status: enabled ? "active" : "disabled",
