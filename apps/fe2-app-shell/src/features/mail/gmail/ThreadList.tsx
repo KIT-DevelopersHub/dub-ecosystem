@@ -2,7 +2,7 @@
 // is ~40px: leading checkbox, star toggle, bold sender (unread) / regular (read),
 // subject + inline snippet, label chips, and a timestamp that swaps to row
 // actions (archive / delete / mark-read) on hover. Bulk selection lifts a toolbar.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   avatarColor,
   displayName,
@@ -18,6 +18,19 @@ import {
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore } from "./useMailStore.tsx";
+
+// P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
+// Archive/trash marks the row `leaving` (slide-out + collapse plays via inline styles),
+// then the real ARCHIVE/TRASH dispatch — which is what actually drops the thread out of
+// `visible` below — fires only after EXIT_MS, keeping the row mounted (and animatable)
+// for the whole exit. Keep this in sync with --dub-motion-normal (200ms).
+const EXIT_MS = 200;
+
+// File-local reduced-motion check (same shape as fe1 SortableList's helper) — no shared
+// hook exists yet, so this stays local per file per Minimal Impact.
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
 
 /** Confirm "完全に削除" (permanent, per-user, no restore). Returns true to proceed. Kept as a
  *  plain window.confirm so the irreversible action always demands an explicit OK; in a
@@ -73,7 +86,19 @@ function StopClick({ children, onClick, label, testId }: { children: JSX.Element
   );
 }
 
-function ThreadRow({ thread, labels }: { thread: MailThreadModel; labels: Label[] }): JSX.Element {
+function ThreadRow({
+  thread,
+  labels,
+  leaving,
+  onArchive,
+  onTrash,
+}: {
+  thread: MailThreadModel;
+  labels: Label[];
+  leaving: boolean;
+  onArchive: () => void;
+  onTrash: () => void;
+}): JSX.Element {
   const { state, dispatch } = useMailStore();
   const [hover, setHover] = useState(false);
   const unread = threadUnread(thread);
@@ -81,10 +106,14 @@ function ThreadRow({ thread, labels }: { thread: MailThreadModel; labels: Label[
   const checked = state.checked.has(thread.id);
   const people = thread.folder === "sent" || thread.folder === "drafts" ? last.to[0] ?? state.me : last.from;
 
+  // P25: `data-thread-row` is a static marker (literal string, survives minification) so a
+  // live-deploy check can grep the built bundle for this row without depending on RTL testids.
   return (
     <div
       role="row"
       data-testid="fe2-mail-inbox-item"
+      data-thread-row="fe2-mail-thread-row"
+      data-leaving={leaving ? "true" : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={() => dispatch({ type: "OPEN_THREAD", id: thread.id })}
@@ -92,16 +121,27 @@ function ThreadRow({ thread, labels }: { thread: MailThreadModel; labels: Label[
         display: "flex",
         alignItems: "center",
         gap: 8,
-        height: 40,
+        height: leaving ? 0 : 40,
         padding: "0 12px 0 8px",
-        cursor: "pointer",
-        borderBottom: "1px solid var(--dub-color-border-default)",
+        cursor: leaving ? "default" : "pointer",
+        overflow: "hidden",
+        opacity: leaving ? 0 : 1,
+        transform: leaving ? "translateX(24px)" : "translateX(0)",
+        pointerEvents: leaving ? "none" : "auto",
+        borderBottomWidth: leaving ? 0 : 1,
+        borderBottomStyle: "solid",
+        borderBottomColor: "var(--dub-color-border-default)",
+        transition:
+          "opacity var(--dub-motion-normal) var(--dub-motion-easing), " +
+          "transform var(--dub-motion-normal) var(--dub-motion-easing), " +
+          "height var(--dub-motion-normal) var(--dub-motion-easing), " +
+          "border-bottom-width var(--dub-motion-normal) var(--dub-motion-easing)",
         background: checked
           ? "var(--dub-color-brand-50)"
           : unread
             ? "var(--dub-color-surface-base)"
             : "var(--dub-color-surface-sunken)",
-        boxShadow: hover ? "inset 1px 0 0 var(--dub-color-border-strong), var(--dub-shadow-sm)" : "none",
+        boxShadow: hover && !leaving ? "inset 1px 0 0 var(--dub-color-border-strong), var(--dub-shadow-sm)" : "none",
       }}
     >
       <StopClick label={checked ? "選択を解除" : "スレッドを選択"} onClick={() => dispatch({ type: "TOGGLE_CHECK", id: thread.id })}>
@@ -211,10 +251,10 @@ function ThreadRow({ thread, labels }: { thread: MailThreadModel; labels: Label[
               </>
             ) : (
               <>
-                <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })}>
+                <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={onArchive}>
                   <MailIcon name="archive" size={18} />
                 </StopClick>
-                <StopClick label="削除" testId="fe2-mail-trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })}>
+                <StopClick label="削除" testId="fe2-mail-trash" onClick={onTrash}>
                   <MailIcon name="trash" size={18} />
                 </StopClick>
               </>
@@ -244,6 +284,44 @@ function ThreadRow({ thread, labels }: { thread: MailThreadModel; labels: Label[
 
 export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
+  const [leavingIds, setLeavingIds] = useState<Set<string>>(new Set());
+  const leaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timers = leaveTimers.current;
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+      timers.clear();
+    };
+  }, []);
+
+  // P25: reduced-motion skips straight to the real (today's instant) dispatch. Otherwise
+  // mark `ids` leaving so ThreadRow can play its slide-out/collapse, and only fire the real
+  // ARCHIVE/TRASH dispatch (which drops the thread out of `visible`) after EXIT_MS. Ids
+  // already leaving are ignored defensively (bulk toolbar has no per-row pointerEvents guard).
+  function beginLeave(ids: string[], type: "ARCHIVE" | "TRASH"): void {
+    if (prefersReducedMotion()) {
+      dispatch({ type, ids });
+      return;
+    }
+    const fresh = ids.filter((id) => !leavingIds.has(id));
+    if (fresh.length === 0) return;
+    setLeavingIds((prev) => {
+      const next = new Set(prev);
+      fresh.forEach((id) => next.add(id));
+      return next;
+    });
+    const timer = setTimeout(() => {
+      dispatch({ type, ids: fresh });
+      setLeavingIds((prev) => {
+        const next = new Set(prev);
+        fresh.forEach((id) => next.delete(id));
+        return next;
+      });
+      fresh.forEach((id) => leaveTimers.current.delete(id));
+    }, EXIT_MS);
+    fresh.forEach((id) => leaveTimers.current.set(id, timer));
+  }
 
   const visible = state.threads.filter((t) => {
     if (t.purged) return false; // 完全に削除: hidden from every folder for this viewer
@@ -323,10 +401,10 @@ export function ThreadList(): JSX.Element {
               </>
             ) : (
               <>
-                <StopClick label="選択をアーカイブ" onClick={() => dispatch({ type: "ARCHIVE", ids: checkedInView })}>
+                <StopClick label="選択をアーカイブ" onClick={() => beginLeave(checkedInView, "ARCHIVE")}>
                   <MailIcon name="archive" size={18} />
                 </StopClick>
-                <StopClick label="選択を削除" onClick={() => dispatch({ type: "TRASH", ids: checkedInView })}>
+                <StopClick label="選択を削除" onClick={() => beginLeave(checkedInView, "TRASH")}>
                   <MailIcon name="trash" size={18} />
                 </StopClick>
               </>
@@ -369,7 +447,14 @@ export function ThreadList(): JSX.Element {
       ) : (
         <div role="rowgroup" style={{ flex: 1, overflowY: "auto" }}>
           {visible.map((t) => (
-            <ThreadRow key={t.id} thread={t} labels={state.labels} />
+            <ThreadRow
+              key={t.id}
+              thread={t}
+              labels={state.labels}
+              leaving={leavingIds.has(t.id)}
+              onArchive={() => beginLeave([t.id], "ARCHIVE")}
+              onTrash={() => beginLeave([t.id], "TRASH")}
+            />
           ))}
         </div>
       )}
