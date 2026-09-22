@@ -127,6 +127,17 @@
   border: 1px dashed var(--dub-color-border-default);
   border-radius: var(--dub-radius-lg);
 }
+.calloutInfo {
+  padding: var(--dub-space-3) var(--dub-space-4);
+  margin: var(--dub-space-4) 0;
+  border: 1px solid var(--dub-color-border-default);
+  border-left: 3px solid var(--dub-color-brand-500);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-brand-50);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  line-height: 1.7;
+}
 .sectionTitle {
   font-size: var(--dub-font-size-xl);
   font-weight: var(--dub-font-weight-bold);

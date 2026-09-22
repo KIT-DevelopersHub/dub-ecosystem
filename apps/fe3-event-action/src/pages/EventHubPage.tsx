@@ -5,12 +5,13 @@
 // NOTE: this page does NOT render its own event switcher — the shell header already
 // carries the global one, so an in-body switcher would double the header (判断36⑤).
 // The standalone dev harness (main.tsx) supplies EventAppHeader itself.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Icon, EmptyState, SkeletonLoader } from "@dub/ui";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { EventDetailsPanel } from "../components/EventDetailsPanel";
 import { EventEditForm } from "../components/EventEditForm";
 import { PhaseBadge } from "../components/PhaseBadge";
+import { BlockEditor, hasDoc, sampleEventDoc } from "../blockeditor";
 import { useCurrentEventId } from "../lib/currentEvent";
 import { useNavigation } from "../contracts/navigation";
 import { eventRoutes, chatHref } from "../lib/routes";
@@ -39,6 +40,17 @@ function HubBody({ eventId }: { eventId: string }) {
   // settings-page round trip for these fields used to strand the user on a
   // separate screen with a "戻る" that didn't return to this hub (判断: fe3 nav fix).
   const [editing, setEditing] = useState(false);
+
+  // "イベント編集" — the free block-editor page mode (しおり UI reused). Distinct
+  // from the structured hero/detail edits above: this is a widget canvas the
+  // organiser lays out freely. It coexists with the structured event data — the
+  // free layout renders above the fixed イベント詳細 panel, never replacing it.
+  const [pageEditing, setPageEditing] = useState(false);
+  const hasLayout = useMemo(() => hasDoc(eventId), [eventId, pageEditing]);
+  const seed = useMemo(
+    () => sampleEventDoc(ev.title, ev.description ?? undefined),
+    [ev.title, ev.description],
+  );
 
   return (
     <div className={styles.page}>
@@ -69,13 +81,34 @@ function HubBody({ eventId }: { eventId: string }) {
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {permissions.write ? (
+                pageEditing ? (
+                  <Button
+                    iconLeft={<Icon name="check" />}
+                    variant="primary"
+                    onClick={() => setPageEditing(false)}
+                    testId="fe3-hub-edit-page-done"
+                  >
+                    編集を終了
+                  </Button>
+                ) : (
+                  <Button
+                    iconLeft={<Icon name="edit" />}
+                    variant="primary"
+                    onClick={() => setPageEditing(true)}
+                    testId="fe3-hub-edit-page"
+                  >
+                    イベント編集
+                  </Button>
+                )
+              ) : null}
+              {permissions.write && !pageEditing ? (
                 <Button
                   iconLeft={<Icon name="edit" />}
                   variant="secondary"
                   onClick={() => setEditing(true)}
                   testId="fe3-hub-edit-event"
                 >
-                  編集
+                  基本情報
                 </Button>
               ) : null}
               <Button
@@ -108,7 +141,29 @@ function HubBody({ eventId }: { eventId: string }) {
         {!editing && ev.description ? <p className={styles.heroDesc}>{ev.description}</p> : null}
       </div>
 
-      <EventDetailsPanel eventId={eventId} canWrite={permissions.write} />
+      {pageEditing ? (
+        // Page-edit mode: the event screen becomes a widget canvas. The
+        // structured イベント詳細 panel is hidden to give a clean editing surface;
+        // it returns unchanged on 編集を終了 (the two layers never overwrite one
+        // another — the block layout is a separate free layer).
+        <section data-testid="fe3-hub-editor">
+          <div className={styles.calloutInfo} data-testid="fe3-hub-edit-banner">
+            イベント編集モード — 右のパレットからブロックを追加し、ダブルクリックで中身を編集、ドラッグで並べ替え・幅変更ができます。変更は自動保存されます。
+          </div>
+          <BlockEditor storageKey={eventId} canWrite seed={seed} />
+        </section>
+      ) : (
+        <>
+          {hasLayout ? (
+            // View mode: the organiser's free block layout renders as page content
+            // above the structured detail panel.
+            <section data-testid="fe3-hub-layout">
+              <BlockEditor storageKey={eventId} canWrite={false} />
+            </section>
+          ) : null}
+          <EventDetailsPanel eventId={eventId} canWrite={permissions.write} />
+        </>
+      )}
     </div>
   );
 }
