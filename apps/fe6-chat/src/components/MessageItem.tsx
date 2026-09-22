@@ -14,6 +14,7 @@ import { Avatar, Icon } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message } from "../api/contract";
 import { MessageBody } from "./MessageBody";
+import { LinkPreviews } from "./LinkPreview";
 import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
 import styles from "../styles/chat.module.css";
@@ -230,6 +231,8 @@ export function MessageItem({
             {grouped && message.editedAt && <span className={styles.editedTag}> (編集済み)</span>}
           </div>
         )}
+
+        {!isDeleted && !editing && <LinkPreviews body={message.body} />}
 
         {!isDeleted && !editing && message.attachments.length > 0 && <Attachments attachments={message.attachments} />}
 

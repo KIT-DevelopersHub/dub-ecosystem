@@ -440,7 +440,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                   outline: "none",
                   background: "transparent",
                   color: "var(--dub-color-text-primary)",
-                  fontSize: "var(--dub-font-size-sm)",
+                  fontSize: "var(--dub-font-size-md)",
                   fontFamily: "inherit",
                 }}
               />

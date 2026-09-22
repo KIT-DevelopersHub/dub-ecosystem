@@ -447,6 +447,9 @@
 .timeline {
   flex: 1;
   overflow-y: auto;
+  /* Keep a fling past the top/bottom scrolling only the timeline — never chain
+     the bounce to the shell behind it (modern WebViews give momentum by default). */
+  overscroll-behavior: contain;
   padding: var(--dub-space-4) 0 var(--dub-space-2);
   display: flex;
   flex-direction: column;
@@ -801,7 +804,11 @@
 
 /* ─────────────────────────────── Composer ──────────────────────────────── */
 .composer {
-  padding: 0 var(--dub-space-4) var(--dub-space-4);
+  /* Chat is full-bleed ([data-app-bleed] → the shell drops its safe-area padding),
+     so the composer must clear the home indicator itself: pad the bottom past the
+     inset while keeping the 16px base gutter. When the keyboard is up the inset
+     collapses to 0 (indicator hidden), so this only adds space when it's needed. */
+  padding: 0 var(--dub-space-4) max(var(--dub-space-4), env(safe-area-inset-bottom));
   position: relative;
 }
 .composerBox {
@@ -881,6 +888,12 @@
 .composer textarea:disabled {
   opacity: 0.5;
 }
+/* Touch: 16px so focusing the composer never triggers iOS auto-zoom. */
+@media (pointer: coarse) {
+  .composer textarea {
+    font-size: var(--dub-font-size-md);
+  }
+}
 .composerBottom {
   display: flex;
   align-items: center;
@@ -914,6 +927,14 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-muted);
   cursor: not-allowed;
+}
+/* Touch: the send button is the composer's primary action — guarantee a full
+   44px tap target on coarse pointers (Apple HIG / WCAG 2.5.5). It's a bespoke
+   button, not the @dub/ui Button, so it needs its own floor. */
+@media (pointer: coarse) {
+  .sendButton {
+    min-height: 44px;
+  }
 }
 /* P13: press-and-away pulse the instant a message is sent — pairs with the
  * pending row's slide-in below so the whole send reads as one motion. */
@@ -1213,6 +1234,90 @@
 .attachSize {
   color: var(--dub-color-text-muted);
   font-size: var(--dub-font-size-xs);
+}
+
+/* ── link preview cards (Slack-style unfurl, below the body) ─────────────── */
+.linkPreviews {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  margin-top: var(--dub-space-2);
+}
+.linkPreview {
+  display: flex;
+  gap: var(--dub-space-3);
+  align-items: flex-start;
+  max-width: 480px;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-left: 4px solid var(--dub-color-border-strong, var(--dub-color-border-default));
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+  color: inherit;
+  text-decoration: none;
+}
+/* The row itself turns surface-sunken on hover, so the card lifts via border + shadow
+   (a sunken card would vanish into the row). */
+.linkPreview:hover {
+  border-left-color: var(--dub-color-brand-600);
+  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
+}
+.linkPreview:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--dub-radius-md);
+}
+.linkPreviewText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.linkPreviewSite {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+}
+.linkPreviewTitle {
+  color: var(--dub-color-text-link, var(--dub-color-brand-600));
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  line-height: 1.3;
+  overflow: hidden;
+  overflow-wrap: anywhere; /* title may be a bare URL: never widen the card on mobile */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.linkPreviewDesc {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+  line-height: 1.4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.linkPreviewImage {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--dub-radius-sm);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-sunken);
+}
+/* mobile mode (same 768px tier as the rest of this file): full width, 44px tap target */
+@media (max-width: 768px) {
+  .linkPreview {
+    max-width: 100%;
+    min-height: 44px;
+  }
+  .linkPreviewImage {
+    width: 72px;
+    height: 48px;
+  }
 }
 
 /* ── composer attachment tray ────────────────────────────────────────────── */

@@ -6,9 +6,13 @@
 // team switchers. Keep the Team shape STABLE — id / key / name / color / description.
 import type { OrgId, UserId, ISODateTime } from "./common";
 
-/** Invite / participation status of an 運営メンバー. Closed union (contract change to extend). */
-export type MemberStatus = "added" | "invited" | "considering" | "declined";
-export const MEMBER_STATUSES: readonly MemberStatus[] = ["added", "invited", "considering", "declined"];
+/** Invite / participation status of an 運営メンバー. Closed union (contract change to extend).
+ *  - added / invited / considering : 在籍系（UI では「在籍中」に統合表示）。invited と
+ *    considering は同義（招待中 == 検討中）で、名簿上は added と同じ「在籍中」として扱う。
+ *  - on_leave : 一時離脱（「休み中」）。休職とは別で、名簿には残るが稼働していない状態。additive。
+ *  - declined : 辞退。名簿 UI からは隠すがデータは保持し「辞退者」ビューで参照する。 */
+export type MemberStatus = "added" | "invited" | "considering" | "on_leave" | "declined";
+export const MEMBER_STATUSES: readonly MemberStatus[] = ["added", "invited", "considering", "on_leave", "declined"];
 
 /**
  * A team / 班. The canonical shared entity — this exact shape is what every app
@@ -43,6 +47,12 @@ export interface Member {
    * record) and RBAC/認証 (identity_users). Set/cleared via PATCH (human-confirmed).
    */
   identityUserId: string | null;
+  /**
+   * このメンバーが配下につく「リーダー」の member id（＝上長）。null は直属リーダー無し
+   * （オーガナイザー／統括や未割り当て）。組織図の親子関係と名簿の組織図順ソートに使う。
+   * 同一 org 内の別 member を指す自己参照（自分自身は不可）。additive・任意。
+   */
+  leaderId?: string | null;
   /** 連絡先 (任意). */
   contact: string | null;
   /** 学校メールアドレス — retained on the roster from a 参加届 (任意 / additive). */
@@ -106,6 +116,8 @@ export interface CreateMemberRequest {
   teamIds: string[];
   department?: string | null;
   grade?: string | null;
+  /** 配下につくリーダーの member id（任意・additive）。 */
+  leaderId?: string | null;
   contact?: string | null;
   note?: string | null;
 }
@@ -118,6 +130,8 @@ export interface UpdateMemberRequest {
   grade?: string | null;
   /** Set (link) or null (unlink) the identity-roster account. Omit = leave unchanged. */
   identityUserId?: string | null;
+  /** 配下につくリーダーの member id。null で解除。省略で変更なし（任意・additive）。 */
+  leaderId?: string | null;
   contact?: string | null;
   note?: string | null;
   sortOrder?: number;

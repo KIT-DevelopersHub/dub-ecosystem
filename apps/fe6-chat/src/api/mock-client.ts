@@ -21,6 +21,7 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  UnfurlPreview,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -28,6 +29,7 @@ import type {
 import type { ChatApiClient } from "./client";
 import { ChatApiError } from "./client";
 import { toggleReactionLocal } from "../store/timeline";
+import { mockUnfurl } from "../lib/unfurl-mock";
 
 const now = (): common.ISODateTime => new Date().toISOString();
 
@@ -338,5 +340,14 @@ export class MockChatClient implements ChatApiClient {
       out.push(u ?? { id, displayName: id, avatarUrl: null });
     }
     return this.settle(out);
+  }
+
+  async unfurl(url: string): Promise<UnfurlPreview | null> {
+    // Parity with HttpChatClient: best-effort, never rejects (a primed nextError -> no card).
+    try {
+      return await this.settle(mockUnfurl(url));
+    } catch {
+      return null;
+    }
   }
 }

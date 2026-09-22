@@ -84,7 +84,14 @@
 }
 .shell {
   display: flex;
-  min-height: 100vh;
+  min-height: 100vh; /* fallback for browsers without dvh */
+  /* Definite height (not just min-height) so full-bleed apps that fill via
+     height:100% (chat/mail) resolve to the viewport and pin their composer to the
+     bottom — with only min-height, a percentage-height child collapses to content
+     height and floats with dead space below. The content region (.shellContent)
+     scrolls internally for taller pages. The var tracks the on-screen keyboard. */
+  height: 100vh; /* fallback */
+  height: var(--dub-app-height, 100dvh);
   background: var(--dub-color-surface-sunken);
 }
 .shellSidebar {
@@ -94,7 +101,8 @@
   position: sticky;
   top: 0;
   align-self: flex-start;
-  height: 100vh;
+  height: 100vh; /* fallback */
+  height: var(--dub-app-height, 100dvh);
   overflow-y: auto;
 }
 .shellMain {
@@ -102,12 +110,16 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0; /* let .shellContent own the scroll instead of growing the shell */
 }
 .shellHeader {
   position: sticky;
   top: 0;
   z-index: var(--dub-zIndex-sticky);
-  padding: var(--dub-space-3) var(--dub-space-6) 0;
+  /* Honour the notch: pad the sticky header past the status bar (top) and any
+     landscape notch (left/right) when the WebView renders edge-to-edge. */
+  padding: max(var(--dub-space-3), env(safe-area-inset-top)) max(var(--dub-space-6), env(safe-area-inset-right)) 0
+    max(var(--dub-space-6), env(safe-area-inset-left));
   border-bottom: 1px solid var(--dub-color-border-default);
   background: color-mix(in srgb, var(--dub-color-surface-raised) 88%, transparent);
   backdrop-filter: saturate(180%) blur(8px);
@@ -115,10 +127,33 @@
 }
 .shellContent {
   flex: 1;
-  padding: var(--dub-space-6);
+  min-height: 0;
+  /* The shell has a definite height, so the content region is the single scroll
+     container (native-app pattern): the header stays fixed, tall pages scroll here,
+     and full-bleed apps fill exactly. */
+  overflow-y: auto;
+  /* Keep flings from bouncing the body behind the fixed header — the boxed apps
+     (mail/inbox/roster) scroll here (modern WebViews give momentum by default). */
+  overscroll-behavior: contain;
+  /* Content gutter + safe-area on the sides/bottom (home indicator) for edge-to-edge. */
+  padding: var(--dub-space-6) max(var(--dub-space-6), env(safe-area-inset-right))
+    max(var(--dub-space-6), env(safe-area-inset-bottom)) max(var(--dub-space-6), env(safe-area-inset-left));
   min-width: 0;
   background: var(--dub-color-surface-sunken);
 }
+/* Phones: tighten the generous desktop gutters so content gets the width, while
+   still clearing the safe-area insets. */
+@media (max-width: 640px) {
+  .shellHeader {
+    padding-right: max(var(--dub-space-4), env(safe-area-inset-right));
+    padding-left: max(var(--dub-space-4), env(safe-area-inset-left));
+  }
+  .shellContent {
+    padding: var(--dub-space-4) max(var(--dub-space-4), env(safe-area-inset-right))
+      max(var(--dub-space-4), env(safe-area-inset-bottom)) max(var(--dub-space-4), env(safe-area-inset-left));
+  }
+}
+/* Full-bleed apps clear their own safe area (own chrome), so keep them edge-to-edge. */
 /* Full-bleed apps (Slack-style chat / Gmail-style mail) opt out of the content
    gutter + sunken frame by rendering an element with [data-app-bleed]. Without
    this the 24px padding boxes an edge-to-edge app, leaving a sunken border on all
@@ -126,4 +161,8 @@
    canvas corner-to-corner (own scroll regions handle overflow). */
 .shellContent:has([data-app-bleed]) {
   padding: 0;
+  /* Full-bleed apps own their internal scroll regions, so the content region must
+     not add its own scrollbar on top (no double scroll); it just hands the app the
+     exact box to fill. */
+  overflow: hidden;
 }

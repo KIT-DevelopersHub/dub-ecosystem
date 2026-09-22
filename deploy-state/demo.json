@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "3cb2410",
-  "branch": "feat/lp-management",
-  "actor": "Claude Code",
-  "markers": ["fe2-lp-screen", "LP管理"],
+  "deployedSha": "3034bbd3",
+  "branch": "staging/furigana-roster-integ",
+  "actor": "Kota",
+  "markers": ["各リーダーの下に配下メンバーをぶら下げて", "members-orgchart"],
   "live": true,
-  "verifiedAt": "2026-09-07T14:16:05Z",
-  "updatedAt": "2026-09-07T14:16:05Z",
-  "note": "LP管理アプリ追加（バージョン一覧・閲覧 v1.0）"
+  "verifiedAt": "2026-09-22T05:14:19Z",
+  "updatedAt": "2026-09-22T05:14:19Z",
+  "note": "組織図: leaderId親子ツリーで配下を明示"
 }

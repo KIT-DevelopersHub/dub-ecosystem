@@ -8,6 +8,7 @@
   border-radius: var(--dub-radius-md);
   border: 1px solid transparent;
   cursor: pointer;
+  touch-action: manipulation;
   transition: background-color var(--dub-motion-fast) var(--dub-motion-easing),
     border-color var(--dub-motion-fast) var(--dub-motion-easing),
     transform var(--dub-motion-fast) var(--dub-motion-easing);
@@ -116,4 +117,16 @@
 }
 .label {
   line-height: var(--dub-font-line-height-tight);
+}
+
+/* Touch: guarantee a >=44px tap target on coarse pointers — the compact sm/icon
+   buttons fall short of it with padding alone (Apple HIG / WCAG 2.5.5). Desktop
+   (fine pointer) keeps its denser sizing untouched. */
+@media (pointer: coarse) {
+  .button {
+    min-height: 44px;
+  }
+  .button.iconButton {
+    min-width: 44px;
+  }
 }

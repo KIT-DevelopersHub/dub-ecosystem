@@ -41,7 +41,7 @@ export interface RosterApi {
   getUser(id: common.UserId): Promise<identity.IdentityUserDetail>;
   patchUser(
     id: common.UserId,
-    patch: { displayName?: string; status?: identity.UserStatus; githubLogin?: string | null },
+    patch: { displayName?: string; furigana?: string | null; status?: identity.UserStatus; githubLogin?: string | null },
   ): Promise<identity.IdentityUser>;
   inviteUser(req: identity.InviteUserRequest): Promise<identity.IdentityUser>;
   /** One-shot退任: identity-local revoke sessions + strip roles + disable (#2). The
