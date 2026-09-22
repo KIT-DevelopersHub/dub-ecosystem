@@ -15,7 +15,16 @@ function pushDeps(
   audit: AuditSink,
   retry?: PushRetryPolicy,
 ): PushDeps {
-  return { devices, deliveries, adapters: { ios, android }, audit: audit.fn, orgId: "org_devhub", retry };
+  return {
+    devices,
+    deliveries,
+    // macos/windows adapters are required by the 4-platform Record but unused by
+    // these ios/android-focused cases; fresh fakes keep the type complete.
+    adapters: { ios, android, macos: new FakePushAdapter(), windows: new FakePushAdapter() },
+    audit: audit.fn,
+    orgId: "org_devhub",
+    retry,
+  };
 }
 
 /** Adapter whose send() returns a scripted sequence of outcomes (for retry tests). */
@@ -51,6 +60,34 @@ describe("dispatchPush", () => {
     expect(res).toEqual({ accepted: true, deviceCount: 2 });
     expect(ios.sends).toHaveLength(1);
     expect(android.sends).toHaveLength(1);
+    expect(deliveries.records.every((r) => r.status === "sent")).toBe(true);
+  });
+
+  it("routes each device to the adapter for its platform (ios/android/macos/windows)", async () => {
+    const devices = new MemoryDeviceStore();
+    await devices.upsertByToken({ userId: ALICE, platform: "ios", pushToken: "i" });
+    await devices.upsertByToken({ userId: ALICE, platform: "android", pushToken: "a" });
+    await devices.upsertByToken({ userId: ALICE, platform: "macos", pushToken: "m" });
+    await devices.upsertByToken({ userId: ALICE, platform: "windows", pushToken: "https://x.notify.windows.com/?t=1" });
+    const deliveries = new MemoryDeliveryStore();
+    const ios = new FakePushAdapter();
+    const android = new FakePushAdapter();
+    const macos = new FakePushAdapter();
+    const windows = new FakePushAdapter();
+    const audit = new AuditSink();
+
+    const res = await dispatchPush(
+      { devices, deliveries, adapters: { ios, android, macos, windows }, audit: audit.fn, orgId: "org_devhub" },
+      CTX,
+      "ntf_x",
+      { userId: ALICE, type: "task.assigned", payload: PAYLOAD },
+    );
+
+    expect(res.deviceCount).toBe(4);
+    expect(ios.sends).toHaveLength(1);
+    expect(android.sends).toHaveLength(1);
+    expect(macos.sends).toHaveLength(1);
+    expect(windows.sends).toHaveLength(1);
     expect(deliveries.records.every((r) => r.status === "sent")).toBe(true);
   });
 

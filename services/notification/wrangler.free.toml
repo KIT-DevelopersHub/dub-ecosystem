@@ -10,11 +10,15 @@
 #     Cron drain (scheduled handler) forwards them to audit-log over SVC_AUDIT
 #     (/internal/audit-async). This closes the free-tier audit degrade.
 #   * domain-event consumer (dub-q-evt-notification): the notification-delivery trigger,
-#     NOT an audit path. It stays dormant on the free tier — free-ifying it would need
-#     producer-side outbox writes in the services that publish domain events plus a
-#     notification-side /internal/events-async drain (cross-service), which is out of
-#     scope for this audit-focused change. The HTTP surface the live app uses (POST /notify
-#     ingest, inbox reads, the feedback widget) is unaffected.
+#     NOT an audit path. On the free tier this is now served over HTTP: producers write
+#     their domain events to the @dub/freeq outbox (topic evt.notification) and the shared
+#     freeq-drain forwards each due row to POST /internal/events-async here (routing.ts:
+#     evt.notification -> SVC_NOTIFICATION). That route runs the SAME lane-A mapping /
+#     lane-B request handlers + envelope.id idempotency as the paid Queue consumer
+#     (src/queue.ts dispatchEvent), so a chat @mention, notification.requested, public
+#     inquiry, etc. become inbox notifications with no Cloudflare Queue. The other HTTP
+#     surface the live app uses (POST /notify ingest, inbox reads, the feedback widget) is
+#     unaffected.
 #
 # Deploy:
 #   export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)
@@ -28,10 +32,28 @@ name = "dub-notification-service"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
-workers_dev = false
+# Enabled so browsers can open the DO-direct realtime inbox WebSocket
+# (wss://<this worker>/ws/:userId). The public surface is WS-only: src/index.ts rejects
+# every non-/ws (and non-/internal/health) request that did NOT arrive over the api-gateway
+# service binding (host "svc"), so the header-trusting HTTP API (incl. /internal/events-async
+# and /notify) stays gateway/binding-only and x-dub-user-id / x-dub-internal cannot be
+# spoofed from the public workers.dev URL. See index.ts.
+workers_dev = true
 
 [observability]
 enabled = true
+
+# Realtime: the notification-owned per-user InboxRoom Durable Object (one instance per
+# user). Free-tier compatible (SQLite-backed DO). ingest signals a recipient's live sockets
+# after an in_app row commits so the fe5 badge updates instantly.
+[[durable_objects.bindings]]
+name = "INBOX_ROOM"
+class_name = "InboxRoom"
+
+# SQLite-backed DO class registration (required to create the DO).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["InboxRoom"]
 
 # Shared dub-core D1 (notif_ namespace only). REAL dub-core id (verified via
 # `wrangler d1 list`): d663f9c6-… . (60a9b8ab-… is the separate `auth-outbox` DB.)
@@ -69,10 +91,33 @@ service = "dub-chat-service"      # POST /internal/system-messages (ChatAdapter)
 binding = "SVC_AUDIT"
 service = "dub-audit-log"
 
+# mobile-bff service binding: the PushAdapter POSTs /internal/push/dispatch here to fan a
+# notification out to the recipient's registered devices (FCM/APNs). Absent = push channel
+# is "skipped" (channel_not_wired) — which is why background OS push never fired on the free
+# tier. The target worker's live name is `mo3-mobile-bff` (NO dub- prefix; see
+# apps/mo3-mobile-bff/wrangler.free.toml), so this must match exactly.
+[[services]]
+binding = "SVC_MOBILE_BFF"
+service = "mo3-mobile-bff"        # POST /internal/push/dispatch (PushAdapter)
+
 # Daily Cron (03:00 UTC): the scheduled handler runs retention purge (inbox 90d /
 # deliveries 30d / processed 7d) AND drains the @dub/freeq audit outbox on the same tick.
 # The Workers FREE plan caps the account at 5 cron triggers, so this stays a single
 # low-rate schedule (delivery-failed audit volume is small; rows stay durable between
 # ticks and are never dropped).
+[vars]
+# Absolute base for the ws-ticket doUrl (gateway-bypassing / DO-direct). ":id" is replaced
+# with the url-encoded user id. Points at THIS worker's workers.dev subdomain (the InboxRoom
+# DO is co-hosted here). gen-staging-configs.sh rewrites the host to the -staging worker.
+NOTIF_RT_DO_URL_BASE = "wss://dub-notification-service.developershub-site.workers.dev/ws/:id"
+# Origin allow-list enforced by the InboxRoom DO (comma-separated). Browser clients must
+# match; native/mobile clients send no Origin and are allowed. Includes the fe2 app-shell
+# origin AND the future custom domain. gen-staging-configs.sh swaps in the staging fe2 origin.
+NOTIF_RT_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
+
+# NOTE: WS_TICKET_SECRET is a Worker Secret (never in this toml). Set via
+# `wrangler secret put WS_TICKET_SECRET --config services/notification/wrangler.free.toml`.
+# The InboxRoom DO verifies with the same secret.
+
 [triggers]
 crons = ["0 3 * * *"]

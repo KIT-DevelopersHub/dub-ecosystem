@@ -8,13 +8,16 @@
 // (mailModel.fixtures.ts).
 import type { mail } from "@dub/types";
 
-export type FolderId = "inbox" | "starred" | "sent" | "drafts" | "trash" | "archive";
+export type FolderId = "inbox" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive";
 
-/** Folders that appear in the left nav (archive is Gmail's "All Mail"-ish sink). */
+/** Folders that appear in the left nav (archive is Gmail's "All Mail"-ish sink).
+ *  `scheduled` (予約済み) is NOT thread-backed — it lists parked future sends from a
+ *  separate store slice (see ScheduledList), so it renders its own pane. */
 export const NAV_FOLDERS: { id: FolderId; label: string; icon: string }[] = [
   { id: "inbox", label: "受信トレイ", icon: "inbox" },
   { id: "starred", label: "スター付き", icon: "star" },
   { id: "sent", label: "送信済み", icon: "send" },
+  { id: "scheduled", label: "予約済み", icon: "clock" },
   { id: "drafts", label: "下書き", icon: "draft" },
   { id: "trash", label: "ゴミ箱", icon: "trash" },
 ];

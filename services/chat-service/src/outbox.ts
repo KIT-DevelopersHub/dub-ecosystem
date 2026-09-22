@@ -38,13 +38,23 @@ export const EVENT_TOPICS: readonly string[] = (Object.keys(CONSUMER_QUEUE_BINDI
  * the publisher built (DubEventEnvelope / AuditRecordEnvelopeV1); its stable `.id` is
  * the downstream idempotency key, so at-least-once redelivery is safe.
  */
-export function outboxQueue<T>(db: D1Database, topic: string): Queue<T> {
+export function outboxQueue<T>(db: D1Database, topic: string, afterSend?: (body: T) => void): Queue<T> {
   return {
     async send(body: T): Promise<void> {
       await enqueue(db, topic, body);
+      // Optional post-enqueue hook: the durable outbox INSERT above is the delivery
+      // guarantee; afterSend fires a best-effort IMMEDIATE side-channel (e.g. a direct
+      // service-binding POST) so a subscriber does not wait for the next freeq-drain
+      // tick. It must be idempotent-safe: the drain later redelivers the SAME envelope
+      // (same .id), and the consumer dedups on envelope.id — so a double delivery is a
+      // no-op, and a dropped afterSend still gets delivered by the drain fallback.
+      afterSend?.(body);
     },
     async sendBatch(batch: Iterable<{ body: T }>): Promise<void> {
-      for (const msg of batch) await enqueue(db, topic, msg.body);
+      for (const msg of batch) {
+        await enqueue(db, topic, msg.body);
+        afterSend?.(msg.body);
+      }
     },
   } as unknown as Queue<T>;
 }
@@ -55,13 +65,31 @@ export function outboxQueue<T>(db: D1Database, topic: string): Queue<T> {
  * freeq outbox adapter keyed by the consumer's topic. Missing bindings therefore
  * become durable D1 rows instead of a fail-loud EVENTS_MISSING_BINDING throw.
  */
+// The frozen consumer whose evt.notification rows drive the notification inbox. Its
+// outbox queue additionally fires an immediate direct delivery (see immediateNotify)
+// so a chat @mention / DM appears in the recipient's inbox in ~1s instead of waiting
+// for the next freeq-drain tick.
+const NOTIFICATION_CONSUMER: ConsumerService = "notification";
+
 export function buildPublisherEnv(
   db: D1Database,
   real: Partial<Record<string, Queue<DubEventEnvelope>>>,
+  // Best-effort immediate delivery of a notification-bound envelope (author = index.ts,
+  // which POSTs it to the notification service over SVC_NOTIFICATION and wraps the call
+  // in ctx.waitUntil). Only wired for the notification consumer; every other consumer
+  // stays outbox-only (drained centrally). Undefined -> pure outbox behaviour (unchanged).
+  immediateNotify?: (envelope: DubEventEnvelope) => void,
 ): DubEventPublisherEnv {
   const env: Record<string, Queue<DubEventEnvelope>> = {};
   for (const [consumer, binding] of Object.entries(CONSUMER_QUEUE_BINDINGS)) {
-    env[binding] = real[binding] ?? outboxQueue<DubEventEnvelope>(db, eventTopic(consumer as ConsumerService));
+    // A real (paid) Queue, when present, keeps its native low latency — no side-channel.
+    if (real[binding]) {
+      env[binding] = real[binding]!;
+      continue;
+    }
+    const afterSend =
+      consumer === NOTIFICATION_CONSUMER && immediateNotify ? immediateNotify : undefined;
+    env[binding] = outboxQueue<DubEventEnvelope>(db, eventTopic(consumer as ConsumerService), afterSend);
   }
   return env;
 }

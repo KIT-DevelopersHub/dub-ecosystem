@@ -19,6 +19,7 @@ import type {
   ReadAllRequest,
   UnreadCountResponse,
   UpdatePreferencesRequest,
+  InboxWsTicketResponse,
 } from "../contracts/notification-api";
 import type { InboxQueryParams } from "../lib/inbox-filter";
 
@@ -27,6 +28,8 @@ const BASE = `${common.API_PREFIX}/notifications`; // "/api/v1/notifications"
 export interface NotificationApi {
   listInbox(query: InboxQueryParams): Promise<ListInboxResponse>;
   getUnreadCount(): Promise<UnreadCountResponse>;
+  /** Fetch a short-lived ws-ticket for the DO-direct realtime inbox stream. */
+  getWsTicket(): Promise<InboxWsTicketResponse>;
   markRead(id: string): Promise<void>;
   /** Restore a previously-read item to unread (additive inverse of markRead). */
   markUnread(id: string): Promise<void>;
@@ -54,6 +57,9 @@ export function createNotificationApi(client: ApiClient): NotificationApi {
     },
     getUnreadCount() {
       return client.get<UnreadCountResponse>(`${BASE}/inbox/unread-count`);
+    },
+    getWsTicket() {
+      return client.get<InboxWsTicketResponse>(`${BASE}/inbox/ws-ticket`);
     },
     async markRead(id) {
       await client.patch<void>(`${BASE}/inbox/${encodeURIComponent(id)}/read`);

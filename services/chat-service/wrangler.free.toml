@@ -3,8 +3,10 @@
 # Queues: the chat.* fan-out + audit that used Queue producers (EVT_NOTIFICATION /
 # AUDIT_QUEUE) is now a @dub/freeq D1 outbox (freeq_outbox on the shared dub-core DB).
 # index.ts falls back to the outbox shim when the Queue bindings are absent, so no
-# event/audit record is dropped; a Cron drain forwards audit rows to audit-log and
-# defers domain events (durable/pending) until the notification consumer route lands.
+# event/audit record is dropped; the shared freeq-drain forwards audit rows to audit-log
+# and now DELIVERS domain events (evt.notification) to notification's
+# /internal/events-async route — so chat.message.created (incl. @mentions) becomes an
+# inbox notification on the free tier instead of sitting pending.
 #
 # The ChatRoom Durable Object (RT hub: WS fanout / presence / ws-ticket verify) is
 # PRESERVED here — SQLite-backed DOs run on the Workers FREE plan, so only the Queue
@@ -64,6 +66,14 @@ service = "dub-file-meta"         # best-effort message<->file link registration
 [[services]]
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
+
+# Immediate direct delivery of DM/@mention notifications: chat POSTs the evt.notification
+# envelope straight to notification's POST /internal/events-async (idempotent on
+# envelope.id) so the recipient's inbox updates in ~1s instead of waiting for the next
+# freeq-drain tick. The durable freeq outbox + central drain remains the fallback.
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
 
 # NOTE: the per-service drain Cron Trigger (was `crons = ["*/5 * * * *"]`) was REMOVED.
 # The freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron),

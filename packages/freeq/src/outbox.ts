@@ -162,5 +162,46 @@ export async function ensureOutbox(db: D1Database): Promise<void> {
   }
 }
 
+export interface PruneOptions {
+  // Delete `done` rows whose created_at is older than this (default 3 days).
+  doneRetentionMs?: number;
+  // Delete terminal `failed` rows whose created_at is older than this (default 30 days).
+  // Failed rows are kept far longer than done rows so an operator can still inspect /
+  // requeue a genuinely-undeliverable message before it is reclaimed.
+  failedRetentionMs?: number;
+  now?: () => number; // clock injection (tests)
+}
+
+export interface PruneResult {
+  deleted: number;
+}
+
+const DEFAULT_DONE_RETENTION_MS = 3 * 24 * 60 * 60 * 1_000; // 3 days
+const DEFAULT_FAILED_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000; // 30 days
+
+/**
+ * Retention job: delete terminal rows (`done` / `failed`) older than their retention
+ * window. This is the ONLY path that removes rows from the outbox — the drain never
+ * deletes — so `pending` rows are NEVER pruned (an undelivered message is never lost).
+ * Without this, done/failed rows accumulate forever (table bloat + growing claim-query
+ * cost); with it the table stays bounded. Safe to run on every drain tick or on its own
+ * cadence; a run that deletes nothing is a single cheap indexed DELETE.
+ */
+export async function pruneOutbox(db: D1Database, opts: PruneOptions = {}): Promise<PruneResult> {
+  const now = opts.now?.() ?? Date.now();
+  const doneCutoff = new Date(now - (opts.doneRetentionMs ?? DEFAULT_DONE_RETENTION_MS)).toISOString();
+  const failedCutoff = new Date(now - (opts.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS)).toISOString();
+  const res = await db
+    .prepare(
+      `DELETE FROM ${OUTBOX_TABLE}
+        WHERE (status = 'done'   AND created_at <= ?)
+           OR (status = 'failed' AND created_at <= ?)`,
+    )
+    .bind(doneCutoff, failedCutoff)
+    .run();
+  const changes = (res as { meta?: { changes?: number } }).meta?.changes ?? 0;
+  return { deleted: Number(changes) || 0 };
+}
+
 /** Small helper for callers that want the canonical timestamp mint. */
 export { nowIso };

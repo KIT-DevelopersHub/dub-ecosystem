@@ -143,6 +143,16 @@ gen_one() {
       /^CHAT_RT_ALLOWED_ORIGINS = "/ {
         print "CHAT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
       }
+      # --- notification realtime vars: same as chat above. The DO-direct WS base + Origin
+      #     allow-list must point at the STAGING notification worker + staging fe2 origin,
+      #     else staging fe2 opens the inbox WS against the PROD notification worker and its
+      #     staging-signed ticket is rejected (401) / Origin mismatch — realtime badge dead. ---
+      /^NOTIF_RT_DO_URL_BASE = "/ {
+        sub(/dub-notification-service\./, "dub-notification-service-staging."); print; next
+      }
+      /^NOTIF_RT_ALLOWED_ORIGINS = "/ {
+        print "NOTIF_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
+      }
       # --- default: swap resource ids + extend gateway CORS, then print ---
       {
         gsub(DUBCORE_ID, DUBCORE_STG)

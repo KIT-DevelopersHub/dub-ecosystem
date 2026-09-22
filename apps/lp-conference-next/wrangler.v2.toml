@@ -1,0 +1,25 @@
+# lp-conference-next-v2 — polished ("ver2") build of the public conference LP,
+# deployed as a SEPARATE, additive assets-only Cloudflare Worker so it lives
+# ALONGSIDE ver1 (wrangler.toml / hokuriku-it-conf.com) without touching it.
+#
+# ver1 = wrangler.toml  -> Worker "lp-conference-next"  @ hokuriku-it-conf.com (untouched)
+# ver2 = this file      -> Worker "lp-conference-next-v2" @ *.workers.dev (new URL)
+#
+# No custom_domain routes here on purpose: ver2 must NOT steal the apex from ver1.
+# workers_dev = true exposes the polished build at
+#   https://lp-conference-next-v2.developershub-site.workers.dev
+#
+# Deploy:
+#   pnpm --filter @dub/lp-conference-next build
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/DubVault/secrets/cf-token.txt)
+#   npx wrangler deploy --config apps/lp-conference-next/wrangler.v2.toml
+name = "lp-conference-next-v2"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+[assets]
+directory = "./out"
+not_found_handling = "404-page"
+
+[observability]
+enabled = true
