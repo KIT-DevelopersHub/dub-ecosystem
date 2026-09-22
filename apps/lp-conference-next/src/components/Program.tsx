@@ -26,7 +26,31 @@ export function Program({ data, index }: { data: ProgramConfig; index?: string }
     if (!d) return;
     if (open !== null && !d.open) d.showModal();
     else if (open === null && d.open) d.close();
+
+    // A native <dialog> opened with showModal() lives in the top layer, above
+    // the decorative custom cursor (z-index:9999) and any WebGL canvas. Without
+    // this, over the dialog the native cursor is hidden (.has-lp-cursor sets
+    // cursor:none) while the custom cursor dot renders BEHIND the dialog — so
+    // the pointer appears to "go behind" and the dialog feels unusable. Toggling
+    // this body flag restores the real cursor and hides the custom one while the
+    // dialog is open; the 'lp:dialog' event lets MotionRoot pause Lenis so the
+    // background no longer scrolls under the modal.
+    const isOpen = open !== null;
+    document.body.classList.toggle("has-open-dialog", isOpen);
+    window.dispatchEvent(
+      new CustomEvent("lp:dialog", { detail: { open: isOpen } }),
+    );
   }, [open]);
+
+  // Safety net: clear the flag if this component unmounts while open.
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("has-open-dialog");
+      window.dispatchEvent(
+        new CustomEvent("lp:dialog", { detail: { open: false } }),
+      );
+    };
+  }, []);
 
   const activeItem = open !== null ? data.items[open] : null;
 

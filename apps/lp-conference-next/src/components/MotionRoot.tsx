@@ -79,6 +79,15 @@ export function MotionRoot() {
     };
     document.addEventListener("click", onAnchorClick);
 
+    // Pause smooth-scroll while a modal dialog is open so wheel/touch input does
+    // not scroll the page behind the backdrop (Program dispatches 'lp:dialog').
+    const onDialogToggle = (e: Event) => {
+      const openNow = (e as CustomEvent<{ open: boolean }>).detail?.open;
+      if (openNow) lenis.stop();
+      else lenis.start();
+    };
+    window.addEventListener("lp:dialog", onDialogToggle as EventListener);
+
     // ---------------------------------------------------------------
     // 2) Scroll-scrubbed parallax  ([data-parallax="<px amplitude>"])
     //    Positive amplitude → element lags (drifts down as you scroll down),
@@ -137,6 +146,7 @@ export function MotionRoot() {
 
     return () => {
       document.removeEventListener("click", onAnchorClick);
+      window.removeEventListener("lp:dialog", onDialogToggle as EventListener);
       window.removeEventListener("load", refresh);
       window.clearTimeout(refreshTimer);
       gsap.ticker.remove(tick);

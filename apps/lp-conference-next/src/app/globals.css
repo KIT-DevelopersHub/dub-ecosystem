@@ -1363,16 +1363,15 @@ img { max-width: 100%; height: auto; display: block; }
   height: 30px;
   border-radius: 9px;
   flex: 0 0 auto;
-  background: linear-gradient(135deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
+  /* The official logo (pale blue→green→gold on transparent) is placed on a deep
+     navy chip so it stays legible on the light header and the dark footer. */
+  background-color: #0c1533;
+  background-image: url("/img/brand-logo.png");
+  background-size: 82%;
+  background-position: center;
+  background-repeat: no-repeat;
   box-shadow: 0 6px 16px -6px rgba(47, 97, 214, 0.6);
   position: relative;
-}
-.brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border-radius: 4px;
-  border: 2px solid rgba(255, 255, 255, 0.9);
 }
 .brand-name {
   display: flex;
@@ -3014,6 +3013,25 @@ button.site-head-cta,
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
+/* The modal <dialog> lives in the top layer, above the decorative custom cursor
+   (z-index:9999). Without help, the native cursor is hidden (.has-lp-cursor sets
+   cursor:none) while the custom dot renders BEHIND the dialog — the pointer
+   appears to vanish "behind" the page and the dialog feels unclickable. While a
+   dialog is open we hide the decorative cursor and restore the real one. */
+body.has-open-dialog .lp-cursor-dot,
+body.has-open-dialog .lp-cursor-ring { display: none !important; }
+body.has-open-dialog.has-lp-cursor,
+body.has-open-dialog.has-lp-cursor a,
+body.has-open-dialog.has-lp-cursor button,
+body.has-open-dialog.has-lp-cursor [role="tab"] { cursor: auto; }
+.prog-dialog,
+.prog-dialog * { cursor: auto; }
+body.has-open-dialog.has-lp-cursor .prog-dialog button,
+body.has-open-dialog.has-lp-cursor .prog-dialog a,
+body.has-open-dialog.has-lp-cursor .prog-dialog [role="button"],
+.prog-dialog button,
+.prog-dialog a,
+.prog-dialog [role="button"] { cursor: pointer; }
 .prog-dialog[open] { animation: prog-dialog-in 0.34s cubic-bezier(0.22, 1, 0.36, 1); }
 .prog-dialog[open]::backdrop { animation: prog-backdrop-in 0.3s ease; }
 @keyframes prog-dialog-in {
