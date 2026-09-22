@@ -26,6 +26,11 @@ import type { ChatRealtimeClient } from "../realtime/client";
 import type { Attachment, MessageDeletionPolicy } from "../api/contract";
 
 const PAGE_SIZE = 50;
+// Fallback polling cadence used ONLY while the realtime WS is not "open" (e.g. the
+// DO-direct host is unreachable, the ticket was rejected, or we are mid-reconnect).
+// Keeps an open channel live-ish without a WS; disabled the moment WS opens so the
+// happy path stays a single socket and no extra requests are spent ($0 concern).
+export const POLL_INTERVAL_MS = 5000;
 
 export interface UseChannelView {
   state: ChannelViewState;
@@ -129,6 +134,35 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
       rtRef.current = null;
     };
   }, [channelId, api, currentUserId, createRealtimeClient, applyStoreEvent, setActiveChannel, setState]);
+
+  // Fallback polling: while the WS is not open, pull anything after the newest known
+  // message on an interval so the timeline still advances (self + others) without a
+  // live socket. Deduped by id via mergeMessages, so a message that later also arrives
+  // over WS — or an optimistic ack — never doubles. Skipped when the tab is hidden and
+  // torn down the moment rtStatus flips to "open".
+  useEffect(() => {
+    if (state.rtStatus === "open") return;
+    let stopped = false;
+    const tick = async (): Promise<void> => {
+      if (globalThis.document?.visibilityState === "hidden") return;
+      const msgs = stateRef.current.messages;
+      const last = msgs[msgs.length - 1];
+      try {
+        const gap = await api.listMessages(
+          last ? { channelId, afterMessageId: last.id } : { channelId, limit: PAGE_SIZE },
+        );
+        if (stopped || gap.items.length === 0) return;
+        setState({ ...stateRef.current, messages: mergeMessages(stateRef.current.messages, gap.items) });
+      } catch {
+        // transient; the next tick retries
+      }
+    };
+    const handle = globalThis.setInterval(() => void tick(), POLL_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      globalThis.clearInterval(handle);
+    };
+  }, [channelId, state.rtStatus, api, setState]);
 
   const loadOlder = useCallback(async () => {
     const cursor = stateRef.current.nextCursor;

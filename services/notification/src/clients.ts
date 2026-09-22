@@ -47,8 +47,12 @@ export interface ChatPort {
 export interface PushDispatch {
   userId: string;
   type: string;
+  notificationId: string;
   title: string;
   body: string | null;
+  // string->string map carried in the platform payload (FCM data / APNs userInfo).
+  // Always includes notificationId; includes deepLink when a target route is known.
+  data: Record<string, string>;
 }
 export interface PushPort {
   dispatch(req: PushDispatch, ctx: RequestContext): Promise<void>;
@@ -125,7 +129,22 @@ export function makePushPort(binding: Fetcher): PushPort {
   const client = createServiceClient(binding, { service: "mobile-bff", caller: SERVICE_NAME });
   return {
     async dispatch(req, ctx) {
-      await client.post(ctx, "/internal/push/dispatch", req);
+      // mobile-bff POST /internal/push/dispatch expects the frozen mobile.PushDispatchRequest
+      // shape { userId, type, payload:{title, body, data} }, plus the off-wire notificationId
+      // it threads into delivery rows. A flat body was silently rejected (payload required),
+      // so no push was ever delivered before this. body is coerced to "" because
+      // MobilePushPayload.body is a required string.
+      const wire = {
+        userId: req.userId,
+        type: req.type,
+        notificationId: req.notificationId,
+        payload: {
+          title: req.title,
+          body: req.body ?? "",
+          data: req.data,
+        },
+      };
+      await client.post(ctx, "/internal/push/dispatch", wire);
     },
   };
 }

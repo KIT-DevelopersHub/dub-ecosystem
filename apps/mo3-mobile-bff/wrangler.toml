@@ -61,8 +61,9 @@ DEFAULT_ORG_ID = "org_devhub"
 
 # Secrets (set via `wrangler secret put`, never committed):
 #   APNS_KEY_P8 / APNS_KEY_ID / APNS_TEAM_ID / APNS_BUNDLE_ID   (iOS, p8 JWT)
+#   APNS_MACOS_BUNDLE_ID                                         (macOS apns-topic; shares the p8 key above)
 #   FCM_SERVICE_ACCOUNT_JSON / FCM_PROJECT_ID                    (Android, HTTP v1)
-# Push adapters are interface-frozen and stubbed in P0 (theme8/8-9; 9-D wave).
+#   WNS_PACKAGE_SID / WNS_CLIENT_SECRET / WNS_TENANT_ID          (Windows, Azure AD client_credentials)
 
 [env.preview.vars]
 ENVIRONMENT = "preview"
