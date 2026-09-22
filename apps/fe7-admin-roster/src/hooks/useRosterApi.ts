@@ -92,7 +92,7 @@ export function usePatchUser(userId: common.UserId) {
   const qc = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (patch: { displayName?: string; status?: identity.UserStatus; githubLogin?: string | null }) =>
+    mutationFn: (patch: { displayName?: string; furigana?: string | null; status?: identity.UserStatus; githubLogin?: string | null }) =>
       api.patchUser(userId, patch),
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: queryKeys.user(userId) });
