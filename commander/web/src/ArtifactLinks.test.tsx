@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ArtifactLinks, primaryKey } from "./ArtifactLinks.tsx";
+import { DUB_STAGING_URL } from "./lib/reflection.ts";
 
 describe("<ArtifactLinks>", () => {
   it("renders clickable demo / staging / PR links in the drawer variant", () => {
@@ -65,11 +66,29 @@ describe("<ArtifactLinks>", () => {
       expect(primaryKey(all, "prod_shipped")).toBe("pr");
     });
 
-    it("primaryKey: degrades when the reached env's URL is missing", () => {
-      // staging phase but no staging URL yet → fall back to demo
+    it("primaryKey: staging reached but no staging URL → stays staging (fixed-host fallback, never demo)", () => {
+      // Regression: badge said 「stagingに反映済み」 while the URL showed DEMO ✓今ここ.
+      // Staging is a single fixed host, so a staging-phase task must keep staging primary.
       expect(primaryKey({ demoUrl: "https://d.workers.dev", stagingUrl: null, prUrl: null }, "staging_deployed")).toBe(
-        "demo",
+        "staging",
       );
+      expect(primaryKey({ demoUrl: "https://d.workers.dev", stagingUrl: null, prUrl: null }, "staging_review")).toBe(
+        "staging",
+      );
+    });
+
+    it("drawer: staging phase without a captured staging URL falls back to the fixed staging host", () => {
+      render(
+        <ArtifactLinks
+          variant="drawer"
+          phase="staging_review"
+          urls={{ demoUrl: "https://d.workers.dev", stagingUrl: null, prUrl: null }}
+        />,
+      );
+      const staging = screen.getByTestId("artifact-link-staging");
+      expect(staging).toHaveAttribute("data-primary", "true");
+      expect(staging).toHaveAttribute("href", DUB_STAGING_URL);
+      expect(screen.getByTestId("artifact-link-demo")).not.toHaveAttribute("data-primary");
     });
 
     it("drawer: staging task shows staging as the primary (large) link, demo secondary/collapsed", () => {

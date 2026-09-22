@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reflectionOf, reflectionLabel } from "./reflection.ts";
+import { reflectionOf, reflectionLabel, DUB_STAGING_URL } from "./reflection.ts";
 import type { BoardItem, FeaturePhase, RunStatus } from "./commanderApi.ts";
 
 function item(
@@ -36,6 +36,12 @@ describe("reflectionOf", () => {
     );
     expect(r).toEqual({ state: "reflected", env: "staging", url: "https://stg.example" });
     expect(reflectionLabel(r!)).toBe("stagingに反映済み");
+  });
+
+  it("staging_review with no captured staging URL → falls back to the fixed staging host", () => {
+    // Regression: badge said 「stagingに反映済み」 but the click-through URL was empty/demo.
+    const r = reflectionOf(item({ phase: "staging_review", run: "succeeded", stagingUrl: null }));
+    expect(r).toEqual({ state: "reflected", env: "staging", url: DUB_STAGING_URL });
   });
 
   it("staging_deployed + running run → stagingに反映中 (in flight)", () => {

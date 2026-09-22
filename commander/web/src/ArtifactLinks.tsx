@@ -13,6 +13,7 @@
 import type { CSSProperties } from "react";
 import { t } from "./lib/theme.ts";
 import type { FeaturePhase } from "./lib/commanderApi.ts";
+import { DUB_STAGING_URL } from "./lib/reflection.ts";
 
 export interface ArtifactUrls {
   demoUrl: string | null;
@@ -64,11 +65,22 @@ function reachedRank(phase: FeaturePhase | undefined, u: ArtifactUrls): number {
 }
 
 /**
- * The link the operator should look at now — the reached env's URL, degrading downward when
- * that env's URL isn't captured yet. 本番 uses the PR as its shipped-record reference then
- * staging (consistent with reflection.ts's prod url = prUrl ?? stagingUrl).
+ * staging に到達済み（phase 由来）なのに run 出力から staging URL を拾えていない時、Dub の固定
+ * staging ホストで補完する。これにより「stagingに反映済み」バッジ（phase 由来）と主 URL が常に一致し、
+ * 「バッジは staging・URL は demo」の不整合が起きない。すでに staging URL が有れば何もしない。
+ */
+function withStagingFallback(u: ArtifactUrls, phase?: FeaturePhase): ArtifactUrls {
+  if (u.stagingUrl) return u;
+  return reachedRank(phase, u) >= 1 ? { ...u, stagingUrl: DUB_STAGING_URL } : u;
+}
+
+/**
+ * The link the operator should look at now — the reached env's URL. Staging に到達していれば
+ * staging URL（未取得なら固定ホストで補完）を主にするので、demo へ降格しない。本番 uses the PR as
+ * its shipped-record reference then staging (consistent with reflection.ts's prod url).
  */
 export function primaryKey(u: ArtifactUrls, phase?: FeaturePhase): LinkKey | null {
+  u = withStagingFallback(u, phase);
   const rank = reachedRank(phase, u);
   if (rank >= 2) {
     if (u.prUrl) return "pr";
@@ -94,12 +106,13 @@ function makeLink(u: ArtifactUrls, key: LinkKey): Link | null {
 
 /** Split captured links into the primary (reached env) and the rest (fixed demo→staging→pr order). */
 function splitLinks(u: ArtifactUrls, phase?: FeaturePhase): { primary: Link | null; secondary: Link[] } {
+  const eff = withStagingFallback(u, phase);
   const pk = primaryKey(u, phase);
-  const primary = pk ? makeLink(u, pk) : null;
+  const primary = pk ? makeLink(eff, pk) : null;
   const order: LinkKey[] = ["demo", "staging", "pr"];
   const secondary = order
     .filter((k) => k !== pk)
-    .map((k) => makeLink(u, k))
+    .map((k) => makeLink(eff, k))
     .filter((l): l is Link => l !== null);
   return { primary, secondary };
 }
