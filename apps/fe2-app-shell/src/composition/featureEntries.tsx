@@ -24,6 +24,7 @@ export type { ApiClient as Fe4ApiClient } from "@dub/fe4-task-gantt/src/contract
 export { ChatRuntimeProvider, chatFeature } from "@dub/fe6-chat/src/feature";
 export type { ChatRuntime } from "@dub/fe6-chat/src/feature";
 export { WsChatClient } from "@dub/fe6-chat/src/realtime/ws-client";
+export { mockUnfurl } from "@dub/fe6-chat/src/lib/unfurl-mock"; // VITE_DEMO link previews
 export type { ChatApiClient } from "@dub/fe6-chat/src/api/client";
 export type {
   Channel,
@@ -44,6 +45,8 @@ export type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  UnfurlPreview,
+  UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
