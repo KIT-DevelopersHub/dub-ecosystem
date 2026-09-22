@@ -9,6 +9,7 @@ import { TaskFilterBar } from "../src/components/TaskFilterBar";
 import { createUserCache } from "../src/domain/user-cache";
 import { ROW_HEIGHT } from "../src/domain/timeline-axis";
 import type { GanttSortActions, GanttSortState } from "../src/domain/gantt-sort-pref";
+import type { TaskFilterState } from "../src/domain/task-query";
 
 // Shared 並び替え fixtures for the GanttView tests (the container owns this state).
 const manualSort: GanttSortState = { manual: true, keys: [] };
@@ -266,7 +267,7 @@ describe("TaskBoardView (design test 10)", () => {
 });
 
 describe("TaskFilterBar 担当者フィルタ", () => {
-  const base = { eventId: "evt_1", status: [], includeArchived: false } as const;
+  const base: TaskFilterState = { eventId: "evt_1", status: [], includeArchived: false };
   const options = [
     { id: "usr_alice", name: "Alice 運営" },
     { id: "usr_bob", name: "Bob 実行委員" },
