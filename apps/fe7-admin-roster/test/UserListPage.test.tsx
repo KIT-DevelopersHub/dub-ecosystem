@@ -173,4 +173,42 @@ describe("UserListPage", () => {
     await waitFor(() => expect(screen.queryByTestId("fe7-user-pane")).not.toBeInTheDocument());
     expect(screen.getByTestId("fe7-user-pane-empty")).toBeInTheDocument();
   });
+
+  it("shows each user's フリガナ column (or 未設定 when unset)", async () => {
+    renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-furigana-user_alice")).toBeInTheDocument());
+    expect(screen.getByTestId("fe7-users-furigana-user_alice")).toHaveTextContent("アリス アドミン");
+    // Carol is seeded without furigana → placeholder.
+    expect(screen.getByTestId("fe7-users-furigana-user_carol")).toHaveTextContent("未設定");
+  });
+
+  it("filters the roster by フリガナ via the search box", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-row-user_bob")).toBeInTheDocument());
+    // "ボブ" only matches Bob's furigana (not his displayName "Bob Member").
+    await user.type(screen.getByTestId("fe7-users-search"), "ボブ");
+    await waitFor(() => expect(screen.queryByTestId("fe7-users-row-user_alice")).not.toBeInTheDocument());
+    expect(screen.getByTestId("fe7-users-row-user_bob")).toBeInTheDocument();
+    // Clear so the URL-backed filter state does not bleed into later tests (jsdom
+    // persists window.location across tests in this file).
+    await user.clear(screen.getByTestId("fe7-users-search"));
+    await waitFor(() => expect(screen.getByTestId("fe7-users-row-user_alice")).toBeInTheDocument());
+  });
+
+  it("edits フリガナ in the inline pane and persists it to the row", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-open-user_carol")).toBeInTheDocument());
+    await user.click(screen.getByTestId("fe7-users-open-user_carol"));
+    const pane = await screen.findByTestId("fe7-user-pane");
+
+    const input = within(pane).getByTestId("fe7-user-furigana");
+    await user.type(input, "キャロル ゲスト");
+    await user.click(within(pane).getByTestId("fe7-user-save"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("fe7-users-furigana-user_carol")).toHaveTextContent("キャロル ゲスト"),
+    );
+  });
 });

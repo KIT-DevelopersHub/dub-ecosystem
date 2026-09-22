@@ -253,6 +253,12 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
     for (const u of userList) if (!byId.has(u.id)) byId.set(u.id, u);
     return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "ja"));
   }, [roster, userList]);
+  // 担当者フィルタの選択肢: assignableUsers を {id,name} に射影（already roster∪assigned,
+  // 名前でソート済み）。これで担当者を選ぶとその人のタスク/バーだけに絞り込まれる。
+  const assigneeFilterOptions = useMemo(
+    () => assignableUsers.map((u) => ({ id: u.id, name: u.displayName })),
+    [assignableUsers],
+  );
   // userId → display name, for the presence bar avatars (roster ∪ resolved-from-tasks).
   // The DO may not carry a signed displayName, so the bar resolves labels from here.
   const displayNameById = useMemo(() => {
@@ -1230,6 +1236,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           value={filter}
           onChange={setFilter}
           onClear={() => setFilter(emptyFilter(eventId))}
+          assigneeOptions={assigneeFilterOptions}
           disabled={!caps.canRead}
         />
         <label className={styles.numToggle}>
@@ -1268,6 +1275,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
             (zoom === "week" &&
               filter.status.length === 0 &&
               filter.teamId === undefined &&
+              filter.assigneeId === undefined &&
               !filter.includeArchived)
           }
           title="表示（粒度・フィルタ・チーム・アーカイブ）を初期状態に戻す"

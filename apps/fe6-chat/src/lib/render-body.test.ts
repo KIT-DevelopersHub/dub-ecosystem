@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inlineSegments, parseBlocks } from "./render-body";
+import { inlineSegments, parseBlocks, extractPreviewUrls } from "./render-body";
 
 describe("inlineSegments", () => {
   it("splits text and mentions", () => {
@@ -69,5 +69,82 @@ describe("parseBlocks", () => {
   it("separates a paragraph from a following list", () => {
     const blocks = parseBlocks("intro\n- a\n- b");
     expect(blocks.map((b) => b.type)).toEqual(["paragraph", "bullet"]);
+  });
+});
+
+describe("bare URL autolink", () => {
+  it("links https?:// runs and keeps surrounding text (Japanese punctuation excluded)", () => {
+    expect(inlineSegments("see https://zenn.dev/a/b。次")).toEqual([
+      { type: "text", value: "see " },
+      { type: "link", href: "https://zenn.dev/a/b", label: "https://zenn.dev/a/b" },
+      { type: "text", value: "。次" },
+    ]);
+  });
+
+  it("drops trailing sentence punctuation but keeps balanced parens", () => {
+    expect(inlineSegments("(https://ex.com/a_(b)).")).toEqual([
+      { type: "text", value: "(" },
+      { type: "link", href: "https://ex.com/a_(b)", label: "https://ex.com/a_(b)" },
+      { type: "text", value: ")." },
+    ]);
+    expect(inlineSegments("x https://ex.com/p, y")).toEqual([
+      { type: "text", value: "x " },
+      { type: "link", href: "https://ex.com/p", label: "https://ex.com/p" },
+      { type: "text", value: ", y" },
+    ]);
+  });
+
+  it("does not autolink inside inline code, nor re-link a markdown link", () => {
+    expect(inlineSegments("`https://ex.com`")).toEqual([{ type: "code", value: "https://ex.com" }]);
+    expect(inlineSegments("[d](https://ex.com/x)")).toEqual([{ type: "link", label: "d", href: "https://ex.com/x" }]);
+  });
+
+  it("coexists with mentions and bold", () => {
+    expect(inlineSegments("<@u1> *see* https://ex.com")).toEqual([
+      { type: "mention", userId: "u1" },
+      { type: "text", value: " " },
+      { type: "bold", value: "see" },
+      { type: "text", value: " " },
+      { type: "link", href: "https://ex.com", label: "https://ex.com" },
+    ]);
+  });
+
+  it("never splits a URL on _ ~ * inside it (wikipedia-style paths)", () => {
+    const wiki = "https://en.wikipedia.org/wiki/Foo_bar_baz";
+    expect(inlineSegments(`see ${wiki} now`)).toEqual([
+      { type: "text", value: "see " },
+      { type: "link", href: wiki, label: wiki },
+      { type: "text", value: " now" },
+    ]);
+    expect(inlineSegments("https://ex.com/a~b~c http://ex.com/x*y*z")).toEqual([
+      { type: "link", href: "https://ex.com/a~b~c", label: "https://ex.com/a~b~c" },
+      { type: "text", value: " " },
+      { type: "link", href: "http://ex.com/x*y*z", label: "http://ex.com/x*y*z" },
+    ]);
+    // styling still wins when it starts first (documented non-nesting)
+    expect(inlineSegments("*see https://x.dev*")).toEqual([{ type: "bold", value: "see https://x.dev" }]);
+  });
+
+  it("stops at full-width punctuation and handles nested parens", () => {
+    expect(inlineSegments("https://ex.com/a！https://ex.com/b（注）")).toEqual([
+      { type: "link", href: "https://ex.com/a", label: "https://ex.com/a" },
+      { type: "text", value: "！" },
+      { type: "link", href: "https://ex.com/b", label: "https://ex.com/b" },
+      { type: "text", value: "（注）" },
+    ]);
+    expect(inlineSegments("https://x/A_((b)).")).toEqual([
+      { type: "link", href: "https://x/A_((b))", label: "https://x/A_((b))" },
+      { type: "text", value: "." },
+    ]);
+  });
+});
+
+describe("extractPreviewUrls", () => {
+  it("returns the first N unique http(s) urls, skipping code", () => {
+    const body = "a https://one.dev https://one.dev [x](https://two.dev)\n```\nhttps://three.dev\n```\n- https://four.dev";
+    expect(extractPreviewUrls(body)).toEqual(["https://one.dev", "https://two.dev"]);
+    expect(extractPreviewUrls(body, 3)).toEqual(["https://one.dev", "https://two.dev", "https://four.dev"]);
+    expect(extractPreviewUrls("[rel](/local) `https://c.dev`")).toEqual([]);
+    expect(extractPreviewUrls("> quoted https://q.dev\nhttp://plain.dev")).toEqual(["https://q.dev", "http://plain.dev"]);
   });
 });

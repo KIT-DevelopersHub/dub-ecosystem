@@ -82,6 +82,7 @@ describe("assembleFeatureModules", () => {
       "events",
       "tasks",
       "gantt",
+      "calendar",
       "notifications",
       "chat",
       "mail",
