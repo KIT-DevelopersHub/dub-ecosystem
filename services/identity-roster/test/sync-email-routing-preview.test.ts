@@ -14,7 +14,7 @@ async function preview(h: Harness, userId: string, addresses: unknown[]) {
 }
 
 function mkUser(id: string, email: string, over: Partial<UserRow> = {}): UserRow {
-  return { id, orgId: ORG_ID, email, displayName: id, githubLogin: null, avatarUrl: null, status: "active", source: "manual", createdAt: "t", updatedAt: "t", ...over };
+  return { id, orgId: ORG_ID, email, displayName: id, furigana: null, githubLogin: null, avatarUrl: null, status: "active", source: "manual", createdAt: "t", updatedAt: "t", ...over };
 }
 
 describe("sync-email-routing preview (#5)", () => {

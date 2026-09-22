@@ -63,7 +63,12 @@ export class MemIdentityRepo implements IdentityRepo {
     }
     if (filter.q) {
       const needle = filter.q.toLowerCase();
-      rows = rows.filter((u) => u.displayName.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle));
+      rows = rows.filter(
+        (u) =>
+          u.displayName.toLowerCase().includes(needle) ||
+          (u.furigana ?? "").toLowerCase().includes(needle) ||
+          u.email.toLowerCase().includes(needle),
+      );
     }
     return pageSlice(rows.map((u) => ({ ...u })), filter.limit, filter.cursor);
   }
@@ -72,7 +77,7 @@ export class MemIdentityRepo implements IdentityRepo {
   }
   async updateUser(
     userId: string,
-    patch: Partial<Pick<UserRow, "displayName" | "githubLogin" | "status" | "source" | "avatarUrl">>,
+    patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>,
     updatedAt: string,
   ): Promise<void> {
     const u = this.users.get(userId);
