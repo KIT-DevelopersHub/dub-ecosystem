@@ -16,7 +16,11 @@ import {
   RegistryProvider,
   actionTypeRegistry,
 } from "@dub/fe3-event-action";
-import { NotificationProvider, type NotificationDeps } from "@dub/fe5-notification-inbox";
+import {
+  NotificationProvider,
+  createWsUnreadConnector,
+  type NotificationDeps,
+} from "@dub/fe5-notification-inbox";
 import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import { TaskApiClientProvider, TaskRouteProvider, ChatRuntimeProvider, WsChatClient, type ChatRuntime, type TaskRouteContextValue } from "./featureEntries.tsx";
@@ -106,9 +110,10 @@ export function NotificationProviders({ api, children }: { api: ApiClient; child
   const toast = useToast();
   const { data } = useBffHome(api);
   const initialUnreadHint = data?.unreadCount;
-  const deps = useMemo<NotificationDeps>(
-    () => ({
-      api: createNotificationClient(api),
+  const deps = useMemo<NotificationDeps>(() => {
+    const notifApi = createNotificationClient(api);
+    return {
+      api: notifApi,
       navigate: (path: string) => {
         void navigate({ to: path });
       },
@@ -116,9 +121,16 @@ export function NotificationProviders({ api, children }: { api: ApiClient; child
         show: (kind, message) => toast.show({ kind, title: message }),
       },
       ...(typeof initialUnreadHint === "number" ? { initialUnreadHint } : {}),
-    }),
-    [api, navigate, toast, initialUnreadHint],
-  );
+      // Realtime badge push: subscribe the DO-direct inbox WebSocket (ws-ticket authed,
+      // gateway-bypassing — the only transport that works with bearer auth + the gateway's
+      // 15s stream cap). On each server signal the connector refetches the authoritative
+      // unread count; the 60s poller stays as the reconciliation fallback.
+      unreadLiveConnect: createWsUnreadConnector({
+        getTicket: () => notifApi.getWsTicket(),
+        fetchCount: async () => (await notifApi.getUnreadCount()).count,
+      }),
+    };
+  }, [api, navigate, toast, initialUnreadHint]);
   return <NotificationProvider deps={deps}>{children}</NotificationProvider>;
 }
 

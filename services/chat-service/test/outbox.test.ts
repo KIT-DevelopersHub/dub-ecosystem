@@ -87,3 +87,55 @@ describe("audit fallback", () => {
     expect(env.payload.action).toBe("chat.message.create");
   });
 });
+
+describe("immediate notification direct-delivery (afterSend chokepoint)", () => {
+  it("outboxQueue.send fires afterSend with the enqueued body AFTER the durable INSERT", async () => {
+    const { d1, raw } = makeD1();
+    const seen: Array<{ hello: string }> = [];
+    await outboxQueue<{ hello: string }>(d1 as D1Database, eventTopic("notification"), (b) => seen.push(b)).send({
+      hello: "world",
+    });
+    // durable row written
+    expect(rows(raw, "evt.notification")).toHaveLength(1);
+    // and afterSend fired with the same body
+    expect(seen).toEqual([{ hello: "world" }]);
+  });
+
+  it("buildPublisherEnv wires immediateNotify ONLY for the notification consumer", async () => {
+    const { d1 } = makeD1();
+    const delivered: DubEventEnvelope[] = [];
+    const pubEnv = buildPublisherEnv(d1 as D1Database, {}, (e) => delivered.push(e));
+    const envelope = createEvent(
+      "chat.message.created",
+      { channelId: "chan_1", messageId: "msg_1", authorId: "user_author", mentions: ["user_b"] },
+      ctx,
+    );
+    await publishEvent(pubEnv, envelope);
+
+    // The notification consumer subscribes to chat.message.created, so exactly ONE
+    // immediate delivery fires (the notification-bound envelope), regardless of how many
+    // other consumers also get durable outbox rows.
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.name).toBe("chat.message.created");
+    expect(delivered[0]!.id).toBe(envelope.id); // same envelope -> idempotent redelivery
+  });
+
+  it("a real (paid) Queue binding keeps native latency (no immediate side-channel)", async () => {
+    const { d1 } = makeD1();
+    const sent: DubEventEnvelope[] = [];
+    const realQueue = {
+      async send(b: DubEventEnvelope) {
+        sent.push(b);
+      },
+      async sendBatch() {},
+    } as unknown as Queue<DubEventEnvelope>;
+    const notifBinding = CONSUMER_QUEUE_BINDINGS.notification;
+    const delivered: DubEventEnvelope[] = [];
+    const pubEnv = buildPublisherEnv(d1 as D1Database, { [notifBinding]: realQueue }, (e) => delivered.push(e));
+    const envelope = createEvent("chat.message.created", { channelId: "c", messageId: "m", authorId: "a" }, ctx);
+    await publishEvent(pubEnv, envelope);
+    // notification consumer used the real Queue; the immediate side-channel did NOT fire.
+    expect(sent).toHaveLength(1);
+    expect(delivered).toHaveLength(0);
+  });
+});

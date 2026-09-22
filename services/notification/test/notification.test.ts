@@ -6,6 +6,7 @@ import { ingest, type IngestDeps } from "../src/ingest";
 import { consumeEventQueue } from "../src/queue";
 import { mappingToIngest } from "../src/queue";
 import { EVENT_MAPPINGS } from "../src/mapping";
+import { buildChatDmNotifyInput } from "../src/chat";
 import { resolveEnabled, defaultEnabled } from "../src/preferences";
 import { makeRecipientResolver } from "../src/recipients";
 import { resolveAuditQueue } from "../src/outbox";
@@ -17,6 +18,8 @@ import {
   type AdapterRegistry,
 } from "../src/adapters";
 import { unreadCount, upsertPreference, listPreferenceOverrides } from "../src/repo";
+import { verifyWsTicket, DEV_WS_SECRET } from "../src/wsticket";
+import type { InboxRealtimePublisher } from "../src/realtime";
 import type { ChannelAdapter, DeliveryJob, IngestInput, NotifyRecipients } from "../src/types";
 import {
   makeTestEnv,
@@ -164,6 +167,13 @@ describe("preferences", () => {
     expect(defaultEnabled("x.y", "push", "normal")).toBe(true);
   });
 
+  it("chat.mention / chat.dm are the deliberate chat.* in_app exception (default ON)", () => {
+    expect(defaultEnabled("chat.mention", "in_app", "normal")).toBe(true);
+    expect(defaultEnabled("chat.dm", "in_app", "normal")).toBe(true);
+    // any other chat.* type stays off by default (unchanged behavior).
+    expect(defaultEnabled("chat.channel.created", "in_app", "normal")).toBe(false);
+  });
+
   it("#6 email override off -> email skipped, in_app still delivered", async () => {
     const h = makeTestEnv();
     await upsertPreference(h.db, "u1", "*", "email", false);
@@ -225,16 +235,45 @@ describe("chat adapter (stub swap)", () => {
 });
 
 describe("push adapter (stub swap)", () => {
-  it("#14 wired push port receives dispatch {userId,type,title,body}; delivery sent", async () => {
+  it("#14 wired push port receives nested payload with notificationId + deepLink; delivery sent", async () => {
     const h = makeTestEnv();
     const push = fakePush(); // push default is on
     const res = await ingest(
       coreDeps(h, { push }),
-      baseInput({ type: "task.assigned", recipients: { userIds: ["u1"] }, channels: ["push"], title: "Assigned", body: "to you" }),
+      baseInput({
+        type: "task.assigned",
+        recipients: { userIds: ["u1"] },
+        channels: ["push"],
+        title: "Assigned",
+        body: "to you",
+        resourceType: "task",
+        resourceId: "tsk_9",
+      }),
     );
-    expect(push.calls).toEqual([{ userId: "u1", type: "task.assigned", title: "Assigned", body: "to you" }]);
+    // mo3 /internal/push/dispatch requires the nested payload; data carries the inbox id
+    // (for tap-correlation) and the deep link derived from (resourceType, resourceId).
+    expect(push.calls).toEqual([
+      {
+        userId: "u1",
+        type: "task.assigned",
+        notificationId: res.notificationId,
+        title: "Assigned",
+        body: "to you",
+        data: { notificationId: res.notificationId, deepLink: "dub://tasks/tsk_9" },
+      },
+    ]);
     const rows = await deliveries(h.db, res.notificationId);
     expect(rows).toEqual([{ channel: "push", status: "sent", attempts: 1 }]);
+  });
+
+  it("push deepLink falls back to inbox when the notification has no typed resource", async () => {
+    const h = makeTestEnv();
+    const push = fakePush();
+    const res = await ingest(
+      coreDeps(h, { push }),
+      baseInput({ type: "system.announcement", recipients: { userIds: ["u1"] }, channels: ["push"], title: "Hi" }),
+    );
+    expect(push.calls[0]!.data).toEqual({ notificationId: res.notificationId, deepLink: "dub://inbox" });
   });
 
   it("push channel with no wired push port is skipped (P0 default)", async () => {
@@ -324,6 +363,40 @@ describe("lane-A mapping", () => {
     expect(input.recipients).toEqual({});
   });
 
+  it("chat.message.created isDm -> buildChatDmNotifyInput notifies the other DM member(s)", () => {
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_1",
+      messageId: "msg_dm_1",
+      authorId: "u_author",
+      isDm: true,
+      dmRecipientIds: ["u_author", "u_other"], // author included on the wire; must be excluded
+    });
+    const input = buildChatDmNotifyInput(env as Parameters<typeof buildChatDmNotifyInput>[0]);
+    expect(input).not.toBeNull();
+    expect(input!.type).toBe("chat.dm");
+    expect(input!.recipients).toEqual({ userIds: ["u_other"] });
+    expect(input!.channels).toEqual(["in_app"]);
+    expect(input!.resourceType).toBe("channel");
+    expect(input!.resourceId).toBe("chan_dm_1");
+    expect(input!.dedupKey).toBe("chat.dm:msg_dm_1");
+  });
+
+  it("chat.message.created not a DM -> buildChatDmNotifyInput is a no-op (null)", () => {
+    const env = envelope("chat.message.created", { channelId: "chan_1", messageId: "msg_3", authorId: "u_author" });
+    expect(buildChatDmNotifyInput(env as Parameters<typeof buildChatDmNotifyInput>[0])).toBeNull();
+  });
+
+  it("chat.message.created isDm with no other member -> buildChatDmNotifyInput is a no-op (null)", () => {
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_2",
+      messageId: "msg_dm_2",
+      authorId: "u_author",
+      isDm: true,
+      dmRecipientIds: ["u_author"],
+    });
+    expect(buildChatDmNotifyInput(env as Parameters<typeof buildChatDmNotifyInput>[0])).toBeNull();
+  });
+
   it("public.inquiry.received propagates name/email/message into content body", () => {
     const rule = EVENT_MAPPINGS["public.inquiry.received"]!;
     const env = envelope("public.inquiry.received", { kind: "sponsor", name: "Bob", email: "bob@example.com", message: "We would like to sponsor." });
@@ -362,6 +435,46 @@ describe("queue consumer (lanes A/B + idempotency)", () => {
     await consumeEventQueue(fakeBatch([env]).batch, h.env);
     const row = await h.db.first<{ request_id: string }>(`SELECT request_id FROM notif_notifications LIMIT 1`);
     expect(row?.request_id).toBe("req_from_env");
+  });
+
+  it("chat.message.created isDm lands an in-app inbox notification for the other member (default-on)", async () => {
+    const h = makeTestEnv();
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_e2e",
+      messageId: "msg_dm_e2e",
+      authorId: "u_author",
+      isDm: true,
+      dmRecipientIds: ["u_author", "u_other"],
+    });
+    const { batch, messages } = fakeBatch([env]);
+    await consumeEventQueue(batch, h.env);
+    expect(messages[0]!.acked).toBe(true);
+    expect(await unreadCount(h.db, "u_other")).toBe(1);
+    expect(await unreadCount(h.db, "u_author")).toBe(0);
+  });
+
+  it("chat.message.created with BOTH mentions and isDm raises two independent notifications off one event", async () => {
+    const h = makeTestEnv();
+    const env = envelope("chat.message.created", {
+      channelId: "chan_dm_both",
+      messageId: "msg_both",
+      authorId: "u_author",
+      mentions: ["u_mentioned"],
+      isDm: true,
+      dmRecipientIds: ["u_author", "u_dm_other"],
+    });
+    await consumeEventQueue(fakeBatch([env]).batch, h.env);
+    expect(await unreadCount(h.db, "u_mentioned")).toBe(1); // chat.mention
+    expect(await unreadCount(h.db, "u_dm_other")).toBe(1); // chat.dm
+  });
+
+  it("chat.message.created plain channel message (no mentions/dm) rings nobody's bell", async () => {
+    const h = makeTestEnv();
+    const env = envelope("chat.message.created", { channelId: "chan_plain", messageId: "msg_plain", authorId: "u_author" });
+    const { batch, messages } = fakeBatch([env]);
+    await consumeEventQueue(batch, h.env);
+    expect(messages[0]!.acked).toBe(true);
+    expect(await unreadCount(h.db, "u_author")).toBe(0);
   });
 });
 
@@ -601,5 +714,143 @@ describe("HTTP app", () => {
     const h = makeTestEnv();
     const res = await req("/inbox", { headers: {} }, h);
     expect(res.status).toBe(401);
+  });
+});
+
+// The free-tier transport landing route: freeq-drain POSTs each due evt.notification
+// outbox row here. It runs the SAME lane-A mapping / lane-B request handlers +
+// envelope.id idempotency as the Queue path, so a domain event becomes an inbox
+// notification with no Cloudflare Queue. This is the piece that connects producers'
+// evt.notification outbox rows to the notification inbox (chat @mention, etc.).
+describe("POST /internal/events-async (free-tier domain-event landing route)", () => {
+  const app = createApp();
+  const req = (path: string, init: RequestInit, env: TestEnvHandle) =>
+    app.request(path, init, env.env as unknown as Record<string, unknown>);
+  const internalPost = (body: unknown) => ({
+    method: "POST",
+    headers: { "content-type": "application/json", "x-dub-internal": "1" },
+    body: JSON.stringify(body),
+  });
+  const countNotifications = (h: TestEnvHandle) =>
+    h.db.first<{ c: number }>(`SELECT COUNT(*) AS c FROM notif_notifications`).then((r) => r?.c ?? 0);
+
+  it("delivers a mapped event end-to-end -> notif_notifications row + in_app inbox item", async () => {
+    const h = makeTestEnv();
+    // task.assigned maps to recipients { userIds: [assigneeId] } (no external resolver call).
+    const env = envelope("task.assigned", { taskId: "task_1", eventId: "ev_1", assigneeId: "u9" }, { id: "evt_ea_1" });
+    const res = await req("/internal/events-async", internalPost(env), h);
+    expect(res.status).toBe(202);
+    expect((await res.json()) as { ok: boolean }).toEqual({ ok: true });
+
+    expect(await countNotifications(h)).toBe(1);
+    const del = await h.db.all<{ user_id: string; channel: string }>(
+      `SELECT user_id, channel FROM notif_deliveries WHERE channel = 'in_app'`,
+    );
+    expect(del).toEqual([{ user_id: "u9", channel: "in_app" }]);
+
+    const inbox = await req("/inbox", { headers: { "x-dub-user-id": "u9" } }, h);
+    const page = (await inbox.json()) as { items: { type: string }[] };
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.type).toBe("task.assigned");
+  });
+
+  it("is idempotent by envelope.id: re-delivering the same envelope creates no duplicate", async () => {
+    const h = makeTestEnv();
+    const env = envelope("task.assigned", { taskId: "t2", eventId: "e2", assigneeId: "u1" }, { id: "evt_ea_dup" });
+    const first = await req("/internal/events-async", internalPost(env), h);
+    expect(first.status).toBe(202);
+    const second = await req("/internal/events-async", internalPost(env), h);
+    expect(second.status).toBe(202);
+    expect(await countNotifications(h)).toBe(1); // second delivery deduped on envelope.id
+  });
+
+  it("acks an unknown event name as a 202 no-op (forward-compat, no notification)", async () => {
+    const h = makeTestEnv();
+    const env = envelope("task.dependency_changed", { taskId: "t3" }, { id: "evt_ea_unknown" });
+    const res = await req("/internal/events-async", internalPost(env), h);
+    expect(res.status).toBe(202);
+    expect(await countNotifications(h)).toBe(0); // no mapping/handler -> no-op
+  });
+
+  it("without x-dub-internal -> 403 FORBIDDEN", async () => {
+    const h = makeTestEnv();
+    const env = envelope("task.assigned", { taskId: "t4", eventId: "e4", assigneeId: "u1" }, { id: "evt_ea_403" });
+    const res = await req(
+      "/internal/events-async",
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(env) },
+      h,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("a malformed envelope (no name/id) -> validation error, no notification", async () => {
+    const h = makeTestEnv();
+    const res = await req("/internal/events-async", internalPost({ payload: {} }), h);
+    expect(res.status).toBe(400);
+    expect(await countNotifications(h)).toBe(0);
+  });
+
+  it("GET /inbox/ws-ticket returns a user-scoped, verifiable ticket + doUrl", async () => {
+    const h = makeTestEnv({
+      NOTIF_RT_DO_URL_BASE: "wss://dub-notification-service-staging.example.workers.dev/ws/:id",
+    } as Partial<import("../src/env").Env>);
+    const res = await req("/inbox/ws-ticket", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ticket: string; doUrl: string; expEpochMs: number };
+    expect(body.doUrl).toBe("wss://dub-notification-service-staging.example.workers.dev/ws/u1");
+    expect(body.expEpochMs).toBeGreaterThan(Date.now());
+    // The DO would verify with the same secret; claims bind to the authenticated user.
+    const claims = await verifyWsTicket(DEV_WS_SECRET, body.ticket);
+    expect(claims?.userId).toBe("u1");
+  });
+
+  it("GET /inbox/ws-ticket requires auth (no x-dub-user-id -> 401)", async () => {
+    const h = makeTestEnv();
+    const res = await req("/inbox/ws-ticket", {}, h);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("ingest realtime push", () => {
+  function recordingRealtime(): { rt: InboxRealtimePublisher; pushed: string[] } {
+    const pushed: string[] = [];
+    return {
+      pushed,
+      rt: {
+        async pushInboxChanged(userId: string) {
+          pushed.push(userId);
+        },
+      },
+    };
+  }
+
+  it("signals each recipient that received an in_app row", async () => {
+    const h = makeTestEnv();
+    const { rt, pushed } = recordingRealtime();
+    await ingest(
+      { ...coreDeps(h), realtime: rt },
+      baseInput({ type: "system.announcement", recipients: { userIds: ["u1", "u2"] }, channels: ["in_app"] }),
+    );
+    expect(pushed.sort()).toEqual(["u1", "u2"]);
+  });
+
+  it("does not signal when there are no recipients", async () => {
+    const h = makeTestEnv();
+    const { rt, pushed } = recordingRealtime();
+    await ingest(
+      { ...coreDeps(h), realtime: rt },
+      baseInput({ type: "system.announcement", recipients: { userIds: [] }, channels: ["in_app"] }),
+    );
+    expect(pushed).toEqual([]);
+  });
+
+  it("does not signal for an email-only notification (no in_app row)", async () => {
+    const h = makeTestEnv();
+    const { rt, pushed } = recordingRealtime();
+    await ingest(
+      { ...coreDeps(h), realtime: rt },
+      baseInput({ type: "x.y", recipients: { userIds: ["u1"] }, channels: ["email"] }),
+    );
+    expect(pushed).toEqual([]);
   });
 });

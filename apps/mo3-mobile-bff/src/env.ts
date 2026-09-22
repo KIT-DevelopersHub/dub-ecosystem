@@ -26,13 +26,22 @@ export interface Env {
   ENVIRONMENT?: string; // "local" | "preview" | "production" (default production)
   DEFAULT_ORG_ID?: string; // P0 single-org (common.DUB_DEFAULT_ORG_ID at Apply)
 
-  // --- push provider secrets (interface-frozen; stubbed in P0) ---
+  // --- push provider secrets ---
+  // APNs (iOS + macOS) share one p8 auth key (KeyId/TeamId); only the apns-topic
+  // (= app bundle id) differs per platform. APNS_BUNDLE_ID is the iOS topic;
+  // APNS_MACOS_BUNDLE_ID is the macOS app's bundle id (falls back to APNS_BUNDLE_ID
+  // if the mac build shares the id).
   APNS_KEY_P8?: string;
   APNS_KEY_ID?: string;
   APNS_TEAM_ID?: string;
-  APNS_BUNDLE_ID?: string;
+  APNS_BUNDLE_ID?: string; // iOS apns-topic
+  APNS_MACOS_BUNDLE_ID?: string; // macOS apns-topic (defaults to APNS_BUNDLE_ID)
   FCM_SERVICE_ACCOUNT_JSON?: string;
   FCM_PROJECT_ID?: string;
+  // WNS (Windows) — Azure AD app registration for the client_credentials grant.
+  WNS_PACKAGE_SID?: string; // ms-app://... -> OAuth client_id
+  WNS_CLIENT_SECRET?: string; // Azure AD app client secret
+  WNS_TENANT_ID?: string; // optional; defaults to the "common" endpoint
 }
 
 export interface AppConfig {
@@ -55,6 +64,8 @@ export function configFromEnv(env: Env): AppConfig {
     isProduction: environment === "production",
     defaultOrgId: env.DEFAULT_ORG_ID ?? DEFAULTS.defaultOrgId,
     serviceName: DEFAULTS.serviceName,
-    pushConfigured: Boolean(env.APNS_KEY_P8 || env.FCM_SERVICE_ACCOUNT_JSON),
+    pushConfigured: Boolean(
+      env.APNS_KEY_P8 || env.FCM_SERVICE_ACCOUNT_JSON || env.WNS_PACKAGE_SID,
+    ),
   };
 }

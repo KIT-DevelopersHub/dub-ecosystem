@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-notify",
+  "worker": "dub-demo-chat-notify",
+  "url": "https://dub-demo-chat-notify.developershub-site.workers.dev",
+  "deployedSha": "676093d0",
+  "branch": "feat/chat-notify",
+  "actor": "kota",
+  "markers": ["project-alpha でメンションされました","山田さんからダイレクトメッセージが届きました"],
+  "live": true,
+  "verifiedAt": "2026-09-15T17:03:47Z",
+  "updatedAt": "2026-09-15T17:03:47Z",
+  "note": "DM/mention notifications + チャット tab in Notification app"
+}

@@ -9,6 +9,7 @@ import type { DeviceRecord, DeviceStore } from "./devices";
 import type { DeliveryStore } from "./deliveries";
 import { type ApnsCredentials, type Es256Signer, sendApns } from "./apns";
 import { type FcmAccessTokenProvider, type FcmServiceAccount, sendFcm } from "./fcm";
+import { type WnsAccessTokenProvider, type WnsCredentials, sendWns } from "./wns";
 
 export type SendResult = "sent" | "token_invalid" | "failed";
 
@@ -199,6 +200,38 @@ export class FcmAdapter implements PushAdapter {
       });
     } catch {
       return "failed";
+    }
+  }
+}
+
+export interface WnsAdapterOptions {
+  credentials?: WnsCredentials | null;
+  fetchImpl?: typeof fetch; // inject for tests
+  accessTokenProvider?: WnsAccessTokenProvider; // inject to avoid real OAuth in tests
+  tokenUri?: string;
+}
+
+/** WNS provider (Azure AD client_credentials -> POST toast XML to the Channel URI). */
+export class WnsAdapter implements PushAdapter {
+  private readonly opts: WnsAdapterOptions;
+  constructor(init: boolean | WnsAdapterOptions = false) {
+    this.opts = typeof init === "boolean" ? {} : init;
+  }
+
+  async send(device: DeviceRecord, payload: mobile.MobilePushPayload): Promise<SendResult> {
+    const credentials = this.opts.credentials;
+    if (!credentials) return "failed";
+    try {
+      return await sendWns({
+        credentials,
+        device,
+        payload,
+        fetchImpl: this.opts.fetchImpl,
+        accessTokenProvider: this.opts.accessTokenProvider,
+        tokenUri: this.opts.tokenUri,
+      });
+    } catch {
+      return "failed"; // network/provider error -> delivery failure, audited upstream
     }
   }
 }

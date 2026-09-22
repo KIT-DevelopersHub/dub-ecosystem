@@ -48,6 +48,20 @@ describe("mobile migrations", () => {
     expect(tables).toContain("mobile_mutations");
   });
 
+  it("0003 widens the devices platform CHECK to the 4 push-capable platforms (additive)", () => {
+    const m = MOBILE_MIGRATIONS.find((x) => x.id === "0003_devices_platform_4values");
+    expect(m, "0003_devices_platform_4values migration exists").toBeTruthy();
+    // rebuild targets only mobile_devices (+ the temp), never a foreign namespace
+    for (const table of tablesOf(m!.up)) expect(namespaceOf(table)).toBe("mobile");
+    // the widened constraint lists all four platforms and drops the old 2-value form
+    expect(m!.up).toContain("'ios','android','macos','windows'");
+    expect(m!.up).not.toContain("CHECK (platform IN ('ios','android'))");
+    // documented rebuild: create-new / copy / drop / rename (no PRAGMA — lint-forbidden)
+    expect(m!.up).toContain("INSERT INTO mobile_devices_new");
+    expect(m!.up).toContain("ALTER TABLE mobile_devices_new RENAME TO mobile_devices");
+    expect(m!.up.toLowerCase()).not.toContain("pragma");
+  });
+
   it("migration ids are unique and ordered (forward-only)", () => {
     const ids = MOBILE_MIGRATIONS.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);

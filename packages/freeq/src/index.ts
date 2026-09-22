@@ -6,6 +6,7 @@ export {
   enqueue,
   drain,
   ensureOutbox,
+  pruneOutbox,
   nowIso,
   type OutboxStatus,
   type OutboxRow,
@@ -14,5 +15,7 @@ export {
   type Deliver,
   type DrainOptions,
   type DrainResult,
+  type PruneOptions,
+  type PruneResult,
 } from "./outbox";
 export { backoffMs, type BackoffOptions } from "./backoff";

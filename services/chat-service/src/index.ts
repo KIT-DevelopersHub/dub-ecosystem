@@ -11,7 +11,7 @@ import { createServiceClient, type RequestContext } from "@dub/http";
 import { isDubError } from "@dub/errors";
 import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
 import { common, type auditLog } from "@dub/types";
-import { consoleSink } from "@dub/observability";
+import { consoleSink, HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1ChatRepo } from "./d1-repo";
 import { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
@@ -26,10 +26,54 @@ const DEFAULT_DO_URL_BASE = "wss://chat-rt.developershub.jp/ws/:id";
 // Dev-only fallback secret; production sets WS_TICKET_SECRET via wrangler secret.
 const DEV_WS_SECRET = "dev-insecure-ws-ticket-secret";
 
-function buildPublisher(env: Env): EventPublisher {
+// Immediate direct delivery of a notification-bound envelope. The durable freeq outbox
+// INSERT is the delivery guarantee; this is a best-effort SIDE-CHANNEL that lets a chat
+// @mention / DM reach the recipient's inbox in ~1s instead of waiting for the next
+// freeq-drain alarm tick. It POSTs the SAME envelope the outbox stored to notification's
+// free-tier landing route (POST /internal/events-async) over the SVC_NOTIFICATION service
+// binding, marked internal (x-dub-internal). Idempotent: notification dedups on
+// envelope.id, so the later drain redelivery is a no-op. Wrapped in ctx.waitUntil so it
+// runs to completion after the response without blocking the caller; any failure is
+// swallowed (the outbox+drain fallback still delivers). Absent SVC_NOTIFICATION / ctx ->
+// undefined -> pure outbox behaviour (unchanged, e.g. in tests).
+function makeImmediateNotify(env: Env, ctx?: ExecutionContext): ((envelope: DubEventEnvelope) => void) | undefined {
+  const svc = env.SVC_NOTIFICATION;
+  if (!svc || !ctx) return undefined;
+  return (envelope: DubEventEnvelope) => {
+    ctx.waitUntil(
+      (async () => {
+        try {
+          // Host MUST be "svc": notification enables workers.dev for its realtime WS and
+          // therefore gates its header-trusting HTTP API to service-binding callers
+          // (host "svc"); a non-svc host would be rejected as a spoofable public request.
+          await svc.fetch("https://svc/internal/events-async", {
+            method: "POST",
+            headers: { "content-type": "application/json", [HDR_INTERNAL]: INTERNAL_HEADER_VALUE },
+            body: JSON.stringify(envelope),
+          });
+        } catch (err) {
+          consoleSink({
+            level: "warn",
+            message: "immediate notification delivery failed (outbox drain will retry)",
+            service: "chat-service",
+            fields: { eventId: envelope.id, name: envelope.name, err: String(err) },
+          });
+        }
+      })(),
+    );
+  };
+}
+
+function buildPublisher(env: Env, ctx?: ExecutionContext): EventPublisher {
   // Prefer real (paid) Queue bindings when present; otherwise fan out into the
-  // free-tier @dub/freeq D1 outbox so no subscriber's event is dropped.
-  const pubEnv = buildPublisherEnv(env.DB, env as unknown as Partial<Record<string, Queue<DubEventEnvelope>>>);
+  // free-tier @dub/freeq D1 outbox so no subscriber's event is dropped. The
+  // notification consumer additionally gets an immediate direct delivery (see
+  // makeImmediateNotify) so DM/@mention latency is ~1s, not up to a drain interval.
+  const pubEnv = buildPublisherEnv(
+    env.DB,
+    env as unknown as Partial<Record<string, Queue<DubEventEnvelope>>>,
+    makeImmediateNotify(env, ctx),
+  );
   return {
     async publish(name, payload, ctx) {
       const envelope = createEvent(name, payload, ctx);
@@ -91,7 +135,7 @@ function buildRealtime(env: Env): RealtimePublisher {
   return env.CHAT_ROOM ? new DoRealtimePublisher(env.CHAT_ROOM) : new NoopRealtimePublisher();
 }
 
-export function buildDeps(env: Env, requestId?: string): AppDeps {
+export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext): AppDeps {
   const db = createDbClient(env.DB, {
     namespace: "chat",
     ...(requestId ? { requestId } : {}),
@@ -105,7 +149,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
   return {
     repo: createD1ChatRepo(db),
     authz,
-    publisher: buildPublisher(env),
+    publisher: buildPublisher(env, ctx),
     audit: buildAudit(env),
     realtime: buildRealtime(env),
     eventClient: buildEventClient(env),
@@ -136,7 +180,7 @@ function routeWebSocket(request: Request, env: Env, url: URL): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     // Realtime is DO-direct: browsers open wss://<worker>/ws/:id straight to the DO
     // (HMAC ticket + Origin verified there — no header trust). This needs the worker's
@@ -157,7 +201,9 @@ export default {
       return new Response("not found", { status: 404 });
     }
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
-    const app = createApp(buildDeps(env, requestId));
+    // Pass ctx so the publisher's immediate direct notification delivery can run in
+    // ctx.waitUntil (best-effort side-channel; the freeq outbox+drain is the fallback).
+    const app = createApp(buildDeps(env, requestId, ctx));
     return app.fetch(request as unknown as Request) as unknown as Response;
   },
 
