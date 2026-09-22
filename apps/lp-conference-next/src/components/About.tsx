@@ -7,7 +7,7 @@ import type { AboutConfig } from "@/config/types";
 // interview / activities blocks): a media top, an index, a headline, and a
 // tag-style label per card, revealed with a staggered fade-up. Filled with the
 // conference's 3 "とは？" points and original gradient media (no photos copied).
-const TAGS = ["#学生主導", "#出会いの場", "#技術コミュニティ"];
+const TAGS = ["#次世代エンジニア", "#出会いの場", "#技術コミュニティ"];
 
 export function About({ data, index }: { data: AboutConfig; index?: string }) {
   return (

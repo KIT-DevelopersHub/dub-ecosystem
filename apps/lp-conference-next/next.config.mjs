@@ -9,6 +9,10 @@ const nextConfig = {
   output: "export",
   trailingSlash: true,
   reactStrictMode: true,
+  // Allow an alternate build dir (e.g. NEXT_DIST_DIR=.next-build) so a
+  // production build can run without clobbering a concurrently running
+  // `next dev`. Defaults to the standard .next — no behavior change in CI.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   images: {
     unoptimized: true,
   },

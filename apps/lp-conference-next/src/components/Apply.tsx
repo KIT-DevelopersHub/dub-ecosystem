@@ -12,12 +12,15 @@ export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
       <div className="container">
         <SectionHead eyebrow="JOIN" index={index} title={data.heading} />
         <div className="svc-grid">
+          {/* 受付未開始 — 参加登録 / 登壇応募のフォームはまだ公開していないため、
+              両カードとも押せない disabled 状態で「準備中」を明示する。 */}
           <ServiceCard
             variant="participant"
             icon={<IconTicket />}
             title={data.participant.title}
             body={data.participant.body}
             cta={{ label: data.participant.cta.label, href: data.participant.cta.href }}
+            disabled
             delay={0}
           />
           <ServiceCard
@@ -26,6 +29,7 @@ export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
             title={data.speaker.title}
             body={data.speaker.body}
             cta={{ label: data.speaker.cta.label, href: data.speaker.cta.href }}
+            disabled
             delay={120}
           />
         </div>
@@ -40,6 +44,7 @@ function ServiceCard({
   title,
   body,
   cta,
+  disabled = false,
   delay,
 }: {
   variant: "participant" | "speaker";
@@ -47,22 +52,41 @@ function ServiceCard({
   title: string;
   body: string;
   cta: { label: string; href: string };
+  disabled?: boolean;
   delay: number;
 }) {
   const label = cta.label.replace(/\n/g, "");
-  return (
-    <Reveal className={`svc-card svc-card--${variant}`} variant="up" delay={delay}>
-      <a className="svc-card-link" href={cta.href} aria-label={label}>
-        <span className={`svc-icon svc-icon--${variant}`} aria-hidden="true">
-          {icon}
+  const inner = (
+    <>
+      <span className={`svc-icon svc-icon--${variant}`} aria-hidden="true">
+        {icon}
+      </span>
+      <h3 className="svc-card-title">{title}</h3>
+      <p className="svc-card-body">{body}</p>
+      {disabled ? (
+        <span className="svc-card-cta svc-card-cta--disabled">
+          <span className="svc-card-badge">準備中</span>
+          <span className="svc-card-soon">受付開始までお待ちください</span>
         </span>
-        <h3 className="svc-card-title">{title}</h3>
-        <p className="svc-card-body">{body}</p>
+      ) : (
         <span className="svc-card-cta">
           {label}
           <span className="arrow" aria-hidden="true">→</span>
         </span>
-      </a>
+      )}
+    </>
+  );
+  return (
+    <Reveal className={`svc-card svc-card--${variant}`} variant="up" delay={delay}>
+      {disabled ? (
+        <div className="svc-card-link is-disabled" aria-disabled="true" aria-label={`${label}（準備中）`}>
+          {inner}
+        </div>
+      ) : (
+        <a className="svc-card-link" href={cta.href} aria-label={label}>
+          {inner}
+        </a>
+      )}
     </Reveal>
   );
 }
