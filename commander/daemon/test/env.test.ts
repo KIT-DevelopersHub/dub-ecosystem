@@ -41,6 +41,30 @@ describe("buildSpawnEnv — isolation (default)", () => {
   });
 });
 
+describe("buildSpawnEnv — Cloudflare credential passthrough (isolation)", () => {
+  it("forwards CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID when present on the parent env", () => {
+    const env = buildSpawnEnv(
+      { isolateEnv: true, claudeConfigDir: "/repo/commander/.claude-home" },
+      {
+        ...PERSONAL_BASE,
+        CLOUDFLARE_API_TOKEN: "TESTVALUE-token",
+        CLOUDFLARE_ACCOUNT_ID: "TESTVALUE-account",
+      },
+    );
+    expect(env.CLOUDFLARE_API_TOKEN).toBe("TESTVALUE-token");
+    expect(env.CLOUDFLARE_ACCOUNT_ID).toBe("TESTVALUE-account");
+  });
+
+  it("does NOT add the Cloudflare vars when they are absent from the parent env", () => {
+    const env = buildSpawnEnv(
+      { isolateEnv: true, claudeConfigDir: "/repo/commander/.claude-home" },
+      PERSONAL_BASE, // no CLOUDFLARE_* keys
+    );
+    expect(env.CLOUDFLARE_API_TOKEN).toBeUndefined();
+    expect(env.CLOUDFLARE_ACCOUNT_ID).toBeUndefined();
+  });
+});
+
 describe("buildSpawnEnv — disabled", () => {
   it("inherits the full parent env but still redirects CLAUDE_CONFIG_DIR", () => {
     const env = buildSpawnEnv(
