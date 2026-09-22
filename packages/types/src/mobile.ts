@@ -6,7 +6,10 @@ import type { TaskSummary } from "./task";
 import type { PermissionKey } from "./identity";
 import type { NotificationType } from "./notification";
 
-export type MobilePlatform = "ios" | "android";
+// Push-capable client platforms. iOS/macOS → APNs, android → FCM, windows → WNS.
+// macOS and windows are additive (de1-desktop WebView shell background push); adding
+// them never invalidates an existing ios/android device row.
+export type MobilePlatform = "ios" | "android" | "macos" | "windows";
 
 export interface MobileHomeResponse {
   upcomingEvents: EventSummary[];

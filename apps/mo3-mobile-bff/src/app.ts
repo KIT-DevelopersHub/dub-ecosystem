@@ -85,11 +85,18 @@ function requireString(value: unknown, field: string): string {
   return value;
 }
 
+const VALID_PLATFORMS: ReadonlySet<mobile.MobilePlatform> = new Set([
+  "ios",
+  "android",
+  "macos",
+  "windows",
+]);
+
 function requirePlatform(value: unknown): mobile.MobilePlatform {
-  if (value !== "ios" && value !== "android") {
+  if (typeof value !== "string" || !VALID_PLATFORMS.has(value as mobile.MobilePlatform)) {
     throw errors.validationFailed([{ field: "platform", reason: "invalid" }]);
   }
-  return value;
+  return value as mobile.MobilePlatform;
 }
 
 function requireInternal(c: { req: { header: (n: string) => string | undefined } }): void {
