@@ -49,7 +49,7 @@ if [[ -z "$WRANGLER" ]]; then
   exit 1
 fi
 
-MIGRATION="$REPO_ROOT/infra/d1/migrations/commander/0001_commander_init.sql"
+MIGRATIONS_DIR="$REPO_ROOT/infra/d1/migrations/commander"
 
 PIDS=()
 # Recursively kill a process and ALL its descendants (children first). Needed because
@@ -86,11 +86,19 @@ wait_http() { # url, name, tries
 echo "[dev-up] building phase FSM + shared packages (idempotent)..."
 pnpm --dir "$REPO_ROOT" --filter @dub/commander-phases --filter @dub/db --filter @dub/types build >/dev/null 2>&1 || true
 
-# --- 1) commander-service local D1: apply the commander migration ---------------
-echo "[dev-up] applying commander migration to local D1..."
-( cd "$REPO_ROOT/services/commander-service" && \
-  CI=1 WRANGLER_SEND_METRICS=false CLOUDFLARE_API_TOKEN="" \
-  node "$WRANGLER" d1 execute dub-core --local --persist-to "$D1_DIR" --file "$MIGRATION" >/dev/null )
+# --- 1) commander-service local D1: apply the commander migrations --------------
+# Apply every migrations/commander/*.sql in order. 0001 is CREATE TABLE IF NOT EXISTS
+# (idempotent); later additive ones (ALTER TABLE ADD COLUMN) error harmlessly on a
+# re-run once the column exists, so we tolerate per-file failures for the local disposable
+# D1 (the CI pipeline applies these through the ledgered applyAll, not this loop).
+echo "[dev-up] applying commander migrations to local D1..."
+for MIG in "$MIGRATIONS_DIR"/*.sql; do
+  ( cd "$REPO_ROOT/services/commander-service" && \
+    CI=1 WRANGLER_SEND_METRICS=false CLOUDFLARE_API_TOKEN="" \
+    node "$WRANGLER" d1 execute dub-core --local --persist-to "$D1_DIR" --file "$MIG" >/dev/null 2>&1 ) \
+    && echo "[dev-up]   applied $(basename "$MIG")" \
+    || echo "[dev-up]   skipped $(basename "$MIG") (already applied / idempotent)"
+done
 
 # --- 2) commander-service (phase-gate API) --------------------------------------
 echo "[dev-up] starting commander-service on port ${SERVICE_PORT} ..."

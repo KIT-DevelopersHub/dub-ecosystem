@@ -18,6 +18,7 @@ import {
 } from "./lib/commanderApi.ts";
 import { useRunStream } from "./lib/useRunStream.ts";
 import { deriveLane, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import { ArtifactLinks } from "./ArtifactLinks.tsx";
 import { btnDanger, btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
 
 export interface TaskDrawerHandlers {
@@ -39,7 +40,7 @@ interface TaskDrawerProps extends TaskDrawerHandlers {
   version: number;
 }
 
-type Tab = "log" | "phase";
+type Tab = "log" | "artifact" | "phase";
 
 function errorMessage(e: ApiError): string {
   switch (e.error) {
@@ -123,7 +124,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
     >
       {/* tabs */}
       <div role="tablist" style={{ display: "flex", gap: t.space2, marginBottom: t.space4 }}>
-        {(["log", "phase"] as Tab[]).map((tb) => (
+        {(["log", "artifact", "phase"] as Tab[]).map((tb) => (
           <button
             key={tb}
             type="button"
@@ -137,7 +138,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               borderColor: tab === tb ? t.borderStrong : t.border,
             }}
           >
-            {tb === "log" ? "ログ" : "フェーズ & 監査"}
+            {tb === "log" ? "ログ" : tb === "artifact" ? "成果物" : "フェーズ & 監査"}
           </button>
         ))}
       </div>
@@ -166,6 +167,19 @@ export function TaskDrawer(props: TaskDrawerProps) {
           >
             {stream.log.length === 0 ? "（ログはまだありません）" : stream.log.join("\n")}
           </pre>
+        </div>
+      )}
+
+      {tab === "artifact" && (
+        <div data-testid="drawer-artifact">
+          <div style={{ fontSize: 12, color: t.textMuted, marginBottom: t.space3 }}>
+            この実行の成果物。クリックして demo / staging / PR を確認できます。
+          </div>
+          <ArtifactLinks
+            urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrl }}
+            variant="drawer"
+            running={lane === "running"}
+          />
         </div>
       )}
 

@@ -12,6 +12,9 @@ function item(
     title: "task",
     featurePhase: phase ?? "demo_building",
     taskStatus: "todo",
+    demoUrl: null,
+    stagingUrl: null,
+    prUrl: null,
     latestRun:
       run === null || run === undefined
         ? run === null

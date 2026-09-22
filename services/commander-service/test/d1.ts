@@ -1,7 +1,7 @@
 // Real in-memory SQLite adapter exposing the subset of D1Database used by repo.ts.
 // Runs the ACTUAL commander migration (CHECK constraints + indexes) so the phase-gate
 // persistence is tested against the real schema, not a mock.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
@@ -10,10 +10,15 @@ import type { D1Database } from "@cloudflare/workers-types";
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
 
-const MIGRATION = join(
+// Apply every commander migration (0001 init + later additive ones like the P1-2 URL
+// columns) in filename order, so tests run against the real, current schema.
+const MIGRATIONS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../../../infra/d1/migrations/commander/0001_commander_init.sql",
+  "../../../infra/d1/migrations/commander",
 );
+const MIGRATIONS = readdirSync(MIGRATIONS_DIR)
+  .filter((f) => f.endsWith(".sql"))
+  .sort();
 
 function norm(v: unknown): unknown {
   if (v === undefined) return null;
@@ -23,7 +28,7 @@ function norm(v: unknown): unknown {
 
 export function makeD1(): { d1: D1Database; raw: InstanceType<typeof DatabaseSync> } {
   const raw = new DatabaseSync(":memory:");
-  raw.exec(readFileSync(MIGRATION, "utf8"));
+  for (const m of MIGRATIONS) raw.exec(readFileSync(join(MIGRATIONS_DIR, m), "utf8"));
 
   const adapter = {
     prepare(sql: string) {

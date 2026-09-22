@@ -82,6 +82,10 @@ export interface BoardItem {
   title: string;
   featurePhase: FeaturePhase;
   taskStatus: TaskStatus;
+  /** Artifact URLs auto-extracted from the task's run output (P1-2; null until found). */
+  demoUrl: string | null;
+  stagingUrl: string | null;
+  prUrl: string | null;
   latestRun: { id: string; status: RunStatus; cwd: string; createdAt: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -123,6 +127,8 @@ export interface CommanderApi {
   createTask(input: { title: string; ledgerRef?: string }): Promise<Result<{ feature: Feature; task: Task }>>;
   /** Advance a task's lifecycle status (done = archived / Done lane). */
   updateTaskStatus(id: string, status: TaskStatus): Promise<Result<Task>>;
+  /** Backfill artifact URLs (P1-2) from existing run events. Returns tasks updated. */
+  backfillTaskUrls(): Promise<{ updated: number }>;
   /** Liveness probe (GET /health). False when the service is unreachable. */
   health(): Promise<boolean>;
 }
@@ -257,6 +263,15 @@ export class HttpCommanderApi implements CommanderApi {
       return { ok: false, error: { status: res.status, error: String(body.error ?? "error") } };
     }
     return { ok: true, value: { feature: body.feature as Feature, task: body.task as Task } };
+  }
+
+  async backfillTaskUrls(): Promise<{ updated: number }> {
+    const res = await fetch(`${this.baseUrl}/tasks/backfill-urls`, {
+      method: "POST",
+      headers: this.headers(),
+    });
+    if (!res.ok) return { updated: 0 };
+    return (await res.json()) as { updated: number };
   }
 
   async updateTaskStatus(id: string, status: TaskStatus): Promise<Result<Task>> {

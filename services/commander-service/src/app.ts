@@ -30,6 +30,7 @@ import {
   listRunEvents,
   appendRunEvent,
   isRunEventType,
+  backfillTaskUrls,
 } from "./repo";
 
 export function createApp() {
@@ -151,6 +152,12 @@ export function createApp() {
       : null;
     const created = await createFeatureTask(c.env.DB, { title, ledgerRef });
     return c.json(created, 201);
+  });
+
+  // Backfill artifact URLs (P1-2) for tasks whose runs completed before URL capture
+  // existed — scans existing run events and folds any demo/staging/PR URLs onto the task.
+  app.post("/tasks/backfill-urls", async (c) => {
+    return c.json(await backfillTaskUrls(c.env.DB));
   });
 
   app.patch("/tasks/:id", async (c) => {

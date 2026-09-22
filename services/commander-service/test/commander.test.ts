@@ -324,4 +324,45 @@ describe("commander-service run persistence", () => {
     const bad = await call(app, env, "PATCH", `/tasks/${created.json.task.id}`, { status: "bogus" });
     expect(bad.status).toBe(400);
   });
+
+  it("extracts artifact URLs from run events onto the task board (P1-2, live)", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "URL抽出" });
+    const taskId = created.json.task.id;
+    await call(app, env, "POST", "/runs", { id: "run_url", prompt: "deploy", cwd: "/wt", taskId, status: "running" });
+
+    // demo deploy line, then a PR line — as the daemon would mirror stream-json/stdout.
+    await call(app, env, "POST", "/runs/run_url/events", {
+      type: "stdout",
+      payload: { line: "deployed https://dub-demo-urlx.example.workers.dev" },
+    });
+    await call(app, env, "POST", "/runs/run_url/events", {
+      type: "claude",
+      payload: { data: { type: "result", result: "opened PR https://github.com/o/r/pull/99" } },
+    });
+
+    const board = await call(app, env, "GET", "/tasks");
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.demoUrl).toBe("https://dub-demo-urlx.example.workers.dev");
+    expect(item.prUrl).toBe("https://github.com/o/r/pull/99");
+    expect(item.stagingUrl).toBeNull();
+  });
+
+  it("POST /tasks/backfill-urls recovers URLs from pre-existing run events", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "バックフィル" });
+    const taskId = created.json.task.id;
+    await call(app, env, "POST", "/runs", { id: "run_bf", prompt: "p", cwd: "/wt", taskId, status: "succeeded" });
+    // Simulate an event stored before extraction existed: still parseable on backfill.
+    await call(app, env, "POST", "/runs/run_bf/events", {
+      type: "stdout",
+      payload: { line: "staging: https://staging-bf.example.workers.dev" },
+    });
+
+    const res = await call(app, env, "POST", "/tasks/backfill-urls");
+    expect(res.status).toBe(200);
+    expect(res.json.updated).toBeGreaterThanOrEqual(1);
+
+    const board = await call(app, env, "GET", "/tasks");
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.stagingUrl).toBe("https://staging-bf.example.workers.dev");
+  });
 });

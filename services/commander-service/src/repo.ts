@@ -12,6 +12,7 @@ import {
   PhaseTransitionError,
   type FeaturePhase,
 } from "@dub/commander-phases";
+import { extractArtifactUrls, eventText, mergeUrls } from "./urls";
 
 export interface FeatureRow {
   id: string;
@@ -38,6 +39,10 @@ export interface TaskRow {
   featureId: string;
   title: string;
   status: "todo" | "doing" | "done";
+  /** Artifact URLs auto-extracted from the task's run output (P1-2; nullable). */
+  demoUrl: string | null;
+  stagingUrl: string | null;
+  prUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +70,9 @@ interface TaskDb {
   feature_id: string;
   title: string;
   status: string;
+  demo_url: string | null;
+  staging_url: string | null;
+  pr_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -97,6 +105,9 @@ function toTask(r: TaskDb): TaskRow {
     featureId: r.feature_id,
     title: r.title,
     status: r.status as TaskRow["status"],
+    demoUrl: r.demo_url ?? null,
+    stagingUrl: r.staging_url ?? null,
+    prUrl: r.pr_url ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -240,7 +251,17 @@ export async function createTask(
     )
     .bind(id, featureId, input.title, status, at, at)
     .run();
-  return { id, featureId, title: input.title, status, createdAt: at, updatedAt: at };
+  return {
+    id,
+    featureId,
+    title: input.title,
+    status,
+    demoUrl: null,
+    stagingUrl: null,
+    prUrl: null,
+    createdAt: at,
+    updatedAt: at,
+  };
 }
 
 export async function listTasks(db: D1Database, featureId: string): Promise<TaskRow[]> {
@@ -281,6 +302,10 @@ export interface BoardItem {
   title: string;
   featurePhase: FeaturePhase;
   taskStatus: TaskRow["status"];
+  /** Artifact URLs (P1-2) surfaced on the card / 成果物 tab; null until extracted. */
+  demoUrl: string | null;
+  stagingUrl: string | null;
+  prUrl: string | null;
   latestRun: { id: string; status: RunStatus; cwd: string; createdAt: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -291,6 +316,9 @@ interface BoardItemDb {
   feature_id: string;
   title: string;
   status: string;
+  demo_url: string | null;
+  staging_url: string | null;
+  pr_url: string | null;
   created_at: string;
   updated_at: string;
   feature_phase: string;
@@ -303,7 +331,8 @@ interface BoardItemDb {
 export async function listBoard(db: D1Database): Promise<BoardItem[]> {
   const res = await db
     .prepare(
-      `SELECT t.id, t.feature_id, t.title, t.status, t.created_at, t.updated_at,
+      `SELECT t.id, t.feature_id, t.title, t.status,
+              t.demo_url, t.staging_url, t.pr_url, t.created_at, t.updated_at,
               f.phase AS feature_phase,
               r.id AS run_id, r.status AS run_status, r.cwd AS run_cwd, r.created_at AS run_created_at
          FROM commander_tasks t
@@ -323,6 +352,9 @@ export async function listBoard(db: D1Database): Promise<BoardItem[]> {
     title: r.title,
     featurePhase: r.feature_phase as FeaturePhase,
     taskStatus: r.status as TaskRow["status"],
+    demoUrl: r.demo_url ?? null,
+    stagingUrl: r.staging_url ?? null,
+    prUrl: r.pr_url ?? null,
     latestRun: r.run_id
       ? {
           id: r.run_id,
@@ -334,6 +366,80 @@ export async function listBoard(db: D1Database): Promise<BoardItem[]> {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
+}
+
+// --- Artifact URL extraction persistence (P1-2) ---------------------------
+// URLs are parsed from run output (see ./urls.ts) and stored on the task so the board
+// can offer a click-through link. Latest-wins: a later match (e.g. a re-deploy) replaces
+// the stored URL. Only fields present in `urls` are written (a partial match never clears
+// a previously-found URL).
+
+/** Set the given artifact URL columns on a task (only the provided fields). No-op if
+ *  nothing to write or the task is unknown. */
+export async function updateTaskUrls(
+  db: D1Database,
+  taskId: string,
+  urls: { demoUrl?: string; stagingUrl?: string; prUrl?: string },
+): Promise<void> {
+  const sets: string[] = [];
+  const vals: string[] = [];
+  if (urls.demoUrl) {
+    sets.push("demo_url = ?");
+    vals.push(urls.demoUrl);
+  }
+  if (urls.stagingUrl) {
+    sets.push("staging_url = ?");
+    vals.push(urls.stagingUrl);
+  }
+  if (urls.prUrl) {
+    sets.push("pr_url = ?");
+    vals.push(urls.prUrl);
+  }
+  if (sets.length === 0) return;
+  sets.push("updated_at = ?");
+  vals.push(nowIso());
+  await db
+    .prepare(`UPDATE commander_tasks SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals, taskId)
+    .run();
+}
+
+/**
+ * Backfill artifact URLs for every task from its existing run events — for runs that
+ * completed before P1-2 (their URLs were never captured live). Scans each task's run
+ * output in chronological order (latest-wins) and writes what it finds. Returns how many
+ * tasks were updated.
+ */
+export async function backfillTaskUrls(db: D1Database): Promise<{ updated: number }> {
+  const res = await db
+    .prepare(
+      `SELECT r.task_id AS task_id, e.type AS type, e.payload AS payload
+         FROM commander_run_events e
+         JOIN commander_runs r ON r.id = e.run_id
+        WHERE r.task_id IS NOT NULL
+        ORDER BY e.created_at ASC, e.id ASC`,
+    )
+    .all<{ task_id: string; type: string; payload: string }>();
+
+  const perTask = new Map<string, { demoUrl?: string; stagingUrl?: string; prUrl?: string }>();
+  for (const row of res.results ?? []) {
+    let payload: unknown = {};
+    try {
+      payload = JSON.parse(row.payload);
+    } catch {
+      payload = row.payload;
+    }
+    const found = extractArtifactUrls(eventText(payload));
+    if (!found.demoUrl && !found.stagingUrl && !found.prUrl) continue;
+    perTask.set(row.task_id, mergeUrls(perTask.get(row.task_id) ?? {}, found));
+  }
+
+  let updated = 0;
+  for (const [taskId, urls] of perTask) {
+    await updateTaskUrls(db, taskId, urls);
+    updated += 1;
+  }
+  return { updated };
 }
 
 /**
@@ -369,7 +475,17 @@ export async function createFeatureTask(
       createdAt: at,
       updatedAt: at,
     },
-    task: { id: taskId, featureId, title: input.title, status: "todo", createdAt: at, updatedAt: at },
+    task: {
+      id: taskId,
+      featureId,
+      title: input.title,
+      status: "todo",
+      demoUrl: null,
+      stagingUrl: null,
+      prUrl: null,
+      createdAt: at,
+      updatedAt: at,
+    },
   };
 }
 
@@ -531,6 +647,35 @@ export async function appendRunEvent(
         .prepare("UPDATE commander_runs SET exit_code = ?, updated_at = ? WHERE id = ?")
         .bind(typeof p.code === "number" ? p.code : null, at, runId),
     );
+  }
+
+  // P1-2: harvest artifact URLs from this event and fold them onto the owning task,
+  // in the same batch so the run event and its extracted URLs commit atomically.
+  if (run.taskId) {
+    const found = extractArtifactUrls(eventText(payload));
+    const urlSets: string[] = [];
+    const urlVals: string[] = [];
+    if (found.demoUrl) {
+      urlSets.push("demo_url = ?");
+      urlVals.push(found.demoUrl);
+    }
+    if (found.stagingUrl) {
+      urlSets.push("staging_url = ?");
+      urlVals.push(found.stagingUrl);
+    }
+    if (found.prUrl) {
+      urlSets.push("pr_url = ?");
+      urlVals.push(found.prUrl);
+    }
+    if (urlSets.length > 0) {
+      urlSets.push("updated_at = ?");
+      urlVals.push(at);
+      stmts.push(
+        db
+          .prepare(`UPDATE commander_tasks SET ${urlSets.join(", ")} WHERE id = ?`)
+          .bind(...urlVals, run.taskId),
+      );
+    }
   }
 
   await db.batch(stmts);

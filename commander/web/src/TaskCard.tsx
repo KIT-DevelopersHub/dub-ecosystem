@@ -6,6 +6,7 @@ import { useRunStream } from "./lib/useRunStream.ts";
 import type { CommanderClient } from "./lib/client.ts";
 import type { BoardItem, RunHistoryApi } from "./lib/commanderApi.ts";
 import { deriveLane, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import { ArtifactLinks } from "./ArtifactLinks.tsx";
 import { t } from "./lib/theme.ts";
 
 interface TaskCardProps {
@@ -93,6 +94,12 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
         </span>
         <span style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>{relTime(item.updatedAt)}</span>
       </div>
+
+      {/* artifact links: demo / staging / PR click-throughs (P1-2) */}
+      <ArtifactLinks
+        urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrl }}
+        variant="card"
+      />
 
       {/* layer 3: latest live output (running only) */}
       {isRunning && stream.lastLine && (

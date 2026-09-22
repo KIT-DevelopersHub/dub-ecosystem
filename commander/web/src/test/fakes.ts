@@ -22,6 +22,9 @@ export function makeBoardItem(over: Partial<BoardItem> & { runStatus?: RunStatus
     title: rest.title ?? "サンプルタスク",
     featurePhase: rest.featurePhase ?? "demo_building",
     taskStatus: rest.taskStatus ?? "todo",
+    demoUrl: rest.demoUrl ?? null,
+    stagingUrl: rest.stagingUrl ?? null,
+    prUrl: rest.prUrl ?? null,
     latestRun:
       runStatus === null
         ? null
@@ -90,6 +93,7 @@ export function makeFakeApi(initial: BoardItem[] = []): FakeApi {
         transitions: [],
       };
     }),
+    backfillTaskUrls: vi.fn(async () => ({ updated: 0 })),
     listRuns: vi.fn(async () => []),
     getRun: vi.fn(async (id: string) => ({
       run: { id, taskId: null, prompt: "元の指示", cwd: "/repo/wt", status: "succeeded" as const, exitCode: 0, createdAt: "t", updatedAt: "t" },
