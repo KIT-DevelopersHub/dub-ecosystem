@@ -397,14 +397,16 @@ img { max-width: 100%; height: auto; display: block; }
 .reveal {
   will-change: opacity, transform;
 }
-/* haze: 位置連動の連続フェード。transition なし(毎フレーム --p を直接反映)。
-   --reveal-delay でグループ内のずらし(従来 delay 相当)を表現。 */
+/* haze: 位置連動の“ほんのり霞む”上品な演出。可読性最優先。
+   opacity は下端でも 0.66 までしか落とさず(=本文は常にしっかり読める)、
+   少しせり上がれば 1 に到達。translateY もごく控えめ(最大 6px)。
+   transition なし(毎フレーム --p を直接反映)。--reveal-delay でグループ内のずらし。 */
 .reveal--haze {
   --p: 0;
   transition: none;
-  opacity: clamp(0, calc((var(--p) - var(--reveal-delay, 0)) * 2.1), 1);
+  opacity: clamp(0.66, calc(0.66 + (var(--p) - var(--reveal-delay, 0)) * 1.7), 1);
   transform: translateY(
-    calc((1 - clamp(0, calc((var(--p) - var(--reveal-delay, 0)) * 2), 1)) * 18px)
+    calc((1 - clamp(0, calc((var(--p) - var(--reveal-delay, 0)) * 2.4), 1)) * 6px)
   );
 }
 
