@@ -56,6 +56,10 @@
   --lp-content: 1040px;
 
   /* --- typography --- */
+  /* Font families loaded at runtime via <link> in layout (Google Fonts, display=swap).
+     Kept as vars so the rest of the sheet reads var(--font-inter)/var(--font-jp). */
+  --font-inter: "Inter";
+  --font-jp: "Zen Kaku Gothic New";
   --font-body: var(--font-inter), var(--font-jp), "Hiragino Kaku Gothic ProN",
     "Noto Sans JP", system-ui, -apple-system, sans-serif;
   --font-display: var(--font-jp), var(--font-inter), "Hiragino Kaku Gothic ProN",
