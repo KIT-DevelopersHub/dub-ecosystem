@@ -66,6 +66,7 @@ export const APP_MANIFEST = [
   { id: "events", label: "イベント", navPath: "/events", domain: "event", permissions: ["event:read"], access: { view: "app:events:view", edit: "app:events:edit" } },
   { id: "tasks", label: "マイタスク", navPath: "/me/tasks", domain: "task", permissions: ["task:read"], access: { view: "app:tasks:view", edit: "app:tasks:edit" } },
   { id: "gantt", label: "ガントチャート", navPath: "/gantt", domain: "task", permissions: ["task:read"], access: { view: "app:gantt:view", edit: "app:gantt:edit" } },
+  { id: "calendar", label: "カレンダー", navPath: "/calendar", domain: "task", permissions: ["task:read"], access: { view: "app:calendar:view", edit: "app:calendar:edit" } },
   { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" } },
   { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" } },
   { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" } },
