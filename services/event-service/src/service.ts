@@ -17,6 +17,9 @@ import type {
   EventSectionLayoutRow,
   EventSectionLayoutResponse,
   SaveEventSectionLayoutRequest,
+  EventPageLayoutRow,
+  EventPageLayoutResponse,
+  SaveEventPageLayoutRequest,
   Keyset,
 } from "./types";
 import {
@@ -32,6 +35,8 @@ import {
   EMPTY_EVENT_DETAILS,
   normalizeEventSectionLayout,
   EMPTY_EVENT_SECTION_LAYOUT,
+  normalizeEventPageLayout,
+  EMPTY_EVENT_PAGE_LAYOUT,
   DEFAULT_LIMIT,
   MAX_LIMIT,
   INCLUDE_ACTIONS_CAP,
@@ -333,6 +338,48 @@ export class EventService {
 
     await this.auditWrite(ctx, "event.event.section_layout_updated", "event", id, {
       version: next.version,
+    });
+    return { eventId: id, data: next.data, version: next.version, updatedAt: next.updatedAt };
+  }
+
+  // ---- event page layout (free block-editor doc; event:write to edit) ----
+  async getEventPageLayout(_ctx: ReqCtx, id: common.EventId): Promise<EventPageLayoutResponse> {
+    await this.loadEvent(id); // 404 if missing / cross-org
+    const row = await this.deps.repo.getEventPageLayout(id);
+    if (!row) {
+      return { eventId: id, data: { ...EMPTY_EVENT_PAGE_LAYOUT }, version: 0, updatedAt: null };
+    }
+    return { eventId: id, data: row.data, version: row.version, updatedAt: row.updatedAt };
+  }
+
+  async saveEventPageLayout(
+    ctx: ReqCtx,
+    id: common.EventId,
+    body: SaveEventPageLayoutRequest,
+  ): Promise<EventPageLayoutResponse> {
+    if (typeof body.version !== "number") {
+      throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    }
+    const ev = await this.loadEvent(id);
+    if (ev.archivedAt) throw errArchivedImmutable(id);
+
+    const current = await this.deps.repo.getEventPageLayout(id);
+    const currentVersion = current?.version ?? 0;
+    if (body.version !== currentVersion) throw errVersionConflict(id);
+
+    const next: EventPageLayoutRow = {
+      eventId: id,
+      data: normalizeEventPageLayout(body.data),
+      version: currentVersion + 1,
+      updatedBy: ctx.userId,
+      updatedAt: this.deps.now(),
+    };
+    const ok = await this.deps.repo.upsertEventPageLayout(next, currentVersion);
+    if (!ok) throw errVersionConflict(id);
+
+    await this.auditWrite(ctx, "event.event.page_layout_updated", "event", id, {
+      version: next.version,
+      blocks: next.data.blocks.length,
     });
     return { eventId: id, data: next.data, version: next.version, updatedAt: next.updatedAt };
   }
