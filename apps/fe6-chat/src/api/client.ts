@@ -25,6 +25,8 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  UnfurlPreview,
+  UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -52,6 +54,8 @@ export interface ChatApiClient {
   listUnread(): Promise<UnreadSummary[]>; // subject from auth header — no ?userId= (chat review #10/#13)
   getWsTicket(id: common.ChannelId): Promise<WsTicketResponse>;
   resolveUsers(ids: common.UserId[]): Promise<identity.UserSummary[]>; // batch ≤50 (theme2 B1)
+  /** Link preview (OGP) for one URL; null = no card. Best-effort: never rejects. */
+  unfurl(url: string): Promise<UnfurlPreview | null>;
 }
 
 /** Error carrying the @dub/errors wire body so callers can map codes to UI. */
@@ -228,5 +232,13 @@ export class HttpChatClient implements ChatApiClient {
     // identity /users returns common.Paginated<UserSummary> ({ items, nextCursor }); unwrap to array.
     const res = await this.request<unknown>("GET", `${IDENTITY}/users${qs({ ids: batch.join(",") })}`);
     return unwrapItems<identity.UserSummary>(res);
+  }
+  async unfurl(url: string): Promise<UnfurlPreview | null> {
+    try {
+      const res = await this.request<UnfurlResponse>("GET", `${CHAT}/unfurl${qs({ url })}`);
+      return res?.preview ?? null;
+    } catch {
+      return null; // 400 (blocked url) / network — the card is optional
+    }
   }
 }

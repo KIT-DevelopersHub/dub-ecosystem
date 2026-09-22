@@ -169,6 +169,39 @@
 }
 .chipCheck { font-size: 0.72rem; color: var(--dub-color-brand-600); line-height: 1; }
 .chipCheckbox { accent-color: var(--dub-color-brand-500); margin-right: 2px; }
+
+/* 担当者 filter: a pill-shaped labeled <select>, visually matched to the chips. */
+.filterSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px var(--dub-space-3);
+  border-radius: var(--dub-radius-full, 999px);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm, 0.82rem);
+  line-height: 1.4;
+}
+.filterSelectActive {
+  background: var(--dub-color-brand-100);
+  border-color: var(--dub-color-brand-500);
+  color: var(--dub-color-brand-700);
+  font-weight: var(--dub-font-weight-medium, 600);
+}
+.filterSelectLabel { white-space: nowrap; }
+.filterSelectInput {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  max-width: 160px;
+  padding: 2px 2px;
+  border-radius: var(--dub-radius-sm, 6px);
+}
+.filterSelectInput:disabled { opacity: 0.5; cursor: not-allowed; }
+.filterSelectInput:focus-visible { outline: 2px solid var(--dub-color-brand-500); outline-offset: 1px; }
 .filterClear {
   margin-left: auto;
   padding: 5px var(--dub-space-3);
