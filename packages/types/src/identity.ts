@@ -69,6 +69,8 @@ export const PERMISSION_CATALOG = [
   { key: "app:tasks:edit", name: "Edit in マイタスク app", description: "Create/edit inside the マイタスク app (implies view)", domain: "app", dangerous: false },
   { key: "app:gantt:view", name: "Open ガントチャート app", description: "Open and view the ガントチャート app", domain: "app", dangerous: false },
   { key: "app:gantt:edit", name: "Edit in ガントチャート app", description: "Create/edit inside the ガントチャート app (implies view)", domain: "app", dangerous: false },
+  { key: "app:calendar:view", name: "Open カレンダー app", description: "Open and view the カレンダー app", domain: "app", dangerous: false },
+  { key: "app:calendar:edit", name: "Edit in カレンダー app", description: "Create/edit inside the カレンダー app (implies view)", domain: "app", dangerous: false },
   { key: "app:notifications:view", name: "Open 通知 app", description: "Open and view the 通知 app", domain: "app", dangerous: false },
   { key: "app:notifications:edit", name: "Edit in 通知 app", description: "Manage/act inside the 通知 app (implies view)", domain: "app", dangerous: false },
   { key: "app:chat:view", name: "Open チャット app", description: "Open and view the チャット app", domain: "app", dangerous: false },

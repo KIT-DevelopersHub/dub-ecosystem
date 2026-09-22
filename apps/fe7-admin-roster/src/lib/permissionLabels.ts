@@ -33,6 +33,7 @@ const APP_LABELS: { id: string; name: string }[] = [
   { id: "events", name: "イベント" },
   { id: "tasks", name: "マイタスク" },
   { id: "gantt", name: "ガントチャート" },
+  { id: "calendar", name: "カレンダー" },
   { id: "notifications", name: "通知" },
   { id: "chat", name: "チャット" },
   { id: "mail", name: "メール" },
