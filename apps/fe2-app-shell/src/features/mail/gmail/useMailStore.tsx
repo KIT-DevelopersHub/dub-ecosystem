@@ -7,6 +7,7 @@
 // Sent folder is server-backed and survives a reload. Star/archive/trash/label/reply
 // mutations stay optimistic and in-memory (server persistence is a later slice).
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from "react";
+import type { mail } from "@dub/types";
 import { SELF, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 export interface ComposeState {
@@ -45,6 +46,9 @@ export interface MailState {
   undo: UndoState | null;
   /** Bumped to ask the hydration hook to re-fetch inbox+sent (e.g. after a send). */
   syncNonce: number;
+  /** Parked future sends (予約送信) — the Scheduled folder's list, loaded from the gateway
+   *  (GET /mail/scheduled) by useMailSync. Not thread-backed: rendered by ScheduledList. */
+  scheduled: mail.ScheduledSendListItem[];
 }
 
 export type MailAction =
@@ -74,6 +78,7 @@ export type MailAction =
   | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
   | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean }[] } // restore server-persisted star/archive/trash/purge
+  | { type: "HYDRATE_SCHEDULED"; scheduled: mail.ScheduledSendListItem[] } // replace the Scheduled folder list
   | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
 
 let seq = 0;
@@ -300,6 +305,8 @@ export function reducer(state: MailState, action: MailAction): MailState {
         }),
       };
     }
+    case "HYDRATE_SCHEDULED":
+      return { ...state, scheduled: action.scheduled };
     case "REQUEST_SYNC":
       return { ...state, syncNonce: state.syncNonce + 1 };
     default:
@@ -321,6 +328,7 @@ export const initialMailState: MailState = {
   composes: [],
   undo: null,
   syncNonce: 0,
+  scheduled: [],
 };
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);

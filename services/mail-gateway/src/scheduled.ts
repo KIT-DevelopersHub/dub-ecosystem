@@ -4,7 +4,7 @@ import { createDbClient } from "@dub/db";
 import { consoleSink } from "@dub/observability";
 import type { Env } from "./env";
 import { SEND_LOG_RETENTION_DAYS, INBOUND_RETENTION_DAYS, SERVICE_NAME } from "./config";
-import { attachmentKeysOlderThan, purgeOlderThan } from "./repo";
+import { attachmentKeysOlderThan, purgeOlderThan, purgeScheduledOlderThan } from "./repo";
 import { r2Blobs } from "./attachments";
 
 function cutoff(days: number, now: number): string {
@@ -18,6 +18,9 @@ export async function runRetentionPurge(env: Env, now: number = Date.now()): Pro
   // Collect the R2 keys BEFORE deleting the metadata rows so we can free the bytes too.
   const keys = env.R2_MAIL ? await attachmentKeysOlderThan(db, sendCutoff, inboundCutoff) : [];
   const summary = await purgeOlderThan(db, sendCutoff, inboundCutoff);
+  // Terminal scheduled rows (sent/canceled/failed) share the send-log window. A still
+  // 'scheduled' row (a far-future send-later) is NEVER purged.
+  await purgeScheduledOlderThan(db, sendCutoff);
   if (env.R2_MAIL && keys.length > 0) {
     const blobs = r2Blobs(env.R2_MAIL);
     for (const key of keys) {
