@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
-import { enqueue, drain, backoffMs, type OutboxRow, type OutboxMessage } from "../src/index";
+import { enqueue, drain, pruneOutbox, backoffMs, type OutboxRow, type OutboxMessage } from "../src/index";
 import { makeD1 } from "./d1";
 
 const T0 = Date.parse("2026-08-11T00:00:00.000Z");
@@ -123,6 +123,52 @@ describe("drain (claim -> deliver -> done/retry/failed)", () => {
     const res = await drain(d1, async (m) => void order.push(m.id), { now: clock(T0 + 10), batchSize: 2 });
     expect(res.claimed).toBe(2);
     expect(order).toEqual(["a", "b"]);
+  });
+});
+
+describe("pruneOutbox (retention: delete old terminal rows only)", () => {
+  // Insert an already-terminal row with an explicit created_at (enqueue only makes pending).
+  function seedTerminal(
+    raw: ReturnType<typeof makeD1>["raw"],
+    id: string,
+    status: "done" | "failed",
+    createdAt: string,
+  ): void {
+    raw
+      .prepare(
+        `INSERT INTO freeq_outbox (id, topic, payload, status, attempts, next_attempt_at, created_at, last_error)
+         VALUES (?, 'audit.record', '{}', ?, 1, ?, ?, NULL)`,
+      )
+      .run(id, status, createdAt, createdAt);
+  }
+
+  const NOW = Date.parse("2026-08-11T00:00:00.000Z");
+  const daysAgo = (n: number) => new Date(NOW - n * 24 * 60 * 60 * 1_000).toISOString();
+
+  it("deletes done/failed rows past their window, keeps pending and recent terminal rows", async () => {
+    const { d1, raw } = makeD1();
+    seedTerminal(raw, "old-done", "done", daysAgo(5)); // > 3d done window -> pruned
+    seedTerminal(raw, "fresh-done", "done", daysAgo(1)); // < 3d -> kept
+    seedTerminal(raw, "old-failed", "failed", daysAgo(40)); // > 30d failed window -> pruned
+    seedTerminal(raw, "recent-failed", "failed", daysAgo(10)); // < 30d -> kept
+    await enqueue(d1, "evt.notification", { id: "n" }, { id: "still-pending", now: clock(NOW - 999 * 24 * 60 * 60 * 1_000) });
+
+    const res = await pruneOutbox(d1, { now: () => NOW });
+
+    expect(res).toEqual({ deleted: 2 });
+    expect(rowById(raw, "old-done")).toBeUndefined();
+    expect(rowById(raw, "old-failed")).toBeUndefined();
+    expect(rowById(raw, "fresh-done").status).toBe("done");
+    expect(rowById(raw, "recent-failed").status).toBe("failed");
+    expect(rowById(raw, "still-pending").status).toBe("pending"); // never pruned, however old
+  });
+
+  it("honors caller-supplied retention windows", async () => {
+    const { d1, raw } = makeD1();
+    seedTerminal(raw, "d", "done", daysAgo(2));
+    const res = await pruneOutbox(d1, { now: () => NOW, doneRetentionMs: 24 * 60 * 60 * 1_000 });
+    expect(res).toEqual({ deleted: 1 });
+    expect(rowById(raw, "d")).toBeUndefined();
   });
 });
 
