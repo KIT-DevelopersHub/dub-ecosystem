@@ -20,6 +20,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const { api, can } = useChatRuntime();
   const unread = useChatStore((s) => s.unread);
   const setUnread = useChatStore((s) => s.setUnread);
+  const setTeams = useChatStore((s) => s.setTeams);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [active, setActive] = useState<common.ChannelId | null>(initialChannelId ?? null);
   const [threadOpen, setThreadOpen] = useState(false);
@@ -67,6 +68,20 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
       cancelled = true;
     };
   }, [reloadChannels, eventId]);
+
+  // 運営チーム (チーム単位メンションの候補) と自分の所属チームを一度だけ読み込む。
+  // member-service が落ちていてもチャットは開けるべきなので、失敗は「チームなし」に倒す。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await api.listMentionTeams().catch(() => ({ teams: [], myTeamIds: [] }));
+      if (cancelled) return;
+      setTeams(res.teams, res.myTeamIds);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, setTeams]);
 
   const onSelect = useCallback((channelId: common.ChannelId) => {
     setActive(channelId);

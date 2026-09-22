@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { Avatar, Icon } from "@dub/ui";
 import type { common, identity } from "@dub/types";
-import type { Message } from "../api/contract";
+import type { Message, TeamSummary } from "../api/contract";
 import { MessageBody } from "./MessageBody";
 import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
@@ -26,6 +26,7 @@ export interface MessageItemProps {
   mentionsMe?: boolean; // highlight the whole row (yellow rail)
   pinned?: boolean;
   resolveUser?: (id: common.UserId) => identity.UserSummary | undefined;
+  resolveTeam?: (id: string) => TeamSummary | undefined;
   onToggleReaction?: (id: common.MessageId, emoji: string) => void;
   onSubmitEdit?: (message: Message, body: string) => void | Promise<void>;
   onDelete?: (message: Message) => void; // opens ConfirmDialog upstream
@@ -63,6 +64,7 @@ export function MessageItem({
   mentionsMe = false,
   pinned = false,
   resolveUser,
+  resolveTeam,
   onToggleReaction,
   onSubmitEdit,
   onDelete,
@@ -226,7 +228,7 @@ export function MessageItem({
           </div>
         ) : (
           <div className={styles.textBody} data-testid="fe6-timeline-body">
-            <MessageBody body={message.body} resolveUser={resolveUser} />
+            <MessageBody body={message.body} resolveUser={resolveUser} resolveTeam={resolveTeam} />
             {grouped && message.editedAt && <span className={styles.editedTag}> (編集済み)</span>}
           </div>
         )}

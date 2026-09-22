@@ -3,7 +3,7 @@
 // reactions, mentions and a code block — so the mock server renders like a real
 // Slack-style workspace out of the box.
 import type { identity } from "@dub/types";
-import type { Channel, ChannelMember, Message, Reaction } from "../api/contract";
+import type { Channel, ChannelMember, Message, Reaction, TeamSummary } from "../api/contract";
 import type { MockSeed } from "../api/mock-client";
 import { setPresence } from "../lib/presence";
 
@@ -27,6 +27,19 @@ const users: identity.UserSummary[] = [
   { id: KENICHI, displayName: "山本 健一", avatarUrl: null },
   { id: BOT, displayName: "DevHub Bot", avatarUrl: null },
 ];
+
+// 運営チーム (member-service ロスター準拠). チーム単位メンションの候補。
+export const TEAM_HQ = "team_hq";
+export const TEAM_CORP = "team_corp";
+const teams: TeamSummary[] = [
+  { id: TEAM_HQ, key: "soukatsu", name: "統括チーム", color: "#1e3a5f" },
+  { id: TEAM_CORP, key: "houjin", name: "法人チーム", color: "#7c3aed" },
+  { id: "team_dev", key: "dev", name: "開発チーム", color: "#2563eb" },
+  { id: "team_ops", key: "ops", name: "当日進行チーム", color: "#059669" },
+  { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777" },
+];
+// ME belongs to 統括チーム -> <!team:team_hq> は自分宛メンションとして光る。
+const myTeamIds = [TEAM_HQ];
 
 // channel ids
 const C_GENERAL = "chn_general00000000000000000";
@@ -107,6 +120,15 @@ const messages: Message[] = [
   }),
   m("msg_00040000000000000000000x", C_GENERAL, KENICHI, `<@${ME}> ありがとう！ステージングの確認もお願いできますか`, t(9, 9, 20)),
   m("msg_00050000000000000000000x", C_GENERAL, ME, "了解です、これから見ます 👀", t(9, 9, 21)),
+  // チーム単位メンション: 統括チーム(自分が所属 → 行がハイライト)と法人チーム。
+  m(
+    "msg_00051000000000000000000x",
+    C_GENERAL,
+    HANAKO,
+    `<!team:${TEAM_HQ}> 明日の定例、10:00 開始に変更します。<!team:${TEAM_CORP}> 契約書の確認もお願いします 🙏`,
+    t(9, 9, 24),
+    { reactions: [react("👍", DAISUKE, MISAKI)] },
+  ),
   m(THREAD_ROOT, C_GENERAL, MISAKI, "新しいロゴ案、3パターン用意しました。意見ください！", t(9, 10, 30), {
     replyCount: 3,
     reactions: [react("🎨", ME, HANAKO, DAISUKE), react("❤️", KENICHI)],
@@ -189,5 +211,5 @@ setPresence({
 const pins = [{ channelId: C_GENERAL, messageId: "msg_00020000000000000000000x" }];
 
 export function demoSeed(): MockSeed {
-  return { currentUserId: ME, channels, messages, members, users, pins };
+  return { currentUserId: ME, channels, messages, members, users, pins, teams, myTeamIds };
 }

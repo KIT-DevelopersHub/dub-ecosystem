@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
-import type { Message } from "../api/contract";
+import type { Message, TeamSummary } from "../api/contract";
+import type { MentionCandidate } from "../lib/mentions";
 import { newClientTempId } from "../lib/ulid";
 import { MessageItem } from "./MessageItem";
 import { MessageComposer } from "./MessageComposer";
@@ -20,7 +21,8 @@ export interface ThreadPaneProps {
   currentUserId: common.UserId;
   canModerate: boolean;
   resolveUser?: (id: common.UserId) => identity.UserSummary | undefined;
-  resolveMentionCandidates?: (query: string) => identity.UserSummary[];
+  resolveTeam?: (id: string) => TeamSummary | undefined;
+  resolveMentionCandidates?: (query: string) => MentionCandidate[];
   onToggleReaction?: (id: common.MessageId, emoji: string) => void;
   onClose: () => void;
 }
@@ -31,6 +33,7 @@ export function ThreadPane({
   currentUserId,
   canModerate,
   resolveUser,
+  resolveTeam,
   resolveMentionCandidates,
   onToggleReaction,
   onClose,
@@ -99,6 +102,7 @@ export function ThreadPane({
           currentUserId={currentUserId}
           canModerate={canModerate}
           resolveUser={resolve}
+          resolveTeam={resolveTeam}
           onToggleReaction={onToggleReaction}
         />
         <div className={styles.threadReplyCount}>{replies.length} 件の返信</div>
@@ -109,6 +113,7 @@ export function ThreadPane({
             currentUserId={currentUserId}
             canModerate={canModerate}
             resolveUser={resolve}
+            resolveTeam={resolveTeam}
             onToggleReaction={onToggleReaction}
           />
         ))}

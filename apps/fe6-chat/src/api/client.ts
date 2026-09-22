@@ -25,6 +25,7 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  TeamSummary,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -52,6 +53,17 @@ export interface ChatApiClient {
   listUnread(): Promise<UnreadSummary[]>; // subject from auth header — no ?userId= (chat review #10/#13)
   getWsTicket(id: common.ChannelId): Promise<WsTicketResponse>;
   resolveUsers(ids: common.UserId[]): Promise<identity.UserSummary[]>; // batch ≤50 (theme2 B1)
+  /**
+   * チーム単位メンションに必要なチーム情報 (member-service が単一の真実源):
+   * 候補 + チップの表示名に使う `teams` と、自分宛メンション判定に使う `myTeamIds`。
+   */
+  listMentionTeams(): Promise<MentionTeams>;
+}
+
+/** GET /api/v1/members/me/mention-teams のレスポンス。 */
+export interface MentionTeams {
+  teams: TeamSummary[];
+  myTeamIds: string[];
 }
 
 /** Error carrying the @dub/errors wire body so callers can map codes to UI. */
@@ -77,6 +89,9 @@ export interface HttpChatClientOptions {
 const API = "/api/v1";
 const CHAT = `${API}/chat`;
 const IDENTITY = `${API}/identity`;
+// 運営チームは member-service が単一の真実源。チームメンションはそこを読むだけで、
+// chat 側にチームを複製しない。
+const MEMBERS = `${API}/members`;
 const IDENTITY_BATCH_MAX = 50;
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -228,5 +243,12 @@ export class HttpChatClient implements ChatApiClient {
     // identity /users returns common.Paginated<UserSummary> ({ items, nextCursor }); unwrap to array.
     const res = await this.request<unknown>("GET", `${IDENTITY}/users${qs({ ids: batch.join(",") })}`);
     return unwrapItems<identity.UserSummary>(res);
+  }
+  async listMentionTeams(): Promise<MentionTeams> {
+    // Self-scoped endpoint: readable by any signed-in user, unlike the roster-gated
+    // /members/teams — a plain chat member must still be able to pick @統括チーム and
+    // read the chip by name. The caller is taken from the session (no userId in the path).
+    const res = await this.request<Partial<MentionTeams>>("GET", `${MEMBERS}/me/mention-teams`);
+    return { teams: res?.teams ?? [], myTeamIds: res?.myTeamIds ?? [] };
   }
 }

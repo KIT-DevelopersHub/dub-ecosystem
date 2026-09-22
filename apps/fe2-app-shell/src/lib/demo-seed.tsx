@@ -1344,7 +1344,18 @@ function createChatStore() {
   const generalMessages = [
     msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
     msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+    // チーム単位メンション: 個人を1人ずつ書かずチーム全員へ。team_hq は ME の所属なので
+    // 行が「自分宛」ハイライトになる (team_corp は所属していない別チーム)。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZTM",
+      authorId: "usr_bob",
+      body: "<!team:team_hq> 明日の定例は 10:00 開始に変更します。<!team:team_corp> 契約書のレビューもお願いします 🙏",
+      createdAt: "2026-08-01T00:10:00.000Z",
+    }),
   ];
+  // 送信されたメッセージをチャネルごとに保持する (デモでも投稿→表示が一往復する)。
+  const timelines = new Map<string, ReturnType<typeof msg>[]>([["chn_general", generalMessages]]);
+  let postSeq = 0;
 
   function handle(method: string, pathname: string, url: URL, _body: unknown): Response | null {
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
@@ -1369,9 +1380,29 @@ function createChatStore() {
       if (m && method === "POST") return json(null, 204);
     }
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
-      const channelId = url.searchParams.get("channelId");
-      // #general opens to a seeded timeline (incl. a system post); others stay empty.
-      return json(page(channelId === "chn_general" ? generalMessages : []));
+      const channelId = url.searchParams.get("channelId") ?? "";
+      const threadRootId = url.searchParams.get("threadRootId");
+      // #general opens to a seeded timeline (incl. a system post); others start empty
+      // and fill up with whatever is posted in this session.
+      const all = timelines.get(channelId) ?? [];
+      return json(page(all.filter((m) => (m.threadRootId ?? null) === (threadRootId ?? null))));
+    }
+    // 投稿: デモでも「@チーム を入力 → 送信 → チップで表示」まで一往復する。
+    if (method === "POST" && pathname === "/api/v1/chat/messages") {
+      const b = (_body ?? {}) as { channelId?: string; body?: string; threadRootId?: string };
+      const channelId = b.channelId ?? "chn_general";
+      // ids must sort AFTER the "msg_01SEED…" seeds (timelines are ordered by id).
+      const posted = msg({
+        id: `msg_01ZDEMO${String(postSeq++).padStart(18, "0")}`,
+        channelId,
+        authorId: ME_ID,
+        body: String(b.body ?? ""),
+        threadRootId: b.threadRootId ?? null,
+        createdAt: new Date().toISOString(),
+      });
+      const list = timelines.get(channelId) ?? [];
+      timelines.set(channelId, [...list, posted]);
+      return json(posted, 201);
     }
     {
       // Members / pins: demo returns a small roster and no pins (bare arrays per the
@@ -2051,6 +2082,7 @@ function createMembersStore() {
     { id: "team_sponsor", key: "sponsor", name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
+    { id: "team_corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
   ];
   const mk = (
     id: string,
@@ -2090,6 +2122,9 @@ function createMembersStore() {
     mk("member_e2", "石井", "リーダー", "added", ["team_pr"], 14, null, "メディア情報学科", "2年"),
     mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 15, "ichiro@example.com", "メディア情報学科", "1年"),
     mk("member_5", "山田 三郎", "デザイン", "declined", [], 16),
+    // 法人 — ログイン中のアカウント(統括所属)は含まれない = 「自分宛でないチーム」の対照。
+    mk("member_c1", "野村", "オーガナイザー", "added", ["team_corp"], 18, null, "経営情報学科", "M1"),
+    mk("member_c2", "橋本", "リーダー", "added", ["team_corp"], 19, null, "経営情報学科", "3年"),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
     mk("member_6", "田村 未", "メンバー", "invited", [], 17, null, "情報工学科", "1年"),
   ];
@@ -2148,6 +2183,11 @@ function createMembersStore() {
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
+    // チーム単位メンション用 (self-scoped): チーム一覧 + ログイン中アカウントの所属。
+    if (method === "GET" && pathname === "/api/v1/members/me/mention-teams") {
+      const me = members.find((m) => m.identityUserId === ME_ID);
+      return json({ teams: teams.map((t) => ({ ...t })), myTeamIds: [...(me?.teamIds ?? [])] });
+    }
 
     // teams
     if (method === "POST" && pathname === "/api/v1/members/teams") {

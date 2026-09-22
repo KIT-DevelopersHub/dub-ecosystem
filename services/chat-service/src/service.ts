@@ -44,6 +44,7 @@ import {
   dmKey as deriveDmKey,
   encodeCursor,
   extractMentions,
+  extractTeamMentions,
   toChannel,
   toMember,
   toMessage,
@@ -353,7 +354,9 @@ export class ChatService {
     // post-commit fan-out. `mentions` (author excluded) rides the domain event so
     // notification can turn a chat @mention into an in-app notification WITHOUT ever
     // seeing the message text (it never reads chat D1). A self-mention never notifies.
-    const mentions = extractMentions(text).filter((uid) => uid !== ctx.userId);
+    // チーム単位メンション (<!team:id>) は member-service で「今の」チーム員に展開して
+    // 同じ mentions に畳み込む (notification 側は個人/チームの区別を知らなくてよい)。
+    const mentions = await this.resolveMentions(ctx, channel, text);
     // A DM message notifies its other member(s) the same way (author excluded). Only
     // resolve membership for "dm"-type channels — the common case (event/topic channels)
     // skips the extra repo round-trip entirely.
@@ -384,6 +387,30 @@ export class ChatService {
       threadRootId: row.threadRootId,
     });
     return toMessage(row, {});
+  }
+
+  /**
+   * Notification targets for one body: direct <@user> mentions plus the members of
+   * every <!team:…> mentioned, de-duped, author excluded (a self-mention — including
+   * one reached through your own team — never notifies you).
+   *
+   * On a PRIVATE channel the team expansion is intersected with the channel's member
+   * list: a team mention must never notify someone who cannot even read the channel
+   * (the notification carries the channelId, so it would leak the private channel's
+   * existence — and one token would leak it to the whole team at once).
+   */
+  private async resolveMentions(ctx: ReqCtx, channel: ChannelRow, text: string): Promise<common.UserId[]> {
+    const direct = extractMentions(text);
+    const teamIds = extractTeamMentions(text);
+    let fromTeams: common.UserId[] = [];
+    if (teamIds.length > 0) {
+      fromTeams = await this.deps.memberClient.teamMemberUserIds(ctx, teamIds);
+      if (channel.visibility === "private" && fromTeams.length > 0) {
+        const members = new Set((await this.deps.repo.listMembers(channel.id)).map((m) => m.userId));
+        fromTeams = fromTeams.filter((uid) => members.has(uid));
+      }
+    }
+    return [...new Set([...direct, ...fromTeams])].filter((uid) => uid !== ctx.userId);
   }
 
   async listMessages(

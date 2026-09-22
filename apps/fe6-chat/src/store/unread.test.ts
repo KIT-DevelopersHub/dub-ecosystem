@@ -42,6 +42,17 @@ describe("unread aggregation", () => {
     expect(map["b"]!.mentioned).toBe(true);
   });
 
+  it("flags mention when the body mentions a team I belong to", () => {
+    const map = applyUnreadEvent({}, created("b", "<!team:team_hq> 確認おねがいします"), "a", ME, ["team_hq"]);
+    expect(map["b"]!.mentioned).toBe(true);
+  });
+
+  it("does NOT flag mention for a team I do not belong to", () => {
+    const map = applyUnreadEvent({}, created("b", "<!team:team_corp> 確認おねがいします"), "a", ME, ["team_hq"]);
+    expect(map["b"]!.unreadCount).toBe(1);
+    expect(map["b"]!.mentioned).toBe(false);
+  });
+
   it("clears unread on read", () => {
     const start = toUnreadMap([{ channelId: "b", unreadCount: 4, lastReadMessageId: null, mentioned: true }]);
     const map = clearUnread(start, "b", "msg_last");

@@ -24,6 +24,19 @@ export interface Reaction {
   userIds: common.UserId[];
 }
 
+/**
+ * 運営チーム (member-service `member.Team`) as the composer needs it for チーム単位
+ * メンション. Structurally a subset of the canonical shape, so the raw
+ * GET /api/v1/members/teams rows are assignable as-is (single source of truth
+ * stays member-service — FE6 never invents teams).
+ */
+export interface TeamSummary {
+  id: string;
+  key: string;
+  name: string;
+  color?: string | null;
+}
+
 export interface Attachment {
   fileId: common.FileId;
   name: string;
@@ -70,7 +83,7 @@ export interface Message extends common.Versioned {
   // non-null let a null slip into the Avatar (initials(null).trim()) and crash the
   // whole chat screen; renderers must treat null as "system".
   authorId: common.UserId | null;
-  body: string; // Markdown subset; mentions encoded as <@userId>
+  body: string; // Markdown subset; mentions encoded as <@userId> / <!team:teamId>
   threadRootId: common.MessageId | null; // null = top-level
   replyCount: number;
   reactions: Reaction[];

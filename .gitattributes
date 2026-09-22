@@ -1,0 +1,7 @@
+# Source files are always diffed as TEXT. A single control byte inside a string
+# literal (services/chat-service/src/domain.ts held a raw NUL as the dm_key
+# separator) makes git classify the whole file as binary and render its diff as
+# "Bin 3119 -> 4495 bytes" — unreviewable in a PR. Forcing the `diff` attribute
+# keeps review working even if such a literal reappears.
+*.ts diff
+*.tsx diff

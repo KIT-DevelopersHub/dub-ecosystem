@@ -44,6 +44,7 @@ export type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  TeamSummary,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,

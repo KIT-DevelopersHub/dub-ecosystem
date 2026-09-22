@@ -39,6 +39,7 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  TeamSummary,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
@@ -139,6 +140,8 @@ export function createTaskApiClient(api: ApiClient): Fe4ApiClient {
 // ResourceClient-backed factory (cross-PR: fe6-chat).
 const CHAT = "/api/v1/chat";
 const IDENTITY = "/api/v1/identity";
+// 運営チーム (チーム単位メンション) の単一の真実源は member-service。
+const MEMBERS = "/api/v1/members";
 const IDENTITY_BATCH_MAX = 50;
 
 // chat-service (and identity /users) return the frozen `common.Paginated<T>` envelope
@@ -248,5 +251,15 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
         })
         .then((r) => unwrapItems<identity.UserSummary>(r));
     },
+    // チーム単位メンション (@統括チーム 等) の候補 + 自分の所属チーム。名簿権限を持たない
+    // 一般メンバーでも読める self-scoped エンドポイントを使う (roster-gated な
+    // /members/teams だと一般メンバーには候補もチーム名も出ない)。
+    listMentionTeams: () =>
+      api
+        .request<{ teams?: TeamSummary[]; myTeamIds?: string[] }>({
+          method: "GET",
+          path: `${MEMBERS}/me/mention-teams` as ApiPath,
+        })
+        .then((r) => ({ teams: r?.teams ?? [], myTeamIds: r?.myTeamIds ?? [] })),
   };
 }

@@ -70,4 +70,23 @@ describe("MessageItem authorization UI", () => {
     );
     expect(screen.getByText("@Me")).toBeInTheDocument();
   });
+
+  it("renders a チーム単位メンション with the resolved team name", () => {
+    render(
+      <MessageItem
+        message={msg({ body: "<!team:team_hq> 確認おねがいします" })}
+        currentUserId={ME}
+        canModerate={false}
+        resolveTeam={(id) => (id === "team_hq" ? { id, key: "soukatsu", name: "統括チーム", color: "#1e3a5f" } : undefined)}
+      />,
+    );
+    const chip = screen.getByTestId("fe6-team-mention");
+    expect(chip).toHaveTextContent("@統括チーム");
+    expect(chip).toHaveAttribute("data-team-id", "team_hq");
+  });
+
+  it("falls back to the raw teamId when the team cannot be resolved", () => {
+    render(<MessageItem message={msg({ body: "<!team:team_gone> hi" })} currentUserId={ME} canModerate={false} />);
+    expect(screen.getByTestId("fe6-team-mention")).toHaveTextContent("@team_gone");
+  });
 });

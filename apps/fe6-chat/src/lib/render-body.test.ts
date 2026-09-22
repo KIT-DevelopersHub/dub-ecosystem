@@ -14,6 +14,18 @@ describe("inlineSegments", () => {
     expect(inlineSegments("`<@usr_a>`")).toEqual([{ type: "code", value: "<@usr_a>" }]);
   });
 
+  it("splits チーム単位メンション <!team:id> as its own segment", () => {
+    expect(inlineSegments("hi <!team:team_hq> !")).toEqual([
+      { type: "text", value: "hi " },
+      { type: "teamMention", teamId: "team_hq" },
+      { type: "text", value: " !" },
+    ]);
+  });
+
+  it("treats <!team:id> inside backticks as literal code", () => {
+    expect(inlineSegments("`<!team:team_hq>`")).toEqual([{ type: "code", value: "<!team:team_hq>" }]);
+  });
+
   it("parses bold / italic / underline / strike inline styles", () => {
     expect(inlineSegments("a *b* _i_ ++u++ ~s~")).toEqual([
       { type: "text", value: "a " },

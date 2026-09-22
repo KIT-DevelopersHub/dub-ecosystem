@@ -98,6 +98,16 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await svc.submitParticipation(internalReqCtx(c), body), 201);
   });
 
+  // チーム単位メンションの展開 (chat-service → member-service, s2s のみ).
+  // ?teamIds=team_a,team_b -> { userIds }: そのチームに属し identity アカウントに
+  // リンク済みのメンバー。チャットは投稿者の権限で呼ぶわけではない(通知のための
+  // 名簿参照)ので identity:read は課さず、x-dub-internal だけで閉じる。
+  app.get("/members/internal/team-members", async (c) => {
+    const raw = c.req.query("teamIds") ?? "";
+    const teamIds = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+    return c.json(await svc.listTeamIdentityUserIds(teamIds));
+  });
+
   // Self 参加届 (アカウント設定 → 参加情報). The gateway's GET/POST /api/v1/me/participation
   // authenticates the session, then forwards here as a genuine s2s call (x-dub-internal +
   // the caller's identity x-dub-user-id). Session-scoped to THAT user — no target id, and
@@ -123,6 +133,14 @@ export function createApp(deps: AppDeps): Hono {
   // ---- overview (all three views) ----
   app.get("/members/overview", rosterRead, async (c) => {
     return c.json(await svc.getOverview(reqCtx(c)));
+  });
+
+  // チーム単位メンション用の自分視点のチーム情報 (signed-in なら誰でも可・rosterRead 不要)。
+  // 名簿を読む権限が無い一般メンバーでも「@統括チーム」を選べて、受け取った側も
+  // チップをチーム名で読める必要があるため。返すのはチーム(id/key/name/color)と
+  // 「自分の所属 teamIds」だけで、他人の名簿行は一切含まない。
+  app.get("/members/me/mention-teams", async (c) => {
+    return c.json(await svc.listMentionTeams(reqCtx(c)));
   });
 
   // ---- teams ----

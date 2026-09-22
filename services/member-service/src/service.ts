@@ -50,6 +50,9 @@ function optText(value: unknown, field: string): string | null {
   return t.length === 0 ? null : t;
 }
 
+/** Upper bound on teams expanded in one チーム単位メンション lookup (see listTeamIdentityUserIds). */
+const MAX_TEAM_MENTION_EXPANSION = 20;
+
 export class MemberService {
   constructor(private readonly deps: AppDeps) {}
 
@@ -77,6 +80,54 @@ export class MemberService {
   async listTeams(_ctx: ReqCtx): Promise<member.ListTeamsResponse> {
     const teams = await this.deps.repo.listTeams(this.deps.orgId);
     return { teams: teams.map(toTeam) };
+  }
+
+  /**
+   * The team directory as a NON-roster caller needs it for チーム単位メンション: every
+   * team (id/key/name/color — the same fields the mention chip renders) plus which of
+   * them the caller belongs to.
+   *
+   * Deliberately NOT behind rosterRead: an ordinary chat member holds neither
+   * identity:read nor app:members:view, and without this they would see a team mention
+   * render as a raw `team_…` id and could never tell that a mention was aimed at them.
+   * It exposes no person rows — only the caller's own membership — so it stays well
+   * short of the roster read the gated endpoints guard.
+   */
+  async listMentionTeams(ctx: ReqCtx): Promise<{ teams: member.Team[]; myTeamIds: string[] }> {
+    const orgId = this.deps.orgId;
+    const [teams, people, links] = await Promise.all([
+      this.deps.repo.listTeams(orgId),
+      this.deps.repo.listPeople(orgId),
+      this.deps.repo.teamLinksForOrg(orgId),
+    ]);
+    const me = people.find((p) => p.identityUserId === ctx.userId);
+    const myTeamIds = me ? links.filter((l) => l.personId === me.id).map((l) => l.teamId) : [];
+    return { teams: teams.map(toTeam), myTeamIds };
+  }
+
+  /**
+   * Identity accounts behind one or more teams — the expansion chat-service needs to
+   * turn a チーム単位メンション (<!team:id>) into per-user notifications. Roster people
+   * with no linked identity account are skipped (nothing to notify); ids are unique and
+   * returned in roster order. Read-only, internal-only (see /members/internal/*).
+   */
+  async listTeamIdentityUserIds(teamIds: readonly string[]): Promise<{ userIds: string[] }> {
+    // One message can only mention so many teams; bound the request so a crafted body
+    // cannot turn one post into an unbounded roster scan.
+    const wanted = new Set(teamIds.filter((id) => id.length > 0).slice(0, MAX_TEAM_MENTION_EXPANSION));
+    if (wanted.size === 0) return { userIds: [] };
+    const orgId = this.deps.orgId;
+    const [people, links] = await Promise.all([this.deps.repo.listPeople(orgId), this.deps.repo.teamLinksForOrg(orgId)]);
+    const inTeam = new Set(links.filter((l) => wanted.has(l.teamId)).map((l) => l.personId));
+    const userIds: string[] = [];
+    const seen = new Set<string>();
+    for (const p of people) {
+      const uid = p.identityUserId;
+      if (!uid || !inTeam.has(p.id) || seen.has(uid)) continue;
+      seen.add(uid);
+      userIds.push(uid);
+    }
+    return { userIds };
   }
 
   /** Resolve a unique, URL-safe key within the org (auto-suffix on collision). */

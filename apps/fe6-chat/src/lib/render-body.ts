@@ -2,7 +2,8 @@
 //
 // Two levels:
 //  - inline: bold *b* · italic _i_ · underline ++u++ · strike ~s~ · inline code `c`
-//    · link [t](url) · mention <@id>. Rendered by MessageBody; kept pure & unit-tested.
+//    · link [t](url) · mention <@id> · team mention <!team:id>. Rendered by
+//    MessageBody; kept pure & unit-tested.
 //  - block:  paragraph · blockquote (> ) · bullet list (- / *) · ordered list (1.) ·
 //    fenced code block (```lang ... ```). Line-based, so it round-trips what the
 //    composer toolbar inserts.
@@ -18,6 +19,7 @@ export type BodySegment =
   | { type: "strike"; value: string }
   | { type: "link"; href: string; label: string }
   | { type: "mention"; userId: string }
+  | { type: "teamMention"; teamId: string }
   | { type: "code"; value: string };
 
 export type BodyBlock =
@@ -27,8 +29,8 @@ export type BodyBlock =
   | { type: "ordered"; items: BodySegment[][] }
   | { type: "codeblock"; value: string; lang: string | null };
 
-// inline code + mention are tokenized first so their contents stay literal.
-const TOKEN_RE = /(`[^`\n]+`)|(<@[A-Za-z0-9_]+>)/g;
+// inline code + mentions (person / team) are tokenized first so their contents stay literal.
+const TOKEN_RE = /(`[^`\n]+`)|(<@[A-Za-z0-9_]+>)|(<!team:[A-Za-z0-9_-]+>)/g;
 // inline styles inside plain runs. Link first (so a URL isn't mis-split); then bold /
 // italic / underline (++) / strike. Non-nested, single level — matches the toolbar.
 const INLINE_RE =
@@ -69,6 +71,7 @@ export function inlineSegments(text: string): BodySegment[] {
     if (idx > last) out.push(...inlineStyles(text.slice(last, idx)));
     const token = m[0];
     if (token.startsWith("`")) out.push({ type: "code", value: token.slice(1, -1) });
+    else if (token.startsWith("<!team:")) out.push({ type: "teamMention", teamId: token.slice(7, -1) });
     else out.push({ type: "mention", userId: token.slice(2, -1) });
     last = idx + token.length;
   }
@@ -80,6 +83,26 @@ const RE_FENCE = /^```/;
 const RE_QUOTE = /^>\s?/;
 const RE_BULLET = /^[-*]\s+/;
 const RE_ORDERED = /^\d+\.\s+/;
+
+/**
+ * Body with ``` fenced blocks and `inline code` removed. Mention scanning (who is
+ * notified / whose row lights up) must agree with what the renderer shows: a mention
+ * typed inside code is documentation, not a ping. Line-based, same rule as parseBlocks
+ * (an unclosed fence swallows the rest of the body).
+ */
+export function stripCodeSpans(body: string): string {
+  const out: string[] = [];
+  let inFence = false;
+  for (const line of body.split("\n")) {
+    if (RE_FENCE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    out.push(line.replace(/`[^`\n]+`/g, " "));
+  }
+  return out.join("\n");
+}
 
 /** Parse a message body into block-level structures (paragraph/quote/list/code). */
 export function parseBlocks(body: string): BodyBlock[] {

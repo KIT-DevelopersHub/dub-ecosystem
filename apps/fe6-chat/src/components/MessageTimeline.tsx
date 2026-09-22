@@ -4,11 +4,12 @@
 // Native scroll + loadOlder paging (FE6 virtualization deferred, design §8-1 #7).
 import { Avatar } from "@dub/ui";
 import type { common, identity } from "@dub/types";
-import type { Message } from "../api/contract";
+import type { Message, TeamSummary } from "../api/contract";
 import type { PendingMessage } from "../types";
 import { firstUnreadIndex, needsDateDivider } from "../lib/timeline-view";
-import { isMentioned } from "../lib/mentions";
+import { mentionsMe as bodyMentionsMe } from "../lib/mentions";
 import { MessageItem } from "./MessageItem";
+import { MessageBody } from "./MessageBody";
 import styles from "../styles/chat.module.css";
 
 export interface MessageTimelineProps {
@@ -20,6 +21,9 @@ export interface MessageTimelineProps {
   hasOlder: boolean;
   pinnedIds?: ReadonlySet<common.MessageId>;
   resolveUser?: (id: common.UserId) => identity.UserSummary | undefined;
+  resolveTeam?: (id: string) => TeamSummary | undefined;
+  /** 自分が所属するチーム — チーム単位メンションも自分宛としてハイライトする。 */
+  myTeamIds?: readonly string[];
   onLoadOlder?: () => void;
   onToggleReaction?: (id: common.MessageId, emoji: string) => void;
   onSubmitEdit?: (message: Message, body: string) => void | Promise<void>;
@@ -63,7 +67,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
 
       {messages.map((m, i) => {
         const grouped = isGrouped(messages, i) && i !== unreadAt;
-        const mentionsMe = m.authorId !== currentUserId && isMentioned(m.body, currentUserId);
+        const mentionsMe = m.authorId !== currentUserId && bodyMentionsMe(m.body, currentUserId, props.myTeamIds);
         return (
           <div key={m.id}>
             {needsDateDivider(messages, i) && (
@@ -84,6 +88,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
               mentionsMe={mentionsMe}
               pinned={props.pinnedIds?.has(m.id) ?? false}
               resolveUser={props.resolveUser}
+              resolveTeam={props.resolveTeam}
               onToggleReaction={props.onToggleReaction}
               onSubmitEdit={props.onSubmitEdit}
               onDelete={props.onDelete}
@@ -107,7 +112,8 @@ export function MessageTimeline(props: MessageTimelineProps) {
           </div>
           <div className={styles.msgBody}>
             <div className={styles.textBody} data-testid="fe6-timeline-body">
-              {p.request.body}
+              {/* 送信中も確定後と同じ見え方に: 生の <!team:…> / <@…> を出さない。 */}
+              <MessageBody body={p.request.body} resolveUser={props.resolveUser} resolveTeam={props.resolveTeam} />
             </div>
             {p.state === "failed" && (
               <div className={styles.failedNote}>

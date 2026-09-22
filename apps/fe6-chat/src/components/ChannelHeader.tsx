@@ -5,8 +5,9 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Avatar, Icon } from "@dub/ui";
 import type { common, identity } from "@dub/types";
-import type { Channel, ChannelMember, Message } from "../api/contract";
+import type { Channel, ChannelMember, Message, TeamSummary } from "../api/contract";
 import { getPresence } from "../lib/presence";
+import { toPlainMentions } from "../lib/mentions";
 import styles from "../styles/chat.module.css";
 
 export interface ChannelHeaderProps {
@@ -16,6 +17,7 @@ export interface ChannelHeaderProps {
   pinned: Message[];
   searchValue: string;
   resolveUser?: (id: common.UserId) => identity.UserSummary | undefined;
+  resolveTeam?: (id: string) => TeamSummary | undefined;
   onOpenSettings?: () => void;
   onSearchChange: (value: string) => void;
   onUnpin?: (messageId: common.MessageId) => void;
@@ -94,6 +96,7 @@ export function ChannelHeader({
   pinned,
   searchValue,
   resolveUser,
+  resolveTeam,
   onOpenSettings,
   onSearchChange,
   onUnpin,
@@ -192,7 +195,9 @@ export function ChannelHeader({
                           close();
                         }}
                       >
-                        {m.body.slice(0, 120) || "(添付ファイル)"}
+                        {/* 一覧プレビューなので本文はレンダリングせず、メンションだけ名前に直す。 */}
+                        {toPlainMentions(m.body, (id) => resolveUser?.(id)?.displayName, (id) => resolveTeam?.(id)?.name).slice(0, 120) ||
+                          "(添付ファイル)"}
                       </button>
                       <button
                         type="button"
