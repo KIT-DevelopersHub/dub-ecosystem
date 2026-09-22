@@ -77,6 +77,23 @@ class GatewayClient {
     return PaginatedInbox.fromJson(res.data!);
   }
 
+  /// The current `dub_session` token value, read from the persistent cookie
+  /// jar, or null when there is no session.
+  ///
+  /// The mobile-bff (`m-api.developershub.jp`) accepts this same value as either
+  /// a `dub_session` cookie or a `Bearer` token — the auth-service verifies the
+  /// token identically regardless of carrier. In production the session cookie
+  /// is host-only on `api.developershub.jp` (COOKIE_DOMAIN unset), so it does
+  /// NOT cross to the `m-api` subdomain automatically; the push client reads it
+  /// here and attaches it to the mobile-bff request explicitly.
+  Future<String?> sessionToken() async {
+    final cookies = await _jar.loadForRequest(Uri.parse(AppConfig.gatewayBaseUrl));
+    for (final c in cookies) {
+      if (c.name == 'dub_session' && c.value.isNotEmpty) return c.value;
+    }
+    return null;
+  }
+
   /// POST /api/v1/auth/logout — revoke the current session and clear cookies.
   Future<void> logout() async {
     try {
