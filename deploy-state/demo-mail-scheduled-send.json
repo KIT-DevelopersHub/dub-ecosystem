@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mail-scheduled-send",
+  "worker": "dub-demo-mail-scheduled-send",
+  "url": "https://dub-demo-mail-scheduled-send.developershub-site.workers.dev",
+  "deployedSha": "1f14a380",
+  "branch": "feat/mail-scheduled-send",
+  "actor": "Kota",
+  "markers": ["fe2-mail-compose-schedule-open","fe2-mail-scheduled"],
+  "live": true,
+  "verifiedAt": "2026-09-22T06:34:01Z",
+  "updatedAt": "2026-09-22T06:34:01Z",
+  "note": "予約送信(予約投稿): メール作成に送信日時指定+予約済みフォルダ(一覧/編集/取消)"
+}

@@ -36,9 +36,16 @@ export function useMailSync(): void {
     flagsReady.current = false; // pause flag persistence while we (re)load
     void (async () => {
       try {
-        const [inbox, sent] = await Promise.all([api.listInbox({ limit: 50 }), api.listSent({ limit: 50 })]);
+        const [inbox, sent, scheduled] = await Promise.all([
+          api.listInbox({ limit: 50 }),
+          api.listSent({ limit: 50 }),
+          // Scheduled (予約送信) is best-effort: an older gateway without the endpoint yields
+          // an empty list rather than blanking inbox+sent.
+          api.listScheduled({ limit: 50 }).catch(() => ({ items: [], nextCursor: null })),
+        ]);
         if (!alive) return;
         dispatch({ type: "HYDRATE", threads: combineThreads(inbox.items, sent.items, me) });
+        dispatch({ type: "HYDRATE_SCHEDULED", scheduled: scheduled.items });
         loaded.current.clear(); // force the open thread to re-fetch its full body (+ any new reply)
         // Restore persisted flags on top of the freshly hydrated threads, then arm the
         // persist effect with the server's flag-state as the baseline (so applying them is

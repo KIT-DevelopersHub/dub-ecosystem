@@ -53,7 +53,12 @@ export function MailSidebar(): JSX.Element {
 
       {NAV_FOLDERS.map((f) => {
         const active = state.labelFilter === null && state.folder === f.id;
-        const unread = f.id === "drafts" ? count(f.id, state.threads, false) : count(f.id, state.threads, true);
+        const unread =
+          f.id === "scheduled"
+            ? state.scheduled.length // 予約済み is not thread-backed: count the parked sends
+            : f.id === "drafts"
+              ? count(f.id, state.threads, false)
+              : count(f.id, state.threads, true);
         return (
           <button
             key={f.id}
