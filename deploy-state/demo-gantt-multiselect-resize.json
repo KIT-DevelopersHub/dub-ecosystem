@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-multiselect-resize",
+  "worker": "dub-demo-gantt-multiselect-resize",
+  "url": "https://dub-demo-gantt-multiselect-resize.developershub-site.workers.dev",
+  "deployedSha": "075b985b",
+  "branch": "feat/gantt-multiselect-resize",
+  "actor": "kota",
+  "markers": ["fe4-gantt-group-resize-r","fe4-gantt-group-resize-l"],
+  "live": true,
+  "verifiedAt": "2026-09-10T11:56:26Z",
+  "updatedAt": "2026-09-10T11:56:26Z",
+  "note": ""
+}

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Button, Icon } from "@dub/ui";
+import { Button, Icon, Breadcrumbs } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { useActionRegistry } from "../context/ApiContext";
@@ -44,14 +44,14 @@ function ActionDetailInner({ eventId, actionId }: { eventId: string; actionId: s
     <div className={styles.page} data-testid="fe3-action-detail">
       <div className={styles.pageHeader}>
         <div>
-          <button
-            type="button"
-            className={styles.link}
-            style={{ background: "none", border: "none", cursor: "pointer" }}
-            onClick={() => nav.navigate(eventRoutes.detail(eventId))}
-          >
-            ← {ev.title}
-          </button>
+          <Breadcrumbs
+            testId="fe3-action-breadcrumbs"
+            items={[
+              { label: "イベント", icon: "calendar", onClick: () => nav.navigate(eventRoutes.list()) },
+              { label: ev.title, onClick: () => nav.navigate(eventRoutes.detail(eventId)) },
+              { label: action.title },
+            ]}
+          />
           <h1 className={styles.pageTitle}>
             <Icon name={registry.has(action.kind) ? plugin.icon : "check-square"} /> {action.title}
           </h1>

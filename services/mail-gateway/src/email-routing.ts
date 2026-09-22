@@ -18,17 +18,28 @@
 // messages (which do not contain the token). A missing zone/account id for the
 // requested operation is a 503 (mis-provisioned), distinct from a bad request (400).
 import { DubError } from "@dub/errors";
-import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
+import { consoleSink } from "@dub/observability";
+import { DEFAULT_SEND_TIMEOUT_MS, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 import { parseTimeoutMs } from "./resilience";
 
 const CF_API_BASE = "https://api.cloudflare.com/client/v4";
+
+/** Default Email Routing Worker target for an issued receiving address (free-tier prod
+ *  Worker name). Overridable via CF_EMAIL_ROUTING_WORKER_NAME. */
+export const DEFAULT_EMAIL_ROUTING_WORKER = "dub-mail-gateway";
+
+/** Human-readable "forward target" shown for an issued receiving address: every issued
+ *  @zone address routes to the mail Worker (not a per-address forward), so the roster UI
+ *  displays this fixed label rather than asking an admin to choose a destination. */
+export const MAIL_WORKER_DESTINATION_LABEL = "mail-gateway (Worker)";
 
 export interface EmailRoutingConfig {
   token: string;
   accountId?: string; // required for destination-address operations
   zoneId?: string; // required for rule operations
   zoneName: string; // zone apex (anti-spoof check on rule matchers)
+  workerName: string; // Email Routing Worker target for issued receiving addresses
   timeoutMs: number;
   fetchImpl?: typeof fetch; // injectable for tests; defaults to global fetch
 }
@@ -111,6 +122,70 @@ function firstForwardTarget(rule: CfRoutingRule): string | null {
   return null;
 }
 
+function hasWorkerAction(rule: CfRoutingRule): boolean {
+  return (rule.actions ?? []).some((a) => a.type === "worker");
+}
+
+/** The first literal `to` matcher whose address is in `zoneName` (a receiving address). */
+function firstZoneReceiver(rule: CfRoutingRule, zoneName: string): string | null {
+  const suffix = `@${zoneName.trim().toLowerCase()}`;
+  for (const m of rule.matchers ?? []) {
+    if (m.type !== "literal" || m.field !== "to" || typeof m.value !== "string") continue;
+    const address = m.value.trim().toLowerCase();
+    if (address.length > suffix.length && address.endsWith(suffix)) return address;
+  }
+  return null;
+}
+
+/** Management view of ONE issued @zone receiving address (a routing rule the roster admin
+ *  console owns). Distinct from RosterEmailAddress (sync source): this carries the RULE ID
+ *  so the console can enable/disable/delete it, and a display `destination` for the table. */
+export interface IssuedEmailAddress {
+  id: string; // routing rule id (used for PATCH/DELETE)
+  localPart: string; // e.g. "info"
+  address: string; // localPart@zone
+  destination: string; // display: the mail Worker (or a legacy forward target)
+  enabled: boolean; // rule enabled/paused
+  createdAt: string; // CF rules carry no created ts → "" (the UI does not render it)
+}
+
+/** Map one routing rule to an issued-address view, or null when the rule has no literal
+ *  `to` matcher in our zone (catch-all / archive-only / other rules are not issued addresses). */
+export function issuedAddressFromRule(rule: CfRoutingRule, zoneName: string): IssuedEmailAddress | null {
+  const address = firstZoneReceiver(rule, zoneName);
+  if (!address) return null;
+  const destination = hasWorkerAction(rule) ? MAIL_WORKER_DESTINATION_LABEL : (firstForwardTarget(rule) ?? MAIL_WORKER_DESTINATION_LABEL);
+  return {
+    id: rule.id,
+    localPart: address.split("@")[0] ?? address,
+    address,
+    destination,
+    enabled: !!rule.enabled,
+    createdAt: "",
+  };
+}
+
+/** Every issued @zone receiving address, de-duped by address (first rule wins). */
+export function issuedAddressesFromRules(rules: CfRoutingRule[], zoneName: string): IssuedEmailAddress[] {
+  const byAddress = new Map<string, IssuedEmailAddress>();
+  for (const rule of rules ?? []) {
+    const issued = issuedAddressFromRule(rule, zoneName);
+    if (issued && !byAddress.has(issued.address)) byAddress.set(issued.address, issued);
+  }
+  return [...byAddress.values()];
+}
+
+/** Build the CreateRuleInput that issues a receiving address forwarding to the mail
+ *  Worker. Inbound to `address` is handed to the Worker's email() handler (→ Dub inbox). */
+export function issueReceivingRuleInput(address: string, localPart: string, workerName: string): CreateRuleInput {
+  return {
+    name: `dub-issued:${localPart}`,
+    enabled: true,
+    matchers: [{ type: "literal", field: "to", value: address }],
+    actions: [{ type: "worker", value: [workerName] }],
+  };
+}
+
 interface CfEnvelope<T> {
   success: boolean;
   errors: Array<{ code?: number; message?: string }>;
@@ -137,6 +212,7 @@ export function emailRoutingConfigFromEnv(env: Env): EmailRoutingConfig | null {
     accountId: env.CF_EMAIL_ROUTING_ACCOUNT_ID || undefined,
     zoneId: env.CF_EMAIL_ROUTING_ZONE_ID || undefined,
     zoneName: env.CF_EMAIL_ROUTING_ZONE_NAME || "developershub.jp",
+    workerName: env.CF_EMAIL_ROUTING_WORKER_NAME || DEFAULT_EMAIL_ROUTING_WORKER,
     timeoutMs: parseTimeoutMs(env),
     fetchImpl: undefined,
   };
@@ -232,7 +308,18 @@ export class CfEmailRoutingClient {
 
     const parsed = (await res.json().catch(() => null)) as CfEnvelope<T> | null;
     if (!res.ok || !parsed || parsed.success !== true) {
-      throw new DubError("MAIL_EMAIL_ROUTING_UPSTREAM", cfErrorDetail(res.status, parsed, res.statusText || "request rejected"), {
+      const detail = cfErrorDetail(res.status, parsed, res.statusText || "request rejected");
+      // The client-facing 502 is redacted to "Internal error" (5xx redaction policy —
+      // see @dub/errors toErrorResponse), so log the token-free detail server-side or
+      // this failure mode is impossible to diagnose from the outside (bit us once: the
+      // admin UI toggle 502'd with no visible cause until this was added + wrangler tail).
+      consoleSink({
+        level: "error",
+        message: "mail-gateway: Cloudflare Email Routing API call rejected",
+        service: SERVICE_NAME,
+        fields: { method, path, status: res.status, detail },
+      });
+      throw new DubError("MAIL_EMAIL_ROUTING_UPSTREAM", detail, {
         status: 502,
         retryable: res.status >= 500 || res.status === 429,
       });
@@ -272,9 +359,30 @@ export class CfEmailRoutingClient {
     return env.result;
   }
 
+  async getRule(id: string): Promise<CfRoutingRule> {
+    const zone = this.requireZone();
+    const env = await this.call<CfRoutingRule>("GET", `/zones/${zone}/email/routing/rules/${encodeURIComponent(id)}`);
+    return env.result;
+  }
+
   async updateRule(id: string, patch: UpdateRuleInput): Promise<CfRoutingRule> {
     const zone = this.requireZone();
-    const env = await this.call<CfRoutingRule>("PATCH", `/zones/${zone}/email/routing/rules/${encodeURIComponent(id)}`, patch);
+    // Cloudflare's Email Routing Rules API has no PATCH verb on this resource — the
+    // "Update Email Routing Rule" operation is PUT, and PUT REPLACES the whole rule:
+    // confirmed live against the real API (see wrangler tail on dub-mail-gateway-staging)
+    // that a body carrying only the changed field (e.g. { enabled }) 422s with
+    // "Invalid Input: actions: must have actions; matchers: must have matchers." So
+    // fetch the current rule and merge the patch on top before PUTting the full body —
+    // callers (the admin UI's enable/disable toggle) can still pass a partial patch.
+    const current = await this.getRule(id);
+    const merged: CreateRuleInput = {
+      name: patch.name ?? current.name,
+      enabled: patch.enabled ?? current.enabled,
+      matchers: patch.matchers ?? current.matchers,
+      actions: patch.actions ?? current.actions,
+      ...((patch.priority ?? current.priority) !== undefined ? { priority: patch.priority ?? current.priority } : {}),
+    };
+    const env = await this.call<CfRoutingRule>("PUT", `/zones/${zone}/email/routing/rules/${encodeURIComponent(id)}`, merged);
     return env.result;
   }
 

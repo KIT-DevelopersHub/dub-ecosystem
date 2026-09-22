@@ -4,14 +4,13 @@
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { identity, common, auditLog, auth, chat, member } from "@dub/types";
-import { isErrorResponse } from "@dub/errors";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
 import { queryKeys } from "../lib/queryKeys";
 import { type UserListFilters } from "../lib/listUsersQuery";
 import { type AuditFilters } from "../lib/auditQuery";
 import { type MailStatusResponse } from "../lib/mailStatus";
-import { presentError } from "../lib/errorDisplay";
+import { presentError, toErrorResponse } from "../lib/errorDisplay";
 import { applyRoleGrant, makePendingAssignment, addUserRoleId, removeUserRoleId } from "../lib/optimistic";
 import { runOffboard } from "../lib/offboard";
 import type {
@@ -23,13 +22,17 @@ import type {
   SyncEmailRoutingResult,
   EmailRoutingSyncPreview,
   CreateEmailAddressRequest,
+  EmailRoutingAddress,
 } from "../contracts/pending";
 
 /** The mail-gateway proxy answers 503 with this code when the CF token is unset.
  *  The sync surface reads it to show a "未接続" notice instead of a generic error. */
 export const EMAIL_ROUTING_UNCONFIGURED = "MAIL_EMAIL_ROUTING_UNCONFIGURED";
 export function isEmailRoutingUnconfigured(err: unknown): boolean {
-  return isErrorResponse(err) && err.error.code === EMAIL_ROUTING_UNCONFIGURED;
+  // Unwrap ApiError (FE2-injected transport) as well as the bare envelope so the
+  // 「未接続」notice shows on both transports, not only in the standalone harness.
+  const envelope = toErrorResponse(err);
+  return !!envelope && envelope.error.code === EMAIL_ROUTING_UNCONFIGURED;
 }
 
 // ---- queries ----
@@ -392,6 +395,27 @@ export function useCreateEmailAddress() {
   return useMutation({
     mutationFn: (req: CreateEmailAddressRequest) => api.createEmailAddress(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+  });
+}
+
+/** List the issued @developershub.jp RECEIVING addresses (zone-scoped routing rules) —
+ *  the counterpart read for the「発行済みアドレス」management surface (delete pairs with
+ *  NewEmailAddressDialog's issue). */
+export function useEmailAddresses(): UseQueryResult<common.Paginated<EmailRoutingAddress>> {
+  const { api } = useRosterContext();
+  return useQuery({ queryKey: queryKeys.emailAddresses(), queryFn: () => api.listEmailAddresses() });
+}
+
+/** Delete (revoke) an issued @developershub.jp address = drop its Email Routing rule.
+ *  The counterpart to useCreateEmailAddress. The optimistic hide + undo window are owned
+ *  by IssuedAddressesDialog (deferred commit); this hook just fires the DELETE and
+ *  reconciles the cache on settle (a rolled-back/failed delete restores the row). */
+export function useDeleteEmailAddress() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteEmailAddress(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
   });
 }
 

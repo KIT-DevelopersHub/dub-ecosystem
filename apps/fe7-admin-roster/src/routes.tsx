@@ -23,9 +23,15 @@ function usersRoute(): Promise<{ Component: ComponentType }> {
 function userDetailRoute(): Promise<{ Component: ComponentType }> {
   return import("./components/UserDetailPage").then(({ UserDetailPage }) => ({
     Component: function UserDetailRoute() {
-      const { params } = useNavigation();
+      const { params, navigate } = useNavigation();
       const { me } = useRosterContext();
-      return <UserDetailPage userId={params.userId ?? ""} currentUserId={me?.user.id ?? ""} />;
+      return (
+        <UserDetailPage
+          userId={params.userId ?? ""}
+          currentUserId={me?.user.id ?? ""}
+          onBack={() => navigate("/admin/users")}
+        />
+      );
     },
   }));
 }
@@ -53,8 +59,8 @@ function roleNewRoute(): Promise<{ Component: ComponentType }> {
 
 // メールアドレス管理 (/admin/email-routing) のみユーザー明示承認で launcher/ナビ/route から
 // 完全撤去。EmailRoutingPage コンポーネントと専用フック/API/型も削除済み。名簿のアドレス発行
-// (NewEmailAddressDialog) と退任フロー(offboard)が使う createEmailAddress / list / delete は
-// 名簿機能なので残置している。
+// (NewEmailAddressDialog) と退任フロー(offboard)、および発行済みアドレスの削除
+// (IssuedAddressesDialog) が使う createEmailAddress / list / delete は名簿機能なので残置している。
 // 変更履歴 (/admin/history) の UI アプリ（AuditHistoryPage・ルート・タイル・サブナビ項目）は
 // ユーザー明示指示で完全撤去した。監査ログの取得基盤（rosterApi.auditLogs / useAuditLogs /
 // buildAuditQuery とバックエンドの収集）は壊さず残置している（他機能/将来の再利用のため）。

@@ -19,14 +19,17 @@ import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
+import { childProgressByParent } from "../domain/child-progress";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
+import { planBulkResizeFromRows } from "../domain/bulk-resize";
 import { applyManualOrder, moveSelectionVertical, reorderWithinSiblings, reorderSelectionWithinSiblings, selectionRoots } from "../domain/row-order";
 import { sortRowsMulti, type SortContext } from "../domain/row-sort";
 import type { RowGroup } from "../domain/row-groups";
-import { PRIORITY_LABEL } from "../domain/task-form";
+import { PRIORITY_LABEL, DATE_LABEL } from "../domain/task-form";
 import { useGanttSort } from "../domain/gantt-sort-pref";
 import { computeTaskNumbers, MAX_PAD_WIDTH } from "../domain/task-number";
-import { useTaskNumberPrefix, useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
+import { useTaskNumberPadWidth, useTaskNumberVisible } from "../domain/task-number-pref";
+import { teamCodeById } from "../domain/team-code";
 import {
   clearViewPref,
   filterFromPref,
@@ -47,6 +50,10 @@ export interface TaskWorkspacePageProps {
   eventId: common.EventId;
   /** effectivePermissions from GET /api/v1/me (null = still loading -> deny). */
   permissions: readonly identity.PermissionKey[] | null;
+  /** Deep-link target from `/events/:eventId/tasks/:taskId` (parseTaskIdFromPath in
+   *  taskRoutes.tsx). Auto-opens that task's detail panel once it appears in the
+   *  loaded list; applied at most once per mount (a later manual selection wins). */
+  initialSelectedTaskId?: common.TaskId | null;
 }
 
 // Solid fill colours for the sort-group brackets (@dub/tokens hex). Priorities map to
@@ -63,11 +70,11 @@ const NEUTRAL_GROUP_COLOR = "#6f7a90"; // gray.500
 /** Human labels for validation `field` keys shown in the ErrorDialog breakdown. */
 const FIELD_LABEL: Record<string, string> = {
   title: "タイトル",
-  dueAt: "期日",
-  startsAt: "開始日",
-  endsAt: "終了日",
+  dueAt: DATE_LABEL.end,
+  startsAt: DATE_LABEL.start,
+  endsAt: DATE_LABEL.end,
   status: "ステータス",
-  priority: "優先度",
+  priority: "重要度",
   assigneeId: "担当",
   teamId: "チーム",
   parentTaskId: "親タスク",
@@ -81,7 +88,7 @@ const FIELD_LABEL: Record<string, string> = {
  * edit/delete) wired through the optimistic store. The former list/board view
  * switch was removed — the gantt is the one canvas.
  */
-export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePageProps) {
+export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId = null }: TaskWorkspacePageProps) {
   const client = useApiClient();
   const toast = useToast();
   const feedback = useWriteFeedback();
@@ -149,12 +156,13 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // The primary sort key (keys[0]) drives the group-bracket rail below when it's a
   // groupable key (チーム/重要度) and we're not in manual mode.
   const primarySortKey = sortState.manual ? null : (sortState.keys[0]?.key ?? null);
-  // Task-number prefix (e.g. "AA") + zero-pad width (e.g. 4 -> "AA-0001") — personal
-  // view settings, persisted per event.
-  const [numberPrefix, setNumberPrefix] = useTaskNumberPrefix(eventId);
+  // Task-number zero-pad width (e.g. 4 -> "TK-0001") — personal view setting,
+  // persisted per event. The prefix itself is NOT a free-text preference any more:
+  // it's derived per row from the task's owning team (teamCodeById below), so every
+  // team shows its own code instead of one shared value.
   const [numberPadWidth, setNumberPadWidth] = useTaskNumberPadWidth(eventId);
   // Show/hide the task-number badge (default ON). OFF hides the badges and the
-  // prefix/桁数 inputs, but keeps their saved values for when it's turned back on.
+  // 桁数 input, but keeps its saved value for when it's turned back on.
   const [numberVisible, setNumberVisible] = useTaskNumberVisible(eventId);
   const teams = useTeams().data ?? [];
   // Org member roster — the source for the assignee dropdown. Without it the only
@@ -215,6 +223,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   }, [query]);
 
   const tasks = store.list();
+
+  // Deep-link open (⌘K search etc.): once the URL's :taskId appears in the loaded
+  // list, select it so the detail panel opens automatically. Applies at most once —
+  // a subsequent manual selection (or clearing it) is never overridden back.
+  const appliedInitialSelect = useRef(false);
+  useEffect(() => {
+    if (appliedInitialSelect.current || !initialSelectedTaskId) return;
+    if (tasks.some((t) => t.id === initialSelectedTaskId)) {
+      appliedInitialSelect.current = true;
+      setSelected(initialSelectedTaskId);
+    }
+  }, [tasks, initialSelectedTaskId]);
 
   // batch-resolve assignee display names (N+1 avoided — one request per new set)
   useEffect(() => {
@@ -333,13 +353,18 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gantt.data, tasks, orderedTaskIds, sortState, sortContext]);
 
-  // WBS task numbers (e.g. "AA-1-1"), derived from the CURRENT display order + the
+  // WBS task numbers (e.g. "TK-1-1"), derived from the CURRENT display order + the
   // WBS tree on each row, so re-ordering / re-parenting re-numbers automatically. It
   // is computed over the exact rows the gantt renders (filtered + sorted), so the
-  // badges match what's on screen. View-time only — nothing persisted.
+  // badges match what's on screen. View-time only — nothing persisted. The prefix is
+  // resolved PER ROW from that row's own team (teamCodeById) — not one shared value
+  // — so every team gets its own correct code instead of every task showing "AA".
   const numberById = useMemo<ReadonlyMap<common.TaskId, string>>(
-    () => (filteredDto && numberVisible ? computeTaskNumbers(filteredDto.rows, numberPrefix, numberPadWidth) : new Map()),
-    [filteredDto, numberVisible, numberPrefix, numberPadWidth],
+    () =>
+      filteredDto && numberVisible
+        ? computeTaskNumbers(filteredDto.rows, (r) => teamCodeById(r.teamId, teamById), numberPadWidth)
+        : new Map(),
+    [filteredDto, numberVisible, teamById, numberPadWidth],
   );
 
   const selectedTask = selected ? tasks.find((t) => t.id === selected) ?? null : null;
@@ -359,6 +384,17 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   // same-scope siblings stay selectable even when a status filter hides some rows.
   const allRows = useMemo(() => gantt.data?.rows ?? [], [gantt.data]);
   const scopeTasks = useMemo(() => scopeTasksFromRows(allRows), [allRows]);
+
+  // Every WBS parent's (any depth) leaf-status roll-up, computed ONCE here from the
+  // FULL (unfiltered) row set + the live/optimistic statusById, and shared by both the
+  // gantt bars/dots AND the detail panel's status field/badge — a single source so a
+  // parent's displayed status never disagrees between the two surfaces (症状#1). Recomputes
+  // whenever a task's status changes (statusById depends on `tasks`, so an optimistic
+  // child-status edit propagates to every ancestor's aggregate the same render, 症状#5).
+  const childProgressById = useMemo(
+    () => childProgressByParent(allRows, statusById),
+    [allRows, statusById],
+  );
   // Prefer the store's fresh title so the parent / 先行タスク pickers relabel the same
   // tick after a rename (falls back to the DTO row title for status-filtered-out rows,
   // which the store list omits).
@@ -615,7 +651,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     return true;
   };
 
-  // Re-issue a field-only patch (title/status/優先度/担当/チーム/開始日/期日) as a plain
+  // Re-issue a field-only patch (title/status/重要度/担当/チーム/開始日/期日) as a plain
   // "set" — the reversible primitive an undo/redo command re-runs. It reads a FRESH
   // version (getTask) first, so a DEFERRED undo/redo (run long after the edit, once the
   // task's version has moved on) can never 409 on a stale panel-cached version — the
@@ -746,6 +782,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       {
         eventId,
         title: draft.title,
+        ...(draft.description ? { description: draft.description } : {}),
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(teamId ? { teamId } : {}),
@@ -820,7 +857,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
   const onSaveDetail = (patch: task.UpdateTaskRequest, relations: RelationEdit): Promise<boolean> => {
     if (!selectedTask) return Promise.resolve(false);
     const needsRelations = relations.parentChanged || relations.depsChanged;
-    // Field-only edit (title/status/優先度/担当/チーム/開始日/期日): keep the optimistic
+    // Field-only edit (title/status/重要度/担当/チーム/開始日/期日): keep the optimistic
     // fast-path AND record it for undo/redo. Snapshot the BEFORE value of each changed
     // field from the current task so Ctrl/⌘-Z restores exactly those fields.
     const { parentTaskId: _p, ...fieldOnlyPatch } = patch;
@@ -1068,6 +1105,40 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
     });
   };
 
+  // Bulk RESIZE (複数選択の一括リサイズ): the selection bounding box's left/right handle
+  // stretches every selected task by the SAME whole-day delta — right edge shifts each
+  // task's END, left edge shifts each task's START (等量デルタ; see domain/bulk-resize.ts).
+  // A leaf persists its own row directly; a selected WBS parent instead SCALES its
+  // descendants — its own span is DERIVED from them (read model returns it null), so
+  // writing the parent's own row would be discarded on the next GET, same as the
+  // single-parent resize (onParentResize above). selectionRoots dedupes a selected
+  // descendant of another selected parent so it is never resized twice.
+  const onBulkResizeDays = (ids: readonly common.TaskId[], edge: "start" | "end", deltaDays: number) => {
+    if (deltaDays === 0 || ids.length === 0) return;
+    const rows = gantt.currentRows();
+    const roots = selectionRoots(rows, new Set(ids));
+    if (roots.length === 0) return;
+    const plan = planBulkResizeFromRows(rows, roots, edge, deltaDays);
+    if (plan.writes.length === 0) return; // the tightest task was already at the 1-day floor
+    const after = plan.writes.map((w) => ({
+      id: w.taskId as common.TaskId,
+      startsAt: w.startsAt as common.ISODateTime,
+      endsAt: w.endsAt as common.ISODateTime,
+    }));
+    // Snapshot the children's/leaves' CURRENT dates so undo restores them exactly
+    // (scaling has no clean day-aligned inverse — same discipline as onParentResize).
+    const before = after
+      .map(({ id }) => rows.find((r) => r.taskId === id))
+      .filter((r): r is NonNullable<typeof r> => !!r && !!r.startsAt && !!r.endsAt)
+      .map((r) => ({ id: r.taskId, startsAt: r.startsAt!, endsAt: r.endsAt! }));
+    void applyChildScheduleSet(after);
+    history.push({
+      label: "選択タスクの一括リサイズ",
+      undo: () => applyChildScheduleSet(before),
+      redo: () => applyChildScheduleSet(after),
+    });
+  };
+
   // Bulk up/down reorder (手動 mode only): slide the selection one slot within each
   // sibling group, persist the manual order, and record undo/redo. Reuses the same
   // order machinery as the single-row drag reorder.
@@ -1097,7 +1168,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
       <header className={styles.pageHeader}>
         <div className={styles.pageHeaderText}>
           <h1 className={styles.pageTitle}>タスク ガントチャート</h1>
-          <p className={styles.pageSubtitle}>期日・依存・進捗をひとつのタイムラインで管理します。</p>
+          <p className={styles.pageSubtitle}>終了日・依存・進捗をひとつのタイムラインで管理します。</p>
         </div>
         {/* Realtime presence: the Google-Docs-style cluster of who is viewing this gantt
             right now (live). Shown to everyone — viewers included, not just writers. */}
@@ -1173,35 +1244,20 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           <span className={styles.numPrefixLabel}>タスク番号を表示</span>
         </label>
         {numberVisible && (
-          <>
-            <label className={styles.numPrefix}>
-              <span className={styles.numPrefixLabel}>番号プレフィックス</span>
-              <input
-                type="text"
-                className={styles.numPrefixInput}
-                value={numberPrefix}
-                onChange={(e) => setNumberPrefix(e.target.value)}
-                maxLength={8}
-                placeholder="AA"
-                aria-label="タスク番号のプレフィックス"
-                data-testid="fe4-number-prefix"
-              />
-            </label>
-            <label className={styles.numPrefix}>
-              <span className={styles.numPrefixLabel}>桁数</span>
-              <input
-                type="number"
-                className={styles.numPadInput}
-                value={numberPadWidth}
-                onChange={(e) => setNumberPadWidth(Number(e.target.value))}
-                min={0}
-                max={MAX_PAD_WIDTH}
-                step={1}
-                aria-label="タスク番号の桁数（ゼロ埋め）"
-                data-testid="fe4-number-pad"
-              />
-            </label>
-          </>
+          <label className={styles.numPrefix}>
+            <span className={styles.numPrefixLabel}>桁数</span>
+            <input
+              type="number"
+              className={styles.numPadInput}
+              value={numberPadWidth}
+              onChange={(e) => setNumberPadWidth(Number(e.target.value))}
+              min={0}
+              max={MAX_PAD_WIDTH}
+              step={1}
+              aria-label="タスク番号の桁数（ゼロ埋め）"
+              data-testid="fe4-number-pad"
+            />
+          </label>
         )}
         <button
           type="button"
@@ -1242,6 +1298,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           onSelect={setSelected}
           onCreateOnDate={caps.canWrite ? onCreateOnDate : undefined}
           statusById={statusById}
+          childProgressById={childProgressById}
           assigneeNameById={assigneeNameById}
           titleOverrides={titleById}
           teamColorById={teamColorById}
@@ -1250,6 +1307,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           {...(rowGroupById ? { rowGroupById } : {})}
           onBulkDelete={caps.canDelete ? onBulkDelete : undefined}
           onBulkShiftDays={caps.canWrite ? onBulkShiftDays : undefined}
+          onBulkResizeDays={caps.canWrite ? onBulkResizeDays : undefined}
           onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
           onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
@@ -1284,6 +1342,7 @@ export function TaskWorkspacePage({ eventId, permissions }: TaskWorkspacePagePro
           barStartsAt={selectedRow?.startsAt ?? null}
           barEndsAt={selectedRow?.endsAt ?? null}
           hasChildren={selectedRow?.hasChildren ?? false}
+          aggregatedStatus={selectedTask ? childProgressById.get(selectedTask.id)?.dominantStatus : undefined}
           {...(fieldErrors ? { fieldErrors } : {})}
           onSave={onSaveDetail}
           onDelete={onDeleteDetail}

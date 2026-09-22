@@ -64,3 +64,10 @@ MAIL_ARCHIVE_CC = "archive@developershub.jp"
 MAIL_SEND_MAX_ATTEMPTS = "3"
 MAIL_SEND_TIMEOUT_MS = "15000"
 MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
+# Email Routing admin (address issuance). The token is a Workers Secret set out-of-band
+# (wrangler secret put CF_EMAIL_ROUTING_TOKEN); the ids/zone/worker below are non-secret.
+# CF_EMAIL_ROUTING_ZONE_ID / CF_EMAIL_ROUTING_ACCOUNT_ID are provisioned on the worker
+# out-of-band (dashboard/secret). WORKER_NAME = this deployed Worker (email Worker target
+# for issued receiving addresses); it defaults to dub-mail-gateway in code when unset.
+CF_EMAIL_ROUTING_ZONE_NAME = "developershub.jp"
+CF_EMAIL_ROUTING_WORKER_NAME = "dub-mail-gateway"

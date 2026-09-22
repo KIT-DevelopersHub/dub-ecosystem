@@ -20,6 +20,15 @@ export type ListInboxResponse = notification.ListInboxResponse; // Paginated<Inb
 export type UnreadCountResponse = notification.UnreadCountResponse;
 export type PreferenceEntry = notification.PreferenceEntry;
 
+// ---- Realtime inbox stream ws-ticket (GET /notifications/inbox/ws-ticket) ----
+// Short-lived HMAC ticket + the absolute wss:// URL of the DO-direct inbox stream. The
+// client opens `${doUrl}?ticket=${ticket}` and re-fetches a fresh ticket per reconnect.
+export interface InboxWsTicketResponse {
+  ticket: string;
+  doUrl: string;
+  expEpochMs: number;
+}
+
 // ---- Notification management (admin) ----
 export type AdminNotificationItem = notification.AdminNotificationItem;
 export type ListAdminNotificationsResponse = notification.ListAdminNotificationsResponse;

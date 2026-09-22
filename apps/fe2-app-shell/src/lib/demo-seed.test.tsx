@@ -43,6 +43,23 @@ describe("createDemoFetch", () => {
     expect(gantt.rows.length).toBeGreaterThan(0);
   });
 
+  it("persists an event edit (PATCH) so the save reflects on re-read", async () => {
+    const a = api();
+    const before = await a.request<{ version: number; title: string }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    const updated = await a.request<{ version: number; title: string; startsAt: string | null; description: string | null }>({
+      method: "PATCH",
+      path: "/api/v1/events/evt_1",
+      body: { version: before.version, title: "編集済みイベント", startsAt: "2026-10-01T00:30:00.000Z", description: "更新後の説明" },
+    });
+    expect(updated.title).toBe("編集済みイベント");
+    expect(updated.startsAt).toBe("2026-10-01T00:30:00.000Z");
+    expect(updated.description).toBe("更新後の説明");
+    expect(updated.version).toBe(before.version + 1);
+    // re-read reflects the change (persisted in-memory), and the list summary is in sync
+    const after = await a.request<{ title: string }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    expect(after.title).toBe("編集済みイベント");
+  });
+
   it("still surfaces NOT_FOUND for un-seeded routes (in-frame fallback)", async () => {
     let caught: unknown;
     try {
@@ -52,6 +69,59 @@ describe("createDemoFetch", () => {
     }
     expect(ApiError.isApiError(caught)).toBe(true);
     expect((caught as ApiError).status).toBe(404);
+  });
+});
+
+describe("event section layout (shared D&D order/visibility)", () => {
+  it("GET returns the default empty layout for an event never saved to", async () => {
+    const layout = await api().request<{ eventId: string; data: { order: string[]; hidden: string[] }; version: number }>(
+      { method: "GET", path: "/api/v1/events/evt_layout_get/section-layout" },
+    );
+    expect(layout.data).toEqual({ order: [], hidden: [] });
+    expect(layout.version).toBe(0);
+  });
+
+  it("PUT saves (v0 -> v1) and persists across a fresh api() instance (localStorage-backed)", async () => {
+    const eventId = "evt_layout_persist";
+    const saved = await api().request<{ data: { order: string[] }; version: number }>({
+      method: "PUT",
+      path: `/api/v1/events/${eventId}/section-layout`,
+      body: { version: 0, data: { order: ["links", "contacts"], hidden: ["memo"] } },
+    });
+    expect(saved.version).toBe(1);
+    expect(saved.data.order).toEqual(["links", "contacts"]);
+
+    // A fresh api()/createDemoFetch() call simulates a reload: the in-memory session
+    // resets, but the localStorage-backed layout must still read back.
+    const reread = await api().request<{ data: { order: string[]; hidden: string[] }; version: number }>({
+      method: "GET",
+      path: `/api/v1/events/${eventId}/section-layout`,
+    });
+    expect(reread.version).toBe(1);
+    expect(reread.data.order).toEqual(["links", "contacts"]);
+    expect(reread.data.hidden).toEqual(["memo"]);
+  });
+
+  it("stale version PUT -> 409 EVENT_VERSION_CONFLICT", async () => {
+    const eventId = "evt_layout_conflict";
+    await api().request({
+      method: "PUT",
+      path: `/api/v1/events/${eventId}/section-layout`,
+      body: { version: 0, data: { order: ["a"], hidden: [] } },
+    });
+    // second save must use version 1; sending 0 again conflicts (mirrors event-service).
+    let caught: unknown;
+    try {
+      await api().request({
+        method: "PUT",
+        path: `/api/v1/events/${eventId}/section-layout`,
+        body: { version: 0, data: { order: ["b"], hidden: [] } },
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(ApiError.isApiError(caught)).toBe(true);
+    expect((caught as ApiError).status).toBe(409);
   });
 });
 
@@ -72,13 +142,13 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 57-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 59-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
     expect(list.items.every((r) => r.isSystem)).toBe(true);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(57);
+    expect(catalog).toHaveLength(59);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -152,7 +222,10 @@ describe("admin RBAC console (interactive roster surface)", () => {
 describe("admin email routing (@developershub.jp address management)", () => {
   interface Addr { id: string; localPart: string; address: string; destination: string; enabled: boolean }
   interface Page<T> { items: T[] }
-  const BASE = "/api/v1/mail/admin/email-routing/addresses";
+  // Frontend calls the ISSUED (zone-rule) surface since #468 — the demo mock must serve
+  // it, not the removed account-scoped /addresses path (regression: the 発行済みアドレス
+  // dialog listed via /issued-addresses and 404'd against the stale mock).
+  const BASE = "/api/v1/mail/admin/email-routing/issued-addresses";
   const list = (a: ReturnType<typeof api>) => a.request<Page<Addr>>({ method: "GET", path: BASE });
 
   it("the demo admin holds mail:admin (so the tab is reachable) and lists @developershub.jp addresses", async () => {
@@ -164,23 +237,23 @@ describe("admin email routing (@developershub.jp address management)", () => {
     expect(addrs.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
   });
 
-  it("issue: POST creates an address; bad local part and bad destination 400", async () => {
+  it("issue: POST creates an address with only a local part (destination fixed to the mail Worker); bad local part 400", async () => {
     const a = api();
     const before = (await list(a)).items.length;
-    const created = await a.request<Addr>({ method: "POST", path: BASE, body: { localPart: "events", destination: "team@example.com" } });
+    // No destination supplied — the forward target is fixed to the mail Worker server-side.
+    const created = await a.request<Addr>({ method: "POST", path: BASE, body: { localPart: "events" } });
     expect(created.address).toBe("events@developershub.jp");
     expect(created.enabled).toBe(true);
+    expect(created.destination).toBe("mail-gateway (Worker)");
     expect((await list(a)).items.length).toBe(before + 1);
 
-    for (const bad of [{ localPart: "Bad Space", destination: "team@example.com" }, { localPart: "ok", destination: "not-an-email" }]) {
-      let e: unknown;
-      try {
-        await a.request({ method: "POST", path: BASE, body: bad });
-      } catch (err) {
-        e = err;
-      }
-      expect((e as ApiError).status).toBe(400);
+    let e: unknown;
+    try {
+      await a.request({ method: "POST", path: BASE, body: { localPart: "Bad Space" } });
+    } catch (err) {
+      e = err;
     }
+    expect((e as ApiError).status).toBe(400);
   });
 
   it("enable/disable via PATCH and delete via DELETE persist", async () => {
@@ -191,5 +264,15 @@ describe("admin email routing (@developershub.jp address management)", () => {
 
     await a.request({ method: "DELETE", path: `${BASE}/${target.id}` });
     expect((await list(a)).items.some((x) => x.id === target.id)).toBe(false);
+  });
+
+  it("roster-addresses (sync source) lists the receiving addresses for Email Routing 同期", async () => {
+    const a = api();
+    const res = await a.request<{ items: Array<{ address: string; destination: string; enabled: boolean }> }>({
+      method: "GET",
+      path: "/api/v1/mail/admin/email-routing/roster-addresses",
+    });
+    expect(res.items.length).toBeGreaterThan(0);
+    expect(res.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
   });
 });

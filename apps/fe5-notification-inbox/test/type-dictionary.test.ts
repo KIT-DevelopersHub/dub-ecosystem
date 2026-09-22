@@ -64,6 +64,13 @@ describe("resolveCategory (server type -> tab category)", () => {
     expect(resolveCategory("feedbackish")).toBe("other");
   });
 
+  it("maps chat.* (mention / dm) to チャット", () => {
+    expect(resolveCategory("chat.mention")).toBe("chat");
+    expect(resolveCategory("chat.dm")).toBe("chat");
+    // guard against a non-namespaced near-match
+    expect(resolveCategory("chatty")).toBe("other");
+  });
+
   it("does not misclassify a non-namespaced near-match", () => {
     // "released.foo" must NOT be treated as release.*
     expect(resolveCategory("released.foo")).toBe("other");

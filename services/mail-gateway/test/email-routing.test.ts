@@ -36,6 +36,7 @@ function client(fetchImpl: typeof fetch, over: Partial<EmailRoutingConfig> = {})
     accountId: "acc_1",
     zoneId: "zone_1",
     zoneName: "developershub.jp",
+    workerName: "dub-mail-gateway",
     timeoutMs: 5000,
     fetchImpl,
     ...over,

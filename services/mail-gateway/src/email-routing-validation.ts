@@ -36,6 +36,33 @@ function localOf(email: string): string {
   return email.split("@")[0] ?? "";
 }
 
+/**
+ * Issue a receiving address: the admin supplies only a local part; the full address is
+ * derived from our own zone and the forward target is fixed (the mail Worker), so there
+ * is no destination to validate. Anti-spoof holds automatically — the address is always
+ * `${localPart}@${zoneName}`.
+ */
+export function parseIssueAddressRequest(body: unknown, zoneName: string): { localPart: string; address: string } {
+  const o = body as { localPart?: unknown } | null;
+  if (!o || typeof o !== "object") bad("request body must be a JSON object");
+  if (typeof o!.localPart !== "string" || o!.localPart.trim().length === 0) bad("`localPart` is required");
+  const localPart = (o!.localPart as string).trim().toLowerCase();
+  if (!LOCAL_PART_RE.test(localPart)) {
+    bad("local part must be lowercase alphanumeric with . _ % + - (no spaces)");
+  }
+  const address = `${localPart}@${zoneName.toLowerCase()}`;
+  if (address.length > ADDRESS_MAX_LEN) bad(`address too long (max ${ADDRESS_MAX_LEN})`);
+  return { localPart, address };
+}
+
+/** Update an issued address: only the enable/disable toggle is mutable (the forward target
+ *  is fixed to the mail Worker, so a destination change is not accepted here). */
+export function parseUpdateIssuedAddressRequest(body: unknown): { enabled: boolean } {
+  const o = body as { enabled?: unknown } | null;
+  if (!o || typeof o !== "object") bad("request body must be a JSON object");
+  return { enabled: mustBool(o!.enabled, "enabled") };
+}
+
 /** Destination address to create (a forward target — any domain, e.g. a personal inbox). */
 export function parseCreateAddressRequest(body: unknown): { email: string } {
   const o = body as { email?: unknown } | null;

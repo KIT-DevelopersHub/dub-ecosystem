@@ -16,6 +16,7 @@ export interface Env {
 
   // --- live consumer service bindings (routing destinations) ---
   SVC_AUDIT_LOG?: Fetcher; // audit-log       POST /internal/audit-async
+  SVC_NOTIFICATION?: Fetcher; // notification  POST /internal/events-async (evt.notification)
   SVC_TASK?: Fetcher; // task-service     POST /internal/events-async
   SVC_GANTT?: Fetcher; // gantt-service    POST /internal/events-async
   SVC_FILE_META?: Fetcher; // file-meta        POST /internal/events-async
@@ -27,6 +28,7 @@ export interface Env {
 // The env keys that hold a consumer service binding (used by the routing map).
 export type ServiceBindingName =
   | "SVC_AUDIT_LOG"
+  | "SVC_NOTIFICATION"
   | "SVC_TASK"
   | "SVC_GANTT"
   | "SVC_FILE_META"

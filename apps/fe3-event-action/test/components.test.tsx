@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, setAuth, resetAuth, makeNav } from "./util";
@@ -6,6 +6,7 @@ import { createMockEventApi } from "../src/api/mockData";
 import { EventListPage } from "../src/pages/EventListPage";
 import { PhaseTransitionControl } from "../src/components/PhaseTransitionControl";
 import { GenericActionPanel } from "../src/components/GenericActionPanel";
+import { EventEditForm } from "../src/components/EventEditForm";
 import type { event } from "@dub/types";
 
 beforeEach(() => resetAuth());
@@ -92,5 +93,69 @@ describe("GenericActionPanel (test observation #3)", () => {
     );
     expect(screen.getByTestId("fe3-action-generic-panel")).toBeInTheDocument();
     expect(screen.getByText("weird_custom_kind")).toBeInTheDocument();
+  });
+});
+
+describe("EventEditForm — edit name / schedule / description", () => {
+  const baseEvent: event.DubEvent = {
+    id: "evt_edit",
+    orgId: "org_devhub",
+    title: "編集対象イベント",
+    description: "旧説明",
+    phase: "planning",
+    startsAt: null,
+    endsAt: null,
+    archivedAt: null,
+    version: 3,
+    createdAt: "2026-08-09T00:00:00Z",
+    updatedAt: "2026-08-09T00:00:00Z",
+  };
+
+  it("saves title, schedule and description via updateEvent (optimistic edit)", async () => {
+    setAuth(["event:read", "event:write"]);
+    const api = createMockEventApi({ events: 1, actionsPerEvent: 0 });
+    const spy = vi.spyOn(api, "updateEvent");
+    renderWithProviders(<EventEditForm event={baseEvent} canWrite />, { api });
+
+    await userEvent.clear(screen.getByLabelText("タイトル"));
+    await userEvent.type(screen.getByLabelText("タイトル"), "新タイトル");
+    fireEvent.change(screen.getByTestId("fe3-edit-starts"), { target: { value: "2026-09-15T10:00" } });
+    fireEvent.change(screen.getByTestId("fe3-edit-ends"), { target: { value: "2026-09-15T18:30" } });
+    await userEvent.clear(screen.getByLabelText("説明"));
+    await userEvent.type(screen.getByLabelText("説明"), "新説明");
+
+    await userEvent.click(screen.getByTestId("fe3-settings-save"));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    const [id, req] = spy.mock.calls[0]!;
+    expect(id).toBe("evt_edit");
+    expect(req.version).toBe(3);
+    expect(req.title).toBe("新タイトル");
+    expect(req.description).toBe("新説明");
+    // datetime-local (local wall clock) round-trips to the same instant on the wire.
+    expect(new Date(req.startsAt!).getTime()).toBe(new Date("2026-09-15T10:00").getTime());
+    expect(new Date(req.endsAt!).getTime()).toBe(new Date("2026-09-15T18:30").getTime());
+  });
+
+  it("rejects an end before start without calling updateEvent", async () => {
+    setAuth(["event:read", "event:write"]);
+    const api = createMockEventApi({ events: 1, actionsPerEvent: 0 });
+    const spy = vi.spyOn(api, "updateEvent");
+    renderWithProviders(<EventEditForm event={baseEvent} canWrite />, { api });
+
+    fireEvent.change(screen.getByTestId("fe3-edit-starts"), { target: { value: "2026-09-15T18:00" } });
+    fireEvent.change(screen.getByTestId("fe3-edit-ends"), { target: { value: "2026-09-15T09:00" } });
+    await userEvent.click(screen.getByTestId("fe3-settings-save"));
+
+    expect(await screen.findByTestId("fe3-settings-edit-error")).toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("read-only user gets disabled inputs and disabled save", () => {
+    setAuth(["event:read"]);
+    renderWithProviders(<EventEditForm event={baseEvent} canWrite={false} />);
+    expect(screen.getByTestId("fe3-edit-starts")).toBeDisabled();
+    expect(screen.getByTestId("fe3-edit-ends")).toBeDisabled();
+    expect(screen.getByTestId("fe3-settings-save")).toBeDisabled();
   });
 });

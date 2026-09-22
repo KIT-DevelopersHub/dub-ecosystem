@@ -20,7 +20,7 @@ const DUE_OPTIONS: { value: DueBucket; label: string }[] = [
 
 const SORT_OPTIONS: { value: TaskSort; label: string }[] = [
   { value: "due", label: "期限が近い順" },
-  { value: "priority", label: "優先度が高い順" },
+  { value: "priority", label: "重要度が高い順" },
   { value: "updated", label: "更新が新しい順" },
   { value: "created", label: "作成が新しい順" },
   { value: "title", label: "タイトル順" },

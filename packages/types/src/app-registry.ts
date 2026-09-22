@@ -73,6 +73,7 @@ export const APP_MANIFEST = [
   { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"], access: { view: "app:members:view", edit: "app:members:edit" } },
   { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], access: { view: "app:participation:view", edit: "app:participation:edit" }, openToAllAuthenticated: true },
   { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true },
+  { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" } },
   { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" } },
 ] as const satisfies readonly AppManifestEntry[];
 
@@ -115,4 +116,40 @@ export function appViewKey(id: string): PermissionKey | undefined {
 /** The `app:<id>:edit` gate key for one app (undefined for an unknown id). */
 export function appEditKey(id: string): PermissionKey | undefined {
   return getApp(id)?.access.edit;
+}
+
+/**
+ * The DOMAIN permission key(s) that back an app — the keys a role must ALSO hold for a
+ * per-app grant to be EFFECTIVE (the app's service reads gate on these). Empty for an
+ * unknown id. E.g. "members" → ["identity:read"], "events" → ["event:read"].
+ */
+export function appDomainKeys(id: string): readonly PermissionKey[] {
+  return getApp(id)?.permissions ?? [];
+}
+
+/**
+ * Normalize a role's selected permission set so every per-app access key it holds is
+ * EFFECTIVE, not merely cosmetic. Closes the 抜け that made ロール管理 per-app toggles
+ * front-end-only: turning an app on granted just the `app:<id>:view|edit` key, so the
+ * app's DOMAIN API still 403'd (the toggle never became real 実効権限).
+ *
+ * For each app the set references it ensures:
+ *   (a) `app:<id>:edit` co-carries `app:<id>:view` (edit ⇒ view), and
+ *   (b) holding either per-app key also grants the DOMAIN read key(s) the app needs
+ *       to function (appDomainKeys — e.g. identity:read for 運営メンバー).
+ *
+ * Pure + idempotent (safe to run on every save). It ONLY adds domain READ keys — never
+ * domain write/admin — so granting e.g. app:members:edit delegates 名簿編集 WITHOUT
+ * escalating the role to identity:admin (minimal escalation).
+ */
+export function withRequiredAppDomainKeys(perms: readonly PermissionKey[]): PermissionKey[] {
+  const set = new Set<PermissionKey>(perms);
+  for (const app of APP_MANIFEST) {
+    const hasEdit = set.has(app.access.edit);
+    const hasView = set.has(app.access.view);
+    if (!hasEdit && !hasView) continue;
+    if (hasEdit) set.add(app.access.view); // edit ⇒ view
+    for (const key of app.permissions) set.add(key); // domain read key(s)
+  }
+  return [...set].sort();
 }

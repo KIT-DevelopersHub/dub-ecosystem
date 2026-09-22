@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "roster-issue-no-dest",
+  "worker": "dub-demo-roster-issue-no-dest",
+  "url": "https://dub-demo-roster-issue-no-dest.developershub-site.workers.dev",
+  "deployedSha": "7b613cc",
+  "branch": "feat/roster-issue-no-destination",
+  "actor": "Claude Code",
+  "markers": ["fe7-email-forward-hint"],
+  "live": true,
+  "verifiedAt": "2026-09-05T20:28:22Z",
+  "updatedAt": "2026-09-05T20:28:22Z",
+  "note": "アドレス発行ダイアログから転送先フィールドを削除"
+}

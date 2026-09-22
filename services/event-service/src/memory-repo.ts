@@ -1,7 +1,7 @@
 // In-memory EventRepo: backs unit tests and local `--test` runs. Same keyset
 // semantics as the D1 repo so pagination tests are representative.
 import type { common, event } from "@dub/types";
-import type { EventRepo, EventRow, ActionRow, EventDetailsRow, Keyset } from "./types";
+import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventSectionLayoutRow, Keyset } from "./types";
 
 function afterKeysetById(id: string) {
   return (row: { id: string }) => row.id > id;
@@ -11,6 +11,7 @@ export class InMemoryEventRepo implements EventRepo {
   private events = new Map<common.EventId, EventRow>();
   private actions = new Map<common.ActionId, ActionRow>();
   private details = new Map<common.EventId, EventDetailsRow>();
+  private sectionLayouts = new Map<common.EventId, EventSectionLayoutRow>();
 
   // test/seed helper — bypasses service invariants (e.g. cross-org rows).
   seedEvent(row: EventRow): void {
@@ -120,6 +121,18 @@ export class InMemoryEventRepo implements EventRepo {
     this.details.set(next.eventId, cloneDetails(next));
     return true;
   }
+
+  async getEventSectionLayout(eventId: common.EventId): Promise<EventSectionLayoutRow | null> {
+    const r = this.sectionLayouts.get(eventId);
+    return r ? cloneSectionLayout(r) : null;
+  }
+  async upsertEventSectionLayout(next: EventSectionLayoutRow, expectedVersion: number): Promise<boolean> {
+    const cur = this.sectionLayouts.get(next.eventId);
+    const curVersion = cur?.version ?? 0;
+    if (curVersion !== expectedVersion) return false;
+    this.sectionLayouts.set(next.eventId, cloneSectionLayout(next));
+    return true;
+  }
 }
 
 function cloneDetails(r: EventDetailsRow): EventDetailsRow {
@@ -135,6 +148,10 @@ function cloneDetails(r: EventDetailsRow): EventDetailsRow {
       contacts: r.data.contacts.map((c) => ({ ...c })),
     },
   };
+}
+
+function cloneSectionLayout(r: EventSectionLayoutRow): EventSectionLayoutRow {
+  return { ...r, data: { order: [...r.data.order], hidden: [...r.data.hidden] } };
 }
 
 function cmpStr(a: string, b: string): number {

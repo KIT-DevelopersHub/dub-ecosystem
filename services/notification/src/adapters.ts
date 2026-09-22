@@ -11,6 +11,7 @@ import type { AuditRecordEnvelopeV1 } from "@dub/events";
 import type { auditLog } from "@dub/types";
 import type { ChatPort, IdentityPort, MailPort, PushPort } from "./clients";
 import { insertInbox, recordDelivery } from "./repo";
+import { buildPushDeepLink } from "./push-deeplink";
 import { DEFAULT_MAILBOX, MAX_DELIVERY_ATTEMPTS, SERVICE_NAME } from "./config";
 import type { ChannelAdapter, DeliveryJob, DeliveryResult, NotificationChannel } from "./types";
 import { nowIso } from "@dub/db";
@@ -71,8 +72,21 @@ export function makePushAdapter(deps: { push?: PushPort; ctx: RequestContext }):
     channel: "push",
     async deliver(job: DeliveryJob): Promise<DeliveryResult> {
       if (!deps.push) return { status: "skipped", detail: "channel_not_wired" };
+      // data carries the inbox id (so a tapped push can mark-read / correlate) and the
+      // deep link the client navigates to. mobile-bff nests these under payload.data.
+      const data: Record<string, string> = {
+        notificationId: job.notificationId,
+        deepLink: buildPushDeepLink(job.resourceType, job.resourceId),
+      };
       await deps.push.dispatch(
-        { userId: job.userId, type: job.type, title: job.title, body: job.body },
+        {
+          userId: job.userId,
+          type: job.type,
+          notificationId: job.notificationId,
+          title: job.title,
+          body: job.body,
+          data,
+        },
         deps.ctx,
       );
       return { status: "sent" };

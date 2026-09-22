@@ -37,6 +37,40 @@ describe("mentions ride chat.message.created", () => {
   });
 });
 
+describe("DM messages ride chat.message.created with isDm/dmRecipientIds", () => {
+  it("carries isDm + the other member's id (author excluded) for a dm-type channel", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const c = await call(app, "POST", "/chat/channels", {
+      body: { type: "dm", visibility: "private", name: "DM", memberIds: ["user_other"] },
+    });
+    await call(app, "POST", "/chat/messages", { body: { channelId: c.json.id, body: "hi there" } });
+
+    const payloads = deps.publisher.payloadsFor("chat.message.created") as Array<{
+      isDm?: boolean;
+      dmRecipientIds?: string[];
+    }>;
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]!.isDm).toBe(true);
+    expect(payloads[0]!.dmRecipientIds).toEqual(["user_other"]);
+  });
+
+  it("omits isDm/dmRecipientIds entirely for a non-dm channel (backward-compat no-op)", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
+    await call(app, "POST", "/chat/messages", { body: { channelId: c.json.id, body: "just a channel message" } });
+
+    const payloads = deps.publisher.payloadsFor("chat.message.created") as Array<{
+      isDm?: boolean;
+      dmRecipientIds?: string[];
+    }>;
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]!.isDm).toBeUndefined();
+    expect(payloads[0]!.dmRecipientIds).toBeUndefined();
+  });
+});
+
 describe("reaction.updated realtime fan-out", () => {
   it("publishes reaction.updated with the full post-toggle set on add and remove", async () => {
     const deps = makeDeps();

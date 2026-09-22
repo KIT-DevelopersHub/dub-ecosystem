@@ -56,6 +56,13 @@ import {
   ADMIN_VIEWER_PERMISSION,
 } from "./config";
 import type { IngestInput } from "./types";
+import { dispatchEvent } from "./queue";
+import type { DubEventEnvelope } from "@dub/events";
+import { signWsTicket, ticketExpiryMs, DEV_WS_SECRET } from "./wsticket";
+
+// Absolute wss:// base for the ws-ticket doUrl (gateway-bypassing / DO-direct). ":id" is
+// replaced with the url-encoded user id. Overridden per-env by NOTIF_RT_DO_URL_BASE.
+const DEFAULT_DO_URL_BASE = "wss://dub-notification-service.developershub-site.workers.dev/ws/:id";
 
 interface GetPreferencesResponse {
   userId: string;
@@ -105,6 +112,27 @@ export function createApp(options: CreateAppOptions = {}) {
 
   // ---- health
   app.get("/internal/health", (c) => c.json({ status: "ok", service: SERVICE_NAME }));
+
+  // ---- POST /internal/events-async: free-tier domain-event landing route. The Workers
+  // Free plan has no dub-q-evt-notification Queue consumer, so freeq-drain forwards each
+  // due evt.notification outbox row here (routing.ts: evt.notification -> SVC_NOTIFICATION
+  // /internal/events-async). It runs the SAME lane-A mapping / lane-B request handlers +
+  // envelope.id idempotency as the Queue path (dispatchEvent), so a chat @mention, a
+  // notification.requested, a public inquiry, etc. become inbox notifications regardless
+  // of transport. A non-2xx tells the caller's drain to retry (row stays pending) so no
+  // event is ever lost; an unknown event name is a 202 no-op (forward-compat, matching the
+  // Queue's onUnknownEvent: "ack"). Internal-only (x-dub-internal), like POST /notify —
+  // registered ONCE at the bare path (the drain addresses it via the SVC_NOTIFICATION
+  // binding), not under the "/notifications" gateway segment.
+  app.post("/internal/events-async", async (c) => {
+    if (!c.req.header(HEADERS.internal)) throw errors.forbidden("POST /internal/events-async is internal-only");
+    const body = (await c.req.json().catch(() => null)) as Partial<DubEventEnvelope> | null;
+    if (!body || typeof body.name !== "string" || typeof body.id !== "string") {
+      throw errors.validationFailed([{ field: "body", reason: "invalid_envelope" }]);
+    }
+    await dispatchEvent(c.env, body as DubEventEnvelope);
+    return c.json({ ok: true }, 202);
+  });
 
   // ---- notification-domain routes (notify / release / inbox / preferences).
   // Mounted under BOTH the bare root ("" -> /notify, /inbox, /preferences, /release) AND
@@ -245,6 +273,21 @@ export function createApp(options: CreateAppOptions = {}) {
       if (admin) await backfillAdminAudienceInbox(db, userId);
       const page = await listInbox(db, userId, q, admin);
       return c.json(page satisfies notification.ListInboxResponse);
+    });
+
+    // ---- GET /inbox/ws-ticket: issue a short-lived HMAC ws-ticket for the DO-direct
+    // realtime inbox stream. authOnly (covered by /inbox/* above) -> the ticket is bound to
+    // the authenticated user. The client opens `doUrl?ticket=...` (a WebSocket straight to
+    // the per-user InboxRoom DO, gateway-bypassing) and re-fetches a fresh ticket per
+    // reconnect (tickets are ~60s). Returns { ticket, doUrl, expEpochMs }.
+    app.get(`${p}/inbox/ws-ticket`, async (c) => {
+      const userId = getUserId(c);
+      const secret = c.env.WS_TICKET_SECRET ?? DEV_WS_SECRET;
+      const base = c.env.NOTIF_RT_DO_URL_BASE ?? DEFAULT_DO_URL_BASE;
+      const expEpochMs = ticketExpiryMs();
+      const ticket = await signWsTicket(secret, { userId, expEpochMs });
+      const doUrl = base.replace(":id", encodeURIComponent(userId));
+      return c.json({ ticket, doUrl, expEpochMs });
     });
 
     app.get(`${p}/inbox/unread-count`, async (c) => {

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-parent-status-agg",
+  "worker": "dub-demo-gantt-parent-status-agg",
+  "url": "https://dub-demo-gantt-parent-status-agg.developershub-site.workers.dev",
+  "deployedSha": "ea64941c",
+  "branch": "fix/gantt-parent-status-agg",
+  "actor": "kota",
+  "markers": ["階層集計デモ：全体進行（3階層サンプル）","子タスクの進捗から自動集計されます"],
+  "live": true,
+  "verifiedAt": "2026-09-10T12:12:22Z",
+  "updatedAt": "2026-09-10T12:12:22Z",
+  "note": "PR: parent status recursive aggregation + majority + dropdown sync fix"
+}
