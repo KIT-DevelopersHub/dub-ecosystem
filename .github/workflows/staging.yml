@@ -36,8 +36,19 @@ on:
     types: [labeled, synchronize, reopened]
 
 # Single shared staging environment: newest labelled PR/push wins, older run cancelled.
+#
+# The group is evaluated BEFORE the job's `if:`, so a fixed group name let ANY unlabelled
+# PR push cancel a staging deploy that was already running — the run then skipped its job
+# and staging kept serving the previous bundle (observed: an unrelated PR push killed a
+# labelled PR's deploy mid-flight). Runs that will not deploy therefore get their own throwaway
+# group and cancel nobody; only real deploys (push:main / a `stagingへ`-labelled PR)
+# contend for the single `deploy-staging` slot.
 concurrency:
-  group: deploy-staging
+  group: >-
+    ${{ (github.event_name == 'push' ||
+         contains(github.event.pull_request.labels.*.name, 'stagingへ'))
+        && 'deploy-staging'
+        || format('staging-noop-{0}', github.run_id) }}
   cancel-in-progress: true
 
 permissions:
