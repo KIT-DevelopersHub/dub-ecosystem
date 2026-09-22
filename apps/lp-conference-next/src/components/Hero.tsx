@@ -11,8 +11,6 @@ import { HeroScene } from "@/components/HeroScene";
 // motion is pure CSS (see globals.css hero-* keyframes); under
 // prefers-reduced-motion it collapses to instant-visible. Server component.
 export function Hero({ data, subheading }: { data: HeroConfig; subheading?: string }) {
-  const oneLine = (s: string) => s.replace(/\n/g, "");
-
   return (
     <section id="top" className="hero hero--v31">
       {/* v3.1 full-bleed WebGL blob field (decorative). A dark-blue CSS gradient
@@ -52,27 +50,32 @@ export function Hero({ data, subheading }: { data: HeroConfig; subheading?: stri
             </p>
           </div>
 
+          {/* 受付未開始 — 参加登録 / 登壇応募はまだ開いていないため、押せない
+              disabled 状態で「準備中」を明示する（href なし・aria-disabled）。 */}
           <div className="hero-ctas">
             {data.primaryCta && (
-              <a
-                className="hero-cta hero-cta--participant"
-                href={data.primaryCta.href}
-                aria-label={oneLine(data.primaryCta.label)}
-                data-magnetic
+              <button
+                type="button"
+                className="hero-cta hero-cta--participant is-disabled"
+                disabled
+                aria-disabled="true"
+                aria-label="参加登録（準備中・受付開始までお待ちください）"
               >
                 参加登録はこちら
-                <span className="hero-cta-arrow" aria-hidden="true">→</span>
-              </a>
+                <span className="hero-cta-badge">準備中</span>
+              </button>
             )}
             {data.secondaryCta && (
-              <a
-                className="hero-cta hero-cta--speaker"
-                href={data.secondaryCta.href}
-                aria-label={oneLine(data.secondaryCta.label)}
+              <button
+                type="button"
+                className="hero-cta hero-cta--speaker is-disabled"
+                disabled
+                aria-disabled="true"
+                aria-label="登壇応募（準備中・受付開始までお待ちください）"
               >
                 登壇に応募する
-                <span className="hero-cta-arrow" aria-hidden="true">→</span>
-              </a>
+                <span className="hero-cta-badge">準備中</span>
+              </button>
             )}
           </div>
         </div>

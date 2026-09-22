@@ -67,10 +67,17 @@ export function Header({
               お問い合わせ
             </a>
             {cta && (
-              <a className="site-head-cta" href={cta.href} onClick={() => setOpen(false)}>
+              /* 受付未開始 — 参加登録はまだ開いていないため disabled 表示 */
+              <button
+                type="button"
+                className="site-head-cta is-disabled"
+                disabled
+                aria-disabled="true"
+                aria-label={`${cta.label}（準備中）`}
+              >
                 {cta.label}
-                <span className="arrow" aria-hidden="true">→</span>
-              </a>
+                <span className="site-head-cta-badge">準備中</span>
+              </button>
             )}
           </div>
         </nav>

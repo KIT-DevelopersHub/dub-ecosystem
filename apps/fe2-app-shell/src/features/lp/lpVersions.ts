@@ -33,13 +33,22 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
+    id: "v3.2",
+    name: "v3.2 コンテンツ確定版",
+    description:
+      "v3.1 の立体ヒーローをベースに、初回表示の波紋イントロを削除して即表示に、開催日を 2026-09-13・14 に更新、受付前の「参加登録」「登壇応募」を準備中(disabled)表示に、ファーストビューに IT カンファレンスらしいキャッチを追加、プログラムをダイアログで随時更新できる構成に、クラウドファンディング導線を CAMPFIRE へ、CONTACT をメール/Instagram/X のアイコンボタンに刷新(X = @DevelopersHubPR)。ファビコン/ブランドアイコンも導入。本番ドメイン hokuriku-it-conf.com に反映済み。",
+    url: "https://hokuriku-it-conf.com",
+    updatedAt: "2026-09-23",
+    status: "current",
+  },
+  {
     id: "v3.1",
     name: "v3.1 ヒーロー立体強化版",
     description:
-      "v3.0 のダイナミック刷新をベースに、ファーストビュー(ヒーロー)を全画面の WebGL 3D ブロブ場＋巨大発光タイポに強化。スクロールに合わせてカメラが立体的に潜り込む非線形の奥行き演出を追加し、フォント読み込みを非同期化して表示速度(Lighthouse)を改善、ヒーロー背景は見た目そのままに描画コストを大幅軽量化。本番ドメイン hokuriku-it-conf.com に反映済み。",
-    url: "https://hokuriku-it-conf.com",
+      "v3.0 のダイナミック刷新をベースに、ファーストビュー(ヒーロー)を全画面の WebGL 3D ブロブ場＋巨大発光タイポに強化。スクロールに合わせてカメラが立体的に潜り込む非線形の奥行き演出を追加し、フォント読み込みを非同期化して表示速度(Lighthouse)を改善、ヒーロー背景は見た目そのままに描画コストを大幅軽量化。v3.2 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-next-v3-1.developershub-site.workers.dev",
     updatedAt: "2026-09-22",
-    status: "current",
+    status: "archived",
   },
   {
     id: "v3.0",

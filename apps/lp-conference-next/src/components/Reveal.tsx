@@ -24,7 +24,7 @@ import { createElement, useEffect, useRef, useState, type ReactNode } from "reac
 // framer-motion は一切使わない（軽量・GPU 合成 = opacity/transform/clip-path のみ）。
 
 type RevealTag =
-  | "div" | "section" | "p" | "li" | "ul" | "h2" | "h3" | "span" | "a";
+  | "div" | "section" | "p" | "li" | "ul" | "h2" | "h3" | "span" | "a" | "button";
 type Variant = "up" | "fade" | "wipe" | "rise-lg" | "zoom" | "haze";
 
 export interface RevealProps {
@@ -38,7 +38,11 @@ export interface RevealProps {
   id?: string;
   role?: string;
   href?: string;
+  type?: "button" | "submit" | "reset";
+  onClick?: () => void;
   "aria-label"?: string;
+  "aria-haspopup"?: "dialog" | "menu" | "true" | boolean;
+  "aria-controls"?: string;
   /** allow decorative motion hooks (data-line / data-parallax / data-magnetic). */
   [dataAttr: `data-${string}`]: string | boolean | undefined;
 }

@@ -5,7 +5,7 @@
 // prefers-reduced-motion (see globals.css). Decorative; original text only.
 export function Marquee({
   words = "HOKURIKU IT CONFERENCE 2027",
-  sub = "学生 × 大規模 × 北陸",
+  sub = "IT × 大規模 × 北陸",
 }: {
   words?: string;
   sub?: string;

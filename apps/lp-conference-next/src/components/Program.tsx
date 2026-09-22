@@ -1,7 +1,10 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Reveal } from "@/components/Reveal";
 import { SectionHead } from "@/components/SectionHead";
 import { renderEmphasis } from "@/lib/markup";
-import type { ProgramConfig, ProgramItem } from "@/config/types";
+import type { ProgramConfig } from "@/config/types";
 
 // Program — reproduces goodpatch's "Design Platform" skeleton: a bold full-bleed
 // blue block with a giant heading, then a stacked list of big-name rows, each
@@ -9,7 +12,48 @@ import type { ProgramConfig, ProgramItem } from "@/config/types";
 // that slides in on hover, and a circle-arrow affordance. Filled with the
 // conference's 聴く / 体験する / 出会う pillars and original inline-SVG art —
 // no goodpatch assets/copy.
+//
+// 各行はクリックでダイアログ（native <dialog>）を開く。内容はまだ作成中のため
+// 「準備中｜内容は随時更新します」を上品に表示し、空振りにしない。
 export function Program({ data, index }: { data: ProgramConfig; index?: string }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+
+  const close = useCallback(() => setOpen(null), []);
+
+  useEffect(() => {
+    const d = dialogRef.current;
+    if (!d) return;
+    if (open !== null && !d.open) d.showModal();
+    else if (open === null && d.open) d.close();
+
+    // A native <dialog> opened with showModal() lives in the top layer, above
+    // the decorative custom cursor (z-index:9999) and any WebGL canvas. Without
+    // this, over the dialog the native cursor is hidden (.has-lp-cursor sets
+    // cursor:none) while the custom cursor dot renders BEHIND the dialog — so
+    // the pointer appears to "go behind" and the dialog feels unusable. Toggling
+    // this body flag restores the real cursor and hides the custom one while the
+    // dialog is open; the 'lp:dialog' event lets MotionRoot pause Lenis so the
+    // background no longer scrolls under the modal.
+    const isOpen = open !== null;
+    document.body.classList.toggle("has-open-dialog", isOpen);
+    window.dispatchEvent(
+      new CustomEvent("lp:dialog", { detail: { open: isOpen } }),
+    );
+  }, [open]);
+
+  // Safety net: clear the flag if this component unmounts while open.
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("has-open-dialog");
+      window.dispatchEvent(
+        new CustomEvent("lp:dialog", { detail: { open: false } }),
+      );
+    };
+  }, []);
+
+  const activeItem = open !== null ? data.items[open] : null;
+
   return (
     <section id="program" className="section program-block block-arc block-arc--top">
       <div className="container">
@@ -22,9 +66,19 @@ export function Program({ data, index }: { data: ProgramConfig; index?: string }
           ghost="PROGRAM"
         />
 
-        <ul className="prow-list">
+        <div className="prow-list">
           {data.items.map((item, i) => (
-            <Reveal as="li" className="prow" key={item.name ?? i} variant="up" delay={90 * i}>
+            <Reveal
+              as="button"
+              type="button"
+              className="prow prow--btn"
+              key={item.name ?? i}
+              variant="up"
+              delay={90 * i}
+              onClick={() => setOpen(i)}
+              aria-haspopup="dialog"
+              aria-label={`${item.name ?? "プログラム"}の詳細を開く`}
+            >
               <span className="prow-idx" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
               <span className="prow-icon" aria-hidden="true">{pillarIcon(i)}</span>
               <span className="prow-copy">
@@ -37,8 +91,45 @@ export function Program({ data, index }: { data: ProgramConfig; index?: string }
               <span className="prow-arrow" aria-hidden="true">→</span>
             </Reveal>
           ))}
-        </ul>
+        </div>
       </div>
+
+      <dialog
+        ref={dialogRef}
+        className="prog-dialog"
+        aria-labelledby="prog-dialog-title"
+        onClose={close}
+        onClick={(e) => {
+          // backdrop（カード外）クリックで閉じる
+          if (e.target === dialogRef.current) close();
+        }}
+      >
+        {activeItem && (
+          <div className="prog-dialog-card">
+            <button type="button" className="prog-dialog-close" onClick={close} aria-label="閉じる">
+              <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+            <span className="prog-dialog-icon" aria-hidden="true">
+              {open !== null && pillarIcon(open)}
+            </span>
+            <span className="prog-dialog-eyebrow">PROGRAM</span>
+            <h3 className="prog-dialog-title" id="prog-dialog-title">{activeItem.name}</h3>
+            {activeItem.note && <p className="prog-dialog-note">{activeItem.note}</p>}
+            <div className="prog-dialog-status">
+              <span className="prog-dialog-badge">
+                <span className="prog-dialog-dot" aria-hidden="true" />
+                準備中
+              </span>
+              <p className="prog-dialog-status-text">
+                プログラムの詳細は現在準備中です。<br />
+                内容は決まり次第、随時更新します。
+              </p>
+            </div>
+          </div>
+        )}
+      </dialog>
     </section>
   );
 }

@@ -3,7 +3,7 @@
   "publishedAt": "2026-09-06T00:00:00.000Z",
   "seo": {
     "title": "北陸ITカンファレンス 2027",
-    "description": "学生×大規模×北陸。次世代エンジニアと技術者が出会う、技術の祭典。2027年9月14日(火)・15日(水)、金沢工業大学にて開催。",
+    "description": "IT×大規模×北陸。次世代エンジニアと技術者が出会う、技術の祭典。2027年9月13日(月)・14日(火)、金沢工業大学にて開催。",
     "siteUrl": "https://conference.developershub.jp",
     "ogImage": "/og-default.png"
   },
@@ -17,13 +17,13 @@
   ],
   "hero": {
     "heading": "北陸ITカンファレンス",
-    "dateLabel": "2027年9月14日(火)・15日(水)",
+    "dateLabel": "2027年9月13日(月)・14日(火)",
     "venueLabel": "金沢工業大学",
     "primaryCta": { "label": "参加登録はこちら", "href": "#apply" },
     "secondaryCta": { "label": "登壇に応募する", "href": "#apply" }
   },
   "catch": {
-    "lead": "学生 × 大規模 × 北陸",
+    "lead": "IT × 大規模 × 北陸",
     "heading": "次世代エンジニアと技術者が出会う、技術の祭典"
   },
   "about": {
@@ -46,7 +46,7 @@
   "crowdfunding": {
     "heading": "クラウドファンディング情報",
     "body": "CAMPFIREにて支援プロジェクト公開中。\n応援お待ちしています！",
-    "cta": { "label": "クラウドファンディングを見る", "href": "#" }
+    "cta": { "label": "クラウドファンディングを見る", "href": "https://camp-fire.jp/projects/975088/" }
   },
   "apply": {
     "heading": "応募フォーム",

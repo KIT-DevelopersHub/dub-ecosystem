@@ -25,10 +25,20 @@ export function Crowdfunding({ data, index }: { data: CrowdfundingConfig; index?
           </Reveal>
           {data.cta && (
             <Reveal className="support-actions" variant="up" delay={220}>
-              <a className="btn-support" href={data.cta.href} data-magnetic>
-                {data.cta.label}
-                <span className="arrow" aria-hidden="true">→</span>
-              </a>
+              {(() => {
+                const external = /^https?:\/\//.test(data.cta.href);
+                return (
+                  <a
+                    className="btn-support"
+                    href={data.cta.href}
+                    data-magnetic
+                    {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                  >
+                    {data.cta.label}
+                    <span className="arrow" aria-hidden="true">{external ? "↗" : "→"}</span>
+                  </a>
+                );
+              })()}
             </Reveal>
           )}
         </div>

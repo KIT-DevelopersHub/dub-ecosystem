@@ -185,67 +185,6 @@ img { max-width: 100%; height: auto; display: block; }
 }
 
 /* ============================================================
-   Entrance curtain — first-paint "ドワー" loading→burst overlay
-   ============================================================ */
-.lp-entrance {
-  position: fixed;
-  inset: 0;
-  z-index: 999;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  background:
-    radial-gradient(120% 100% at 50% 40%, rgba(23, 184, 146, 0.35) 0%, transparent 55%),
-    linear-gradient(158deg, #0f2f8f 0%, #1e3fa8 46%, #0e6f8f 100%);
-  pointer-events: none;
-  will-change: opacity, transform, filter;
-  /* pure-CSS recede (framer-motion removed) — holds, then fades+scales+blurs out */
-  animation: entrance-recede 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-@keyframes entrance-recede {
-  0%, 40% { opacity: 1; transform: scale(1); filter: blur(0); }
-  100% { opacity: 0; transform: scale(1.12); filter: blur(8px); }
-}
-/* expanding shockwave ring — the visual pulse of the burst */
-.lp-entrance-wave {
-  position: absolute;
-  top: 40%;
-  left: 50%;
-  width: 40vmax;
-  height: 40vmax;
-  margin: -20vmax 0 0 -20vmax;
-  border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.55);
-  box-shadow:
-    0 0 60px rgba(255, 255, 255, 0.35),
-    inset 0 0 60px rgba(23, 184, 146, 0.4);
-  will-change: transform, opacity;
-  transform: scale(0);
-  animation: entrance-wave 1.25s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
-}
-@keyframes entrance-wave {
-  0% { transform: scale(0); opacity: 0.55; }
-  100% { transform: scale(1); opacity: 0; }
-}
-.lp-entrance-mark {
-  position: relative;
-  font-family: var(--font-inter), sans-serif;
-  font-size: clamp(0.72rem, 2.4vw, 1.05rem);
-  font-weight: 800;
-  letter-spacing: 0.4em;
-  text-indent: 0.4em;
-  color: rgba(255, 255, 255, 0.92);
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.25);
-  will-change: transform, opacity;
-  animation: entrance-mark 1.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-@keyframes entrance-mark {
-  0% { opacity: 0; transform: scale(0.72); }
-  22%, 42% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.06); }
-}
-
-/* ============================================================
    Hero (TOP)
    ============================================================ */
 .hero {
@@ -1424,16 +1363,15 @@ img { max-width: 100%; height: auto; display: block; }
   height: 30px;
   border-radius: 9px;
   flex: 0 0 auto;
-  background: linear-gradient(135deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
+  /* The official logo (pale blue→green→gold on transparent) is placed on a deep
+     navy chip so it stays legible on the light header and the dark footer. */
+  background-color: #0c1533;
+  background-image: url("/img/brand-logo.png");
+  background-size: 82%;
+  background-position: center;
+  background-repeat: no-repeat;
   box-shadow: 0 6px 16px -6px rgba(47, 97, 214, 0.6);
   position: relative;
-}
-.brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border-radius: 4px;
-  border: 2px solid rgba(255, 255, 255, 0.9);
 }
 .brand-name {
   display: flex;
@@ -2265,7 +2203,6 @@ img { max-width: 100%; height: auto; display: block; }
   .hero::before, .hero::after { animation: none !important; }
   .catch::before, .catch::after { animation: none !important; }
   .scroll-progress { display: none !important; }
-  .lp-entrance { display: none !important; }
   .apply-grid .apply-card,
   .apply-grid .apply-card:hover,
   .apply-grid .apply-card:focus-visible { transform: none; box-shadow: var(--shadow-md); }
@@ -2277,7 +2214,6 @@ img { max-width: 100%; height: auto; display: block; }
   .program-card:hover,
   .site-head-cta:hover { transform: none; }
   .hero-scroll-line::after { animation: none !important; }
-  .lp-entrance-wave, .lp-entrance-mark { animation: none !important; }
   .hero-bg-blob, .support-shape { animation: none !important; }
   .svc-card-link:hover, .info-card:hover, .git-btn:hover, .btn-support:hover,
   .work-card-io:hover .work-card { transform: none; }
@@ -2941,4 +2877,302 @@ img { max-width: 100%; height: auto; display: block; }
 .hero--v31 .hero-sub {
   color: #cfe0ff;
   text-shadow: 0 1px 18px rgba(10, 20, 60, 0.6);
+}
+
+/* ============================================================
+   v3.2 — 受付未開始の disabled 表示 / SNS ボタン / プログラムのダイアログ
+   ============================================================ */
+
+/* --- <button> として描画される CTA の素リセット（a と同じ見た目に揃える） --- */
+button.hero-cta,
+button.site-head-cta,
+.prow--btn {
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* --- Hero CTA disabled（既存の .hero-cta.is-disabled を button 用に補強） --- */
+.hero-cta.is-disabled {
+  gap: 0.6rem;
+}
+.hero-cta.is-disabled .hero-cta-badge {
+  color: var(--lp-ink);
+}
+
+/* --- Header CTA disabled --- */
+.site-head-cta.is-disabled {
+  cursor: not-allowed;
+  color: var(--lp-ink-soft);
+  background: var(--lp-surface-muted, #eef0f3);
+  border: 1px solid var(--lp-border);
+  box-shadow: none;
+}
+.site-head-cta.is-disabled:hover { transform: none; box-shadow: none; }
+.site-head-cta-badge {
+  font-size: 0.72em;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--lp-ink-soft);
+  background: rgba(16, 28, 168, 0.08);
+  border-radius: 999px;
+  padding: 0.14em 0.6em;
+}
+
+/* --- Apply service card disabled --- */
+.svc-card-link.is-disabled {
+  cursor: not-allowed;
+  background: linear-gradient(180deg, #fbfcfe 0%, #eef1f6 100%);
+  filter: grayscale(0.25);
+}
+.svc-card-link.is-disabled:hover,
+.svc-card-link.is-disabled:focus-visible {
+  transform: none;
+  box-shadow: var(--shadow-md);
+  border-color: var(--lp-border-soft);
+}
+.svc-card-link.is-disabled .svc-icon { filter: grayscale(0.55); opacity: 0.85; }
+.svc-card-link.is-disabled:hover .svc-icon { transform: none; }
+.svc-card-cta--disabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  color: var(--lp-ink-soft) !important;
+}
+.svc-card-badge {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 800;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: linear-gradient(120deg, #7c8698 0%, #59616f 100%);
+  border-radius: 999px;
+  padding: 0.4em 1em;
+}
+.svc-card-soon {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--lp-ink-mute);
+}
+
+/* --- Contact: JOIN disabled + SNS ボタン --- */
+.git-btn.is-disabled {
+  cursor: not-allowed;
+  background: var(--lp-surface-muted, #eef0f3) !important;
+  border-color: var(--lp-border) !important;
+  box-shadow: none;
+}
+.git-btn.is-disabled .git-btn-en { color: var(--lp-ink-mute); }
+.git-btn.is-disabled .git-btn-jp { color: var(--lp-ink-soft); }
+.git-btn-badge {
+  position: absolute;
+  right: 1.1rem; top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--lp-ink-soft);
+  background: rgba(16, 28, 168, 0.08);
+  border-radius: 999px;
+  padding: 0.24em 0.7em;
+}
+.git-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lp-blue-deep);
+  margin-bottom: 0.1rem;
+}
+
+/* --- Contact: メール/Instagram/X アイコンボタン群 --- */
+.git-social {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+}
+.git-social-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--lp-border);
+  box-shadow: var(--shadow-sm);
+  color: var(--lp-blue-deep);
+  text-decoration: none;
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease,
+    background 0.22s ease, color 0.22s ease;
+}
+.git-social-btn:hover {
+  transform: translateY(-4px) scale(1.06);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--lp-blue);
+  background: var(--lp-blue);
+  color: #fff;
+}
+.git-social-btn:focus-visible {
+  outline: 3px solid var(--lp-blue);
+  outline-offset: 3px;
+}
+
+/* --- Program の行を button 化（見た目は .prow のまま・全幅クリック可） --- */
+.prow--btn {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  color: inherit;
+  cursor: pointer;
+}
+.prow--btn:focus-visible { outline-offset: -3px; }
+
+/* ---- Program ダイアログ（native <dialog>） ---- */
+.prog-dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  max-width: min(92vw, 520px);
+  width: 100%;
+  color: var(--lp-ink);
+  overflow: visible;
+}
+.prog-dialog::backdrop {
+  background: rgba(9, 16, 44, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+/* The modal <dialog> lives in the top layer, above the decorative custom cursor
+   (z-index:9999). Without help, the native cursor is hidden (.has-lp-cursor sets
+   cursor:none) while the custom dot renders BEHIND the dialog — the pointer
+   appears to vanish "behind" the page and the dialog feels unclickable. While a
+   dialog is open we hide the decorative cursor and restore the real one. */
+body.has-open-dialog .lp-cursor-dot,
+body.has-open-dialog .lp-cursor-ring { display: none !important; }
+body.has-open-dialog.has-lp-cursor,
+body.has-open-dialog.has-lp-cursor a,
+body.has-open-dialog.has-lp-cursor button,
+body.has-open-dialog.has-lp-cursor [role="tab"] { cursor: auto; }
+.prog-dialog,
+.prog-dialog * { cursor: auto; }
+body.has-open-dialog.has-lp-cursor .prog-dialog button,
+body.has-open-dialog.has-lp-cursor .prog-dialog a,
+body.has-open-dialog.has-lp-cursor .prog-dialog [role="button"],
+.prog-dialog button,
+.prog-dialog a,
+.prog-dialog [role="button"] { cursor: pointer; }
+.prog-dialog[open] { animation: prog-dialog-in 0.34s cubic-bezier(0.22, 1, 0.36, 1); }
+.prog-dialog[open]::backdrop { animation: prog-backdrop-in 0.3s ease; }
+@keyframes prog-dialog-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes prog-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+.prog-dialog-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: clamp(1.75rem, 5vw, 2.5rem);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, #ffffff 0%, var(--lp-surface-alt) 100%);
+  border: 1px solid var(--lp-border-soft);
+  box-shadow: var(--shadow-xl);
+}
+.prog-dialog-close {
+  position: absolute;
+  top: 0.9rem; right: 0.9rem;
+  display: grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--lp-border);
+  background: #fff;
+  color: var(--lp-ink-soft);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+.prog-dialog-close:hover { background: var(--lp-surface-alt); color: var(--lp-ink); transform: rotate(90deg); }
+.prog-dialog-icon {
+  display: grid;
+  place-items: center;
+  width: 62px; height: 62px;
+  border-radius: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--lp-blue) 0%, var(--lp-teal) 100%);
+  box-shadow: 0 12px 24px -8px rgba(47, 97, 214, 0.5);
+}
+.prog-dialog-eyebrow {
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  font-size: 0.72rem;
+  color: var(--lp-teal);
+}
+.prog-dialog-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.6rem, 5vw, 2.2rem);
+  color: var(--lp-heading);
+  line-height: 1.1;
+}
+.prog-dialog-note {
+  margin: 0;
+  color: var(--lp-ink-soft);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+.prog-dialog-status {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 1.1rem 1.2rem;
+  border-radius: var(--radius-lg);
+  border: 1px dashed rgba(47, 97, 214, 0.3);
+  background: linear-gradient(135deg, rgba(47, 97, 214, 0.06), rgba(23, 184, 146, 0.06));
+}
+.prog-dialog-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 800;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+  color: var(--lp-blue-deep);
+  background: #fff;
+  border: 1px solid var(--lp-border);
+  border-radius: 999px;
+  padding: 0.3em 0.9em;
+}
+.prog-dialog-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--lp-teal);
+  box-shadow: 0 0 0 0 rgba(23, 184, 146, 0.5);
+  animation: prog-dot-pulse 1.8s ease-out infinite;
+}
+@keyframes prog-dot-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(23, 184, 146, 0.5); }
+  70%  { box-shadow: 0 0 0 7px rgba(23, 184, 146, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(23, 184, 146, 0); }
+}
+.prog-dialog-status-text {
+  margin: 0.7rem 0 0;
+  color: var(--lp-ink-soft);
+  font-size: 0.95rem;
+  line-height: 1.75;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prog-dialog[open],
+  .prog-dialog[open]::backdrop { animation: none; }
+  .prog-dialog-dot { animation: none; }
+  .prog-dialog-close:hover { transform: none; }
 }
