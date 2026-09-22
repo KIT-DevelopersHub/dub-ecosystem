@@ -4,6 +4,7 @@
 // listLpVersions() を useQuery で読み、読み込み中はスケルトン、0 件なら空状態、失敗時は
 // ErrorState を出す（Dub 既存アプリ = driveshare/usage と同じ状態ハンドリング）。各行から
 // 公開 URL を新規タブで開ける（外部リンクは rel でハードニング）。
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Badge,
@@ -18,6 +19,7 @@ import {
 } from "@dub/ui";
 import type { BadgeTone } from "@dub/ui";
 import { listLpVersions, type LpVersion, type LpVersionStatus } from "./lpVersions.ts";
+import { LpViewer } from "./LpViewer.tsx";
 
 const LP_VERSIONS_KEY = ["lp", "versions"] as const;
 
@@ -32,7 +34,13 @@ function formatUpdated(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("ja-JP");
 }
 
-function VersionRow({ version }: { version: LpVersion }): JSX.Element {
+function VersionRow({
+  version,
+  onView,
+}: {
+  version: LpVersion;
+  onView: (version: LpVersion) => void;
+}): JSX.Element {
   const status = STATUS_META[version.status];
   return (
     <Card testId={`fe2-lp-version-${version.id}`}>
@@ -48,18 +56,16 @@ function VersionRow({ version }: { version: LpVersion }): JSX.Element {
           <span style={{ opacity: 0.85 }}>{version.description}</span>
           <small style={{ opacity: 0.65 }}>更新日: {formatUpdated(version.updatedAt)}</small>
         </Stack>
-        <a
-          href={version.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`${version.name} を新しいタブで見る`}
-          style={{ textDecoration: "none" }}
-          data-testid={`fe2-lp-view-${version.id}`}
+        {/* 「見る」= アプリ内フルスクリーンで LP を表示（別ブラウザタブは開かない）。
+            LP 表示中はシェルの chrome を覆って隠し、「アプリに戻る」で通常 UI へ戻る。 */}
+        <Button
+          variant="secondary"
+          iconRight={<Icon name="external-link" />}
+          onClick={() => onView(version)}
+          testId={`fe2-lp-view-${version.id}`}
         >
-          <Button variant="secondary" iconRight={<Icon name="external-link" />}>
-            見る
-          </Button>
-        </a>
+          見る
+        </Button>
       </Stack>
     </Card>
   );
@@ -67,6 +73,9 @@ function VersionRow({ version }: { version: LpVersion }): JSX.Element {
 
 export function LpManagementScreen(): JSX.Element {
   const query = useQuery({ queryKey: LP_VERSIONS_KEY, queryFn: listLpVersions });
+  // 表示中の LP（null = 一覧表示）。「見る」でセットしてフルスクリーン閲覧に入り、
+  // 「アプリに戻る」で null に戻して通常の管理画面(=アプリ)へ復帰する。
+  const [viewing, setViewing] = useState<LpVersion | null>(null);
 
   const header = (
     <PageHeader
@@ -108,7 +117,7 @@ export function LpManagementScreen(): JSX.Element {
     body = (
       <Stack gap={4} testId="fe2-lp-list">
         {query.data.map((v) => (
-          <VersionRow key={v.id} version={v} />
+          <VersionRow key={v.id} version={v} onView={setViewing} />
         ))}
       </Stack>
     );
@@ -118,6 +127,7 @@ export function LpManagementScreen(): JSX.Element {
     <Stack gap={6} testId="fe2-lp-screen">
       {header}
       {body}
+      {viewing ? <LpViewer version={viewing} onBack={() => setViewing(null)} /> : null}
     </Stack>
   );
 }
