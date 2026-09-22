@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "event-inline-edit",
+  "worker": "dub-demo-event-inline-edit",
+  "url": "https://dub-demo-event-inline-edit.developershub-site.workers.dev",
+  "deployedSha": "a908b6af",
+  "branch": "feat/event-inline-edit",
+  "actor": "ko-tarou",
+  "markers": ["fe3-event-inline-edit-v1","fe3-detail-edit-page"],
+  "live": true,
+  "verifiedAt": "2026-09-22T12:28:43Z",
+  "updatedAt": "2026-09-22T12:28:43Z",
+  "note": "Event page inline block editor (shiori UI reused)"
+}
