@@ -184,6 +184,21 @@ ALTER TABLE member_people ADD COLUMN desired_activity TEXT;
 `.trim(),
 };
 
+// 0010: 各メンバーが配下につく「リーダー」への自己参照リンク (leader_id) を足す additive
+// ALTER (non-destructive)。組織図の親子関係と名簿の組織図順ソートに使う。null は直属リーダー
+// 無し。既存行は全て null（後方互換）。SQLite ADD COLUMN は既定値/参照制約を付けられないため
+// nullable のプレーン TEXT（アプリ層で同一 org・非自己参照を検証）。Mirrors
+// 0010_person_leader.sql (schema-lockstep).
+export const MEMBER_PERSON_LEADER_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0010_person_leader",
+  up: `
+ALTER TABLE member_people ADD COLUMN leader_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_member_people_leader
+  ON member_people(leader_id) WHERE leader_id IS NOT NULL;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -195,4 +210,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PARTICIPATION_ROMAJI_MIGRATION,
   MEMBER_PARTICIPATION_REVIEW_STATE_MIGRATION,
   MEMBER_PERSON_DESIRED_ACTIVITY_MIGRATION,
+  MEMBER_PERSON_LEADER_MIGRATION,
 ];
