@@ -9,7 +9,7 @@ import { Button, Card, Icon, PageHeader, SegmentedControl, SkeletonLoader } from
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { task } from "@dub/types";
-import { useCalendarApi } from "./CalendarProvider.tsx";
+import { useCalendarApi, useCalendarCurrentUserId } from "./CalendarProvider.tsx";
 import { CalendarGrid } from "./CalendarGrid.tsx";
 import { TaskDetailDialog } from "./TaskDetailDialog.tsx";
 import {
@@ -44,14 +44,19 @@ function weekRangeLabel(anchor: Date): string {
 
 export function CalendarScreen(): JSX.Element {
   const api = useCalendarApi();
+  const currentUserId = useCalendarCurrentUserId();
   const navigate = useNavigate();
   const [view, setView] = useState<CalendarViewMode>("month");
   const [anchor, setAnchor] = useState<Date>(() => todayUtc());
   const [selected, setSelected] = useState<task.Task | null>(null);
 
+  // Scope to the caller's own tasks (担当/依頼), the only event-less list task-service
+  // allows a user — a bare list is rejected by the "/me rule". `enabled` waits for the
+  // session so we never fire an unscoped (400-bound) request while auth is loading.
   const { data, isPending, isError, refetch } = useQuery({
-    queryKey: ["calendar", "tasks"],
-    queryFn: () => api.listAllTasks(),
+    queryKey: ["calendar", "tasks", currentUserId],
+    queryFn: () => api.listMyTasks(currentUserId as NonNullable<typeof currentUserId>),
+    enabled: currentUserId != null,
   });
 
   const tasks = data ?? [];
