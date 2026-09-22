@@ -1,12 +1,35 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import type { common } from "@dub/types";
 import { ChatRuntimeProvider, type ChatRuntime } from "../context";
 import { useChannelView } from "./useChannelView";
 import { MockChatClient } from "../api/mock-client";
 import { MockRealtimeClient } from "../realtime/mock-client";
+import type { ChatRealtimeClient, RealtimeStatus } from "../realtime/client";
+import type { ChatRealtimeEvent, WsTicketResponse } from "../api/contract";
 import { demoSeed, ME, OTHER } from "../dev/seed";
 import { useChatStore } from "../store/useChatStore";
+
+// A realtime client that never reaches "open" — models the DO-direct WS being
+// unreachable (bad host / rejected ticket). Used to exercise the polling fallback.
+class NeverOpenRealtimeClient implements ChatRealtimeClient {
+  private statusHandlers = new Set<(s: RealtimeStatus) => void>();
+  connect(_channelId: common.ChannelId, _ticket: WsTicketResponse): void {
+    for (const h of this.statusHandlers) h("reconnecting");
+  }
+  disconnect(): void {
+    for (const h of this.statusHandlers) h("closed");
+  }
+  onEvent(_handler: (e: ChatRealtimeEvent) => void): () => void {
+    return () => undefined;
+  }
+  onStatusChange(handler: (s: RealtimeStatus) => void): () => void {
+    this.statusHandlers.add(handler);
+    handler("connecting");
+    return () => this.statusHandlers.delete(handler);
+  }
+}
 
 const GENERAL = "chn_general00000000000000000";
 
@@ -97,6 +120,41 @@ describe("useChannelView integration", () => {
     });
     expect(result.current.state.messages.length).toBe(before + 1);
     expect(result.current.state.messages.some((m) => m.body === "live message")).toBe(true);
+  });
+
+  it("falls back to polling when the WS never opens: a server-side message appears without RT", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = new MockChatClient(demoSeed());
+      const runtime: ChatRuntime = {
+        api,
+        currentUserId: ME,
+        can: () => true,
+        createRealtimeClient: () => new NeverOpenRealtimeClient(),
+      };
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <ChatRuntimeProvider value={runtime}>{children}</ChatRuntimeProvider>
+      );
+      const { result } = renderHook(() => useChannelView(GENERAL), { wrapper });
+      await vi.waitFor(() => expect(result.current.loading).toBe(false));
+      // WS is stuck off the happy path — never "open".
+      expect(result.current.state.rtStatus).not.toBe("open");
+
+      // Another client posts to the same channel (server-side only; not via the hook).
+      await act(async () => {
+        await api.postMessage({ channelId: GENERAL, body: "arrived via poll", clientTempId: "x" });
+      });
+      // Nothing yet — the hook has not been told.
+      expect(result.current.state.messages.some((m) => m.body === "arrived via poll")).toBe(false);
+
+      // One poll cycle later, the fallback pulls it into the timeline.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(result.current.state.messages.some((m) => m.body === "arrived via poll")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("optimistically removes a message the instant delete is called, before the DELETE resolves (hard)", async () => {

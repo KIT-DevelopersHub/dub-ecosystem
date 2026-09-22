@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "publishedAt": "2026-09-06T00:00:00.000Z",
+  "seo": {
+    "title": "北陸ITカンファレンス 2027",
+    "description": "学生×大規模×北陸。次世代エンジニアと技術者が出会う、技術の祭典。2027年9月14日(火)・15日(水)、金沢工業大学にて開催。",
+    "siteUrl": "https://conference.developershub.jp",
+    "ogImage": "/og-default.png"
+  },
+  "nav": [
+    { "label": "TOP", "href": "#top" },
+    { "label": "北陸ITカンファレンスとは？", "href": "#about" },
+    { "label": "プログラム内容", "href": "#program" },
+    { "label": "クラファン情報", "href": "#crowdfunding" },
+    { "label": "応募", "href": "#apply" },
+    { "label": "お問い合わせ", "href": "#contact" }
+  ],
+  "hero": {
+    "heading": "北陸ITカンファレンス",
+    "dateLabel": "2027年9月14日(火)・15日(水)",
+    "venueLabel": "金沢工業大学",
+    "primaryCta": { "label": "参加登録はこちら", "href": "#apply" },
+    "secondaryCta": { "label": "登壇に応募する", "href": "#apply" }
+  },
+  "catch": {
+    "lead": "学生 × 大規模 × 北陸",
+    "heading": "次世代エンジニアと技術者が出会う、技術の祭典"
+  },
+  "about": {
+    "heading": "北陸ITカンファレンスとは？",
+    "body": [
+      "**学生主導**で開かれる北陸の技術イベント",
+      "**地域エンジニア・企業・学生**が出会う場",
+      "北陸に**技術コミュニティ**の循環を生み出す"
+    ]
+  },
+  "program": {
+    "heading": "プログラム内容",
+    "note": "2日間で、**聴く・体験する・出会う**を一体にした構成を予定しています。\nプログラムは決まり次第、順次公開します。",
+    "items": [
+      { "name": "聴く", "note": "第一線のエンジニアによる技術セッション" },
+      { "name": "体験する", "note": "手を動かして学ぶワークショップ" },
+      { "name": "出会う", "note": "学生・地域エンジニア・企業の交流" }
+    ]
+  },
+  "crowdfunding": {
+    "heading": "クラウドファンディング情報",
+    "body": "CAMPFIREにて支援プロジェクト公開中。\n応援お待ちしています！",
+    "cta": { "label": "クラウドファンディングを見る", "href": "#" }
+  },
+  "apply": {
+    "heading": "応募フォーム",
+    "participant": {
+      "title": "参加者",
+      "body": "どなたでも無料でご参加いただけます。\n北陸の技術シーンに触れる2日間へ、\nお気軽にお越しください。",
+      "cta": { "label": "参加登録は\nこちら！", "href": "#" }
+    },
+    "speaker": {
+      "title": "登壇",
+      "body": "あなたの知見や開発ストーリーを、\n北陸のエンジニアへ届けるチャンス。\nご応募をお待ちしています。",
+      "cta": { "label": "登壇への応募は\nこちら！", "href": "#" }
+    }
+  },
+  "contact": {
+    "heading": "お問い合わせ",
+    "org": "主催：DevelopersHub（一般社団法人 Developers Hub）",
+    "email": "info@developershub.jp",
+    "note": "皆様のご参加を心よりお待ちしております。"
+  },
+  "footer": {
+    "org": "北陸ITカンファレンス",
+    "links": [
+      { "label": "公式サイト", "href": "https://developershub.jp" }
+    ],
+    "copyright": "© DevelopersHub"
+  }
+}

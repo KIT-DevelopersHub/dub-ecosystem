@@ -10,7 +10,7 @@
 // alarms are supported on SQLite-backed DOs.
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { consoleSink } from "@dub/observability";
-import { drainAll } from "./drain-all";
+import { drainAll, pruneAll, type PruneAllResult } from "./drain-all";
 import type { Env } from "./env";
 
 // 60 seconds — the drain safety-net cadence. A DO alarm does NOT count against the
@@ -23,6 +23,13 @@ import type { Env } from "./env";
 // (chat-service -> notification POST /internal/events-async, idempotent on envelope.id);
 // this alarm is the durable fallback that guarantees eventual delivery.
 export const DRAIN_INTERVAL_MS = 60 * 1000;
+
+// Retention runs far less often than the drain: delivery is the hot path, pruning is
+// housekeeping. At most once every 6h keeps prune write traffic negligible while still
+// bounding table growth. The last-prune timestamp is persisted in DO storage so the
+// cadence holds across ticks (the drain fires every 60s).
+export const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+export const LAST_PRUNE_KEY = "freeq:lastPruneAt";
 
 export class FreeqDrainDO {
   constructor(
@@ -54,6 +61,30 @@ export class FreeqDrainDO {
   async alarm(): Promise<void> {
     await this.state.storage.setAlarm(Date.now() + DRAIN_INTERVAL_MS);
     const results = await drainAll(this.env);
-    consoleSink({ level: "info", message: "freeq aggregated drain (DO alarm)", service: "freeq-drain", fields: { ...results } });
+    const prune = await this.maybePrune();
+    consoleSink({
+      level: "info",
+      message: "freeq aggregated drain (DO alarm)",
+      service: "freeq-drain",
+      fields: { ...results, ...(prune ? { prune } : {}) },
+    });
+  }
+
+  /**
+   * Run the retention pass at most once per PRUNE_INTERVAL_MS. Returns the per-DB result
+   * when it ran, or null when it was skipped (baseline tick or within the interval). The
+   * first tick after a cold start only records a baseline and does NOT prune, so a fresh
+   * DO never deletes on its very first alarm. Never throws — pruneAll is best-effort per DB.
+   */
+  private async maybePrune(): Promise<PruneAllResult | null> {
+    const now = Date.now();
+    const last = await this.state.storage.get<number>(LAST_PRUNE_KEY);
+    if (last === undefined) {
+      await this.state.storage.put(LAST_PRUNE_KEY, now); // baseline; defer pruning to a later tick
+      return null;
+    }
+    if (now - last < PRUNE_INTERVAL_MS) return null;
+    await this.state.storage.put(LAST_PRUNE_KEY, now);
+    return pruneAll(this.env);
   }
 }

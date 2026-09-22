@@ -180,6 +180,84 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
   return out;
 }
 
+/** Parse an ISO8601 datetime that must be strictly in the future (relative to `now`).
+ *  Returns the normalized ISO string, or pushes a FieldError and returns null. */
+function parseFutureIso(v: unknown, field: string, fe: FieldError[], now: number, minLeadMs = 0): string | null {
+  if (typeof v !== "string" || v.length === 0) {
+    fe.push({ field, reason: "required", message: "ISO8601 datetime required" });
+    return null;
+  }
+  const t = Date.parse(v);
+  if (Number.isNaN(t)) {
+    fe.push({ field, reason: "invalid_datetime", message: "not a valid ISO8601 datetime" });
+    return null;
+  }
+  if (t <= now + minLeadMs) {
+    fe.push({ field, reason: "not_future", message: "scheduledAt must be in the future" });
+    return null;
+  }
+  return new Date(t).toISOString();
+}
+
+/** Validate POST /mail/scheduled body: a SendMailRequest + a future `scheduledAt`.
+ *  Attachments are NOT supported on a scheduled send in this slice — reject them loudly
+ *  rather than silently dropping the files at delivery. */
+export function parseScheduleMailRequest(body: unknown, now: number = Date.now()): mail.ScheduleMailRequest {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  if (Array.isArray((body as Record<string, unknown>).attachments) && ((body as Record<string, unknown>).attachments as unknown[]).length > 0) {
+    throw mailInvalid([{ field: "attachments", reason: "unsupported", message: "attachments are not supported on a scheduled send" }]);
+  }
+  // Reuse the full send-request validation (to/cc/subject/body/inReplyTo/loopHeaders).
+  const base = parseSendMailRequest(body);
+  const fe: FieldError[] = [];
+  const scheduledAt = parseFutureIso((body as Record<string, unknown>).scheduledAt, "scheduledAt", fe, now);
+  if (fe.length > 0) throw mailInvalid(fe);
+  return { ...base, scheduledAt: scheduledAt as string };
+}
+
+/** Validate PATCH /mail/scheduled/:id body: any subset of editable fields. At least one
+ *  field must be present. `scheduledAt`, when present, must still be in the future. */
+export function parseScheduleMailPatch(body: unknown, now: number = Date.now()): mail.ScheduleMailPatch {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  const fe: FieldError[] = [];
+  const b = body;
+  const out: mail.ScheduleMailPatch = {};
+
+  if (b.to !== undefined) {
+    const to = parseAddressField(b.to, "to", fe);
+    if (to !== null) {
+      if (to.length === 0) fe.push({ field: "to", reason: "required", message: "at least one recipient" });
+      else if (to.length > MAX_RECIPIENTS) fe.push({ field: "to", reason: "too_long", message: `<= ${MAX_RECIPIENTS}` });
+      else out.to = to;
+    }
+  }
+  if (b.cc !== undefined) {
+    const cc = parseAddressField(b.cc, "cc", fe);
+    if (cc !== null) out.cc = cc;
+  }
+  if (b.subject !== undefined) {
+    if (typeof b.subject !== "string" || b.subject.length < 1 || b.subject.length > SUBJECT_MAX) {
+      fe.push({ field: "subject", reason: "invalid_length", message: `1..${SUBJECT_MAX}` });
+    } else out.subject = b.subject;
+  }
+  if (b.textBody !== undefined) {
+    if (typeof b.textBody !== "string" || b.textBody.length === 0) fe.push({ field: "textBody", reason: "required" });
+    else out.textBody = b.textBody;
+  }
+  if (b.htmlBody !== undefined) {
+    if (typeof b.htmlBody !== "string") fe.push({ field: "htmlBody", reason: "invalid_type" });
+    else out.htmlBody = b.htmlBody;
+  }
+  if (b.scheduledAt !== undefined) {
+    const at = parseFutureIso(b.scheduledAt, "scheduledAt", fe, now);
+    if (at !== null) out.scheduledAt = at;
+  }
+
+  if (fe.length > 0) throw mailInvalid(fe);
+  if (Object.keys(out).length === 0) throw mailInvalid([{ field: "(root)", reason: "empty_patch", message: "at least one field required" }]);
+  return out;
+}
+
 /** Validate GET /messages query params (threadId? / cursor? / limit). */
 export function parseListMessagesQuery(q: Record<string, string | undefined>): { threadId?: string; cursor?: string; limit: number } {
   const fe: FieldError[] = [];

@@ -91,6 +91,15 @@ service = "dub-chat-service"      # POST /internal/system-messages (ChatAdapter)
 binding = "SVC_AUDIT"
 service = "dub-audit-log"
 
+# mobile-bff service binding: the PushAdapter POSTs /internal/push/dispatch here to fan a
+# notification out to the recipient's registered devices (FCM/APNs). Absent = push channel
+# is "skipped" (channel_not_wired) — which is why background OS push never fired on the free
+# tier. The target worker's live name is `mo3-mobile-bff` (NO dub- prefix; see
+# apps/mo3-mobile-bff/wrangler.free.toml), so this must match exactly.
+[[services]]
+binding = "SVC_MOBILE_BFF"
+service = "mo3-mobile-bff"        # POST /internal/push/dispatch (PushAdapter)
+
 # Daily Cron (03:00 UTC): the scheduled handler runs retention purge (inbox 90d /
 # deliveries 30d / processed 7d) AND drains the @dub/freeq audit outbox on the same tick.
 # The Workers FREE plan caps the account at 5 cron triggers, so this stays a single
