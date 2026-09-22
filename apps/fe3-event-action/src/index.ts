@@ -4,6 +4,18 @@
 // FeatureModule + registry singleton
 export { eventFeatureModule, actionTypeRegistry } from "./module";
 
+// Reusable block editor (generalised from the しおり panel; powers the
+// event-page inline editor, and available to any surface wanting a block canvas).
+export {
+  BlockEditor,
+  BLOCK_EDITOR_MARKER,
+  type BlockEditorProps,
+  type Block,
+  type BlockDoc,
+  type BlockType,
+  type ColSpan,
+} from "./blockeditor";
+
 // ActionTypeRegistry contract (FE4 exports taskActionPlugin: ActionTypePlugin)
 export {
   createActionTypeRegistry,
