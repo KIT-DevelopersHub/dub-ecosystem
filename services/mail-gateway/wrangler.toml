@@ -98,9 +98,13 @@ CF_EMAIL_ROUTING_ZONE_NAME = "developershub.jp"  # anti-spoof matcher check
 # service's deployed Worker name AND be enabled as an email Worker on the zone.
 CF_EMAIL_ROUTING_WORKER_NAME = "dub-mail-gateway"
 
-# Retention purge Cron (03:20 UTC daily): send_log 30d / inbound 30d.
+# Cron: every 5 minutes (ONE trigger — the Workers Free plan caps the account at 5 cron
+# triggers, so we keep mail-gateway's single trigger and just make it tick more often).
+# The scheduled() handler runs the 予約送信 (scheduled-send) drain on EVERY tick — giving a
+# "send later" a ~5-minute delivery granularity — and runs the daily retention purge only
+# on the ~03:20 UTC tick (gated in code). No new trigger, no paid Queue.
 [triggers]
-crons = ["20 3 * * *"]
+crons = ["*/5 * * * *"]
 
 [observability]
 enabled = true

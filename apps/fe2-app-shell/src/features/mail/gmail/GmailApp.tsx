@@ -6,6 +6,7 @@
 import { useEffect, useRef } from "react";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
+import { ScheduledList } from "./ScheduledList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
@@ -193,7 +194,13 @@ function GmailBody(): JSX.Element {
       <SearchBar />
       <div style={{ flex: 1, display: "flex", gap: 8, minHeight: 0, padding: "0 8px 8px" }}>
         <MailSidebar />
-        {openThread ? <ReadingPane thread={openThread} labels={state.labels} /> : <ThreadList />}
+        {state.folder === "scheduled" && !state.labelFilter ? (
+          <ScheduledList />
+        ) : openThread ? (
+          <ReadingPane thread={openThread} labels={state.labels} />
+        ) : (
+          <ThreadList />
+        )}
       </div>
       {state.composes.map((c, i) => (
         <ComposeWindow key={c.id} compose={c} offset={i} />
