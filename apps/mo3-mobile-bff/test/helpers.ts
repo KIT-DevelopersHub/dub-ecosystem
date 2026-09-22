@@ -62,8 +62,10 @@ export class FakeAuthenticator implements Authenticator {
   };
   caps: identity.PermissionKey[] = ["event:read", "task:read"];
   capabilityCalls: { userId: string; scope?: CapabilityScope }[] = [];
+  verifiedTokens: string[] = []; // records every token passed to verify (Bearer or cookie)
 
-  async verify(): Promise<auth.AuthVerifyResponse> {
+  async verify(_ctx: RequestContext, token: string): Promise<auth.AuthVerifyResponse> {
+    this.verifiedTokens.push(token);
     return this.verifyResult;
   }
   async capabilities(_ctx: RequestContext, userId: string, _orgId: string, scope?: CapabilityScope): Promise<identity.PermissionKey[]> {

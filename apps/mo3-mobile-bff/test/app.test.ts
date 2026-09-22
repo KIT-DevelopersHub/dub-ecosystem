@@ -130,6 +130,40 @@ describe("devices", () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
+
+  // de1 Flutter WebView: authenticates with the web `dub_session` cookie, no Bearer.
+  it("registers a device via the dub_session cookie (WebView) — no Bearer", async () => {
+    const h = makeHarness();
+    const res = await buildApp(h.deps).request(
+      "/m/v1/devices",
+      jsonInit({ platform: "android", pushToken: "fcmTok" }, { cookie: "dub_session=sess_cookie_val; other=1" }),
+    );
+    expect(res.status).toBe(201);
+    expect(h.authenticator.verifiedTokens).toEqual(["sess_cookie_val"]); // extracted the cookie token and verified it
+    expect(await h.devices.listActiveByUser(ALICE)).toHaveLength(1);
+  });
+
+  it("lists and deletes devices via the dub_session cookie", async () => {
+    const h = makeHarness();
+    const app = buildApp(h.deps);
+    const cookie = { cookie: "dub_session=sess_cookie_val" };
+    const reg = await app.request("/m/v1/devices", jsonInit({ platform: "android", pushToken: "fcmTok" }, cookie));
+    const { deviceId } = (await reg.json()) as { deviceId: string };
+    const list = await app.request("/m/v1/devices", { headers: cookie });
+    expect(((await list.json()) as { devices: unknown[] }).devices).toHaveLength(1);
+    const del = await app.request(`/m/v1/devices/${deviceId}`, { method: "DELETE", headers: cookie });
+    expect(del.status).toBe(204);
+  });
+
+  it("401 on device registration with neither Bearer nor cookie", async () => {
+    const h = makeHarness();
+    const res = await buildApp(h.deps).request(
+      "/m/v1/devices",
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ platform: "ios", pushToken: "x" }) },
+    );
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("UNAUTHENTICATED");
+  });
 });
 
 describe("transparent proxy", () => {
