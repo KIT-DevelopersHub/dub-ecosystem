@@ -18,8 +18,30 @@ import {
 } from "./lib/commanderApi.ts";
 import { useRunStream } from "./lib/useRunStream.ts";
 import { deriveLane, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import {
+  reflectionOf,
+  reflectionLabel,
+  REFLECTION_ICON,
+  REFLECTION_COLOR,
+} from "./lib/reflection.ts";
 import { ArtifactLinks } from "./ArtifactLinks.tsx";
+import { Spinner, ProgressBar } from "./Spinner.tsx";
 import { btnDanger, btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
+
+/** Human copy for the in-flight banner shown while an action is processing. */
+function inFlightLabel(kind: InFlight, to: FeaturePhase | null): string {
+  if (kind === "approve") {
+    if (to === "staging_deployed") return "staging に反映中… 完了すると『確認待ち』に移ります";
+    if (to === "prod_shipped") return "本番に反映中… 完了すると『完了』に移ります";
+    return "反映中…";
+  }
+  if (kind === "reject") return "却下を記録し、修正 run を起動中…";
+  if (kind === "rerun") return "指示を送って新しい run を起動中…";
+  if (kind === "archive") return "アーカイブ中…";
+  return "処理中…";
+}
+
+type InFlight = "approve" | "reject" | "rerun" | "archive" | null;
 
 export interface TaskDrawerHandlers {
   onApprove: (to: FeaturePhase) => Promise<void>;
@@ -64,6 +86,11 @@ export function TaskDrawer(props: TaskDrawerProps) {
   const [rerunOpen, setRerunOpen] = useState(false);
   const [rerunPrompt, setRerunPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  // Which action is currently processing (drives the visible 「反映中…」 banner). `busy`
+  // alone only disabled buttons — the operator saw nothing happen (「動いてる?」). This
+  // makes the in-flight state explicit until the server round-trip + run kick resolve.
+  const [inFlight, setInFlight] = useState<InFlight>(null);
+  const [inFlightTo, setInFlightTo] = useState<FeaturePhase | null>(null);
 
   const stream = useRunStream(item?.latestRun ? item.latestRun.id : null, { client, history });
 
@@ -92,18 +119,27 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
   if (!item) return null;
   const lane = deriveLane(item);
+  const reflection = reflectionOf(item);
   const approvalEdge = detail?.allowedTransitions.find((tr) => tr.requiresApproval) ?? null;
   const rejectEdge =
     detail?.allowedTransitions.find(
       (tr) => tr.to === "demo_rejected" || tr.to === "staging_rejected",
     ) ?? null;
 
-  const wrap = async (fn: () => Promise<void>) => {
+  const wrap = async (
+    fn: () => Promise<void>,
+    kind: InFlight = null,
+    to: FeaturePhase | null = null,
+  ) => {
     setBusy(true);
+    setInFlight(kind);
+    setInFlightTo(to);
     try {
       await fn();
     } finally {
       setBusy(false);
+      setInFlight(null);
+      setInFlightTo(null);
     }
   };
 
@@ -122,6 +158,45 @@ export function TaskDrawer(props: TaskDrawerProps) {
         </span>
       }
     >
+      {/* reflection banner: 反映済み(✅+URL) / 反映中(🔄 spinner) / 反映失敗(⚠️) を最上部で明示。
+          確認待ちで「反映が終わったのか進行中か」を即判別でき、本番反映中の進行表示も兼ねる。 */}
+      {reflection && (
+        <div
+          data-testid="drawer-reflection"
+          data-reflection-state={reflection.state}
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: t.space2,
+            marginBottom: t.space4,
+            padding: t.space3,
+            borderRadius: t.radius,
+            border: `1px solid ${REFLECTION_COLOR[reflection.state]}`,
+            fontSize: 13,
+            fontWeight: 600,
+            color: REFLECTION_COLOR[reflection.state],
+          }}
+        >
+          {reflection.state === "reflecting" ? (
+            <Spinner size={13} color={REFLECTION_COLOR[reflection.state]} />
+          ) : (
+            <span aria-hidden>{REFLECTION_ICON[reflection.state]}</span>
+          )}
+          <span>{reflectionLabel(reflection)}</span>
+          {reflection.state === "reflected" && reflection.url && (
+            <a
+              href={reflection.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ marginLeft: "auto", color: REFLECTION_COLOR[reflection.state], fontSize: 12 }}
+            >
+              確認する ↗
+            </a>
+          )}
+        </div>
+      )}
+
       {/* tabs */}
       <div role="tablist" style={{ display: "flex", gap: t.space2, marginBottom: t.space4 }}>
         {(["log", "artifact", "phase"] as Tab[]).map((tb) => (
@@ -277,13 +352,38 @@ export function TaskDrawer(props: TaskDrawerProps) {
               type="button"
               data-testid="action-archive"
               disabled={busy}
-              onClick={() => void wrap(props.onArchive)}
+              onClick={() => void wrap(props.onArchive, "archive")}
               style={btnGhost}
             >
               完了（アーカイブ）
             </button>
           )}
         </div>
+
+        {/* in-flight banner: makes 「反映中…」 visible (the 「動いてる?」 fix). */}
+        {inFlight && (
+          <div
+            data-testid="action-inflight"
+            role="status"
+            aria-live="polite"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: t.space2,
+              padding: t.space3,
+              borderRadius: t.radius,
+              border: `1px solid ${t.warning}`,
+              background: t.surface,
+              fontSize: 13,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: t.space2 }}>
+              <Spinner />
+              <span>{inFlightLabel(inFlight, inFlightTo)}</span>
+            </div>
+            <ProgressBar />
+          </div>
+        )}
 
         {/* approval confirm (🔒 self-approval guard) */}
         {pendingApproval && (
@@ -304,14 +404,19 @@ export function TaskDrawer(props: TaskDrawerProps) {
               data-testid="approval-confirm-yes"
               disabled={busy}
               onClick={() =>
-                void wrap(async () => {
-                  await props.onApprove(pendingApproval);
-                  setPendingApproval(null);
-                })
+                void wrap(
+                  async () => {
+                    await props.onApprove(pendingApproval);
+                    setPendingApproval(null);
+                  },
+                  "approve",
+                  pendingApproval,
+                )
               }
-              style={btnPrimary}
+              style={{ ...btnPrimary, display: "inline-flex", alignItems: "center", gap: t.space2 }}
             >
-              承認して実行
+              {busy && inFlight === "approve" && <Spinner size={12} color="#fff" />}
+              {busy && inFlight === "approve" ? "反映中…" : "承認して実行"}
             </button>
             <button type="button" onClick={() => setPendingApproval(null)} style={{ ...btnGhost, marginLeft: t.space2 }}>
               キャンセル
@@ -339,7 +444,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
                     await props.onReject(rejectTo, feedback.trim());
                     setRejectTo(null);
                     setFeedback("");
-                  })
+                  }, "reject")
                 }
                 style={{ ...btnDanger, opacity: feedback.trim() === "" ? 0.5 : 1 }}
               >
@@ -372,7 +477,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
                     await props.onRerun(rerunPrompt.trim());
                     setRerunOpen(false);
                     setRerunPrompt("");
-                  })
+                  }, "rerun")
                 }
                 style={{ ...btnPrimary, opacity: rerunPrompt.trim() === "" ? 0.5 : 1 }}
               >

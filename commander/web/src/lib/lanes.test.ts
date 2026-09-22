@@ -51,8 +51,19 @@ describe("deriveLane", () => {
     expect(deriveLane(item({ phase: "staging_rejected", run: "succeeded" }))).toBe<Lane>("needs_fix");
   });
 
-  it("prod_shipped → done (terminal wins over run status)", () => {
-    expect(deriveLane(item({ phase: "prod_shipped", run: "running" }))).toBe<Lane>("done");
+  it("prod_shipped shows本番反映の進行: running→running(本番反映中), failed→needs_fix, else→done", () => {
+    // 本番承認も staging と同じ進行UIに繋ぐ: 反映 run が走行中なら done へ飛ばさず走行中に見せる。
+    expect(deriveLane(item({ phase: "prod_shipped", run: "running" }))).toBe<Lane>("running");
+    expect(deriveLane(item({ phase: "prod_shipped", run: "pending" }))).toBe<Lane>("running");
+    expect(deriveLane(item({ phase: "prod_shipped", run: "failed" }))).toBe<Lane>("needs_fix");
+    expect(deriveLane(item({ phase: "prod_shipped", run: "succeeded" }))).toBe<Lane>("done");
+    expect(deriveLane(item({ phase: "prod_shipped", run: null }))).toBe<Lane>("done");
+  });
+
+  it("archived prod task (taskStatus done) → done even while a run is in flight", () => {
+    expect(deriveLane(item({ phase: "prod_shipped", taskStatus: "done", run: "running" }))).toBe<Lane>(
+      "done",
+    );
   });
 
   it("archived task (taskStatus done) → done", () => {

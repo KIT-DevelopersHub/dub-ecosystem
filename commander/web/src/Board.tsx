@@ -38,6 +38,29 @@ function composePrompt(prior: string | null, addition: string): string {
   return `${prior}\n\n---\n[前回の実行へのフィードバック / 追加指示]\n${addition}`;
 }
 
+// Instruction the staging反映 run carries when the user approves demo → staging. This is
+// what makes 「stgに進む」 do real work (not just flip the phase): the daemon spawns a run
+// in the task's worktree that merges the demo-approved版そのもの into staging and deploys,
+// and its live progress is what the board shows as 「staging反映中…」 until it succeeds
+// (→ 確認待ち via reconcilePhases) or fails (→ 要修正).
+export const STAGING_DEPLOY_PROMPT =
+  "[commander] このタスクの demo で承認された版そのものを staging に反映してください。" +
+  "手順: (1) demo承認版を staging 統合ブランチにマージ (別物を混ぜない・diff照合)、" +
+  "(2) `pnpm deploy:staging` で staging に反映、" +
+  "(3) `pnpm verify:live staging \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
+  "(4) 完了したら staging URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
+
+// Instruction the本番反映 run carries when the user approves staging → prod. Mirrors the
+// staging反映 run so 本番承認 も同じ進行UI（本番反映中 → 完了/失敗）に繋がる: the daemon
+// spawns a real run that ships the staging-approved版そのもの to 本番, and its live progress
+// is what the board shows as 「本番反映中」 until it succeeds (→完了) or fails (→要修正).
+export const PROD_DEPLOY_PROMPT =
+  "[commander] このタスクの staging で承認された版そのものを本番に反映してください。" +
+  "手順: (1) staging承認版を main にマージ (別物を混ぜない・diff照合)、" +
+  "(2) `pnpm deploy` で本番に反映、" +
+  "(3) `pnpm verify:live prod \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
+  "(4) 完了したら本番 URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
+
 export function Board({
   client = defaultClient,
   api = defaultApi,
@@ -57,6 +80,11 @@ export function Board({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [drawerVersion, setDrawerVersion] = useState(0);
   const reconcilingRef = useRef(false);
+  // Feature ids whose staging反映 run was just kicked but whose new (pending) run may not
+  // be visible on the board yet. While a feature sits here, reconcilePhases must NOT
+  // auto-advance staging_deployed→staging_review off the *stale* (succeeded demo) run —
+  // otherwise 「反映中」 would be skipped and the card would jump straight to 確認待ち.
+  const deployingRef = useRef<Set<string>>(new Set());
 
   // Auto-advance deploy-complete markers (non-approval system edges) so a succeeded run
   // lands in 確認待ち. demo_building→demo_review, staging_deployed→staging_review.
@@ -66,7 +94,9 @@ export function Board({
       const pending = list.filter(
         (i) =>
           i.latestRun?.status === "succeeded" &&
-          (i.featurePhase === "demo_building" || i.featurePhase === "staging_deployed"),
+          (i.featurePhase === "demo_building" || i.featurePhase === "staging_deployed") &&
+          // Don't advance off the stale demo run while its staging反映 run is still landing.
+          !deployingRef.current.has(i.featureId),
       );
       if (pending.length === 0) return false;
       reconcilingRef.current = true;
@@ -87,6 +117,16 @@ export function Board({
   const load = useCallback(async () => {
     try {
       const list = await api.listBoard();
+      // Once a feature's freshly-kicked staging反映 run is visible (pending/running), stop
+      // shielding it — the run's own status now governs (running=反映中, succeeded=確認待ち).
+      for (const i of list) {
+        if (
+          deployingRef.current.has(i.featureId) &&
+          (i.latestRun?.status === "pending" || i.latestRun?.status === "running")
+        ) {
+          deployingRef.current.delete(i.featureId);
+        }
+      }
       const advanced = await reconcilePhases(list);
       const fresh = advanced ? await api.listBoard() : list;
       setItems(fresh);
@@ -203,14 +243,41 @@ export function Board({
   const handleApprove = useCallback(
     async (to: FeaturePhase) => {
       if (!selected) return;
-      await api.transition(selected.featureId, to, { approvedByUser: true });
-      // demo承認→staging_deployed: mark staging deploy complete so it re-enters 確認待ち.
+      const cwdOpt = selected.latestRun?.cwd ? { cwd: selected.latestRun.cwd } : {};
+
       if (to === "staging_deployed") {
-        await api.transition(selected.featureId, "staging_review", { approvedByUser: false });
+        // demo承認→staging_deployed: kick a REAL staging反映 run (not just a phase flip). The
+        // card then sits in 走行中 streaming live progress = 「反映中」; reconcilePhases moves it
+        // to staging_review only when that run SUCCEEDS (failure → 要修正). Shield it meanwhile
+        // so the stale demo run doesn't auto-advance it past 反映中.
+        await api.transition(selected.featureId, to, { approvedByUser: true });
+        deployingRef.current.add(selected.featureId);
+        try {
+          await client.startRun(STAGING_DEPLOY_PROMPT, { taskId: selected.taskId, ...cwdOpt });
+        } catch {
+          // daemon down: can't run the reflect now. Fall back to the phase-only advance so
+          // the task still leaves 確認待ち instead of getting stuck; the shield is released.
+          deployingRef.current.delete(selected.featureId);
+          await api.transition(selected.featureId, "staging_review", { approvedByUser: false });
+        }
+      } else if (to === "prod_shipped") {
+        // staging承認→prod_shipped: 本番も staging と同じ進行UIに繋ぐ。実 run を先にキックして
+        // から prod_shipped へ遷移する（順序が逆だと、遷移直後に古い staging run が残ったまま
+        // deriveLane が prod_shipped→done と判定し「完了」に一瞬飛ぶ done-flash が起きる）。
+        // これで prod_shipped + 走行中 run = 「本番反映中」→ 成功で完了 / 失敗で要修正 になる。
+        try {
+          await client.startRun(PROD_DEPLOY_PROMPT, { taskId: selected.taskId, ...cwdOpt });
+        } catch {
+          // daemon down: no progress run possible — fall through to the phase-only ship so
+          // the approval still registers (本番反映済) instead of getting stuck in 確認待ち.
+        }
+        await api.transition(selected.featureId, "prod_shipped", { approvedByUser: true });
+      } else {
+        await api.transition(selected.featureId, to, { approvedByUser: true });
       }
       await refreshAfterAction();
     },
-    [api, selected, refreshAfterAction],
+    [api, client, selected, refreshAfterAction],
   );
 
   const handleReject = useCallback(

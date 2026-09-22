@@ -6,7 +6,15 @@ import { useRunStream } from "./lib/useRunStream.ts";
 import type { CommanderClient } from "./lib/client.ts";
 import type { BoardItem, RunHistoryApi } from "./lib/commanderApi.ts";
 import { deriveLane, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import {
+  reflectionOf,
+  reflectionLabel,
+  REFLECTION_ICON,
+  REFLECTION_COLOR,
+  type Reflection,
+} from "./lib/reflection.ts";
 import { ArtifactLinks } from "./ArtifactLinks.tsx";
+import { Spinner } from "./Spinner.tsx";
 import { t } from "./lib/theme.ts";
 
 interface TaskCardProps {
@@ -38,9 +46,21 @@ function relTime(iso: string): string {
 export function TaskCard({ item, client, history, onOpen, onCancel, pending }: TaskCardProps) {
   const lane = deriveLane(item);
   const isRunning = lane === "running" && !!item.latestRun;
+  // A running deploy phase reads as 「反映中」 rather than a generic run, so the operator can
+  // see 「stgに進む」 actually kicked work (not just a badge flip).
+  const deployingLabel =
+    isRunning && item.featurePhase === "staging_deployed"
+      ? "staging反映中"
+      : isRunning && item.featurePhase === "prod_shipped"
+        ? "本番反映中"
+        : null;
   // Only running cards subscribe live; others pass null (no socket).
   const stream = useRunStream(isRunning ? item.latestRun!.id : null, { client, history });
   const accent = LANE_COLORS[lane];
+  // Reflection cue (requirement #2): on a settled card — especially in 確認待ち — show at a
+  // glance whether the deploy is 反映済み / 反映失敗 (with time + URL). A running card keeps
+  // its live spinner (deployingLabel/lastLine) instead, so we skip the badge there.
+  const reflection = !isRunning ? reflectionOf(item) : null;
 
   const open = () => onOpen(item.taskId);
   return (
@@ -95,11 +115,35 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
         <span style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>{relTime(item.updatedAt)}</span>
       </div>
 
+      {/* reflection badge: 反映済み / 反映失敗 at a glance (requirement #2) */}
+      {reflection && (
+        <ReflectionBadge taskId={item.taskId} reflection={reflection} when={relTime(item.updatedAt)} />
+      )}
+
       {/* artifact links: demo / staging / PR click-throughs (P1-2) */}
       <ArtifactLinks
         urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrl }}
         variant="card"
       />
+
+      {/* deploy-in-progress banner: makes 「反映中」 explicit on the card */}
+      {deployingLabel && (
+        <div
+          data-testid={`task-deploying-${item.taskId}`}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: t.space2,
+            marginTop: t.space2,
+            fontSize: 12,
+            fontWeight: 600,
+            color: LANE_COLORS.running,
+          }}
+        >
+          <Spinner size={12} color={LANE_COLORS.running} />
+          {deployingLabel}…
+        </div>
+      )}
 
       {/* layer 3: latest live output (running only) */}
       {isRunning && stream.lastLine && (
@@ -144,6 +188,49 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 反映ステータスのバッジ。確認待ちゾーンで「押した直後のカードが本当に反映されたのか」を
+ * 一目で判別できるようにする（requirement #2）。反映済み=✅+反映時刻+URL、反映中=🔄、
+ * 反映失敗=⚠️ を色分けで示す。
+ */
+function ReflectionBadge({
+  taskId,
+  reflection,
+  when,
+}: {
+  taskId: string;
+  reflection: Reflection;
+  when: string;
+}) {
+  const color = REFLECTION_COLOR[reflection.state];
+  return (
+    <div
+      data-testid={`reflection-badge-${taskId}`}
+      data-reflection-state={reflection.state}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: t.space2,
+        marginTop: t.space2,
+        padding: `2px ${t.space2}`,
+        borderRadius: "var(--dub-radius-sm, 8px)",
+        border: `1px solid ${color}`,
+        fontSize: 12,
+        fontWeight: 600,
+        color,
+        maxWidth: "100%",
+        boxSizing: "border-box",
+      }}
+    >
+      <span aria-hidden>{REFLECTION_ICON[reflection.state]}</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {reflectionLabel(reflection)}
+        {reflection.state !== "reflecting" && when ? ` · ${when}` : ""}
+      </span>
     </div>
   );
 }

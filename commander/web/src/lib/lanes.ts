@@ -30,18 +30,29 @@ export const LANE_COLORS: Record<Lane, string> = {
  * Derive the board lane for one task.
  *
  * Order matters — it encodes precedence:
- *  1. done      = task archived (taskStatus done) OR feature shipped to prod.
- *  2. needs_fix = feature was rejected (demo/staging) OR the latest run failed.
- *  3. queued    = no run has been started yet.
- *  4. running   = latest run is pending/running.
- *  5. review    = latest run succeeded (awaiting the operator's approve/reject).
+ *  1. done      = task archived (taskStatus done).
+ *  2. prod_shipped = 本番反映: a prod-deploy run may still be in flight, so we show its
+ *                 progress — running=本番反映中(走行中) / failed=反映失敗(要修正) — and only
+ *                 land in 完了 once the run settles (or when there is no deploy run).
+ *  3. needs_fix = feature was rejected (demo/staging) OR the latest run failed.
+ *  4. queued    = no run has been started yet.
+ *  5. running   = latest run is pending/running.
+ *  6. review    = latest run succeeded (awaiting the operator's approve/reject).
  */
 export function deriveLane(item: BoardItem): Lane {
-  if (item.taskStatus === "done" || item.featurePhase === "prod_shipped") return "done";
+  // Archived tasks are always done, whatever the phase/run.
+  if (item.taskStatus === "done") return "done";
+  const run = item.latestRun;
+  // 本番承認は staging と同じ進行UIに繋ぐ: prod_shipped でも実 run が走行中なら「本番反映中」
+  // として走行中に見せ、成功で完了 / 失敗で要修正に落とす（先に done へ飛ばさない）。
+  if (item.featurePhase === "prod_shipped") {
+    if (run && (run.status === "pending" || run.status === "running")) return "running";
+    if (run && run.status === "failed") return "needs_fix";
+    return "done";
+  }
   if (item.featurePhase === "demo_rejected" || item.featurePhase === "staging_rejected") {
     return "needs_fix";
   }
-  const run = item.latestRun;
   if (!run) return "queued";
   if (run.status === "failed") return "needs_fix";
   if (run.status === "pending" || run.status === "running") return "running";

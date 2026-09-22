@@ -73,6 +73,121 @@ describe("<Board>", () => {
     );
   });
 
+  it("staging approval kicks a REAL staging反映 run instead of flipping straight to staging_review", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "反映対象", featurePhase: "demo_review", runStatus: "succeeded" }),
+    ]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-rev"));
+    await userEvent.click(await screen.findByTestId("action-approve"));
+    await userEvent.click(await screen.findByTestId("approval-confirm-yes"));
+
+    // A real run is kicked (the "反映中" work), carrying the staging反映 instruction + cwd.
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    const [prompt, opts] = client.startRun.mock.calls.at(-1)!;
+    expect(prompt).toMatch(/staging に反映/);
+    expect(opts).toMatchObject({ taskId: "rev", cwd: "/repo/wt" });
+    // It must NOT auto-advance to staging_review here — the run's success does that.
+    expect(api.transition).not.toHaveBeenCalledWith("feat-1", "staging_review", expect.anything());
+  });
+
+  it("shows a visible 反映中 in-flight banner while a staging approval is processing", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "反映対象", featurePhase: "demo_review", runStatus: "succeeded" }),
+    ]);
+    // Hold the run kick open so the in-flight state is observable.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const client = makeFakeClient();
+    client.startRun.mockImplementation(async () => {
+      await gate;
+      return { runId: "run-new" };
+    });
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-rev"));
+    await userEvent.click(await screen.findByTestId("action-approve"));
+    await userEvent.click(await screen.findByTestId("approval-confirm-yes"));
+
+    const banner = await screen.findByTestId("action-inflight");
+    expect(banner).toHaveTextContent("staging に反映中");
+    release();
+    await waitFor(() => expect(screen.queryByTestId("action-inflight")).not.toBeInTheDocument());
+  });
+
+  it("prod approval kicks a REAL 本番反映 run and ships via the approval gate (approvedByUser:true)", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "本番反映対象", featurePhase: "staging_review", runStatus: "succeeded" }),
+    ]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-rev"));
+    await userEvent.click(await screen.findByTestId("action-approve"));
+    await userEvent.click(await screen.findByTestId("approval-confirm-yes"));
+
+    // A real run is kicked (本番反映中 の実作業), carrying the本番反映 instruction + cwd.
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    const [prompt, opts] = client.startRun.mock.calls.at(-1)!;
+    expect(prompt).toMatch(/本番に反映/);
+    expect(opts).toMatchObject({ taskId: "rev", cwd: "/repo/wt" });
+    // And the ship transition goes through the approval gate.
+    await waitFor(() =>
+      expect(api.transition).toHaveBeenCalledWith("feat-1", "prod_shipped", { approvedByUser: true }),
+    );
+  });
+
+  it("shows a本番反映中 in-flight banner while a prod approval is processing", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "本番反映対象", featurePhase: "staging_review", runStatus: "succeeded" }),
+    ]);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const client = makeFakeClient();
+    client.startRun.mockImplementation(async () => {
+      await gate;
+      return { runId: "run-new" };
+    });
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-rev"));
+    await userEvent.click(await screen.findByTestId("action-approve"));
+    await userEvent.click(await screen.findByTestId("approval-confirm-yes"));
+
+    const banner = await screen.findByTestId("action-inflight");
+    expect(banner).toHaveTextContent("本番に反映中");
+    release();
+    await waitFor(() => expect(screen.queryByTestId("action-inflight")).not.toBeInTheDocument());
+  });
+
+  it("a本番反映 run in flight keeps the card in 走行中 as 「本番反映中」 (not jumping straight to 完了)", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "prd", featureId: "feat-1", title: "本番反映中カード", featurePhase: "prod_shipped", runStatus: "running" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+    expect(await within(screen.getByTestId("lane-running")).findByText("本番反映中カード")).toBeInTheDocument();
+    expect(screen.getByTestId("task-deploying-prd")).toHaveTextContent("本番反映中");
+  });
+
+  it("shows a 反映済み badge on a 確認待ち card so staging反映の完了が一目で分かる", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({
+        taskId: "rev",
+        featureId: "feat-1",
+        title: "反映済み確認カード",
+        featurePhase: "staging_review",
+        runStatus: "succeeded",
+        stagingUrl: "https://stg.example",
+      }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+    const badge = await screen.findByTestId("reflection-badge-rev");
+    expect(badge).toHaveAttribute("data-reflection-state", "reflected");
+    expect(badge).toHaveTextContent("stagingに反映済み");
+  });
+
   it("reject carries feedback into a new run and sends the feature back to building", async () => {
     const api = makeFakeApi([
       makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "却下対象", featurePhase: "demo_review", runStatus: "succeeded" }),
