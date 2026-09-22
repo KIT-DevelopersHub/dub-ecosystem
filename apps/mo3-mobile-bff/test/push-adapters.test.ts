@@ -226,18 +226,22 @@ describe("FcmAdapter", () => {
   });
 });
 
-// ---- macOS via ApnsAdapter (same p8 key, mac apns-topic) ----
+// ---- iOS + macOS via FcmAdapter (Method A: Apple tokens dispatched through FCM,
+//      which forwards to APNs inside Firebase; the server holds no APNs key) ----
 
-const APNS_MAC_CREDS = { keyP8: "unused", keyId: "KID1234567", teamId: "TEAM123456", bundleId: "jp.devhub.desktop" };
+describe("FcmAdapter (Apple platforms)", () => {
+  it("sends an iOS device through the same FCM messages:send endpoint", async () => {
+    const rec = recorder(() => new Response(JSON.stringify({ name: "ok" }), { status: 200 }));
+    const adapter = new FcmAdapter({ serviceAccount: FCM_SA, fetchImpl: rec.fetchImpl, accessTokenProvider: async () => "at_ios" });
+    expect(await adapter.send(dev("ios_tok", "ios"), PAYLOAD)).toBe("sent");
+    expect(nth(rec.calls, 0).url).toBe("https://fcm.googleapis.com/v1/projects/proj_1/messages:send");
+  });
 
-describe("ApnsAdapter (macOS)", () => {
-  it("sends a macos device via APNs with the mac bundle id as apns-topic", async () => {
-    const rec = recorder(() => new Response("", { status: 200 }));
-    const adapter = new ApnsAdapter({ credentials: APNS_MAC_CREDS, fetchImpl: rec.fetchImpl, signer: async () => "JWT.MAC" });
-    const res = await adapter.send(dev("mac_tok", "macos"), PAYLOAD);
-    expect(res).toBe("sent");
-    expect(nth(rec.calls, 0).url).toBe("https://api.push.apple.com/3/device/mac_tok");
-    expect(headerOf(nth(rec.calls, 0).init, "apns-topic")).toBe("jp.devhub.desktop");
+  it("sends a macOS device through the same FCM messages:send endpoint", async () => {
+    const rec = recorder(() => new Response(JSON.stringify({ name: "ok" }), { status: 200 }));
+    const adapter = new FcmAdapter({ serviceAccount: FCM_SA, fetchImpl: rec.fetchImpl, accessTokenProvider: async () => "at_mac" });
+    expect(await adapter.send(dev("mac_tok", "macos"), PAYLOAD)).toBe("sent");
+    expect(nth(rec.calls, 0).url).toBe("https://fcm.googleapis.com/v1/projects/proj_1/messages:send");
   });
 });
 
