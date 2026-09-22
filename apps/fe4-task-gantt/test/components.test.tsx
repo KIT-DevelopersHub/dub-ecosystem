@@ -5,6 +5,7 @@ import { GanttView } from "../src/components/GanttView";
 import { ViewSwitcher } from "../src/components/ViewSwitcher";
 import { TaskListView } from "../src/components/TaskListView";
 import { TaskBoardView } from "../src/components/TaskBoardView";
+import { TaskFilterBar } from "../src/components/TaskFilterBar";
 import { createUserCache } from "../src/domain/user-cache";
 import { ROW_HEIGHT } from "../src/domain/timeline-axis";
 import type { GanttSortActions, GanttSortState } from "../src/domain/gantt-sort-pref";
@@ -261,5 +262,45 @@ describe("TaskBoardView (design test 10)", () => {
       expect(screen.getByTestId(`fe4-column-${col}`)).toBeInTheDocument();
     }
     expect(screen.getByTestId("fe4-column-todo")).toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+describe("TaskFilterBar 担当者フィルタ", () => {
+  const base = { eventId: "evt_1", status: [], includeArchived: false } as const;
+  const options = [
+    { id: "usr_alice", name: "Alice 運営" },
+    { id: "usr_bob", name: "Bob 実行委員" },
+  ];
+
+  it("lists 全員 + every assignee option, and picking one sets assigneeId", () => {
+    const onChange = vi.fn();
+    render(
+      <TaskFilterBar value={{ ...base }} onChange={onChange} onClear={() => {}} assigneeOptions={options} />,
+    );
+    const select = screen.getByTestId("fe4-filter-assignee") as HTMLSelectElement;
+    expect(within(select).getByText("全員")).toBeInTheDocument();
+    expect(within(select).getByText("Alice 運営")).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "usr_bob" } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ assigneeId: "usr_bob" }));
+  });
+
+  it("selecting 全員 clears assigneeId and the active-filter count reflects it", () => {
+    const onChange = vi.fn();
+    render(
+      <TaskFilterBar
+        value={{ ...base, assigneeId: "usr_alice" }}
+        onChange={onChange}
+        onClear={() => {}}
+        assigneeOptions={options}
+      />,
+    );
+    expect(screen.getByTestId("fe4-filter-count").textContent).toBe("1");
+    fireEvent.change(screen.getByTestId("fe4-filter-assignee"), { target: { value: "" } });
+    expect(onChange).toHaveBeenCalledWith(expect.not.objectContaining({ assigneeId: expect.anything() }));
+  });
+
+  it("hides the 担当者 selector when no options are available", () => {
+    render(<TaskFilterBar value={{ ...base }} onChange={() => {}} onClear={() => {}} assigneeOptions={[]} />);
+    expect(screen.queryByTestId("fe4-filter-assignee")).toBeNull();
   });
 });
