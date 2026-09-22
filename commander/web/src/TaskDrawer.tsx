@@ -253,6 +253,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
           <ArtifactLinks
             urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrl }}
             variant="drawer"
+            phase={item.featurePhase}
             running={lane === "running"}
           />
         </div>

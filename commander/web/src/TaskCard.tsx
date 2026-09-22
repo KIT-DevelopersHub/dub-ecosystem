@@ -124,6 +124,7 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
       <ArtifactLinks
         urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrl }}
         variant="card"
+        phase={item.featurePhase}
       />
 
       {/* deploy-in-progress banner: makes 「反映中」 explicit on the card */}
