@@ -7,6 +7,7 @@ import { Header } from "@/components/Header";
 import { Hero } from "@/components/Hero";
 import { Apply } from "@/components/Apply";
 import { Program } from "@/components/Program";
+import { Marquee } from "@/components/Marquee";
 import { About } from "@/components/About";
 import { Crowdfunding } from "@/components/Crowdfunding";
 import { Vision } from "@/components/Vision";
@@ -43,6 +44,7 @@ export default function Page() {
       <Hero data={config.hero} subheading={config.catch.lead} />
       <Apply data={config.apply} />
       <Program data={config.program} />
+      <Marquee sub={config.catch.lead} />
       <About data={config.about} />
       <Crowdfunding data={config.crowdfunding} />
       <Vision eyebrow="VISION" statement={config.catch.heading} />

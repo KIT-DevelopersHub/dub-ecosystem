@@ -1,88 +1,45 @@
-"use client";
-
-import Image from "next/image";
-import { useState } from "react";
 import { Reveal } from "@/components/Reveal";
 import { SectionHead } from "@/components/SectionHead";
 import { renderEmphasis } from "@/lib/markup";
 import type { ProgramConfig, ProgramItem } from "@/config/types";
 
-// Program — reproduces goodpatch's "Featured Work" skeleton: an eyebrow + heading,
-// a horizontal filter-tab row (All + categories), then a responsive card grid
-// whose tiles reveal on scroll and zoom on hover with an arrow affordance.
-// Filled with the conference's 聴く / 体験する / 出会う program pillars and
-// original inline-SVG icons — no goodpatch assets/copy.
+// Program — reproduces goodpatch's "Design Platform" skeleton: a bold full-bleed
+// blue block with a giant heading, then a stacked list of big-name rows, each
+// with an index, an oversized name + description, a circular masked medallion
+// that slides in on hover, and a circle-arrow affordance. Filled with the
+// conference's 聴く / 体験する / 出会う pillars and original inline-SVG art —
+// no goodpatch assets/copy.
 export function Program({ data, index }: { data: ProgramConfig; index?: string }) {
-  // Categories = each pillar's own name (All + the pillar names), mirroring
-  // goodpatch's category filter interaction.
-  const cats = ["すべて", ...data.items.map((it) => it.name).filter(Boolean) as string[]];
-  const [active, setActive] = useState("すべて");
-  const shown = active === "すべて" ? data.items : data.items.filter((it) => it.name === active);
-
   return (
-    <section id="program" className="section work">
+    <section id="program" className="section program-block block-arc block-arc--top">
       <div className="container">
         <SectionHead
           eyebrow="PROGRAM"
           index={index}
           title={data.heading}
           lead={renderEmphasis(data.note)}
+          light
+          ghost="PROGRAM"
         />
 
-        <Reveal className="work-tabs" variant="fade" role="tablist" aria-label="プログラム区分">
-          {cats.map((c) => (
-            <button
-              key={c}
-              type="button"
-              role="tab"
-              aria-selected={active === c}
-              className={`work-tab${active === c ? " is-active" : ""}`}
-              onClick={() => setActive(c)}
-            >
-              {c}
-            </button>
-          ))}
-        </Reveal>
-
-        <div className="work-grid">
-          {shown.map((item, i) => (
-            <Reveal className="work-card-io" variant="up" delay={90 * i} key={item.name ?? i}>
-              <WorkCard item={item} n={data.items.indexOf(item) + 1} />
+        <ul className="prow-list">
+          {data.items.map((item, i) => (
+            <Reveal as="li" className="prow" key={item.name ?? i} variant="up" delay={90 * i}>
+              <span className="prow-idx" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+              <span className="prow-icon" aria-hidden="true">{pillarIcon(i)}</span>
+              <span className="prow-copy">
+                {item.name && <span className="prow-name">{item.name}</span>}
+                {item.note && <span className="prow-note">{item.note}</span>}
+              </span>
+              <span className={`prow-medallion prow-medallion--${i + 1}`} aria-hidden="true">
+                {pillarIcon(i)}
+              </span>
+              <span className="prow-arrow" aria-hidden="true">→</span>
             </Reveal>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
-  );
-}
-
-function WorkCard({ item, n }: { item: ProgramItem; n: number }) {
-  const idx = String(n).padStart(2, "0");
-  return (
-    <article className="work-card">
-      <div className="work-card-media">
-        {item.photo ? (
-          <Image
-            className="work-card-photo"
-            src={item.photo}
-            alt={item.name ?? ""}
-            width={389}
-            height={376}
-            loading="lazy"
-          />
-        ) : (
-          <span className="work-card-icon" aria-hidden="true">
-            {pillarIcon(n - 1)}
-          </span>
-        )}
-        <span className="work-card-idx" aria-hidden="true">{idx}</span>
-      </div>
-      <div className="work-card-body">
-        {item.name && <h3 className="work-card-name">{item.name}</h3>}
-        {item.note && <p className="work-card-note">{item.note}</p>}
-        <span className="work-card-arrow" aria-hidden="true">→</span>
-      </div>
-    </article>
   );
 }
 

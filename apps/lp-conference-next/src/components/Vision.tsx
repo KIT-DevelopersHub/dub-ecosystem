@@ -15,7 +15,7 @@ export function Vision({
   index?: string;
 }) {
   return (
-    <section className="vision">
+    <section className="vision block-arc block-arc--top">
       <div className="vision-rings" aria-hidden="true" data-parallax="-70" />
       <div className="container vision-inner">
         <Reveal as="span" className="section-eyebrow" variant="fade">

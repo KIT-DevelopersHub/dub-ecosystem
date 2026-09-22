@@ -21,6 +21,15 @@
   --lp-teal: #17b892;         /* mint accent (darkened for contrast) */
   --lp-link: #1a5fb8;         /* links on white (~5.2:1 AA) */
 
+  /* --- goodpatch-grammar bold blocks (v4) --- */
+  --lp-block-blue: #1a45d8;     /* full-bleed royal-blue block */
+  --lp-block-blue-2: #1533b0;   /* deeper blue for gradient depth */
+  --lp-block-navy: #0e1330;     /* dark navy block (matches footer) */
+  --lp-block-gray: #eceef2;     /* light editorial gray block */
+  --lp-ghost: rgba(16, 28, 168, 0.05);       /* ghost outline text on light */
+  --lp-ghost-on-blue: rgba(255, 255, 255, 0.10);
+  --lp-ghost-on-navy: rgba(255, 255, 255, 0.045);
+
   /* --- surfaces & section backgrounds --- */
   --lp-surface: #ffffff;
   --lp-surface-alt: #f6f9fe;  /* faint blue-tinted panel */
@@ -2375,3 +2384,375 @@ img { max-width: 100%; height: auto; display: block; }
 .reveal--zoom.is-armed .work-card-photo,
 .reveal--zoom.is-armed .info-card-media { transform: scale(1.06); }
 
+
+/* ============================================================
+   goodpatch grammar v4 — bold editorial overhaul (final cascade)
+   Full-bleed solid color blocks · GIANT two-tone / ghost-outline
+   section heads · curved arc dividers · circle-arrow pills ·
+   Design-Platform row list · horizontal wordmark marquee.
+   Reproduces goodpatch.com/ja's LOOK & MOTION with the
+   conference's own copy, palette and original art.
+   ============================================================ */
+
+/* ---- Section heads: giant English word + JP subtitle + ghost echo ---- */
+.section-head { margin: 0 0 clamp(2.5rem, 6vw, 4.5rem); }
+.section-head-stack {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+.section-head--center { text-align: center; }
+.section-head--center .section-head-stack { display: block; }
+
+.section .section-title,
+.section-title {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15em;
+  margin: 0;
+  text-align: left;
+  line-height: 1;
+}
+.section-head--center .section-title { align-items: center; text-align: center; }
+.section-title-en {
+  position: relative;
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 900;
+  font-size: clamp(3rem, 11vw, 8.5rem);
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  color: var(--lp-heading);
+  text-transform: none;
+}
+.section-title-idx {
+  font-size: 0.26em;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--lp-teal);
+  vertical-align: super;
+  margin-right: 0.5em;
+}
+.section-title-jp {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.05rem, 2.7vw, 1.65rem);
+  letter-spacing: 0.02em;
+  color: var(--lp-blue);
+  margin-top: 0.35em;
+  line-height: 1.5;
+}
+/* oversized outline echo of the word, sitting behind the head */
+.section-ghost {
+  position: absolute;
+  left: -0.04em;
+  top: 50%;
+  transform: translateY(-58%);
+  z-index: 0;
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 900;
+  font-size: clamp(5rem, 20vw, 15rem);
+  line-height: 0.8;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--lp-ghost);
+  pointer-events: none;
+  user-select: none;
+}
+.section-head--center .section-ghost { left: 50%; transform: translate(-50%, -58%); }
+
+/* light variant (on blue / navy blocks) */
+.section-head--light .section-title-en { color: #fff; }
+.section-head--light .section-title-jp { color: rgba(255, 255, 255, 0.82); }
+.section-head--light .section-title-idx { color: #9fe6d3; }
+.section-head--light .section-ghost { -webkit-text-stroke-color: var(--lp-ghost-on-blue); }
+.section-head--light .section-lead { color: rgba(255, 255, 255, 0.8); }
+.section-head--light .section-lead strong { color: #fff; }
+
+.section-head .section-lead {
+  position: relative;
+  z-index: 1;
+  text-align: left;
+  margin: clamp(1.4rem, 3vw, 2.2rem) 0 0;
+  max-width: 56ch;
+  font-size: clamp(1.02rem, 2vw, 1.2rem);
+}
+.section-head--center .section-lead { text-align: center; margin-inline: auto; }
+
+/* ---- Bold full-bleed color blocks (alternating rhythm) ---- */
+.svc { background: var(--lp-block-gray); }
+.cards { background: var(--lp-surface); }
+.program-block {
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  background:
+    radial-gradient(120% 90% at 85% 0%, rgba(255, 255, 255, 0.12) 0%, transparent 55%),
+    linear-gradient(160deg, var(--lp-block-blue) 0%, var(--lp-block-blue-2) 100%);
+}
+.getintouch { background: var(--lp-block-gray); }
+
+/* ---- Curved arc divider (goodpatch's signature curved section boundary) ----
+   A dome of the PREVIOUS block's color sits at the very top of this block and
+   curves down into it. Drawn inside the block so it survives overflow:hidden.
+   Per-block `--arc-from` sets the incoming color. */
+.block-arc { position: relative; }
+.block-arc--top::before {
+  content: "";
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  top: -1px;
+  height: clamp(2.75rem, 6.5vw, 6rem);
+  background: var(--arc-from, var(--lp-block-gray));
+  border-radius: 0 0 50% 50% / 0 0 100% 100%;
+  z-index: 0;
+}
+.program-block.block-arc--top { --arc-from: var(--lp-block-gray); }
+.vision.block-arc--top { --arc-from: #0e6f8f; } /* meets the support band's teal-blue base */
+.block-arc > .container { position: relative; z-index: 1; }
+
+/* ---- Circle-arrow pills (goodpatch's signature round arrow chip) ---- */
+.hero-cta-arrow,
+.svc-card-cta .arrow,
+.git-btn .arrow,
+.btn-support .arrow,
+.crowd-actions .arrow,
+.prow-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 2em;
+  height: 2em;
+  border-radius: 50%;
+  font-size: 0.82em;
+  line-height: 1;
+  background: var(--lp-blue);
+  color: #fff;
+  flex: 0 0 auto;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.24s ease;
+}
+/* on filled/dark buttons the chip flips to white-on-color */
+.hero-cta--participant .hero-cta-arrow,
+.btn-support .arrow,
+.git-btn--primary .arrow {
+  background: #fff;
+  color: var(--lp-blue-deep);
+}
+.git-btn .arrow { position: static; transform: none; }
+.git-btn:hover .arrow { transform: translateX(3px); }
+.svc-card--speaker .svc-card-cta .arrow { background: var(--lp-speaker); }
+
+/* ---- Program → Design-Platform row list ---- */
+.program-block .prow-list {
+  list-style: none;
+  margin: clamp(1.5rem, 4vw, 3rem) 0 0;
+  padding: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+.prow {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: clamp(1rem, 2.5vw, 2rem);
+  padding: clamp(1.4rem, 3.4vw, 2.6rem) clamp(0.5rem, 2vw, 1.5rem);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+  transition: background-color 0.3s ease, padding-left 0.3s ease;
+}
+.prow::before {
+  /* full-row highlight wash that wipes in on hover */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 0;
+}
+.prow:hover::before { opacity: 1; }
+.prow:hover { padding-left: clamp(1rem, 3vw, 2.5rem); }
+.prow > * { position: relative; z-index: 1; }
+.prow-idx {
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.85rem, 1.6vw, 1.05rem);
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.55);
+}
+.prow-icon {
+  display: grid;
+  place-items: center;
+  width: clamp(46px, 5vw, 60px);
+  height: clamp(46px, 5vw, 60px);
+  border-radius: 16px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.prow:hover .prow-icon { transform: rotate(-6deg) scale(1.06); }
+.prow-copy { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.prow-name {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.8rem, 5vw, 3.4rem);
+  line-height: 1.05;
+  color: #fff;
+  letter-spacing: 0.01em;
+}
+.prow-note {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: clamp(0.92rem, 1.7vw, 1.08rem);
+  line-height: 1.7;
+}
+/* circular masked medallion that slides in from the right on hover.
+   Absolutely positioned so it overlays without shifting the row grid. */
+.prow-medallion {
+  position: absolute;
+  right: clamp(3.5rem, 7vw, 6rem);
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: clamp(84px, 12vw, 150px);
+  height: clamp(84px, 12vw, 150px);
+  border-radius: 50%;
+  color: #fff;
+  box-shadow: 0 18px 40px -14px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translate(40px, -50%) scale(0.9);
+  transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+.prow-medallion svg { width: 44%; height: 44%; }
+.prow-medallion--1 { background: linear-gradient(140deg, #2f5cff, #6f8dff); }
+.prow-medallion--2 { background: linear-gradient(140deg, #17b892, #3fd6b2); }
+.prow-medallion--3 { background: linear-gradient(140deg, #7b8cff, #17b892); }
+.prow:hover .prow-medallion { opacity: 1; transform: translate(0, -50%) scale(1); }
+.prow-arrow {
+  background: #fff;
+  color: var(--lp-blue-deep);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.prow:hover .prow-arrow { transform: translateX(6px); }
+@media (max-width: 760px) {
+  .prow { grid-template-columns: auto 1fr auto; }
+  .prow-icon { display: none; }
+  .prow-medallion { display: none; }
+}
+
+/* ---- Horizontal wordmark marquee (goodpatch "Latest Activity" strip) ---- */
+.marquee {
+  position: relative;
+  overflow: hidden;
+  padding-block: clamp(2.5rem, 6vw, 4.5rem);
+  background: var(--lp-block-navy);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.4rem, 1.5vw, 1rem);
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  flex-shrink: 0;
+  will-change: transform;
+}
+.marquee-track--a { animation: marquee-l 34s linear infinite; }
+.marquee-track--b { animation: marquee-r 40s linear infinite; }
+@keyframes marquee-l { from { transform: translateX(0); } to { transform: translateX(-33.333%); } }
+@keyframes marquee-r { from { transform: translateX(-33.333%); } to { transform: translateX(0); } }
+.marquee-unit { display: inline-flex; align-items: center; }
+.marquee-word {
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 900;
+  font-size: clamp(2.4rem, 8vw, 6rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  padding-inline: 0.28em;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.34);
+  white-space: nowrap;
+}
+.marquee-track--b .marquee-word {
+  -webkit-text-stroke: 0;
+  color: rgba(255, 255, 255, 0.06);
+}
+.marquee-word--sub {
+  font-family: var(--font-display);
+  -webkit-text-stroke: 0;
+  color: rgba(159, 230, 211, 0.85);
+  font-size: clamp(1.6rem, 5vw, 3.6rem);
+}
+.marquee-star {
+  color: var(--lp-teal);
+  font-size: clamp(1.4rem, 4vw, 3rem);
+  padding-inline: 0.35em;
+}
+
+/* ---- Vision → dark navy block, giant white statement + ghost echo ---- */
+.vision {
+  background: var(--lp-block-navy);
+  color: #fff;
+  overflow: hidden;
+}
+.vision-rings {
+  background:
+    repeating-radial-gradient(circle at 84% 46%, transparent 0 54px, rgba(255, 255, 255, 0.04) 54px 56px);
+  opacity: 1;
+}
+.vision .section-eyebrow {
+  color: #9fe6d3;
+  position: relative;
+  z-index: 1;
+}
+.vision .section-eyebrow::before { background: rgba(159, 230, 211, 0.7); }
+.vision-statement {
+  position: relative;
+  z-index: 1;
+  color: #fff;
+  font-size: clamp(2.1rem, 6vw, 4.4rem);
+  line-height: 1.28;
+  max-width: 22ch;
+}
+.vision-inner::before {
+  content: "VISION";
+  position: absolute;
+  left: -0.03em;
+  top: -0.28em;
+  z-index: 0;
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 900;
+  font-size: clamp(6rem, 26vw, 22rem);
+  line-height: 0.8;
+  letter-spacing: -0.04em;
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--lp-ghost-on-navy);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ---- Hero: stronger circle-arrow + slightly bolder ground ---- */
+.hero-cta--speaker .hero-cta-arrow { background: var(--lp-blue); color: #fff; }
+
+/* ---- Contact CTA buttons: give them the round-arrow chip treatment ---- */
+.git-btn { padding-right: 4rem; }
+
+/* ---- Crowdfunding band: add signature top arc ---- */
+.support-band { position: relative; }
+
+/* ---- Reduced motion: freeze marquee + medallions ---- */
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track--a,
+  .marquee-track--b { animation: none !important; }
+  .prow:hover .prow-medallion { transform: translate(0, -50%); }
+}
+
+/* ---- Responsive: keep giant type from overflowing on small screens ---- */
+@media (max-width: 560px) {
+  .section-title-en { font-size: clamp(2.6rem, 15vw, 4rem); }
+  .section-ghost { display: none; }
+}
