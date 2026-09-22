@@ -36,6 +36,11 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     setFlags: vi.fn().mockImplementation((threadId: string, patch: Record<string, boolean>) =>
       Promise.resolve({ threadId, starred: false, archived: false, trashed: false, purged: false, ...patch }),
     ),
+    schedule: vi.fn().mockResolvedValue({ id: "sch", scheduledAt: "2099-01-01T00:00:00.000Z", status: "scheduled" }),
+    listScheduled: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    getScheduled: vi.fn().mockResolvedValue({ id: "sch", to: [], subject: "s", snippet: "", scheduledAt: "2099-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z", status: "scheduled", textBody: "b" }),
+    updateScheduled: vi.fn().mockResolvedValue({ id: "sch", to: [], subject: "s", snippet: "", scheduledAt: "2099-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z", status: "scheduled", textBody: "b" }),
+    cancelScheduled: vi.fn().mockResolvedValue({ id: "sch", status: "canceled" }),
     ...over,
   };
 }
