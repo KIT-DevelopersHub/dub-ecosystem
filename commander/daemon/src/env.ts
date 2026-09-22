@@ -56,6 +56,16 @@ export const ESSENTIAL_ENV_KEYS: readonly string[] = [
  *  knobs + Claude auth/runtime). Personal CLAUDE_CONFIG_DIR is overridden below. */
 const PRESERVE_PREFIXES: readonly string[] = ["COMMANDER_", "ANTHROPIC_", "CLAUDE_"];
 
+// Operator-supplied credentials passed straight through to the spawned claude so its
+// own tooling (wrangler / the Cloudflare SDK) can authenticate. These are ONLY forwarded
+// when the operator has set them on the daemon's own process.env at launch — absent =>
+// not added. Commander never reads them from a file, never logs them, and never persists
+// them; it only copies the value verbatim from parent env to child env.
+const PASSTHROUGH_ENV_KEYS: readonly string[] = [
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_ACCOUNT_ID",
+];
+
 /**
  * Fail-safe resolution of the config-dir override (COMMANDER_CLAUDE_CONFIG_DIR).
  *
@@ -75,9 +85,10 @@ export function resolveClaudeConfigDir(
 /**
  * Build the env handed to the spawned claude process.
  *
- * Isolated (default): a fresh object containing only the essential keys plus the
- * preserved prefixes (COMMANDER_, ANTHROPIC_, CLAUDE_), with CLAUDE_CONFIG_DIR forced
- * to Commander's config home last (so any inherited personal value cannot win).
+ * Isolated (default): a fresh object containing only the essential keys, the explicit
+ * passthrough keys (CLOUDFLARE_*, when present on the parent env), and the preserved
+ * prefixes (COMMANDER_, ANTHROPIC_, CLAUDE_), with CLAUDE_CONFIG_DIR forced to
+ * Commander's config home last (so any inherited personal value cannot win).
  *
  * Non-isolated: the full parent env, but CLAUDE_CONFIG_DIR still redirected when set.
  */
@@ -92,7 +103,7 @@ export function buildSpawnEnv(
   }
 
   const env: NodeJS.ProcessEnv = {};
-  for (const key of ESSENTIAL_ENV_KEYS) {
+  for (const key of [...ESSENTIAL_ENV_KEYS, ...PASSTHROUGH_ENV_KEYS]) {
     const v = base[key];
     if (v !== undefined) env[key] = v;
   }
