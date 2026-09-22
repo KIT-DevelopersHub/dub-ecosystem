@@ -34,11 +34,6 @@ export function Contact({
             <span className="git-btn-jp">参加登録はこちら</span>
             <span className="git-btn-badge">準備中</span>
           </div>
-          <a className="git-btn" href={`mailto:${data.email}`}>
-            <span className="git-btn-en">MAIL</span>
-            <span className="git-btn-jp">{data.email}</span>
-            <span className="arrow" aria-hidden="true">→</span>
-          </a>
           {siteUrl && (
             <a className="git-btn" href={siteUrl} target="_blank" rel="noopener noreferrer">
               <span className="git-btn-en">SITE</span>
@@ -46,17 +41,37 @@ export function Contact({
               <span className="arrow" aria-hidden="true">↗</span>
             </a>
           )}
-          <a className="git-btn" href={instagramUrl} target="_blank" rel="noopener noreferrer" aria-label="Instagram（新しいタブで開く）">
-            <span className="git-btn-icon" aria-hidden="true"><IconInstagram /></span>
-            <span className="git-btn-en">INSTAGRAM</span>
-            <span className="git-btn-jp">@developershub.conference</span>
-            <span className="arrow" aria-hidden="true">↗</span>
+        </Reveal>
+
+        {/* メール / Instagram / X — アイコンボタン群（クリックで各リンクへ遷移） */}
+        <Reveal className="git-social" variant="up" delay={180}>
+          <a
+            className="git-social-btn"
+            href={`mailto:${data.email}`}
+            aria-label="メールで問い合わせ"
+            title="メールで問い合わせ"
+          >
+            <IconMail />
           </a>
-          <a className="git-btn" href={xUrl} target="_blank" rel="noopener noreferrer" aria-label="X（旧Twitter・新しいタブで開く）">
-            <span className="git-btn-icon" aria-hidden="true"><IconX /></span>
-            <span className="git-btn-en">X (TWITTER)</span>
-            <span className="git-btn-jp">@cda_kit</span>
-            <span className="arrow" aria-hidden="true">↗</span>
+          <a
+            className="git-social-btn"
+            href={instagramUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram（新しいタブで開く）"
+            title="Instagram"
+          >
+            <IconInstagram />
+          </a>
+          <a
+            className="git-social-btn"
+            href={xUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="X（旧Twitter・新しいタブで開く）"
+            title="X"
+          >
+            <IconX />
           </a>
         </Reveal>
 
@@ -68,7 +83,15 @@ export function Contact({
   );
 }
 
-// Brand glyphs for the SNS buttons (original inline SVG — no external assets).
+// Icons for the contact buttons (original inline SVG — no external assets).
+function IconMail() {
+  return (
+    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="m3.5 7 8.5 6 8.5-6" />
+    </svg>
+  );
+}
 function IconInstagram() {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
