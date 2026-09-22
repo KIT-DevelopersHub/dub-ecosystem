@@ -35,12 +35,15 @@ export interface BlockEditorProps {
   canWrite: boolean;
   /** When storage is empty and this is set, seed the canvas with `seed`. */
   seed?: BlockDoc;
-  /** Notified after every change so the caller can mirror to a backend later. */
+  /** Explicit initial doc (e.g. loaded from D1). Takes precedence over localStorage
+   *  and `seed`, so a backend-persisted layout is the source of truth on open. */
+  initialDoc?: BlockDoc;
+  /** Notified after every change so the caller can mirror to a backend (D1). */
   onDocChange?: (doc: BlockDoc) => void;
 }
 
-export function BlockEditor({ storageKey, canWrite, seed, onDocChange }: BlockEditorProps) {
-  const [doc, setDoc] = useState<BlockDoc>(() => loadDoc(storageKey) ?? seed ?? emptyDoc());
+export function BlockEditor({ storageKey, canWrite, seed, initialDoc, onDocChange }: BlockEditorProps) {
+  const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? loadDoc(storageKey) ?? seed ?? emptyDoc());
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Undo / redo history (snapshots of blocks).

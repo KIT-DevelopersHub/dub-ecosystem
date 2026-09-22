@@ -10,9 +10,18 @@ import type {
   EventDetailsData,
   EventSectionLayoutRow,
   EventSectionLayoutData,
+  EventPageLayoutRow,
+  EventPageLayoutData,
   Keyset,
 } from "./types";
-import { EMPTY_EVENT_DETAILS, normalizeEventDetails, EMPTY_EVENT_SECTION_LAYOUT, normalizeEventSectionLayout } from "./domain";
+import {
+  EMPTY_EVENT_DETAILS,
+  normalizeEventDetails,
+  EMPTY_EVENT_SECTION_LAYOUT,
+  normalizeEventSectionLayout,
+  EMPTY_EVENT_PAGE_LAYOUT,
+  normalizeEventPageLayout,
+} from "./domain";
 
 interface EventDbRow {
   id: string;
@@ -84,6 +93,28 @@ function toSectionLayoutRow(r: EventSectionLayoutDbRow): EventSectionLayoutRow {
   return {
     eventId: r.event_id,
     data: parseSectionLayoutData(r.data),
+    version: r.version,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+  };
+}
+
+// event_event_page_layout row shape is identical to event_event_details (event_id
+// PK + JSON data blob + version); its own table (see schema.ts) so the block-doc's
+// optimistic version lock never collides with details/section-layout.
+type EventPageLayoutDbRow = EventDetailsDbRow;
+
+function parsePageLayoutData(json: string): EventPageLayoutData {
+  try {
+    return normalizeEventPageLayout(JSON.parse(json) as Partial<EventPageLayoutData>);
+  } catch {
+    return { ...EMPTY_EVENT_PAGE_LAYOUT };
+  }
+}
+function toPageLayoutRow(r: EventPageLayoutDbRow): EventPageLayoutRow {
+  return {
+    eventId: r.event_id,
+    data: parsePageLayoutData(r.data),
     version: r.version,
     updatedBy: r.updated_by,
     updatedAt: r.updated_at,
@@ -305,6 +336,33 @@ export function createD1EventRepo(db: DbClient): EventRepo {
       }
       const res = await db.run(
         `UPDATE event_event_section_layout SET data = ?, version = ?, updated_by = ?, updated_at = ?
+         WHERE event_id = ? AND version = ?`,
+        dataJson, next.version, next.updatedBy, next.updatedAt, next.eventId, expectedVersion,
+      );
+      return res.meta.changes > 0;
+    },
+
+    async getEventPageLayout(eventId: common.EventId): Promise<EventPageLayoutRow | null> {
+      const r = await db.first<EventPageLayoutDbRow>(
+        `SELECT * FROM event_event_page_layout WHERE event_id = ?`,
+        eventId,
+      );
+      return r ? toPageLayoutRow(r) : null;
+    },
+
+    async upsertEventPageLayout(next: EventPageLayoutRow, expectedVersion: number): Promise<boolean> {
+      const dataJson = JSON.stringify(next.data);
+      if (expectedVersion === 0) {
+        const res = await db.run(
+          `INSERT OR IGNORE INTO event_event_page_layout
+             (event_id, data, version, updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          next.eventId, dataJson, next.version, next.updatedBy, next.updatedAt,
+        );
+        return res.meta.changes > 0;
+      }
+      const res = await db.run(
+        `UPDATE event_event_page_layout SET data = ?, version = ?, updated_by = ?, updated_at = ?
          WHERE event_id = ? AND version = ?`,
         dataJson, next.version, next.updatedBy, next.updatedAt, next.eventId, expectedVersion,
       );

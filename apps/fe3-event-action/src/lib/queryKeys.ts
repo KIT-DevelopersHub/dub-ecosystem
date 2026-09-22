@@ -10,6 +10,7 @@ export const eventKeys = {
   detail: (eventId: common.EventId) => [...eventKeys.details(), eventId] as const,
   eventDetails: (eventId: common.EventId) => [...eventKeys.detail(eventId), "eventDetails"] as const,
   sectionLayout: (eventId: common.EventId) => [...eventKeys.detail(eventId), "sectionLayout"] as const,
+  pageLayout: (eventId: common.EventId) => [...eventKeys.detail(eventId), "pageLayout"] as const,
   actions: (eventId: common.EventId) => [...eventKeys.detail(eventId), "actions"] as const,
   action: (actionId: common.ActionId) => [...eventKeys.all, "action", actionId] as const,
   users: (ids: readonly string[]) => [...eventKeys.all, "users", [...ids].sort().join(",")] as const,

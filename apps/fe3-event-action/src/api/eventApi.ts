@@ -13,6 +13,7 @@ import type {
 } from "./actionContracts";
 import type { EventDetails, SaveEventDetailsRequest } from "./detailsContracts";
 import type { EventSectionLayout, SaveEventSectionLayoutRequest } from "./sectionLayoutContracts";
+import type { EventPageLayout, SaveEventPageLayoutRequest } from "./pageLayoutContracts";
 
 export interface EventApi {
   listEvents(query: event.ListEventsQuery): Promise<event.ListEventsResponse>;
@@ -29,6 +30,11 @@ export interface EventApi {
   // detail page's sections. event:write required to save; event:read to view.
   getEventSectionLayout(id: common.EventId): Promise<EventSectionLayout>;
   saveEventSectionLayout(id: common.EventId, req: SaveEventSectionLayoutRequest): Promise<EventSectionLayout>;
+
+  // Shared (event-scoped, not per-viewer) event-page block layout ("イベント編集"
+  // free block-editor doc). event:write required to save; event:read to view.
+  getEventPageLayout(id: common.EventId): Promise<EventPageLayout>;
+  saveEventPageLayout(id: common.EventId, req: SaveEventPageLayoutRequest): Promise<EventPageLayout>;
 
   listActions(eventId: common.EventId, query?: ListActionsQuery): Promise<ListActionsResponse>;
   createAction(eventId: common.EventId, req: CreateActionRequest): Promise<event.DubAction>;
@@ -81,6 +87,14 @@ export function createHttpEventApi(client: ApiClient): EventApi {
       client.request<EventSectionLayout, SaveEventSectionLayoutRequest>({
         method: "PUT",
         path: `/api/v1/events/${id}/section-layout`,
+        body: req,
+      }),
+    getEventPageLayout: (id) =>
+      client.request<EventPageLayout>({ method: "GET", path: `/api/v1/events/${id}/page-layout` }),
+    saveEventPageLayout: (id, req) =>
+      client.request<EventPageLayout, SaveEventPageLayoutRequest>({
+        method: "PUT",
+        path: `/api/v1/events/${id}/page-layout`,
         body: req,
       }),
     listActions: (eventId, query) =>

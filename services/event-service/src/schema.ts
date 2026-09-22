@@ -79,3 +79,24 @@ CREATE TABLE event_event_section_layout (
 );
 `.trim(),
 };
+
+// Additive follow-up migration: the free block-editor doc ("イベント編集" しおり
+// canvas) for the event hub page — one doc per event, shared by every viewer,
+// editable only by event:write roles. Kept in lockstep with
+// infra/d1/migrations/event/0004_event_page_layout.sql (guarded by
+// schema-lockstep.test.ts, same as 0001/0002/0003). Its own table (not folded into
+// event_event_details / event_event_section_layout) so the block-doc's optimistic
+// version lock never races a content or section-order edit's.
+export const EVENT_PAGE_LAYOUT_SCHEMA_MIGRATION: Migration = {
+  namespace: "event",
+  id: "0004_event_page_layout",
+  up: `
+CREATE TABLE event_event_page_layout (
+  event_id   TEXT PRIMARY KEY REFERENCES event_events(id),
+  data       TEXT NOT NULL,
+  version    INTEGER NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`.trim(),
+};

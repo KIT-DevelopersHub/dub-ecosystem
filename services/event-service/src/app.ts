@@ -12,6 +12,7 @@ import type {
   UpdateActionRequest,
   SaveEventDetailsRequest,
   SaveEventSectionLayoutRequest,
+  SaveEventPageLayoutRequest,
 } from "./types";
 import { EventService, type ReqCtx } from "./service";
 
@@ -115,6 +116,16 @@ export function createApp(deps: AppDeps): Hono {
   app.put("/events/:id/section-layout", authz.requirePermission("event:write", eventIdScope), async (c) => {
     const body = await readJson<SaveEventSectionLayoutRequest>(c);
     return c.json(await svc.saveEventSectionLayout(reqCtx(c), c.req.param("id"), body));
+  });
+
+  // ---- event page layout (free block-editor doc for the event hub page) ----
+  app.get("/events/:id/page-layout", authz.requirePermission("event:read", eventIdScope), async (c) => {
+    return c.json(await svc.getEventPageLayout(reqCtx(c), c.req.param("id")));
+  });
+
+  app.put("/events/:id/page-layout", authz.requirePermission("event:write", eventIdScope), async (c) => {
+    const body = await readJson<SaveEventPageLayoutRequest>(c);
+    return c.json(await svc.saveEventPageLayout(reqCtx(c), c.req.param("id"), body));
   });
 
   // ---- actions (hierarchy: created only under an event) ----

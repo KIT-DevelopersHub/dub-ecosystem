@@ -15,6 +15,7 @@ import type {
   EventSponsor,
   EventChecklistItem,
   EventSectionLayoutData,
+  EventPageLayoutData,
 } from "./types";
 
 // Linear phase order (forward = higher index). Back-transition or ->closed = admin.
@@ -225,4 +226,26 @@ export function normalizeEventSectionLayout(input: Partial<EventSectionLayoutDat
     order: idList(input?.order),
     hidden: idList(input?.hidden),
   };
+}
+
+// ---- event page layout (free block-editor doc for the event hub page) ----
+// The backend treats the block list as OPAQUE (frontend owns the block schema, like
+// the section catalog above). We only bound the array to a sane block count so a
+// malformed/oversized payload can't blow up the row, and carry version/updatedAt.
+export const EMPTY_EVENT_PAGE_LAYOUT: EventPageLayoutData = { version: 1, blocks: [], updatedAt: "" };
+
+const MAX_BLOCKS = 500; // generous ceiling for one event page
+
+/** Coerce arbitrary client input into a well-formed EventPageLayoutData. Blocks are
+ *  passed through untouched (opaque) but bounded in count; each must be a non-null
+ *  object (drops primitives/nulls that could never be a valid block). */
+export function normalizeEventPageLayout(input: Partial<EventPageLayoutData> | undefined): EventPageLayoutData {
+  const rawBlocks = Array.isArray(input?.blocks) ? input!.blocks : [];
+  const blocks = rawBlocks
+    .filter((b): b is object => typeof b === "object" && b !== null)
+    .slice(0, MAX_BLOCKS);
+  const version =
+    typeof input?.version === "number" && Number.isFinite(input.version) ? input.version : 1;
+  const updatedAt = typeof input?.updatedAt === "string" ? input.updatedAt.slice(0, MAX_FIELD) : "";
+  return { version, blocks, updatedAt };
 }

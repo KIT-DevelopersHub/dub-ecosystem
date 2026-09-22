@@ -11,7 +11,8 @@ import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { EventDetailsPanel } from "../components/EventDetailsPanel";
 import { EventEditForm } from "../components/EventEditForm";
 import { PhaseBadge } from "../components/PhaseBadge";
-import { BlockEditor, hasDoc, sampleEventDoc } from "../blockeditor";
+import { sampleEventDoc } from "../blockeditor";
+import { EventPageLayout } from "../components/EventPageLayout";
 import { useCurrentEventId } from "../lib/currentEvent";
 import { useNavigation } from "../contracts/navigation";
 import { eventRoutes, chatHref } from "../lib/routes";
@@ -46,7 +47,6 @@ function HubBody({ eventId }: { eventId: string }) {
   // organiser lays out freely. It coexists with the structured event data — the
   // free layout renders above the fixed イベント詳細 panel, never replacing it.
   const [pageEditing, setPageEditing] = useState(false);
-  const hasLayout = useMemo(() => hasDoc(eventId), [eventId, pageEditing]);
   const seed = useMemo(
     () => sampleEventDoc(ev.title, ev.description ?? undefined),
     [ev.title, ev.description],
@@ -148,19 +148,18 @@ function HubBody({ eventId }: { eventId: string }) {
         // another — the block layout is a separate free layer).
         <section data-testid="fe3-hub-editor">
           <div className={styles.calloutInfo} data-testid="fe3-hub-edit-banner">
-            イベント編集モード — 右のパレットからブロックを追加し、ダブルクリックで中身を編集、ドラッグで並べ替え・幅変更ができます。変更は自動保存されます。
+            イベント編集モード — 右のパレットからブロックを追加し、ダブルクリックで中身を編集、ドラッグで並べ替え・幅変更ができます。変更は自動保存されます（メンバー全員に共有）。
           </div>
-          <BlockEditor storageKey={eventId} canWrite seed={seed} />
+          <EventPageLayout eventId={eventId} mode="edit" canWrite seed={seed} />
         </section>
       ) : (
         <>
-          {hasLayout ? (
-            // View mode: the organiser's free block layout renders as page content
-            // above the structured detail panel.
-            <section data-testid="fe3-hub-layout">
-              <BlockEditor storageKey={eventId} canWrite={false} />
-            </section>
-          ) : null}
+          {/* View mode: the organiser's free block layout (saved to D1, shared across
+              viewers) renders as page content above the structured detail panel. The
+              wrapper self-hides when no layout has been saved yet. */}
+          <section data-testid="fe3-hub-layout">
+            <EventPageLayout eventId={eventId} mode="view" canWrite={false} />
+          </section>
           <EventDetailsPanel eventId={eventId} canWrite={permissions.write} />
         </>
       )}

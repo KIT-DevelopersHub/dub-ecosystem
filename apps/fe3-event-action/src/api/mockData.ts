@@ -27,6 +27,11 @@ import {
   type EventSectionLayout,
   type SaveEventSectionLayoutRequest,
 } from "./sectionLayoutContracts";
+import {
+  emptyEventPageLayout,
+  type EventPageLayout,
+  type SaveEventPageLayoutRequest,
+} from "./pageLayoutContracts";
 
 let seq = 0;
 function id(prefix: string): string {
@@ -124,6 +129,37 @@ function storeSectionLayout(l: EventSectionLayout): void {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(SECTION_LAYOUT_LS_PREFIX + l.eventId, JSON.stringify(l));
+  } catch {
+    /* quota / private mode — non-fatal for the demo */
+  }
+}
+
+// ---- page-layout persistence (localStorage; same demo-harness caveat as above:
+// simulates the SHARED doc across viewers only within one browser — a real
+// cross-viewer share needs the actual event-service/D1 backend, exercised in staging). ----
+const PAGE_LAYOUT_LS_PREFIX = "fe3-mock-page-layout:";
+
+function loadPageLayout(eventId: string): EventPageLayout {
+  if (typeof localStorage === "undefined") return emptyEventPageLayout(eventId);
+  try {
+    const raw = localStorage.getItem(PAGE_LAYOUT_LS_PREFIX + eventId);
+    if (!raw) return emptyEventPageLayout(eventId);
+    const parsed = JSON.parse(raw) as EventPageLayout;
+    return {
+      eventId,
+      version: typeof parsed.version === "number" ? parsed.version : 0,
+      updatedAt: parsed.updatedAt ?? null,
+      data: parsed.data && Array.isArray(parsed.data.blocks) ? parsed.data : emptyEventPageLayout(eventId).data,
+    };
+  } catch {
+    return emptyEventPageLayout(eventId);
+  }
+}
+
+function storePageLayout(l: EventPageLayout): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(PAGE_LAYOUT_LS_PREFIX + l.eventId, JSON.stringify(l));
   } catch {
     /* quota / private mode — non-fatal for the demo */
   }
@@ -331,6 +367,30 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
         updatedAt: now(),
       };
       storeSectionLayout(next);
+      return next;
+    },
+
+    async getEventPageLayout(eid: common.EventId): Promise<EventPageLayout> {
+      await delay();
+      getEventOr404(eid);
+      return loadPageLayout(eid);
+    },
+
+    async saveEventPageLayout(eid: common.EventId, req: SaveEventPageLayoutRequest): Promise<EventPageLayout> {
+      await delay();
+      const e = getEventOr404(eid);
+      if (e.archivedAt !== null) {
+        throw new DubError(EventErrorCodes.ARCHIVED_IMMUTABLE, "Event is archived (read-only)", { status: 409 });
+      }
+      const current = loadPageLayout(eid);
+      assertVersion(current.version, req.version, EventErrorCodes.VERSION_CONFLICT);
+      const next: EventPageLayout = {
+        eventId: eid,
+        data: req.data,
+        version: current.version + 1,
+        updatedAt: now(),
+      };
+      storePageLayout(next);
       return next;
     },
 
