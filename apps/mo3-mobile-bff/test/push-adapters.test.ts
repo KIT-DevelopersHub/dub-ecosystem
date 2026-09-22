@@ -4,9 +4,10 @@
 // exercises the default WebCrypto signers to prove they emit verifiable JWTs.
 import { describe, it, expect } from "vitest";
 import type { mobile } from "@dub/types";
-import { ApnsAdapter, FcmAdapter } from "../src/push";
+import { ApnsAdapter, FcmAdapter, WnsAdapter } from "../src/push";
 import { sendApns } from "../src/apns";
 import { sendFcm } from "../src/fcm";
+import { sendWns, mapWnsStatus, buildToastXml } from "../src/wns";
 import type { DeviceRecord } from "../src/devices";
 
 const PAYLOAD: mobile.MobilePushPayload = { title: "Hi", body: "There", data: { k: "v" } };
@@ -222,6 +223,120 @@ describe("FcmAdapter", () => {
     }) as unknown as typeof fetch;
     const adapter = new FcmAdapter({ serviceAccount: FCM_SA, fetchImpl, accessTokenProvider: async () => "at" });
     expect(await adapter.send(dev("t", "android"), PAYLOAD)).toBe("failed");
+  });
+});
+
+// ---- macOS via ApnsAdapter (same p8 key, mac apns-topic) ----
+
+const APNS_MAC_CREDS = { keyP8: "unused", keyId: "KID1234567", teamId: "TEAM123456", bundleId: "jp.devhub.desktop" };
+
+describe("ApnsAdapter (macOS)", () => {
+  it("sends a macos device via APNs with the mac bundle id as apns-topic", async () => {
+    const rec = recorder(() => new Response("", { status: 200 }));
+    const adapter = new ApnsAdapter({ credentials: APNS_MAC_CREDS, fetchImpl: rec.fetchImpl, signer: async () => "JWT.MAC" });
+    const res = await adapter.send(dev("mac_tok", "macos"), PAYLOAD);
+    expect(res).toBe("sent");
+    expect(nth(rec.calls, 0).url).toBe("https://api.push.apple.com/3/device/mac_tok");
+    expect(headerOf(nth(rec.calls, 0).init, "apns-topic")).toBe("jp.devhub.desktop");
+  });
+});
+
+// ---- WNS (Windows) ----
+
+const WNS_CREDS = { packageSid: "ms-app://s-1-15-2-xxx", clientSecret: "secret_v" };
+const CHANNEL_URI = "https://db5.notify.windows.com/?token=abc123";
+
+describe("sendWns", () => {
+  it("POSTs the toast XML to the Channel URI with the OAuth bearer + wns headers and maps 200 -> sent", async () => {
+    const rec = recorder(() => new Response("", { status: 200 }));
+    const res = await sendWns({
+      credentials: WNS_CREDS,
+      device: { pushToken: CHANNEL_URI },
+      payload: PAYLOAD,
+      fetchImpl: rec.fetchImpl,
+      accessTokenProvider: async () => "wns_at",
+    });
+    expect(res).toBe("sent");
+    expect(nth(rec.calls, 0).url).toBe(CHANNEL_URI);
+    expect(headerOf(nth(rec.calls, 0).init, "authorization")).toBe("Bearer wns_at");
+    expect(headerOf(nth(rec.calls, 0).init, "x-wns-type")).toBe("wns/toast");
+    expect(headerOf(nth(rec.calls, 0).init, "content-type")).toBe("text/xml");
+    const body = String(nth(rec.calls, 0).init?.body);
+    expect(body).toContain('template="ToastGeneric"');
+    expect(body).toContain("<text>Hi</text>");
+    expect(body).toContain("<text>There</text>");
+  });
+
+  it("carries the custom data map on the toast launch attribute (deep-link survives a tap)", async () => {
+    const rec = recorder(() => new Response("", { status: 200 }));
+    await sendWns({
+      credentials: WNS_CREDS,
+      device: { pushToken: CHANNEL_URI },
+      payload: { title: "t", body: "b", data: { deepLink: "dub://tasks/task_9", notificationId: "ntf_9" } },
+      fetchImpl: rec.fetchImpl,
+      accessTokenProvider: async () => "wns_at",
+    });
+    const body = String(nth(rec.calls, 0).init?.body);
+    // launch carries a URL-encoded query string of the data map.
+    expect(body).toContain("launch=");
+    expect(body).toContain("notificationId=ntf_9");
+    expect(body).toContain("deepLink=dub");
+  });
+
+  it("uses the real client_credentials token flow when no provider is injected", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes("oauth2")) {
+        return new Response(JSON.stringify({ access_token: "at_wns_real" }), { status: 200 });
+      }
+      return new Response("", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const res = await sendWns({ credentials: WNS_CREDS, device: { pushToken: CHANNEL_URI }, payload: PAYLOAD, fetchImpl });
+    expect(res).toBe("sent");
+    expect(nth(calls, 0).url).toContain("login.microsoftonline.com");
+    const form = new URLSearchParams(String(nth(calls, 0).init?.body));
+    expect(form.get("grant_type")).toBe("client_credentials");
+    expect(form.get("client_id")).toBe(WNS_CREDS.packageSid);
+    expect(form.get("scope")).toBe("https://wns.windows.com/.default");
+    expect(headerOf(nth(calls, 1).init, "authorization")).toBe("Bearer at_wns_real");
+  });
+
+  it("maps a gone/expired channel (404/410/403) -> token_invalid, else failed", () => {
+    expect(mapWnsStatus(200)).toBe("sent");
+    expect(mapWnsStatus(404)).toBe("token_invalid");
+    expect(mapWnsStatus(410)).toBe("token_invalid");
+    expect(mapWnsStatus(403)).toBe("token_invalid");
+    expect(mapWnsStatus(500)).toBe("failed");
+    expect(mapWnsStatus(429)).toBe("failed");
+  });
+
+  it("xml-escapes the title/body (no XML injection)", () => {
+    const xml = buildToastXml({ title: "a & <b>", body: '"c"' });
+    expect(xml).toContain("a &amp; &lt;b&gt;");
+    expect(xml).toContain("&quot;c&quot;");
+  });
+});
+
+describe("WnsAdapter", () => {
+  it("returns failed without credentials (boolean false), no fetch", async () => {
+    expect(await new WnsAdapter(false).send(dev(CHANNEL_URI, "windows"), PAYLOAD)).toBe("failed");
+  });
+
+  it("delegates to sendWns and returns sent", async () => {
+    const rec = recorder(() => new Response("", { status: 200 }));
+    const adapter = new WnsAdapter({ credentials: WNS_CREDS, fetchImpl: rec.fetchImpl, accessTokenProvider: async () => "at" });
+    expect(await adapter.send(dev(CHANNEL_URI, "windows"), PAYLOAD)).toBe("sent");
+    expect(nth(rec.calls, 0).url).toBe(CHANNEL_URI);
+  });
+
+  it("returns failed (never throws) when the transport errors", async () => {
+    const fetchImpl = (async () => {
+      throw new Error("boom");
+    }) as unknown as typeof fetch;
+    const adapter = new WnsAdapter({ credentials: WNS_CREDS, fetchImpl, accessTokenProvider: async () => "at" });
+    expect(await adapter.send(dev(CHANNEL_URI, "windows"), PAYLOAD)).toBe("failed");
   });
 });
 

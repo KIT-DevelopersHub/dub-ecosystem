@@ -221,6 +221,8 @@ export interface Harness {
   mutations: MemoryMutationStore;
   ios: FakePushAdapter;
   android: FakePushAdapter;
+  macos: FakePushAdapter;
+  windows: FakePushAdapter;
   audit: AuditSink;
 }
 
@@ -245,6 +247,8 @@ export function makeHarness(): Harness {
   const mutations = new MemoryMutationStore();
   const ios = new FakePushAdapter();
   const android = new FakePushAdapter();
+  const macos = new FakePushAdapter();
+  const windows = new FakePushAdapter();
   const audit = new AuditSink();
   let seq = 0;
 
@@ -261,13 +265,13 @@ export function makeHarness(): Harness {
     changeLog,
     changeLogStore,
     mutations,
-    pushAdapters: { ios, android },
+    pushAdapters: { ios, android, macos, windows },
     pushRetry: { maxAttempts: 1 },
     audit: audit.fn,
     newRequestId: () => `req_${++seq}`,
   };
 
-  return { deps, auth: authService, identity, event, task, notification, authenticator, devices, deliveries, changeLog, changeLogStore, mutations, ios, android, audit };
+  return { deps, auth: authService, identity, event, task, notification, authenticator, devices, deliveries, changeLog, changeLogStore, mutations, ios, android, macos, windows, audit };
 }
 
 // ---- request builders ----

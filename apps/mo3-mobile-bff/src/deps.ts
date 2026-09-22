@@ -9,9 +9,10 @@ import { configFromEnv, type AppConfig, type Env } from "./env";
 import { type Authenticator, DubAuthenticator } from "./authn";
 import { D1DeviceStore, type DeviceStore } from "./devices";
 import { D1DeliveryStore, type DeliveryStore } from "./deliveries";
-import { ApnsAdapter, FcmAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
+import { ApnsAdapter, FcmAdapter, WnsAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
 import type { ApnsCredentials } from "./apns";
 import type { FcmServiceAccount } from "./fcm";
+import type { WnsCredentials } from "./wns";
 import { D1ChangeLogReader, D1ChangeLogStore, type ChangeLogReader, type ChangeLogStore } from "./change-log";
 import { D1MutationStore, type MutationStore } from "./mutation-store";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
@@ -80,20 +81,49 @@ export function buildDeps(env: Env): Deps {
  * adapter (send() -> "failed", audited upstream) instead of throwing at worker boot.
  */
 export function buildPushAdapters(env: Env): Record<mobile.MobilePlatform, PushAdapter> {
-  const apns = apnsCredentials(env);
+  // iOS + macOS share one p8 key; only the apns-topic (bundle id) differs.
+  const iosApns = apnsCredentials(env);
+  const macApns = apnsMacosCredentials(env);
+  const wns = wnsCredentials(env);
   return {
     // ApnsAdapterOptions nests the credentials under `credentials` — passing the bare
     // ApnsCredentials object would leave opts.credentials undefined (send() -> "failed").
-    ios: new ApnsAdapter(apns ? { credentials: apns } : false),
+    ios: new ApnsAdapter(iosApns ? { credentials: iosApns } : false),
+    macos: new ApnsAdapter(macApns ? { credentials: macApns } : false),
     android: new FcmAdapter(fcmOptions(env)),
+    windows: new WnsAdapter(wns ? { credentials: wns } : false),
   };
 }
 
-/** APNs p8 credentials from secrets; null unless the full set is present. */
+/** APNs p8 credentials for iOS from secrets; null unless the full set is present. */
 export function apnsCredentials(env: Env): ApnsCredentials | null {
   const { APNS_KEY_P8, APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID } = env;
   if (!APNS_KEY_P8 || !APNS_KEY_ID || !APNS_TEAM_ID || !APNS_BUNDLE_ID) return null;
   return { keyP8: APNS_KEY_P8, keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID, bundleId: APNS_BUNDLE_ID };
+}
+
+/**
+ * APNs p8 credentials for macOS. Reuses the iOS p8 key/KeyId/TeamId but targets the
+ * macOS app's bundle id (apns-topic): APNS_MACOS_BUNDLE_ID, falling back to
+ * APNS_BUNDLE_ID when the mac build ships under the same id. null unless the key set
+ * and at least one bundle id are present.
+ */
+export function apnsMacosCredentials(env: Env): ApnsCredentials | null {
+  const { APNS_KEY_P8, APNS_KEY_ID, APNS_TEAM_ID, APNS_MACOS_BUNDLE_ID, APNS_BUNDLE_ID } = env;
+  const bundleId = APNS_MACOS_BUNDLE_ID ?? APNS_BUNDLE_ID;
+  if (!APNS_KEY_P8 || !APNS_KEY_ID || !APNS_TEAM_ID || !bundleId) return null;
+  return { keyP8: APNS_KEY_P8, keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID, bundleId };
+}
+
+/** WNS (Windows) Azure AD credentials; null unless SID + secret are both present. */
+export function wnsCredentials(env: Env): WnsCredentials | null {
+  const { WNS_PACKAGE_SID, WNS_CLIENT_SECRET, WNS_TENANT_ID } = env;
+  if (!WNS_PACKAGE_SID || !WNS_CLIENT_SECRET) return null;
+  return {
+    packageSid: WNS_PACKAGE_SID,
+    clientSecret: WNS_CLIENT_SECRET,
+    ...(WNS_TENANT_ID ? { tenantId: WNS_TENANT_ID } : {}),
+  };
 }
 
 /** FCM (Android, $0) HTTP v1 options from the service-account JSON secret. A parse
