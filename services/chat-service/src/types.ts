@@ -9,6 +9,7 @@
 import type { common, auditLog, identity, chat } from "@dub/types";
 import type { MiddlewareHandler, Context } from "hono";
 import type { DubEventName, DubEventPayloadMap } from "@dub/events";
+import type { Unfurler } from "./unfurl";
 
 // ---- wire enums (design §2) ----
 export type ChannelType = "event" | "topic" | "dm";
@@ -348,4 +349,7 @@ export interface AppDeps {
   now: () => string;
   newChannelId: () => common.ChannelId;
   newMessageId: () => common.MessageId;
+  // Link preview resolver (GET /chat/unfurl). Optional: absent => the route answers
+  // `preview: null` so clients simply render no card (tests / minimal deploys).
+  unfurler?: Unfurler;
 }
