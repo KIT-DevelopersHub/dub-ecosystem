@@ -9,7 +9,8 @@
   margin: 0 auto;
   color: var(--dub-color-text-primary);
   background: var(--dub-color-surface-base);
-  min-height: 100vh;
+  min-height: 100vh; /* fallback */
+  min-height: var(--dub-app-height, 100dvh);
   font-family: var(--dub-font-family-sans, system-ui, sans-serif);
 }
 
@@ -1113,6 +1114,14 @@
   cursor: ew-resize;
   opacity: 0;
   transition: opacity 0.12s ease;
+}
+/* Touch has no hover, so the resize handles would be invisible/unusable. Reveal
+   them (and widen the hit area) on coarse pointers. */
+@media (pointer: coarse) {
+  .barHandle {
+    opacity: 0.6;
+    width: 14px;
+  }
 }
 .barHandle::after {
   content: "";

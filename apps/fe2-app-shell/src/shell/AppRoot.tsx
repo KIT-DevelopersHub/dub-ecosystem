@@ -10,6 +10,7 @@ import type { ThemeName } from "@dub/ui";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { AuthProvider } from "../auth/AuthProvider.tsx";
 import { useUiStore } from "../store/uiStore.tsx";
+import { useVisualViewportHeight } from "../lib/useVisualViewportHeight.ts";
 import { GlobalErrorFallback } from "./GlobalErrorFallback.tsx";
 
 export function createQueryClient(): QueryClient {
@@ -80,6 +81,9 @@ export function AppRoot({
   children: ReactNode;
 }): JSX.Element {
   const client = queryClient ?? createQueryClient();
+  // Keep --dub-app-height in step with the visual viewport so full-height surfaces
+  // stay above the on-screen keyboard on mobile WebView (see the hook's docstring).
+  useVisualViewportHeight();
   return (
     <ErrorBoundary>
       <QueryClientProvider client={client}>
