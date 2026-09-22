@@ -7,9 +7,9 @@ import type { RosterUser } from "../contracts/pending";
 
 /** Columns the roster table allows sorting on. Complex cells (運営メンバー・ロール)
  *  are intentionally excluded — they render composite widgets, not a scalar key. */
-export type SortableUserKey = "name" | "email" | "source" | "status";
+export type SortableUserKey = "name" | "furigana" | "email" | "source" | "status";
 
-export const SORTABLE_USER_KEYS: readonly SortableUserKey[] = ["name", "email", "source", "status"];
+export const SORTABLE_USER_KEYS: readonly SortableUserKey[] = ["name", "furigana", "email", "source", "status"];
 
 export function isSortableUserKey(key: string): key is SortableUserKey {
   return (SORTABLE_USER_KEYS as readonly string[]).includes(key);
@@ -27,6 +27,13 @@ function compareBy(key: SortableUserKey, a: RosterUser, b: RosterUser): number {
   switch (key) {
     case "name":
       return a.displayName.localeCompare(b.displayName, "ja");
+    case "furigana": {
+      // 五十音ソート: フリガナがあればそれで、無ければ表示名で比較（フリガナ未設定を
+      // 末尾に落とさず、実際の読みに近い表示名で埋める）。ja ロケールで仮名を正しく並べる。
+      const ka = (a.furigana ?? "").trim() || a.displayName;
+      const kb = (b.furigana ?? "").trim() || b.displayName;
+      return ka.localeCompare(kb, "ja");
+    }
     case "email":
       return a.email.localeCompare(b.email, "ja");
     case "source":
