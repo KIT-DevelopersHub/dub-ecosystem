@@ -12,7 +12,9 @@ function h(over: Record<string, string> = {}): Record<string, string> {
   return { "content-type": "application/json", "x-dub-request-id": "req_sched", "x-dub-user-id": USER, ...over };
 }
 function req(env: Env, path: string, method: string, body?: unknown): Promise<Response> {
-  return app.fetch(new Request(`https://svc${path}`, { method, headers: h(), ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), env);
+  // Hono's app.fetch is typed `Response | Promise<Response>`; normalise to a Promise so
+  // this helper's declared return type holds regardless of the Hono version on main.
+  return Promise.resolve(app.fetch(new Request(`https://svc${path}`, { method, headers: h(), ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), env));
 }
 
 const future = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
