@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "gantt-assignee-search",
+  "worker": "dub-demo-gantt-assignee-search",
+  "url": "https://dub-demo-gantt-assignee-search.developershub-site.workers.dev",
+  "deployedSha": "a707761a",
+  "branch": "feat/gantt-assignee-search",
+  "actor": "Kota",
+  "markers": ["fe4-filter-assignee","担当者で絞り込む"],
+  "live": true,
+  "verifiedAt": "2026-09-22T06:13:30Z",
+  "updatedAt": "2026-09-22T06:13:30Z",
+  "note": "gantt: filter tasks/bars by assignee (担当者で絞り込み)"
+}
