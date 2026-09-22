@@ -46,7 +46,11 @@
   "event-service": {
     "missingInSpec": [
       "GET /events/{}/details",
-      "PUT /events/{}/details"
+      "GET /events/{}/page-layout",
+      "GET /events/{}/section-layout",
+      "PUT /events/{}/details",
+      "PUT /events/{}/page-layout",
+      "PUT /events/{}/section-layout"
     ],
     "missingInCode": []
   },
@@ -78,17 +82,22 @@
   },
   "mail-gateway": {
     "missingInSpec": [
+      "DELETE /mail/scheduled/{}",
       "GET /mail/flags",
       "GET /mail/mailboxes",
       "GET /mail/messages",
       "GET /mail/messages/{}",
+      "GET /mail/scheduled",
+      "GET /mail/scheduled/{}",
       "GET /mail/sent",
       "GET /mail/sent/{}",
       "GET /mail/threads/{}",
+      "PATCH /mail/scheduled/{}",
       "POST /mail/flags/{}",
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
-      "POST /mail/outbox"
+      "POST /mail/outbox",
+      "POST /mail/scheduled"
     ],
     "missingInCode": [
       "DELETE /admin/email-routing/addresses/{}",
@@ -112,15 +121,18 @@
   },
   "notification": {
     "missingInSpec": [
+      "GET /inbox/ws-ticket",
       "GET /manage",
       "GET /notifications/inbox",
       "GET /notifications/inbox/unread-count",
+      "GET /notifications/inbox/ws-ticket",
       "GET /notifications/manage",
       "GET /notifications/preferences",
       "PATCH /inbox/{}/unread",
       "PATCH /notifications/inbox/{}/read",
       "PATCH /notifications/inbox/{}/unread",
       "PATCH /notifications/preferences",
+      "POST /internal/events-async",
       "POST /manage/publish-batch",
       "POST /manage/unpublish-batch",
       "POST /manage/{}/publish",
