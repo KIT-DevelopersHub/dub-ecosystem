@@ -22,6 +22,7 @@ import {
 } from "./adapters";
 import { makeRecipientResolver } from "./recipients";
 import { resolveAuditQueue } from "./outbox";
+import { buildInboxRealtime } from "./realtime";
 import type { IngestDeps } from "./ingest";
 
 export function buildDb(env: Env, requestId: string): DbClient {
@@ -63,5 +64,7 @@ export function buildIngestDeps(
     auditEnv: resolveAuditQueue(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     ctx,
+    // Realtime badge push (best-effort). Noop when the INBOX_ROOM DO is unbound.
+    realtime: buildInboxRealtime(env.INBOX_ROOM),
   };
 }

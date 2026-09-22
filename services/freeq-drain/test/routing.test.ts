@@ -114,7 +114,10 @@ describe("deliver (audit.record + live evt.*)", () => {
     const res = await drain(d1, makeDeliver(env), OPTS);
 
     expect(res.delivered).toBe(1);
-    expect(notif.calls[0]!.url).toBe("https://notification/internal/events-async");
+    // Host is "svc": notification enables workers.dev (realtime WS) and gates its
+    // header-trusting HTTP API to service-binding callers (host "svc"). Bindings ignore
+    // the host, so delivery still works over the SVC_NOTIFICATION binding.
+    expect(notif.calls[0]!.url).toBe("https://svc/internal/events-async");
     expect(notif.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
     expect(notif.calls[0]!.body).toEqual(envelope); // forwarded verbatim
     expect(readRow(raw, "r6")).toMatchObject({ status: "done" });

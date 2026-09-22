@@ -67,6 +67,14 @@ service = "dub-file-meta"         # best-effort message<->file link registration
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
+# Immediate direct delivery of DM/@mention notifications: chat POSTs the evt.notification
+# envelope straight to notification's POST /internal/events-async (idempotent on
+# envelope.id) so the recipient's inbox updates in ~1s instead of waiting for the next
+# freeq-drain tick. The durable freeq outbox + central drain remains the fallback.
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
+
 # NOTE: the per-service drain Cron Trigger (was `crons = ["*/5 * * * *"]`) was REMOVED.
 # The freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron),
 # freeing a slot on the Workers FREE plan's 5-cron account cap.

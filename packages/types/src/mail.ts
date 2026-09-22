@@ -159,7 +159,60 @@ export interface MailSentDetail extends MailSentListItem {
   attachments?: MailAttachment[];
 }
 
-// ---- ⑤ per-user thread flags (改善#8; ADDITIVE — frozen ① untouched) ----
+// ---- ⑤ Scheduled send (予約送信 / 予約投稿; ADDITIVE — frozen ① untouched) ----
+// A compose the sender parked to go out at a future time (Gmail's "送信日時を設定"). The
+// full payload is stored in mail_scheduled with status='scheduled' and a due time; a
+// free-tier drain claims due rows and hands each to the SAME send core as an immediate
+// send (so 二重送信ゼロ / Sent-folder / archive-CC all hold). List / edit / cancel act on
+// still-'scheduled' rows only. Attachments are NOT carried on a scheduled send in this
+// slice (schedule an attachment-less body; a later slice may persist bytes to R2).
+
+/** Terminal + live states of a scheduled send. */
+export type ScheduledSendStatus = "scheduled" | "sent" | "canceled" | "failed";
+
+/** POST /mail/scheduled body: a SendMailRequest plus the future send time. */
+export interface ScheduleMailRequest extends SendMailRequest {
+  /** ISO8601 time to send. Must be in the future (server rejects a past time). */
+  scheduledAt: ISODateTime;
+}
+/** Accepted-schedule ack (POST /mail/scheduled). */
+export interface ScheduleMailResponse {
+  id: string;
+  scheduledAt: ISODateTime;
+  status: "scheduled";
+}
+/** Scheduled-folder list row (body omitted; snippet only, like the Sent list). */
+export interface ScheduledSendListItem {
+  id: string;
+  from?: MailAddress; // resolved envelope From when already known (else at send time)
+  to: MailAddress[];
+  cc?: MailAddress[];
+  subject: string;
+  snippet: string;
+  scheduledAt: ISODateTime;
+  createdAt: ISODateTime;
+  status: ScheduledSendStatus;
+  inReplyTo?: string; // set when the scheduled send is a reply
+  sentMessageId?: string; // set once delivered (status='sent')
+  errorCode?: string; // set when the drain gave up (status='failed')
+}
+/** Scheduled-folder detail: list row plus the full editable body. */
+export interface ScheduledSendDetail extends ScheduledSendListItem {
+  textBody: string;
+  htmlBody?: string;
+}
+/** PATCH /mail/scheduled/:id — edit fields and/or reschedule. All optional; only the
+ *  provided fields change. Allowed only while the row is still 'scheduled'. */
+export interface ScheduleMailPatch {
+  to?: MailAddress[];
+  cc?: MailAddress[];
+  subject?: string;
+  textBody?: string;
+  htmlBody?: string;
+  scheduledAt?: ISODateTime;
+}
+
+// ---- ⑥ per-user thread flags (改善#8; ADDITIVE — frozen ① untouched) ----
 // Star / archive / trash persisted server-side, per user + per thread, so they survive a
 // reload (previously in-memory only). A thread with no stored row is all-false (default).
 /** One thread's flag state for the signed-in user. `purged` (完全に削除) is Gmail's

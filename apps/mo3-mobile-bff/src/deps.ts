@@ -9,7 +9,9 @@ import { configFromEnv, type AppConfig, type Env } from "./env";
 import { type Authenticator, DubAuthenticator } from "./authn";
 import { D1DeviceStore, type DeviceStore } from "./devices";
 import { D1DeliveryStore, type DeliveryStore } from "./deliveries";
-import { ApnsAdapter, FcmAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
+import { FcmAdapter, WnsAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
+import type { FcmServiceAccount } from "./fcm";
+import type { WnsCredentials } from "./wns";
 import { D1ChangeLogReader, D1ChangeLogStore, type ChangeLogReader, type ChangeLogStore } from "./change-log";
 import { D1MutationStore, type MutationStore } from "./mutation-store";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
@@ -59,10 +61,7 @@ export function buildDeps(env: Env): Deps {
     changeLog: new D1ChangeLogReader(db),
     changeLogStore: new D1ChangeLogStore(db),
     mutations: new D1MutationStore(db),
-    pushAdapters: {
-      ios: new ApnsAdapter(config.pushConfigured),
-      android: new FcmAdapter(config.pushConfigured),
-    },
+    pushAdapters: buildPushAdapters(env),
     pushRetry: { maxAttempts: 3 },
     // Prefer the real (paid) Queue binding; else fall back to the free-tier @dub/freeq D1
     // outbox shim so push delivery-failure audit records are durably persisted, never
@@ -70,4 +69,53 @@ export function buildDeps(env: Env): Deps {
     audit: (input) => publishAudit({ AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue(env.DB_MOBILE, AUDIT_TOPIC) }, input),
     newRequestId,
   };
+}
+
+/**
+ * Construct the per-platform push adapters from Worker Secrets.
+ *
+ * Method A (unified FCM): iOS, macOS and Android all dispatch through FCM HTTP v1
+ * — a single code path. Firebase forwards Apple-platform tokens to APNs internally
+ * (the APNs auth key is registered once in the Firebase console), so the server holds
+ * NO direct APNs credentials; the old per-platform ApnsAdapter wiring is gone. Only
+ * Windows keeps its own transport (WNS). A missing/malformed secret degrades to a
+ * credential-less adapter (send() -> "failed", audited upstream) rather than throwing
+ * at worker boot.
+ */
+export function buildPushAdapters(env: Env): Record<mobile.MobilePlatform, PushAdapter> {
+  const fcm = fcmOptions(env); // one FCM config for ios/macos/android
+  const wns = wnsCredentials(env);
+  return {
+    ios: new FcmAdapter(fcm), // Apple push via FCM -> APNs (no server-side APNs key)
+    macos: new FcmAdapter(fcm), // Apple push via FCM -> APNs
+    android: new FcmAdapter(fcm),
+    windows: new WnsAdapter(wns ? { credentials: wns } : false),
+  };
+}
+
+/** WNS (Windows) Azure AD credentials; null unless SID + secret are both present. */
+export function wnsCredentials(env: Env): WnsCredentials | null {
+  const { WNS_PACKAGE_SID, WNS_CLIENT_SECRET, WNS_TENANT_ID } = env;
+  if (!WNS_PACKAGE_SID || !WNS_CLIENT_SECRET) return null;
+  return {
+    packageSid: WNS_PACKAGE_SID,
+    clientSecret: WNS_CLIENT_SECRET,
+    ...(WNS_TENANT_ID ? { tenantId: WNS_TENANT_ID } : {}),
+  };
+}
+
+/** FCM (Android, $0) HTTP v1 options from the service-account JSON secret. A parse
+ *  failure yields a credential-less adapter rather than crashing the worker. */
+export function fcmOptions(env: Env): { serviceAccount: FcmServiceAccount | null; projectId?: string } {
+  if (!env.FCM_SERVICE_ACCOUNT_JSON) return { serviceAccount: null };
+  let serviceAccount: FcmServiceAccount | null = null;
+  try {
+    const parsed = JSON.parse(env.FCM_SERVICE_ACCOUNT_JSON) as FcmServiceAccount;
+    if (parsed && typeof parsed.client_email === "string" && typeof parsed.private_key === "string") {
+      serviceAccount = parsed;
+    }
+  } catch {
+    serviceAccount = null; // malformed secret -> send() returns "failed" (audited)
+  }
+  return { serviceAccount, ...(env.FCM_PROJECT_ID ? { projectId: env.FCM_PROJECT_ID } : {}) };
 }
