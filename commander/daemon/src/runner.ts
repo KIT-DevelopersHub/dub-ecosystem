@@ -116,6 +116,13 @@ export class RunStore {
       "--output-format",
       "stream-json",
       "--verbose",
+      // Headless claude has no operator to approve tool prompts; without a permission
+      // mode Edit/Write fail with "permission not granted". acceptEdits auto-accepts
+      // edits (Bash/deny still governed by settings.json). extraArgs come after so an
+      // operator override wins.
+      ...(this.config.permissionMode
+        ? ["--permission-mode", this.config.permissionMode]
+        : []),
       ...this.config.extraArgs,
     ];
 

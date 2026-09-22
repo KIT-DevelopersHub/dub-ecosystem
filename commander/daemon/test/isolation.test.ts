@@ -42,6 +42,7 @@ function config(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     runTimeoutMs: 0,
     isolateEnv: true,
     claudeConfigDir: COMMANDER_HOME,
+    permissionMode: "acceptEdits",
     ...overrides,
   };
 }

@@ -7,6 +7,14 @@ import type { DaemonConfig, Run, RunEvent } from "../src/types.ts";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/fake-claude", import.meta.url));
 const SLOW_CLAUDE = fileURLToPath(new URL("./fixtures/slow-claude", import.meta.url));
+const ARGS_ECHO = fileURLToPath(new URL("./fixtures/args-echo-claude", import.meta.url));
+
+function readResult(events: RunEvent[]): unknown {
+  const claude = events.find((e) => e.type === "claude") as
+    | { type: "claude"; data: { result: string } }
+    | undefined;
+  return JSON.parse(claude!.data.result);
+}
 
 function config(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
   return {
@@ -19,6 +27,7 @@ function config(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     runTimeoutMs: 0,
     isolateEnv: true,
     claudeConfigDir: "",
+    permissionMode: "acceptEdits",
     ...overrides,
   };
 }
@@ -52,6 +61,25 @@ describe("RunStore exec bridge", () => {
     expect(exit && exit.type === "exit" && exit.code).toBe(0);
 
     expect(store.get(run.id)!.status).toBe("succeeded");
+  });
+
+  it("passes --permission-mode to the spawned CLI so headless Edit/Write are allowed", async () => {
+    const store = new RunStore(config({ claudeBin: ARGS_ECHO, permissionMode: "acceptEdits" }));
+    const run = store.start({ prompt: "edit a file" });
+    const args = readResult(await collectUntilDone(store, run.id)) as string[];
+
+    const i = args.indexOf("--permission-mode");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(args[i + 1]).toBe("acceptEdits");
+    // Minimum-scope: never the blanket bypass.
+    expect(args).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("omits --permission-mode when the config leaves it empty", async () => {
+    const store = new RunStore(config({ claudeBin: ARGS_ECHO, permissionMode: "" }));
+    const run = store.start({ prompt: "hi" });
+    const args = readResult(await collectUntilDone(store, run.id)) as string[];
+    expect(args).not.toContain("--permission-mode");
   });
 
   it("marks the run failed when the CLI binary is missing", async () => {

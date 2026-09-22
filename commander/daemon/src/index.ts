@@ -15,6 +15,8 @@
 //   COMMANDER_ISOLATE_ENV       "0"/"false" to disable env isolation (default: on)
 //   COMMANDER_CLAUDE_CONFIG_DIR CLAUDE_CONFIG_DIR handed to spawned claude
 //                               (default: commander/.claude-home next to this daemon)
+//   COMMANDER_PERMISSION_MODE   --permission-mode for headless claude (default
+//                               "acceptEdits" so Edit/Write work non-interactively; "" omits)
 
 import { fileURLToPath } from "node:url";
 import { createDaemonServer, VERSION } from "./server.ts";
@@ -51,6 +53,9 @@ function loadConfig(): DaemonConfig {
     runTimeoutMs: Number(process.env.COMMANDER_RUN_TIMEOUT_MS ?? 7_200_000),
     isolateEnv,
     claudeConfigDir,
+    // Default acceptEdits so headless runs can Edit/Write without an operator prompt.
+    // Set COMMANDER_PERMISSION_MODE="" to omit the flag.
+    permissionMode: process.env.COMMANDER_PERMISSION_MODE ?? "acceptEdits",
   };
   if (process.env.COMMANDER_SERVICE_URL) config.serviceUrl = process.env.COMMANDER_SERVICE_URL;
   if (process.env.COMMANDER_SERVICE_TOKEN) config.serviceToken = process.env.COMMANDER_SERVICE_TOKEN;

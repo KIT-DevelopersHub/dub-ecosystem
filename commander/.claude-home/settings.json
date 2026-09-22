@@ -1,3 +1,50 @@
 {
-  "hooks": {}
+  "hooks": {},
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Edit",
+      "Write",
+      "Read",
+      "Bash(*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+      "Read(**/.ssh/**)",
+      "Read(**/*credentials*)",
+      "Read(**/*secret*)",
+      "Read(/Users/kota/Desktop/notes/**)",
+      "Read(/Users/kota/.claude/**)",
+      "Edit(/Users/kota/Desktop/notes/**)",
+      "Edit(/Users/kota/.claude/**)",
+      "Write(/Users/kota/Desktop/notes/**)",
+      "Write(/Users/kota/.claude/**)",
+      "Bash(git push --force:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git push -f:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(wget:*)",
+      "Bash(pip install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(open:*)",
+      "Bash(sudo:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(rm -rf /Users/kota/Desktop/notes:*)",
+      "Bash(dd:*)",
+      "Bash(mkfs:*)",
+      "Bash(chmod 777:*)",
+      "Bash(chmod -R 777:*)",
+      "Bash(curl:* | sh)",
+      "Bash(curl:* | bash)",
+      "Bash(:* | sh)",
+      "Bash(:* | bash)"
+    ]
+  }
 }

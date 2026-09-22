@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+// Test fixture standing in for the `claude` CLI. Instead of doing work, it reports
+// the ARGV it was spawned with, so tests can PROVE the daemon injects the expected
+// flags (e.g. --permission-mode acceptEdits). Emits one stream-json `result` line
+// whose `result` is a JSON string of process.argv (minus node + script), then exits 0.
+const args = process.argv.slice(2);
+process.stdout.write(
+  JSON.stringify({ type: "result", subtype: "success", result: JSON.stringify(args) }) + "\n",
+);
+process.exit(0);

@@ -85,4 +85,14 @@ export interface DaemonConfig {
    * rules/hooks). Empty string disables the redirect.
    */
   claudeConfigDir: string;
+  /**
+   * Permission mode passed to headless claude as `--permission-mode <mode>`. A
+   * non-interactive `claude -p` has NO operator to approve tool prompts, so Edit/Write
+   * would otherwise fail with "permission not granted". "acceptEdits" (default) auto-
+   * accepts file edits; combined with the allow-list in Commander's settings.json
+   * (Edit/Write/Bash) this gives the spawned agent working edit permission at minimum
+   * scope (dangerous ops stay denied). Empty string omits the flag. We do NOT use
+   * `--dangerously-skip-permissions` (that bypasses the deny-list too).
+   */
+  permissionMode: string;
 }
