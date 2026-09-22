@@ -57,6 +57,22 @@ export const ESSENTIAL_ENV_KEYS: readonly string[] = [
 const PRESERVE_PREFIXES: readonly string[] = ["COMMANDER_", "ANTHROPIC_", "CLAUDE_"];
 
 /**
+ * Fail-safe resolution of the config-dir override (COMMANDER_CLAUDE_CONFIG_DIR).
+ *
+ * An EMPTY or whitespace value must NOT leave the spawned claude without a
+ * CLAUDE_CONFIG_DIR — buildSpawnEnv drops an empty one, and Claude Code then reads the
+ * operator's personal ~/.claude (its judgment-queue UserPromptSubmit hook + personal
+ * CLAUDE.md). Any empty/whitespace override therefore resolves to Commander's own
+ * home, so the personal config can never re-attach through a misconfigured env.
+ */
+export function resolveClaudeConfigDir(
+  raw: string | undefined,
+  fallback: string,
+): string {
+  return raw && raw.trim() ? raw : fallback;
+}
+
+/**
  * Build the env handed to the spawned claude process.
  *
  * Isolated (default): a fresh object containing only the essential keys plus the

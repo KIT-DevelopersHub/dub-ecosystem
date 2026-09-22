@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSpawnEnv } from "../src/env.ts";
+import { buildSpawnEnv, resolveClaudeConfigDir } from "../src/env.ts";
 
 // A parent env that mimics an operator whose shell exports personal secrets and a
 // personal CLAUDE_CONFIG_DIR pointing at ~/.claude.
@@ -55,5 +55,24 @@ describe("buildSpawnEnv — disabled", () => {
     const env = buildSpawnEnv({ isolateEnv: true, claudeConfigDir: undefined }, PERSONAL_BASE);
     // Personal /Users/operator/.claude must NOT leak through the CLAUDE_* passthrough.
     expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+  });
+});
+
+describe("resolveClaudeConfigDir — fail-safe redirect (no personal ~/.claude fallback)", () => {
+  const HOME = "/repo/commander/.claude-home";
+
+  it("keeps an explicit non-empty override", () => {
+    expect(resolveClaudeConfigDir("/some/other/home", HOME)).toBe("/some/other/home");
+  });
+
+  it("falls back to Commander's home when the override is undefined", () => {
+    expect(resolveClaudeConfigDir(undefined, HOME)).toBe(HOME);
+  });
+
+  it("falls back to Commander's home when the override is empty or whitespace", () => {
+    // The dangerous case: an explicit "" would otherwise leave CLAUDE_CONFIG_DIR unset,
+    // re-attaching the operator's personal ~/.claude (judgment-queue hook + CLAUDE.md).
+    expect(resolveClaudeConfigDir("", HOME)).toBe(HOME);
+    expect(resolveClaudeConfigDir("   ", HOME)).toBe(HOME);
   });
 });

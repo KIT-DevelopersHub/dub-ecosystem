@@ -18,6 +18,7 @@
 
 import { fileURLToPath } from "node:url";
 import { createDaemonServer, VERSION } from "./server.ts";
+import { resolveClaudeConfigDir } from "./env.ts";
 import type { DaemonConfig } from "./types.ts";
 
 // commander/daemon/src/index.ts -> commander/.claude-home (robust to any cwd).
@@ -28,6 +29,14 @@ const DEFAULT_CLAUDE_CONFIG_DIR = fileURLToPath(
 function loadConfig(): DaemonConfig {
   const isolateEnv = !/^(0|false|no)$/i.test(
     process.env.COMMANDER_ISOLATE_ENV ?? "",
+  );
+  // Fail-safe redirect: an EMPTY COMMANDER_CLAUDE_CONFIG_DIR must NOT fall through to
+  // the personal ~/.claude (see resolveClaudeConfigDir). `?? DEFAULT` only catches
+  // undefined, so an explicit "" would otherwise leave the redirect unset and re-attach
+  // the operator's judgment-queue hook + personal CLAUDE.md to the spawned claude.
+  const claudeConfigDir = resolveClaudeConfigDir(
+    process.env.COMMANDER_CLAUDE_CONFIG_DIR,
+    DEFAULT_CLAUDE_CONFIG_DIR,
   );
   const config: DaemonConfig = {
     port: Number(process.env.COMMANDER_PORT ?? 4319),
@@ -41,8 +50,7 @@ function loadConfig(): DaemonConfig {
     idleTimeoutMs: Number(process.env.COMMANDER_RUN_IDLE_TIMEOUT_MS ?? 1_800_000),
     runTimeoutMs: Number(process.env.COMMANDER_RUN_TIMEOUT_MS ?? 7_200_000),
     isolateEnv,
-    claudeConfigDir:
-      process.env.COMMANDER_CLAUDE_CONFIG_DIR ?? DEFAULT_CLAUDE_CONFIG_DIR,
+    claudeConfigDir,
   };
   if (process.env.COMMANDER_SERVICE_URL) config.serviceUrl = process.env.COMMANDER_SERVICE_URL;
   if (process.env.COMMANDER_SERVICE_TOKEN) config.serviceToken = process.env.COMMANDER_SERVICE_TOKEN;
