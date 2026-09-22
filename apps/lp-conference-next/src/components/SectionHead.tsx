@@ -29,7 +29,7 @@ export function SectionHead({
     .join(" ");
   return (
     <div className={cls}>
-      <Reveal as="span" className="section-eyebrow" variant="fade">
+      <Reveal as="span" className="section-eyebrow section-eyebrow--line" variant="fade" data-line>
         {index && <span className="section-eyebrow-idx">{index}</span>}
         {eyebrow}
       </Reveal>

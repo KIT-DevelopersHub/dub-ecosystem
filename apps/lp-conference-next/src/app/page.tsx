@@ -1,6 +1,7 @@
 import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
 import { Entrance } from "@/components/Entrance";
+import { MotionRoot } from "@/components/MotionRoot";
 import { ScrollProgress } from "@/components/ScrollProgress";
 import { Header } from "@/components/Header";
 import { Hero } from "@/components/Hero";
@@ -36,6 +37,7 @@ export default function Page() {
   return (
     <>
       <Entrance />
+      <MotionRoot />
       <ScrollProgress />
       <Header nav={config.nav} cta={config.hero.primaryCta} />
       <Hero data={config.hero} subheading={config.catch.lead} />

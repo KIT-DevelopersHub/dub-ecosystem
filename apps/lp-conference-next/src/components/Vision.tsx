@@ -16,7 +16,7 @@ export function Vision({
 }) {
   return (
     <section className="vision">
-      <div className="vision-rings" aria-hidden="true" />
+      <div className="vision-rings" aria-hidden="true" data-parallax="-70" />
       <div className="container vision-inner">
         <Reveal as="span" className="section-eyebrow" variant="fade">
           {index && <span className="section-eyebrow-idx">{index}</span>}

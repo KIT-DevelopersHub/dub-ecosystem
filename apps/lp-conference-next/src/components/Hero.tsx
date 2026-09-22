@@ -16,10 +16,10 @@ export function Hero({ data, subheading }: { data: HeroConfig; subheading?: stri
     <section id="top" className="hero">
       {/* original full-bleed motion background (decorative) */}
       <div className="hero-bg" aria-hidden="true">
-        <span className="hero-bg-blob hero-bg-blob--a" />
-        <span className="hero-bg-blob hero-bg-blob--b" />
-        <span className="hero-bg-blob hero-bg-blob--c" />
-        <div className="hero-net-wrap">
+        <span className="hero-bg-blob hero-bg-blob--a" data-parallax="70" />
+        <span className="hero-bg-blob hero-bg-blob--b" data-parallax="120" />
+        <span className="hero-bg-blob hero-bg-blob--c" data-parallax="40" />
+        <div className="hero-net-wrap" data-parallax="-90">
           <HeroNetwork />
         </div>
       </div>
@@ -30,10 +30,14 @@ export function Hero({ data, subheading }: { data: HeroConfig; subheading?: stri
 
           <h1 className="hero-title">
             <span className="hero-title-line">
-              <span className="hero-title-jp">北陸</span>
-              <span className="hero-title-it">IT</span>
+              <span className="hero-title-inner">
+                <span className="hero-title-jp">北陸</span>
+                <span className="hero-title-it">IT</span>
+              </span>
             </span>
-            <span className="hero-title-line hero-title-line--2">カンファレンス</span>
+            <span className="hero-title-line hero-title-line--2">
+              <span className="hero-title-inner">カンファレンス</span>
+            </span>
           </h1>
 
           {subheading && <p className="hero-sub">{subheading}</p>}
@@ -55,6 +59,7 @@ export function Hero({ data, subheading }: { data: HeroConfig; subheading?: stri
                 className="hero-cta hero-cta--participant"
                 href={data.primaryCta.href}
                 aria-label={oneLine(data.primaryCta.label)}
+                data-magnetic
               >
                 参加登録はこちら
                 <span className="hero-cta-arrow" aria-hidden="true">→</span>

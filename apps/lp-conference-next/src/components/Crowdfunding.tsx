@@ -9,9 +9,9 @@ export function Crowdfunding({ data, index }: { data: CrowdfundingConfig; index?
   return (
     <section id="crowdfunding" className="support">
       <div className="support-band">
-        <span className="support-shape support-shape--a" aria-hidden="true" />
-        <span className="support-shape support-shape--b" aria-hidden="true" />
-        <span className="support-shape support-shape--c" aria-hidden="true" />
+        <span className="support-shape support-shape--a" aria-hidden="true" data-parallax="90" />
+        <span className="support-shape support-shape--b" aria-hidden="true" data-parallax="-110" />
+        <span className="support-shape support-shape--c" aria-hidden="true" data-parallax="60" />
         <div className="container support-inner">
           <Reveal as="span" className="section-eyebrow section-eyebrow--onDark" variant="fade">
             {index && <span className="section-eyebrow-idx">{index}</span>}
@@ -25,7 +25,7 @@ export function Crowdfunding({ data, index }: { data: CrowdfundingConfig; index?
           </Reveal>
           {data.cta && (
             <Reveal className="support-actions" variant="up" delay={220}>
-              <a className="btn-support" href={data.cta.href}>
+              <a className="btn-support" href={data.cta.href} data-magnetic>
                 {data.cta.label}
                 <span className="arrow" aria-hidden="true">→</span>
               </a>

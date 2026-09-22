@@ -39,6 +39,8 @@ export interface RevealProps {
   role?: string;
   href?: string;
   "aria-label"?: string;
+  /** allow decorative motion hooks (data-line / data-parallax / data-magnetic). */
+  [dataAttr: `data-${string}`]: string | boolean | undefined;
 }
 
 // これ以上「下」にある要素だけを最初に隠す（見えている物は隠さない）。

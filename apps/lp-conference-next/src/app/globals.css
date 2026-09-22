@@ -393,8 +393,27 @@ img { max-width: 100%; height: auto; display: block; }
   --rise: 12px;
   animation: hero-rise 0.5s cubic-bezier(0, 0, 0.58, 1) 0.05s both;
 }
-.hero-title {
-  animation: hero-wipe 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+/* Hero headline — goodpatch's signature masked per-line rise: each line sits in
+   an overflow:hidden clip and its inner content translates up from below the
+   mask (translateY 108% → 0) on a staggered easeOutQuint. Reads as the words
+   "standing up" out of the page rather than a flat fade. */
+.hero-title { display: block; }
+.hero-title-line {
+  display: block;
+  overflow: hidden;
+  padding-block: 0.04em; /* room for descenders inside the clip */
+}
+.hero-title-inner {
+  display: inline-block;
+  will-change: transform;
+  animation: hero-line-rise 1.05s cubic-bezier(0.22, 1, 0.36, 1) 0.28s both;
+}
+.hero-title-line--2 .hero-title-inner {
+  animation-delay: 0.42s;
+}
+@keyframes hero-line-rise {
+  from { transform: translateY(108%); }
+  to { transform: translateY(0); }
 }
 .hero-meta {
   --rise: 16px;
@@ -2252,6 +2271,7 @@ img { max-width: 100%; height: auto; display: block; }
   /* Entrance / reveal: never leave anything hidden under reduced motion. */
   .hero-eyebrow,
   .hero-title,
+  .hero-title-inner,
   .hero-meta,
   .hero-ctas,
   .hero-visual,
@@ -2267,4 +2287,91 @@ img { max-width: 100%; height: auto; display: block; }
     transform: none !important;
     clip-path: none !important;
   }
+  /* parallax / line-draw / cursor never engage under reduced motion */
+  [data-parallax] { translate: none !important; }
+  .lp-cursor-dot, .lp-cursor-ring { display: none !important; }
+  .has-lp-cursor, .has-lp-cursor * { cursor: auto !important; }
 }
+
+/* ============================================================
+   GSAP + Lenis motion layer  (goodpatch stack: GSAP/ScrollTrigger/Lenis)
+   All effects are driven from MotionRoot.tsx and are ADD-ONLY: with no JS
+   (or reduced motion) every custom property below resolves to a static,
+   fully-visible default.
+   ============================================================ */
+
+/* Scroll-scrubbed parallax — MotionRoot scrubs the px amplitude into --par-y.
+   Applied via `translate:` (an independent CSS property) so it composes with
+   each element's own CSS keyframe `transform` animation without clobbering it. */
+[data-parallax] {
+  translate: 0 calc(var(--par-y, 0) * 1px);
+  will-change: translate;
+}
+
+/* Scroll-linked line draw — goodpatch's clip/scaleX progress reveal. The
+   eyebrow keeps its own text; a thin brand rule to its right draws left→right
+   as --line scrubs 0→1. Default (no JS) = fully drawn. */
+.section-eyebrow--line {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.section-eyebrow--line::after {
+  content: "";
+  width: clamp(28px, 6vw, 72px);
+  height: 2px;
+  background: linear-gradient(90deg, var(--lp-blue), var(--lp-teal));
+  border-radius: 2px;
+  transform-origin: 0 50%;
+  transform: scaleX(var(--line, 1));
+  opacity: calc(0.25 + 0.75 * var(--line, 1));
+  will-change: transform;
+}
+.section-eyebrow--onDark.section-eyebrow--line::after {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+/* Custom cursor — a crisp dot + a lagging ring (fine pointer only; MotionRoot
+   adds .has-lp-cursor and animates position via GSAP). The ring grows over
+   interactive targets (.lp-cursor-hot). Decorative; hidden for touch/reduced. */
+.has-lp-cursor,
+.has-lp-cursor a,
+.has-lp-cursor button,
+.has-lp-cursor [role="tab"] { cursor: none; }
+.lp-cursor-dot,
+.lp-cursor-ring {
+  position: fixed;
+  left: 0;
+  top: 0;
+  translate: -50% -50%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999;
+}
+.lp-cursor-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--lp-blue);
+  transition: opacity 0.2s ease;
+}
+.lp-cursor-ring {
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid rgba(47, 97, 214, 0.55);
+  scale: 1;
+  transition: scale 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.28s ease, background-color 0.28s ease;
+}
+.lp-cursor-hot .lp-cursor-ring {
+  scale: 1.75;
+  border-color: rgba(23, 184, 146, 0.7);
+  background: rgba(47, 97, 214, 0.08);
+}
+.lp-cursor-hot .lp-cursor-dot { opacity: 0.4; }
+
+/* Media reveal richness — image tiles get a slightly stronger scale-in so the
+   grid feels alive as it staggers into view (goodpatch layered-image feel). */
+.reveal--zoom.is-armed .work-card-photo,
+.reveal--zoom.is-armed .info-card-media { transform: scale(1.06); }
+
