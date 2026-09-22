@@ -1,4 +1,5 @@
 import type { HeroConfig } from "@/config/types";
+import { HeroScene } from "@/components/HeroScene";
 
 // Hero — reproduces goodpatch's hero skeleton (centered massive headline + a
 // medium centered subheading over a full-bleed motion background), filled with
@@ -13,15 +14,13 @@ export function Hero({ data, subheading }: { data: HeroConfig; subheading?: stri
   const oneLine = (s: string) => s.replace(/\n/g, "");
 
   return (
-    <section id="top" className="hero">
-      {/* original full-bleed motion background (decorative) */}
+    <section id="top" className="hero hero--v31">
+      {/* v3.1 full-bleed WebGL blob field (decorative). A dark-blue CSS gradient
+          sits behind it (see .hero--v31) so there is never a white flash and a
+          missing WebGL context degrades gracefully. Original art — no goodpatch
+          asset/shape/copy. */}
       <div className="hero-bg" aria-hidden="true">
-        <span className="hero-bg-blob hero-bg-blob--a" data-parallax="70" />
-        <span className="hero-bg-blob hero-bg-blob--b" data-parallax="120" />
-        <span className="hero-bg-blob hero-bg-blob--c" data-parallax="40" />
-        <div className="hero-net-wrap" data-parallax="-90">
-          <HeroNetwork />
-        </div>
+        <HeroScene />
       </div>
 
       <div className="hero-body">
@@ -85,52 +84,5 @@ export function Hero({ data, subheading }: { data: HeroConfig; subheading?: stri
         <span className="hero-scroll-line" aria-hidden="true" />
       </a>
     </section>
-  );
-}
-
-// Abstract "engineers connecting" network — pure SVG, brand gradient, gentle
-// pulse on the nodes (paused under prefers-reduced-motion via CSS). Original art.
-function HeroNetwork() {
-  const nodes = [
-    { cx: 60, cy: 70, r: 9 },
-    { cx: 210, cy: 40, r: 7 },
-    { cx: 330, cy: 110, r: 11 },
-    { cx: 150, cy: 175, r: 8 },
-    { cx: 285, cy: 220, r: 9 },
-    { cx: 70, cy: 250, r: 7 },
-    { cx: 360, cy: 300, r: 8 },
-    { cx: 180, cy: 300, r: 10 },
-  ];
-  const edges: [number, number][] = [
-    [0, 1], [1, 2], [0, 3], [3, 2], [3, 4], [2, 4],
-    [3, 5], [4, 6], [4, 7], [5, 7], [7, 6],
-  ];
-  return (
-    <svg className="hero-net" viewBox="0 0 420 360" role="presentation" focusable="false">
-      <defs>
-        <linearGradient id="netGrad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#2f61d6" />
-          <stop offset="1" stopColor="#17b892" />
-        </linearGradient>
-        <radialGradient id="nodeGlow" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0" stopColor="#2f61d6" stopOpacity="0.25" />
-          <stop offset="1" stopColor="#2f61d6" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <g stroke="url(#netGrad)" strokeWidth="1.6" strokeOpacity="0.5">
-        {edges.map(([a, b], i) => (
-          <line key={i} x1={nodes[a].cx} y1={nodes[a].cy} x2={nodes[b].cx} y2={nodes[b].cy} />
-        ))}
-      </g>
-      <g>
-        {nodes.map((n, i) => (
-          <g key={i} className="hero-net-node" style={{ animationDelay: `${i * 0.4}s` }}>
-            <circle cx={n.cx} cy={n.cy} r={n.r * 2.4} fill="url(#nodeGlow)" />
-            <circle cx={n.cx} cy={n.cy} r={n.r} fill="url(#netGrad)" />
-            <circle cx={n.cx} cy={n.cy} r={n.r} fill="#fff" fillOpacity="0.18" />
-          </g>
-        ))}
-      </g>
-    </svg>
   );
 }
