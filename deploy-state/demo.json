@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "18741af2",
+  "deployedSha": "3034bbd3",
   "branch": "staging/furigana-roster-integ",
   "actor": "Kota",
-  "markers": ["フリガナ", "打診中", "たかおか"],
+  "markers": ["各リーダーの下に配下メンバーをぶら下げて", "members-orgchart"],
   "live": true,
-  "verifiedAt": "2026-09-21T19:39:57Z",
-  "updatedAt": "2026-09-21T19:39:57Z",
-  "note": "furigana+roster整理 FB反映(status3分類/furigana表示/leader組織図)"
+  "verifiedAt": "2026-09-22T05:14:19Z",
+  "updatedAt": "2026-09-22T05:14:19Z",
+  "note": "組織図: leaderId親子ツリーで配下を明示"
 }
