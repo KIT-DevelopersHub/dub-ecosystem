@@ -2,9 +2,12 @@
 // previously constructed the adapters with a bare boolean (config.pushConfigured), which
 // carries NO credentials, so send() always returned "failed" even with the secrets set —
 // no push ever went out. buildPushAdapters must thread the real credentials through.
+// Method A: iOS/macOS/android are all FcmAdapter (Apple via FCM->APNs); only Windows
+// keeps WNS. The server no longer parses direct APNs credentials.
 import { describe, it, expect } from "vitest";
 import type { Env } from "../src/env";
-import { apnsCredentials, fcmOptions, buildPushAdapters } from "../src/deps";
+import { wnsCredentials, fcmOptions, buildPushAdapters } from "../src/deps";
+import { FcmAdapter, WnsAdapter } from "../src/push";
 
 const FCM_SA = { client_email: "svc@proj.iam.gserviceaccount.com", private_key: "PKEY", project_id: "proj_1" };
 
@@ -36,22 +39,42 @@ describe("fcmOptions (Android $0 wiring)", () => {
   });
 });
 
-describe("apnsCredentials (iOS wiring)", () => {
-  it("builds credentials only when the full p8 secret set is present", () => {
-    const full = { APNS_KEY_P8: "p8", APNS_KEY_ID: "KID", APNS_TEAM_ID: "TEAM", APNS_BUNDLE_ID: "jp.devhub.app" };
-    expect(apnsCredentials(env(full))).toEqual({ keyP8: "p8", keyId: "KID", teamId: "TEAM", bundleId: "jp.devhub.app" });
+describe("wnsCredentials (Windows wiring)", () => {
+  it("builds credentials when SID + secret are present", () => {
+    const out = wnsCredentials(env({ WNS_PACKAGE_SID: "ms-app://sid", WNS_CLIENT_SECRET: "sec" }));
+    expect(out).toEqual({ packageSid: "ms-app://sid", clientSecret: "sec" });
   });
 
-  it("returns null when any part is missing", () => {
-    expect(apnsCredentials(env({ APNS_KEY_P8: "p8", APNS_KEY_ID: "KID" }))).toBeNull();
-    expect(apnsCredentials(env({}))).toBeNull();
+  it("carries WNS_TENANT_ID when present", () => {
+    const out = wnsCredentials(env({ WNS_PACKAGE_SID: "ms-app://sid", WNS_CLIENT_SECRET: "sec", WNS_TENANT_ID: "tid" }));
+    expect(out).toMatchObject({ tenantId: "tid" });
+  });
+
+  it("returns null when either SID or secret is missing", () => {
+    expect(wnsCredentials(env({ WNS_PACKAGE_SID: "ms-app://sid" }))).toBeNull();
+    expect(wnsCredentials(env({ WNS_CLIENT_SECRET: "sec" }))).toBeNull();
+    expect(wnsCredentials(env({}))).toBeNull();
   });
 });
 
 describe("buildPushAdapters", () => {
-  it("returns an ios + android adapter regardless of secret presence", () => {
+  it("returns an adapter for all 4 platforms regardless of secret presence", () => {
     const adapters = buildPushAdapters(env({}));
     expect(adapters.ios).toBeDefined();
     expect(adapters.android).toBeDefined();
+    expect(adapters.macos).toBeDefined();
+    expect(adapters.windows).toBeDefined();
+  });
+
+  it("routes iOS/macOS/android through FcmAdapter (Method A: Apple via FCM->APNs)", () => {
+    const adapters = buildPushAdapters(env({}));
+    expect(adapters.ios).toBeInstanceOf(FcmAdapter);
+    expect(adapters.macos).toBeInstanceOf(FcmAdapter);
+    expect(adapters.android).toBeInstanceOf(FcmAdapter);
+  });
+
+  it("keeps Windows on WnsAdapter", () => {
+    const adapters = buildPushAdapters(env({}));
+    expect(adapters.windows).toBeInstanceOf(WnsAdapter);
   });
 });

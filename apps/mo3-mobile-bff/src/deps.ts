@@ -9,9 +9,9 @@ import { configFromEnv, type AppConfig, type Env } from "./env";
 import { type Authenticator, DubAuthenticator } from "./authn";
 import { D1DeviceStore, type DeviceStore } from "./devices";
 import { D1DeliveryStore, type DeliveryStore } from "./deliveries";
-import { ApnsAdapter, FcmAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
-import type { ApnsCredentials } from "./apns";
+import { FcmAdapter, WnsAdapter, type PushAdapter, type PushRetryPolicy } from "./push";
 import type { FcmServiceAccount } from "./fcm";
+import type { WnsCredentials } from "./wns";
 import { D1ChangeLogReader, D1ChangeLogStore, type ChangeLogReader, type ChangeLogStore } from "./change-log";
 import { D1MutationStore, type MutationStore } from "./mutation-store";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
@@ -72,28 +72,36 @@ export function buildDeps(env: Env): Deps {
 }
 
 /**
- * Construct the per-platform push adapters from Worker Secrets. Previously the
- * adapters were built with a bare boolean (`config.pushConfigured`), which per
- * push.ts carries NO credentials — so send() always returned "failed" even when the
- * secrets were set, and no push ever went out. Here we parse the real credentials and
- * hand them to the adapters. A missing/malformed secret degrades to a credential-less
- * adapter (send() -> "failed", audited upstream) instead of throwing at worker boot.
+ * Construct the per-platform push adapters from Worker Secrets.
+ *
+ * Method A (unified FCM): iOS, macOS and Android all dispatch through FCM HTTP v1
+ * — a single code path. Firebase forwards Apple-platform tokens to APNs internally
+ * (the APNs auth key is registered once in the Firebase console), so the server holds
+ * NO direct APNs credentials; the old per-platform ApnsAdapter wiring is gone. Only
+ * Windows keeps its own transport (WNS). A missing/malformed secret degrades to a
+ * credential-less adapter (send() -> "failed", audited upstream) rather than throwing
+ * at worker boot.
  */
 export function buildPushAdapters(env: Env): Record<mobile.MobilePlatform, PushAdapter> {
-  const apns = apnsCredentials(env);
+  const fcm = fcmOptions(env); // one FCM config for ios/macos/android
+  const wns = wnsCredentials(env);
   return {
-    // ApnsAdapterOptions nests the credentials under `credentials` — passing the bare
-    // ApnsCredentials object would leave opts.credentials undefined (send() -> "failed").
-    ios: new ApnsAdapter(apns ? { credentials: apns } : false),
-    android: new FcmAdapter(fcmOptions(env)),
+    ios: new FcmAdapter(fcm), // Apple push via FCM -> APNs (no server-side APNs key)
+    macos: new FcmAdapter(fcm), // Apple push via FCM -> APNs
+    android: new FcmAdapter(fcm),
+    windows: new WnsAdapter(wns ? { credentials: wns } : false),
   };
 }
 
-/** APNs p8 credentials from secrets; null unless the full set is present. */
-export function apnsCredentials(env: Env): ApnsCredentials | null {
-  const { APNS_KEY_P8, APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID } = env;
-  if (!APNS_KEY_P8 || !APNS_KEY_ID || !APNS_TEAM_ID || !APNS_BUNDLE_ID) return null;
-  return { keyP8: APNS_KEY_P8, keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID, bundleId: APNS_BUNDLE_ID };
+/** WNS (Windows) Azure AD credentials; null unless SID + secret are both present. */
+export function wnsCredentials(env: Env): WnsCredentials | null {
+  const { WNS_PACKAGE_SID, WNS_CLIENT_SECRET, WNS_TENANT_ID } = env;
+  if (!WNS_PACKAGE_SID || !WNS_CLIENT_SECRET) return null;
+  return {
+    packageSid: WNS_PACKAGE_SID,
+    clientSecret: WNS_CLIENT_SECRET,
+    ...(WNS_TENANT_ID ? { tenantId: WNS_TENANT_ID } : {}),
+  };
 }
 
 /** FCM (Android, $0) HTTP v1 options from the service-account JSON secret. A parse

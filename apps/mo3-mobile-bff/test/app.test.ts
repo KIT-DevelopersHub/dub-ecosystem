@@ -126,9 +126,19 @@ describe("devices", () => {
 
   it("register with an invalid platform -> 400 VALIDATION_FAILED", async () => {
     const h = makeHarness();
-    const res = await buildApp(h.deps).request("/m/v1/devices", jsonInit({ platform: "windows", pushToken: "x" }, authHeaders()));
+    const res = await buildApp(h.deps).request("/m/v1/devices", jsonInit({ platform: "linux", pushToken: "x" }, authHeaders()));
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
+  });
+
+  it.each(["ios", "android", "macos", "windows"])("registers a %s device (201)", async (platform) => {
+    const h = makeHarness();
+    const res = await buildApp(h.deps).request(
+      "/m/v1/devices",
+      jsonInit({ platform, pushToken: `tok_${platform}` }, authHeaders()),
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { deviceId: string }).deviceId).toMatch(/^mdev_/);
   });
 
   // de1 Flutter WebView: authenticates with the web `dub_session` cookie, no Bearer.
