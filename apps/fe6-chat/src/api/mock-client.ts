@@ -2,6 +2,7 @@
 // dev and unit tests without chat-service. Deterministic, dependency-free.
 import { chat, type common, type identity } from "@dub/types";
 import { newChannelId, newMessageId } from "../lib/ulid";
+import { mentionsMe } from "../lib/mentions";
 import type {
   Channel,
   ChannelMember,
@@ -21,12 +22,13 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  TeamSummary,
   UnfurlPreview,
   UnreadSummary,
   UpdateChannelRequest,
   WsTicketResponse,
 } from "./contract";
-import type { ChatApiClient } from "./client";
+import type { ChatApiClient, MentionTeams } from "./client";
 import { ChatApiError } from "./client";
 import { toggleReactionLocal } from "../store/timeline";
 import { mockUnfurl } from "../lib/unfurl-mock";
@@ -40,6 +42,10 @@ export interface MockSeed {
   members?: ChannelMember[];
   users?: identity.UserSummary[];
   pins?: { channelId: common.ChannelId; messageId: common.MessageId }[];
+  /** 運営チーム (チーム単位メンションの候補). */
+  teams?: TeamSummary[];
+  /** currentUserId が所属するチーム — チーム経由の自分宛メンション判定用. */
+  myTeamIds?: string[];
 }
 
 export class MockChatClient implements ChatApiClient {
@@ -47,6 +53,8 @@ export class MockChatClient implements ChatApiClient {
   private messages: Message[] = [];
   private members: ChannelMember[] = [];
   private users = new Map<common.UserId, identity.UserSummary>();
+  private teams: TeamSummary[] = [];
+  private myTeamIds: string[] = [];
   private readState = new Map<common.ChannelId, common.MessageId>();
   private pins = new Map<common.ChannelId, Set<common.MessageId>>();
   private readonly me: common.UserId;
@@ -64,6 +72,8 @@ export class MockChatClient implements ChatApiClient {
     this.messages = (seed.messages ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : 1));
     this.members = seed.members ?? [];
     for (const u of seed.users ?? []) this.users.set(u.id, u);
+    this.teams = seed.teams ?? [];
+    this.myTeamIds = seed.myTeamIds ?? [];
     for (const p of seed.pins ?? []) {
       const set = this.pins.get(p.channelId) ?? new Set<common.MessageId>();
       set.add(p.messageId);
@@ -319,7 +329,7 @@ export class MockChatClient implements ChatApiClient {
         channelId,
         unreadCount: unread.length,
         lastReadMessageId: lastRead,
-        mentioned: unread.some((m) => m.body.includes(`<@${this.me}>`)),
+        mentioned: unread.some((m) => mentionsMe(m.body, this.me, this.myTeamIds)),
       });
     }
     return this.settle(out);
@@ -340,6 +350,10 @@ export class MockChatClient implements ChatApiClient {
       out.push(u ?? { id, displayName: id, avatarUrl: null });
     }
     return this.settle(out);
+  }
+
+  async listMentionTeams(): Promise<MentionTeams> {
+    return this.settle({ teams: this.teams.map((t) => ({ ...t })), myTeamIds: [...this.myTeamIds] });
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {

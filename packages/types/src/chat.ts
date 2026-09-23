@@ -111,6 +111,9 @@ export interface SearchMessagesQuery {
   channelId?: ChannelId;
   limit?: number;
 }
+export interface UnfurlQuery {
+  url: string; // required; the link to preview (SSRF-guarded server side)
+}
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
 // SINGLE source of truth for the query-parameter *names* chat-service's read endpoints put
@@ -128,6 +131,7 @@ export const CHAT_WIRE = {
     query: ["cursor", "limit", "channelId", "threadRootId", "afterMessageId"],
   },
   searchMessages: { method: "GET", path: "/chat/search", query: ["q", "channelId", "limit"] },
+  unfurl: { method: "GET", path: "/chat/unfurl", query: ["url"] },
 } as const;
 
 // Compile-time tie: each endpoint's query keys must be real keys of its query type.
@@ -135,7 +139,9 @@ type _ChatWireKeysAreTyped =
   (typeof CHAT_WIRE.listChannels.query)[number] extends keyof ListChannelsQuery
     ? (typeof CHAT_WIRE.listMessages.query)[number] extends keyof ListMessagesQuery
       ? (typeof CHAT_WIRE.searchMessages.query)[number] extends keyof SearchMessagesQuery
-        ? true
+        ? (typeof CHAT_WIRE.unfurl.query)[number] extends keyof UnfurlQuery
+          ? true
+          : never
         : never
       : never
     : never;

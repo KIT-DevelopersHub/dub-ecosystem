@@ -18,6 +18,7 @@ export interface Env {
   SVC_IDENTITY: Fetcher; // identity-roster (authz)
   SVC_EVENT?: Fetcher; // event-service (read-only eventExists check)
   SVC_FILE_META?: Fetcher; // file-meta (best-effort message<->file link registration)
+  SVC_MEMBER?: Fetcher; // member-service (チーム単位メンションの展開; absent => 展開しない)
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain defers audit
   SVC_NOTIFICATION?: Fetcher; // notification (immediate direct delivery of DM/@mention evt.notification to POST /internal/events-async; absent => outbox+drain fallback only)
 

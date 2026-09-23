@@ -1,14 +1,14 @@
 /// <reference lib="dom" />
 // Rich message composer: formatting toolbar (bold / italic / code / code-block /
-// link / emoji / mention / attach), Markdown-subset body, <@userId> mention
-// autocomplete, sessionStorage draft persistence, empty-body guard, archived
-// disable (design §2-2, §7). Attachment is a fileId hand-off (upload lives in
-// file-meta) — here it is a stubbed affordance. Test-ids preserved for units.
+// link / emoji / mention / attach), Markdown-subset body, mention autocomplete for
+// both people (<@userId>) and 運営チーム (<!team:teamId>), sessionStorage draft
+// persistence, empty-body guard, archived disable (design §2-2, §7). Attachment is a
+// fileId hand-off (upload lives in file-meta) — here it is a stubbed affordance.
+// Test-ids preserved for units.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, isImeComposing } from "@dub/ui";
-import type { identity } from "@dub/types";
 import type { common } from "@dub/types";
-import { applyMention, detectMentionTrigger } from "../lib/mentions";
+import { applyMention, detectMentionTrigger, type MentionCandidate } from "../lib/mentions";
 import { clearDraft, DRAFT_MAX_LEN, loadDraft, saveDraft } from "../store/draft";
 import { newFileId } from "../lib/ulid";
 import type { Attachment } from "../api/contract";
@@ -20,7 +20,7 @@ export interface MessageComposerProps {
   disabled?: boolean;
   disabledReason?: string;
   error?: string | null;
-  resolveMentionCandidates?: (query: string) => identity.UserSummary[];
+  resolveMentionCandidates?: (query: string) => MentionCandidate[];
   onSend: (body: string, attachments?: Attachment[]) => void | Promise<void>;
 }
 
@@ -117,9 +117,9 @@ export function MessageComposer({
   }, []);
 
   const pickMention = useCallback(
-    (user: identity.UserSummary) => {
+    (candidate: MentionCandidate) => {
       if (!trigger) return;
-      const next = applyMention(text, caret, trigger, user.id);
+      const next = applyMention(text, caret, trigger, candidate);
       setText(next.text);
       setSelected(0);
       focusCaret(next.caret);
@@ -254,10 +254,18 @@ export function MessageComposer({
     <div className={styles.composer}>
       {candidates.length > 0 && (
         <ul className={styles.mentionMenu} role="listbox" data-testid="fe6-composer-mention-menu">
-          {candidates.map((u, i) => (
-            <li key={u.id} role="option" aria-selected={i === selected}>
-              <button type="button" aria-selected={i === selected} onClick={() => pickMention(u)}>
-                {u.displayName}
+          {candidates.map((c, i) => (
+            <li key={`${c.kind}:${c.id}`} role="option" aria-selected={i === selected}>
+              <button type="button" aria-selected={i === selected} onClick={() => pickMention(c)}>
+                {c.kind === "team" && (
+                  <span
+                    className={styles.mentionTeamDot}
+                    aria-hidden
+                    {...(c.color && /^#[0-9a-fA-F]{3,8}$/.test(c.color) ? { style: { background: c.color } } : {})}
+                  />
+                )}
+                <span className={styles.mentionMenuLabel}>{c.label}</span>
+                {c.kind === "team" && <span className={styles.mentionMenuHint}>チーム全員に通知</span>}
               </button>
             </li>
           ))}
@@ -415,7 +423,7 @@ export function MessageComposer({
           {error ?? attachError}
         </div>
       )}
-      <div className={styles.composerHelp}>Enter で送信 · Shift+Enter で改行 · @ でメンション</div>
+      <div className={styles.composerHelp}>Enter で送信 · Shift+Enter で改行 · @ でメンション(個人 / チーム)</div>
     </div>
   );
 }

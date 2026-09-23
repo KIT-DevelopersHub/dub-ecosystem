@@ -1359,6 +1359,14 @@ function createChatStore() {
       body: "こっちは画像なしのサイトです https://example.com/ このページは OGP ないみたいですね https://no-ogp.invalid/page",
       createdAt: "2026-08-01T00:12:00.000Z",
     }),
+    // チーム単位メンション: 個人を1人ずつ書かずチーム全員へ。team_hq は ME の所属なので
+    // 行が「自分宛」ハイライトになる (team_corp は所属していない別チーム)。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZTM",
+      authorId: "usr_bob",
+      body: "<!team:team_hq> 明日の定例は 10:00 開始に変更します。<!team:team_corp> 契約書のレビューもお願いします 🙏",
+      createdAt: "2026-08-01T00:14:00.000Z",
+    }),
   ];
   // Posted messages persist for the session (per channel) so a sent URL renders
   // its card in place; ids are minted ascending so they sort after the seed.
@@ -2095,6 +2103,7 @@ function createMembersStore() {
     { id: "team_sponsor", key: "sponsor", name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
+    { id: "team_corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
   ];
   const mk = (
     id: string,
@@ -2257,6 +2266,11 @@ function createMembersStore() {
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
+    // チーム単位メンション用 (self-scoped): チーム一覧 + ログイン中アカウントの所属。
+    if (method === "GET" && pathname === "/api/v1/members/me/mention-teams") {
+      const me = members.find((m) => m.identityUserId === ME_ID);
+      return json({ teams: teams.map((t) => ({ ...t })), myTeamIds: [...(me?.teamIds ?? [])] });
+    }
 
     // teams
     if (method === "POST" && pathname === "/api/v1/members/teams") {

@@ -2,7 +2,8 @@
 // matching messages grouped nowhere fancy — a flat, newest-first list with the
 // channel name, author, and a snippet. Clicking a hit navigates to that channel.
 import type { common, identity } from "@dub/types";
-import type { SearchHit } from "../api/contract";
+import type { SearchHit, TeamSummary } from "../api/contract";
+import { toPlainMentions } from "../lib/mentions";
 import styles from "../styles/chat.module.css";
 
 export interface SearchResultsProps {
@@ -10,6 +11,7 @@ export interface SearchResultsProps {
   loading: boolean;
   results: SearchHit[];
   resolveUser?: (id: common.UserId) => identity.UserSummary | undefined;
+  resolveTeam?: (id: string) => TeamSummary | undefined;
   onSelect: (hit: SearchHit) => void;
   onClose: () => void;
 }
@@ -25,7 +27,7 @@ function timeShort(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export function SearchResults({ query, loading, results, resolveUser, onSelect, onClose }: SearchResultsProps) {
+export function SearchResults({ query, loading, results, resolveUser, resolveTeam, onSelect, onClose }: SearchResultsProps) {
   // System posts (authorId null) render as "システム" — never pass null downstream.
   const nameOf = (id: common.UserId | null): string => (id === null ? "システム" : (resolveUser?.(id)?.displayName ?? id));
   return (
@@ -54,7 +56,7 @@ export function SearchResults({ query, loading, results, resolveUser, onSelect, 
                   <span className={styles.searchHitAuthor}>{nameOf(h.message.authorId)}</span>
                   <span className={styles.searchHitTime}>{timeShort(h.message.createdAt)}</span>
                 </div>
-                <div className={styles.searchHitBody}>{snippet(h.message.body, query)}</div>
+                <div className={styles.searchHitBody}>{snippet(toPlainMentions(h.message.body, (id) => resolveUser?.(id)?.displayName, (id) => resolveTeam?.(id)?.name), query)}</div>
               </button>
             </li>
           ))}

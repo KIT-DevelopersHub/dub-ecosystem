@@ -14,7 +14,8 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { ReadTracker } from "../store/read-tracker";
 import { mapChatError } from "../lib/errors";
 import { ChatApiError } from "../api/client";
-import type { Attachment, Channel, ChannelMember, Message, SearchHit } from "../api/contract";
+import type { Attachment, Channel, ChannelMember, Message, SearchHit, TeamSummary } from "../api/contract";
+import type { MentionCandidate } from "../lib/mentions";
 import { ChannelHeader } from "./ChannelHeader";
 import { ChannelSettingsForm } from "./ChannelSettingsForm";
 import { MessageTimeline } from "./MessageTimeline";
@@ -23,6 +24,9 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { SearchResults } from "./SearchResults";
 import { ThreadPane } from "./ThreadPane";
 import styles from "../styles/chat.module.css";
+
+const MAX_MENTION_CANDIDATES = 8;
+const MAX_TEAM_CANDIDATES = 3;
 
 export function ChannelPage({
   channelId,
@@ -43,6 +47,10 @@ export function ChannelPage({
   const view = useChannelView(channelId);
   const { show } = useToast();
   const markRead = useChatStore((s) => s.markRead);
+  // 運営チーム (チーム単位メンション) は ChatApp が一度だけ読み込み store に載せる。
+  const teams = useChatStore((s) => s.teams);
+  const myTeamIds = useChatStore((s) => s.myTeamIds);
+  const teamsLoaded = useChatStore((s) => s.teamsLoaded);
   const isMobile = useIsMobile();
 
   const [channel, setChannel] = useState<Channel | null>(null);
@@ -152,14 +160,31 @@ export function ChannelPage({
   }, [newestId]);
 
   const resolveUser = useCallback((id: common.UserId) => users[id], [users]);
+  // 読み込み中は中立の「チーム」表記にして、生の team_01J… が一瞬見える(データ無しと
+  // 区別が付かない)状態を避ける。読み込み後も解決できない = 消えたチーム -> id のまま。
+  const resolveTeam = useCallback(
+    (id: string): TeamSummary | undefined =>
+      teams.find((t) => t.id === id) ?? (teamsLoaded ? undefined : { id, key: "", name: "チーム" }),
+    [teams, teamsLoaded],
+  );
+  // @-候補は「チーム → 個人」の順。チームは母数が少なく狙って打つものなので先頭に出す
+  // (法人チーム / 統括チームのように「そのチーム全員へ」を一発で選べる)。
   const resolveMentionCandidates = useCallback(
-    (query: string): identity.UserSummary[] => {
+    (query: string): MentionCandidate[] => {
       const q = query.toLowerCase();
-      return Object.values(users)
+      // チーム枠は最大3 (残りは必ず人に残す): "@" だけ打った時に全チームが候補を埋め、
+      // 従来の人メンションが押し出される退行を防ぐ。
+      const teamHits: MentionCandidate[] = teams
+        .filter((t) => t.name.toLowerCase().includes(q) || t.key.toLowerCase().includes(q))
+        .slice(0, MAX_TEAM_CANDIDATES)
+        .map((t) => ({ kind: "team", id: t.id, label: t.name, color: t.color ?? null }));
+      const userHits: MentionCandidate[] = Object.values(users)
         .filter((u) => u.displayName.toLowerCase().includes(q))
-        .slice(0, 8);
+        .slice(0, MAX_MENTION_CANDIDATES - teamHits.length)
+        .map((u) => ({ kind: "user", id: u.id, label: u.displayName, avatarUrl: u.avatarUrl }));
+      return [...teamHits, ...userHits];
     },
-    [users],
+    [teams, users],
   );
 
   const onSend = useCallback(
@@ -268,6 +293,7 @@ export function ChannelPage({
             pinned={pinned}
             searchValue={searchQuery}
             resolveUser={resolveUser}
+            resolveTeam={resolveTeam}
             onOpenSettings={() => setSettingsOpen(true)}
             onSearchChange={setSearchQuery}
             onUnpin={onUnpin}
@@ -281,6 +307,7 @@ export function ChannelPage({
             loading={searchLoading}
             results={searchResults}
             resolveUser={resolveUser}
+            resolveTeam={resolveTeam}
             onSelect={onSelectSearchHit}
             onClose={() => {
               setSearchQuery("");
@@ -299,6 +326,8 @@ export function ChannelPage({
           hasOlder={view.state.nextCursor !== null}
           pinnedIds={pinnedIds}
           resolveUser={resolveUser}
+          resolveTeam={resolveTeam}
+          myTeamIds={myTeamIds}
           onLoadOlder={() => void view.loadOlder()}
           onToggleReaction={(id, emoji) => void view.toggleReaction(id, emoji)}
           onSubmitEdit={onSubmitEdit}
@@ -329,6 +358,7 @@ export function ChannelPage({
               currentUserId={currentUserId}
               canModerate={canModerate}
               resolveUser={resolveUser}
+              resolveTeam={resolveTeam}
               resolveMentionCandidates={resolveMentionCandidates}
               onToggleReaction={(id, emoji) => void view.toggleReaction(id, emoji)}
               onClose={() => setThread(null)}

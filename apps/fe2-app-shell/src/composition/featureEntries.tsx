@@ -45,6 +45,7 @@ export type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  TeamSummary,
   UnfurlPreview,
   UnfurlResponse,
   UnreadSummary,

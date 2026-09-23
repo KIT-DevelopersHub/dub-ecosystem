@@ -142,7 +142,7 @@ default to `member`. Channel-admin (or the `chat:moderate` permission) is requir
 | `threadRootId` | string (`msg_<ULID>`) \| null | Non-null = a threaded reply; the root must live in the same channel |
 | `authorId` | string (`user_<ULID>`) \| null | `null` only for `kind = "system"` posts |
 | `kind` | `"user" \| "system"` | `system` = a notification-delivered post |
-| `body` | string (1..16000 chars) | Message text. Mentions use the `<@userId>` form. Once deleted, redacted to `"[deleted]"` |
+| `body` | string (1..16000 chars) | Message text. Mentions use the `<@userId>` form; a whole-team mention uses `<!team:teamId>` (team ids come from member-service `GET /members/me/mention-teams` — self-scoped and readable by any signed-in user, unlike the roster-gated `GET /members/teams`). Once deleted, redacted to `"[deleted]"` |
 | `attachmentFileIds` | string[] (`file_<ULID>`) | file-meta ids; returned empty once the message is deleted |
 | `reactions` | `Record<emoji, userId[]>` | Emoji -> reactors. Empty object when none |
 | `version` | number | Optimistic-lock version — send it on edit |
@@ -371,6 +371,15 @@ and a `message.created` realtime event fanned out to the channel's WS subscriber
 For a `type: "dm"` channel the event additionally carries `isDm: true` and `dmRecipientIds`
 (the channel's other member(s), author excluded) so notification raises a DM in-app
 notification the same way — neither field's absence is an error (additive, ADR-0003 §2).
+
+Team mentions (`<!team:teamId>`) are expanded at post time against member-service
+(`GET /members/internal/team-members`, service-to-service only) and folded into the same
+`mentions` list on the domain event — subscribers never see teams, only the userIds to
+notify. Rules: the author is always excluded (including via their own team); on a
+**private** channel the expansion is intersected with the channel's members, so a team
+mention never notifies someone who cannot read the channel; a mention written inside
+`` `inline code` `` or a ``` fenced block is literal and notifies nobody; if the roster
+lookup is unavailable the message still posts (the team fan-out is best-effort).
 
 ### `PATCH /messages/:id`
 

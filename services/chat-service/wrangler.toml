@@ -56,6 +56,12 @@ service = "event-service"
 binding = "SVC_FILE_META"
 service = "dub-file-meta"
 
+# 運営メンバー/チーム名簿 (チーム単位メンション <!team:id> を通知先 userId へ展開する
+# ためだけの read-only s2s 呼び出し。GET /members/internal/team-members)。
+[[services]]
+binding = "SVC_MEMBER"
+service = "member-service"
+
 # Producer queues (chat.* fan-out targets — dub-q- prefix). The chat.* rows are
 # △ in the frozen catalog (active after 9-C); the only subscriber is notification.
 [[queues.producers]]

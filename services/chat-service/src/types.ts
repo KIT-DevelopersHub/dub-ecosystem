@@ -257,6 +257,13 @@ export interface FileClient {
   ): Promise<void>;
 }
 
+// member-service lookup used to expand a チーム単位メンション (<!team:id>) into the
+// identity accounts to notify. Best-effort: when the binding is absent (local/preview)
+// or the call fails, a team mention still posts — it just notifies nobody extra.
+export interface MemberClient {
+  teamMemberUserIds(ctx: { requestId: string; userId?: string }, teamIds: string[]): Promise<common.UserId[]>;
+}
+
 export interface ChatRepo {
   // channels
   createChannel(row: ChannelRow): Promise<void>;
@@ -343,6 +350,7 @@ export interface AppDeps {
   realtime: RealtimePublisher;
   eventClient: EventClient;
   fileClient: FileClient;
+  memberClient: MemberClient;
   orgId: common.OrgId;
   wsTicketSecret: string;
   doUrlBase: string; // absolute; ":id" -> channelId

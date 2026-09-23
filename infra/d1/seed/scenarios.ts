@@ -353,6 +353,7 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
       { id: `member_team_sponsor${sfx}`, key: `sponsor${sfx}`, name: "スポンサーチーム", color: "#ea580c", description: "協賛打診・メニュー設計・契約" },
       { id: `member_team_venue${sfx}`, key: `venue${sfx}`, name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
       { id: `member_team_pr${sfx}`, key: `pr${sfx}`, name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
+      { id: `member_team_corp${sfx}`, key: `houjin${sfx}`, name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
     ];
     for (let i = 0; i < memberTeams.length; i++) {
       const t = memberTeams[i]!;
@@ -375,6 +376,8 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
       { id: `member_p9${sfx}`, name: "白木", role: "オーガナイザー", status: "added", teams: [5], contact: null },
       { id: `member_p10${sfx}`, name: "鈴木 一郎", role: "広報担当", status: "invited", teams: [5], contact: "ichiro@example.com" },
       { id: `member_p11${sfx}`, name: "山田 三郎", role: "デザイン", status: "declined", teams: [] as number[], contact: null },
+      { id: `member_p12${sfx}`, name: "野村", role: "オーガナイザー", status: "added", teams: [6], contact: null },
+      { id: `member_p13${sfx}`, name: "橋本", role: "リーダー", status: "added", teams: [6], contact: null },
     ];
     for (let i = 0; i < memberPeople.length; i++) {
       const p = memberPeople[i]!;

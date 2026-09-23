@@ -76,6 +76,10 @@ service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/aud
 binding = "SVC_NOTIFICATION"
 service = "dub-notification-service"
 
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"    # チーム単位メンション <!team:id> -> 通知先 userId の展開
+
 # NOTE: the per-service drain Cron Trigger (was `crons = ["*/5 * * * *"]`) was REMOVED.
 # The freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron),
 # freeing a slot on the Workers FREE plan's 5-cron account cap.

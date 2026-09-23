@@ -7,7 +7,7 @@ import type { common, identity, auditLog, chat } from "@dub/types";
 import type { DubEventName, DubEventPayloadMap } from "@dub/events";
 import { createApp } from "../src/app";
 import { InMemoryChatRepo } from "../src/memory-repo";
-import type { AppDeps, Authz, EventPublisher, AuditSink, RealtimePublisher, EventClient, FileClient } from "../src/types";
+import type { AppDeps, Authz, EventPublisher, AuditSink, RealtimePublisher, EventClient, FileClient, MemberClient } from "../src/types";
 
 export interface PublishedEvent {
   name: DubEventName;
@@ -60,6 +60,18 @@ export class FakeEventClient implements EventClient {
   }
 }
 
+/** Team -> identity users, as member-service would answer (チーム単位メンション展開). */
+export class FakeMemberClient implements MemberClient {
+  calls: string[][] = [];
+  constructor(private readonly byTeam: Record<string, common.UserId[]> = {}) {}
+  async teamMemberUserIds(_ctx: unknown, teamIds: string[]): Promise<common.UserId[]> {
+    this.calls.push([...teamIds]);
+    const out = new Set<common.UserId>();
+    for (const t of teamIds) for (const u of this.byTeam[t] ?? []) out.add(u);
+    return [...out];
+  }
+}
+
 export class FakeFileClient implements FileClient {
   calls: { messageId: string; fileIds: string[] }[] = [];
   async registerLinks(_ctx: unknown, messageId: common.MessageId, fileIds: common.FileId[]): Promise<void> {
@@ -101,12 +113,14 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & {
   audit: FakeAudit;
   realtime: FakeRealtime;
   fileClient: FakeFileClient;
+  memberClient: FakeMemberClient;
 } {
   const repo = new InMemoryChatRepo();
   const publisher = new FakePublisher();
   const audit = new FakeAudit();
   const realtime = new FakeRealtime();
   const fileClient = new FakeFileClient();
+  const memberClient = new FakeMemberClient();
   const deps: AppDeps = {
     repo,
     authz: fakeAuthz(new Set<identity.PermissionKey>(["chat:create", "chat:moderate"])),
@@ -115,6 +129,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & {
     realtime,
     eventClient: new FakeEventClient(true),
     fileClient,
+    memberClient,
     orgId: "org_devhub",
     wsTicketSecret: "test-secret",
     doUrlBase: "wss://chat-rt.test/ws/:id",
@@ -131,6 +146,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & {
     audit: deps.audit as FakeAudit,
     realtime: deps.realtime as FakeRealtime,
     fileClient: deps.fileClient as FakeFileClient,
+    memberClient: deps.memberClient as FakeMemberClient,
   });
 }
 

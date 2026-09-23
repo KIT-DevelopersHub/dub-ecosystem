@@ -2,6 +2,7 @@
 // FE5 owns everything else (theme4 1-5). Pure map operations.
 import type { common } from "@dub/types";
 import type { ChatRealtimeEvent, UnreadSummary } from "../api/contract";
+import { mentionsMe } from "../lib/mentions";
 
 export type UnreadMap = Record<common.ChannelId, UnreadSummary>;
 
@@ -23,19 +24,21 @@ export function unreadTotal(map: UnreadMap): number {
 /**
  * A message.created in a channel the user is NOT actively viewing increments its
  * unread count. `activeChannelId` is the open channel (its unread stays 0), and
- * `currentUserId` prevents counting the user's own messages.
+ * `currentUserId` prevents counting the user's own messages. `myTeamIds` makes a
+ * チーム単位メンション (<!team:…>) badge the channel exactly like a direct one.
  */
 export function applyUnreadEvent(
   map: UnreadMap,
   event: ChatRealtimeEvent,
   activeChannelId: common.ChannelId | null,
   currentUserId: common.UserId,
+  myTeamIds: readonly string[] = [],
 ): UnreadMap {
   if (event.kind !== "message.created") return map;
   if (event.channelId === activeChannelId) return map;
   if (event.authorId === currentUserId) return map;
   const prev = map[event.channelId];
-  const mentioned = /<@([A-Za-z0-9_]+)>/.test(event.body) && event.body.includes(`<@${currentUserId}>`);
+  const mentioned = mentionsMe(event.body, currentUserId, myTeamIds);
   const next: UnreadSummary = prev
     ? { ...prev, unreadCount: prev.unreadCount + 1, mentioned: prev.mentioned || mentioned }
     : { channelId: event.channelId, unreadCount: 1, lastReadMessageId: null, mentioned };

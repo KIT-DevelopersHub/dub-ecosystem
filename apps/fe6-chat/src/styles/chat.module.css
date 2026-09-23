@@ -599,6 +599,14 @@
   padding: 0 2px;
   font-weight: var(--dub-font-weight-medium);
 }
+/* チーム単位メンション: 個人メンションと見分けが付くよう枠線付きのチップにする
+   (色はチーム色があればインラインで上書き) */
+.mentionTeam {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--dub-radius-full);
+  white-space: nowrap;
+}
 .inlineCode {
   font-family: var(--dub-font-family-mono);
   background: var(--dub-color-surface-sunken);
@@ -995,6 +1003,26 @@
 .mentionMenu li button:hover,
 .mentionMenu li button[aria-selected="true"] {
   background: var(--dub-color-brand-100);
+}
+/* チーム候補: チーム色のドット + 「チーム全員に通知」の補足 */
+.mentionTeamDot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-brand-500);
+  flex-shrink: 0;
+}
+.mentionMenuLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mentionMenuHint {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-secondary);
+  flex-shrink: 0;
 }
 
 /* connection / archived banners */

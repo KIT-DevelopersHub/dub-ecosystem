@@ -18,7 +18,7 @@ import { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
 import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
 import { createUnfurler } from "./unfurl";
 import type { Env } from "./env";
-import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, RealtimePublisher } from "./types";
+import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, MemberClient, RealtimePublisher } from "./types";
 
 export type { Env } from "./env";
 
@@ -129,6 +129,39 @@ function buildFileClient(env: Env): FileClient {
   };
 }
 
+function buildMemberClient(env: Env): MemberClient {
+  return {
+    async teamMemberUserIds(ctx, teamIds) {
+      if (teamIds.length === 0) return [];
+      if (!env.SVC_MEMBER) {
+        // Loud on purpose: without the binding a team mention posts and renders but
+        // silently notifies nobody — that must show up in logs, not just in confusion.
+        consoleSink({ level: "warn", message: "SVC_MEMBER not bound — team mention notifies nobody", service: "chat-service", fields: { teamIds: teamIds.join(",") } });
+        return [];
+      }
+      const client = createServiceClient(env.SVC_MEMBER, { service: "member-service", caller: "chat-service" });
+      const rc: RequestContext = { requestId: ctx.requestId, ...(ctx.userId ? { userId: ctx.userId } : {}) };
+      try {
+        // internal-only route (x-dub-internal is added by createServiceClient): the
+        // roster lookup is for notification fan-out, not an end-user roster read.
+        // Tight timeout / no retry: this sits in the POST path, so a slow roster must
+        // cost the sender a moment, not a hung send (it degrades to "no fan-out").
+        const res = await client.get<{ userIds?: string[] }>(rc, "/members/internal/team-members", {
+          query: { teamIds: teamIds.join(",") },
+          timeoutMs: 1500,
+          retry: false,
+        });
+        return res?.userIds ?? [];
+      } catch (err) {
+        // Best-effort: a roster hiccup must never fail the post. The team mention is
+        // still stored and rendered; only the extra notifications are lost.
+        consoleSink({ level: "warn", message: "team mention expansion failed", service: "chat-service", fields: { teamIds: teamIds.join(","), err: String(err) } });
+        return [];
+      }
+    },
+  };
+}
+
 function buildRealtime(env: Env): RealtimePublisher {
   // Real DO fanout when the CHAT_ROOM namespace is bound; Noop otherwise so the
   // HTTP master runs unchanged in local/preview without a DO.
@@ -154,6 +187,7 @@ export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext):
     realtime: buildRealtime(env),
     eventClient: buildEventClient(env),
     fileClient: buildFileClient(env),
+    memberClient: buildMemberClient(env),
     orgId: env.DUB_DEFAULT_ORG_ID ?? common.DUB_DEFAULT_ORG_ID,
     wsTicketSecret: env.WS_TICKET_SECRET ?? DEV_WS_SECRET,
     doUrlBase: env.CHAT_RT_DO_URL_BASE ?? DEFAULT_DO_URL_BASE,

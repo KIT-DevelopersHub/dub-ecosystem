@@ -6,7 +6,7 @@
 //      shows live on every open client (previously reactions were not realtime).
 import { describe, it, expect } from "vitest";
 import type { chat } from "@dub/types";
-import { makeDeps, call, createApp } from "./harness";
+import { makeDeps, call, createApp, FakeMemberClient } from "./harness";
 
 const topic = { type: "topic", visibility: "public", name: "General" } as const;
 
@@ -68,6 +68,72 @@ describe("DM messages ride chat.message.created with isDm/dmRecipientIds", () =>
     expect(payloads).toHaveLength(1);
     expect(payloads[0]!.isDm).toBeUndefined();
     expect(payloads[0]!.dmRecipientIds).toBeUndefined();
+  });
+});
+
+describe("チーム単位メンション (<!team:id>) は投稿時にチーム員へ展開される", () => {
+  it("expands a team mention to its members (author + duplicates excluded)", async () => {
+    const memberClient = new FakeMemberClient({
+      team_hq: ["user_b", "user_caller"], // 自分も統括所属 -> 自分宛通知はしない
+      team_corp: ["user_c", "user_b"],
+    });
+    const deps = makeDeps({ memberClient });
+    const app = createApp(deps);
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
+    await call(app, "POST", "/chat/messages", {
+      body: { channelId: c.json.id, body: "<!team:team_hq> と <!team:team_corp> 確認おねがいします <@user_d>" },
+    });
+
+    expect(memberClient.calls).toEqual([["team_hq", "team_corp"]]);
+    const payloads = deps.publisher.payloadsFor("chat.message.created") as Array<{ mentions?: string[] }>;
+    expect(payloads[0]!.mentions).toEqual(["user_d", "user_b", "user_c"]);
+  });
+
+  it("never calls member-service when the body has no team mention", async () => {
+    const memberClient = new FakeMemberClient({ team_hq: ["user_b"] });
+    const deps = makeDeps({ memberClient });
+    const app = createApp(deps);
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
+    await call(app, "POST", "/chat/messages", { body: { channelId: c.json.id, body: "hi <@user_b>" } });
+    expect(memberClient.calls).toEqual([]);
+  });
+
+  it("does NOT notify for a mention written inside code (documentation, not a ping)", async () => {
+    const memberClient = new FakeMemberClient({ team_hq: ["user_b"] });
+    const deps = makeDeps({ memberClient });
+    const app = createApp(deps);
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
+    await call(app, "POST", "/chat/messages", {
+      // インラインコードと、行頭から始まる ``` フェンス (レンダラと同じ判定単位)。
+      body: { channelId: c.json.id, body: "書き方はこう: `<!team:team_hq>`\n```\n<@user_c>\n```" },
+    });
+    expect(memberClient.calls).toEqual([]);
+    const payloads = deps.publisher.payloadsFor("chat.message.created") as Array<{ mentions?: string[] }>;
+    expect(payloads[0]!.mentions).toBeUndefined();
+  });
+
+  it("on a PRIVATE channel, team members who are not in the channel are not notified", async () => {
+    const memberClient = new FakeMemberClient({ team_hq: ["user_in", "user_out"] });
+    const deps = makeDeps({ memberClient });
+    const app = createApp(deps);
+    const c = await call(app, "POST", "/chat/channels", {
+      body: { type: "topic", visibility: "private", name: "Secret" },
+    });
+    await call(app, "POST", `/chat/channels/${c.json.id}/members`, { body: { userId: "user_in" } });
+    await call(app, "POST", "/chat/messages", { body: { channelId: c.json.id, body: "<!team:team_hq> 内緒の話" } });
+
+    const payloads = deps.publisher.payloadsFor("chat.message.created") as Array<{ mentions?: string[] }>;
+    expect(payloads[0]!.mentions).toEqual(["user_in"]);
+  });
+
+  it("still posts when the team has no linked accounts (no mentions on the event)", async () => {
+    const deps = makeDeps({ memberClient: new FakeMemberClient({}) });
+    const app = createApp(deps);
+    const c = await call(app, "POST", "/chat/channels", { body: topic });
+    const m = await call(app, "POST", "/chat/messages", { body: { channelId: c.json.id, body: "<!team:team_hq> hi" } });
+    expect(m.status).toBe(201);
+    const payloads = deps.publisher.payloadsFor("chat.message.created") as Array<{ mentions?: string[] }>;
+    expect(payloads[0]!.mentions).toBeUndefined();
   });
 });
 

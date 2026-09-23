@@ -2,12 +2,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageComposer } from "./MessageComposer";
+import type { MentionCandidate } from "../lib/mentions";
 import { loadDraft } from "../store/draft";
 
-const candidates = [
-  { id: "usr_rin", displayName: "Rin", avatarUrl: null },
-  { id: "usr_ren", displayName: "Ren", avatarUrl: null },
+const candidates: MentionCandidate[] = [
+  { kind: "user", id: "usr_rin", label: "Rin", avatarUrl: null },
+  { kind: "user", id: "usr_ren", label: "Ren", avatarUrl: null },
+  { kind: "team", id: "team_hq", label: "統括チーム", color: "#1e3a5f" },
+  { kind: "team", id: "team_corp", label: "法人チーム", color: "#7c3aed" },
 ];
+const resolveCandidates = (q: string): MentionCandidate[] =>
+  candidates.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()));
 
 describe("MessageComposer", () => {
   beforeEach(() => {
@@ -47,7 +52,7 @@ describe("MessageComposer", () => {
       <MessageComposer
         channelId="chn_a"
         onSend={vi.fn()}
-        resolveMentionCandidates={(q) => candidates.filter((c) => c.displayName.toLowerCase().includes(q.toLowerCase()))}
+        resolveMentionCandidates={resolveCandidates}
       />,
     );
     const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
@@ -55,6 +60,16 @@ describe("MessageComposer", () => {
     expect(screen.getByTestId("fe6-composer-mention-menu")).toBeInTheDocument();
     await user.click(screen.getByText("Rin"));
     expect(input.value).toBe("hi <@usr_rin> ");
+  });
+
+  it("offers 運営チーム in the same menu and inserts <!team:teamId> on selection", async () => {
+    const user = userEvent.setup();
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} resolveMentionCandidates={resolveCandidates} />);
+    const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "@法人");
+    expect(screen.getByTestId("fe6-composer-mention-menu")).toBeInTheDocument();
+    await user.click(screen.getByText("法人チーム"));
+    expect(input.value).toBe("<!team:team_corp> ");
   });
 
   it("disables the input when archived", () => {
@@ -123,7 +138,7 @@ describe("MessageComposer", () => {
       <MessageComposer
         channelId="chn_a"
         onSend={vi.fn()}
-        resolveMentionCandidates={(q) => candidates.filter((c) => c.displayName.toLowerCase().includes(q.toLowerCase()))}
+        resolveMentionCandidates={resolveCandidates}
       />,
     );
     const input = screen.getByTestId("fe6-composer-input") as HTMLTextAreaElement;

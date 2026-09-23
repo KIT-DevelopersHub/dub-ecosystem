@@ -385,6 +385,27 @@ paths:
           description: Search results
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /chat/unfurl:
+    get:
+      operationId: unfurl
+      summary: Link preview (OGP) for one URL
+      tags:
+        - chat
+      description: Best-effort — preview is null when the target has no OGP or is rejected by the SSRF guard.
+      parameters:
+        - name: url
+          in: query
+          required: true
+          description: The link to preview (http/https only).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Preview (null = no card)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /chat/unread:
     get:
       operationId: listUnread

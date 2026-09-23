@@ -20,12 +20,13 @@ STAGING_WORKER_DIRS=(
   "services/file-meta"
   "services/drive-proxy"
   "services/drive-share-service"
+  # member-service before chat-service — chat binds it (SVC_MEMBER = チーム単位メンションの展開).
+  "services/member-service"
   "services/chat-service"
   "services/mail-gateway"
   "services/deploy-service"
   "services/github-sync"
   "services/audit-log"
-  "services/member-service"
   "services/usage-meter"
   # 4. api-gateway (binds all upstreams)
   "services/api-gateway"
