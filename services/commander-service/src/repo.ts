@@ -681,3 +681,204 @@ export async function appendRunEvent(
   await db.batch(stmts);
   return { id, runId, type: input.type, payload, createdAt: at };
 }
+
+// --- AI chat sessions + messages (persistence for "Dubに聞く"/"Dubを操作") ----
+// Chat history lives in the commander_ namespace so it survives restarts. "履歴をクリア"
+// deletes rows physically (no soft-delete). Multiple sessions per kind back the UI tabs.
+
+export type ChatKind = "ask" | "operate";
+export type ChatRole = "user" | "assistant";
+export type ChatMessageStatus = "streaming" | "done" | "error";
+
+const CHAT_KINDS: readonly ChatKind[] = ["ask", "operate"];
+export function isChatKind(v: unknown): v is ChatKind {
+  return typeof v === "string" && (CHAT_KINDS as readonly string[]).includes(v);
+}
+
+export interface ChatSessionRow {
+  id: string;
+  kind: ChatKind;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface ChatMessageRow {
+  id: string;
+  sessionId: string;
+  role: ChatRole;
+  text: string;
+  tools: string[];
+  status: ChatMessageStatus;
+  seq: number;
+  createdAt: string;
+}
+
+interface ChatSessionDb {
+  id: string;
+  kind: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+interface ChatMessageDb {
+  id: string;
+  session_id: string;
+  role: string;
+  text: string;
+  tools: string;
+  status: string;
+  seq: number;
+  created_at: string;
+}
+
+function toChatSession(r: ChatSessionDb): ChatSessionRow {
+  return { id: r.id, kind: r.kind as ChatKind, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at };
+}
+function toChatMessage(r: ChatMessageDb): ChatMessageRow {
+  let tools: string[] = [];
+  try {
+    const parsed = JSON.parse(r.tools);
+    if (Array.isArray(parsed)) tools = parsed.filter((x): x is string => typeof x === "string");
+  } catch {
+    /* corrupt tools json -> empty */
+  }
+  return {
+    id: r.id,
+    sessionId: r.session_id,
+    role: r.role as ChatRole,
+    text: r.text,
+    tools,
+    status: r.status as ChatMessageStatus,
+    seq: Number(r.seq),
+    createdAt: r.created_at,
+  };
+}
+
+export async function createChatSession(
+  db: D1Database,
+  input: { kind: ChatKind; title?: string },
+): Promise<ChatSessionRow> {
+  const id = newId("chat");
+  const at = nowIso();
+  const title = (input.title ?? "").slice(0, 200);
+  await db
+    .prepare(
+      "INSERT INTO commander_chat_sessions (id, kind, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(id, input.kind, title, at, at)
+    .run();
+  return { id, kind: input.kind, title, createdAt: at, updatedAt: at };
+}
+
+export async function listChatSessions(db: D1Database, kind: ChatKind): Promise<ChatSessionRow[]> {
+  const res = await db
+    .prepare("SELECT * FROM commander_chat_sessions WHERE kind = ? ORDER BY updated_at DESC, id DESC")
+    .bind(kind)
+    .all<ChatSessionDb>();
+  return (res.results ?? []).map(toChatSession);
+}
+
+export async function getChatSession(db: D1Database, id: string): Promise<ChatSessionRow | null> {
+  const row = await db
+    .prepare("SELECT * FROM commander_chat_sessions WHERE id = ?")
+    .bind(id)
+    .first<ChatSessionDb>();
+  return row ? toChatSession(row) : null;
+}
+
+export async function getChatMessages(db: D1Database, sessionId: string): Promise<ChatMessageRow[]> {
+  const res = await db
+    .prepare("SELECT * FROM commander_chat_messages WHERE session_id = ? ORDER BY seq ASC, created_at ASC")
+    .bind(sessionId)
+    .all<ChatMessageDb>();
+  return (res.results ?? []).map(toChatMessage);
+}
+
+/** Update the session title and/or bump updated_at. Returns null if unknown. */
+export async function updateChatSession(
+  db: D1Database,
+  id: string,
+  input: { title?: string },
+): Promise<ChatSessionRow | null> {
+  const at = nowIso();
+  if (typeof input.title === "string") {
+    await db
+      .prepare("UPDATE commander_chat_sessions SET title = ?, updated_at = ? WHERE id = ?")
+      .bind(input.title.slice(0, 200), at, id)
+      .run();
+  } else {
+    await db.prepare("UPDATE commander_chat_sessions SET updated_at = ? WHERE id = ?").bind(at, id).run();
+  }
+  return getChatSession(db, id);
+}
+
+/** Physically delete a session and all its messages (履歴をクリア = 物理削除). */
+export async function deleteChatSession(db: D1Database, id: string): Promise<boolean> {
+  const res = await db.batch([
+    db.prepare("DELETE FROM commander_chat_messages WHERE session_id = ?").bind(id),
+    db.prepare("DELETE FROM commander_chat_sessions WHERE id = ?").bind(id),
+  ]);
+  const sessionDelete = res[res.length - 1] as { meta?: { changes?: number } };
+  return (sessionDelete?.meta?.changes ?? 0) > 0;
+}
+
+/** Append a message to a session (seq = next). Bumps the session's updated_at. */
+export async function addChatMessage(
+  db: D1Database,
+  sessionId: string,
+  input: { role: ChatRole; text: string; tools?: string[]; status?: ChatMessageStatus },
+): Promise<ChatMessageRow | null> {
+  const session = await getChatSession(db, sessionId);
+  if (!session) return null;
+  const seqRow = await db
+    .prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM commander_chat_messages WHERE session_id = ?")
+    .bind(sessionId)
+    .first<{ next: number }>();
+  const seq = Number(seqRow?.next ?? 1);
+  const id = newId("cmsg");
+  const at = nowIso();
+  const tools = JSON.stringify(input.tools ?? []);
+  const status: ChatMessageStatus = input.status ?? "done";
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO commander_chat_messages (id, session_id, role, text, tools, status, seq, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind(id, sessionId, input.role, input.text, tools, status, seq, at),
+    db.prepare("UPDATE commander_chat_sessions SET updated_at = ? WHERE id = ?").bind(at, sessionId),
+  ]);
+  return { id, sessionId, role: input.role, text: input.text, tools: input.tools ?? [], status, seq, createdAt: at };
+}
+
+/** Finalize/patch a message (e.g. streaming -> done with final text + tools). */
+export async function updateChatMessage(
+  db: D1Database,
+  id: string,
+  input: { text?: string; tools?: string[]; status?: ChatMessageStatus },
+): Promise<ChatMessageRow | null> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (typeof input.text === "string") {
+    sets.push("text = ?");
+    vals.push(input.text);
+  }
+  if (input.tools) {
+    sets.push("tools = ?");
+    vals.push(JSON.stringify(input.tools));
+  }
+  if (input.status) {
+    sets.push("status = ?");
+    vals.push(input.status);
+  }
+  if (sets.length === 0) {
+    const row = await db.prepare("SELECT * FROM commander_chat_messages WHERE id = ?").bind(id).first<ChatMessageDb>();
+    return row ? toChatMessage(row) : null;
+  }
+  const res = await db
+    .prepare(`UPDATE commander_chat_messages SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals, id)
+    .run();
+  if ((res.meta?.changes ?? 0) === 0) return null;
+  const row = await db.prepare("SELECT * FROM commander_chat_messages WHERE id = ?").bind(id).first<ChatMessageDb>();
+  return row ? toChatMessage(row) : null;
+}

@@ -62,6 +62,13 @@ function fakeApi(f: Feature, allowed: FeatureDetail["allowedTransitions"], opts:
     updateTaskStatus: vi.fn(async () => ({ ok: false as const, error: { status: 0, error: "unused" } })),
     backfillTaskUrls: vi.fn(async () => ({ updated: 0 })),
     health: vi.fn(async () => true),
+    listChats: vi.fn(async () => []),
+    createChat: vi.fn(async () => ({ id: "c", kind: "ask" as const, title: "", createdAt: "t", updatedAt: "t" })),
+    getChat: vi.fn(async () => null),
+    renameChat: vi.fn(async () => null),
+    deleteChat: vi.fn(async () => true),
+    addChatMessage: vi.fn(async () => null),
+    updateChatMessage: vi.fn(async () => null),
   };
   return { api, transition };
 }

@@ -73,6 +73,31 @@ export interface RunDetail {
   events: RunEventRecord[];
 }
 
+// --- AI chat persistence ("Dubに聞く"/"Dubを操作" history) ---------------------
+export type ChatKind = "ask" | "operate";
+export type ChatRole = "user" | "assistant";
+export type ChatMessageStatus = "streaming" | "done" | "error";
+
+/** A persisted chat session (commander_chat_sessions) — one conversation thread/tab. */
+export interface ChatSession {
+  id: string;
+  kind: ChatKind;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+/** A persisted chat message (commander_chat_messages). */
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  role: ChatRole;
+  text: string;
+  tools: string[];
+  status: ChatMessageStatus;
+  seq: number;
+  createdAt: string;
+}
+
 export type TaskStatus = "todo" | "doing" | "done";
 
 /** A task row plus its feature phase and latest run — one card on the board. */
@@ -131,6 +156,29 @@ export interface CommanderApi {
   backfillTaskUrls(): Promise<{ updated: number }>;
   /** Liveness probe (GET /health). False when the service is unreachable. */
   health(): Promise<boolean>;
+
+  // --- AI chat persistence -----------------------------------------------------
+  /** Sessions for a chat kind, newest-updated first. */
+  listChats(kind: ChatKind): Promise<ChatSession[]>;
+  /** Create a new (empty) chat session. */
+  createChat(kind: ChatKind, title?: string): Promise<ChatSession>;
+  /** One session with its full message history (null when unknown). */
+  getChat(id: string): Promise<{ session: ChatSession; messages: ChatMessage[] } | null>;
+  /** Rename a session (also bumps updated_at). */
+  renameChat(id: string, title: string): Promise<ChatSession | null>;
+  /** PHYSICALLY delete a session + its messages (履歴をクリア = 物理削除). */
+  deleteChat(id: string): Promise<boolean>;
+  /** Append a message to a session. */
+  addChatMessage(
+    sessionId: string,
+    input: { role: ChatRole; text: string; tools?: string[]; status?: ChatMessageStatus },
+  ): Promise<ChatMessage | null>;
+  /** Finalize/patch a message (streaming -> done with final text + tools). */
+  updateChatMessage(
+    sessionId: string,
+    messageId: string,
+    input: { text?: string; tools?: string[]; status?: ChatMessageStatus },
+  ): Promise<ChatMessage | null>;
 }
 
 /** Narrow slice of the API the run console needs to restore history after a reset. */
@@ -285,5 +333,76 @@ export class HttpCommanderApi implements CommanderApi {
       return { ok: false, error: { status: res.status, error: String(body.error ?? "error") } };
     }
     return { ok: true, value: body.task as Task };
+  }
+
+  // --- AI chat persistence -----------------------------------------------------
+
+  async listChats(kind: ChatKind): Promise<ChatSession[]> {
+    const res = await fetch(`${this.baseUrl}/chats?kind=${encodeURIComponent(kind)}`);
+    if (!res.ok) throw new Error(`GET /chats -> ${res.status}`);
+    return ((await res.json()) as { sessions: ChatSession[] }).sessions;
+  }
+
+  async createChat(kind: ChatKind, title = ""): Promise<ChatSession> {
+    const res = await fetch(`${this.baseUrl}/chats`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ kind, title }),
+    });
+    if (!res.ok) throw new Error(`POST /chats -> ${res.status}`);
+    return ((await res.json()) as { session: ChatSession }).session;
+  }
+
+  async getChat(id: string): Promise<{ session: ChatSession; messages: ChatMessage[] } | null> {
+    const res = await fetch(`${this.baseUrl}/chats/${id}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`GET /chats/${id} -> ${res.status}`);
+    return (await res.json()) as { session: ChatSession; messages: ChatMessage[] };
+  }
+
+  async renameChat(id: string, title: string): Promise<ChatSession | null> {
+    const res = await fetch(`${this.baseUrl}/chats/${id}`, {
+      method: "PATCH",
+      headers: this.headers(),
+      body: JSON.stringify({ title }),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`PATCH /chats/${id} -> ${res.status}`);
+    return ((await res.json()) as { session: ChatSession }).session;
+  }
+
+  async deleteChat(id: string): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/chats/${id}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    return res.ok;
+  }
+
+  async addChatMessage(
+    sessionId: string,
+    input: { role: ChatRole; text: string; tools?: string[]; status?: ChatMessageStatus },
+  ): Promise<ChatMessage | null> {
+    const res = await fetch(`${this.baseUrl}/chats/${sessionId}/messages`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { message: ChatMessage }).message;
+  }
+
+  async updateChatMessage(
+    sessionId: string,
+    messageId: string,
+    input: { text?: string; tools?: string[]; status?: ChatMessageStatus },
+  ): Promise<ChatMessage | null> {
+    const res = await fetch(`${this.baseUrl}/chats/${sessionId}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: this.headers(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { message: ChatMessage }).message;
   }
 }

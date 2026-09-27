@@ -366,3 +366,67 @@ describe("commander-service run persistence", () => {
     expect(item.stagingUrl).toBe("https://staging-bf.example.workers.dev");
   });
 });
+
+describe("commander-service AI chat persistence", () => {
+  let app: ReturnType<typeof createApp>;
+  let env: Env;
+
+  beforeEach(() => {
+    app = createApp();
+    env = makeEnv();
+  });
+
+  it("creates sessions per kind and lists newest-updated first", async () => {
+    const a = await call(app, env, "POST", "/chats", { kind: "ask", title: "最初" });
+    expect(a.status).toBe(201);
+    expect(a.json.session.kind).toBe("ask");
+    const b = await call(app, env, "POST", "/chats", { kind: "ask", title: "次" });
+    const op = await call(app, env, "POST", "/chats", { kind: "operate", title: "操作" });
+
+    const askList = await call(app, env, "GET", "/chats?kind=ask");
+    expect(askList.json.sessions).toHaveLength(2);
+    const opList = await call(app, env, "GET", "/chats?kind=operate");
+    expect(opList.json.sessions).toHaveLength(1);
+    expect(opList.json.sessions[0].id).toBe(op.json.session.id);
+    expect(b.json.session.id).not.toBe(a.json.session.id);
+  });
+
+  it("rejects an invalid kind", async () => {
+    expect((await call(app, env, "POST", "/chats", { kind: "nope" })).status).toBe(400);
+    expect((await call(app, env, "GET", "/chats?kind=nope")).status).toBe(400);
+  });
+
+  it("appends messages with increasing seq and returns them in order", async () => {
+    const s = (await call(app, env, "POST", "/chats", { kind: "ask", title: "" })).json.session;
+    await call(app, env, "POST", `/chats/${s.id}/messages`, { role: "user", text: "質問1" });
+    const asst = await call(app, env, "POST", `/chats/${s.id}/messages`, {
+      role: "assistant",
+      text: "",
+      status: "streaming",
+    });
+    expect(asst.json.message.seq).toBe(2);
+
+    // Finalize the streaming assistant message.
+    const upd = await call(app, env, "PATCH", `/chats/${s.id}/messages/${asst.json.message.id}`, {
+      text: "答え",
+      tools: ["Read x"],
+      status: "done",
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.json.message.text).toBe("答え");
+    expect(upd.json.message.tools).toEqual(["Read x"]);
+
+    const got = await call(app, env, "GET", `/chats/${s.id}`);
+    expect(got.json.messages.map((m: { text: string }) => m.text)).toEqual(["質問1", "答え"]);
+    expect(got.json.messages[1].status).toBe("done");
+  });
+
+  it("physically deletes a session and its messages (履歴クリア)", async () => {
+    const s = (await call(app, env, "POST", "/chats", { kind: "ask", title: "" })).json.session;
+    await call(app, env, "POST", `/chats/${s.id}/messages`, { role: "user", text: "x" });
+    const del = await call(app, env, "DELETE", `/chats/${s.id}`);
+    expect(del.status).toBe(200);
+    expect((await call(app, env, "GET", `/chats/${s.id}`)).status).toBe(404);
+    expect((await call(app, env, "GET", "/chats?kind=ask")).json.sessions).toHaveLength(0);
+  });
+});

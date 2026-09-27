@@ -5,6 +5,9 @@ import { vi } from "vitest";
 import type { CommanderClient, DaemonRunEvent, StartRunOptions } from "../lib/client.ts";
 import type {
   BoardItem,
+  ChatKind,
+  ChatMessage,
+  ChatSession,
   CommanderApi,
   Feature,
   FeatureDetail,
@@ -38,16 +41,74 @@ export function makeBoardItem(over: Partial<BoardItem> & { runStatus?: RunStatus
 export interface FakeApi extends CommanderApi {
   _items: BoardItem[];
   _phases: Record<string, FeaturePhase>;
+  _sessions: ChatSession[];
+  _messages: ChatMessage[];
 }
 
 export function makeFakeApi(initial: BoardItem[] = []): FakeApi {
   const items = [...initial];
   const phases: Record<string, FeaturePhase> = {};
   for (const i of items) phases[i.featureId] = i.featurePhase;
+  let chatSeq = 0;
 
   const api: FakeApi = {
     _items: items,
     _phases: phases,
+    _sessions: [],
+    _messages: [],
+    listChats: vi.fn(async (kind: ChatKind) =>
+      api._sessions.filter((s) => s.kind === kind).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+    ),
+    createChat: vi.fn(async (kind: ChatKind, title = "") => {
+      const now = new Date(Date.now() + chatSeq++).toISOString();
+      const s: ChatSession = { id: `chat-${api._sessions.length + 1}`, kind, title, createdAt: now, updatedAt: now };
+      api._sessions.unshift(s);
+      return s;
+    }),
+    getChat: vi.fn(async (id: string) => {
+      const session = api._sessions.find((s) => s.id === id);
+      if (!session) return null;
+      return { session, messages: api._messages.filter((m) => m.sessionId === id).sort((a, b) => a.seq - b.seq) };
+    }),
+    renameChat: vi.fn(async (id: string, title: string) => {
+      const s = api._sessions.find((x) => x.id === id);
+      if (!s) return null;
+      s.title = title;
+      s.updatedAt = new Date(Date.now() + chatSeq++).toISOString();
+      return s;
+    }),
+    deleteChat: vi.fn(async (id: string) => {
+      const before = api._sessions.length;
+      api._sessions = api._sessions.filter((s) => s.id !== id);
+      api._messages = api._messages.filter((m) => m.sessionId !== id);
+      return api._sessions.length < before;
+    }),
+    addChatMessage: vi.fn(async (sessionId: string, input) => {
+      const session = api._sessions.find((s) => s.id === sessionId);
+      if (!session) return null;
+      const seq = api._messages.filter((m) => m.sessionId === sessionId).length + 1;
+      const msg: ChatMessage = {
+        id: `msg-${api._messages.length + 1}`,
+        sessionId,
+        role: input.role,
+        text: input.text,
+        tools: input.tools ?? [],
+        status: input.status ?? "done",
+        seq,
+        createdAt: new Date(Date.now() + chatSeq++).toISOString(),
+      };
+      api._messages.push(msg);
+      session.updatedAt = msg.createdAt;
+      return msg;
+    }),
+    updateChatMessage: vi.fn(async (_sessionId: string, messageId: string, input) => {
+      const m = api._messages.find((x) => x.id === messageId);
+      if (!m) return null;
+      if (typeof input.text === "string") m.text = input.text;
+      if (input.tools) m.tools = input.tools;
+      if (input.status) m.status = input.status;
+      return m;
+    }),
     health: vi.fn(async () => true),
     listBoard: vi.fn(async () => api._items.map((i) => ({ ...i, featurePhase: phases[i.featureId] ?? i.featurePhase }))),
     createTask: vi.fn(async ({ title }: { title: string; ledgerRef?: string }) => {

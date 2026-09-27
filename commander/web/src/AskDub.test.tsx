@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { AskDub } from "./AskDub.tsx";
-import { makeFakeClient } from "./test/fakes.ts";
+import { ChatProvider } from "./lib/chatStore.tsx";
+import { makeFakeApi, makeFakeClient, type FakeApi } from "./test/fakes.ts";
 import { ASK_RUN_ARGS, DUB_ECOSYSTEM_CWD } from "./lib/askDub.ts";
-import type { DaemonRunEvent } from "./lib/client.ts";
+import type { CommanderClient, DaemonRunEvent } from "./lib/client.ts";
 
 const answerFlow: DaemonRunEvent[] = [
   { type: "status", status: "running" },
@@ -12,52 +13,91 @@ const answerFlow: DaemonRunEvent[] = [
   { type: "status", status: "succeeded" },
 ];
 
-describe("<AskDub>", () => {
+function renderAsk(api: FakeApi, client: CommanderClient) {
+  return render(
+    <ChatProvider api={api} client={client}>
+      <AskDub />
+    </ChatProvider>,
+  );
+}
+
+describe("<AskDub> (multi-session, persisted)", () => {
   beforeEach(() => localStorage.clear());
 
-  it("shows sample questions when empty", () => {
-    render(<AskDub client={makeFakeClient()} seed={[]} />);
-    expect(screen.getAllByTestId("askdub-sample").length).toBeGreaterThan(0);
-  });
-
-  it("asks a question against dub-ecosystem and streams the answer", async () => {
+  it("auto-creates a session, streams the answer, and runs read-only in dub-ecosystem", async () => {
+    const api = makeFakeApi();
     const client = makeFakeClient(answerFlow);
-    render(<AskDub client={client} seed={[]} />);
+    renderAsk(api, client);
 
-    fireEvent.change(screen.getByTestId("askdub-input"), {
-      target: { value: "カレンダーはどこ?" },
-    });
-    fireEvent.click(screen.getByTestId("askdub-send"));
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "カレンダーはどこ?" } });
+    fireEvent.click(screen.getByTestId("chat-send"));
 
-    // Question echoed, answer resolved from the result event.
-    expect(await screen.findByText("カレンダーはどこ?")).toBeInTheDocument();
-    expect(await screen.findByText(/apps\/fe9-calendar/)).toBeInTheDocument();
+    // Assert within the message log (the question also appears as the session title).
+    const log = await screen.findByTestId("chat-log");
+    expect(await within(log).findByText("カレンダーはどこ?")).toBeInTheDocument();
+    expect(await within(log).findByText(/apps\/fe9-calendar/)).toBeInTheDocument();
 
-    // Ran in the dub-ecosystem repo (read-only Q&A), not a task worktree.
     expect(client.startRun).toHaveBeenCalledWith(
       expect.stringContaining("質問: カレンダーはどこ?"),
       { cwd: DUB_ECOSYSTEM_CWD, args: ASK_RUN_ARGS },
     );
-    // Tool activity captured.
-    expect(await screen.findByText(/調べたもの/)).toBeInTheDocument();
+    // History persisted to the service (survives restart): user + assistant rows.
+    await waitFor(() => expect(api._messages.filter((m) => m.role === "user")).toHaveLength(1));
+    expect(api._messages.some((m) => m.role === "assistant" && /fe9-calendar/.test(m.text))).toBe(true);
   });
 
   it("re-injects prior turns into a follow-up prompt", async () => {
+    const api = makeFakeApi();
     const client = makeFakeClient(answerFlow);
-    render(<AskDub client={client} seed={[]} />);
+    renderAsk(api, client);
 
-    fireEvent.change(screen.getByTestId("askdub-input"), { target: { value: "最初の質問" } });
-    fireEvent.click(screen.getByTestId("askdub-send"));
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "最初の質問" } });
+    fireEvent.click(screen.getByTestId("chat-send"));
     await screen.findByText(/apps\/fe9-calendar/);
 
-    fireEvent.change(screen.getByTestId("askdub-input"), { target: { value: "その続きは?" } });
-    fireEvent.click(screen.getByTestId("askdub-send"));
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "その続きは?" } });
+    fireEvent.click(screen.getByTestId("chat-send"));
 
     await waitFor(() => {
-      const followup = client.startRun.mock.calls[1]?.[0] as string;
+      const calls = (client.startRun as ReturnType<typeof makeFakeClient>["startRun"]).mock.calls;
+      const followup = calls[calls.length - 1]?.[0] as string;
       expect(followup).toContain("これまでの会話");
       expect(followup).toContain("最初の質問");
       expect(followup).toContain("質問: その続きは?");
     });
+  });
+
+  it("creates multiple sessions and switches between them", async () => {
+    const api = makeFakeApi();
+    renderAsk(api, makeFakeClient(answerFlow));
+
+    fireEvent.click(screen.getByTestId("chat-new-session"));
+    await waitFor(() => expect(screen.getAllByTestId("chat-session")).toHaveLength(1));
+    fireEvent.click(screen.getByTestId("chat-new-session"));
+    await waitFor(() => expect(screen.getAllByTestId("chat-session")).toHaveLength(2));
+
+    // Exactly one active at a time.
+    const active = screen.getAllByTestId("chat-session").filter((s) => s.getAttribute("data-active") === "1");
+    expect(active).toHaveLength(1);
+  });
+
+  it("keeps the composer draft per session across unmount/remount (Task 3)", async () => {
+    const api = makeFakeApi();
+    const client = makeFakeClient(answerFlow);
+    // Seed a session so the draft is keyed to a real session id.
+    const session = await api.createChat("ask");
+
+    const view = renderAsk(api, client);
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "書きかけの下書き" } });
+    // Persisted under the active session's draft key.
+    expect(localStorage.getItem(`commander.draft.${session.id}`)).toBe("書きかけの下書き");
+
+    // Navigate away (unmount) and back (remount) — draft restores.
+    view.unmount();
+    renderAsk(api, client);
+    await waitFor(() =>
+      expect((screen.getByTestId("chat-input") as HTMLTextAreaElement).value).toBe("書きかけの下書き"),
+    );
   });
 });

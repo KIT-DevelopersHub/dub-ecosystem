@@ -31,17 +31,27 @@ import {
   appendRunEvent,
   isRunEventType,
   backfillTaskUrls,
+  isChatKind,
+  createChatSession,
+  listChatSessions,
+  getChatSession,
+  getChatMessages,
+  updateChatSession,
+  deleteChatSession,
+  addChatMessage,
+  updateChatMessage,
+  type ChatMessageStatus,
 } from "./repo";
 
 export function createApp() {
   const app = new Hono<AppBindings>();
 
   // The Dub-hosted / local commander web SPA calls this API cross-origin.
-  app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "OPTIONS"] }));
+  app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
 
   // Optional operator-token guard on mutations (see env.ts). Off when unset.
   app.use("*", async (c, next) => {
-    if (c.req.method === "POST" || c.req.method === "PATCH") {
+    if (c.req.method === "POST" || c.req.method === "PATCH" || c.req.method === "DELETE") {
       const expected = c.env.COMMANDER_OPERATOR_TOKEN;
       if (expected && c.req.header("x-commander-token") !== expected) {
         return c.json({ error: "unauthorized" }, 401);
@@ -221,6 +231,74 @@ export function createApp() {
     });
     if (!event) return c.json({ error: "run_not_found" }, 404);
     return c.json({ event }, 201);
+  });
+
+  // ── AI chat sessions + messages ("Dubに聞く"/"Dubを操作" history) ──────────────
+  // Durable across restarts. DELETE physically removes a session + its messages.
+  app.get("/chats", async (c) => {
+    const kind = c.req.query("kind");
+    if (!isChatKind(kind)) return c.json({ error: "invalid_kind" }, 400);
+    return c.json({ sessions: await listChatSessions(c.env.DB, kind) });
+  });
+
+  app.post("/chats", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!isChatKind(body?.kind)) return c.json({ error: "invalid_kind" }, 400);
+    const title = typeof body?.title === "string" ? body.title : "";
+    const session = await createChatSession(c.env.DB, { kind: body.kind, title });
+    return c.json({ session }, 201);
+  });
+
+  app.get("/chats/:id", async (c) => {
+    const session = await getChatSession(c.env.DB, c.req.param("id"));
+    if (!session) return c.json({ error: "chat_not_found" }, 404);
+    return c.json({ session, messages: await getChatMessages(c.env.DB, session.id) });
+  });
+
+  app.patch("/chats/:id", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const title = typeof body?.title === "string" ? body.title : undefined;
+    const session = await updateChatSession(c.env.DB, c.req.param("id"), { title });
+    if (!session) return c.json({ error: "chat_not_found" }, 404);
+    return c.json({ session });
+  });
+
+  app.delete("/chats/:id", async (c) => {
+    const ok = await deleteChatSession(c.env.DB, c.req.param("id"));
+    if (!ok) return c.json({ error: "chat_not_found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  app.post("/chats/:id/messages", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const role = body?.role === "user" || body?.role === "assistant" ? body.role : null;
+    if (!role) return c.json({ error: "invalid_role" }, 400);
+    const text = typeof body?.text === "string" ? body.text : "";
+    const tools = Array.isArray(body?.tools)
+      ? body.tools.filter((x: unknown): x is string => typeof x === "string")
+      : undefined;
+    const status: ChatMessageStatus | undefined =
+      body?.status === "streaming" || body?.status === "done" || body?.status === "error"
+        ? body.status
+        : undefined;
+    const message = await addChatMessage(c.env.DB, c.req.param("id"), { role, text, tools, status });
+    if (!message) return c.json({ error: "chat_not_found" }, 404);
+    return c.json({ message }, 201);
+  });
+
+  app.patch("/chats/:id/messages/:mid", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const text = typeof body?.text === "string" ? body.text : undefined;
+    const tools = Array.isArray(body?.tools)
+      ? body.tools.filter((x: unknown): x is string => typeof x === "string")
+      : undefined;
+    const status: ChatMessageStatus | undefined =
+      body?.status === "streaming" || body?.status === "done" || body?.status === "error"
+        ? body.status
+        : undefined;
+    const message = await updateChatMessage(c.env.DB, c.req.param("mid"), { text, tools, status });
+    if (!message) return c.json({ error: "message_not_found" }, 404);
+    return c.json({ message });
   });
 
   return app;
