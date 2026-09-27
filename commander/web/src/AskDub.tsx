@@ -15,6 +15,7 @@ import {
   parseClaudeEvent,
 } from "./lib/askDub.ts";
 import { btnPrimary, btnGhost, card, input, t } from "./lib/theme.ts";
+import { isSubmitEnter } from "./lib/keyboard.ts";
 
 export interface ChatMessage {
   id: string;
@@ -235,8 +236,9 @@ export function AskDub({ client = defaultClient, seed }: AskDubProps) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            // Enter to send, Shift+Enter for newline.
-            if (e.key === "Enter" && !e.shiftKey) {
+            // Enter to send, Shift+Enter for newline. The 変換確定 Enter (while the
+            // IME is composing) must NOT send — isSubmitEnter guards that.
+            if (isSubmitEnter(e)) {
               e.preventDefault();
               void ask(draft);
             }
