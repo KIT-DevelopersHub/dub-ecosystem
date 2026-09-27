@@ -10,7 +10,7 @@
 // Edit/delete are gated by authorship + can("chat:moderate") (design §6).
 // Deleted messages render as a redacted tombstone. Test-ids preserved for units.
 import { useState } from "react";
-import { Avatar, Icon } from "@dub/ui";
+import { Avatar, Icon, isSubmitEnter } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message, TeamSummary } from "../api/contract";
 import { MessageBody } from "./MessageBody";
@@ -207,7 +207,8 @@ export function MessageItem({
                 if (e.key === "Escape") {
                   e.preventDefault();
                   setEditing(false);
-                } else if (e.key === "Enter" && !e.shiftKey) {
+                } else if (isSubmitEnter(e)) {
+                  // 変換確定 Enter (IME composing) must not save the edit.
                   e.preventDefault();
                   void commitEdit();
                 }
