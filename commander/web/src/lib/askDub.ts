@@ -12,14 +12,29 @@ export const DUB_ECOSYSTEM_CWD =
   (import.meta.env?.VITE_DUB_ECOSYSTEM_PATH as string | undefined) ??
   "/Users/kota/dev/dub-ecosystem";
 
-/** Read-only Q&A framing prepended to every question. Explicitly forbids edits so the
- *  spawned claude (even under acceptEdits) treats this as an inspection task. */
+/** Read-only Q&A framing prepended to every question. This is a CONVERSATION-FIRST
+ *  assistant: it answers in chat like a colleague and only dips into the code minimally
+ *  when a fact needs confirming — it must NOT crawl the whole repo or fan out into many
+ *  subagents just because a topic was named. Edits are forbidden (read-only). */
 export const QA_SYSTEM_PREFIX =
-  "あなたは dub-ecosystem コードベースの Q&A アシスタントです。" +
-  "ユーザーの質問に、このリポジトリの実際のコードを調べて日本語で答えてください。" +
-  "厳守: ファイルの編集・作成・削除・コミットは一切しない（読み取り専用の調査のみ）。" +
-  "回答は PREP（結論→理由→根拠）で簡潔に。関連するファイルパスを添える。" +
-  "分からないことは推測で埋めず「コード上は確認できない」と正直に述べる。";
+  "あなたは dub-ecosystem について会話ベースで答えるアシスタントです。" +
+  "まず会話として短く答えてください（同僚に雑談で聞かれた体で、結論から簡潔に）。" +
+  "重要（過剰調査の禁止）: 話題が出ただけでコードベース全体を走査しない。" +
+  "サブエージェント（Task/Explore）を大量に立てて調べ尽くさない。" +
+  "まずは既知・概略で答え、確証が要る一点だけを最小限（目安1〜2ファイル）だけ確認する。" +
+  "「調べて」「詳しく」「〜して」と明示的に頼まれた時だけ、その範囲に限って踏み込む。" +
+  "厳守: ファイルの編集・作成・削除・コミットは一切しない（読み取り専用）。" +
+  "分からないことは推測で埋めず「コード上は未確認」と正直に述べる。";
+
+/**
+ * Extra CLI args that keep a Q&A conversational instead of a full-codebase crawl.
+ * The root complaint was "10 subagents crawling the repo for one casual question":
+ * `--disallowedTools Task` structurally blocks subagent fan-out (the model must answer
+ * itself with at most a few Read/Grep), regardless of whether the prompt is heeded.
+ * Direct inspection still works when the user explicitly says 「調べて」. (This Claude
+ * build has no `--max-turns`; disallowing Task is the on-target lever.)
+ */
+export const ASK_RUN_ARGS = ["--disallowedTools", "Task"];
 
 /**
  * Compose the prompt for a Q&A run. Prior Q&A turns are re-injected as context so a

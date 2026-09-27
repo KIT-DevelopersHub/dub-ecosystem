@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Board } from "./Board.tsx";
 import { AskDub } from "./AskDub.tsx";
+import { OperateDub } from "./OperateDub.tsx";
 import type { CommanderClient } from "./lib/client.ts";
 import type { CommanderApi } from "./lib/commanderApi.ts";
 import { btnGhost, t } from "./lib/theme.ts";
@@ -14,12 +15,19 @@ interface AppProps {
   initialTab?: TabId;
 }
 
-type TabId = "board" | "ask";
+type TabId = "board" | "ask" | "operate";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "board", label: "ボード" },
   { id: "ask", label: "Dubに聞く" },
+  { id: "operate", label: "Dubを操作" },
 ];
+
+const TAB_SUBTITLE: Record<TabId, string> = {
+  board: "ローカル Claude Code を Web から並行駆動する司令ボード — 投入・走行・確認・判断を1画面で",
+  ask: "dub-ecosystem のコードを Claude Code に聞ける Q&A チャット — 読み取り専用",
+  operate: "Dub の本番バックエンドを自然言語で操作 — 計画→確認→実行（書き込みは要確認）",
+};
 
 /** Standalone Commander page (commander/web dev/build). Two views share the chrome:
  *  「ボード」= 投入(composer) → 走行(lanes) → 確認/判断(drawer) → close (作らせる);
@@ -40,11 +48,7 @@ export function App({ client, api, initialTab = "board" }: AppProps) {
       }}
     >
       <h1 style={{ fontSize: 18, marginBottom: 4 }}>Commander</h1>
-      <p style={{ opacity: 0.7, marginTop: 0, fontSize: 13 }}>
-        {tab === "board"
-          ? "ローカル Claude Code を Web から並行駆動する司令ボード — 投入・走行・確認・判断を1画面で"
-          : "dub-ecosystem のコードを Claude Code に聞ける Q&A チャット — 読み取り専用"}
-      </p>
+      <p style={{ opacity: 0.7, marginTop: 0, fontSize: 13 }}>{TAB_SUBTITLE[tab]}</p>
 
       <nav style={{ display: "flex", gap: t.space2, marginBottom: t.space5 }} role="tablist">
         {TABS.map((tb) => {
@@ -73,8 +77,10 @@ export function App({ client, api, initialTab = "board" }: AppProps) {
 
       {tab === "board" ? (
         <Board {...(client ? { client } : {})} {...(api ? { api } : {})} />
-      ) : (
+      ) : tab === "ask" ? (
         <AskDub {...(client ? { client } : {})} />
+      ) : (
+        <OperateDub {...(client ? { client } : {})} />
       )}
     </div>
   );

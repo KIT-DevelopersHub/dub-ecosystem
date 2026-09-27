@@ -82,6 +82,20 @@ describe("RunStore exec bridge", () => {
     expect(args).not.toContain("--permission-mode");
   });
 
+  it("appends per-run args LAST so a caller flag wins over global extraArgs", async () => {
+    const store = new RunStore(
+      config({ claudeBin: ARGS_ECHO, extraArgs: ["--model", "sonnet"] }),
+    );
+    const run = store.start({ prompt: "ask", args: ["--max-turns", "6"] });
+    const args = readResult(await collectUntilDone(store, run.id)) as string[];
+
+    const mt = args.indexOf("--max-turns");
+    expect(mt).toBeGreaterThanOrEqual(0);
+    expect(args[mt + 1]).toBe("6");
+    // Per-run args come after the global extraArgs.
+    expect(args.indexOf("--model")).toBeLessThan(mt);
+  });
+
   it("marks the run failed when the CLI binary is missing", async () => {
     const store = new RunStore(config({ claudeBin: "/no/such/claude-binary-xyz" }));
     const run = store.start({ prompt: "hi" });

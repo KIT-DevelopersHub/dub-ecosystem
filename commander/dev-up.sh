@@ -115,6 +115,24 @@ DAEMON_CLAUDE_ENV=()
 if [[ "$MODE" == "--check" ]]; then
   DAEMON_CLAUDE_ENV=(COMMANDER_CLAUDE_BIN="$REPO_ROOT/commander/daemon/test/fixtures/fake-claude")
 fi
+
+# Optional Cloudflare creds for the "Dubを操作" console (operate against prod D1/API).
+# Forwarded to the spawned claude (env.ts PASSTHROUGH_ENV_KEYS) so `wrangler --remote`
+# can authenticate. Local secret only ([[dub-secrets-vault-location]]); when absent, the
+# operate console still plans and can run local commands, but --remote writes simply fail
+# to auth (safe default). The token value is never printed and never committed.
+CF_ENV=()
+CF_TOKEN_FILE="${DUB_CF_TOKEN_FILE:-$HOME/DubVault/secrets/cf-token.txt}"
+if [[ "$MODE" != "--check" && -f "$CF_TOKEN_FILE" ]]; then
+  CF_ENV=(
+    CLOUDFLARE_API_TOKEN="$(tr -d '[:space:]' < "$CF_TOKEN_FILE")"
+    CLOUDFLARE_ACCOUNT_ID="${DUB_CF_ACCOUNT_ID:-b8f6ddbf8fa8cf4e421eae870bdb6dac}"
+  )
+  echo "[dev-up] Cloudflare creds loaded for 'Dubを操作' (token file present)"
+else
+  echo "[dev-up] no Cloudflare token at $CF_TOKEN_FILE - 'Dubを操作' --remote writes will not auth (safe default)"
+fi
+
 echo "[dev-up] starting daemon on port ${DAEMON_PORT} ..."
 ( cd "$REPO_ROOT" && \
   env COMMANDER_PORT="$DAEMON_PORT" \
@@ -122,6 +140,7 @@ echo "[dev-up] starting daemon on port ${DAEMON_PORT} ..."
       COMMANDER_CWD="$REPO_ROOT" \
       COMMANDER_SERVICE_URL="http://127.0.0.1:$SERVICE_PORT" \
       COMMANDER_SERVICE_TOKEN="$TOKEN" \
+      ${CF_ENV[@]+"${CF_ENV[@]}"} \
       ${DAEMON_CLAUDE_ENV[@]+"${DAEMON_CLAUDE_ENV[@]}"} \
       node --experimental-strip-types commander/daemon/src/index.ts ) >"$LOG_DIR/daemon.log" 2>&1 &
 PIDS+=("$!")

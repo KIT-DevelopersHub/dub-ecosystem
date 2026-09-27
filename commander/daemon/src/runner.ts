@@ -87,7 +87,7 @@ export class RunStore {
     };
     this.runs.set(id, run);
     this.sink.runStarted(run);
-    this.spawnClaude(run);
+    this.spawnClaude(run, input.args ?? []);
     return run;
   }
 
@@ -109,7 +109,7 @@ export class RunStore {
     this.emit(run, { type: "status", status, at: new Date().toISOString() });
   }
 
-  private spawnClaude(run: Run): void {
+  private spawnClaude(run: Run, runArgs: string[] = []): void {
     const args = [
       "-p",
       run.prompt,
@@ -124,6 +124,9 @@ export class RunStore {
         ? ["--permission-mode", this.config.permissionMode]
         : []),
       ...this.config.extraArgs,
+      // Per-run args come LAST so a caller-supplied flag (e.g. Q&A's --max-turns)
+      // wins over the global extraArgs.
+      ...runArgs,
     ];
 
     let child: ChildProcess;

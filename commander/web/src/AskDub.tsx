@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HttpCommanderClient, type CommanderClient } from "./lib/client.ts";
 import {
+  ASK_RUN_ARGS,
   buildAskPrompt,
   buildTranscript,
   DUB_ECOSYSTEM_CWD,
@@ -115,7 +116,11 @@ export function AskDub({ client = defaultClient, seed }: AskDubProps) {
         setMessages((prev) => prev.map((m) => (m.id === assistantId ? fn(m) : m)));
 
       try {
-        const { runId } = await client.startRun(prompt, { cwd: DUB_ECOSYSTEM_CWD });
+        const { runId } = await client.startRun(prompt, {
+          cwd: DUB_ECOSYSTEM_CWD,
+          // Keep the Q&A conversational: block subagent fan-out (see ASK_RUN_ARGS).
+          args: ASK_RUN_ARGS,
+        });
         let acc = "";
         let sawResult = false;
         unsubRef.current = client.streamEvents(

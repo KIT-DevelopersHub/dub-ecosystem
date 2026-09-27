@@ -4,6 +4,8 @@
 // feature only composes them into shell chrome (no logic duplication).
 export { App } from "./App.tsx";
 export { Board } from "./Board.tsx";
+export { AskDub } from "./AskDub.tsx";
+export { OperateDub } from "./OperateDub.tsx";
 export { TaskComposer } from "./TaskComposer.tsx";
 export { TaskDrawer } from "./TaskDrawer.tsx";
 export { TaskCard } from "./TaskCard.tsx";

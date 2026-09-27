@@ -17,6 +17,12 @@ export interface StartRunOptions {
   cwd?: string;
   /** Task this run belongs to (commander_tasks.id); persisted on the run row. */
   taskId?: string;
+  /**
+   * Extra CLI args appended to THIS run's `claude -p` (after the daemon's global
+   * extraArgs, so a per-run flag wins). Used e.g. by "Dubに聞く" to pass
+   * `--max-turns` so a Q&A stays conversational instead of crawling the whole repo.
+   */
+  args?: string[];
 }
 
 export interface CommanderClient {
@@ -53,6 +59,7 @@ export class HttpCommanderClient implements CommanderClient {
     const body: Record<string, unknown> = { prompt };
     if (opts.cwd) body.cwd = opts.cwd;
     if (opts.taskId) body.taskId = opts.taskId;
+    if (opts.args && opts.args.length > 0) body.args = opts.args;
     const res = await fetch(`${this.baseUrl}/runs`, {
       method: "POST",
       headers: this.headers({ "content-type": "application/json" }),

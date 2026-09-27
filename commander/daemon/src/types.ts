@@ -38,6 +38,12 @@ export interface StartRunInput {
   cwd?: string;
   /** Task this run belongs to (commander_tasks.id); persisted on the run row. */
   taskId?: string;
+  /**
+   * Per-run extra CLI args, appended AFTER config.extraArgs (so a per-run flag wins).
+   * Lets a caller cap a single run, e.g. `["--max-turns", "6"]` for a Q&A that should
+   * stay conversational rather than crawl the whole repo.
+   */
+  args?: string[];
 }
 
 export interface DaemonConfig {

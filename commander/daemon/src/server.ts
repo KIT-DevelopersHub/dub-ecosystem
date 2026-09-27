@@ -97,7 +97,7 @@ export function createDaemonServer(config: DaemonConfig) {
     }
 
     if (method === "POST" && pathname === "/runs") {
-      let parsed: { prompt?: unknown; cwd?: unknown; taskId?: unknown };
+      let parsed: { prompt?: unknown; cwd?: unknown; taskId?: unknown; args?: unknown };
       try {
         parsed = JSON.parse((await readBody(req)) || "{}");
       } catch {
@@ -108,7 +108,11 @@ export function createDaemonServer(config: DaemonConfig) {
       }
       const cwd = typeof parsed.cwd === "string" ? parsed.cwd : undefined;
       const taskId = typeof parsed.taskId === "string" ? parsed.taskId : undefined;
-      const run = store.start({ prompt: parsed.prompt, cwd, taskId });
+      // Per-run CLI args (only strings survive); appended after the global extraArgs.
+      const args = Array.isArray(parsed.args)
+        ? parsed.args.filter((a): a is string => typeof a === "string")
+        : undefined;
+      const run = store.start({ prompt: parsed.prompt, cwd, taskId, args });
       return json(res, 201, { runId: run.id, status: run.status });
     }
 

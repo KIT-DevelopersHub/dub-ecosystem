@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AskDub } from "./AskDub.tsx";
 import { makeFakeClient } from "./test/fakes.ts";
-import { DUB_ECOSYSTEM_CWD } from "./lib/askDub.ts";
+import { ASK_RUN_ARGS, DUB_ECOSYSTEM_CWD } from "./lib/askDub.ts";
 import type { DaemonRunEvent } from "./lib/client.ts";
 
 const answerFlow: DaemonRunEvent[] = [
@@ -36,7 +36,7 @@ describe("<AskDub>", () => {
     // Ran in the dub-ecosystem repo (read-only Q&A), not a task worktree.
     expect(client.startRun).toHaveBeenCalledWith(
       expect.stringContaining("質問: カレンダーはどこ?"),
-      { cwd: DUB_ECOSYSTEM_CWD },
+      { cwd: DUB_ECOSYSTEM_CWD, args: ASK_RUN_ARGS },
     );
     // Tool activity captured.
     expect(await screen.findByText(/調べたもの/)).toBeInTheDocument();
