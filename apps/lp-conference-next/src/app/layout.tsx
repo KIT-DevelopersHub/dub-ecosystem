@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
+import { StructuredData } from "@/components/StructuredData";
 
 // Typography — Inter for latin/numerals (clean, high x-height) layered over
 // Zen Kaku Gothic New for Japanese (modern, highly readable geometric gothic).
@@ -24,13 +25,39 @@ export const metadata: Metadata = {
   metadataBase: new URL(seo.siteUrl),
   title: seo.title,
   description: seo.description,
+  keywords: [
+    "北陸ITカンファレンス",
+    "北陸 IT カンファレンス",
+    "ITカンファレンス 北陸",
+    "金沢工業大学 イベント",
+    "DevelopersHub",
+    "エンジニア コミュニティ 北陸",
+    "学生 エンジニア イベント",
+    "技術カンファレンス 2027",
+  ],
+  applicationName: seo.title,
+  authors: [{ name: "DevelopersHub" }],
   alternates: { canonical: seo.siteUrl },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true },
+  },
   openGraph: {
     type: "website",
+    locale: "ja_JP",
+    siteName: seo.title,
     title: seo.title,
     description: seo.description,
     url: seo.siteUrl,
-    images: [seo.ogImage],
+    images: [
+      {
+        url: seo.ogImage,
+        width: 1200,
+        height: 630,
+        alt: seo.title,
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
@@ -54,6 +81,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <head>
+        <StructuredData />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* Load Google Fonts WITHOUT blocking first paint. The stylesheet is a

@@ -33,13 +33,22 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
-    id: "v3.3",
-    name: "v3.3 表示崩れ修正版",
+    id: "v3.4",
+    name: "v3.4 SEO対策版",
     description:
-      "v3.2 のコンテンツ確定版をベースに表示崩れを修正。ノートPC相当の低め viewport(1366x768/1280x800/1024x768)でヒーローの「SCROLL」案内が参加登録/登壇応募ボタンに重なっていた不具合を解消(max-height:960px でヒーローの縦リズムを詰めてSCROLLを縮小、max-height:820px では非表示に)。あわせて body に overflow-x:hidden のバックストップを追加、マーキー見出し「HOKURIKU IT CONFERENCE」を clamp(2.4rem,8vw,6rem)/900 → clamp(2.2rem,6.4vw,5rem)/800 に軽量化してトーンダウン。1024x768〜3440x1440 で重なり・横スクロールが無いことを Playwright で実測済み。本番ドメイン hokuriku-it-conf.com へ反映予定。",
+      "v3.3 の表示崩れ修正版をベースに SEO を強化。canonical/OGP/Twitterカードが本番と異なるドメイン(conference.developershub.jp)を指していた誤りを本番ドメイン hokuriku-it-conf.com に修正(検索に出ない主因の可能性)、title/description にキーワードを補強、構造化データ(JSON-LD: Event + Organization)を追加、sitemap.xml / robots.txt を自動生成(sitemap参照込み)、noindex 不在を確認。Google Search Console 登録・sitemap送信の手順は別途案内。本番ドメイン hokuriku-it-conf.com へ反映予定。",
     url: "https://hokuriku-it-conf.com",
     updatedAt: "2026-09-28",
     status: "current",
+  },
+  {
+    id: "v3.3",
+    name: "v3.3 表示崩れ修正版",
+    description:
+      "v3.2 のコンテンツ確定版をベースに表示崩れを修正。ノートPC相当の低め viewport(1366x768/1280x800/1024x768)でヒーローの「SCROLL」案内が参加登録/登壇応募ボタンに重なっていた不具合を解消(max-height:960px でヒーローの縦リズムを詰めてSCROLLを縮小、max-height:820px では非表示に)。あわせて body に overflow-x:hidden のバックストップを追加、マーキー見出し「HOKURIKU IT CONFERENCE」を clamp(2.4rem,8vw,6rem)/900 → clamp(2.2rem,6.4vw,5rem)/800 に軽量化してトーンダウン。1024x768〜3440x1440 で重なり・横スクロールが無いことを Playwright で実測済み。v3.4 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-next-v3-3.developershub-site.workers.dev",
+    updatedAt: "2026-09-23",
+    status: "archived",
   },
   {
     id: "v3.2",
