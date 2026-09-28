@@ -1,0 +1,15 @@
+# This is a vendored copy of a pub.dev package (see ../README.md). pub.dev
+# archives don't ship a .gitignore, so local `flutter pub get`/`flutter test`
+# runs against this copy (done once, to verify the patch) leave build/test
+# artifacts behind. Keep this directory limited to the actual package source.
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+/build/
+/pubspec.lock
+example/.dart_tool/
+example/.flutter-plugins
+example/.flutter-plugins-dependencies
+example/build/
+example/pubspec.lock
+example/windows/flutter/ephemeral/
