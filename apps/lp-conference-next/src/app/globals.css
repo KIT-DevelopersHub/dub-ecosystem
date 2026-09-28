@@ -80,6 +80,11 @@ html {
 
 body {
   margin: 0;
+  /* hard guarantee against horizontal scroll — a belt-and-suspenders backstop
+     for the full-bleed giant headings (marquee/ghost text) below, which are
+     already width-capped, in case a fallback font or an unusual viewport
+     ever renders them wider than expected. */
+  overflow-x: hidden;
   font-family: var(--font-body);
   color: var(--lp-ink);
   background: var(--lp-surface);
@@ -2608,8 +2613,12 @@ img { max-width: 100%; height: auto; display: block; }
 .marquee-unit { display: inline-flex; align-items: center; }
 .marquee-word {
   font-family: var(--font-inter), sans-serif;
-  font-weight: 900;
-  font-size: clamp(2.4rem, 8vw, 6rem);
+  font-weight: 800;
+  /* responsive to viewport width, capped so it never dominates a wide/PC
+     screen or forces horizontal scroll (also backstopped by `overflow-x:
+     hidden` on body) — kept a notch smaller/lighter than before for a more
+     restrained, editorial feel rather than an oversized shout. */
+  font-size: clamp(2.2rem, 6.4vw, 5rem);
   line-height: 1;
   letter-spacing: -0.02em;
   padding-inline: 0.28em;
@@ -2850,6 +2859,23 @@ img { max-width: 100%; height: auto; display: block; }
 @keyframes hero31-scroll-pulse {
   0%, 100% { transform: scaleY(0.35); opacity: 0.35; transform-origin: top; }
   50% { transform: scaleY(1); opacity: 1; transform-origin: top; }
+}
+
+/* Short-viewport safety — on laptop-height screens (~768-900px tall), the
+   vertically-centered copy stack can end close enough to the viewport
+   bottom that the bottom-anchored "SCROLL" cue overlaps the CTA buttons.
+   Tighten vertical rhythm and shrink the cue on short viewports only;
+   normal/tall viewports (where the two never collide) are untouched. */
+@media (max-height: 960px) {
+  .hero--v31 .hero-eyebrow { margin-bottom: 0.55rem; }
+  .hero--v31 .hero-title { margin-bottom: 0.85rem; }
+  .hero--v31 .hero-meta { margin-bottom: 0.9rem; gap: 0.4rem; }
+  .hero--v31 .hero-scroll { bottom: 0.55rem; gap: 0.35rem; }
+  .hero--v31 .hero-scroll-line { height: 22px; }
+}
+@media (max-height: 820px) {
+  .hero--v31 .hero-title-line { font-size: clamp(2.6rem, 8.4vw, 5.8rem); }
+  .hero--v31 .hero-scroll { display: none; }
 }
 
 /* header legibility while transparent over the dark hero (this LP only) */
