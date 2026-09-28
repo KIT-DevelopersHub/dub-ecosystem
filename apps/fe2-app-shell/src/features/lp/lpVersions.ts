@@ -33,13 +33,22 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
+    id: "v3.3",
+    name: "v3.3 表示崩れ修正版",
+    description:
+      "v3.2 のコンテンツ確定版をベースに表示崩れを修正。ノートPC相当の低め viewport(1366x768/1280x800/1024x768)でヒーローの「SCROLL」案内が参加登録/登壇応募ボタンに重なっていた不具合を解消(max-height:960px でヒーローの縦リズムを詰めてSCROLLを縮小、max-height:820px では非表示に)。あわせて body に overflow-x:hidden のバックストップを追加、マーキー見出し「HOKURIKU IT CONFERENCE」を clamp(2.4rem,8vw,6rem)/900 → clamp(2.2rem,6.4vw,5rem)/800 に軽量化してトーンダウン。1024x768〜3440x1440 で重なり・横スクロールが無いことを Playwright で実測済み。本番ドメイン hokuriku-it-conf.com へ反映予定。",
+    url: "https://hokuriku-it-conf.com",
+    updatedAt: "2026-09-28",
+    status: "current",
+  },
+  {
     id: "v3.2",
     name: "v3.2 コンテンツ確定版",
     description:
-      "v3.1 の立体ヒーローをベースに、初回表示の波紋イントロを削除して即表示に、開催日を 2026-09-13・14 に更新、受付前の「参加登録」「登壇応募」を準備中(disabled)表示に、ファーストビューに IT カンファレンスらしいキャッチを追加、プログラムをダイアログで随時更新できる構成に、クラウドファンディング導線を CAMPFIRE へ、CONTACT をメール/Instagram/X のアイコンボタンに刷新(X = @DevelopersHubPR)。ファビコン/ブランドアイコンも導入。本番ドメイン hokuriku-it-conf.com に反映済み。",
-    url: "https://hokuriku-it-conf.com",
+      "v3.1 の立体ヒーローをベースに、初回表示の波紋イントロを削除して即表示に、開催日を 2026-09-13・14 に更新、受付前の「参加登録」「登壇応募」を準備中(disabled)表示に、ファーストビューに IT カンファレンスらしいキャッチを追加、プログラムをダイアログで随時更新できる構成に、クラウドファンディング導線を CAMPFIRE へ、CONTACT をメール/Instagram/X のアイコンボタンに刷新(X = @DevelopersHubPR)。ファビコン/ブランドアイコンも導入。v3.3 へ差し替え済みのため参照用アーカイブとして保存。",
+    url: "https://lp-conference-next-v3-2.developershub-site.workers.dev",
     updatedAt: "2026-09-23",
-    status: "current",
+    status: "archived",
   },
   {
     id: "v3.1",
