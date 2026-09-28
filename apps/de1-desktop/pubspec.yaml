@@ -1,5 +1,5 @@
 name: dub_desktop
-description: "DAV desktop client (Flutter, macOS + Windows) for the DevHub/Dub ecosystem. Talks to the shared api-gateway; feature-parity with the web app is the goal."
+description: "Dub — the DevHub/Dub desktop client (Flutter, macOS + Windows). A thin native shell that renders the real Web SPA (fe2-app-shell) verbatim, so it is a pixel-for-pixel copy of the web app and follows every web deploy."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 1.0.2+3
 
 environment:
   sdk: ^3.7.2
@@ -35,18 +35,51 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
-  # State management (pure Dart, no native plugins).
+  # The entire desktop UI is the real Web SPA rendered in an embedded WebView
+  # (macOS = WKWebView, Windows = WebView2). This is what makes the desktop app
+  # a literal copy of the web app. No bespoke Flutter screens, no HTTP client —
+  # the web bundle owns all of that.
+  flutter_inappwebview: ^6.1.5
+
+  # State management for the *only* native layer: the biometric launch gate and
+  # the credential-autofill controller (pure Dart, no native plugins).
   flutter_riverpod: ^2.5.1
-  # HTTP client + web-parity cookie session handling (all pure Dart — no
-  # platform channels, so the macOS/Windows builds need no extra pods).
-  dio: ^5.7.0
-  dio_cookie_manager: ^3.1.1
-  cookie_jar: ^4.0.8
+
+  # OS-native biometric launch gate. Federated plugin: macOS uses
+  # local_auth_darwin (Touch ID), iOS uses the same plugin (Face ID / Touch ID),
+  # Windows uses local_auth_windows (Windows Hello). `biometricOnly: false` lets
+  # the OS fall back to the device passcode/password when biometrics are
+  # unavailable or fail.
+  local_auth: ^2.3.0
+
+  # Secure at-rest storage for the saved Dub credentials (email + password).
+  # macOS/iOS = Keychain, Windows = Credential Manager (DPAPI). Never a plain
+  # file.
+  flutter_secure_storage: ^9.2.2
+
+  # ── Push notifications ────────────────────────────────────────────────────
+  # OS notification display on every platform (macOS/Windows/iOS/Android). Used
+  # by BOTH transports: the Phase 0 foreground watcher and Phase 1 FCM remote.
+  flutter_local_notifications: ^19.0.0
+
+  # Phase 1 (Android remote push, $0). Guarded to Android at runtime; a missing
+  # google-services.json degrades gracefully to Phase 0-only.
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.3
+
+  # Device-token registration call to mo3-mobile-bff (POST /m/v1/devices).
+  http: ^1.2.2
+
+# Vendored patch for a Windows-only vertical-scroll bug in
+# flutter_inappwebview_windows 0.6.0 (the latest stable release — the fix is
+# not upstream yet). See third_party/README.md for the full root-cause
+# writeup and links to the upstream issues.
+dependency_overrides:
+  flutter_inappwebview_windows:
+    path: third_party/flutter_inappwebview_windows
 
 dev_dependencies:
   flutter_test:
-    sdk: flutter
-  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to

@@ -1,9 +1,69 @@
 # ADR-0006: Desktop client — Flutter (macOS + Windows) over the shared gateway
 
-- Status: Proposed
+- Status: Accepted (revised — see "Update 2026-09" below)
 - Date: 2026-08-19
 - Deciders: DevHub (Dub) core
 - Related: ADR-0004 (auth session cookie), `apps/de1-desktop`, `docs/openapi/api-gateway.yaml`, `apps/mo1-ios` / `apps/mo2-android` (native mobile precedent)
+
+## Update 2026-09: thin WebView shell, not a per-screen native rebuild
+
+Between this ADR's proposal and shipping, several branches built out **native Flutter
+widgets per screen** (chat, gantt, tasks, events) that re-implemented `apps/fe2-app-shell`
+screen-by-screen. That duplicated the web app's UI/logic for no product benefit and was
+abandoned (see the old `feat/de1-desktop-{chat,gantt,tasks,events-drive-settings,mail}`
+branches — superseded, recommended for closing).
+
+The decision that stands: **`apps/de1-desktop` is a Flutter app whose only screen is a
+WebView (`flutter_inappwebview`) pointed at `fe2-app-shell`** (`lib/ui/web_shell.dart`).
+Flutter is still the right framework choice (§1 below is unchanged — one codebase for
+macOS/Windows, plus Android/iOS as of this update), but it is used as a **native app
+shell/wrapper**, not as a UI-reimplementation layer. Everything in §3–6 below
+(gateway-direct calls, cookie auth, contract reuse, state mgmt) applies to the *web app
+inside the WebView*, not to Dart-side screens — de1-desktop itself has no feature code, no
+models, and no state management beyond the shell (login-form autofill, app-lock,
+WebView lifecycle, and OS push notifications).
+
+Minimal native surface added on top of the WebView (kept intentionally small):
+- **Face ID / Touch ID app-lock + credential autofill** (`lib/state/app_lock.dart`,
+  `lib/state/autofill.dart`, `lib/state/credential_store.dart`) — biometric gate in front
+  of the WebView, and JS-injected autofill of the login form from a securely stored
+  credential, so returning users skip typing their password.
+- **OS push notifications** (`lib/push/*`) — see the dedicated design note below.
+
+## Update 2026-09 (push notifications) — 2-phase design
+
+Desktop push does **not** rely on the web SPA's own push stack (no Service-Worker Web
+Push from inside the WebView — `flutter_inappwebview`/WKWebView do not reliably support
+that today). Instead:
+
+- **Phase 0 — foreground, $0, zero server changes.** `lib/push/foreground_bridge.dart`
+  injects a small JS watcher into the WebView page that reuses the SPA's own authenticated
+  session to poll `GET /api/v1/notifications/inbox?unreadOnly=true` and bridges genuinely
+  new items to `lib/push/push_notifications.dart` (`flutter_local_notifications`), which
+  displays a uniform OS notification on every platform and routes a tap back into the SPA
+  via `window.__dubNavigate`.
+- **Phase 1+ — background/terminated remote wake.** `lib/push/fcm_push.dart` (Android, and
+  macOS/iOS over FCM-on-APNs) and `lib/push/native_push.dart` + a native bridge
+  (`ios/…/AppDelegate.swift`, `macos/…/AppDelegate.swift`,
+  `windows/runner/push_channel.{h,cpp}`) obtain a platform push token and register it with
+  `POST /m/v1/devices` on `mo3-mobile-bff` (already implemented server-side, including the
+  APNs/WNS/FCM send adapters — this ADR only covers the client).
+
+**Auth seam (resolved this update):** `POST/GET/DELETE /m/v1/devices` on `mo3-mobile-bff`
+already accepts the WebView's own `dub_session` cookie as an alternative to a mobile
+Bearer token (`apps/mo3-mobile-bff/src/app.ts` `cookieSession()`, added for exactly this
+de1 track — de1 has no separate mobile login/token-exchange step). `lib/push/mo3_session.dart`
+reads that cookie straight out of the WebView's cookie jar
+(`CookieManager.instance().getCookie(url: AppConfig.apiBaseUrl, name: 'dub_session')`) and
+sends it as a `Cookie:` header; a `--dart-define=MOBILE_BEARER=...` bearer still overrides
+it for manual testing. Registration defers/retries only while genuinely logged out (no
+cookie yet).
+
+**Remaining open dependency (blocks Phase 1 going live in production):**
+`mo3-mobile-bff`'s custom route (`m-api.developershub.jp`) is not deployed yet
+(`workers_dev = false`, route commented out in `apps/mo3-mobile-bff/wrangler.toml`) — the
+client is auth-ready but has nowhere to actually reach in prod until that route (or an
+equivalent `AppConfig.mo3BaseUrl` override) ships.
 
 ## Context
 
