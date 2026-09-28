@@ -46,3 +46,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase project config — PROJECT-SPECIFIC CREDENTIALS. Never commit.
+# Obtain from the Firebase console / `flutterfire configure` (see
+# docs/desktop-flutter/PUSH_SETUP.md). The app degrades to a no-op without them.
+lib/firebase_options.dart
+**/google-services.json
+**/GoogleService-Info.plist
+ios/firebase_app_id_file.json
+macos/firebase_app_id_file.json

@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'push/push_service.dart';
 import 'state/auth.dart';
 import 'ui/app_shell.dart';
 import 'ui/login_screen.dart';
 import 'ui/theme.dart';
 
 void main() {
+  // Required before touching platform channels (Firebase background handler).
+  WidgetsFlutterBinding.ensureInitialized();
+  // Register the FCM background/terminated message handler as early as possible
+  // (no-op on unsupported platforms or when push is disabled).
+  PushService.registerBackgroundHandler();
   runApp(const ProviderScope(child: DubDesktopApp()));
 }
 

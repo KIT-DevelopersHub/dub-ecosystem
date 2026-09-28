@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../push/push_registration.dart';
 import '../state/auth.dart';
 import 'inbox_view.dart';
 
@@ -36,6 +37,10 @@ class AppShell extends ConsumerWidget {
     final selectedId = ref.watch(selectedAppProvider);
     final me = ref.watch(authControllerProvider).me;
     final theme = Theme.of(context);
+
+    // Authenticated: start background-push registration (idempotent). Deep-links
+    // from a notification tap route to the notifications app.
+    ref.read(pushRegistrarProvider).start();
 
     return Scaffold(
       appBar: AppBar(
@@ -81,9 +86,12 @@ class AppShell extends ConsumerWidget {
                 style: TextStyle(color: theme.colorScheme.onPrimaryContainer),
               ),
             ),
-            onSelected: (v) {
+            onSelected: (v) async {
               if (v == 'logout') {
-                ref.read(authControllerProvider.notifier).logout();
+                // De-register the device while the session is still valid, then
+                // clear the session.
+                await ref.read(pushRegistrarProvider).unregister();
+                await ref.read(authControllerProvider.notifier).logout();
               }
             },
             itemBuilder: (_) => const [
