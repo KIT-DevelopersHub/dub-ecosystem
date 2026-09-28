@@ -1,0 +1,92 @@
+/* LP管理 ログ管理タブ のローカルスタイル。色・余白・字は @dub/tokens の CSS 変数だけを使う
+   （ハードコードした色/px を置かない＝テーマ切替とデザイン一貫性を壊さないため）。
+   チャートライブラリは追加しない: 流入元の内訳は純 CSS の横棒で描く。 */
+
+/* ── KPI カード ─────────────────────────────────────────────────────────── */
+.kpiGrid {
+  display: grid;
+  /* 4枚を横並び。狭い幅では自動で 2 列 → 1 列に落ちる（メディアクエリ不要）。 */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--dub-space-4);
+}
+
+.kpiLabel {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.kpiValue {
+  font-size: var(--dub-font-size-3xl);
+  font-weight: var(--dub-font-weight-bold);
+  line-height: var(--dub-font-lineHeight-tight);
+  /* 数字は等幅で並べる（桁が揺れて読み違えるのを防ぐ）。 */
+  font-variant-numeric: tabular-nums;
+}
+
+.kpiHint {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  line-height: var(--dub-font-lineHeight-normal);
+}
+
+/* ── 流入元別 横棒 ──────────────────────────────────────────────────────── */
+.bars {
+  display: grid;
+  gap: var(--dub-space-4);
+}
+
+.barRow {
+  display: grid;
+  /* ラベル列 / 棒 / 数値列。棒だけが伸縮する。 */
+  grid-template-columns: minmax(6.5rem, 9rem) 1fr minmax(5.5rem, auto);
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.barLabel {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.barTrack {
+  height: 10px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-brand-500);
+}
+
+.barValue {
+  text-align: right;
+  font-size: var(--dub-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--dub-color-text-secondary);
+}
+
+.barShare {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+/* ── 補足テキスト ───────────────────────────────────────────────────────── */
+.note {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+.sectionTitle {
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
