@@ -1,9 +1,12 @@
 # ADR-0006: Desktop client — Flutter (macOS + Windows) over the shared gateway
 
-- Status: Proposed
+- Status: **Superseded by ADR-0008** (2026-09-28) — the Flutter native app
+  (`apps/de1-desktop`) was removed from the repo. Desktop now ships as a thin
+  WebView shell over the existing web app (`apps/fe2-app-shell`). Kept below
+  for historical context only; do not build against this decision.
 - Date: 2026-08-19
 - Deciders: DevHub (Dub) core
-- Related: ADR-0004 (auth session cookie), `apps/de1-desktop`, `docs/openapi/api-gateway.yaml`, `apps/mo1-ios` / `apps/mo2-android` (native mobile precedent)
+- Related: ADR-0004 (auth session cookie), ~~`apps/de1-desktop`~~ (removed), `docs/openapi/api-gateway.yaml`, `apps/mo1-ios` / `apps/mo2-android` (native mobile precedent)
 
 ## Context
 
