@@ -1,0 +1,15 @@
+# commander-service — Commander phase-gate API. Scaffold only; DO NOT deploy from this
+# unit (database_id filled at the infra Apply step, like the other services).
+name = "commander-service"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared dub-core D1 (commander_ namespace only). database_id filled at infra Apply.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "PLACEHOLDER_DUB_CORE_D1_ID"
+
+[observability]
+enabled = true

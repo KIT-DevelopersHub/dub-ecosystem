@@ -57,6 +57,17 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
     ownerUnit: "drive-share-service",
     tables: ["driveshare_role_file_grants", "driveshare_role_grant_members"],
   },
+  {
+    ns: "commander",
+    ownerUnit: "commander-service",
+    tables: [
+      "commander_features",
+      "commander_tasks",
+      "commander_phase_transitions",
+      "commander_runs",
+      "commander_run_events",
+    ],
+  },
 ];
 
 // Compile-time guard: every NAMESPACES entry appears exactly once in the registry.

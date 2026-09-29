@@ -1,0 +1,21 @@
+{
+  "name": "@dub/commander-service",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "commander-service — HTTP API for the Commander feature phase state machine. Persists Feature/Task/PhaseTransition/Run/RunEvent on the shared dub-core D1 (commander_ namespace) and enforces the phase gate (段飛ばし=409, 自己承認=403) via @dub/commander-phases.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/commander-phases": "workspace:*",
+    "@dub/db": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
