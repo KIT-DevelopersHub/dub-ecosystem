@@ -78,10 +78,16 @@ jobs:
     steps:
       # pull_request: build the PR head. push:main: pull_request is null, so the ||
       # falls back to github.sha (main's HEAD) — the exact tree that goes to prod.
+      # fetch-depth: 0 — the liveness gate below needs the MERGE-BASE with origin/main to
+      # decide whether a Liveness-Marker is branch-unique (see "marker base-uniqueness"
+      # further down). A shallow checkout has neither origin/main nor a common ancestor, so
+      # the check would degrade to "unknown" on every run and the guard would be inert —
+      # exactly the failure mode that made the staging-occupancy guard useless for months.
       - name: Checkout target SHA
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
 
       - name: Preflight — CF token present (same-repo PRs only)
         run: |
@@ -133,6 +139,99 @@ jobs:
       - name: Deploy to staging
         run: bash infra/deploy/deploy-staging.sh
 
+      # --- EVICTION NOTICE (push:main only) --------------------------------------------
+      # THE 2026-09-29 INCIDENT, IN ONE STEP.
+      #
+      # The owner reviewed PR #562 (ロール管理リファクタ) on staging at 15:01:21Z. At
+      # 15:14:56Z an UNRELATED PR (#561) merged to main. This workflow also fires on
+      # `push: main` and redeploys the SINGLE shared staging slot from main's HEAD — so 13m35s
+      # after the review, the staging URL silently stopped serving #562 and started serving
+      # main. NOTHING said so: #562 kept its `stagingへ` label, its sticky comment still read
+      # "staging デプロイ完了", and the URL still resolved. #562 was never merged and prod
+      # still serves the OLD role UI.
+      #
+      # So: every time main takes the slot, tell the PRs it just displaced, and make the repo
+      # state honest by removing the `stagingへ` label they no longer actually hold.
+      #
+      # continue-on-error: a comment/label hiccup must NEVER fail a successful staging deploy
+      # — the deploy itself is the important part and it has already happened by this point.
+      - name: Announce staging eviction to displaced PRs
+        if: github.event_name == 'push'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          FE2_URL: ${{ steps.origins.outputs.fe2 }}
+        run: |
+          set -uo pipefail   # deliberately NOT -e: best-effort, per-PR failures are tolerated
+          MARKER="<!-- staging-deploy -->"
+          SHORT="$(printf '%s' "${SHA}" | cut -c1-8)"
+
+          PRS_JSON="$(gh pr list --repo "${REPO}" --state open --label 'stagingへ' \
+            --json number,headRefOid,headRefName --limit 100 2>/dev/null || echo '[]')"
+
+          # "number<TAB>headSha<TAB>branch" for every labelled PR whose head is NOT the main
+          # SHA we just deployed (a PR whose head IS this SHA is not displaced by it).
+          ROWS="$(printf '%s' "${PRS_JSON}" | SHA="${SHA}" node -e '
+            let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+              let rows=[]; try { rows = JSON.parse(s||"[]"); } catch { rows = []; }
+              if (!Array.isArray(rows)) rows = [];
+              for (const r of rows) {
+                if (!r || !r.number) continue;
+                if ((r.headRefOid||"") === process.env.SHA) continue;
+                console.log([r.number, r.headRefOid||"", r.headRefName||""].join("\t"));
+              }
+            });' || echo '')"
+
+          if [ -z "${ROWS}" ]; then
+            echo "no labelled PR was displaced by this main deploy."
+            exit 0
+          fi
+
+          printf '%s\n' "${ROWS}" | while IFS="$(printf '\t')" read -r PR HEAD BRANCH; do
+            [ -n "${PR}" ] || continue
+            echo "--- evicting PR #${PR} (${BRANCH} @ ${HEAD})"
+            {
+              echo "${MARKER}"
+              echo "### ⚠️ staging から退去しました（この PR のビルドはもう staging にいません）"
+              echo ""
+              echo "main に別の変更がマージされ、staging が **main の HEAD** で再デプロイされました。"
+              echo "staging はリポジトリ全体で **1 枠しかない共有環境** なので、この PR のビルドは上書きされています。"
+              echo ""
+              echo "| 項目 | 値 |"
+              echo "|---|---|"
+              echo "| 今 staging が配信しているもの | main \`${SHORT}\` |"
+              echo "| この PR の head | \`${HEAD}\` (\`${BRANCH}\`) |"
+              echo "| 退去時刻 | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+              echo "| staging URL | ${FE2_URL} |"
+              echo ""
+              echo "**この URL を開いても、この PR の変更は見られません。**"
+              echo "退去前にこの URL で行った確認結果は、この時点で無効です。"
+              echo ""
+              echo "- \`stagingへ\` ラベルは自動で外しました（リポジトリの状態を実態に合わせるため）。"
+              echo "- もう一度 staging で確認するには、**\`stagingへ\` ラベルを付け直してください**（再デプロイされます）。"
+              echo "- \`確認した\` を付けるのは、**付け直した後の staging で再確認してから**にしてください。"
+            } > /tmp/evicted-${PR}.md
+
+            CID="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+              --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" 2>/dev/null | head -n1)"
+            if [ -n "${CID}" ]; then
+              gh api --method PATCH "repos/${REPO}/issues/comments/${CID}" \
+                -F body=@/tmp/evicted-${PR}.md >/dev/null \
+                && echo "    rewrote sticky comment ${CID}" \
+                || echo "::warning::could not rewrite the sticky comment on PR #${PR}"
+            else
+              gh pr comment "${PR}" --repo "${REPO}" --body-file /tmp/evicted-${PR}.md \
+                && echo "    posted eviction comment" \
+                || echo "::warning::could not comment on PR #${PR}"
+            fi
+
+            gh pr edit "${PR}" --repo "${REPO}" --remove-label 'stagingへ' >/dev/null \
+              && echo "    removed the stagingへ label" \
+              || echo "::warning::could not remove the stagingへ label from PR #${PR}"
+          done
+
       # LIVENESS GATE: prove the feature is ACTUALLY in the served staging bundle before the
       # owner is invited to add `確認した`. Opt-in per PR: add a trailer line to the PR body
       #   Liveness-Marker: <string>[, <string>...]
@@ -146,17 +245,51 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          MARKERS="$(printf '%s\n' "${PR_BODY:-}" | grep -iE '^[[:space:]]*Liveness-Marker[[:space:]]*:' | head -n1 | sed -E 's/^[^:]*:[[:space:]]*//' || true)"
-          if [ -z "${MARKERS// /}" ]; then
+          # Trailer parsing lives in scripts/lib/promote-lib.sh so staging.yml, deploy.yml and
+          # scripts/promote-prod.sh normalise markers IDENTICALLY (CRLF strip, first trailer,
+          # comma split, trim). Three hand-rolled copies is how a marker passes in one place
+          # and fails in another.
+          . scripts/lib/promote-lib.sh
+
+          ARGS=(); COUNT=0
+          while IFS= read -r m; do
+            [ -n "$m" ] || continue
+            ARGS+=("$m"); COUNT=$((COUNT + 1))
+          done < <(printf '%s\n' "${PR_BODY:-}" | parse_liveness_markers)
+
+          if [ "$COUNT" -eq 0 ]; then
             echo "status=skipped" >> "$GITHUB_OUTPUT"
             echo "detail=no \`Liveness-Marker:\` trailer in the PR body — served bundle not asserted." >> "$GITHUB_OUTPUT"
             echo "::warning::no Liveness-Marker trailer; skipping feature-liveness assertion."
             exit 0
           fi
-          # comma -> args
-          IFS=',' read -r -a ARR <<< "$MARKERS"
-          ARGS=(); for m in "${ARR[@]}"; do t="$(printf '%s' "$m" | sed 's/^ *//;s/ *$//')"; [ -n "$t" ] && ARGS+=("$t"); done
+          MARKERS="$(IFS=,; printf '%s' "${ARGS[*]}")"
           echo "markers=${MARKERS}" >> "$GITHUB_OUTPUT"
+
+          # --- GUARD: the marker must be able to DISTINGUISH this build (2026-09-29) -------
+          # PR #562's trailer was `アプリのアクセス権`, a string that also exists on main
+          # (apps/fe7-admin-roster/src/components/AppAccessSection.tsx). A marker already
+          # present on the base passes against a bundle built from the base — i.e. it would
+          # have reported "live" for the main-HEAD redeploy that had evicted #562 and
+          # contained none of its code. Require at least ONE marker absent from the
+          # merge-base. If the base itself can't be resolved we WARN and continue: an
+          # unresolvable base is not evidence of a bad marker, and turning it into a red
+          # check would just train people to ignore the gate.
+          BASE="$(git merge-base HEAD origin/main 2>/dev/null || echo '')"
+          if [ -z "$BASE" ]; then
+            echo "::warning::could not resolve the merge-base with origin/main; marker base-uniqueness not checked."
+          else
+            RC=0; markers_base_unique "$BASE" "${ARGS[@]}" || RC=$?
+            if [ "$RC" = 1 ]; then
+              echo "status=not-unique" >> "$GITHUB_OUTPUT"
+              echo "detail=❌ Liveness-Marker \`${MARKERS}\` はすべて base (\`${BASE}\`) に既に存在します — このビルドを現在の本番ビルドと区別できないため、liveness の証拠になりません。この PR でしか出ない文字列(新しい data-testid・新しいラベル文言)に差し替えてください。" >> "$GITHUB_OUTPUT"
+              echo "::error::Liveness-Marker(s) '${MARKERS}' all exist on the merge-base ${BASE}. Such a marker passes against an UNCHANGED bundle and proves nothing. Use a branch-unique string (a new data-testid, a new label)."
+              exit 0
+            elif [ "$RC" != 0 ]; then
+              echo "::warning::marker base-uniqueness check was inconclusive (rc=${RC}); continuing."
+            fi
+          fi
+
           if bash scripts/verify-live.sh staging "${ARGS[@]}"; then
             echo "status=live" >> "$GITHUB_OUTPUT"
             echo "detail=all marker(s) present in the served staging bundle: \`${MARKERS}\`" >> "$GITHUB_OUTPUT"
@@ -180,9 +313,10 @@ jobs:
         run: |
           MARKER="<!-- staging-deploy -->"
           case "${LIVENESS_STATUS}" in
-            live)     LIVE_LINE="- liveness: ✅ live — ${LIVENESS_DETAIL}" ;;
-            not-live) LIVE_LINE="- liveness: 🚫 NOT live — ${LIVENESS_DETAIL} **確認しないでください（再デプロイが必要）。**" ;;
-            *)        LIVE_LINE="- liveness: ⏭️ 未検証 — ${LIVENESS_DETAIL:-PR 本文に \`Liveness-Marker: <文字列>\` を書くと配信バンドルを自動検証します。}" ;;
+            live)       LIVE_LINE="- liveness: ✅ live — ${LIVENESS_DETAIL}" ;;
+            not-live)   LIVE_LINE="- liveness: 🚫 NOT live — ${LIVENESS_DETAIL} **確認しないでください（再デプロイが必要）。**" ;;
+            not-unique) LIVE_LINE="- liveness: 🚫 マーカー不適格 — ${LIVENESS_DETAIL} **この状態では確認しないでください。**" ;;
+            *)          LIVE_LINE="- liveness: ⏭️ 未検証 — ${LIVENESS_DETAIL:-PR 本文に \`Liveness-Marker: <文字列>\` を書くと配信バンドルを自動検証します。}" ;;
           esac
           # Build the comment body into a file (every line stays indented under `run: |`,
           # so no column-0 heredoc that would break the YAML block scalar).
@@ -200,6 +334,10 @@ jobs:
             echo "${LIVE_LINE}"
             echo ""
             echo "動作確認できたら、この PR に **\`確認した\`** ラベルを付けてください（本番マージのゲートが緑になります）。"
+            echo ""
+            echo "> ⚠️ staging はリポジトリ全体で 1 枠しかない共有環境です。main に別の変更がマージされると、"
+            echo "> この PR のビルドは自動的に上書きされます（その場合はこのコメントが「退去しました」に書き換わり、"
+            echo "> \`stagingへ\` ラベルも外れます）。確認は早めに、書き換わっていたらラベルを付け直してください。"
           } > /tmp/staging-comment.md
           CID="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n1)"
@@ -212,11 +350,23 @@ jobs:
           fi
 
       # Fail the job LAST (after the sticky comment is posted) when the feature markers were
-      # given but are NOT in the served staging bundle. This turns a stale/empty staging
-      # deploy into a red check, so the PR can't be advanced to 確認した on a build the user
-      # would open and find broken. `skipped` (no trailer) and `live` both pass.
+      # given but are unusable. Two failing states, both of which would otherwise let a PR be
+      # advanced to 確認した on evidence that means nothing:
+      #   not-live   — the markers are NOT in the served staging bundle (stale/empty deploy).
+      #   not-unique — every marker already exists on the merge-base, so it would pass against
+      #                an UNCHANGED bundle (PR #562's `アプリのアクセス権`, 2026-09-29).
+      # `skipped` (no trailer) and `live` both pass.
       - name: Enforce liveness result
-        if: github.event_name == 'pull_request' && steps.liveness.outputs.status == 'not-live'
+        if: >-
+          github.event_name == 'pull_request' &&
+          (steps.liveness.outputs.status == 'not-live' ||
+           steps.liveness.outputs.status == 'not-unique')
+        env:
+          LIVENESS_STATUS: ${{ steps.liveness.outputs.status }}
         run: |
-          echo "::error::staging liveness FAILED — the feature markers are not in the served bundle. Re-deploy / investigate before requesting 確認."
+          if [ "${LIVENESS_STATUS}" = "not-unique" ]; then
+            echo "::error::staging liveness FAILED — every Liveness-Marker already exists on the merge-base, so it cannot distinguish this build from the current production build. Replace it with a branch-unique string before requesting 確認."
+          else
+            echo "::error::staging liveness FAILED — the feature markers are not in the served bundle. Re-deploy / investigate before requesting 確認."
+          fi
           exit 1
