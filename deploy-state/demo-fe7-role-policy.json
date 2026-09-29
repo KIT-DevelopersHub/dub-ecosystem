@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "fe7-role-policy",
+  "worker": "dub-demo-fe7-role-policy",
+  "url": "https://dub-demo-fe7-role-policy.developershub-site.workers.dev",
+  "deployedSha": "1fd6d65f",
+  "branch": "feat/fe7-role-policy-demo",
+  "actor": "ko-tarou",
+  "markers": ["アプリのアクセス権","-app-access-table","その他（どのアプリにも属さない権限）"],
+  "live": true,
+  "verifiedAt": "2026-09-29T08:10:01Z",
+  "updatedAt": "2026-09-29T08:10:01Z",
+  "note": "ロール管理: アプリのアクセス権(無効/閲覧/編集)を軸に再構成 + 配下の細かい設定はアプリの詳細ダイアログへ"
+}
