@@ -307,7 +307,8 @@ echo "  ✓ ${WORKFLOW} 完了"
 live=true
 if [ "${#MARKERS[@]}" -gt 0 ]; then
   echo "::group::post-deploy liveness (served ${PROD_URL})"
-  if bash scripts/verify-live.sh prod ${MARKERS[@]+"${MARKERS[@]}"}; then live=true; else live=false; fi
+  # --retries: wait out edge propagation instead of reporting a just-shipped release as 未反映
+  if bash scripts/verify-live.sh prod --retries 6 --retry-delay 10 ${MARKERS[@]+"${MARKERS[@]}"}; then live=true; else live=false; fi
   echo "::endgroup::"
 else
   echo "::warning::マーカー未指定のため本番の実測はスキップしました。"

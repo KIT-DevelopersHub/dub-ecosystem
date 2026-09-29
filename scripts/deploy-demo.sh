@@ -115,7 +115,8 @@ echo "::endgroup::"
 # ---- 4. LIVENESS: assert the served slot now really contains the feature -----------
 echo "::group::post-deploy liveness (served slot)"
 live=true
-if bash scripts/verify-live.sh demo "${MARKERS[@]}"; then live=true; else live=false; fi
+# --retries: give the freshly uploaded version time to reach every edge before calling 未反映
+if bash scripts/verify-live.sh demo --retries 6 --retry-delay 10 "${MARKERS[@]}"; then live=true; else live=false; fi
 echo "::endgroup::"
 
 # ---- 5. MANIFEST: record the current slot occupant ---------------------------------

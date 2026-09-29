@@ -168,7 +168,7 @@ if [ "$DRY_RUN" = 1 ]; then
   echo "[dry-run] would ensure the 'Liveness-Marker:' trailer is in the PR body"
   echo "[dry-run] would (re)apply the '${STAGING_LABEL}' label -> staging.yml deploys"
   echo "[dry-run] would wait for the ${WORKFLOW} run on ${HEAD_SHA}"
-  echo "[dry-run] would verify: scripts/verify-live.sh staging ${MARKERS[*]}"
+  echo "[dry-run] would verify: scripts/verify-live.sh staging --retries 6 --retry-delay 10 ${MARKERS[*]}"
   echo "[dry-run] would write ${MANIFEST}. Nothing changed."
   exit 0
 fi
@@ -219,7 +219,9 @@ echo "  ✓ ${WORKFLOW} 完了"
 
 # ---- 4) 配信物に対する実測 (これが確認依頼に添える証跡) ----------------------------------
 echo "::group::post-deploy liveness (served ${URL})"
-if bash scripts/verify-live.sh staging ${MARKERS[@]+"${MARKERS[@]}"}; then live=true; else live=false; fi
+# --retries: the version was uploaded seconds ago; give it time to reach every edge before
+# calling it "未反映" (a single immediate read can still return the previous bundle).
+if bash scripts/verify-live.sh staging --retries 6 --retry-delay 10 ${MARKERS[@]+"${MARKERS[@]}"}; then live=true; else live=false; fi
 echo "::endgroup::"
 
 write_env_manifest "$MANIFEST" staging "$URL" "$HEAD_SHA" "$HEAD_REF" "$ACTOR" "$live" \
