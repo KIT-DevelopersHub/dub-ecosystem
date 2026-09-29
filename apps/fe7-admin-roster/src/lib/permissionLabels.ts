@@ -34,10 +34,20 @@ const DOMAIN_LABELS: Record<string, string> = {
 // DERIVED from APP_MANIFEST — never hand-listed. The previous hand-written table had
 // drifted whenever an app was registered without being added here (its `app:<id>:*` keys then
 // fell back to the catalog's English text) — exactly the 抜け a new app would hit again.
-const APP_LABELS: { id: string; name: string }[] = appRegistry.APP_MANIFEST.map((a) => ({
-  id: a.id,
-  name: a.label,
-}));
+//
+// NAME_QUALIFIERS is the ONLY hand-written part: a parenthetical for apps whose launcher
+// tile name alone is not self-explanatory in a permission list (Commander is an English
+// product name, so 権限一覧 spells out what it governs). Keyed by `AppId`, so a removed or
+// renamed app id is a COMPILE error — the derivation stays the source of truth and a new
+// app still gets a label automatically, qualifier or not.
+const NAME_QUALIFIERS: Partial<Record<appRegistry.AppId, string>> = {
+  commander: "開発オペレーション",
+};
+
+const APP_LABELS: { id: string; name: string }[] = appRegistry.APP_MANIFEST.map((a) => {
+  const qualifier = NAME_QUALIFIERS[a.id];
+  return { id: a.id, name: qualifier ? `${a.label}（${qualifier}）` : a.label };
+});
 
 // Descriptions are written as an outcome ("オンにすると〜できるようになる") so even
 // non-obvious keys make clear what granting them lets a member do.

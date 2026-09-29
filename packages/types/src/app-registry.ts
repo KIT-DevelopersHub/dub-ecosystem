@@ -118,6 +118,13 @@ export const APP_MANIFEST = [
   // ロール管理 itself has no knob beyond 無効/閲覧/編集 — that 3 段階 is its whole settings surface.
   { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" },
     detailPermissions: [] },
+  // Commander: admin/dev tooling that drives the LOCAL Claude Code exec bridge and gates
+  // demo→staging→prod phase moves. Admin-only by design (identity:admin) and NOT in the
+  // launcher's PUBLISHED_APPS, so it is greyed (member-hidden) until explicitly released.
+  // identity:admin is claimed by 運営メンバー's 詳細設定 (a non-app key belongs to at most one
+  // app), so Commander — like ロール管理 — has no knob beyond 無効/閲覧/編集.
+  { id: "commander", label: "Commander", navPath: "/commander", domain: "identity", permissions: ["identity:admin"], access: { view: "app:commander:view", edit: "app:commander:edit" },
+    detailPermissions: [] },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

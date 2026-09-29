@@ -1,0 +1,23 @@
+{
+  "name": "@dub/commander-phases",
+  "version": "0.1.0",
+  "description": "Commander feature phase state machine — the single source of truth for the demo→staging→prod flow (段飛ばし + 自己承認 を型/実行で禁止). Pure, dependency-free; consumed by the local daemon and the commander-service worker.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
