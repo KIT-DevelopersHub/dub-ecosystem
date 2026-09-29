@@ -157,7 +157,10 @@ jobs:
           IFS=',' read -r -a ARR <<< "$MARKERS"
           ARGS=(); for m in "${ARR[@]}"; do t="$(printf '%s' "$m" | sed 's/^ *//;s/ *$//')"; [ -n "$t" ] && ARGS+=("$t"); done
           echo "markers=${MARKERS}" >> "$GITHUB_OUTPUT"
-          if bash scripts/verify-live.sh staging "${ARGS[@]}"; then
+          # --retries: the Worker version was uploaded seconds ago and needs a moment to
+          # reach every edge. Without the wait this gate reads the PREVIOUS bundle and turns
+          # a deploy that DID land red ("未反映" と出るのに実際は反映済み).
+          if bash scripts/verify-live.sh staging --retries 6 --retry-delay 10 "${ARGS[@]}"; then
             echo "status=live" >> "$GITHUB_OUTPUT"
             echo "detail=all marker(s) present in the served staging bundle: \`${MARKERS}\`" >> "$GITHUB_OUTPUT"
           else
