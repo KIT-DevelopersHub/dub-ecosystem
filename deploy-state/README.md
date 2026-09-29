@@ -9,8 +9,8 @@ actually looking at.
 | `demo.json`    | the shared `fe2-demo` Worker (backend-free mock SPA) | `scripts/deploy-demo.sh` |
 | `demo-<slug>.json` | a **disposable per-feature** demo Worker `dub-demo-<slug>` (backend-free mock SPA) | `scripts/deploy-demo-feature.sh` (removed by `scripts/teardown-demo.sh`) |
 | `staging-queue.json` | the batch of **demo-approved features** waiting to be flushed to staging together | `scripts/staging-queue.sh` |
-| `staging.json` | the shared `-staging` Worker set               | `.github/workflows/staging.yml` (commented into the sticky PR comment; see note) |
-| `prod.json`    | production                                     | `deploy.yml` on merge to `main`  |
+| `staging.json` | the shared `-staging` Worker set               | `scripts/promote-staging.sh` (`pnpm deploy:staging`); also reported into the sticky PR comment by `.github/workflows/staging.yml` (see note) |
+| `prod.json`    | production                                     | `scripts/promote-prod.sh --merge` (`pnpm ship:prod`), after `deploy.yml` deploys the merge to `main` |
 
 ## Parallel-development flow (per-feature demos + staging queue)
 
@@ -26,6 +26,13 @@ OWN throwaway Worker so reviews never clobber each other.
 4. when a flush condition trips (≥5 queued / oldest ≥24h / manual flag), `staging-queue.sh flush`
    prints the integration-branch merge+deploy plan; staging then equals all demo-approved
    features (demo=staging parity). See [runbook 06](../docs/runbooks/06-parallel-demo-staging-flow.md).
+5. `promote-staging.sh` (`pnpm deploy:staging`) reflects that PR to staging in one command:
+   `Liveness-Marker` trailer -> `stagingへ` label -> wait for `staging.yml` -> `verify-live` ->
+   write `staging.json` -> print the URL (only when `live: true`).
+6. owner confirms on staging and adds `確認した`; `promote-prod.sh` (`pnpm ship:prod`) checks the
+   gates (READ-ONLY by default, never adds the label itself) and, with `--merge`, merges to main,
+   waits for `deploy.yml`, verifies prod and writes `prod.json`.
+   See [runbook 07](../docs/runbooks/07-staging-prod-promotion.md).
 
 `demo-<slug>.json` adds `kind: "demo-feature"`, `slug`, and `worker` on top of the fields below.
 

@@ -14,6 +14,7 @@ DevHub (Dub) エコシステムの運用手順書。**手順のみ** をまと�
 | [04-staging-label-gate.md](./04-staging-label-gate.md) | 3環境デプロイ。staging 全複製・「stagingへ」/「確認した」ラベル運用・二重ゲート・無料枠実数・カットオーバー |
 | [05-liveness-verification.md](./05-liveness-verification.md) | 「確認して」の前に配信バンドルへ機能マーカー実在を機械検証。demo 直列化(`deploy:demo`)・`verify:live`・`deploy-state/` 台帳・staging CI liveness ゲート |
 | [06-parallel-demo-staging-flow.md](./06-parallel-demo-staging-flow.md) | 並行開発フロー。使い捨て per-feature demo(`deploy:demo:feature`)→承認→`teardown:demo`→staging キュー(`staging:queue`)5件バッチ flush→統合ブランチ反映 |
+| [07-staging-prod-promotion.md](./07-staging-prod-promotion.md) | staging 反映(`deploy:staging`)と本番反映(`ship:prod`)の 1 コマンド化。ラベル操作→CI 待ち→`verify:live`→`deploy-state` 更新まで。本番は既定 READ-ONLY・`確認した` 自己付与なし |
 
 ## 前提知識（3 runbook 共通）
 
