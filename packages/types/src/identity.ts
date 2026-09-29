@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (61 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (63 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -93,7 +93,7 @@ export const PERMISSION_CATALOG = [
   { key: "app:commander:edit", name: "Edit in Commander app", description: "Run commands / advance phases inside the Commander app (implies view)", domain: "app", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 61 keys (open `${string}:${string}` template retired).
+// Closed union of the 63 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

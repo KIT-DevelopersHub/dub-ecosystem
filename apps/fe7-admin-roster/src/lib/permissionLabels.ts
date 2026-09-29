@@ -43,6 +43,7 @@ const APP_LABELS: { id: string; name: string }[] = [
   { id: "driveshare", name: "Drive共有" },
   { id: "lp", name: "LP管理" },
   { id: "admin", name: "管理" },
+  { id: "commander", name: "Commander（開発オペレーション）" },
 ];
 
 // Descriptions are written as an outcome ("オンにすると〜できるようになる") so even

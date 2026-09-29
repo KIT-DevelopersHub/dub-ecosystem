@@ -88,6 +88,9 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
     operatorToken: "",
     idleTimeoutMs: 0,
     runTimeoutMs: 0,
+    isolateEnv: true,
+    claudeConfigDir: "",
+    permissionMode: "acceptEdits",
     ...overrides,
   };
   const { server } = createDaemonServer(config);
