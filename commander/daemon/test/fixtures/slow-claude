@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+// Test fixture standing in for a long-running `claude`. Emits an init line, then
+// stays alive (SIGTERM from cancel/timeout ends it). Used by cancel/timeout tests.
+process.stdout.write(JSON.stringify({ type: "system", subtype: "init" }) + "\n");
+const timer = setTimeout(() => process.exit(0), 30_000);
+process.on("SIGTERM", () => {
+  clearTimeout(timer);
+  process.exit(143);
+});

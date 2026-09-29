@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+// Test fixture standing in for the `claude` CLI. Ignores all args and emits two
+// stream-json lines then exits 0, mimicking `claude -p --output-format stream-json`.
+process.stdout.write(JSON.stringify({ type: "system", subtype: "init" }) + "\n");
+process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result: "PONG" }) + "\n");
+process.exit(0);
