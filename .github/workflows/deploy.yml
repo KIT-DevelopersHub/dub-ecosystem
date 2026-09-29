@@ -29,9 +29,14 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
-  # read-only: resolve the merged PR (title/number/url) behind the deploy for the
-  # post-deploy Admin notification. No write scopes.
+  # write: the post-deploy step commits deploy-state/prod.json back to main so there is a
+  # machine-readable record of WHAT IS ACTUALLY ON PRODUCTION. Until 2026-09-29 that file was
+  # still the seed (`deployedSha: null`) and nothing ever wrote it, so "prod is stale" was
+  # undetectable — production served the OLD role UI for days with no signal anywhere.
+  # The push is best-effort (main is protected); a rejected push warns, never fails.
+  contents: write
+  # read-only: resolve the merged PR (title/number/url/body) behind the deploy for the
+  # post-deploy Admin notification and the Liveness-Marker trailer.
   pull-requests: read
 
 env:
@@ -157,6 +162,112 @@ jobs:
         env:
           SKIP_HEALTHCHECK: ${{ inputs.skip_healthcheck && '1' || '0' }}
 
+      # --- PROD LIVENESS + LIVE-STATE RECORD -------------------------------------------
+      # WHY (2026-09-29): staging has asserted its served bundle against the PR's
+      # `Liveness-Marker:` trailer since #423, but PRODUCTION never did. Combined with
+      # `deploy-state/prod.json` still being the seed (`deployedSha: null`, written by nobody),
+      # there was NO way — by machine or by eye — to tell what production actually served.
+      # The result: PR #562 was evicted from staging by an unrelated merge, never got merged,
+      # and prod quietly kept serving the OLD role UI (#270/#526) with everything "green".
+      #
+      # This step closes both halves: assert the markers against the PROD bundle, and write
+      # down what is live. The marker trailer is parsed by scripts/lib/promote-lib.sh — the
+      # SAME function staging.yml and scripts/promote-prod.sh use, so the three cannot drift.
+      #
+      # Does NOT fail here (see "Enforce production liveness" below): the record must be
+      # written even when the verification fails — a FAILED verification is exactly the state
+      # worth recording.
+      # Runs only when the deploy above succeeded (default step condition) — there is nothing
+      # to verify or record after a failed deploy.
+      - name: Verify production liveness + record live state
+        id: prodstate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          . scripts/lib/promote-lib.sh
+
+          # Same mechanism the label gate and the admin-notify step already use.
+          PR_NUM="$(gh pr list --repo "${REPO}" --search "${SHA}" --state merged \
+            --json number --jq '.[0].number' 2>/dev/null || echo '')"
+          [ "${PR_NUM}" = "null" ] && PR_NUM=""
+          PR_BODY=""
+          if [ -n "${PR_NUM}" ]; then
+            PR_BODY="$(gh pr view "${PR_NUM}" --repo "${REPO}" --json body --jq '.body' 2>/dev/null || echo '')"
+          fi
+
+          MK=(); COUNT=0
+          while IFS= read -r m; do
+            [ -n "$m" ] || continue
+            MK+=("$m"); COUNT=$((COUNT + 1))
+          done < <(printf '%s\n' "${PR_BODY}" | parse_liveness_markers)
+
+          STATUS="skipped"; LIVE="false"
+          if [ "${COUNT}" -eq 0 ]; then
+            # Back-compatible, identical to staging: no trailer => warn and continue. docs /
+            # chore / deps PRs legitimately have nothing to assert.
+            echo "::warning::no Liveness-Marker trailer on the merged PR (${PR_NUM:-unknown}); production bundle not asserted."
+          else
+            if bash scripts/verify-live.sh prod "${MK[@]}"; then
+              STATUS="live"; LIVE="true"
+            else
+              STATUS="not-live"
+            fi
+          fi
+
+          MARKERS_CSV="$(IFS=,; printf '%s' "${MK[*]-}")"
+          echo "status=${STATUS}"             >> "$GITHUB_OUTPUT"
+          echo "markers=${MARKERS_CSV}"       >> "$GITHUB_OUTPUT"
+          echo "pr=${PR_NUM}"                 >> "$GITHUB_OUTPUT"
+
+          SHA="${SHA}" PR_NUM="${PR_NUM}" MARKERS_CSV="${MARKERS_CSV}" LIVE="${LIVE}" \
+          STATUS="${STATUS}" ACTOR="${GITHUB_ACTOR:-}" node -e '
+            const fs = require("fs");
+            const p = "deploy-state/prod.json";
+            let cur = {};
+            try { cur = JSON.parse(fs.readFileSync(p, "utf8")); } catch { cur = {}; }
+            const now = new Date().toISOString();
+            const markers = (process.env.MARKERS_CSV || "").split(",").map(s => s.trim()).filter(Boolean);
+            const out = {
+              env: "prod",
+              url: cur.url || "https://dub-fe2-app-shell.developershub-site.workers.dev",
+              deployedSha: process.env.SHA,
+              branch: "main",
+              actor: process.env.ACTOR || "",
+              pr: process.env.PR_NUM ? Number(process.env.PR_NUM) : null,
+              markers,
+              live: process.env.LIVE === "true",
+              verifiedAt: markers.length ? now : null,
+              updatedAt: now,
+              note: markers.length
+                ? `deploy.yml: verify-live prod -> ${process.env.STATUS}`
+                : "deploy.yml: deployed; no Liveness-Marker trailer on the merged PR, so the served bundle was not asserted.",
+            };
+            fs.writeFileSync(p, JSON.stringify(out, null, 2) + "\n");
+            console.log("deploy-state/prod.json:", JSON.stringify(out));
+          '
+
+      # Commit the live-state record back to main. main is a protected branch (PR +
+      # `確認した` required), so a direct push from CI is rejected with GH006 — this is
+      # bookkeeping, the deploy already happened, and a rejected push must WARN, never fail.
+      # Same tolerance as .github/workflows/refresh-demos.yml.
+      - name: Commit deploy-state/prod.json (best effort)
+        if: always() && steps.prodstate.conclusion == 'success'
+        continue-on-error: true
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- deploy-state/prod.json; then
+            echo "no prod live-state change to commit"
+            exit 0
+          fi
+          git add deploy-state/prod.json
+          git commit -m "chore(deploy): record production live state [skip ci]"
+          if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            echo "::warning::could not push deploy-state/prod.json to protected main (GH006). Production is deployed and (if markers were given) verified regardless; the manifest on main is unchanged."
+          fi
+
       # --- Auto Admin notification (every successful prod deploy) ---
       # Records ONE idempotent audience='admin' notification in dub-core D1 describing the
       # deployed change (merged PR title/number/url + SHA + services + time). Admins see it
@@ -194,4 +305,16 @@ jobs:
             ${URL:+--url "${URL}"} \
             --services "全Worker + fe2 + mo3 (deploy-prod.sh)" \
             --ref "${GITHUB_REF}"
+
+      # Fail the job LAST — after the live-state record is written/pushed and the admins are
+      # notified — when the merged PR DID carry markers and production does not serve them.
+      # A prod deploy that did not actually ship the feature must be a RED run: until now the
+      # only place a stale production could have surfaced was a human opening the URL, and on
+      # 2026-09-29 nobody did for days. Placed last (same pattern as staging.yml) so failing
+      # it never suppresses the bookkeeping steps above.
+      - name: Enforce production liveness
+        if: always() && steps.prodstate.outputs.status == 'not-live'
+        run: |
+          echo "::error::production liveness FAILED — the merged PR's Liveness-Marker(s) are NOT in the served production bundle. Production may still be serving an older build. Investigate before announcing the change."
+          exit 1
 

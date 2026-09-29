@@ -35,7 +35,7 @@ jobs:
           node-version: 24
       - name: bash syntax check
         run: |
-          for f in scripts/*.sh; do bash -n "$f" && echo "  ok syntax $f"; done
+          for f in scripts/*.sh scripts/lib/*.sh; do bash -n "$f" && echo "  ok syntax $f"; done
       - name: verify-live self-test
         run: bash scripts/verify-live.sh --self-test
       - name: deploy-demo-feature self-test
@@ -46,3 +46,10 @@ jobs:
         run: bash scripts/staging-queue.sh --self-test
       - name: staging-queue seed ledger is valid JSON
         run: node -e 'JSON.parse(require("fs").readFileSync("deploy-state/staging-queue.json","utf8")); console.log("staging-queue.json OK")'
+      # The ship-visibility guards (marker normalisation, marker base-uniqueness, staging
+      # occupancy with its CI-run fallback). Fully offline: the two network seams are
+      # overridden with fixtures inside the self-tests.
+      - name: promote-lib self-test
+        run: bash scripts/lib/promote-lib.sh --self-test
+      - name: promote-prod self-test
+        run: bash scripts/promote-prod.sh --self-test
