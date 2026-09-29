@@ -10,10 +10,13 @@ function MemberRow({
   m,
   onEdit,
   onDelete,
+  readOnly,
 }: {
   m: OrgMember;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
+  /** 閲覧のみの権限 — 行の編集/削除は押せない (policy の readOnly フラグ由来). */
+  readOnly: boolean;
 }): JSX.Element {
   return (
     <div className={styles.memberRow} data-testid={`members-teamrow-${m.id}`}>
@@ -27,8 +30,8 @@ function MemberRow({
       <MemberStatusBadge status={m.status} />
       <div className={styles.rowSpacer} />
       <div className={styles.rowActions}>
-        <IconButton name="edit" aria-label={`${m.name} を編集`} onClick={() => onEdit(m)} />
-        <IconButton name="trash" aria-label={`${m.name} を削除`} variant="danger" onClick={() => onDelete(m)} />
+        <IconButton name="edit" aria-label={`${m.name} を編集`} disabled={readOnly} onClick={() => onEdit(m)} />
+        <IconButton name="trash" aria-label={`${m.name} を削除`} variant="danger" disabled={readOnly} onClick={() => onDelete(m)} />
       </div>
     </div>
   );
@@ -41,6 +44,7 @@ export function TeamsView({
   onDeleteMember,
   onEditTeam,
   onDeleteTeam,
+  readOnly = false,
 }: {
   teams: MemberTeam[];
   members: OrgMember[];
@@ -48,6 +52,8 @@ export function TeamsView({
   onDeleteMember: (m: OrgMember) => void;
   onEditTeam: (t: MemberTeam) => void;
   onDeleteTeam: (t: MemberTeam) => void;
+  /** 運営メンバー app が「閲覧」のとき true — 書き込み操作をすべて disabled にする. */
+  readOnly?: boolean;
 }): JSX.Element {
   const unassigned = members.filter((m) => m.teamIds.length === 0);
 
@@ -69,8 +75,8 @@ export function TeamsView({
                 <span className={styles.teamName}>{team.name}</span>
                 <Badge tone="neutral">{inTeam.length}</Badge>
                 <div className={styles.teamActions}>
-                  <IconButton name="edit" aria-label={`${team.name} を編集`} onClick={() => onEditTeam(team)} />
-                  <IconButton name="trash" aria-label={`${team.name} を削除`} variant="danger" onClick={() => onDeleteTeam(team)} />
+                  <IconButton name="edit" aria-label={`${team.name} を編集`} disabled={readOnly} onClick={() => onEditTeam(team)} />
+                  <IconButton name="trash" aria-label={`${team.name} を削除`} variant="danger" disabled={readOnly} onClick={() => onDeleteTeam(team)} />
                 </div>
               </div>
             }
@@ -78,7 +84,7 @@ export function TeamsView({
             {inTeam.length === 0 ? (
               <p className={styles.emptyTeamNote}>メンバー未割り当て</p>
             ) : (
-              inTeam.map((m) => <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} />)
+              inTeam.map((m) => <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} readOnly={readOnly} />)
             )}
           </Card>
         );
@@ -93,7 +99,7 @@ export function TeamsView({
           </div>
           <div className={styles.unassignedBody}>
             {unassigned.map((m) => (
-              <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} />
+              <MemberRow key={m.id} m={m} onEdit={onEditMember} onDelete={onDeleteMember} readOnly={readOnly} />
             ))}
           </div>
         </section>

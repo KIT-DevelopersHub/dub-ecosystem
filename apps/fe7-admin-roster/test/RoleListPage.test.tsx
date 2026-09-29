@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { appRegistry } from "@dub/types";
 import { RoleListPage } from "../src/components/RoleListPage";
 import { renderWithProviders, makeMe } from "./renderWithProviders";
 
@@ -23,7 +24,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     await waitFor(() => expect(screen.getByTestId("fe7-roles-caption")).toBeInTheDocument());
     expect(screen.getByTestId("fe7-roles-open-role_admin")).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_admin")).toBeInTheDocument());
-    expect(screen.getByTestId("fe7-role-role_admin-permission-matrix")).toBeInTheDocument();
+    expect(screen.getByTestId("fe7-role-role_admin-app-access-table")).toBeInTheDocument();
   });
 
   it("clicking the already-selected tab keeps it selected (no deselect to empty)", async () => {
@@ -36,7 +37,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect(screen.getByTestId("fe7-role-inline-role_admin")).toBeInTheDocument();
   });
 
-  it("expands a role in place and shows its permission matrix on the SAME screen", async () => {
+  it("expands a role in place and shows its app policy table on the SAME screen", async () => {
     const user = userEvent.setup();
     const { navigate } = renderWithProviders(<RoleListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
@@ -46,10 +47,10 @@ describe("RoleListPage (single-screen inline permissions)", () => {
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
 
-    // inline editor + full 33-key matrix appear WITHOUT any navigation
+    // inline editor + the per-app level table appear WITHOUT any navigation
     await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_organizer")).toBeInTheDocument());
-    expect(screen.getByTestId("fe7-role-role_organizer-permission-matrix")).toBeInTheDocument();
-    expect(screen.getByTestId("fe7-role-role_organizer-matrix-key-event:read")).toBeInTheDocument();
+    expect(screen.getByTestId("fe7-role-role_organizer-app-access-table")).toBeInTheDocument();
+    expect(screen.getByTestId("fe7-role-role_organizer-app-level-events")).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
     expect(screen.getByTestId("fe7-roles-open-role_organizer")).toHaveAttribute("aria-expanded", "true");
   });
@@ -67,16 +68,21 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect(screen.queryByTestId("fe7-role-inline-role_organizer")).not.toBeInTheDocument();
   });
 
-  it("edits a permission inline and saves via confirm", async () => {
+  it("edits a detail permission via the app dialog and saves via confirm", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
-    const toggle = await screen.findByTestId("fe7-role-role_organizer-matrix-key-task:read");
+    // 詳細は「アプリ名クリック → ダイアログ」。配下の細かい権限はアプリを有効にしてから触る。
+    await user.click(await screen.findByTestId("fe7-role-role_organizer-app-name-tasks"));
+    const dialog = await screen.findByTestId("fe7-role-role_organizer-app-dialog");
+    await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-level-view"));
+    const toggle = within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-toggle-task:read");
     expect((toggle as HTMLInputElement).checked).toBe(false);
     await user.click(toggle);
     expect((toggle as HTMLInputElement).checked).toBe(true);
+    await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-close"));
 
     // role_organizer starts with 2 permissions (event:read, event:write)
     const row = screen.getByTestId("fe7-roles-open-role_organizer");
@@ -86,10 +92,10 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     const confirm = await screen.findByTestId("fe7-role-role_organizer-save-confirm");
     await user.click(within(confirm).getByRole("button", { name: "確認" }));
 
-    // save persists via the update API and the refetched list shows the new count,
-    // all on the same screen (matrix stays mounted, no navigation away).
-    await waitFor(() => expect(within(row).getByText("3 権限")).toBeInTheDocument());
-    expect(screen.getByTestId("fe7-role-role_organizer-permission-matrix")).toBeInTheDocument();
+    // save persists via the update API and the refetched list shows the new count
+    // (2 + app:tasks:view + task:read), all on the same screen (no navigation away).
+    await waitFor(() => expect(within(row).getByText("4 権限")).toBeInTheDocument());
+    expect(screen.getByTestId("fe7-role-role_organizer-app-access-table")).toBeInTheDocument();
   });
 
   it("admin can edit a system role inline; admin role pins identity:admin", async () => {
@@ -101,15 +107,16 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     // editable — the Save button is present and other keys are toggleable.
     await user.click(screen.getByTestId("fe7-roles-open-role_admin"));
     await waitFor(() =>
-      expect((screen.getByTestId("fe7-role-role_admin-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true),
+      expect((screen.getByTestId("fe7-role-role_admin-app-level-admin-none") as HTMLButtonElement).disabled).toBe(true),
     );
-    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-mail:admin") as HTMLInputElement).disabled).toBe(false);
+    // ...every other app's level stays switchable, and Save is available.
+    expect((screen.getByTestId("fe7-role-role_admin-app-level-mail-none") as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByTestId("fe7-role-role_admin-save")).toBeInTheDocument();
 
-    // a non-admin system role (member) is fully editable, identity:admin included.
+    // a non-admin system role (member) is fully editable, 管理 app included.
     await user.click(screen.getByTestId("fe7-roles-open-role_member"));
-    await waitFor(() => expect(screen.getByTestId("fe7-role-role_member-permission-matrix")).toBeInTheDocument());
-    expect((screen.getByTestId("fe7-role-role_member-matrix-key-event:read") as HTMLInputElement).disabled).toBe(false);
+    await waitFor(() => expect(screen.getByTestId("fe7-role-role_member-app-access-table")).toBeInTheDocument());
+    expect((screen.getByTestId("fe7-role-role_member-app-level-admin-none") as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByTestId("fe7-role-role_member-save")).toBeInTheDocument();
   });
 
@@ -133,17 +140,42 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect(screen.queryByTestId("fe7-role-inline-role_organizer")).not.toBeInTheDocument();
   });
 
-  it("renders each permission domain's keys in a 2-column grid", async () => {
+  it("lists EVERY registered app as one table row, plus the その他 area below", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
-    const grid = await screen.findByTestId("fe7-role-role_organizer-matrix-grid-event");
-    expect(grid).toBeInTheDocument();
-    expect(grid.style.display).toBe("grid");
-    // multi-column track template (auto-fit → 2 columns on a normal-width panel)
-    expect(grid.style.gridTemplateColumns).toContain("repeat");
+    await waitFor(() => expect(screen.getByTestId("fe7-role-role_organizer-app-access-table")).toBeInTheDocument());
+    // 一覧はアプリ単位の行だけ。アプリを新規登録すれば自動で 1 行増える(手動追加なし)。
+    for (const appId of appRegistry.APP_IDS) {
+      expect(screen.getByTestId(`fe7-role-role_organizer-app-name-${appId}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`fe7-role-role_organizer-app-level-${appId}`)).toBeInTheDocument();
+    }
+    // アプリ単位でない権限は一番下の「その他」に、分類ごと 1 行でまとまる（トグルはダイアログ側）。
+    const other = screen.getByTestId("fe7-role-role_organizer-other-permissions");
+    expect(within(other).getByTestId("fe7-role-role_organizer-other-name-infra")).toBeInTheDocument();
+    expect(within(other).getByTestId("fe7-role-role_organizer-other-name-audit")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-role-role_organizer-other-toggle-infra:deploy")).not.toBeInTheDocument();
+
+    await user.click(within(other).getByTestId("fe7-role-role_organizer-other-name-infra"));
+    const dialog = await screen.findByTestId("fe7-role-role_organizer-other-dialog");
+    expect(within(dialog).getByTestId("fe7-role-role_organizer-other-toggle-infra:deploy")).toBeInTheDocument();
+  });
+
+  // メッセージ削除ポリシーはロール管理から撤去した（ロールの権限ではなくチャット側の設定）。
+  // 画面直下にもチャットのダイアログにも出さない。
+  it("メッセージ削除ポリシーはロール管理のどこにも出ない", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RoleListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
+    expect(screen.queryByTestId("fe7-chat-deletion-policy")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
+    await user.click(await screen.findByTestId("fe7-role-role_organizer-app-name-chat"));
+    const dialog = await screen.findByTestId("fe7-role-role_organizer-app-dialog");
+    expect(within(dialog).queryByTestId("fe7-chat-deletion-policy")).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId("fe7-role-role_organizer-app-dialog-settings")).not.toBeInTheDocument();
   });
 
   it("editor reseeds per tab: switching from admin to organizer then saving edits ONLY organizer", async () => {
@@ -151,24 +183,47 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     renderWithProviders(<RoleListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_admin")).toBeInTheDocument());
 
-    // View admin first (5 perms), then switch to organizer (2 perms) via the tabs.
+    // View admin first (7 perms), then switch to organizer (2 perms) via the tabs.
     await user.click(screen.getByTestId("fe7-roles-open-role_admin"));
     await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_admin")).toBeInTheDocument());
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
     await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_organizer")).toBeInTheDocument());
 
     // The organizer editor must be seeded from organizer (2), NOT leak admin's 5 keys.
-    const toggle = screen.getByTestId("fe7-role-role_organizer-matrix-key-task:read") as HTMLInputElement;
+    await user.click(screen.getByTestId("fe7-role-role_organizer-app-name-tasks"));
+    const dialog = await screen.findByTestId("fe7-role-role_organizer-app-dialog");
+    await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-level-view"));
+    const toggle = within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-toggle-task:read") as HTMLInputElement;
     expect(toggle.checked).toBe(false);
     await user.click(toggle);
+    await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-close"));
     await user.click(screen.getByTestId("fe7-role-role_organizer-save"));
     const confirm = await screen.findByTestId("fe7-role-role_organizer-save-confirm");
     await user.click(within(confirm).getByRole("button", { name: "確認" }));
 
-    // organizer -> 3 (2 + task:read), and admin stays 5 (untouched by the leak).
+    // organizer -> 4 (2 + app:tasks:view + task:read), and admin stays 7 (untouched by the leak).
     const orgTab = screen.getByTestId("fe7-roles-open-role_organizer");
-    await waitFor(() => expect(within(orgTab).getByText("3 権限")).toBeInTheDocument());
-    expect(within(screen.getByTestId("fe7-roles-open-role_admin")).getByText("5 権限")).toBeInTheDocument();
+    await waitFor(() => expect(within(orgTab).getByText("4 権限")).toBeInTheDocument());
+    expect(within(screen.getByTestId("fe7-roles-open-role_admin")).getByText("7 権限")).toBeInTheDocument();
+  });
+
+  // 閲覧 の管理者: identity:admin は持つが 管理アプリが「閲覧」= サーバの requireAdminEdit が 403 に
+  // する状態。UI 側も同じ判定(policy.decide)で書き込み操作を一切出さない — 押せるのに 403 になる
+  // ボタンを見せないための本命の回帰テスト。
+  it("管理アプリが「閲覧」の管理者には作成・保存の操作を出さない (サーバの 403 と一致)", async () => {
+    const user = userEvent.setup();
+    const viewerAdmin = makeMe(["identity:read", "identity:admin", "app:admin:view"], { exact: true });
+    renderWithProviders(<RoleListPage />, { me: viewerAdmin });
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
+
+    expect(screen.queryByTestId("fe7-roles-new")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-roles-delete-role_organizer")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
+    await waitFor(() =>
+      expect((screen.getByTestId("fe7-role-role_organizer-app-level-events-edit") as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect(screen.queryByTestId("fe7-role-role_organizer-save")).not.toBeInTheDocument();
   });
 
   it("read-only user can view permissions inline but cannot edit or create", async () => {
@@ -180,9 +235,12 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect(screen.queryByTestId("fe7-roles-delete-role_organizer")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
+    // 閲覧者は段階セレクタも詳細トグルも押せない(表示だけ)。
     await waitFor(() =>
-      expect((screen.getByTestId("fe7-role-role_organizer-matrix-key-event:read") as HTMLInputElement).disabled).toBe(true),
+      expect((screen.getByTestId("fe7-role-role_organizer-app-level-events-edit") as HTMLButtonElement).disabled).toBe(true),
     );
+    await user.click(screen.getByTestId("fe7-role-role_organizer-other-name-audit"));
+    expect((screen.getByTestId("fe7-role-role_organizer-other-toggle-audit:read") as HTMLInputElement).disabled).toBe(true);
     expect(screen.queryByTestId("fe7-role-role_organizer-save")).not.toBeInTheDocument();
   });
 });

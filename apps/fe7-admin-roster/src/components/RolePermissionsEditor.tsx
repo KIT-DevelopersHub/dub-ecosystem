@@ -14,9 +14,9 @@ import { useState } from "react";
 import type { identity } from "@dub/types";
 import { TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
-import { PermissionMatrix } from "./PermissionMatrix";
-import { usePermissionCatalog, useUpdateRole } from "../hooks/useRosterApi";
-import { usePermissions } from "../hooks/usePermissions";
+import { RolePolicyEditor } from "./RolePolicyEditor";
+import { useUpdateRole } from "../hooks/useRosterApi";
+import { useCanAdminEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
 import { errorMessage } from "../lib/errorDisplay";
@@ -31,9 +31,8 @@ interface RoleDraft {
 }
 
 export function RolePermissionsEditor({ role }: { role: identity.Role }) {
-  const catalog = usePermissionCatalog();
   const update = useUpdateRole(role.id);
-  const { can } = usePermissions();
+  const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
 
   // Same storageKey shape as RoleEditorPage's edit branch (fe7.role.<id>) so a stray
@@ -50,7 +49,7 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
 
   // System roles are now editable by admins; only the identity:admin authz gate
   // blocks editing. Deletion of system roles stays blocked (RoleListPage).
-  const readOnly = !can("identity:admin");
+  const readOnly = !canAdminEdit;
   // Keys that cannot be toggled off (admin role must keep identity:admin).
   const lockedKeys = lockedKeysForRole(role);
   // testid namespace so multiple accordions never collide (matrix keys are shared).
@@ -104,11 +103,7 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
           <TextField id={`${ns}-name`} value={name} onChange={(v) => setName(v)} disabled={readOnly} testId={`${ns}-name`} />
         </FormField>
       ) : null}
-      {catalog.data ? (
-        <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
-      ) : (
-        <p>権限カタログを読み込み中…</p>
-      )}
+      <RolePolicyEditor selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
       {readOnly ? (
         <p style={noteStyle}>編集権限がありません。</p>
       ) : (

@@ -9,6 +9,8 @@ import { useMemo, useState } from "react";
 import { PageHeader, DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextField, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
 import type { ColumnDef, BadgeTone } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { useAppCapability } from "../../auth/AuthProvider.tsx";
+import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
 import { ACTIVITY_LABEL, GRADE_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import styles from "./participation.module.css";
@@ -64,6 +66,10 @@ function emailCandidate(p: Participation): string | null {
 }
 
 export function ParticipationListPage(): JSX.Element {
+  // 反映確定(resolve)は member-service 側で 参加届 app の「編集」を要求する
+  // (requireParticipationEdit)。同じ判定を UI にも効かせ、閲覧のみの運営には押せる形で
+  // 見せない — 押しても 403 になるボタンを出さないため。
+  const { canEdit } = useAppCapability("participation");
   const list = useParticipationList();
   const teamsQuery = useParticipationTeams();
   const resolveMut = useResolveParticipation();
@@ -97,11 +103,11 @@ export function ParticipationListPage(): JSX.Element {
         </Badge>
         {p.reviewState === "added" ? null : (
           <>
-            <Button size="sm" variant="primary" onClick={() => setAddTarget(p)} testId={`participation-add-${p.id}`}>
+            <Button size="sm" variant="primary" disabled={!canEdit} onClick={() => setAddTarget(p)} testId={`participation-add-${p.id}`}>
               追加する
             </Button>
             {p.reviewState === "pending" ? (
-              <Button size="sm" variant="ghost" onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
+              <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
                 しない
               </Button>
             ) : null}
@@ -138,6 +144,7 @@ export function ParticipationListPage(): JSX.Element {
 
   return (
     <div data-testid="participation-list-page">
+      <AppReadOnlyNotice appId="participation" testId="participation-readonly-notice" />
       <PageHeader
         title="参加届の回答一覧"
         description="送信された参加届を確認できます（運営のみ）。左端で運営メンバーに追加するか選べます。行をクリックすると詳細が開きます。"

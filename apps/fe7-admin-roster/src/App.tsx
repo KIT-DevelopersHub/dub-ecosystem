@@ -39,7 +39,21 @@ const MOCK_ME: gateway.MeResponse = {
   // mail:admin lets the harness exercise the Email Routing surfaces (roster sync,
   // address issue); chat:moderate lets it edit the メッセージ削除ポリシー section — the
   // mock admin role grants both in production too.
-  permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "chat:moderate"],
+  //
+  // app:admin:view/edit are REQUIRED now that write affordances go through the policy
+  // layer (useCanAdminEdit = identity:admin AND 編集 on the 管理 app, same as the server's
+  // requireAdminEdit). Production gets them from migration 0010; without them the harness
+  // admin would silently render every admin screen read-only.
+  permissions: [
+    "identity:read",
+    "identity:admin",
+    "audit:read",
+    "event:read",
+    "mail:admin",
+    "chat:moderate",
+    "app:admin:view",
+    "app:admin:edit",
+  ],
   sessionExpiresAt: Date.now() + 3600_000,
 };
 

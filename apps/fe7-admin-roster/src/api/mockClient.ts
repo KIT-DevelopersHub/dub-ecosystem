@@ -2,7 +2,7 @@
 // Powers the standalone dev harness and component/E2E tests (design §5: "P1
 // 実装時の依存先はモックサーバ(契約準拠スタブ)"). NOT shipped to production —
 // FE2 provides the real ResourceClient there.
-import { identity, chat } from "@dub/types"; // value import: identity.PERMISSION_CATALOG + chat.DEFAULT_MESSAGE_DELETION_POLICY
+import { identity } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
 import type { common, auditLog, gateway, member } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
 import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
@@ -42,7 +42,7 @@ const ORG = "org_devhub";
 
 function seedState(seed?: MockSeed): MockState {
   const roles = new Map<string, identity.Role>([
-    ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"], isSystem: true }],
+    ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "app:admin:view", "app:admin:edit"], isSystem: true }],
     ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read"], isSystem: true }],
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
   ]);
@@ -75,7 +75,7 @@ function seedState(seed?: MockSeed): MockState {
   const me: gateway.MeResponse = seed?.me ?? {
     user: { id: "user_alice", displayName: "Alice Admin", avatarUrl: null },
     orgId: ORG,
-    permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin"],
+    permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "app:admin:view", "app:admin:edit"],
     sessionExpiresAt: Date.now() + 3600_000,
   };
   // user_alice starts with a viewable credential (demo/E2E); others are unset until an
@@ -95,12 +95,9 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
   const s = seedState(seed);
   // Dev-only: delay reads so loading/skeleton states are previewable (FRONTEND_GUIDE §5).
   const readDelay = () => (latencyMs > 0 ? new Promise((r) => setTimeout(r, latencyMs)) : Promise.resolve());
-  // Chat message-deletion policy (mock default = product default: all hard, version 0).
-  let chatPolicy: chat.DeletionPolicyResponse = { policy: { ...chat.DEFAULT_MESSAGE_DELETION_POLICY }, version: 0 };
 
   async function get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
     await readDelay();
-    if (path.endsWith("/chat/settings/deletion-policy")) return { policy: { ...chatPolicy.policy }, version: chatPolicy.version } as unknown as T;
     if (path.endsWith("/permissions/catalog")) return [...identity.PERMISSION_CATALOG] as unknown as T;
     if (path.endsWith("/identity/roles")) return paginate([...s.roles.values()]) as unknown as T;
     if (path.endsWith("/identity/users")) {
@@ -384,12 +381,6 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
   }
 
   async function patch<T>(path: string, body?: unknown): Promise<T> {
-    if (path.endsWith("/chat/settings/deletion-policy")) {
-      const req = body as chat.UpdateDeletionPolicyRequest;
-      if (req.version !== chatPolicy.version) throw err("CHAT_VERSION_CONFLICT", "stale deletion-policy version");
-      chatPolicy = { policy: { member: req.policy.member, moderator: req.policy.moderator }, version: chatPolicy.version + 1 };
-      return { policy: { ...chatPolicy.policy }, version: chatPolicy.version } as unknown as T;
-    }
     const roleMatch = path.match(/\/identity\/roles\/([^/]+)$/);
     if (roleMatch) {
       const role = s.roles.get(roleMatch[1]!);

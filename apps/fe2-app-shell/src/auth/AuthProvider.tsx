@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { appRegistry } from "@dub/types";
+import { appRegistry, policy } from "@dub/types";
 import type { gateway, identity } from "@dub/types";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
@@ -20,6 +20,8 @@ export type AuthState =
 interface AuthContextValue {
   state: AuthState;
   can(p: PermissionKey): boolean;
+  /** Per-app 無効/閲覧/編集 for every registered app (fail-closed 無効 while /me loads). */
+  appLevel(appId: string): policy.AppAccessLevel;
   onUnauthenticated: () => void;
 }
 
@@ -49,10 +51,20 @@ export function AuthProvider({
 
   const value = useMemo<AuthContextValue>(() => {
     const perms = state.status === "authenticated" ? new Set<string>(state.me.permissions) : null;
+    // Per-app level: derive locally from `permissions`, then overlay the server's map
+    // (/me appAccess) where present. Both come from the same policy module over the same key
+    // set, so they agree — the overlay makes the server authoritative, and the local base
+    // covers an app registered in a shell that ships BEFORE the gateway redeploys (otherwise
+    // that app would read 無効 for everyone). Fail-closed when unauthenticated.
+    const levels: Record<string, policy.AppAccessLevel> | null =
+      state.status === "authenticated"
+        ? { ...policy.appAccessMap(state.me.permissions), ...(state.me.appAccess ?? {}) }
+        : null;
     return {
       state,
       // fail-closed: false while loading / unauthenticated
       can: (p: PermissionKey) => perms?.has(p) ?? false,
+      appLevel: (appId: string) => levels?.[appId] ?? policy.AppAccessLevel.None,
       onUnauthenticated: onUnauthenticated ?? (() => {}),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,20 +89,39 @@ export function usePermissions(): { can(p: PermissionKey): boolean } {
 }
 
 /**
- * Per-app access for the current viewer, resolved from the app's `app:<id>:view` /
- * `app:<id>:edit` keys (APP_MANIFEST). `canView` gates opening the app (the launcher +
- * route guard already enforce it); `canEdit` is the hook a feature's write UI consumes to
- * show/hide create/edit affordances for the 「編集・作成まで」 tier. Fail-closed: both are
- * false while /me loads or for an unknown app id.
+ * THE hook a feature uses to decide whether its write affordances are live.
+ *
+ * Returns the policy layer's capability flags for one app: `level` (無効/閲覧/編集), plus
+ * `canView` / `canEdit` / `readOnly`. 閲覧 ⇒ `readOnly` is true, and every 保存/作成/削除
+ * control in that app must be `disabled` — that is the flag the coordinator asked for, and
+ * it is derived (never hand-listed), so a newly registered app is covered on day one.
+ *
+ * Fail-closed: everything false while /me loads and for an unknown app id. The server still
+ * enforces the same levels (@dub/auth-client requireAppAccess) — this only shapes the UI.
+ */
+export function useAppCapability(appId: string): policy.AppCapability {
+  const { appLevel } = useAuthCtx();
+  const level = appLevel(appId);
+  const canView = policy.levelAtLeast(level, policy.AppAccessLevel.View);
+  const canEdit = level === policy.AppAccessLevel.Edit;
+  return {
+    appId,
+    label: appRegistry.getApp(appId)?.label ?? appId,
+    level,
+    enabled: level !== policy.AppAccessLevel.None,
+    canView,
+    canEdit,
+    readOnly: canView && !canEdit,
+  };
+}
+
+/**
+ * @deprecated Use {@link useAppCapability} — it adds `level` / `readOnly` (the 閲覧 flag) and
+ * reads the server-derived map. Kept as a thin alias so existing call sites keep compiling.
  */
 export function useAppCan(appId: string): { canView: boolean; canEdit: boolean } {
-  const { can } = useAuthCtx();
-  const view = appRegistry.appViewKey(appId);
-  const edit = appRegistry.appEditKey(appId);
-  return {
-    canView: view ? can(view) : false,
-    canEdit: edit ? can(edit) : false,
-  };
+  const { canView, canEdit } = useAppCapability(appId);
+  return { canView, canEdit };
 }
 
 /** Returns the resolved MeResponse or throws when not authenticated. */

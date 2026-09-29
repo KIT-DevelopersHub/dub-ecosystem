@@ -9,6 +9,7 @@ import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
+import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createMembersApi, type MembersApi } from "./membersApi.tsx";
 import { MembersApiProvider } from "./MembersProvider.tsx";
 import { MembersPage } from "./MembersPage.tsx";
@@ -50,13 +51,17 @@ function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
   } as MembersApi;
 }
 
-function wrap(ui: ReactNode, api: MembersApi): JSX.Element {
+// Default subject: 運営メンバー app at 編集 (+ identity:admin) — what member-service now
+// demands for a write. Pass `permissions` to render as a 閲覧 subject instead.
+function wrap(ui: ReactNode, api: MembersApi, permissions = editorPermissions("members", ["identity:read", "identity:admin"])): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MembersApiProvider value={api}>{ui}</MembersApiProvider>
-      </ToastProvider>
+      <FakeAuthProvider permissions={permissions}>
+        <ToastProvider>
+          <MembersApiProvider value={api}>{ui}</MembersApiProvider>
+        </ToastProvider>
+      </FakeAuthProvider>
     </QueryClientProvider>
   );
 }
@@ -81,6 +86,27 @@ describe("createMembersApi", () => {
     await m.deleteTeam("t1");
     expect(calls[0]).toMatchObject({ method: "PATCH", path: "/api/v1/members/people/m1" });
     expect(calls[1]).toMatchObject({ method: "DELETE", path: "/api/v1/members/teams/t1" });
+  });
+});
+
+describe("MembersPage — 3 段階 (policy) の 閲覧 tier", () => {
+  // ロール管理で 運営メンバー を「閲覧」にした運営: member-service は書き込みを 403 にするので
+  // (requireMembersEdit)、UI も同じ判定で全書き込み操作を無効化し、理由を一行示す。
+  it("閲覧のみのとき、追加/編集/削除がすべて押せず理由が表示される", async () => {
+    render(wrap(<MembersPage />, makeApi(), viewerPermissions("members", ["identity:read"])));
+    expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("members-readonly-notice")).toBeInTheDocument());
+    expect((screen.getByTestId("members-add-member") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("members-add-team") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "山田太郎 を編集" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "山田太郎 を削除" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("編集のときは操作可能で、閲覧バナーも出ない", async () => {
+    render(wrap(<MembersPage />, makeApi()));
+    expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
+    await waitFor(() => expect((screen.getByTestId("members-add-member") as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByTestId("members-readonly-notice")).not.toBeInTheDocument();
   });
 });
 

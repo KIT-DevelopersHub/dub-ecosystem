@@ -4,7 +4,7 @@ import type { MiddlewareHandler, Context } from "hono";
 import type { Fetcher } from "@cloudflare/workers-types";
 import { DubError, CommonErrorCodes } from "@dub/errors";
 import { createServiceClient, newRequestId, DUB_HEADERS, type RequestContext, type ServiceClient } from "@dub/http";
-import { auth, identity, common } from "@dub/types";
+import { auth, identity, common, policy, appRegistry } from "@dub/types";
 
 const DANGEROUS_KEYS: ReadonlySet<string> = new Set(
   identity.PERMISSION_CATALOG.filter((e) => e.dangerous).map((e) => e.key),
@@ -34,6 +34,9 @@ export interface AuthnContext {
   session: auth.SessionInfo | null; // non-null only in mode:"verify"
 }
 
+/** Scope resolver shared by requirePermission / requireAppAccess. */
+export type AuthzScopeResolver = (c: Context) => { orgId?: common.OrgId; resourceType?: string; resourceId?: string };
+
 export interface AuthClient {
   verify(ctx: RequestContext, token: string): Promise<auth.AuthVerifyResponse>;
   requireAuth(): MiddlewareHandler;
@@ -41,9 +44,32 @@ export interface AuthClient {
   hasPermission(subjectUserId: common.UserId, orgId: common.OrgId, check: identity.AuthzQuery, opts?: AuthzCallOptions): Promise<boolean>;
   requirePermission(
     permission: identity.PermissionKey,
-    resolve?: (c: Context) => { orgId?: common.OrgId; resourceType?: string; resourceId?: string },
+    resolve?: AuthzScopeResolver,
     opts?: AuthzCallOptions,
   ): MiddlewareHandler;
+  /**
+   * POLICY enforcement point (the PEP for @dub/types `policy`). Demands that the caller's
+   * role reaches `level` (無効 < 閲覧 < 編集) on `app`, optionally AND a fine-grained key.
+   *
+   * Prefer this over a bare `requirePermission` on any route that belongs to an app: it is
+   * the ONLY thing that makes the ロール管理 3-tier authoritative server-side — an admin who
+   * sets an app to 閲覧 gets writes rejected with 403 even if the role still carries the old
+   * domain write key. One batched /authz/check round-trip regardless of how many keys the
+   * requirement resolves to, and the 403 message distinguishes 無効 from 閲覧のみ.
+   */
+  requireAppAccess(
+    app: string,
+    level: policy.AppAccessLevel,
+    extra?: { permission?: identity.PermissionKey; resolve?: AuthzScopeResolver; opts?: AuthzCallOptions },
+  ): MiddlewareHandler;
+  /** The caller's current level on `app` (無効/閲覧/編集) in ONE batched check — for handlers
+   *  that must shape a response (e.g. omit write-only fields) rather than reject. */
+  appAccessLevel(
+    subjectUserId: common.UserId,
+    orgId: common.OrgId,
+    app: string,
+    opts?: AuthzCallOptions,
+  ): Promise<policy.AppAccessLevel>;
   invalidateAuthzCache(userId?: common.UserId): void;
 }
 
@@ -183,7 +209,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
   function requirePermission(
     permission: identity.PermissionKey,
-    resolve?: (c: Context) => { orgId?: common.OrgId; resourceType?: string; resourceId?: string },
+    resolve?: AuthzScopeResolver,
     opts?: AuthzCallOptions,
   ): MiddlewareHandler {
     return async (c, next) => {
@@ -199,7 +225,79 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     };
   }
 
-  return { verify, requireAuth, checkPermissions, hasPermission, requirePermission, invalidateAuthzCache };
+  /** Which of `keys` the subject actually holds, in ONE batched /authz/check call. */
+  async function grantedSubset(
+    subjectUserId: common.UserId,
+    orgId: common.OrgId,
+    keys: readonly identity.PermissionKey[],
+    scope: { resourceType?: string; resourceId?: string },
+    opts?: AuthzCallOptions,
+  ): Promise<identity.PermissionKey[]> {
+    if (keys.length === 0) return [];
+    const checks: identity.AuthzQuery[] = keys.map((permission) => ({
+      permission,
+      ...(scope.resourceType ? { resourceType: scope.resourceType } : {}),
+      ...(scope.resourceId ? { resourceId: scope.resourceId } : {}),
+    }));
+    const res = await checkPermissions({ subjectUserId, orgId, checks }, opts);
+    return keys.filter((_, i) => res.decisions[i]?.allowed === true);
+  }
+
+  async function appAccessLevel(
+    subjectUserId: common.UserId,
+    orgId: common.OrgId,
+    app: string,
+    opts?: AuthzCallOptions,
+  ): Promise<policy.AppAccessLevel> {
+    const keys = policy.keysForAppLevel(app, policy.AppAccessLevel.Edit); // [view, edit]
+    const granted = await grantedSubset(subjectUserId, orgId, keys, {}, opts);
+    return policy.appAccessLevelOf(granted, app);
+  }
+
+  function requireAppAccess(
+    app: string,
+    level: policy.AppAccessLevel,
+    extra?: { permission?: identity.PermissionKey; resolve?: AuthzScopeResolver; opts?: AuthzCallOptions },
+  ): MiddlewareHandler {
+    // Fail closed on a typo'd / unregistered app id: the requirement resolves to no keys,
+    // so nothing would be checked. Reject at wiring time-ish (first request) instead.
+    return async (c, next) => {
+      const authn = c.get("authn") as AuthnContext | undefined;
+      if (!authn) throw new DubError("AUTH_INVALID_TOKEN", "requireAuth must run before requireAppAccess", { status: 401 });
+      const scope = extra?.resolve?.(c) ?? {};
+      const orgId = scope.orgId ?? common.DUB_DEFAULT_ORG_ID;
+      const requestId = c.req.header(DUB_HEADERS.requestId) ?? undefined;
+      const callOpts: AuthzCallOptions = { ...extra?.opts, ...(requestId ? { requestId } : {}) };
+
+      const requirement: policy.PolicyRequirement = {
+        app,
+        level,
+        ...(extra?.permission ? { permission: extra.permission } : {}),
+      };
+      const required = policy.requiredKeysFor(requirement);
+      const granted = await grantedSubset(authn.userId, orgId, required, scope, callOpts);
+      const decision = policy.decide(granted, requirement);
+      if (!decision.allowed) {
+        const label = appRegistry.getApp(app)?.label;
+        throw new DubError(CommonErrorCodes.FORBIDDEN, policy.denyMessage(decision, label), {
+          status: 403,
+          details: [{ field: "app", reason: decision.reason ?? "forbidden", message: `${app}:${level}` }],
+        });
+      }
+      await next();
+    };
+  }
+
+  return {
+    verify,
+    requireAuth,
+    checkPermissions,
+    hasPermission,
+    requirePermission,
+    requireAppAccess,
+    appAccessLevel,
+    invalidateAuthzCache,
+  };
 }
 
 // ---- context helpers ----

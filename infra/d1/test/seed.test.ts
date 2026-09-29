@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { identity } from "@dub/types";
+import { identity, appRegistry } from "@dub/types";
 import { seedScenario } from "../seed/scenarios";
 import { applyAndSeed } from "../seed/seed-demo";
 import { SEED } from "../seed/fixtures";
@@ -203,5 +203,50 @@ describe("seedScenario", () => {
     expect(has("role_sys_maintainer", "app:driveshare:edit")).toBe(true);
     expect(has("role_sys_maintainer", "app:members:edit")).toBe(false);
     expect(has("role_sys_maintainer", "app:admin:view")).toBe(false);
+  });
+
+  // Policy-layer invariant (0010): `app:<id>:edit` ⇒ `app:<id>:view` for EVERY app and EVERY
+  // role. A role holding only the edit key is ambiguous — the launcher/route guard (which
+  // reads :view) would hide the app while the service (which reads :edit) allowed writes.
+  // identity-roster normalises every role write, so this guards the STORED rows the
+  // migrations produce. Iterates APP_MANIFEST, so a newly registered app is checked too.
+  it("no role holds an app's edit key without its view key (policy invariant, 0010)", async () => {
+    const { raw } = await migratedD1();
+    const rows = raw
+      .prepare("SELECT role_id, permission_key FROM identity_role_permissions")
+      .all() as Array<{ role_id: string; permission_key: string }>;
+    const byRole = new Map<string, Set<string>>();
+    for (const r of rows) {
+      const set = byRole.get(r.role_id) ?? new Set<string>();
+      set.add(r.permission_key);
+      byRole.set(r.role_id, set);
+    }
+    for (const [roleId, keys] of byRole) {
+      for (const app of appRegistry.APP_MANIFEST) {
+        if (keys.has(app.access.edit)) {
+          expect(keys.has(app.access.view), `${roleId} holds ${app.access.edit} without ${app.access.view}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  // The 3 段階 is enforced server-side now (identity-roster requireAdminEdit, member-service
+  // requireMembersEdit / requireParticipationEdit). Any role that can administer identity
+  // must therefore also hold those apps' edit keys, or writes it could do yesterday 403 today.
+  it("every identity:admin role can still write in 管理 / 運営メンバー / 参加届 (0010 backfill)", async () => {
+    const { raw } = await migratedD1();
+    const adminRoles = (raw
+      .prepare("SELECT role_id FROM identity_role_permissions WHERE permission_key = 'identity:admin'")
+      .all() as Array<{ role_id: string }>).map((r) => r.role_id);
+    expect(adminRoles.length).toBeGreaterThan(0);
+    const has = (roleId: string, key: string): boolean =>
+      !!(raw
+        .prepare("SELECT 1 AS ok FROM identity_role_permissions WHERE role_id = ? AND permission_key = ?")
+        .get(roleId, key) as { ok: number } | undefined);
+    for (const roleId of adminRoles) {
+      for (const key of ["app:admin:edit", "app:members:edit", "app:participation:edit"]) {
+        expect(has(roleId, key), `${roleId} must keep ${key} (write regression)`).toBe(true);
+      }
+    }
   });
 });

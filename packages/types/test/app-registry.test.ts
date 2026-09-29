@@ -5,7 +5,7 @@
 // union already rejects unknown keys; these runtime assertions make the invariant
 // explicit and catch JS-level drift.
 import { describe, it, expect } from "vitest";
-import { identity, appRegistry } from "../src/index";
+import { identity, appRegistry, policy } from "../src/index";
 
 const catalogKeys = new Set(identity.PERMISSION_CATALOG.map((e) => e.key));
 const catalogDomains = new Set(identity.PERMISSION_CATALOG.map((e) => e.domain));
@@ -52,7 +52,7 @@ describe("APP_MANIFEST — canonical app ↔ RBAC coverage", () => {
   });
 
   // ── per-app access tier (view/edit) — the toggle-every-app invariant ──────────
-  const appDomainKeys = new Set(
+  const appDomainKeys = new Set<string>(
     identity.PERMISSION_CATALOG.filter((e) => e.domain === "app").map((e) => e.key),
   );
 
@@ -82,11 +82,52 @@ describe("APP_MANIFEST — canonical app ↔ RBAC coverage", () => {
   });
 
   it("no orphan app:* catalog key — every domain-'app' key is claimed by exactly one app", () => {
-    const claimed = new Set(appRegistry.allAppAccessKeys());
+    const claimed = new Set<string>(appRegistry.allAppAccessKeys());
     for (const key of appDomainKeys) {
       expect(claimed.has(key), `catalog key '${key}' is in domain 'app' but no APP_MANIFEST entry claims it`).toBe(true);
     }
     expect(appDomainKeys.size).toBe(claimed.size);
+  });
+
+  // ── 詳細設定 scope (detailPermissions) — the partition invariant ───────────────
+  // Every app declares which fine-grained keys its 詳細設定 dialog owns; the keys nobody
+  // claims are, by definition, the 「その他」 block. These assertions are what makes a NEW
+  // catalog key impossible to lose: it is either claimed by one app or it is その他.
+  it("every app declares a detailPermissions scope ([] is an explicit answer)", () => {
+    for (const app of appRegistry.APP_MANIFEST) {
+      expect(Array.isArray(app.detailPermissions), `app '${app.id}' has no detailPermissions`).toBe(true);
+    }
+  });
+
+  it("detail keys exist in the catalog and are never per-app (domain 'app') keys", () => {
+    for (const app of appRegistry.APP_MANIFEST) {
+      for (const key of app.detailPermissions) {
+        expect(catalogKeys.has(key), `app '${app.id}' detail key '${key}' not in catalog`).toBe(true);
+        expect(appDomainKeys.has(key), `app '${app.id}' must not claim graded key '${key}'`).toBe(false);
+      }
+    }
+  });
+
+  it("no catalog key is claimed by two apps (no key shown in two 詳細 dialogs)", () => {
+    const owner = new Map<string, string>();
+    for (const app of appRegistry.APP_MANIFEST) {
+      for (const key of app.detailPermissions) {
+        const prev = owner.get(key);
+        expect(prev, `'${key}' claimed by both '${prev}' and '${app.id}'`).toBeUndefined();
+        owner.set(key, app.id);
+      }
+    }
+  });
+
+  it("app detail keys + その他 partition the catalog exactly (nothing unreachable)", () => {
+    const claimed = new Set(policy.claimedDetailKeys());
+    const other = new Set(policy.otherPermissions().map((e) => e.key));
+    const graded = new Set(policy.appAccessCatalogKeys());
+    for (const entry of identity.PERMISSION_CATALOG) {
+      const buckets = [claimed.has(entry.key), other.has(entry.key), graded.has(entry.key)].filter(Boolean).length;
+      expect(buckets, `'${entry.key}' must live in exactly one bucket (app 詳細 / その他 / 段階), got ${buckets}`).toBe(1);
+    }
+    expect(claimed.size + other.size + graded.size).toBe(identity.PERMISSION_CATALOG.length);
   });
 
   it("access-key helpers agree with the manifest", () => {

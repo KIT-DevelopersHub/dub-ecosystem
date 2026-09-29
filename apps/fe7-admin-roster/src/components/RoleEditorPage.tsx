@@ -3,9 +3,9 @@ import type { identity } from "@dub/types";
 import { appRegistry } from "@dub/types";
 import { PageHeader, Breadcrumbs, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
-import { PermissionMatrix } from "./PermissionMatrix";
-import { useRoles, usePermissionCatalog, useCreateRole, useUpdateRole } from "../hooks/useRosterApi";
-import { usePermissions } from "../hooks/usePermissions";
+import { RolePolicyEditor } from "./RolePolicyEditor";
+import { useRoles, useCreateRole, useUpdateRole } from "../hooks/useRosterApi";
+import { useCanAdminEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { buildRoleUpdate, lockedKeysForRole } from "../lib/permissionMatrix";
 import { errorMessage } from "../lib/errorDisplay";
@@ -18,11 +18,10 @@ interface RoleDraft {
 
 // roleId omitted -> create mode.
 export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: () => void }) {
-  const catalog = usePermissionCatalog();
   const roles = useRoles();
   const create = useCreateRole();
   const update = useUpdateRole(roleId ?? "");
-  const { can } = usePermissions();
+  const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
 
   const existing = useMemo(() => roles.data?.items.find((r) => r.id === roleId), [roles.data, roleId]);
@@ -45,7 +44,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   }
 
   // System roles are editable by admins now; only the identity:admin gate blocks it.
-  const readOnly = !can("identity:admin");
+  const readOnly = !canAdminEdit;
 
   // Dirty relative to the pristine baseline (server role, or empty in create mode).
   const dirty = roleId
@@ -115,11 +114,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
         <FormField label="ロール名" htmlFor="fe7-role-name">
           <TextField id="fe7-role-name" value={name} onChange={(v) => setName(v)} disabled={nameDisabled} testId="fe7-role-name" />
         </FormField>
-        {catalog.data ? (
-          <PermissionMatrix catalog={catalog.data} selected={perms} disabled={readOnly} onChange={setPerms} lockedKeys={lockedKeys} />
-        ) : (
-          <p>権限カタログを読み込み中…</p>
-        )}
+        <RolePolicyEditor selected={perms} disabled={readOnly} onChange={setPerms} lockedKeys={lockedKeys} />
         {!readOnly ? (
           <Button variant="primary" onClick={() => setConfirmSave(true)} disabled={!name.trim()} testId="fe7-role-save">保存</Button>
         ) : (

@@ -10,6 +10,7 @@ import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
+import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
 import { ParticipationPage } from "./ParticipationPage.tsx";
@@ -52,13 +53,21 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
   } as ParticipationApi;
 }
 
-function wrap(ui: ReactNode, api: ParticipationApi): JSX.Element {
+// Default subject: 参加届 app at 編集 (+ identity:admin) — what member-service demands to
+// 反映確定 a submission. Pass `permissions` to render as a 閲覧 subject instead.
+function wrap(
+  ui: ReactNode,
+  api: ParticipationApi,
+  permissions = editorPermissions("participation", ["identity:read", "identity:admin"]),
+): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <ParticipationApiProvider value={api}>{ui}</ParticipationApiProvider>
-      </ToastProvider>
+      <FakeAuthProvider permissions={permissions}>
+        <ToastProvider>
+          <ParticipationApiProvider value={api}>{ui}</ParticipationApiProvider>
+        </ToastProvider>
+      </FakeAuthProvider>
     </QueryClientProvider>
   );
 }
@@ -181,6 +190,17 @@ const SUBMISSION: Participation = {
   status: "submitted", matchKind: "created_new", reviewState: "pending", submittedBy: "u_1",
   submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",
 };
+
+describe("ParticipationListPage — 3 段階 (policy) の 閲覧 tier", () => {
+  it("閲覧のみのとき 反映確定(追加する/しない)を押せない", async () => {
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })) });
+    render(wrap(<ParticipationListPage />, api, viewerPermissions("participation", ["identity:read"])));
+    expect(await screen.findByTestId("participation-list-table")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("participation-readonly-notice")).toBeInTheDocument());
+    expect((screen.getByTestId("participation-add-p_1") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("participation-skip-p_1") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
 
 describe("ParticipationListPage", () => {
   it("renders submitted 参加届 rows with the school email + Gmail", async () => {

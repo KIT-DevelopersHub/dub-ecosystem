@@ -30,30 +30,34 @@ describe("role assignment flow (UserDetailPage)", () => {
   });
 });
 
-describe("role editor (PermissionMatrix)", () => {
-  it("creates a role after selecting permissions and confirming", async () => {
+describe("role editor (app policy table)", () => {
+  it("creates a role after setting an app's level and confirming", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleEditorPage onDone={() => {}} />);
-    await waitFor(() => expect(screen.getByTestId("fe7-permission-matrix")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe7-app-access-table")).toBeInTheDocument());
 
     await user.type(screen.getByTestId("fe7-role-name"), "reviewer");
-    await user.click(screen.getByTestId("fe7-matrix-key-event:read"));
+    // 一覧表でイベントを「閲覧」にする (旧: フラットな権限トグル)
+    await user.click(screen.getByTestId("fe7-app-level-events-view"));
+    expect(screen.getByTestId("fe7-app-state-events").textContent).toBe("閲覧");
     await user.click(screen.getByTestId("fe7-role-save"));
     // ConfirmDialog appears; confirm. @dub/ui ConfirmDialog does not put testids on
     // its buttons, so click the confirm action by role within the dialog.
     const confirm = await screen.findByTestId("fe7-role-save-confirm");
     await user.click(within(confirm).getByRole("button", { name: "確認" }));
-    // no throw = success path exercised; matrix still present
-    expect(screen.getByTestId("fe7-permission-matrix")).toBeInTheDocument();
+    // no throw = success path exercised; the table is still present
+    expect(screen.getByTestId("fe7-app-access-table")).toBeInTheDocument();
   });
 
-  it("admin role locks identity:admin but leaves its other keys editable (RoleEditorPage)", async () => {
+  it("admin role pins the 管理 app (both tiers) but leaves other apps editable", async () => {
     renderWithProviders(<RoleEditorPage roleId="role_admin" onDone={() => {}} />);
+    // 管理 is frozen (self-lockout guard) — its level cannot be lowered. The lock resolves
+    // once useRoles() has loaded the role, so wait on the disabled state itself.
     await waitFor(() =>
-      expect((screen.getByTestId("fe7-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true),
+      expect((screen.getByTestId("fe7-app-level-admin-none") as HTMLButtonElement).disabled).toBe(true),
     );
-    // Self-lockout guard only pins identity:admin; the rest of the admin role is editable now.
-    expect((screen.getByTestId("fe7-matrix-key-event:read") as HTMLInputElement).disabled).toBe(false);
+    // ...while every other app stays switchable.
+    expect((screen.getByTestId("fe7-app-level-events-none") as HTMLButtonElement).disabled).toBe(false);
   });
 });
 
@@ -61,28 +65,40 @@ describe("system role editing (self-lockout guard)", () => {
   const systemRole = (id: string, name: string, permissions: identity.PermissionKey[]): identity.Role =>
     ({ id, orgId: "org_devhub", name, isSystem: true, permissions });
 
-  it("admin can toggle a system role's permission and save", async () => {
+  it("admin can change a system role's app level and save", async () => {
     const user = userEvent.setup();
-    const role = systemRole("role_member", "member", ["identity:read", "event:read"]);
+    const role = systemRole("role_member", "member", ["identity:read", "event:read", "app:events:view"]);
     renderWithProviders(<RolePermissionsEditor role={role} />);
-    await waitFor(() => expect(screen.getByTestId("fe7-role-role_member-permission-matrix")).toBeInTheDocument());
+    const ns = "fe7-role-role_member";
+    await waitFor(() => expect(screen.getByTestId(`${ns}-app-access-table`)).toBeInTheDocument());
 
-    const mail = screen.getByTestId("fe7-role-role_member-matrix-key-mail:read") as HTMLInputElement;
-    expect(mail.disabled).toBe(false);
-    await user.click(mail);
-    await user.click(screen.getByTestId("fe7-role-role_member-save"));
-    const confirm = await screen.findByTestId("fe7-role-role_member-save-confirm");
+    await user.click(screen.getByTestId(`${ns}-app-level-events-edit`));
+    expect(screen.getByTestId(`${ns}-app-state-events`).textContent).toBe("編集");
+    await user.click(screen.getByTestId(`${ns}-save`));
+    const confirm = await screen.findByTestId(`${ns}-save-confirm`);
     await user.click(within(confirm).getByRole("button", { name: "確認" }));
     // no throw = save succeeded against the mock (system-role edit is allowed)
-    await waitFor(() => expect(screen.getByTestId("fe7-role-role_member-permission-matrix")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId(`${ns}-app-access-table`)).toBeInTheDocument());
   });
 
-  it("admin role locks identity:admin while other keys stay editable", async () => {
-    const role = systemRole("role_admin", "admin", ["identity:read", "identity:admin", "event:read"]);
+  it("admin role locks the 管理 app level and identity:admin (運営メンバー配下)", async () => {
+    const user = userEvent.setup();
+    const role = systemRole("role_admin", "admin", ["identity:read", "identity:admin", "app:admin:view", "app:admin:edit"]);
     renderWithProviders(<RolePermissionsEditor role={role} />);
-    await waitFor(() => expect(screen.getByTestId("fe7-role-role_admin-permission-matrix")).toBeInTheDocument());
+    const ns = "fe7-role-role_admin";
+    await waitFor(() => expect(screen.getByTestId(`${ns}-app-access-table`)).toBeInTheDocument());
 
-    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-identity:admin") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByTestId("fe7-role-role_admin-matrix-key-event:read") as HTMLInputElement).disabled).toBe(false);
+    // 管理アプリ自体の段階が固定（無効に落とせない = 自分の首を切らせない）。
+    await user.click(screen.getByTestId(`${ns}-app-name-admin`));
+    const adminDialog = await screen.findByTestId(`${ns}-app-dialog`);
+    expect((within(adminDialog).getByTestId(`${ns}-app-dialog-level-none`) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(adminDialog).getByTestId(`${ns}-app-dialog-close`));
+
+    // identity:admin は 運営メンバー アプリ配下の細かい権限。アプリを有効にしても固定のまま。
+    await user.click(screen.getByTestId(`${ns}-app-level-members-view`));
+    await user.click(screen.getByTestId(`${ns}-app-name-members`));
+    const membersDialog = await screen.findByTestId(`${ns}-app-dialog`);
+    expect((within(membersDialog).getByTestId(`${ns}-app-dialog-toggle-identity:admin`) as HTMLInputElement).disabled).toBe(true);
+    expect((within(membersDialog).getByTestId(`${ns}-app-dialog-toggle-identity:read`) as HTMLInputElement).disabled).toBe(false);
   });
 });

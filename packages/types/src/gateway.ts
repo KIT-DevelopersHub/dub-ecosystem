@@ -1,6 +1,7 @@
 // gateway — api-gateway namespace (only external HTTP boundary). Composes only.
 import type { OrgId, EpochMs } from "./common";
 import type { UserSummary, PermissionKey } from "./identity";
+import type { AppAccessLevel } from "./policy";
 import type { EventSummary } from "./event";
 import type { TaskStatus } from "./task";
 
@@ -9,6 +10,15 @@ export interface MeResponse {
   orgId: OrgId;
   permissions: PermissionKey[];
   sessionExpiresAt: EpochMs; // epoch-ms exception (theme10)
+  /**
+   * Per-app access level (無効/閲覧/編集) for EVERY registered app, derived from `permissions`
+   * by the policy layer (@dub/types `policy.appAccessMap`). Additive and OPTIONAL: it is a
+   * projection, not new state, so an older gateway that omits it is still valid — clients
+   * fall back to deriving it locally from `permissions`. Sent because it is the one thing
+   * every screen needs (which buttons are dead), and deriving it once server-side keeps a
+   * client from inventing its own rule.
+   */
+  appAccess?: Record<string, AppAccessLevel>;
 }
 
 // ---- self profile (アカウント設定 → 表示名/アバター) -------------------------------

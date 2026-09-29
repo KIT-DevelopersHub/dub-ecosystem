@@ -3,6 +3,7 @@
 // and call these methods. Audit/authz/revoke side effects go through Deps.
 import { DubError, errors, CommonErrorCodes, type FieldError } from "@dub/errors";
 import type { common, identity } from "@dub/types";
+import { policy } from "@dub/types";
 import type { Deps, RequestCtx } from "./deps";
 import type { AssignmentRow, RoleRow, UserRow } from "./repo/types";
 import { evaluate, effectiveOrgWidePermissions, type EvalContext } from "./authz";
@@ -542,7 +543,7 @@ export class IdentityService {
     if (await this.d.repo.getRoleByName(orgId, name)) throw errors.conflict(`role name exists: ${name}`, { code: "ROLE_NAME_EXISTS" });
 
     const now = this.d.now();
-    const role: RoleRow = { id: this.d.newId("role"), orgId, name, isSystem: false, permissions: dedupePerms(req.permissions), createdAt: now, updatedAt: now };
+    const role: RoleRow = { id: this.d.newId("role"), orgId, name, isSystem: false, permissions: normalizePerms(req.permissions), createdAt: now, updatedAt: now };
     await this.d.repo.createRole(role);
     await this.d.audit.publish(this.record("identity.role.created", "success", ctx, orgId, "role", role.id, { name }));
     return this.toRole(role);
@@ -570,7 +571,7 @@ export class IdentityService {
     await this.d.repo.updateRolePermissions(
       roleId,
       req.name,
-      req.permissions !== undefined ? dedupePerms(req.permissions) : undefined,
+      req.permissions !== undefined ? normalizePerms(req.permissions) : undefined,
       this.d.now(),
     );
     await this.d.audit.publish(this.record("identity.role.updated", "success", ctx, orgId, "role", roleId, { permissionChange: req.permissions !== undefined }));
@@ -687,6 +688,17 @@ export class IdentityService {
     return evaluate(ctx, q);
   }
 
+  /**
+   * Policy-layer decision (無効/閲覧/編集 + optional fine-grained key) for the service's own
+   * routes. Loads the eval context ONCE and decides over the whole effective set, so a
+   * multi-key requirement costs one context load instead of one per key (what a loop of
+   * `can()` would do). Org-wide grants only — per-app access is never resource-scoped.
+   */
+  async decidePolicy(userId: string, orgId: string, req: policy.PolicyRequirement): Promise<policy.PolicyDecision> {
+    const ctx = await this.loadEvalContext(userId, orgId);
+    return policy.decide(effectiveOrgWidePermissions(ctx), req);
+  }
+
   async effectivePermissions(userId: string, orgId: string): Promise<EffectivePermissionsResponse> {
     const ctx = await this.loadEvalContext(userId, orgId);
     return { userId, orgId, permissions: effectiveOrgWidePermissions(ctx) };
@@ -741,6 +753,15 @@ function assertPermissionKeys(keys: unknown): asserts keys is identity.Permissio
   });
   if (bad.length > 0) throw new DubError(CommonErrorCodes.VALIDATION_FAILED, "unknown permission key(s)", { details: bad });
 }
-function dedupePerms(keys: identity.PermissionKey[]): identity.PermissionKey[] {
-  return [...new Set(keys)];
+/**
+ * The ONE write-path normalisation for a role's permission bundle: de-duplicate, then run
+ * the policy layer's invariant (`app:<id>:edit` ⇒ `app:<id>:view`) and sort.
+ *
+ * Why here and not in the UI: the 3-tier level (無効/閲覧/編集) is DERIVED from these keys, so
+ * an "edit without view" row would make a role's level ambiguous — the launcher would grey
+ * the app while the service allowed writes. Normalising at the single write path means no
+ * client (FE7, a script, curl) can persist that state, whatever it POSTs.
+ */
+function normalizePerms(keys: identity.PermissionKey[]): identity.PermissionKey[] {
+  return policy.normalizeAppAccessKeys([...new Set(keys)]);
 }
