@@ -35,7 +35,7 @@ import {
   useMembersOverview,
   useUnlinkMemberIdentity,
 } from "../hooks/useRosterApi";
-import { usePermissions } from "../hooks/usePermissions";
+import { usePermissions, useCanAdminEdit } from "../hooks/usePermissions";
 import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
 import { displayError } from "../lib/errorDisplay";
@@ -102,6 +102,7 @@ export function UserListPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkAccount, setLinkAccount] = useState<RosterUser | null>(null);
   const { can } = usePermissions();
+  const canAdminEdit = useCanAdminEdit();
   const { me } = useRosterContext();
   const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
   // ⑤ Unfiltered total for the「X件中Y件」summary (cheap: cached, one page in demo).
@@ -119,9 +120,10 @@ export function UserListPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const currentUserId = me?.user.id ?? "";
-  const canInvite = can("identity:admin");
-  const canManageRoles = can("identity:admin"); // grant/revoke org-wide roles inline
-  const canLinkMembers = can("identity:admin"); // link/unlink 運営メンバー from the メール名簿 side
+  // 管理アプリが「編集」でなければ書き込み UI は出さない(サーバの requireAdminEdit と同条件)。
+  const canInvite = canAdminEdit;
+  const canManageRoles = canAdminEdit; // grant/revoke org-wide roles inline
+  const canLinkMembers = canAdminEdit; // link/unlink 運営メンバー from the メール名簿 side
   const roles = rolesQuery.data?.items ?? [];
   // identity userId -> the 運営メンバー linked to it (1:1). Drives the「運営メンバー」列.
   const memberByIdentity = new Map(
@@ -157,7 +159,7 @@ export function UserListPage() {
   // Selection acts on the currently-loaded rows; drop keys that left the filter.
   const visibleIds = new Set(items.map((u) => u.id));
   const effectiveSelected = selectedIds.filter((id) => visibleIds.has(id));
-  const canBulk = can("identity:admin");
+  const canBulk = canAdminEdit;
   // Resolve the selection against the freshest list so the pane reflects saved edits
   // and closes itself if the selected user drops out of the current filter.
   const selectedUser = items.find((u) => u.id === selectedId) ?? null;

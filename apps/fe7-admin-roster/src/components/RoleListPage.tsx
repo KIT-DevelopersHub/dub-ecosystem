@@ -3,16 +3,15 @@ import type { identity } from "@dub/types";
 import { PageHeader, Badge, Button, ConfirmDialog, EmptyState, ErrorState, SegmentedControl, SkeletonList } from "@dub/ui";
 import type { SegmentedOption } from "@dub/ui";
 import { useRoles, useDeleteRole } from "../hooks/useRosterApi";
-import { usePermissions } from "../hooks/usePermissions";
+import { useCanAdminEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { RolePermissionsEditor } from "./RolePermissionsEditor";
-import { ChatDeletionPolicySection } from "./ChatDeletionPolicySection";
 import { errorMessage, displayError } from "../lib/errorDisplay";
 import styles from "./RoleListPage.module.css";
 
 // Single-screen role management. Roles are switched with the shared @dub/ui
 // `SegmentedControl` (the sliding-pill selector); only the selected role's
-// permission matrix (view + edit + save) is shown below it. This replaces the old
+// policy editor (アプリ別 3 段階の表 + 詳細ダイアログ + その他 + save) is shown below it. This replaces the old
 // vertical accordion — no navigation to a second "role editor" screen, and no
 // long stack of expandable cards. One role is active at a time so the shared
 // matrix testids never collide on the page.
@@ -35,13 +34,13 @@ const panelHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "ce
 export function RoleListPage({ onNew }: { onNew?: () => void }) {
   const roles = useRoles();
   const del = useDeleteRole();
-  const { can } = usePermissions();
+  const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
   const [pendingDelete, setPendingDelete] = useState<identity.Role | null>(null);
   // Explicit user pick. When null we fall back to the first role (effectiveId
   // below) so the panel is never empty on load and after a delete.
   const [activeId, setActiveId] = useState<string | null>(null);
-  const canAdmin = can("identity:admin");
+  const canAdmin = canAdminEdit;
 
   function confirmDelete() {
     if (!pendingDelete) return;
@@ -80,7 +79,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
     <div>
       <PageHeader
         title="ロール管理"
-        description="上のタブでロールを切り替えると、その権限をその場で確認・編集できます。"
+        description="上のタブでロールを切り替え、アプリごとに「無効 / 閲覧 / 編集」を選びます。"
         testId="fe7-roles-header"
         actions={canAdmin ? <Button variant="primary" onClick={onNew} testId="fe7-roles-new">ロールを作成</Button> : null}
       />
@@ -135,12 +134,6 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
           ) : null}
         </>
       )}
-      {/* Workspace-wide chat setting — not per-role, so it lives below the role strip.
-          Today all tiers default to 完全に消す(hard); this is the 器 for a future split. */}
-      <div style={{ marginTop: 24 }}>
-        <ChatDeletionPolicySection />
-      </div>
-
       <ConfirmDialog
         title="ロールを削除"
         message={`「${pendingDelete?.name}」を削除します。よろしいですか？`}

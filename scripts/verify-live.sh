@@ -35,6 +35,11 @@
 #   --api <path>     additionally GET <origin><path> and require --expect-status
 #   --expect-status  expected HTTP status for --api (default 200)
 #   --timeout <s>    per-request curl timeout (default 20)
+#   --retries <n>    re-fetch and re-assert up to <n> extra times when a marker is missing
+#                    (default 0). A freshly deployed Worker version needs a few seconds to
+#                    reach every edge, so a single check run right after `wrangler deploy`
+#                    can read the PREVIOUS bundle and report a false "NOT live".
+#   --retry-delay <s>  seconds between those attempts (default 10)
 #
 # Exit codes: 0 = all markers present (LIVE) · 3 = a marker missing (NOT live) ·
 #             4 = environment unreachable · 2 = usage error.
@@ -74,7 +79,7 @@ gateway_origin_for() {  # env -> the api-gateway origin (for --api checks)
 }
 
 # ---- args -------------------------------------------------------------------------
-JSON=0; API_PATH=""; EXPECT_STATUS=200; TIMEOUT=20
+JSON=0; API_PATH=""; EXPECT_STATUS=200; TIMEOUT=20; RETRIES=0; RETRY_DELAY=10
 MODE="env"; TARGET=""; ENVNAME=""
 declare -a MARKERS=()
 
@@ -86,6 +91,8 @@ while [ $# -gt 0 ]; do
     --api)           API_PATH="${2:?--api needs a path}"; shift 2 ;;
     --expect-status) EXPECT_STATUS="${2:?}"; shift 2 ;;
     --timeout)       TIMEOUT="${2:?}"; shift 2 ;;
+    --retries)       RETRIES="${2:?}"; shift 2 ;;
+    --retry-delay)   RETRY_DELAY="${2:?}"; shift 2 ;;
     --url)           MODE="url";  TARGET="${2:?--url needs a URL}"; shift 2 ;;
     --file)          MODE="file"; TARGET="${2:?--file needs a path}"; shift 2 ;;
     --self-test)     MODE="selftest"; shift ;;
@@ -109,6 +116,17 @@ if [ "$MODE" = "selftest" ]; then
     then echo "  FAIL missing-marker should FAIL"; fail=1; else echo "  ok  missing-marker -> FAIL"; fi
   if bash "${BASH_SOURCE[0]}" --file "$tmp/no-such-file" 'x' >/dev/null 2>&1
     then echo "  FAIL unreachable should FAIL"; fail=1; else echo "  ok  unreachable-file -> FAIL"; fi
+  # documented exit codes — CI and promote-*.sh branch on these, and `set -e` used to
+  # swallow 3 into 1 when --json was off
+  rc=0; bash "${BASH_SOURCE[0]}" --file "$tmp/fixture.js" 'NOT_THERE' >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 3 ] && echo "  ok  missing-marker -> exit 3" || { echo "  FAIL missing-marker exit ${rc} != 3"; fail=1; }
+  rc=0; bash "${BASH_SOURCE[0]}" --file "$tmp/no-such-file" 'x' >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 4 ] && echo "  ok  unreachable -> exit 4" || { echo "  FAIL unreachable exit ${rc} != 4"; fail=1; }
+  # --retries must not turn a local --file check into a wait loop (nothing can change)
+  rc=0; SECONDS=0
+  bash "${BASH_SOURCE[0]}" --file "$tmp/fixture.js" --retries 3 --retry-delay 5 'NOT_THERE' >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 3 ] && [ "$SECONDS" -lt 3 ] && echo "  ok  --file ignores --retries" \
+    || { echo "  FAIL --file retried (rc=${rc}, ${SECONDS}s)"; fail=1; }
   [ "$fail" = 0 ] && { echo "self-test: PASS"; exit 0; } || { echo "self-test: FAIL"; exit 1; }
 fi
 
@@ -144,16 +162,21 @@ crawl_assets() {  # origin
   done
 }
 
+# Fetch everything the target serves RIGHT NOW into a fresh $BLOB.
+# Returns 0 ok · 4 unreachable · 5 --api status mismatch. (Re-runnable: the retry loop below
+# calls this again after a wait, so it must not exit the script itself.)
+collect() {
+  : > "$BLOB"
 case "$MODE" in
   file)
     DESC="file:$TARGET"
-    [ -f "$TARGET" ] || { echo "::error::file not found: $TARGET" >&2; exit 4; }
+    [ -f "$TARGET" ] || { echo "::error::file not found: $TARGET" >&2; return 4; }
     cat "$TARGET" >> "$BLOB"
     ;;
   url)
     DESC="$TARGET"
     # 1) the SPA shell (or whatever the URL points at)
-    fetch "$TARGET" || { echo "::error::unreachable: $TARGET" >&2; exit 4; }
+    fetch "$TARGET" || { echo "::error::unreachable: $TARGET" >&2; return 4; }
     # 2) every JS/CSS asset the shell references — feature code (a data-testid, a class, a
     #    CSS @keyframes) lives in the hashed bundles, NOT in index.html. Without this, a
     #    per-feature demo URL is checked against index.html alone and EVERY real UI marker
@@ -166,7 +189,7 @@ case "$MODE" in
     ORIGIN="$(fe2_origin_for "$ENVNAME")"
     DESC="$ENVNAME ($ORIGIN)"
     # 1) the SPA shell
-    if ! fetch "${ORIGIN}/"; then echo "::error::$ENVNAME unreachable at ${ORIGIN}/" >&2; exit 4; fi
+    if ! fetch "${ORIGIN}/"; then echo "::error::$ENVNAME unreachable at ${ORIGIN}/" >&2; return 4; fi
     # 2) every JS/CSS asset the shell references, including lazy route chunks (feature code
     #    lives here, not in HTML)
     crawl_assets "$ORIGIN"
@@ -179,13 +202,29 @@ case "$MODE" in
         code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "${GW}${API_PATH}" || echo 000)"
         if [ "$code" != "$EXPECT_STATUS" ]; then
           echo "::error::API ${GW}${API_PATH} returned HTTP ${code}, expected ${EXPECT_STATUS}" >&2
-          exit 3
+          return 5
         fi
         echo "  api ok  ${API_PATH} -> HTTP ${code}"
       fi
     fi
     ;;
 esac
+  return 0
+}
+
+# Assert every marker is present (logical AND). 0 = all present · 3 = at least one missing.
+assert_markers() {
+  local m missing=0
+  for m in "${MARKERS[@]}"; do
+    if grep -qF -- "$m" "$BLOB"; then
+      echo "  ✓ present  ${m}"
+    else
+      echo "  ✗ MISSING  ${m}"
+      missing=1
+    fi
+  done
+  [ "$missing" = 0 ] || return 3
+}
 
 # Emit a JSON array of the markers (pure bash — no jq dependency).
 markers_json() {
@@ -197,23 +236,34 @@ markers_json() {
   printf '[%s]' "$out"
 }
 
-# ---- assert every marker is present (logical AND) ---------------------------------
-missing=0
-for m in "${MARKERS[@]}"; do
-  if grep -qF -- "$m" "$BLOB"; then
-    echo "  ✓ present  ${m}"
-  else
-    echo "  ✗ MISSING  ${m}"
-    missing=1
-  fi
+# ---- fetch + assert, retrying while the deploy is still propagating ----------------
+# A Worker version that was just uploaded needs a few seconds to reach every edge, so a
+# single check fired right after `wrangler deploy` can still read the PREVIOUS bundle and
+# call a feature that DID ship "NOT live" (that false red is what blocked PR #562's staging
+# gate). Retrying turns that into a short wait. `--file` is local — never retry it.
+attempt=0
+while :; do
+  rc=0
+  collect || rc=$?
+  if [ "$rc" = 0 ]; then assert_markers || rc=$?; fi
+  if [ "$rc" = 0 ] || [ "$MODE" = file ] || [ "$attempt" -ge "$RETRIES" ]; then break; fi
+  attempt=$((attempt + 1))
+  echo "  … まだ反映されていません。${RETRY_DELAY}s 待って取り直します (${attempt}/${RETRIES})"
+  sleep "$RETRY_DELAY"
 done
 
-if [ "$missing" -ne 0 ]; then
-  echo "::error::NOT LIVE — ${DESC}: one or more markers missing. Do NOT ask anyone to confirm this." >&2
-  [ "$JSON" = 1 ] && printf '{"live":false,"target":"%s","markers":%s}\n' "$DESC" "$(markers_json)"
+if [ "$rc" = 4 ]; then exit 4; fi   # unreachable — already reported
+
+# `[ x ] && printf` would be the last command of the script under `set -e`, so a false test
+# would replace the intended exit code with 1. Keep the JSON line inside an `if`.
+if [ "$rc" != 0 ]; then
+  if [ "$rc" = 3 ]; then
+    echo "::error::NOT LIVE — ${DESC}: one or more markers missing. Do NOT ask anyone to confirm this." >&2
+  fi
+  if [ "$JSON" = 1 ]; then printf '{"live":false,"target":"%s","markers":%s}\n' "$DESC" "$(markers_json)"; fi
   exit 3
 fi
 
 echo "LIVE — ${DESC}: all ${#MARKERS[@]} marker(s) present."
-[ "$JSON" = 1 ] && printf '{"live":true,"target":"%s","markers":%s}\n' "$DESC" "$(markers_json)"
+if [ "$JSON" = 1 ]; then printf '{"live":true,"target":"%s","markers":%s}\n' "$DESC" "$(markers_json)"; fi
 exit 0

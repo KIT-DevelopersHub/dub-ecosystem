@@ -1,7 +1,11 @@
 // 運営メンバー管理 top screen. Hosts the two views (チーム別 / 組織図) behind Tabs,
 // plus the toolbar (メンバー追加 / チーム追加 / 印刷) and the shared create/edit dialogs
-// + destructive ConfirmDialog. Read = identity:read (route gate); write actions are
-// re-authorized server-side (identity:admin).
+// + destructive ConfirmDialog. Read = identity:read (route gate).
+//
+// WRITE = the policy layer's 編集 tier on the 運営メンバー app (app:members:edit) AND
+// identity:admin — the SAME requirement member-service enforces (requireMembersEdit). When
+// ロール管理 sets this app to 閲覧, every create/edit/delete affordance is disabled and a
+// reason banner is shown, so a 閲覧 user never presses a button that would 403.
 // NOTE: the flat 一覧 tab was removed — the per-person list (氏名/ロール/アドレス/ログイン
 // 紐付け) is owned by the ユーザー名簿 side, which the members app is being merged into.
 import { useMemo, useState } from "react";
@@ -14,6 +18,8 @@ import {
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { useAppCapability } from "../../auth/AuthProvider.tsx";
+import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
 import { TeamsView } from "./TeamsView.tsx";
 import { OrgChartView } from "./OrgChartView.tsx";
@@ -25,6 +31,7 @@ import styles from "./members.module.css";
 type TabId = "teams" | "org";
 
 export function MembersPage(): JSX.Element {
+  const { canEdit } = useAppCapability("members");
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
@@ -68,15 +75,16 @@ export function MembersPage(): JSX.Element {
   return (
     <div data-testid="members-page">
       <div className={styles.noPrint}>
+        <AppReadOnlyNotice appId="members" testId="members-readonly-notice" />
         <PageHeader
           title="運営メンバー"
           description="運営メンバーの招待状況と所属チームを管理します（組織図PDFの代替）"
           actions={
             <span style={{ display: "inline-flex", gap: "var(--dub-space-2)" }}>
-              <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} onClick={openAddTeam} testId="members-add-team">
+              <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} disabled={!canEdit} onClick={openAddTeam} testId="members-add-team">
                 チームを追加
               </Button>
-              <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} testId="members-add-member">
+              <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} disabled={!canEdit} onClick={openAddMember} testId="members-add-member">
                 メンバーを追加
               </Button>
             </span>
@@ -106,6 +114,7 @@ export function MembersPage(): JSX.Element {
         <TeamsView
           teams={teams}
           members={rosterMembers}
+          readOnly={!canEdit}
           onEditMember={openEditMember}
           onDeleteMember={(m) => setConfirm({ kind: "member", target: m })}
           onEditTeam={openEditTeam}

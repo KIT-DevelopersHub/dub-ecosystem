@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
 import type { identity, gateway } from "@dub/types";
+import { policy } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import { createServices } from "../services";
 import { authenticate } from "../auth";
@@ -31,6 +32,10 @@ export async function meHandler(c: Context<{ Bindings: GatewayEnv; Variables: Ga
     orgId: user.orgId,
     permissions: perms.permissions,
     sessionExpiresAt: auth.session ? auth.session.sessionExpiresAt : 0,
+    // Per-app 無効/閲覧/編集 for every registered app, derived from the effective permission
+    // set by the policy layer. Pure projection (no extra upstream call) — the shell reads it
+    // to decide which write affordances are live instead of each feature re-deriving it.
+    appAccess: policy.appAccessMap(perms.permissions),
   };
   return c.json(body);
 }

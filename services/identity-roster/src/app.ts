@@ -7,6 +7,7 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { DubError, dubErrorHandler, errors, CommonErrorCodes } from "@dub/errors";
 import { DUB_HEADERS, newRequestId } from "@dub/http";
 import type { identity } from "@dub/types";
+import { policy, appRegistry } from "@dub/types";
 import type { AppVariables } from "./env";
 import type { Deps } from "./deps";
 import type { RequestCtx } from "./deps";
@@ -66,6 +67,34 @@ export function createApp(opts: AppOptions): App {
     if (!(await svc.can(userId, orgId, { permission }))) throw errors.forbidden(`permission denied: ${permission}`);
     await next();
   };
+  /**
+   * POLICY gate (@dub/types `policy`): the app must be at `level` for the caller's role, AND
+   * (optionally) the fine-grained key must be held. identity-roster dogfoods its own RBAC,
+   * so it decides in-process instead of calling @dub/auth-client's requireAppAccess — same
+   * policy module, same semantics, one repo round-trip.
+   */
+  const requirePolicy = (
+    app: string,
+    level: policy.AppAccessLevel,
+    permission?: identity.PermissionKey,
+  ): MiddlewareHandler<Env> => async (c, next) => {
+    const userId = c.get("userId");
+    if (!userId) throw new DubError("AUTH_INVALID_TOKEN", "unauthenticated", { status: 401 });
+    const decision = await svc.decidePolicy(userId, orgId, { app, level, ...(permission ? { permission } : {}) });
+    if (!decision.allowed) throw errors.forbidden(policy.denyMessage(decision, appRegistry.getApp(app)?.label));
+    await next();
+  };
+  /**
+   * Every WRITE route of the 管理 (ロール管理 / メール名簿) app. Demands identity:admin as before
+   * AND that ロール管理 sets the 管理 app to 編集 for that role — this is what makes the 3-tier
+   * authoritative: switching 管理 to 閲覧 makes these routes 403 even though the role keeps
+   * identity:admin, so a 閲覧 admin genuinely cannot change anything (not just a greyed button).
+   *
+   * READ routes stay on plain identity:read: they are shared surface (assignee pickers, /me
+   * fan-out) and gating them on the 管理 app would 403 unrelated apps. Opening the 管理 SCREEN
+   * is gated by app:admin:view in the shell route guard.
+   */
+  const requireAdminEdit = requirePolicy("admin", policy.AppAccessLevel.Edit, "identity:admin");
 
   // ===================== external (/identity/*) =====================
   const ext = new Hono<Env>();
@@ -105,7 +134,7 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.getUserDetail(id, orgId));
   });
 
-  ext.post("/users/invite", requirePermission("identity:admin"), async (c) => {
+  ext.post("/users/invite", requireAdminEdit, async (c) => {
     const body = await readJson<{ email: string; displayName?: string; furigana?: string; roleIds?: string[] }>(c);
     return c.json(await svc.invite(orgId, body, ctxOf(c)), 201);
   });
@@ -114,38 +143,38 @@ export function createApp(opts: AppOptions): App {
   // The caller (roster console, holds mail:admin) relays the addresses it read from the
   // mail-gateway proxy; identity upserts them by email (source=email-routing) synchronously.
   // #5: read-only diff preview — no writes; the console applies with the endpoint below.
-  ext.post("/users/sync-email-routing/preview", requirePermission("identity:admin"), async (c) => {
+  ext.post("/users/sync-email-routing/preview", requireAdminEdit, async (c) => {
     const body = await readJson<{ addresses?: unknown }>(c);
     return c.json(await svc.previewEmailRouting(orgId, body as never));
   });
-  ext.post("/users/sync-email-routing", requirePermission("identity:admin"), async (c) => {
+  ext.post("/users/sync-email-routing", requireAdminEdit, async (c) => {
     const body = await readJson<{ addresses?: unknown }>(c);
     return c.json(await svc.syncEmailRouting(orgId, body as never, ctxOf(c)));
   });
 
-  ext.patch("/users/:id", requirePermission("identity:admin"), async (c) => {
+  ext.patch("/users/:id", requireAdminEdit, async (c) => {
     const body = await readJson<Record<string, unknown>>(c);
     return c.json(await svc.updateUser(c.req.param("id"), orgId, body, ctxOf(c)));
   });
 
   // One-shot退任: revoke sessions + strip roles + disable, atomically & idempotently.
   // The cross-service steps (Email Routing削除・member在籍更新) are chained by the caller.
-  ext.post("/users/:id/offboard", requirePermission("identity:admin"), async (c) => {
+  ext.post("/users/:id/offboard", requireAdminEdit, async (c) => {
     return c.json(await svc.offboardUser(c.req.param("id"), orgId, ctxOf(c)));
   });
 
   ext.get("/roles", requirePermission("identity:read"), async (c) => {
     return c.json(await svc.listRoles(orgId, numParam(c.req.query("limit")), c.req.query("cursor")));
   });
-  ext.post("/roles", requirePermission("identity:admin"), async (c) => {
+  ext.post("/roles", requireAdminEdit, async (c) => {
     const body = await readJson<{ name: string; permissions: identity.PermissionKey[] }>(c);
     return c.json(await svc.createRole(orgId, body, ctxOf(c)), 201);
   });
-  ext.patch("/roles/:id", requirePermission("identity:admin"), async (c) => {
+  ext.patch("/roles/:id", requireAdminEdit, async (c) => {
     const body = await readJson<Record<string, unknown>>(c);
     return c.json(await svc.updateRole(c.req.param("id"), orgId, body, ctxOf(c)));
   });
-  ext.delete("/roles/:id", requirePermission("identity:admin"), async (c) => {
+  ext.delete("/roles/:id", requireAdminEdit, async (c) => {
     await svc.deleteRole(c.req.param("id"), orgId, ctxOf(c));
     return c.body(null, 204);
   });
@@ -153,11 +182,11 @@ export function createApp(opts: AppOptions): App {
   ext.get("/users/:id/roles", requirePermission("identity:read"), async (c) => {
     return c.json(await svc.listUserRoles(c.req.param("id"), orgId));
   });
-  ext.post("/users/:id/roles", requirePermission("identity:admin"), async (c) => {
+  ext.post("/users/:id/roles", requireAdminEdit, async (c) => {
     const body = await readJson<{ roleId: string; resourceType?: string; resourceId?: string }>(c);
     return c.json(await svc.assignRole(c.req.param("id"), orgId, body, ctxOf(c)), 201);
   });
-  ext.delete("/users/:id/roles/:assignmentId", requirePermission("identity:admin"), async (c) => {
+  ext.delete("/users/:id/roles/:assignmentId", requireAdminEdit, async (c) => {
     await svc.revokeRole(c.req.param("id"), c.req.param("assignmentId"), orgId, ctxOf(c));
     return c.body(null, 204);
   });

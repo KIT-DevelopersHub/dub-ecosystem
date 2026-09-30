@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { DataTable, Badge, Button, ConfirmDialog, EmptyState, type ColumnDef } from "@dub/ui";
 import { useUserRoles, useRevokeRole } from "../hooks/useRosterApi";
-import { usePermissions } from "../hooks/usePermissions";
+import { useCanAdminEdit } from "../hooks/usePermissions";
 import type { RoleAssignment } from "../contracts/pending";
 
 export function RoleAssignmentList({ userId }: { userId: string }) {
   const assignments = useUserRoles(userId);
   const revoke = useRevokeRole(userId);
-  const { can } = usePermissions();
+  const canAdminEdit = useCanAdminEdit();
   const [pending, setPending] = useState<RoleAssignment | null>(null);
-  const canAdmin = can("identity:admin");
+  const canAdmin = canAdminEdit;
 
   // Row identity testid surfaced on the first cell (@dub/ui DataTable has no rowTestId).
   const columns: ColumnDef<RoleAssignment>[] = [

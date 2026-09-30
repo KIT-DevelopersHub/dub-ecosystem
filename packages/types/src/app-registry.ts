@@ -52,6 +52,20 @@ export interface AppManifestEntry {
    */
   access: { view: PermissionKey; edit: PermissionKey };
   /**
+   * The FINE-GRAINED (non per-app) catalog keys this app owns — what ロール管理 shows in the
+   * app's 詳細設定 dialog once the 3-tier level is set. REQUIRED (not optional) so adding an
+   * app forces the author to declare its detailed scope; `[]` is a legitimate, explicit
+   * answer for an app that has no knob beyond 無効/閲覧/編集 (gantt, 参加届, LP管理).
+   *
+   * INVARIANT (CI: app-registry.test.ts): a non-`app` catalog key is claimed by AT MOST one
+   * app — so 詳細 dialogs never double-show a key, and gantt/参加届 (which SHARE another app's
+   * domain key) declare `[]` rather than re-claiming the task / identity keys. Every key NOT
+   * claimed here is, by construction, an 「その他」 key (policy.otherPermissions()), so a newly
+   * added catalog key can never fall out of the ロール管理 UI — it just lands in その他 until an
+   * app claims it. Never `app:*` keys (those are the graded tier in `access`).
+   */
+  detailPermissions: readonly PermissionKey[];
+  /**
    * True when the launcher tile is shown to every authenticated user regardless of the
    * permission above (the permission still exists for matrix representation + future
    * enforcement). Documentation of intent; not an authz decision.
@@ -63,23 +77,54 @@ export interface AppManifestEntry {
 // assembleFeatureModules() id list (composition/featureModules.tsx) — the CI cross-check
 // enforces it.
 export const APP_MANIFEST = [
-  { id: "events", label: "イベント", navPath: "/events", domain: "event", permissions: ["event:read"], access: { view: "app:events:view", edit: "app:events:edit" } },
-  { id: "tasks", label: "マイタスク", navPath: "/me/tasks", domain: "task", permissions: ["task:read"], access: { view: "app:tasks:view", edit: "app:tasks:edit" } },
-  { id: "gantt", label: "ガントチャート", navPath: "/gantt", domain: "task", permissions: ["task:read"], access: { view: "app:gantt:view", edit: "app:gantt:edit" } },
-  { id: "calendar", label: "カレンダー", navPath: "/calendar", domain: "task", permissions: ["task:read"], access: { view: "app:calendar:view", edit: "app:calendar:edit" } },
-  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" } },
-  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" } },
-  { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" } },
-  { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true },
-  { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"], access: { view: "app:members:view", edit: "app:members:edit" } },
-  { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], access: { view: "app:participation:view", edit: "app:participation:edit" }, openToAllAuthenticated: true },
-  { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true },
-  { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" } },
-  { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" } },
+  { id: "events", label: "イベント", navPath: "/events", domain: "event", permissions: ["event:read"], access: { view: "app:events:view", edit: "app:events:edit" },
+    detailPermissions: ["event:read", "event:write", "event:admin"] },
+  { id: "tasks", label: "マイタスク", navPath: "/me/tasks", domain: "task", permissions: ["task:read"], access: { view: "app:tasks:view", edit: "app:tasks:edit" },
+    detailPermissions: ["task:read", "task:write", "task:delete"] },
+  // gantt reads the SAME task:* domain keys as マイタスク. Claiming them here too would show
+  // one key in two 詳細 dialogs, so ガント owns no fine-grained key: 無効/閲覧/編集 is its whole
+  // surface (its own app:gantt:* pair still toggles it independently of マイタスク).
+  { id: "gantt", label: "ガントチャート", navPath: "/gantt", domain: "task", permissions: ["task:read"], access: { view: "app:gantt:view", edit: "app:gantt:edit" },
+    detailPermissions: [] },
+  // カレンダー also rides マイタスク's task:* keys (see gantt) → no own fine-grained key.
+  { id: "calendar", label: "カレンダー", navPath: "/calendar", domain: "task", permissions: ["task:read"], access: { view: "app:calendar:view", edit: "app:calendar:edit" },
+    detailPermissions: [] },
+  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
+    detailPermissions: ["notif:inbox:self", "notif:prefs:self", "notif:send", "notif:admin", "notif:broadcast_publish"] },
+  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" },
+    detailPermissions: ["chat:create", "chat:moderate"] },
+  { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" },
+    detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:admin"] },
+  { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true,
+    detailPermissions: ["usage:view"] },
+  // 運営メンバー owns the WHOLE identity:* surface (roster AND role administration): the
+  // 名簿・ロール story belongs inside the roster app, so identity:admin lives in this app's
+  // 詳細設定 rather than ロール管理's.
+  { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"], access: { view: "app:members:view", edit: "app:members:edit" },
+    detailPermissions: ["identity:read", "identity:admin"] },
+  // 参加届 rides 運営メンバー's identity:* keys (see gantt above) → no own fine-grained key.
+  { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], access: { view: "app:participation:view", edit: "app:participation:edit" }, openToAllAuthenticated: true,
+    detailPermissions: [] },
+  // Drive共有 is the ecosystem's file surface: the Google Drive keys AND the R2 file:* keys
+  // (upload/download/visibility) are both configured here — file:* previously belonged to no
+  // app and fell into 「その他」, which hid ファイル settings from the app they act on.
+  { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true,
+    detailPermissions: ["drive:read", "drive:write", "file:read", "file:write", "file:admin"] },
+  // LP管理 reads infra:read, but infra:* governs the whole デプロイ/DNS surface (not just LP),
+  // so those keys stay in 「その他」 instead of being scoped to this app's 詳細 dialog.
+  { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" },
+    detailPermissions: [] },
+  // identity:admin is claimed by 運営メンバー's 詳細設定 (名簿・ロールの話は名簿アプリの中)。
+  // ロール管理 itself has no knob beyond 無効/閲覧/編集 — that 3 段階 is its whole settings surface.
+  { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" },
+    detailPermissions: [] },
   // Commander: admin/dev tooling that drives the LOCAL Claude Code exec bridge and gates
   // demo→staging→prod phase moves. Admin-only by design (identity:admin) and NOT in the
   // launcher's PUBLISHED_APPS, so it is greyed (member-hidden) until explicitly released.
-  { id: "commander", label: "Commander", navPath: "/commander", domain: "identity", permissions: ["identity:admin"], access: { view: "app:commander:view", edit: "app:commander:edit" } },
+  // identity:admin is claimed by 運営メンバー's 詳細設定 (a non-app key belongs to at most one
+  // app), so Commander — like ロール管理 — has no knob beyond 無効/閲覧/編集.
+  { id: "commander", label: "Commander", navPath: "/commander", domain: "identity", permissions: ["identity:admin"], access: { view: "app:commander:view", edit: "app:commander:edit" },
+    detailPermissions: [] },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

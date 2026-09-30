@@ -3,7 +3,7 @@
 // roll back on error; revoke / permission-bundle save / status change wait for the
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import type { identity, common, auditLog, auth, chat, member } from "@dub/types";
+import type { identity, common, auditLog, auth, member } from "@dub/types";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
 import { queryKeys } from "../lib/queryKeys";
@@ -493,37 +493,5 @@ export function useUnlinkMemberIdentity() {
     },
     onSuccess: () => toast({ kind: "success", title: "紐付けを解除しました" }),
     onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.membersOverview() }),
-  });
-}
-
-// ---- チャット: メッセージ削除ポリシー (RBAC-configurable delete behaviour) ----
-
-/** The workspace chat message-deletion policy (per privilege tier). Any authenticated
- *  admin may read it; the section stays read-only unless can("chat:moderate"). */
-export function useChatDeletionPolicy(): UseQueryResult<chat.DeletionPolicyResponse> {
-  const { api } = useRosterContext();
-  return useQuery({
-    queryKey: queryKeys.chatDeletionPolicy(),
-    queryFn: () => api.getChatDeletionPolicy(),
-    staleTime: 60_000,
-  });
-}
-
-/** NON-optimistic: save the deletion policy (ConfirmDialog upstream). Version-locked —
- *  the server 409s on a stale `version`; the caller re-reads and retries. */
-export function useUpdateChatDeletionPolicy() {
-  const { api } = useRosterContext();
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (req: chat.UpdateDeletionPolicyRequest) => api.updateChatDeletionPolicy(req),
-    onSuccess: (res) => {
-      qc.setQueryData(queryKeys.chatDeletionPolicy(), res);
-      toast({ kind: "success", title: "メッセージ削除ポリシーを保存しました" });
-    },
-    onError: (err) => {
-      const p = presentError(err);
-      toast({ kind: "error", title: "保存に失敗しました", description: "message" in p ? p.message : undefined });
-    },
   });
 }

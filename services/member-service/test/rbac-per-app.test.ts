@@ -59,14 +59,21 @@ describe("member-service RBAC — per-app keys are authoritative for the roster"
     expect((await call(app, "POST", "/members/teams", { body: { name: "x" } })).status).toBe(403);
   });
 
-  it("domain keys still work (backward compat): identity:read reads, identity:admin writes", async () => {
+  it("domain key reads (backward compat), but a write needs the app's 編集 — identity:admin alone is 403", async () => {
     const readOnly = createApp(makeDeps({ authz: fakeAuthz(set("identity:read")) }));
     expect((await call(readOnly, "GET", "/members/overview")).status).toBe(200);
     // identity:read alone cannot write
     expect((await call(readOnly, "POST", "/members/teams", { body: { name: "x" } })).status).toBe(403);
 
-    const adminWrite = createApp(makeDeps({ authz: fakeAuthz(set("identity:admin")) }));
-    expect((await call(adminWrite, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(201);
+    // The 3 段階 is now AUTHORITATIVE for writes (policy layer): a role holding the domain key
+    // but NO app:members:edit is 閲覧 on 運営メンバー, so its writes are rejected server-side — the
+    // whole point of "閲覧 にしたらボタンも API も通らない". Real roles that could write before
+    // keep writing because migration 0010 backfills `:edit` onto every identity:admin role.
+    const adminOnly = createApp(makeDeps({ authz: fakeAuthz(set("identity:admin")) }));
+    expect((await call(adminOnly, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(403);
+
+    const backfilled = createApp(makeDeps({ authz: fakeAuthz(set("identity:admin", "app:members:view", "app:members:edit")) }));
+    expect((await call(backfilled, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(201);
   });
 
   it("no over-escalation: app:members:edit does NOT unlock 参加届 resolve (identity:admin)", async () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { HDR_INTERNAL } from "@dub/observability";
 import type { gateway } from "@dub/types";
+import { appRegistry } from "@dub/types";
 import { createApp } from "../src/app";
 import { fakeBinding, authBinding, validSession, json, makeEnv, execCtx } from "./helpers";
 
@@ -47,6 +48,32 @@ describe("GET /api/v1/me", () => {
     // internal permissions call must carry x-dub-internal (genuine service-to-service)
     const internalReq = identity.requests.find((r) => new URL(r.url).pathname === "/internal/users/usr_1/permissions");
     expect(internalReq?.headers.get(HDR_INTERNAL)).toBe("1");
+  });
+
+  it("derives appAccess (無効/閲覧/編集) for EVERY app from the effective permissions", async () => {
+    const identity = fakeBinding((req) => {
+      const path = new URL(req.url).pathname;
+      if (path === "/users/usr_1") {
+        return json(200, {
+          id: "usr_1", orgId: "org_devhub", displayName: "Alice", email: "a@e.jp", githubLogin: null,
+          avatarUrl: null, status: "active", roleIds: ["role_member"],
+          createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+        });
+      }
+      if (path === "/internal/users/usr_1/permissions") {
+        return json(200, { permissions: ["app:tasks:view", "app:tasks:edit", "app:chat:view"] });
+      }
+      return json(404, { error: { code: "NOT_FOUND", message: "no", retryable: false } });
+    });
+    const env = makeEnv({ SVC_AUTH: authBinding(validSession("usr_1", 1_800_000_000_000)).fetcher, SVC_IDENTITY: identity.fetcher });
+
+    const res = await app().fetch(new Request("https://x/api/v1/me", { headers: { authorization: "Bearer t" } }), env, execCtx);
+    const body = (await res.json()) as gateway.MeResponse;
+    expect(body.appAccess?.tasks).toBe("edit");
+    expect(body.appAccess?.chat).toBe("view");
+    expect(body.appAccess?.mail).toBe("none");
+    // every registered app has an entry — a new app can never be missing from the map
+    expect(Object.keys(body.appAccess ?? {}).sort()).toEqual([...appRegistry.APP_IDS].sort());
   });
 
   it("[case10] requires auth", async () => {

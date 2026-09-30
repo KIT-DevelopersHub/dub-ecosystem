@@ -7,6 +7,7 @@
 // one-line description. Any key or domain NOT covered here falls back to the
 // catalog's English text, so a future catalog addition never renders blank.
 import type { identity } from "@dub/types";
+import { appRegistry } from "@dub/types";
 
 /** Feature-group heading per catalog `domain`. Falls back to the raw domain. */
 const DOMAIN_LABELS: Record<string, string> = {
@@ -26,25 +27,27 @@ const DOMAIN_LABELS: Record<string, string> = {
   app: "アプリのアクセス権",
 };
 
-// Per-app access keys (domain "app"). The role matrix renders these via AppAccessSection
-// (有効化トグル + 閲覧/編集作成), but effective-permission lists elsewhere render them per-key,
-// so give each a plain-Japanese label/description too.
-const APP_LABELS: { id: string; name: string }[] = [
-  { id: "events", name: "イベント" },
-  { id: "tasks", name: "マイタスク" },
-  { id: "gantt", name: "ガントチャート" },
-  { id: "calendar", name: "カレンダー" },
-  { id: "notifications", name: "通知" },
-  { id: "chat", name: "チャット" },
-  { id: "mail", name: "メール" },
-  { id: "usage", name: "無料枠 / 課金ガード" },
-  { id: "members", name: "運営メンバー" },
-  { id: "participation", name: "参加届" },
-  { id: "driveshare", name: "Drive共有" },
-  { id: "lp", name: "LP管理" },
-  { id: "admin", name: "管理" },
-  { id: "commander", name: "Commander（開発オペレーション）" },
-];
+// Per-app access keys (domain "app"). ロール管理 renders these as the 3 段階 selector
+// (無効/閲覧/編集), but effective-permission lists elsewhere render them per-key, so each
+// still needs a plain-Japanese label/description.
+//
+// DERIVED from APP_MANIFEST — never hand-listed. The previous hand-written table had
+// drifted whenever an app was registered without being added here (its `app:<id>:*` keys then
+// fell back to the catalog's English text) — exactly the 抜け a new app would hit again.
+//
+// NAME_QUALIFIERS is the ONLY hand-written part: a parenthetical for apps whose launcher
+// tile name alone is not self-explanatory in a permission list (Commander is an English
+// product name, so 権限一覧 spells out what it governs). Keyed by `AppId`, so a removed or
+// renamed app id is a COMPILE error — the derivation stays the source of truth and a new
+// app still gets a label automatically, qualifier or not.
+const NAME_QUALIFIERS: Partial<Record<appRegistry.AppId, string>> = {
+  commander: "開発オペレーション",
+};
+
+const APP_LABELS: { id: string; name: string }[] = appRegistry.APP_MANIFEST.map((a) => {
+  const qualifier = NAME_QUALIFIERS[a.id];
+  return { id: a.id, name: qualifier ? `${a.label}（${qualifier}）` : a.label };
+});
 
 // Descriptions are written as an outcome ("オンにすると〜できるようになる") so even
 // non-obvious keys make clear what granting them lets a member do.

@@ -44,6 +44,10 @@ export function fakeAuthClient(opts: { allow: boolean }): AuthClient {
     },
     checkPermissions: async () => ({ decisions: [] }),
     hasPermission: async () => opts.allow,
+    // Policy gates follow the same `allow` switch as requirePermission: gantt's own tests only
+    // care about allowed-vs-403, not which tier produced it.
+    requireAppAccess: (): MiddlewareHandler => requirePermission(),
+    appAccessLevel: async () => (opts.allow ? "edit" : "none"),
     invalidateAuthzCache: () => {},
   };
 }

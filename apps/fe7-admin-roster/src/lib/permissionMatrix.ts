@@ -1,31 +1,13 @@
-// Pure logic for the PermissionMatrix editor and role permission-bundle diffing.
-// No React here so it is exhaustively unit-testable (design §7 "matrix editor logic").
+// Pure logic for the role permission editor: single-key toggling, the self-lockout guard
+// and the PATCH diff. No React here so it is exhaustively unit-testable.
+//
+// The grouping / per-app folding helpers that used to live here (groupByDomain,
+// toggleDomain, domainSelectionState) are gone: the policy layer (@dub/types `policy`)
+// owns app ⇄ level ⇄ key derivation and the 詳細/その他 partition now, so the UI reads one
+// shared source instead of a second copy in FE7.
 import type { identity } from "@dub/types";
 import { appRegistry } from "@dub/types";
 import type { UpdateRoleRequest } from "../contracts/pending";
-
-export type CatalogEntry = identity.PermissionCatalogEntry;
-
-export interface DomainGroup {
-  domain: string;
-  entries: CatalogEntry[];
-}
-
-/** Group catalog entries by domain, preserving first-seen domain order. */
-export function groupByDomain(catalog: readonly CatalogEntry[]): DomainGroup[] {
-  const order: string[] = [];
-  const byDomain = new Map<string, CatalogEntry[]>();
-  for (const entry of catalog) {
-    let bucket = byDomain.get(entry.domain);
-    if (!bucket) {
-      bucket = [];
-      byDomain.set(entry.domain, bucket);
-      order.push(entry.domain);
-    }
-    bucket.push(entry);
-  }
-  return order.map((domain) => ({ domain, entries: byDomain.get(domain)! }));
-}
 
 /** Selection helper: toggle a single key on/off, returning a new sorted set. */
 export function togglePermission(
@@ -39,59 +21,18 @@ export function togglePermission(
 }
 
 /**
- * Select/deselect every key in a domain at once. Keys in `lockedKeys` are never
- * removed by a deselect (they stay in the set) — used to protect the admin role's
- * identity:admin grant from a domain-level "off" toggle (self-lockout guard).
- */
-export function toggleDomain(
-  selected: readonly identity.PermissionKey[],
-  entries: readonly CatalogEntry[],
-  select: boolean,
-  lockedKeys: readonly identity.PermissionKey[] = [],
-): identity.PermissionKey[] {
-  const set = new Set(selected);
-  const locked = new Set(lockedKeys);
-  for (const e of entries) {
-    const key = e.key as identity.PermissionKey;
-    if (select) set.add(key);
-    else if (!locked.has(key)) set.delete(key);
-  }
-  return [...set].sort();
-}
-
-export interface DomainSelectionState {
-  all: boolean;
-  some: boolean; // indeterminate when some && !all
-}
-
-/** Header checkbox state for a domain given the current selection. */
-export function domainSelectionState(
-  selected: readonly identity.PermissionKey[],
-  entries: readonly CatalogEntry[],
-): DomainSelectionState {
-  const set = new Set(selected);
-  let count = 0;
-  for (const e of entries) if (set.has(e.key as identity.PermissionKey)) count++;
-  return { all: count === entries.length && entries.length > 0, some: count > 0 };
-}
-
-/**
  * Keys that must stay granted on a role and cannot be toggled off (self-lockout
  * guard). Today only the built-in admin role is protected: stripping identity:admin
  * from it would leave nobody able to manage roles/permissions, locking everyone out.
  */
 export function lockedKeysForRole(role: { name: string; isSystem: boolean }): identity.PermissionKey[] {
-  // The admin role also keeps the 管理 app's per-app access keys: now that opening the
-  // 管理 app is gated on app:admin:view (route guard + launcher), stripping it would lock
-  // admins out of the very screen that manages roles. Freeze both view+edit ON.
+  // The admin role also keeps the 管理 app's per-app access keys: opening the 管理 app is
+  // gated on app:admin:view (route guard + launcher) and its WRITES are gated on
+  // app:admin:edit (identity-roster requireAdminEdit), so dropping either would lock admins
+  // out of the very screen that manages roles. Freeze both tiers ON.
   return role.isSystem && role.name === "admin"
     ? ["identity:admin", "app:admin:view", "app:admin:edit"]
     : [];
-}
-
-/** True if selecting `key` requires an extra confirmation (dangerous flag). */
-export function isDangerous(catalog: readonly CatalogEntry[], key: string): boolean {
-  return catalog.some((e) => e.key === key && e.dangerous);
 }
 
 function sameSet(a: readonly string[], b: readonly string[]): boolean {

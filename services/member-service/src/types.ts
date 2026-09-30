@@ -2,7 +2,7 @@
 // the CANONICAL @dub/types `member` namespace (Team is the single shared team
 // definition across all apps); this file adds only the internal persistence rows and
 // injected-dependency interfaces. Distinct from identity_* (RBAC login accounts).
-import type { common, identity, member } from "@dub/types";
+import type { common, identity, member, policy } from "@dub/types";
 import type { MiddlewareHandler, Context } from "hono";
 
 export type MemberStatus = member.MemberStatus;
@@ -95,6 +95,14 @@ export interface Authz {
   requirePermission(
     permission: identity.PermissionKey,
     resolve?: (c: Context) => { orgId?: string; resourceType?: string; resourceId?: string },
+  ): MiddlewareHandler;
+  /** Policy gate: the app must be at `level` (無効/閲覧/編集) for the caller's role, AND the
+   *  optional fine-grained key must be held. Structural subset of @dub/auth-client's
+   *  requireAppAccess so the real client satisfies it without an adapter. */
+  requireAppAccess(
+    app: string,
+    level: policy.AppAccessLevel,
+    extra?: { permission?: identity.PermissionKey },
   ): MiddlewareHandler;
   hasPermission(userId: common.UserId, orgId: common.OrgId, query: identity.AuthzQuery): Promise<boolean>;
 }

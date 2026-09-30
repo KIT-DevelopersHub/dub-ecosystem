@@ -156,3 +156,101 @@ describe("@dub/auth-client middleware", () => {
     await expect(client.requirePermission("task:read")(c, async () => {})).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
   });
 });
+
+// ── policy enforcement (requireAppAccess) ─────────────────────────────────────
+// The per-app 3-tier (無効/閲覧/編集) becomes authoritative server-side here. These tests pin
+// the two properties services rely on: ONE batched round-trip, and a 403 that says WHY.
+describe("@dub/auth-client requireAppAccess (policy PEP)", () => {
+  async function authed(granted: readonly string[]) {
+    const idf = identityFake((body) => body.checks.map((q) => (granted.includes(q.permission) ? allow() : deny())));
+    const client = createAuthClient({ identityBinding: idf.fetcher, serviceName: "svc" });
+    const { c } = fakeCtx({ "x-dub-user-id": "u1" });
+    await client.requireAuth()(c, async () => {});
+    return { client, c, idf };
+  }
+
+  it("閲覧 passes a view requirement in ONE identity call (both keys batched)", async () => {
+    const { client, c, idf } = await authed(["app:tasks:view"]);
+    const next = vi.fn(async () => {});
+    await client.requireAppAccess("tasks", "view")(c, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(idf.n).toBe(1);
+    expect(idf.calls[0]!.checks.map((q) => q.permission)).toEqual(["app:tasks:view"]);
+  });
+
+  it("編集 requirement batches view+edit into ONE call", async () => {
+    const { client, c, idf } = await authed(["app:tasks:view", "app:tasks:edit"]);
+    const next = vi.fn(async () => {});
+    await client.requireAppAccess("tasks", "edit")(c, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(idf.n).toBe(1);
+    expect(idf.calls[0]!.checks.map((q) => q.permission)).toEqual(["app:tasks:view", "app:tasks:edit"]);
+  });
+
+  it("閲覧のみ のロールが書き込みを叩くと 403 (reason=read_only)", async () => {
+    const { client, c } = await authed(["app:tasks:view"]);
+    await expect(client.requireAppAccess("tasks", "edit")(c, async () => {})).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      status: 403,
+      details: [{ field: "app", reason: "read_only" }],
+    });
+  });
+
+  it("無効 のアプリは閲覧すら 403 (reason=app_disabled)", async () => {
+    const { client, c } = await authed([]);
+    await expect(client.requireAppAccess("tasks", "view")(c, async () => {})).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      details: [{ field: "app", reason: "app_disabled" }],
+    });
+  });
+
+  it("AND-checks an extra fine-grained key (level alone is not enough)", async () => {
+    const { client, c } = await authed(["app:chat:view", "app:chat:edit"]);
+    await expect(
+      client.requireAppAccess("chat", "edit", { permission: "chat:moderate" })(c, async () => {}),
+    ).rejects.toMatchObject({ code: "FORBIDDEN", details: [{ field: "app", reason: "missing_permission" }] });
+
+    const ok = await authed(["app:chat:view", "app:chat:edit", "chat:moderate"]);
+    const next = vi.fn(async () => {});
+    await ok.client.requireAppAccess("chat", "edit", { permission: "chat:moderate" })(ok.c, next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed for an unregistered app id (no keys => no silent allow)", async () => {
+    const { client, c, idf } = await authed(["app:tasks:edit"]);
+    await expect(client.requireAppAccess("ghost-app", "view")(c, async () => {})).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      details: [{ field: "app", reason: "unknown_app" }],
+    });
+    expect(idf.n).toBe(0); // nothing to ask identity about
+  });
+
+  it("requires requireAuth first", async () => {
+    const idf = identityFake(() => [allow()]);
+    const client = createAuthClient({ identityBinding: idf.fetcher, serviceName: "svc" });
+    const { c } = fakeCtx({});
+    await expect(client.requireAppAccess("tasks", "view")(c, async () => {})).rejects.toMatchObject({
+      code: "AUTH_INVALID_TOKEN",
+      status: 401,
+    });
+  });
+
+  it("appAccessLevel reports the caller's tier for response shaping", async () => {
+    const viewer = await authed(["app:mail:view"]);
+    expect(await viewer.client.appAccessLevel("u1", "org_devhub", "mail")).toBe("view");
+    const editor = await authed(["app:mail:view", "app:mail:edit"]);
+    expect(await editor.client.appAccessLevel("u1", "org_devhub", "mail")).toBe("edit");
+    const none = await authed([]);
+    expect(await none.client.appAccessLevel("u1", "org_devhub", "mail")).toBe("none");
+  });
+
+  it("fail-closed: identity transport failure propagates (never allows)", async () => {
+    const idf = identityFake(() => ({ status: 500 }));
+    const client = createAuthClient({ identityBinding: idf.fetcher, serviceName: "svc" });
+    const { c } = fakeCtx({ "x-dub-user-id": "u1" });
+    await client.requireAuth()(c, async () => {});
+    await expect(client.requireAppAccess("tasks", "edit")(c, async () => {})).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+    });
+  });
+});

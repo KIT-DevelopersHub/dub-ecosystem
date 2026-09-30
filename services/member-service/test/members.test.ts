@@ -28,6 +28,35 @@ describe("member-service HTTP surface", () => {
     expect(res.status).toBe(403);
   });
 
+  // ── policy layer: the 運営メンバー app's 3 段階 gates writes server-side ─────────────
+  it("403s a write when ロール管理 set 運営メンバー to 閲覧 (even with identity:admin)", async () => {
+    const viewer = new Set<identity.PermissionKey>(["identity:read", "identity:admin", "app:members:view"]);
+    const app = createApp(makeDeps({ authz: fakeAuthz(viewer) }));
+    expect((await call(app, "GET", "/members/overview")).status).toBe(200); // 閲覧 still reads
+    expect((await call(app, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(403);
+    expect((await call(app, "DELETE", "/members/teams/team_x")).status).toBe(403);
+  });
+
+  it("403s a write when 運営メンバー is 無効", async () => {
+    const off = new Set<identity.PermissionKey>(["identity:read", "identity:admin"]);
+    const app = createApp(makeDeps({ authz: fakeAuthz(off) }));
+    expect((await call(app, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(403);
+  });
+
+  it("運営メンバー=編集 does NOT unlock 参加届の反映確定 (per-app, not per-service)", async () => {
+    const membersOnly = new Set<identity.PermissionKey>([
+      "identity:read",
+      "identity:admin",
+      "app:members:view",
+      "app:members:edit",
+    ]);
+    const app = createApp(makeDeps({ authz: fakeAuthz(membersOnly) }));
+    // 運営メンバー writes pass...
+    expect((await call(app, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(201);
+    // ...while the 参加届 app is still 無効 for this role.
+    expect((await call(app, "POST", "/members/participation/part_x/resolve", { body: { action: "skip" } })).status).toBe(403);
+  });
+
   it("GET /members/teams returns the canonical team list with a derived unique key", async () => {
     const app = createApp(makeDeps());
     await call(app, "POST", "/members/teams", { body: { name: "Venue Ops", color: "#4f46e5" } });

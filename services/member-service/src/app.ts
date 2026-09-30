@@ -53,19 +53,24 @@ export function createApp(deps: AppDeps): Hono {
 
   const { authz } = deps;
   const READ = "identity:read" as const;
-  const WRITE = "identity:admin" as const;
+  // POLICY gates (@dub/types `policy`). This service hosts TWO apps: 運営メンバー (teams /
+  // people) and 参加届 (submissions), each with its own row in ロール管理, so a write demands 編集
+  // on the app the route belongs to — setting 運営メンバー to 閲覧 stops team/people writes without
+  // also freezing 参加届の反映確定, and vice versa (no cross-app escalation).
+  //
+  // The app's 編集 tier is the WHOLE requirement — deliberately NOT "編集 AND identity:admin".
+  // #526 made the per-app key the 正典 so 名簿管理 can be delegated to a 統括 role that holds no
+  // org-admin key; re-adding the domain key here would silently revoke that delegation. Roles
+  // that could write via identity:admin alone get their `:edit` key from migration 0010, so no
+  // one loses access — and from now on setting 運営メンバー to 閲覧 really does stop writes.
+  const requireMembersEdit = authz.requireAppAccess("members", "edit");
+  const requireParticipationEdit = authz.requireAppAccess("participation", "edit");
 
-  // Per-app access keys are the AUTHORITATIVE gate for the 運営メンバー・名簿 app: a role
-  // granted the app in ロール管理 can open/edit the roster WITHOUT full org-admin. So the
-  // roster gates accept the DOMAIN key OR the per-app key (any-of), rather than the single
-  // requirePermission check. This is what makes a per-app toggle real 実効権限:
-  //   read  = identity:read  OR app:members:view
-  //   write = identity:admin OR app:members:edit   (名簿編集 delegatable without identity:admin)
-  // Existing 統括 roles that hold only app:members:view/edit (no domain key) work immediately
-  // via this any-of — no data backfill needed. NOTE: participation resolve stays identity:admin
-  // (a separate app surface), so a members-editor is not silently escalated into 参加届 review.
+  // READS keep the any-of (DOMAIN key OR per-app 閲覧): GET /members/teams is the canonical
+  // team list other apps (gantt 等) read, so gating it on the 運営メンバー app alone would break
+  // them, while a 統括 role holding only app:members:view must still be able to open the roster.
+  //   read  = identity:read OR app:members:view      (write = the 編集 gate above)
   const ROSTER_VIEW = "app:members:view" as const;
-  const ROSTER_EDIT = "app:members:edit" as const;
 
   /** Middleware allowing the request iff the caller holds ANY of `keys` (org-wide).
    *  requireAuth has already run, so x-dub-user-id is present. Fail-closed on 401/403. */
@@ -78,8 +83,10 @@ export function createApp(deps: AppDeps): Hono {
       throw errors.forbidden(`permission denied: ${keys.join(" | ")}`);
     };
   }
+  // Reads keep the any-of (domain key OR per-app 閲覧). Writes no longer use it: every write
+  // route now goes through the policy gate above (requireMembersEdit / requireParticipationEdit),
+  // which already demands identity:admin AND 編集 on the owning app.
   const rosterRead = requireAny([READ, ROSTER_VIEW]);
-  const rosterWrite = requireAny([WRITE, ROSTER_EDIT]);
 
   // ---- internal-only guard: /members/internal/* requires the x-dub-internal marker.
   // The gateway strips all x-dub-* off external requests (spoof-defense), so only genuine
@@ -149,21 +156,21 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/members/teams", rosterRead, async (c) => {
     return c.json(await svc.listTeams(reqCtx(c)));
   });
-  app.post("/members/teams", rosterWrite, async (c) => {
+  app.post("/members/teams", requireMembersEdit, async (c) => {
     const body = await readJson<member.CreateTeamRequest>(c);
     return c.json(await svc.createTeam(reqCtx(c), body), 201);
   });
-  app.patch("/members/teams/:id", rosterWrite, async (c) => {
+  app.patch("/members/teams/:id", requireMembersEdit, async (c) => {
     const body = await readJson<member.UpdateTeamRequest>(c);
     return c.json(await svc.updateTeam(reqCtx(c), c.req.param("id"), body));
   });
-  app.delete("/members/teams/:id", rosterWrite, async (c) => {
+  app.delete("/members/teams/:id", requireMembersEdit, async (c) => {
     await svc.deleteTeam(reqCtx(c), c.req.param("id"));
     return c.json({ ok: true });
   });
 
   // ---- people ----
-  app.post("/members/people", rosterWrite, async (c) => {
+  app.post("/members/people", requireMembersEdit, async (c) => {
     const body = await readJson<member.CreateMemberRequest>(c);
     return c.json(await svc.createMember(reqCtx(c), body), 201);
   });
@@ -174,15 +181,15 @@ export function createApp(deps: AppDeps): Hono {
     const member = await svc.getByIdentityUserId(reqCtx(c), c.req.param("identityUserId"));
     return c.json({ member });
   });
-  app.post("/members/people/:id/identity-link", rosterWrite, async (c) => {
+  app.post("/members/people/:id/identity-link", requireMembersEdit, async (c) => {
     const body = await readJson<member.LinkIdentityRequest>(c);
     return c.json(await svc.linkIdentity(reqCtx(c), c.req.param("id"), body));
   });
-  app.patch("/members/people/:id", rosterWrite, async (c) => {
+  app.patch("/members/people/:id", requireMembersEdit, async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));
   });
-  app.delete("/members/people/:id", rosterWrite, async (c) => {
+  app.delete("/members/people/:id", requireMembersEdit, async (c) => {
     await svc.deleteMember(reqCtx(c), c.req.param("id"));
     return c.json({ ok: true });
   });
@@ -202,7 +209,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await svc.listParticipationCandidates(reqCtx(c), c.req.param("id")));
   });
   // 反映確定 (link/create/skip) — roster を書き換えるので identity:admin。
-  app.post("/members/participation/:id/resolve", authz.requirePermission(WRITE), async (c) => {
+  app.post("/members/participation/:id/resolve", requireParticipationEdit, async (c) => {
     const body = await readJson<member.ResolveParticipationRequest>(c);
     return c.json(await svc.resolveParticipation(reqCtx(c), c.req.param("id"), body));
   });

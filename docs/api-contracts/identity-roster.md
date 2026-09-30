@@ -93,7 +93,7 @@ Evaluation is **default-deny**. A single check `{ permission, resourceType?, res
 is **allowed** iff all hold:
 
 1. The subject user exists, `status === "active"`, and is a member of the target org.
-2. `permission` is one of the 32 frozen catalog keys (`identity.PERMISSION_CATALOG`). Non-catalog keys are always denied.
+2. `permission` is one of the 61 frozen catalog keys (`identity.PERMISSION_CATALOG`). Non-catalog keys are always denied.
 3. The user has at least one role assignment in that org whose role grants `permission`, and that assignment is **org-wide** (`resourceType`/`resourceId` both null) **or** exactly matches the query's `resourceType` + `resourceId`.
 
 An org-wide grant satisfies both org-wide and resource-scoped queries; a
@@ -103,6 +103,47 @@ most one resource scope dimension (`"event"`); task-level scoping is P1.
 Effective-permission responses (`IdentityUserDetail.permissions`, `/internal/users/:id/permissions`)
 expose the **org-wide** set only. Resource-scoped grants stay server-side and are
 observable only through `authz/check`.
+
+### 3.1 Policy layer — per-app 無効 / 閲覧 / 編集 (the PDP)
+
+RBAC evaluation above answers "does the subject hold key K?". The **policy layer**
+(`@dub/types` `policy`) answers the product question on top of it: "may this role open, or
+write in, app A?". It is a pure PROJECTION of the frozen catalog — no new key, column or
+endpoint — and it is the single derivation every layer uses (services, shell flags, ロール管理).
+
+| Level | Keys required | Meaning |
+|---|---|---|
+| `none` (無効) | – | The app cannot be opened. Launcher greys it; the shell route guard 403s. |
+| `view` (閲覧) | `app:<id>:view` | Can open and read. Every write affordance is disabled client-side and rejected server-side. |
+| `edit` (編集) | `app:<id>:view` + `app:<id>:edit` | Can create/update/delete inside the app. Implies `view`. |
+
+Ordered: a `view` requirement is satisfied by `edit`. Derived from `APP_MANIFEST`, so a newly
+registered app automatically gets a level, a capability flag, a ロール管理 row and CI coverage.
+
+Invariants:
+
+- **`edit ⇒ view` is materialised, never implied.** `createRole` / `updateRole` run
+  `policy.normalizeAppAccessKeys` on every write (adding the missing `view`, never dropping
+  `edit`), so no stored role can be in the ambiguous "edit without view" state whatever a
+  client POSTs. Migration `0010_app_access_policy_backfill.sql` repairs legacy rows.
+- **Default deny / fail closed.** An unregistered app id, or a level requirement the subject
+  does not reach, denies — and the reason distinguishes `app_disabled` (無効) from `read_only`
+  (閲覧のみ) so a 403 can say which.
+
+Enforcement points (PEP):
+
+- Any service: `@dub/auth-client` `requireAppAccess(app, level, { permission })` — resolves
+  the requirement to its keys and verifies them in ONE batched `/authz/check`.
+- identity-roster dogfoods its own RBAC in-process (`requirePolicy` / `requireAdminEdit`):
+  every **write** route of the 管理 app demands `identity:admin` **AND** the 管理 app at 編集.
+  **Reads stay on plain `identity:read`** — they are shared surface (assignee pickers, `/me`
+  fan-out, other apps' user lookups), so gating them on one app would break unrelated apps.
+- member-service gates 運営メンバー writes on `members` = 編集 and 参加届 反映確定 on
+  `participation` = 編集 — two apps in one service, gated independently.
+
+Consumer-facing projection: `GET /api/v1/me` returns `appAccess` — the level for EVERY
+registered app, derived from the caller's effective permissions (additive/optional; a client
+may derive it locally from `permissions` with the same module).
 
 ---
 

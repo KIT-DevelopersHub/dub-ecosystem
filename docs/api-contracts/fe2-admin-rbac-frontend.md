@@ -10,8 +10,8 @@ no frontend change.
 ## Where the UI lives
 
 - Console screens: `@dub/admin-roster` (FE7) — `RoleListPage`, `RoleEditorPage`
-  (`PermissionMatrix`), `UserListPage` / `UserDetailPage` (`RoleAssignDialog`),
-  `AuditHistoryPage`. Registered into the shell as the `admin` FeatureModule.
+  (`RolePolicyEditor`), `UserListPage` / `UserDetailPage` (`RoleAssignDialog`).
+  Registered into the shell as the `admin` FeatureModule.
 - Reached from the app-shell **AppLauncher** (`apps/fe2-app-shell`,
   `AppShellLayout`) as ロール管理 / ユーザー名簿 / 変更履歴 — shown **only** to viewers
   holding the route's `requiredPermissions` (admin-only; defense in depth on top
@@ -32,22 +32,70 @@ gateway/route AND surfaced by the UI's `can()`.
 The permission sets are seeded in `demo-seed.tsx`; the backend's `identity`
 migration (`0002_system_roles.sql`) is authoritative in production.
 
+## ロール管理 UI = the policy layer's 3 段階 (無効 / 閲覧 / 編集)
+
+The console no longer edits ~60 flat permission toggles. It edits **one level per app**,
+derived by the policy layer (`@dub/types` `policy`, the PDP) from the same catalog keys the
+wire contract already carries — there is no new column, field or endpoint:
+
+| Level | Meaning | Keys held |
+|---|---|---|
+| 無効 (`none`) | The app cannot be opened (launcher greys it, route guard 403s) | – |
+| 閲覧 (`view`) | Can open and read; every create/edit/delete control is **disabled** | `app:<id>:view` |
+| 編集 (`edit`) | Can create/update/delete inside the app (implies 閲覧) | `app:<id>:view` + `app:<id>:edit` |
+
+Screen layout (`RolePolicyEditor`):
+
+1. **一覧** — `AppAccessTable`: one row per app (`policy.appPolicyRows`, driven by
+   `APP_MANIFEST`, so a newly registered app appears automatically) with a 3-way selector.
+2. **詳細設定** — `AppDetailDialog`: clicking the app NAME opens everything that belongs to
+   that app, in one place: the 3-way selector, its fine-grained keys
+   (`APP_MANIFEST.detailPermissions`, e.g. chat の `chat:moderate`), and — as the dialog's
+   BOTTOM section — that app's own workspace settings (`appSettingsPanels`, today chat の
+   メッセージ削除ポリシー). Apps with no fine-grained key say so instead of showing an empty
+   dialog; apps with no settings panel simply omit the bottom section.
+3. **その他** — `OtherPermissionsSection`: keys no app owns (`policy.otherPermissions()` =
+   the complement, so a future catalog key lands here rather than disappearing from the UI):
+   ファイル / インフラ・デプロイ / 監査ログ / GitHub 連携 / Webhook. Rendered as one row per
+   分類 (the same row→dialog interaction as the app table) so the screen stays two tables tall.
+
+**Nothing app-specific sits at page level.** A card for one app directly on the ロール管理
+screen (as the chat メッセージ削除ポリシー used to be) makes the top of the screen grow with every
+app and hides which app it belongs to. The rule is: app-internal → that app's dialog (bottom
+section); belongs to no app → the 「その他」 area at the very bottom.
+
+`policy.setAppAccessLevel` only ever touches that app's two keys, so changing a level never
+discards a 詳細設定. The write path normalises `edit ⇒ view` server-side
+(`policy.normalizeAppAccessKeys` in identity-roster), so no client can persist an ambiguous
+role. `PATCH` still sends the full `permissions` array (changed fields only) — unchanged.
+
+### 閲覧 means buttons are dead (and the server agrees)
+
+The tier is enforced on BOTH sides from the same module, so a disabled control and a 403 can
+never disagree:
+
+- Server (PEP): `@dub/auth-client` `requireAppAccess(app, level, { permission })`. Wired
+  today on identity-roster's 管理 writes (`requireAdminEdit` — identity:admin **AND**
+  `app:admin:edit`) and member-service's 運営メンバー / 参加届 writes.
+- Client (display only): `useAppCapability(appId)` in the shell / `usePermissions().decide()`
+  in FE7 → `readOnly` disables write affordances, `AppReadOnlyNotice` explains why.
+
 ## Endpoints the console depends on
 
 | # | Method & path | Permission | Request body | Success | Notes |
 |---|---|---|---|---|---|
-| ① perms | `GET /api/v1/identity/permissions/catalog` | `identity:read` | – | `PermissionCatalogEntry[]` (the 32 frozen keys) | Rendered by `PermissionMatrix`, grouped by `domain`, `dangerous` flagged. |
-| ① edit | `PATCH /api/v1/identity/roles/:id` | `identity:admin` | `UpdateRoleRequest` `{ name?, permissions? }` (changed fields only) | `Role` | Save from `RoleEditorPage`. |
-| ② add | `POST /api/v1/identity/roles` | `identity:admin` | `CreateRoleRequest` `{ name, permissions }` | `Role` (`isSystem:false`) | Name unique in org. |
-| roles | `GET /api/v1/identity/roles` | `identity:read` | – | `Paginated<Role>` | Role list + member/perm counts. |
-| del | `DELETE /api/v1/identity/roles/:id` | `identity:admin` | – | `204` | Blocked for system roles → `409`. |
-| ③ assign | `POST /api/v1/identity/users/:id/roles` | `identity:admin` | `AssignRoleRequest` `{ roleId, resourceType?, resourceId? }` | `RoleAssignment` | Org-wide when resource fields omitted; `resourceType:"event"` for event-scope. |
+| ① perms | `GET /api/v1/identity/permissions/catalog` | `identity:read` | – | `PermissionCatalogEntry[]` (the 61 frozen keys) | The console reads the frozen catalog from `@dub/types` for labels; this endpoint remains the server-side source. |
+| ① edit | `PATCH /api/v1/identity/roles/:id` | `identity:admin` **+ 管理 app = 編集** | `UpdateRoleRequest` `{ name?, permissions? }` (changed fields only) | `Role` | Save from `RolePolicyEditor`. Server normalises `app:<id>:edit ⇒ app:<id>:view`. |
+| ② add | `POST /api/v1/identity/roles` | `identity:admin` **+ 管理 app = 編集** | `CreateRoleRequest` `{ name, permissions }` | `Role` (`isSystem:false`) | Name unique in org. |
+| roles | `GET /api/v1/identity/roles` | `identity:read` | – | `Paginated<Role>` | Role list + member/perm counts. Reads stay on `identity:read` (shared surface). |
+| del | `DELETE /api/v1/identity/roles/:id` | `identity:admin` **+ 管理 app = 編集** | – | `204` | Blocked for system roles → `409`. |
+| ③ assign | `POST /api/v1/identity/users/:id/roles` | `identity:admin` **+ 管理 app = 編集** | `AssignRoleRequest` `{ roleId, resourceType?, resourceId? }` | `RoleAssignment` | Org-wide when resource fields omitted; `resourceType:"event"` for event-scope. |
 | ③ list | `GET /api/v1/identity/users/:id/roles` | `identity:read` | – | `RoleAssignment[]` | Current assignments on the user detail screen. |
-| ③ revoke | `DELETE /api/v1/identity/users/:id/roles/:assignmentId` | `identity:admin` | – | `204` | |
+| ③ revoke | `DELETE /api/v1/identity/users/:id/roles/:assignmentId` | `identity:admin` **+ 管理 app = 編集** | – | `204` | |
 | users | `GET /api/v1/identity/users` | `identity:read` | `?ids=`, `?status=`, `?q=`, `?cursor=`, `?limit=` | `Paginated<IdentityUser>` | `?ids=` returns `UserSummary`-shaped rows for name resolution. |
 | user | `GET /api/v1/identity/users/:id` | `identity:read` | – | `IdentityUserDetail` (`.permissions` = effective) | |
-| invite | `POST /api/v1/identity/users/invite` | `identity:admin` | `InviteUserRequest` `{ email, displayName?, roleIds? }` | `IdentityUser` (`status:"invited"`) | |
-| patch user | `PATCH /api/v1/identity/users/:id` | `identity:admin` | `Partial<IdentityUser>` `{ displayName?, status?, githubLogin? }` | `IdentityUser` | |
+| invite | `POST /api/v1/identity/users/invite` | `identity:admin` **+ 管理 app = 編集** | `InviteUserRequest` `{ email, displayName?, roleIds? }` | `IdentityUser` (`status:"invited"`) | |
+| patch user | `PATCH /api/v1/identity/users/:id` | `identity:admin` **+ 管理 app = 編集** | `Partial<IdentityUser>` `{ displayName?, status?, githubLogin? }` | `IdentityUser` | |
 | history | `GET /api/v1/audit/logs` | `audit:read` | `?action=identity.` `?actorId=` `?since=` `?until=` `?cursor=` | `Paginated<AuditRecord>` | 変更履歴 tab shows `identity.*` actions only. |
 | banner | `GET /api/v1/mail/status` | (any authed) | – | `{ service, provider, rateLimit }` | Admin header banner (mail-gateway rate-limit). |
 
@@ -72,11 +120,11 @@ Non-2xx must return the standard envelope `{ error: { code, message, retryable, 
 ## Two deliberate FE/contract divergences to note
 
 1. **System role edit.** The backend contract (`identity-roster.md` §4.8) permits
-   `PATCH` on a role regardless of `isSystem` (only `DELETE` is blocked). The FE7
-   editor deliberately renders **system roles read-only** (`RoleEditorPage`:
-   `readOnly = isSystem || !can("identity:admin")`) and the demo mock returns
-   `409` for a system-role `PATCH`, mirroring that UX. No behavior change needed
-   backend-side — the UI simply never sends it for system roles.
+   `PATCH` on a role regardless of `isSystem` (only `DELETE` is blocked). FE7 now allows it
+   too (admins edit system roles in place); only the role NAME stays frozen for a system
+   role, and the built-in `admin` role keeps `identity:admin` + the 管理 app at 編集 pinned
+   (`lockedKeysForRole`, self-lockout guard). A 403-worthy write is never offered: the Save
+   button is gated on the same policy requirement the server checks.
 2. **Effective permissions.** `IdentityUserDetail.permissions` must be the union
    of the user's role permissions (server-resolved). The demo computes this from
    the assigned roles; production resolves it in identity-roster.
