@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type { Message } from "../api/contract";
 import { MessageItem } from "./MessageItem";
 
@@ -88,5 +88,29 @@ describe("MessageItem authorization UI", () => {
   it("falls back to the raw teamId when the team cannot be resolved", () => {
     render(<MessageItem message={msg({ body: "<!team:team_gone> hi" })} currentUserId={ME} canModerate={false} />);
     expect(screen.getByTestId("fe6-team-mention")).toHaveTextContent("@team_gone");
+  });
+
+  it("does NOT save the edit on the IME 変換確定 Enter, but saves on the following plain Enter", () => {
+    const onSubmitEdit = vi.fn();
+    render(
+      <MessageItem
+        message={msg({ authorId: ME })}
+        currentUserId={ME}
+        canModerate={false}
+        onSubmitEdit={onSubmitEdit}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("fe6-timeline-edit"));
+    const editor = screen.getByLabelText("メッセージを編集");
+    fireEvent.change(editor, { target: { value: "編集後のメッセージ" } });
+
+    // 変換確定 Enter: keydown mid-composition (isComposing / keyCode 229) — must not save.
+    fireEvent.keyDown(editor, { key: "Enter", keyCode: 229, isComposing: true });
+    expect(onSubmitEdit).not.toHaveBeenCalled();
+
+    // Plain Enter after confirmation → saves.
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(onSubmitEdit).toHaveBeenCalledTimes(1);
+    expect(onSubmitEdit).toHaveBeenCalledWith(expect.objectContaining({ id: "msg_a" }), "編集後のメッセージ");
   });
 });
