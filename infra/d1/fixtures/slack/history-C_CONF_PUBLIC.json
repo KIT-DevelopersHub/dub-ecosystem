@@ -1,0 +1,38 @@
+[
+  {
+    "ts": "1717000000.000100",
+    "user": "U_ALICE",
+    "text": "みなさんおはようございます、<#C_CONF_PUBLIC|conference-general> で今日の進行を共有します。",
+    "thread_ts": "1717000000.000100",
+    "reply_count": 2
+  },
+  {
+    "ts": "1717000050.000200",
+    "user": "U_BOB",
+    "text": "会場設営は 9:00 に完了しました！ <@U_ALICE> 確認お願いします。",
+    "reactions": [
+      { "name": "thumbsup", "users": ["U_ALICE", "U_GUEST"] },
+      { "name": "tada", "users": ["U_ALICE"] },
+      { "name": "some_custom_shortcode_not_in_map", "users": ["U_BOB"] }
+    ]
+  },
+  {
+    "ts": "1717000100.000300",
+    "user": "U_ALICE",
+    "text": "受付資料はこちらです。",
+    "files": [
+      { "id": "F_HANDOUT", "name": "reception-guide.pdf", "mimetype": "application/pdf", "size": 204800, "url_private": "https://files.slack.com/files-pri/T000-F_HANDOUT/reception-guide.pdf" }
+    ]
+  },
+  {
+    "ts": "1717000150.000400",
+    "user": "U_GUEST",
+    "text": "ゲストですが手伝えることがあれば言ってください。"
+  },
+  {
+    "ts": "1717000200.000500",
+    "user": "U_BOT",
+    "subtype": "bot_message",
+    "text": "本日のリマインダー: 13:00 リハーサル開始"
+  }
+]

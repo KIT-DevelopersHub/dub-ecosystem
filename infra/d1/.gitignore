@@ -1,3 +1,4 @@
 .wrangler/
 *.sqlite
 *.sqlite-journal
+.slack-import/

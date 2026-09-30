@@ -23,7 +23,8 @@
     "db:lint": "pnpm --filter @dub/infra-d1 d1:lint",
     "db:migrate": "pnpm --filter @dub/infra-d1 d1:migrate",
     "db:seed": "pnpm --filter @dub/infra-d1 d1:seed",
-    "db:reset": "pnpm --filter @dub/infra-d1 d1:reset"
+    "db:reset": "pnpm --filter @dub/infra-d1 d1:reset",
+    "slack:import": "pnpm --filter @dub/infra-d1 slack:import"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",

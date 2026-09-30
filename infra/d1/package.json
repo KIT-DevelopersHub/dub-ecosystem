@@ -12,7 +12,8 @@
     "d1:migrate": "node --import tsx scripts/migrate.ts",
     "d1:verify": "node --import tsx scripts/verify.ts",
     "d1:seed": "node --import tsx scripts/migrate.ts seed",
-    "d1:reset": "node --import tsx scripts/migrate.ts reset"
+    "d1:reset": "node --import tsx scripts/migrate.ts reset",
+    "slack:import": "node --import tsx scripts/slack-import.ts"
   },
   "dependencies": {
     "@dub/db": "workspace:*",
