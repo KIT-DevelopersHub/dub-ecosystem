@@ -10,6 +10,7 @@
   margin-bottom: var(--dub-space-2);
 }
 .chip {
+  position: relative;
   border: 1px solid var(--dub-color-border-default);
   background: var(--dub-color-surface-base);
   color: var(--dub-color-text-secondary);
@@ -19,6 +20,17 @@
   font-size: var(--dub-font-size-xs);
   cursor: pointer;
   text-transform: capitalize;
+}
+/* P22: ~22px tall — expand the tappable area. Toolbar gap (space-1) is
+ * enough here since chips also have real horizontal width from their label. */
+.chip::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 .chip:hover {
   background: var(--dub-color-surface-sunken);

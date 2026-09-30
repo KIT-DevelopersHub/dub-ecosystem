@@ -20,6 +20,17 @@
   transition:
     background-color var(--dub-motion-fast) var(--dub-motion-easing),
     color var(--dub-motion-fast) var(--dub-motion-easing);
+  /* P22: matches AppLauncher .trigger — 40px visual box, 44px tappable via ::after. */
+  position: relative;
+}
+.iconTrigger::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 .iconTrigger:hover {
   background: var(--dub-color-surface-sunken);
@@ -73,6 +84,18 @@
   transition:
     background 120ms ease,
     border-color 120ms ease;
+  /* P22: full width already covers the horizontal minimum; only the ~33px row
+   * height is short of 44px. Bump via an invisible ::after (row look unchanged). */
+  position: relative;
+}
+.item::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 100%;
+  height: max(44px, 100%);
 }
 .item:hover:not(:disabled) {
   background: var(--dub-color-surface-sunken);

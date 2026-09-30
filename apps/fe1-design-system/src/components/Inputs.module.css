@@ -38,6 +38,7 @@
   background-image: none;
 }
 .control {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--dub-space-2);
@@ -45,6 +46,20 @@
   font-size: var(--dub-font-size-md);
   color: var(--dub-color-text-primary);
   cursor: pointer;
+}
+/* P22: Checkbox/Radio/Switch render a `<label>` wrapping the native control —
+ * a native browser label already forwards clicks/taps to it, so it's a safe
+ * place to expand the hit-slop. Matters most with an empty/short label (e.g.
+ * a bare row-select checkbox), where the box would otherwise be far under
+ * 44px; with a long label this simply has no visible effect (already bigger). */
+.control::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 /* Switch: the native checkbox is visually hidden but stays focusable/clickable
    (the wrapping <label> forwards clicks); .switchTrack is the visible toggle with

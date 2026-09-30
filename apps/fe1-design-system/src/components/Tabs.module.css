@@ -5,6 +5,7 @@
   border-bottom: 1px solid var(--dub-color-border-default);
 }
 .tab {
+  position: relative;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -14,6 +15,17 @@
   padding: var(--dub-space-2) var(--dub-space-3);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+}
+/* P22: tab rows are ~32-34px tall (under the 44px minimum). The strip's own
+ * top has open space above it, so the hit-slop grows upward without crowding
+ * the sliding underline (bottom: -1px) below. */
+.tab::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: max(44px, 100%);
 }
 .tab:hover:not(:disabled) {
   color: var(--dub-color-text-primary);

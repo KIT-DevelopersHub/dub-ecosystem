@@ -39,6 +39,7 @@
   border-bottom: 1px solid var(--dub-color-border-default);
 }
 .sortButton {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--dub-space-1);
@@ -48,6 +49,36 @@
   font: inherit;
   color: inherit;
   padding: 0;
+}
+/* P22: header sort toggle is only as tall as its own text (~17-20px) —
+ * expand the tappable area via ::after, anchored to the th's own padding
+ * box so it doesn't reach into the next column's sort button. */
+.sortButton::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
+}
+/* Row-select checkbox (no visible <label> text) — the native checkbox alone
+ * is far under 44px. A wrapping <label> forwards clicks/taps to the input
+ * (native semantics) and gets its own 44px hit-slop without resizing the
+ * checkbox artwork itself. */
+.checkboxHit {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+.checkboxHit::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+  height: 44px;
 }
 .loadingCell,
 .emptyWrap {

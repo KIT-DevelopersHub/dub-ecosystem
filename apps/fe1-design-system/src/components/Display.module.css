@@ -22,6 +22,18 @@
   cursor: pointer;
   padding: 0;
   color: var(--dub-color-text-secondary);
+  /* P22: the remove "x" is icon-sized (well under 44px) — expand the tappable
+   * area via an invisible ::after so the compact tag chip look is unchanged. */
+  position: relative;
+}
+.tagRemove::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 
 .badge[data-tone="neutral"] {

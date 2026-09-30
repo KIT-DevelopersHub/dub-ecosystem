@@ -16,6 +16,18 @@
   transition:
     background 120ms ease,
     color 120ms ease;
+  /* P22: 40px visual box is under the 44px minimum touch target — expand the
+   * tappable area only (invisible ::after), keep the 40px header-icon look. */
+  position: relative;
+}
+.trigger::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 .trigger:hover {
   background: var(--dub-color-surface-sunken);
