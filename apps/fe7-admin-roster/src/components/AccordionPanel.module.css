@@ -1,0 +1,24 @@
+/* Height-animated disclosure region (grid-template-rows 0fr/1fr trick): no JS
+   measurement of scrollHeight needed, so it never fights layout/reflow. Motion
+   values come from @dub/tokens (--dub-motion-*), matching the rest of fe7. */
+.rows {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dub-motion-normal, 200ms) var(--dub-motion-easing, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+.rows[data-open] {
+  grid-template-rows: 1fr;
+}
+
+.clip {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Respect users who ask the OS to reduce motion: snap open/closed instantly. */
+@media (prefers-reduced-motion: reduce) {
+  .rows {
+    transition: none;
+  }
+}
