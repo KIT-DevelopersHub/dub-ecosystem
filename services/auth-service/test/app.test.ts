@@ -3,12 +3,18 @@ import { buildApp } from "../src/app";
 import { makeHarness, jsonInit } from "./helpers";
 
 describe("POST /verify (internal)", () => {
+  // Still 403, but the rejection now comes from policyGate (the INTERNAL rule in
+  // POLICY_TABLE) rather than a hand-rolled requireInternal, so the code is @dub/errors'
+  // generic FORBIDDEN carrying `details.reason = "internal_only"`. The service-local
+  // AUTH_INTERNAL_FORBIDDEN code is no longer produced anywhere.
   it("requires x-dub-internal (403 without it)", async () => {
     const h = makeHarness();
     const app = buildApp(h.deps);
     const res = await app.request("/verify", jsonInit({ token: "x" }));
     expect(res.status).toBe(403);
-    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_INTERNAL_FORBIDDEN");
+    const body = (await res.json()) as { error: { code: string; details: { reason: string } } };
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.details.reason).toBe("internal_only");
   });
 
   it("returns the AuthVerifyResponse contract for a valid token", async () => {

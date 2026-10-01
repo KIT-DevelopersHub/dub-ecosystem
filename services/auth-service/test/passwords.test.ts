@@ -295,13 +295,18 @@ describe("POST /internal/admin/users/:userId/password (admin set)", () => {
     expect(res.status).toBe(403);
   });
 
+  // The marker half of `internalWithKeys(["identity:admin"])`. Checked FIRST and reported as
+  // the same `internal_only` 403 a bare INTERNAL route gives, so an external caller cannot use
+  // this endpoint as an oracle for which permission it would have needed.
   it("requires the internal marker (403 without x-dub-internal)", async () => {
     const h = makeHarness();
     withAdmin(h);
     const app = buildApp(h.deps);
     const res = await app.request(`/internal/admin/users/${TARGET}/password`, jsonInit({ password: "issued-password" }, { actor: ADMIN }));
     expect(res.status).toBe(403);
-    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_INTERNAL_FORBIDDEN");
+    const body = (await res.json()) as { error: { code: string; details: { reason: string } } };
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.details.reason).toBe("internal_only");
   });
 
   it("404s for an unknown target user", async () => {
