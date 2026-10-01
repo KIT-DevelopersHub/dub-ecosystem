@@ -6,10 +6,11 @@
 // runs, so this Worker builds, deploys, and is E2E-testable at $0 before any real
 // refresh token exists. Dropping in the real token is exactly this one branch — no
 // other code changes. Authz is POLICY_TABLE (src/policy-table.ts) enforced by @dub/policy-gate,
-// whose decisions come from identity-roster POST /authz/check.
+// whose decisions come from identity-roster POST /authz/check (TTL-cached per isolate — see
+// sharedAuthzGranter below).
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { newRequestId } from "@dub/http";
-import { createAuthzGranter } from "@dub/policy-gate";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { common } from "@dub/types";
 import { createApp } from "./app";
@@ -47,7 +48,11 @@ interface ReqCtx {
 function buildApp(env: Env, reqCtx: ReqCtx): ReturnType<typeof createApp> {
   const client = buildDriveClient(env);
   const service = createDriveShareService({ client, config: parseConfig(env) });
-  const authz = createAuthzGranter(env.SVC_IDENTITY, {
+  // sharedAuthzGranter (not createAuthzGranter): the app is rebuilt per request, so the
+  // identity /authz/check TTL cache has to be memoized per Env to survive between requests
+  // in the same isolate — otherwise every gated route is an unconditional identity
+  // subrequest and identity-roster becomes a hot-path single point of failure (ADR 0004).
+  const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, {
     caller: "drive-share-service",
     requestId: reqCtx.requestId,
   });

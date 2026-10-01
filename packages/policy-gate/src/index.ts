@@ -32,6 +32,15 @@ export {
 } from "./rule";
 export { definePolicyTable, type PolicyTable, type RouteKey, type HttpMethod } from "./table";
 export { policyGate, type PolicyGateOptions, type PolicyGateVars, type PermissionGranter } from "./gate";
-export { createAuthzGranter, type AuthzGranterOptions } from "./authz";
+// `sharedAuthzGranter` is the one a Worker entrypoint should wire (the TTL cache ADR 0004
+// requires only works if it outlives the request); `createAuthzGranter` is the primitive.
+export { createAuthzGranter, sharedAuthzGranter, type AuthzGranterOptions } from "./authz";
+export {
+  createAuthzCache,
+  isDangerousPermission,
+  DANGEROUS_PERMISSION_KEYS,
+  type AuthzCacheOptions,
+  type AuthzDecisionCache,
+} from "./authz-cache";
 export { checkRouteCoverage, assertRouteCoverage, type CoverageResult } from "./coverage";
 export { routeKey, protectableRouteKeys, matchedRouteKey, type RoutedApp, type RegisteredRoute } from "./routes";
