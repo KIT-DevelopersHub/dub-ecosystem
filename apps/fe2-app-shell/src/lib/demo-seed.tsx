@@ -2501,13 +2501,34 @@ function createMembersStore() {
   return { handle };
 }
 
-// ── LP管理 → ログ管理 (流入ログ) ────────────────────────────────────────────────
+// ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
 // Answers the wire contract frozen in features/lp/lpApi.tsx:
-//   GET /api/v1/lp/stats  ?from&to&includeBots
-//   GET /api/v1/lp/visits ?from&to&source&cursor&limit
+//   GET   /api/v1/lp/stats      ?from&to&includeBots
+//   GET   /api/v1/lp/visits     ?from&to&source&cursor&limit
+//   GET   /api/v1/lp/links      ?from&to
+//   POST  /api/v1/lp/links      ?from&to   { name, slug }   409 on duplicate slug
+//   PATCH /api/v1/lp/links/:id  ?from&to   { active }
 // The visit log is GENERATED (not hand-listed) so every range (7/30/90日) has
 // believable data, but from a FIXED seed — the same demo URL always shows the same
 // numbers, so a reviewer can compare two loads and screenshots stay meaningful.
+// Issued links are in-session mutable: a reviewer can really issue one and see it
+// appear (0 visits — the demo never fabricates hits for a brand-new link).
+
+/** 発行する URL の土台。features/lp/lpLinks.ts の LP_BASE_URL / LP_TRACKING_PARAM と一致させる
+ *  （import しないのは demo-seed を feature 非依存に保つため。ズレたら lp.test.tsx が落ちる）。 */
+const DEMO_LP_URL = "https://hokuriku-it-conf.com";
+const DEMO_LP_PARAM = "utm_source";
+
+type DemoLpLink = {
+  id: string;
+  name: string;
+  slug: string;
+  url: string;
+  active: boolean;
+  createdAt: string;
+};
+
+type DemoLpLinkStats = { visits: number; uniques: number; lastVisitAt: string | null };
 
 type DemoLpVisit = {
   id: string;
@@ -2634,12 +2655,80 @@ function createLpStore() {
   const deviceLabelOf = (key: string): string =>
     ({ mobile: "スマホ", desktop: "PC", bot: "bot", unknown: "不明" })[key] ?? key;
 
-  function handle(method: string, pathname: string, url: URL): Response | null {
+  // ── 発行済みの流入URL ────────────────────────────────────────────────────
+  // 生成済みの訪問は linkId = `lnk_<source>` を持つので、流入元ごとに 1 本発行済みという
+  // 状態をそこから起こす（訪問だけあって発行元が無い、という矛盾を作らない）。
+  // direct は流入URL経由ではないので一覧に出さない。
+  const links: DemoLpLink[] = DEMO_LP_SOURCES.filter((s) => s.key !== "direct").map((s, i) => ({
+    id: `lnk_${s.key}`,
+    name: s.label,
+    slug: s.key,
+    url: `${DEMO_LP_URL}/?${DEMO_LP_PARAM}=${s.key}`,
+    // poster(ポスターQR) だけ停止中にして「停止しても集計は残る」状態を見せる。
+    active: s.key !== "poster",
+    createdAt: new Date(Date.now() - (DEMO_LP_DAYS - i) * 24 * 60 * 60 * 1000).toISOString(),
+  }));
+
+  const linkStats = (linkId: string, from: string, to: string): DemoLpLinkStats => {
+    const rows = visits.filter((v) => v.linkId === linkId && v.device !== "bot" && inRange(v, from, to));
+    return {
+      visits: rows.length,
+      uniques: new Set(rows.map((v) => v.visitorId)).size,
+      // visits は新しい順なので先頭が最終訪問。
+      lastVisitAt: rows[0]?.occurredAt ?? null,
+    };
+  };
+
+  const linkSummary = (l: DemoLpLink, from: string, to: string) => ({ ...l, stats: linkStats(l.id, from, to) });
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    const from = url.searchParams.get("from") ?? "";
+    const to = url.searchParams.get("to") ?? "";
+
+    if (method === "GET" && pathname === "/api/v1/lp/links") {
+      // 新しく発行したものを上に（画面の並びと一致させる）。
+      const items = [...links]
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+        .map((l) => linkSummary(l, from, to));
+      return json({ items });
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/links") {
+      const req = (body ?? {}) as { name?: string; slug?: string };
+      const name = (req.name ?? "").trim();
+      const slug = (req.slug ?? "").trim().toLowerCase();
+      if (name.length === 0 || !/^[a-z0-9][a-z0-9_-]*$/.test(slug)) {
+        return problem("VALIDATION", "名前とパラメータ値（半角英数字）を入力してください", 400);
+      }
+      if (links.some((l) => l.slug === slug)) {
+        return problem("CONFLICT", `「${slug}」は既に発行済みです`, 409);
+      }
+      const created: DemoLpLink = {
+        id: `lnk_${slug}`,
+        name,
+        slug,
+        url: `${DEMO_LP_URL}/?${DEMO_LP_PARAM}=${slug}`,
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+      links.push(created);
+      // 発行直後は実績 0。デモでも訪問を捏造しない（0 のまま出すのが正しい挙動）。
+      return json(linkSummary(created, from, to), 201);
+    }
+
+    const patch = /^\/api\/v1\/lp\/links\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && patch) {
+      const id = decodeURIComponent(patch[1]!);
+      const link = links.find((l) => l.id === id);
+      if (!link) return problem("NOT_FOUND", "その流入URLは見つかりません", 404);
+      const req = (body ?? {}) as { active?: boolean };
+      if (typeof req.active === "boolean") link.active = req.active;
+      return json(linkSummary(link, from, to));
+    }
+
     if (method !== "GET") return null;
 
     if (pathname === "/api/v1/lp/stats") {
-      const from = url.searchParams.get("from") ?? "";
-      const to = url.searchParams.get("to") ?? "";
       const includeBots = url.searchParams.get("includeBots") === "true";
       const windowed = visits.filter((v) => inRange(v, from, to));
       const bots = windowed.filter((v) => v.device === "bot");
@@ -2673,8 +2762,6 @@ function createLpStore() {
     }
 
     if (pathname === "/api/v1/lp/visits") {
-      const from = url.searchParams.get("from") ?? "";
-      const to = url.searchParams.get("to") ?? "";
       const source = url.searchParams.get("source");
       const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
       const cursor = url.searchParams.get("cursor");
@@ -2743,7 +2830,7 @@ export function createDemoFetch(): typeof fetch {
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore();
-  // LP流入ログ (90日分・固定シードで生成) — LP管理 → ログ管理タブ。
+  // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -2773,7 +2860,7 @@ export function createDemoFetch(): typeof fetch {
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??
-      lpStore.handle(method, url.pathname, url) ??
+      lpStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.

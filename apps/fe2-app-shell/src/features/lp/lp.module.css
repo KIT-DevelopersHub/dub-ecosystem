@@ -90,3 +90,43 @@
 .num {
   font-variant-numeric: tabular-nums;
 }
+
+/* ── 流入URL タブ ───────────────────────────────────────────────────────── */
+/* URL は省略せず全文見せる（末尾のパラメータが読めないと確認できない）。 */
+.urlText {
+  font-family: var(--dub-font-family-mono);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-lineHeight-normal);
+  color: var(--dub-color-text-secondary);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  overflow-wrap: anywhere;
+  /* 選択してそのままコピーできるように（コピーボタンが使えない環境の保険）。 */
+  user-select: all;
+}
+
+.urlActions {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  flex-wrap: wrap;
+}
+
+.urlOpen {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-brand-600);
+  text-decoration: underline;
+}
+
+.linkName {
+  font-weight: var(--dub-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--dub-space-3);
+}

@@ -13,7 +13,7 @@
 //   4. carry each feature's module-level requiredPermissions so registry
 //      flatten() ANDs them onto every route (fail-closed authz).
 // The result is the array FE2's registerFeatureModules() consumes (main.tsx).
-import { createElement, useMemo, type ComponentType, type ReactNode } from "react";
+import { createElement, Fragment, useMemo, type ComponentType, type ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import { appRegistry, type identity } from "@dub/types";
 import type { IconName } from "@dub/ui";

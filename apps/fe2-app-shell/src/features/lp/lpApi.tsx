@@ -67,11 +67,56 @@ export interface LpVisitsPage {
   nextCursor: string | null;
 }
 
+/** 発行済みの流入URL（計測つき LP URL）1 本。`slug` が utm_source に載る値。 */
+export interface LpLink {
+  id: string;
+  name: string;
+  slug: string;
+  /** サーバーが組み立てた実 URL。表示・コピーはこれを使う（クライアント組み立てと一致が正）。 */
+  url: string;
+  /** false = 停止中。集計は残したまま「新しい共有には使わない」印。 */
+  active: boolean;
+  createdAt: string;
+}
+
+/** 問い合わせ期間内の、その流入URL経由の実績。 */
+export interface LpLinkStats {
+  visits: number;
+  uniques: number;
+  lastVisitAt: string | null;
+}
+
+export interface LpLinkSummary extends LpLink {
+  stats: LpLinkStats;
+}
+
+/** 一覧は「どの期間の実績つきで見るか」を伴う（ログ管理タブと同じ日の閉区間）。 */
+export interface LpLinksQuery {
+  from: string;
+  to: string;
+}
+
+export interface LpLinksPage {
+  items: LpLinkSummary[];
+}
+
+export interface CreateLpLinkInput {
+  name: string;
+  /** 正規化済み（小文字）のパラメータ値。サーバー側も再正規化し重複は 409 で弾く。 */
+  slug: string;
+}
+
 export interface LpApi {
   /** Aggregated visit counters for a day range (app:lp:view). */
   getStats(query: LpStatsQuery): Promise<LpStats>;
   /** One cursor page of raw visits, newest first (app:lp:view). */
   listVisits(query: LpVisitsQuery): Promise<LpVisitsPage>;
+  /** Issued tracking links with their in-range counters (app:lp:view). */
+  listLinks(query: LpLinksQuery): Promise<LpLinksPage>;
+  /** Issue a new tracking link (app:lp:edit). Duplicate slug → 409. */
+  createLink(input: CreateLpLinkInput, query: LpLinksQuery): Promise<LpLinkSummary>;
+  /** Pause / resume an issued link (app:lp:edit). Counters are never deleted. */
+  setLinkActive(input: { id: string; active: boolean }, query: LpLinksQuery): Promise<LpLinkSummary>;
 }
 
 const BASE = "/api/v1/lp";
@@ -90,5 +135,23 @@ export function createLpApi(api: ApiClient): LpApi {
       if (query.limit !== undefined) q.limit = query.limit;
       return api.request<LpVisitsPage>({ method: "GET", path: `${BASE}/visits`, query: q });
     },
+    listLinks: (query) =>
+      api.request<LpLinksPage>({ method: "GET", path: `${BASE}/links`, query: { from: query.from, to: query.to } }),
+    // 作成・更新も from/to を載せる: 返す 1 件に「その期間の実績」を同梱させ、画面が
+    // 作成直後に別途集計を取り直さずに済む（無料枠の読み取りを増やさない）。
+    createLink: (input, query) =>
+      api.request<LpLinkSummary, CreateLpLinkInput>({
+        method: "POST",
+        path: `${BASE}/links`,
+        query: { from: query.from, to: query.to },
+        body: input,
+      }),
+    setLinkActive: ({ id, active }, query) =>
+      api.request<LpLinkSummary, { active: boolean }>({
+        method: "PATCH",
+        path: `${BASE}/links/${encodeURIComponent(id)}`,
+        query: { from: query.from, to: query.to },
+        body: { active },
+      }),
   };
 }

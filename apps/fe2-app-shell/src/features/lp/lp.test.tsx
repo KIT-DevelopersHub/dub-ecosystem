@@ -36,8 +36,17 @@ function wrap(api: LpApi): JSX.Element {
   );
 }
 
+/** 流入URL 側は ログ管理 の表示に関与しないので、スタブは「呼ばれたら落ちる」にしておく
+ *  （知らないうちに依存が増えたらテストが気づく）。 */
+const linksStubs = {
+  listLinks: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  createLink: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  setLinkActive: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+};
+
 function emptyApi(): LpApi {
   return {
+    ...linksStubs,
     getStats: () =>
       Promise.resolve({
         range: { from: "2026-09-01", to: "2026-09-28" },
@@ -150,6 +159,7 @@ describe("LpVisitLogScreen", () => {
 
   it("shows a retryable error state when the api fails", async () => {
     const failing: LpApi = {
+      ...linksStubs,
       getStats: () => Promise.reject(new Error("boom")),
       listVisits: () => Promise.reject(new Error("boom")),
     };
